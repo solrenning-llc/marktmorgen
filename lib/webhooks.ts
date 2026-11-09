@@ -653,11 +653,27 @@ function soon(task: () => Promise<unknown>): Promise<void> {
 }
 
 /**
+ * Who an event read from a payment provider (Stripe, PayPal) would name in `data.buyer`, and when they paid: read
+ * against the store's deletion print (erasedSincePaid) only once the event is to be sent, so the read is made inside a
+ * try (R38; reviews of #3491).
+ */
+export type PaidBy = { email: string | null; paidAt: unknown };
+
+/** The buyer of an event with no address and no name, everything else of it (a customer's id) kept. */
+function withoutAddress(buyer: unknown): unknown {
+  if (!buyer || typeof buyer !== "object" || Array.isArray(buyer)) return buyer;
+  return { ...buyer, email: null, ...(Object.hasOwn(buyer, "name") ? { name: null } : {}) };
+}
+
+/**
  * Records that something happened, once, and sends it to every endpoint that
  * listens for it. `seed` names what it is about (a checkout, a refund), which
- * is what makes the event id the same however often it is noticed.
+ * is what makes the event id the same however often it is noticed. With
+ * `paidBy`, the buyer is sent with no address and no name when the store
+ * deleted them at or after the payment, read only for an event that is new,
+ * heard by a live endpoint and inside the month's deliveries.
  */
-export async function emitEvent(store: Store, type: WebhookEvent, seed: string, data: Record<string, unknown>, now = Date.now()): Promise<number> {
+export async function emitEvent(store: Store, type: WebhookEvent, seed: string, data: Record<string, unknown>, now = Date.now(), paidBy?: PaidBy): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const config = await readConfig(statsId);
@@ -668,6 +684,22 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   const eventId = eventIdFor(statsId, type, seed);
   const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
   if (fresh === null) return 0;
+  // While the plan's costs are paused the try says so first (attempt), and takes the month's delivery then.
+  const month = integrationPauseWord(store, now / 1000) ? null : await allowancesUsedStrict(store, ["webhook"], now).catch(() => null);
+  const used = month?.[0] !== undefined && month[0].used >= month[0].figure;
+  if (paidBy && !used) {
+    // A print that cannot be read throws: the event's mark goes first, so the next time it is noticed it is read again
+    // (CX-123 rule 24), never sent with an address that may be deleted, nor without one that is not.
+    let erased: boolean;
+    try {
+      erased = await erasedSincePaid(store, paidBy.email, paidBy.paidAt);
+    } catch (error) {
+      await redisPipeline([["DEL", eventKey(eventId)]]).catch((lost) =>
+        console.error("WEBHOOK EVENT LOST: a deletion print could not be read and its sent mark could not be taken back", statsId, type, eventId, lost));
+      throw error;
+    }
+    if (erased) data = { ...data, buyer: withoutAddress(data.buyer) };
+  }
 
   // Every text cleaned and bounded where the message is made (cleanText), so what a delivery keeps is bounded.
   const body = JSON.stringify(cleanData({
@@ -706,9 +738,6 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   // is bounded where it is made: a message that would be kept past DELIVERY_WRITE_MAX_BYTES is never kept or sent
   // either. Every endpoint is sent the same message, so one too large is too large for all. Neither takes a
   // delivery of the month, and the lines of each are bounded by the day (skippedLines).
-  // While the plan's costs are paused the try says so first (attempt), and takes the month's delivery then.
-  const month = integrationPauseWord(store, now / 1000) ? null : await allowancesUsedStrict(store, ["webhook"], now).catch(() => null);
-  const used = month?.[0] !== undefined && month[0].used >= month[0].figure;
   const tooLarge = !used && kept.some(tooLargeToKeep);
   if (used || tooLarge) {
     if (tooLarge) console.error("WEBHOOK MESSAGE TOO LARGE: its lines say so, nothing is sent", statsId, type, eventId, Buffer.byteLength(body));
@@ -1274,11 +1303,12 @@ const num = (value: unknown) => (typeof value === "number" && Number.isFinite(va
  * (lib/person-erasure.ts), and which only their own yes given again lifts (lib/contacts.ts). Then the event still goes
  * out, with no address and no name. One HGET, read in its exact shape (CX-123 rule 24): nothing, or a time in seconds;
  * a print that is there in any other shape counts as deleted, since a print exists only once a deletion wrote it. A read
- * with no answer (the pipeline failed, or no reply for the command) throws UnknownReplyError before the event is sent
- * or marked, so the watcher reads the event again next run (review of #3491): an address is never sent, and a person
+ * with no answer (the pipeline failed, or no reply for the command) throws UnknownReplyError, and emitEvent takes the
+ * event's mark back, so the event is read again next run (review of #3491): an address is never sent, and a person
  * never deleted is never sent without one, on a read that is not known. A payment whose time does not read counts any
- * print. A store with no list has deleted nobody (suppressedCommand). Called only when an endpoint hears the event, so
- * every read is inside a try (WEBHOOK_ERASED_READ_COMMANDS). The PayPal sibling is lib/paypal-delivery.ts.
+ * print. A store with no list has deleted nobody (suppressedCommand). Called by emitEvent only for an event about to
+ * be kept for a live endpoint (WEBHOOK_ERASED_READ_COMMANDS), for the Stripe events below and PayPal's refund.issued
+ * (lib/paypal-delivery.ts).
  */
 async function erasedSincePaid(store: Store, email: string | null, paidAt: unknown): Promise<boolean> {
   const listId = store.listId;
@@ -1288,7 +1318,7 @@ async function erasedSincePaid(store: Store, email: string | null, paidAt: unkno
   if (mark === undefined) throw new UnknownReplyError("a person's deletion print");
   if (mark === null) return false;
   if (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark)) {
-    console.error("a person's deletion print is there but not in its shape; the Stripe event goes out with no address and no name", store.handle);
+    console.error("a person's deletion print is there but not in its shape; the event goes out with no address and no name", store.handle);
     return true;
   }
   return !(typeof paidAt === "number" && Number.isSafeInteger(paidAt) && paidAt > 0) || Number(mark) >= paidAt;
@@ -1436,9 +1466,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const session = str(object.id);
     if (!session) return true;
     const details = (object.customer_details ?? {}) as { email?: unknown; name?: unknown };
-    const named = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
-    // The print is read only when an endpoint hears what names the buyer (rule 26): otherwise nothing is sent.
-    const buyer = (heard.has("sale.completed") || heard.has("membership.started")) && (await erasedSincePaid(store, named.email, object.created)) ? { email: null, name: null } : named;
+    const buyer = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
+    // Paid when the session completed (the event's time), not when it was opened (review of #3491, L3).
+    const paidBy = { email: buyer.email, paidAt: event.created };
     const membership = object.mode === "subscription" && meta.kind !== "plan";
     const kind = meta.kind === "call" ? "call" : meta.kind === "plan" ? "payment_plan" : membership ? "membership" : "one_time";
     const totals = (object.total_details ?? {}) as { amount_discount?: unknown };
@@ -1469,7 +1499,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       // utm tags of the page the button was on, and the creator's own site it
       // was bought on through the checkout script (lib/embed-sites.ts).
       source: sourceOf(meta),
-    }, created);
+    }, created, paidBy);
     if (membership) {
       await emitEvent(store, "membership.started", str(object.subscription) ?? session, {
         subscription: str(object.subscription),
@@ -1480,7 +1510,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         trial_days: Number(meta.trial_days) || 0,
         payments: Number(meta.ends_after) || null,
         buyer,
-      }, created);
+      }, created, paidBy);
     }
     return true;
   }
@@ -1505,9 +1535,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       amount_cents: num(object.amount),
       discount_cents: 0,
       currency: str(object.currency) ?? "usd",
-      buyer: { email: heard.has("sale.completed") && (await erasedSincePaid(store, str(object.receipt_email), object.created)) ? null : str(object.receipt_email), name: null },
+      buyer: { email: str(object.receipt_email), name: null },
       paid_at: iso(event.created),
-    }, created);
+    }, created, { email: str(object.receipt_email), paidAt: object.created });
     return true;
   }
 
@@ -1565,8 +1595,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       status: ended ? "ended" : "ending",
       ends_at: ended ? iso(object.ended_at) ?? iso(event.created) : iso(endsAt),
       reason: ended && meta.ends_after ? "completed" : str(details.reason) ?? "cancellation_requested",
-      buyer: { email: (await erasedSincePaid(store, email, object.start_date ?? object.created)) ? null : email, customer },
-    }, created);
+      buyer: { email, customer },
+    }, created, { email, paidAt: object.start_date ?? object.created });
     return true;
   }
 
@@ -1590,7 +1620,6 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const total = num(object.amount_refunded);
     const before = num(previous.amount_refunded);
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
-    const named = { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) };
     await emitEvent(store, "refund.issued", `${charge}|${total}`, {
       charge,
       payment_intent: intent,
@@ -1600,9 +1629,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       amount_cents: num(object.amount),
       fully_refunded: object.refunded === true,
       currency: str(object.currency) ?? "usd",
-      buyer: (await erasedSincePaid(store, named.email, object.created)) ? { email: null, name: null } : named,
+      buyer: { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) },
       refunded_at: iso(event.created),
-    }, created);
+    }, created, { email: str(billing.email) ?? str(object.receipt_email), paidAt: object.created });
     return true;
   }
 

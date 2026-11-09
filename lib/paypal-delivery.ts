@@ -162,7 +162,8 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
         currency: paid.currency,
         buyer: { email: paid.email, name: null },
         refunded_at: new Date().toISOString(),
-      });
+        // Nobody the store deleted at or after the payment is named (R38, rule 30; review of #3491).
+      }, Date.now(), { email: paid.email, paidAt: paid.at });
     },
   });
   done.cleared += await handOverAgain(store, deadline);

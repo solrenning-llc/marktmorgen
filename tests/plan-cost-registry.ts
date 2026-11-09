@@ -578,13 +578,17 @@ export const LOCKED_UNTIL_STAR_COMMANDS = 3;
 /** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
 export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
 /**
- * lib/webhooks.ts erasedSincePaid (R38): before a Stripe-read event names its buyer (refund.issued, sale.completed,
- * membership.started, an offer's sale.completed, membership.canceled), one HGET of that address's print in the store's
- * deletion hash (lib/suppression.ts), so a person deleted at or after the payment is sent with no address. One a
- * Stripe event that names a buyer, made only when the store's endpoints hear that event (review of #3491), and every
- * such event is sent at least once (a try, this unit), so it is counted in every try (held in
- * tests/webhook-stripe-erased.test.ts). A read with no answer sends nothing and is read again next run, as the
- * watcher's other lookups are, within its wait bound (STRIPE_WAIT_RUNS in lib/webhooks.ts).
+ * lib/webhooks.ts erasedSincePaid (R38): before an event read from a payment provider names its buyer (Stripe's
+ * refund.issued, sale.completed, membership.started, an offer's sale.completed and membership.canceled; PayPal's
+ * refund.issued), one HGET of that address's print in the store's deletion hash (lib/suppression.ts), so a person
+ * deleted at or after the payment is sent with no address. Read inside emitEvent only for an event about to be kept
+ * for a live endpoint: new (its SET NX taken), heard, and inside the month's deliveries, so each read goes with at least
+ * one try (this unit), and an event no endpoint hears, one already sent and read again, or one the month cannot take
+ * makes none (reviews of #3491; held in tests/webhook-stripe-erased.test.ts and tests/paypal-refund-erased.test.ts);
+ * only a message too large to keep, which writes its line instead of a try, reads it with none. A read with no answer
+ * takes the event's mark back: a Stripe event is read again next run, as the watcher's other lookups are (one event
+ * waits a store a run, inside the five-minute job's own schedule, STRIPE_WAIT_RUNS in lib/webhooks.ts); PayPal's
+ * refund, whose telling is not tried again (lib/paypal-sales.ts), is then not sent.
  */
 export const WEBHOOK_ERASED_READ_COMMANDS = 1;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */

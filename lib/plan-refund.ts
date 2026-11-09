@@ -172,6 +172,9 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
+        // Only this charge's own row decides (rule 30): one of another charge, or naming none, is unknown, so a dispute
+        // won elsewhere never makes the guarantee payable on a charge whose own dispute may be lost (Claude 5 on #3133).
+        if (idOf(disputes[0].charge) !== chargeId) return { refund: { kind: "unknown", reason: "unreadable" } };
         disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
         disputedCents = num(disputes[0].amount);
       }

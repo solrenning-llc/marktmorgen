@@ -222,6 +222,9 @@ async function main(): Promise<void> {
   is("the page draws the unknown state", page.includes('access.state === "unknown"'), true);
   is("the page offers no checkout on it", /\) : access\.state === "unknown" \? null : \(/.test(page), true);
   is("a device's lesson places are not forgotten on it", page.includes('access.state !== "open" && access.state !== "unknown"'), true);
+  // The way to try again stands alone on its line, not inside a sentence, so it is a 44 px target (WCAG 2.5.5, AX274).
+  const tryAgain = /<Link href=\{base\} className="([^"]*)"[^>]*>\s*\{w\.accessUnknownAgain\}/.exec(page)?.[1] ?? "";
+  is("the way to try again is a 44 px target", ["inline-flex", "min-h-11", "items-center"].every((name) => tryAgain.split(/\s+/).includes(name)), true);
 
   done();
 }

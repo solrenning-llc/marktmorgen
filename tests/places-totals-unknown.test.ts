@@ -188,8 +188,9 @@ async function totalsPart(): Promise<void> {
   const t = { visitors: 10, views: 20, checkouts: 2, sales: 1, cents: 1_000 };
   const data = { totals: { d7: t, d30: t, d90: t, all: t }, currency: "usd", sales: "ok", partial: false } as unknown as StatsData;
   const figures = (name: string, read: StoreFigures["read"]): StoreFigures => ({ sid: name.toLowerCase(), name, handle: name.toLowerCase(), read });
-  const bread = { currency: "usd", paying: 3, trialing: 1, mrr: 2_700 };
-  const pasta = { currency: "usd", paying: 40, trialing: 2, mrr: 36_000 };
+  // Whole readings in one currency (complete, none elsewhere): the shape membersOf now keeps (Claude 1 on #2992).
+  const bread = { currency: "usd", paying: 3, trialing: 1, mrr: 2_700, complete: true, elsewhere: 0 };
+  const pasta = { currency: "usd", paying: 40, trialing: 2, mrr: 36_000, complete: true, elsewhere: 0 };
 
   part("3. All your stores: healthy control");
   const healthy = sumStores([figures("Bread", { state: "ok", data, members: bread }), figures("Pasta", { state: "ok", data, members: pasta })]);
@@ -228,6 +229,55 @@ async function totalsPart(): Promise<void> {
     trialing: "Not known",
     mrr: "Not known",
     note: "Members could not be read just now for Bread and Pasta, so the member numbers are not shown.",
+  });
+
+  // Claude 1 on #2992 at 722c525e (LEVE, rule 30): a store's own reading can be short (more memberships than one
+  // reading takes: complete false) or leave some out of the money (memberships in another currency: elsewhere > 0).
+  // Its studio page says so; the totals showed those figures as the whole.
+  part("3. A store's members read short, or with memberships in another currency");
+  const reading = (over: Record<string, unknown>) => ({ ...bread, atRisk: 0, atRiskMrr: 0, ended30: 0, endedMrr30: 0, complete: true, elsewhere: 0, ...over });
+  const shortRead = await membersOf(Promise.resolve(reading({ complete: false }) as never));
+  const apartRead = await membersOf(Promise.resolve(reading({ elsewhere: 2 }) as never));
+  is("membersOf keeps whether the reading was whole, and how many are in another currency", [shortRead, apartRead], [
+    { ...bread, complete: false, elsewhere: 0 },
+    { ...bread, complete: true, elsewhere: 2 },
+  ]);
+  const wholeRead = { ...pasta, complete: true, elsewhere: 0 };
+  const short = sumStores([figures("Bread", { state: "ok", data, members: shortRead }), figures("Pasta", { state: "ok", data, members: wholeRead })]);
+  is("short reading: every member figure says at least, and the note names Bread", memberLines(short), {
+    paying: "At least 43",
+    trialing: "At least 3",
+    mrr: "At least $387",
+    note: "Bread has more memberships than one reading takes, so the oldest are not in the member numbers below and they may be lower than they are.",
+  });
+  const apart = sumStores([figures("Bread", { state: "ok", data, members: apartRead }), figures("Pasta", { state: "ok", data, members: wholeRead })]);
+  is("another currency: members are counted, the monthly money says at least, and the note names Bread", memberLines(apart), {
+    paying: "43",
+    trialing: "3",
+    mrr: "At least $387",
+    note: "Some memberships of Bread are in another currency, so they are counted as members but are not in the monthly recurring revenue.",
+  });
+  const allThree = sumStores([
+    figures("Bread", { state: "ok", data, members: shortRead }),
+    figures("Pasta", { state: "ok", data, members: { ...pasta, complete: true, elsewhere: 1 } }),
+    figures("Rye", { state: "ok", data, members: "unread" }),
+  ]);
+  is("unread, short and another currency together: each said once, in that order", memberLines(allThree), {
+    paying: "At least 43",
+    trialing: "At least 3",
+    mrr: "At least $387",
+    note:
+      "Members could not be read just now for Rye, so the member numbers below leave it out and may be lower than they are. " +
+      "Bread has more memberships than one reading takes, so the oldest are not in the member numbers below and they may be lower than they are. " +
+      "Some memberships of Pasta are in another currency, so they are counted as members but are not in the monthly recurring revenue.",
+  });
+  const unknownShape = await membersOf(Promise.resolve({ currency: "usd", paying: 3, trialing: 1, mrr: 2_700 } as never));
+  is("a reading without the whole/other-currency fields is taken as short (never whole), with no other currency made up", unknownShape !== null && unknownShape !== "unread" && [unknownShape.complete, unknownShape.elsewhere], [false, 0]);
+  is("control: whole readings in one currency still show exact figures with no note", memberLines(sumStores([figures("Pasta", { state: "ok", data, members: wholeRead })])), {
+    paying: "40",
+    trialing: "2",
+    mrr: "$360",
+    note: null,
   });
 
   part("3. The page keeps the failure");

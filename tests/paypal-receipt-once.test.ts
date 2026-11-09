@@ -32,12 +32,17 @@
  *       person are never made again for a key a request was already made under;
  *   K:  the person deleted while their receipt is being kept: once the deletion is confirmed, the receipt is not kept
  *       again, nothing is sent to them and the order leaves the list; a person deleted before they pay again is sent
- *       the new receipt; a keep whose reply is not exact sends nothing; a store from before lists is given one first.
+ *       the new receipt; a keep whose reply is not exact sends nothing; a store from before lists is given one first;
+ *   L:  the person deleted after paying while their receipt is still owed (the first try refused): the next try writes
+ *       nothing of them again (their purchase, their library, their erasure notes, nothing that names them), sends
+ *       nothing and takes the order off the list; a person deleted before they pay again is handed the new order.
  */
 import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, editProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
-import { forgetNoted } from "@/lib/erasure-index";
+import { forgetNoted, noteForErasure } from "@/lib/erasure-index";
+import { importedKey } from "@/lib/imported-purchases";
+import { storesBoughtFrom } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
 import { type Listing, readListing } from "@/lib/catalog";
 import { openOrder } from "@/lib/paypal-sales";
@@ -653,6 +658,51 @@ async function main(): Promise<void> {
   is("its receipt is sent once", copies(buyerK4).length, 1);
   is("the store has a list now", typeof (await fresh()).listId, "string");
   is("and the order leaves the list", (await listed()).includes(k4), false);
+
+  part("L: the person deleted after paying while their receipt is owed: the next try writes nothing of them again");
+  startOfNextDay();
+  /** Every key and its value (the stub's DUMP: reads, never makes a key), to see what a try wrote. */
+  const snapshot = () => new Map(redis.keys().map((key) => [key, JSON.stringify(redis.run(["DUMP", key]))]));
+  /** The keys a try made or changed since `then` whose value names this address. */
+  const naming = (then: Map<string, string>, buyer: string) =>
+    [...snapshot()].filter(([key, value]) => then.get(key) !== value && value.toLowerCase().includes(buyer)).map(([key]) => key);
+  const notesOf = (buyer: string) => String(noteForErasure(statsId, buyer, "x")[0]?.[1]);
+  resendMode = "422";
+  const buyerL = "erased-after-paying@example.com";
+  const l = await pay(19, buyerL);
+  is("the return route's try: refused by Resend (422)", copies(buyerL).length, 1);
+  is("the order is still owed its receipt", (await listed()).includes(l), true);
+  is("control: that try handed the purchase over and noted it in their library", [redis.run(["EXISTS", importedKey(statsId, buyerL)]), (await storesBoughtFrom(buyerL)).includes(store.sid)], [1, true]);
+  const erasedL = await erasePerson(await fresh(), buyerL, { kind: "person" });
+  is("the deletion completes", erasedL.ok, true);
+  is("control: the deletion took their purchase, library and notes", [redis.run(["EXISTS", importedKey(statsId, buyerL)]), (await storesBoughtFrom(buyerL)).includes(store.sid), redis.run(["EXISTS", notesOf(buyerL)])], [0, false, 0]);
+  const afterErasure = snapshot();
+  resendMode = "up";
+  await sweep(6 / 60);
+  is("the next try does not hand the purchase over again", redis.run(["EXISTS", importedKey(statsId, buyerL)]), 0);
+  is("nor note it in their library again", (await storesBoughtFrom(buyerL)).includes(store.sid), false);
+  is("nor note anything for their deletion again", redis.run(["EXISTS", notesOf(buyerL)]), 0);
+  is("no key it made or changed names them", naming(afterErasure, buyerL), []);
+  is("nothing more was sent to them", copies(buyerL).length, 1);
+  is("the order leaves the list", (await listed()).includes(l), false);
+  await sweeps(3);
+  is("later sweeps write and send nothing of them", [redis.run(["EXISTS", importedKey(statsId, buyerL)]), naming(afterErasure, buyerL), copies(buyerL).length], [0, [], 1]);
+
+  part("L: control: a person deleted before they pay again is handed the new order on its next try");
+  startOfNextDay();
+  const buyerL2 = "deleted-then-paid@example.com";
+  const beforeL2 = await erasePerson(await fresh(), buyerL2, { kind: "person" });
+  is("the earlier deletion completes", beforeL2.ok, true);
+  ahead += 5_000;
+  resendMode = "422";
+  const l2 = await pay(20, buyerL2);
+  is("the return route's try: refused by Resend (422)", copies(buyerL2).length, 1);
+  is("and the purchase handed over", redis.run(["EXISTS", importedKey(statsId, buyerL2)]), 1);
+  resendMode = "up";
+  await sweep(6 / 60);
+  is("the next try sends the receipt", copies(buyerL2).length, 2);
+  is("the purchase is still theirs", redis.run(["EXISTS", importedKey(statsId, buyerL2)]), 1);
+  is("and the order leaves the list", (await listed()).includes(l2), false);
 
   done();
 }

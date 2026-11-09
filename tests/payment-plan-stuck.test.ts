@@ -299,15 +299,20 @@ async function main(): Promise<void> {
     (told?.text ?? "").includes("Twelve-week coaching"),
     (told?.text ?? "").includes(STUCK),
     /keep charging the buyer/.test(told?.text ?? ""),
-    /reconnect/i.test(told?.text ?? ""),
+    /Stripe dashboard/.test(told?.text ?? ""),
   ], [true, true, true, true]);
+  // Rule 23 (Claude 6 on #3367, VR 2): this asserted /reconnect/; the studio offers no way to reconnect an account
+  // already connected (only "Ask Stripe again" and "Disconnect it here"), so the email may promise only what is real:
+  // the fix in the creator's own Stripe dashboard, and what the job does by itself.
+  is("and promises nothing the product does not do: no reconnecting, no studio link", [/reconnect/i.test(told?.text ?? ""), /\/studio/.test(told?.text ?? "")], [false, false]);
+  is("it says what the job does by itself: tries once a week, saves the end and refunds what was taken after it", /once a week/.test(told?.text ?? "") && /refund/i.test(told?.text ?? ""), true);
   is("and nothing about the buyer: no address in it at all", /@/.test(told?.text ?? ""), false);
   is("nothing is written to nl:plans:given-up", await givenUpKey(), 0);
   is("the log says so, once", logged.filter((line) => line.includes("tried once a week from now on, its creator emailed")).length, 1);
   sessions.cs_test_dead00000001 = checkout("cs_test_dead00000001", { kind: "plan", plan_payments: "12", plan_interval: "month" });
   subscriptions.sub_dead00000001 = { id: "sub_dead00000001", status: "active", billing_cycle_anchor: ANCHOR + 400 * DAY };
   const back = updates.length;
-  // The creator reconnects the account: it answers again.
+  // The account answers again (the creator let us back in at Stripe).
   refusing.delete(STUCK);
   const settledOn = await (async () => {
     for (let d = 1; d <= 7; d += 1) {

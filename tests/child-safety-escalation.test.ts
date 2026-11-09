@@ -293,7 +293,7 @@ async function main(): Promise<void> {
   sent.length = 0;
   const twice = Date.UTC(2026, 10, 6, 9, 0);
   const records = () => (redis.run(["SCAN", "0", "MATCH", "nl:csa:alert:*", "COUNT", 1000]) as [string, string[]])[1].length;
-  const request = { kind: "child_safety", url, work: "Placeholder request A", email: "first@example.com" };
+  const request = { kind: "child_safety" as const, url, work: "Placeholder request A", email: "first@example.com" };
   await alertOwner(request, "held", twice);
   const firstOfTwo = tokenOf(sent[0]);
   const originalRecord = String(redis.run(["GET", alertKey(idOf(firstOfTwo))]) ?? "");
@@ -310,7 +310,7 @@ async function main(): Promise<void> {
   is("another sender on the same address the same day gets its own alert", due().length, 2);
   await alertOwner({ ...request, work: "Placeholder request B" }, "held", twice + 3 * HOUR);
   is("other words on the same address the same day get their own", due().length, 3);
-  await alertOwner({ ...request, kind: "intimate_image" }, "not_held", twice + 4 * HOUR);
+  await alertOwner({ ...request, kind: "intimate_image" as const }, "not_held", twice + 4 * HOUR);
   is("the other kind gets its own", due().length, 4);
   await alertOwner(request, "held", twice + DAY);
   is("the same request the next UTC day gets its own", due().length, 5);

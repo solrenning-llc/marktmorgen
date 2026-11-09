@@ -12,6 +12,14 @@
  *                                its handled links; ALERT_KEEP_SECONDS
  *   nl:csa:alerts       zset     the open reports' ids by when each is next due; ALERT_KEEP_SECONDS
  *                                from the last report, its members taken out as they end
+ *   nl:csa:once:<hash>  string   the id of the alert one request opened, claimed (NX) before it opens:
+ *                                a hash of its kind, the request's hash and the UTC day, the same
+ *                                identity as the urgent email's idempotency key; ALERT_ONCE_SECONDS
+ *
+ * A retry of the same request the same day (the same address, sender and
+ * words: lib/child-safety.ts, alertOwner) finds the claim and opens nothing:
+ * the first alert is kept as it is, with its one reminder series and its
+ * links. A claim answered off its shape is unknown: nothing is opened.
  *
  * Never the reporter's words or address, and never a link itself: each email
  * carries its own handled link (32 random bytes after the id), kept only as a
@@ -51,9 +59,13 @@ export const OPEN_ALERTS_MAX = 200;
 export const ALERT_BATCH = 10;
 /** How long an open report's record and the due list are kept: its reminding days and a margin. */
 export const ALERT_KEEP_SECONDS = (ALERT_DAYS + 2) * 86_400;
+/** How long a request's claim is kept: past the end of its UTC day, which is part of its identity. */
+export const ALERT_ONCE_SECONDS = 2 * 86_400;
 
 export const ALERTS_DUE = "nl:csa:alerts";
 export const alertKey = (id: string) => `nl:csa:alert:${id}`;
+/** The claim of one request (its kind, its hash and its UTC day), never the reporter's words or address. */
+export const alertOnceKey = (request: string) => `nl:csa:once:${createHash("sha256").update(`csa-alert:${request}`).digest("hex").slice(0, 32)}`;
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -137,10 +149,12 @@ function newToken(id: string): { token: string; hash: string } {
   return { token, hash: hashOf(token) };
 }
 
-async function forget(id: string): Promise<void> {
+/** Takes back an alert this call opened, its claim with it, so a retry of the request may set its reminder up. */
+async function forget(id: string, once: string): Promise<void> {
   await redisPipeline([
     ["ZREM", ALERTS_DUE, id],
     ["DEL", alertKey(id)],
+    ["DEL", once],
   ]).catch(() => console.error("a child-safety reminder that could not be set up could not be taken back"));
 }
 
@@ -149,13 +163,16 @@ async function forget(id: string): Promise<void> {
  * alertOwner): `send` gets the lines this module adds (the handled link, or
  * why no reminder will follow) and says whether the email went. An urgent
  * email that did not go is reminded within the hour instead of the day.
+ * `request` is the request's identity (its kind, hash and UTC day): a retry
+ * of it opens nothing and leaves the first alert as it is.
  */
 export async function withReminders(
-  report: { kind: Kind; url: string; handle: string; outcome: HoldOutcome },
+  report: { kind: Kind; url: string; handle: string; outcome: HoldOutcome; request: string },
   now: number,
   send: (lines: string[]) => Promise<boolean>,
 ): Promise<boolean> {
   const id = randomBytes(16).toString("hex");
+  const once = alertOnceKey(report.request);
   const link = newToken(id);
   const alert: Alert = {
     v: 1,
@@ -170,24 +187,39 @@ export async function withReminders(
     warned: false,
     tokens: [link.hash],
   };
-  let state: "open" | "full" | "unknown" = "unknown";
+  let state: "open" | "full" | "unknown" | "again" = "unknown";
+  let claimed = false;
   try {
-    const replies = repliesFor(
-      await redisPipeline([
-        ["SET", alertKey(id), JSON.stringify(alert), "EX", ALERT_KEEP_SECONDS, "NX"],
-        ["ZADD", ALERTS_DUE, nextDue(alert), id],
-        ["EXPIRE", ALERTS_DUE, ALERT_KEEP_SECONDS],
-        ["ZCARD", ALERTS_DUE],
-      ]),
-      4,
-    );
-    const count = replies?.[3];
-    if (replies?.[0] !== "OK" || replies[1] !== 1 || typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) state = "unknown";
-    else state = count > OPEN_ALERTS_MAX ? "full" : "open";
+    // Claimed before anything is opened (NX): a retry of the same request finds it and opens nothing, and the first
+    // alert, its due time and its links are left exactly as they are. A reply off its shape opens nothing (rule 24).
+    const claim = repliesFor(await redisPipeline([["SET", once, id, "NX", "EX", ALERT_ONCE_SECONDS]]), 1);
+    if (claim?.[0] === null) {
+      state = "again";
+      console.error("a child-safety report came again the same day: its alert is already open, none added");
+    } else if (claim?.[0] !== "OK") console.error("a child-safety report's claim could not be confirmed; no reminder opened");
+    else claimed = true;
   } catch (error) {
-    console.error("a child-safety reminder could not be set up", error instanceof Error ? error.message : "unknown");
+    console.error("a child-safety report's claim could not be confirmed", error instanceof Error ? error.message : "unknown");
   }
-  if (state !== "open") await forget(id);
+  if (claimed) {
+    try {
+      const replies = repliesFor(
+        await redisPipeline([
+          ["SET", alertKey(id), JSON.stringify(alert), "EX", ALERT_KEEP_SECONDS, "NX"],
+          ["ZADD", ALERTS_DUE, nextDue(alert), id],
+          ["EXPIRE", ALERTS_DUE, ALERT_KEEP_SECONDS],
+          ["ZCARD", ALERTS_DUE],
+        ]),
+        4,
+      );
+      const count = replies?.[3];
+      if (replies?.[0] !== "OK" || replies[1] !== 1 || typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) state = "unknown";
+      else state = count > OPEN_ALERTS_MAX ? "full" : "open";
+    } catch (error) {
+      console.error("a child-safety reminder could not be set up", error instanceof Error ? error.message : "unknown");
+    }
+  }
+  if (claimed && state !== "open") await forget(id, once);
   const lines =
     state === "open"
       ? [
@@ -197,7 +229,9 @@ export async function withReminders(
         ]
       : state === "full"
         ? ["", `The reminder list is full (${OPEN_ALERTS_MAX} open reports), so no reminder will come for this one. Act on it now, and mark the reports already dealt with handled from their emails.`]
-        : ["", "Reminders for this report could not be set up just now, so none will come. Act on it now."];
+        : state === "again"
+          ? ["", "This report was already received today, so no second reminder is set up for it: act on it from the first email and its reminders."]
+          : ["", "Reminders for this report could not be set up just now, so none will come. Act on it now."];
   const sent = await send(lines).catch(() => false);
   if (!sent && state === "open") {
     await redisPipeline([["ZADD", ALERTS_DUE, "XX", now + HOUR, id]]).catch(() => console.error("an unsent urgent email's reminder could not be brought forward"));

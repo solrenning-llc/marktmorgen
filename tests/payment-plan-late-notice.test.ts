@@ -44,7 +44,9 @@ const subscriptions: Record<string, Record<string, unknown>> = {};
 const invoices: Record<string, Invoice[]> = {};
 const refunds: Record<string, Refund[]> = {};
 const keyed = new Map<string, Refund>();
-const emails: { to: string; subject: string; text: string }[] = [];
+const emails: { to: string; subject: string; text: string; key: string | null }[] = [];
+/** Payment intents whose refund Stripe refuses for good (a 400 with this code). */
+const refusedFor = new Map<string, string>();
 let resendFails = false;
 let balance = 1_000_000;
 let stripeCalls = 0;
@@ -55,7 +57,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") {
     if (resendFails) return answer({ message: "down" }, 500);
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
-    emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
+    emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text, key: ((init?.headers ?? {}) as Record<string, string>)["Idempotency-Key"] ?? null });
     return answer({ id: `email_${emails.length}` });
   }
   if (url.hostname !== "api.stripe.com") return answer({ object: "list", data: [], has_more: false });
@@ -88,6 +90,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const intent = body.get("payment_intent") ?? "";
     const charge = Object.values(invoices).flat().map((row) => row.charge).find((c) => c.payment_intent === intent);
     if (!charge) return answer({ error: { message: "No such payment_intent" } }, 404);
+    const refused = refusedFor.get(intent);
+    if (refused) return answer({ error: { type: "invalid_request_error", code: refused, message: "This charge can no longer be refunded." } }, 400);
     const amount = Number(body.get("amount") ?? charge.amount - charge.amount_refunded);
     const made: Refund = { id: `re_${intent.slice(3)}${(refunds[intent]?.length ?? 0) + 1}`, object: "refund", payment_intent: intent, amount, currency: "usd", status: "succeeded", metadata: Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) };
     (refunds[intent] ??= []).push(made);
@@ -222,11 +226,34 @@ async function main(): Promise<void> {
     /Stripe dashboard/i.test(owedNote?.text ?? ""),
   ], [true, true, true, true]);
   is("nothing about the buyer: no address in it", (owedNote?.text ?? "").includes(owedBuyer), false);
+  // The reviews of #3367 at 9489992283 (Claude 6 A1 and LEVE 2): the purchase named, the email sent under its own key.
+  is("naming the checkout that started the plan, under an idempotency key", [(owedNote?.text ?? "").includes(d.session), /plan-owed/.test(owedNote?.key ?? "")], [true, true]);
   is("the buyer not emailed while nothing was given back, the plan kept", [to(owedBuyer).length, await inALine(d.session)], [0, true]);
   balance = 1_000_000;
   await settlePlans();
   is("once the balance covers it: refunded, the buyer emailed once, the plan settled", [(refunds[d.invoices[2].charge.payment_intent] ?? []).length, to(owedBuyer).length, await inALine(d.session)], [1, 1, false]);
   is("and the creator was told only that once", to(OWNER).length, 1);
+
+  part("A refund Stripe refuses for good: the creator is told once, the others still refunded (Claude 3, MEDIUM 1; Claude 6, N2)");
+  const refusedBuyer = "late-buyer-six@example.com";
+  const r = plan(2, 130, 5, refusedBuyer);
+  refusedFor.set(r.invoices[2].charge.payment_intent, "charge_expired_for_refund");
+  await remember(ACCOUNT, r.session, about);
+  const ownerBefore = to(OWNER).length;
+  const refusedOn: number[] = [];
+  for (let day = 0; day <= 6; day += 1) {
+    const before = to(OWNER).length;
+    await settlePlans();
+    if (to(OWNER).length > before) refusedOn.push(day);
+    tick(1);
+  }
+  is("the refundable two refunded and their buyer told, once each", [(refunds[r.invoices[3].charge.payment_intent] ?? []).length, (refunds[r.invoices[4].charge.payment_intent] ?? []).length, to(refusedBuyer).length], [1, 1, 2]);
+  is("the creator told once, PLAN_OWED_TELL_DAYS after, naming the refused invoice", [refusedOn, to(OWNER).length - ownerBefore, (to(OWNER).at(-1)?.text ?? "").includes(r.invoices[2].id)], [[3], 1, true]);
+  is("the plan still in its line, never let go", await inALine(r.session), true);
+  refusedFor.clear();
+  // Taken out by hand so the measure below tries one plan only.
+  const [lined] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf"]]);
+  for (const member of lined as string[]) if (member.startsWith(`${ACCOUNT}|${r.session}|`)) await redis.pipeline([["ZREM", "nl:plans:retry", member]]);
 
   part("A try stays within the registry's figures");
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;

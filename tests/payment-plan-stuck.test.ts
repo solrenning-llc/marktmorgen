@@ -89,7 +89,7 @@ let flakyDown = false;
 const refusing = new Set<string>([STUCK]);
 /** When set, every Stripe call answers this (Stripe down, too many requests, our own key refused). */
 let platform: { status: number; body: unknown } | null = null;
-const emails: { to: string; subject: string; text: string }[] = [];
+const emails: { to: string; subject: string; text: string; key: string | null }[] = [];
 let resendFails = false;
 /** Every checkout session read, in order: which plans a run reached (the review of #3367, item 1). */
 const sessionReads: string[] = [];
@@ -109,7 +109,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") {
     if (resendFails) return answer({ message: "down" }, 500);
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
-    emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
+    emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text, key: ((init?.headers ?? {}) as Record<string, string>)["Idempotency-Key"] ?? null });
     return answer({ id: `email_${emails.length}` });
   }
   if (url.hostname !== "api.stripe.com") return answer({ object: "list", data: [], has_more: false });
@@ -306,6 +306,11 @@ async function main(): Promise<void> {
   // the fix in the creator's own Stripe dashboard, and what the job does by itself.
   is("and promises nothing the product does not do: no reconnecting, no studio link", [/reconnect/i.test(told?.text ?? ""), /\/studio/.test(told?.text ?? "")], [false, false]);
   is("it says what the job does by itself: tries once a week, saves the end and refunds what was taken after it", /once a week/.test(told?.text ?? "") && /refund/i.test(told?.text ?? ""), true);
+  // The reviews of #3367 at 9489992283 (Claude 6 A1, Claude 3 LOW 4, rule 27; Claude 6 LEVE 2).
+  is("it names the purchase: the checkout that started the plan, so the creator finds the right subscription", (told?.text ?? "").includes("cs_test_dead00000001"), true);
+  is("and says, as the code does, that the plan is ended and a payment after its end refunded from the creator's balance", [/end the subscription/i.test(told?.text ?? ""), /from your Stripe balance/i.test(told?.text ?? "")], [true, true]);
+  is("never \"You do not need to do anything else\"", /anything else/i.test(told?.text ?? ""), false);
+  is("sent under an idempotency key of its own plan", typeof told?.key === "string" && /plan-stuck/.test(told?.key ?? ""), true);
   is("and nothing about the buyer: no address in it at all", /@/.test(told?.text ?? ""), false);
   is("nothing is written to nl:plans:given-up", await givenUpKey(), 0);
   is("the log says so, once", logged.filter((line) => line.includes("tried once a week from now on, its creator emailed")).length, 1);

@@ -17,7 +17,11 @@
  *   - a plan Stripe already canceled after its end still has its late payments refunded (a pass that ended it and
  *     could not refund);
  *   - a plan canceled at or before its own end reads no invoices at all;
- *   - a try stays within the registry's Stripe calls (PLAN_SETTLE_RUN in tests/plan-cost-registry.ts).
+ *   - a try stays within the registry's Stripe calls (PLAN_SETTLE_RUN in tests/plan-cost-registry.ts);
+ *   - the reviews of #3367 at 9489992283 (Claude 3, MEDIUM 1 and 2; Claude 6, N1): a payment Stripe refuses to refund
+ *     for good (a 4xx such as charge_expired_for_refund) is left owed and the others are still refunded in the same
+ *     pass; a refund Stripe answers pending is not money given back: the plan stays in its line, is read again, and
+ *     settles only once the refund reads succeeded; one that then fails is made again.
  */
 import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
 import { LATE_REFUND_CALLS, LATE_REFUNDS_PER_TRY } from "@/lib/plan-late-refunds";
@@ -56,6 +60,10 @@ let refundReply: unknown = null;
 let invoiceList: unknown = null;
 /** While true, a refund made does not show on its charge's amount_refunded (Stripe's objects read at different times). */
 let chargeLags = false;
+/** The status Stripe gives a refund it makes. */
+let refundStatus = "succeeded";
+/** Payment intents whose refund Stripe refuses for good (a 400 with this code). */
+const refusedFor = new Map<string, string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -101,8 +109,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const charge = Object.values(invoices).flat().map((row) => row.charge).find((c) => c.payment_intent === intent);
     if (!charge) return answer({ error: { message: "No such payment_intent" } }, 404);
     if (charge.disputed) return answer({ error: { type: "invalid_request_error", code: "charge_disputed", message: "disputed" } }, 400);
+    const refused = refusedFor.get(intent);
+    if (refused) return answer({ error: { type: "invalid_request_error", code: refused, message: "This charge can no longer be refunded." } }, 400);
     const amount = Number(body.get("amount") ?? charge.amount - charge.amount_refunded);
-    const made: Refund = { id: `re_${intent.slice(3)}${(refunds[intent]?.length ?? 0) + 1}`, object: "refund", payment_intent: intent, amount, currency: "usd", status: "succeeded", metadata: Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) };
+    const made: Refund = { id: `re_${intent.slice(3)}${(refunds[intent]?.length ?? 0) + 1}`, object: "refund", payment_intent: intent, amount, currency: "usd", status: refundStatus, metadata: Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) };
     (refunds[intent] ??= []).push(made);
     if (!chargeLags) charge.amount_refunded += amount;
     balance -= amount;
@@ -155,6 +165,8 @@ const reset = () => {
   refundReply = null;
   invoiceList = null;
   chargeLags = false;
+  refundStatus = "succeeded";
+  refusedFor.clear();
   balance = 1_000_000;
 };
 
@@ -234,6 +246,33 @@ async function main(): Promise<void> {
   const k = plan(2, 70, 2);
   subscriptions[k.sub] = { ...subscriptions[k.sub], status: "canceled", ended_at: k.end };
   is("one canceled at its own end reads no invoices", [await finishPlan(ACCOUNT, k.session), invoiceQueries.length], ["done", 0]);
+
+  part("A payment Stripe refuses to refund for good is left owed; the others are still refunded (Claude 3, MEDIUM 1)");
+  reset();
+  const r = plan(2, 130, 5);
+  refusedFor.set(r.invoices[2].charge.payment_intent, "charge_expired_for_refund");
+  await rememberPlan(ACCOUNT, r.session);
+  const refusedRun = await settlePlans();
+  is("the two refundable late payments are refunded in the same pass", [madeFor(r.invoices[3]).length, madeFor(r.invoices[4]).length], [1, 1]);
+  is("the refused one is not, and the plan is kept as owed, not as a failure", [madeFor(r.invoices[2]).length, refusedRun.owed, refusedRun.failed, await inALine(r.session)], [0, 1, 0, true]);
+
+  part("A refund Stripe answers pending is not given back yet (Claude 3, MEDIUM 2; Claude 6, N1)");
+  reset();
+  const p = plan(2, 70, 3);
+  refundStatus = "pending";
+  await rememberPlan(ACCOUNT, p.session);
+  const pendingRun = await settlePlans();
+  is("refunded once, pending: the plan is not settled and stays in its line", [madeFor(p.invoices[2]).length, pendingRun.done, await inALine(p.session)], [1, 0, true]);
+  posts.length = 0;
+  is("read again while pending: no second refund, still owed", [await finishPlan(ACCOUNT, p.session), posts.length], ["owed", 0]);
+  // Stripe fails it later; its idempotency key is forgotten after a day.
+  const pendingRefund = madeFor(p.invoices[2])[0];
+  pendingRefund.status = "failed";
+  p.invoices[2].charge.amount_refunded = 0;
+  balance += pendingRefund.amount;
+  keyed.clear();
+  refundStatus = "succeeded";
+  is("failed later: made again, and settled once it reads succeeded", [await finishPlan(ACCOUNT, p.session), madeFor(p.invoices[2]).map((one) => one.status)], ["done", ["failed", "succeeded"]]);
 
   part("A try stays within the registry's Stripe calls");
   reset();

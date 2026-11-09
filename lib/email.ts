@@ -781,10 +781,12 @@ async function keptSender(key: string): Promise<Sender | "none" | null> {
 
 /**
  * After Amazon said no to a key's email (viaAmazon exactly false: nothing was handed to it, and its once-mark was let
- * go of), the key is kept for Resend instead. Amazon's once-mark is taken again first (SET NX), so no other try of the
- * key can hand the email to Amazon from then on; only then is the kept sender moved (SET XX), by the one try holding
- * that mark. True only when both replies are exactly "OK" (CX-123 rule 24): a mark another try holds, a kept sender
- * gone, or any other reply sends nothing to Resend, and the caller tries again later.
+ * go of), the key is kept for Resend instead. Called only from the Resend guard's beforePost, after its reservation and
+ * right before its one request, so a Resend that cannot post (no review or credential binding, budget denied, usage
+ * unknown) leaves the key kept for Amazon, and a later try sends it there. Amazon's once-mark is taken again first
+ * (SET NX), so no other try of the key can hand the email to Amazon from then on; only then is the kept sender moved
+ * (SET XX), by the one try holding that mark. True only when both replies are exactly "OK" (CX-123 rule 24): a mark
+ * another try holds, a kept sender gone, or any other reply sends nothing to Resend, and the caller tries again later.
  */
 async function moveToResend(key: string): Promise<boolean> {
   try {
@@ -802,8 +804,9 @@ async function moveToResend(key: string): Promise<boolean> {
  * receipt, lib/paypal-delivery.ts). The sender is kept for the key (PINNED_SENDER_SECONDS) just before its first
  * request, and every later try goes only to it, so an email whose answer was lost is never sent again by the other
  * sender, which has never seen the key. A kept sender that is not ready now sends nothing: the caller tries again
- * later. A refusal Amazon gave (viaAmazon exactly false, nothing handed over) moves the key to Resend and goes on to
- * it in the same call, as sendEmail falls over (moveToResend); an unknown answer (null) stays kept for Amazon. False
+ * later. A refusal Amazon gave (viaAmazon exactly false, nothing handed over) goes on to Resend in the same call, as
+ * sendEmail falls over, and the key moves to Resend only in the guard's beforePost (moveToResend): a Resend that cannot
+ * post leaves it kept for Amazon. An unknown answer (null) stays kept for Amazon. False
  * without a key; without Redis it is sendEmail. Every other email goes through sendEmail, unchanged.
  */
 export async function sendEmailPinned(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<boolean> {
@@ -819,9 +822,15 @@ export async function sendEmailPinned(message: OneMessage, runtime: ResendTransp
       if (!(await metered(message.meter, 1))) return false;
       const amazon = await viaAmazon(message, to, key);
       if (amazon !== false) return amazon === true;
-      if (!(await moveToResend(key))) return false;
-      // The SES path already took its allowance, as in sendEmail.
-      return viaResend(message, key, runtime, { preflight: async () => true, beforePost: async () => (await keepSender(key, "resend")) === "resend" });
+      // The key moves to Resend only once Resend is about to post (moveToResend, once; a resend of the same call after
+      // a 429 finds it kept). The SES path already took its allowance, as in sendEmail.
+      let moved = false;
+      const toResendAfterAmazon = async () => {
+        if (moved) return (await keepSender(key, "resend")) === "resend";
+        moved = await moveToResend(key);
+        return moved;
+      };
+      return viaResend(message, key, runtime, { preflight: async () => true, beforePost: toResendAfterAmazon });
     }
     if (kept !== "resend") return false;
   } else {

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { isBillingConfigured, readStartedSubscription } from "@/lib/billing";
-import { setSubscription } from "@/lib/store";
+import { setSubscription, storeForEmail } from "@/lib/store";
 import { dropPause } from "@/lib/plan-pause";
 import { inClosingDay } from "@/lib/closing-holds";
 import { refuseSession } from "@/lib/closing-plan-guard";
@@ -61,8 +61,17 @@ export async function GET(request: NextRequest) {
       trialEnds: started.trialEnds,
       shared: started.shared,
       period: started.period,
-    });
-    if (!saved) return away(origin, studio("billing=error"));
+    }, store);
+    if (!saved) {
+      // Held to the store the decision above was made on: another way back,
+      // or the daily job, may have written in between, and a stale write
+      // must never land over it. Then the creator is told what it holds now.
+      const now = await storeForEmail(ref);
+      const moved = !now || now.sid !== store.sid || now.statsId !== store.statsId || now.stripeCustomerId !== store.stripeCustomerId ||
+        now.subscriptionId !== store.subscriptionId || now.subscriptionActive !== store.subscriptionActive || now.tier !== store.tier || now.cycle !== store.cycle;
+      if (!moved) return away(origin, studio("billing=error"));
+      return away(origin, studio(now?.subscriptionActive ? "billing=already" : "billing=unconfirmed"));
+    }
     // Started again by hand during a break: there is nothing left for the
     // break to start (lib/plan-pause.ts).
     if (started.active) await dropPause(saved).catch((error) => console.error("dropping a break failed", error));

@@ -24,7 +24,8 @@
  * try it again, knowing it may arrive twice; or end the run.
  *
  *   nl:wf:run:<flowId>:<person>   hash: email, status, step, note, startedAt, updatedAt, open,
- *                                 waits, waitAt ("<step>:<first wait>"), retries (lib/flow-retry.ts)
+ *                                 waits, offLooks (looks while the store was switched off), waitAt
+ *                                 ("<step>:<first wait>"), retries (lib/flow-retry.ts)
  *   nl:wf:log:<flowId>:<person>   list of JSON events, oldest first, at most MAX_RUN_EVENTS
  *   nl:wf:runs:<flowId>           zset: person → last change, every run of the last 400 days
  *                                 (complete, so a person or a store can be erased in full)
@@ -221,28 +222,43 @@ export async function claimAttempts(flowId: string, emails: string[], index: num
 /**
  * Counts one more wait for each of these people at step `index`, and says,
  * for each, how many waits their run has had and since when this step has
- * been waiting (lib/flow-retry.ts decides). Null for anyone whose count could
- * not be read: an unknown count is not room for one more wait.
+ * been waiting (lib/flow-retry.ts decides). `switchedOff` counts a look while
+ * the store is switched off, in its own field (`offLooks`, half a wait each),
+ * and reads the whole waits with it; otherwise a whole wait, read with the
+ * looks. Null for anyone whose count could not be read, the other field
+ * included (rule 24: only a missing field is none): an unknown count is not
+ * room for one more wait.
  */
-export async function countWaits(flowId: string, emails: string[], index: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Map<string, { waits: number; since: number } | null>> {
-  const out = new Map<string, { waits: number; since: number } | null>();
+export async function countWaits(
+  flowId: string,
+  emails: string[],
+  index: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  switchedOff = false,
+): Promise<Map<string, { waits: number; offLooks: number; since: number } | null>> {
+  const out = new Map<string, { waits: number; offLooks: number; since: number } | null>();
   if (!emails.length) return out;
-  const reply = await redisPipeline(emails.flatMap((email) => [["HINCRBY", runKey(flowId, personOf(email)), "waits", 1], ["HGET", runKey(flowId, personOf(email)), "waitAt"]])).catch(() => null);
+  const [counted, other] = switchedOff ? ["offLooks", "waits"] : ["waits", "offLooks"];
+  const reply = await redisPipeline(emails.flatMap((email) => [["HINCRBY", runKey(flowId, personOf(email)), counted, 1], ["HMGET", runKey(flowId, personOf(email)), other, "waitAt"]])).catch(() => null);
   const fresh: (string | number)[][] = [];
   emails.forEach((email, i) => {
-    const waits = Array.isArray(reply) ? reply[2 * i] : null;
-    const at = Array.isArray(reply) ? reply[2 * i + 1] : undefined;
-    if (!Array.isArray(reply) || reply.length !== 2 * emails.length || typeof waits !== "number" || !Number.isSafeInteger(waits) || waits < 1 || (at !== null && typeof at !== "string")) {
+    const added = Array.isArray(reply) ? reply[2 * i] : null;
+    const read = Array.isArray(reply) ? reply[2 * i + 1] : null;
+    const [kept, at] = Array.isArray(read) && read.length === 2 ? read : [undefined, undefined];
+    const keptCount = kept === null ? 0 : typeof kept === "string" && /^(0|[1-9]\d{0,15})$/.test(kept) ? Number(kept) : NaN;
+    if (!Array.isArray(reply) || reply.length !== 2 * emails.length || typeof added !== "number" || !Number.isSafeInteger(added) || added < 1 || !Number.isSafeInteger(keptCount) || (at !== null && typeof at !== "string")) {
       out.set(email, null);
       return;
     }
+    const waits = switchedOff ? keptCount : added;
+    const offLooks = switchedOff ? added : keptCount;
     const [step, since] = typeof at === "string" ? at.split(":").map(Number) : [NaN, NaN];
     if (step === index && Number.isSafeInteger(since) && since > 0) {
-      out.set(email, { waits, since });
+      out.set(email, { waits, offLooks, since });
       return;
     }
     // This step's first wait: its clock starts now.
-    out.set(email, { waits, since: nowSeconds });
+    out.set(email, { waits, offLooks, since: nowSeconds });
     fresh.push(["HSET", runKey(flowId, personOf(email)), "waitAt", `${index}:${nowSeconds}`]);
   });
   if (fresh.length) await redisPipeline(fresh).catch(() => {});

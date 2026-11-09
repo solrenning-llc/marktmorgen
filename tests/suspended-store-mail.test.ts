@@ -19,7 +19,7 @@ import { LIST_RETRY_SECONDS, advanceBroadcast } from "@/lib/broadcasts";
 import { MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, WAIT_COMMANDS_PER_TRY } from "@/lib/flow-limits";
 import { LONGEST_DELAY_SECONDS, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { stopRules } from "@/lib/flow-stop-rules";
-import { personOf, readRun } from "@/lib/flow-runs";
+import { countWaits, personOf, readRun } from "@/lib/flow-runs";
 import { enroll, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
 import { type Store, claimHandle, ensureListId, ensureStatsId, noteTakedown, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
@@ -242,6 +242,15 @@ async function main(): Promise<void> {
   await renew();
   const moBack = await run();
   is("back on before then, it goes out at that look", [moBack.sent, messages.at(-1)?.to], [1, ["mo@example.com"]]);
+
+  part("A count field in no known shape stops the run, whichever field is counted (rule 24)");
+  const odd = `nl:wf:run:${flowId}:${personOf("odd@example.com")}`;
+  await redisPipeline([["HSET", odd, "offLooks", "1.5"]]);
+  is("a whole wait with looks in no known shape is not room for one more", (await countWaits(flowId, ["odd@example.com"], 0, nowS())).get("odd@example.com"), null);
+  await redisPipeline([["HDEL", odd, "offLooks"], ["HSET", odd, "waits", "x"]]);
+  is("a look with waits in no known shape is not room for one more", (await countWaits(flowId, ["odd@example.com"], 0, nowS(), true)).get("odd@example.com"), null);
+  await redisPipeline([["DEL", odd]]);
+  is("a run with neither field yet counts from nothing", [(await countWaits(flowId, ["odd@example.com"], 0, 1_800_000_000, true)).get("odd@example.com")], [{ waits: 0, offLooks: 1, since: 1_800_000_000 }]);
 
   part("The studio says so while the store is switched off");
   const page = readFileSync("app/studio/email/page.tsx", "utf8");

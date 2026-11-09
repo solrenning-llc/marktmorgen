@@ -2,7 +2,7 @@ import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
-import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
+import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
 import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
@@ -1003,7 +1003,11 @@ async function waitOrStop(
   const queue: (string | number)[][] = [];
   const outcomes: Settled[] = [];
   if (!people.length) return { queue, outcomes };
-  const counted = await countWaits(flowId, people.map((p) => p.email), index, nowSeconds);
+  // A look while the store is switched off is counted as half a wait (lib/flow-limits.ts, SWITCHED_OFF_LOOKS_PER_WAIT);
+  // a batch waits for one reason, but each person is counted by their own.
+  const off = people.filter((p) => p.reason === "switched_off").map((p) => p.email);
+  const whole = people.filter((p) => p.reason !== "switched_off").map((p) => p.email);
+  const counted = new Map([...(await countWaits(flowId, whole, index, nowSeconds)), ...(await countWaits(flowId, off, index, nowSeconds, true))]);
   for (const p of people) {
     const count = counted.get(p.email) ?? null;
     const stop = stopWaiting(count, nowSeconds);
@@ -1011,7 +1015,7 @@ async function waitOrStop(
       outcomes.push({ email: p.email, state: "failed", note: stop ?? "Stopped here.", to: -1, status: "ended" });
       continue;
     }
-    queue.push(["ZADD", QUEUE, nextTry(p.reason, count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
+    queue.push(["ZADD", QUEUE, nextTry(p.reason, p.reason === "switched_off" ? looksUsed(count) : count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
     outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
   }
   return { queue, outcomes };
@@ -1173,7 +1177,7 @@ export async function sendDueSteps(
     }
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
     // 24): no step is done, an email or an action. Each waits as every other wait does (waitOrStop: counted on the
-    // run, its looks spread over MAX_WAIT_DAYS_PER_STEP (lib/flow-retry.ts), MAX_WAITS_PER_RUN times at the most, then
+    // run, its looks spread over MAX_WAIT_DAYS_PER_STEP (lib/flow-retry.ts), each half a wait of MAX_WAITS_PER_RUN, then
     // the run stops, saying why), queued only
     // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
     if (store.suspended) {

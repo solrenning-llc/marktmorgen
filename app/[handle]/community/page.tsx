@@ -28,6 +28,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { CommunityComposer, ConfirmDeletes } from "@/components/community-composer";
 import { heldOf } from "@/lib/community-approval";
 import { HeldList } from "@/components/community-held";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -226,10 +227,10 @@ export default async function CommunityPage({ params, searchParams }: Params) {
           <HeldList store={store} items={held} kind="post" from={from} space={space?.id ?? null} />
 
           {shown.length === 0 ? (
-            <div className="st-note text-center">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{before ? w.nothingOlder : w.noPostsYet}</p>
-              <p className="mt-1 text-sm">{before ? w.thatIsEverything : canWrite && !(space && locked(space)) ? w.beTheFirst : w.whenSomebodyPosts}</p>
-            </div>
+            <EmptyState
+              title={before ? w.nothingOlder : w.noPostsYet}
+              body={before ? w.thatIsEverything : canWrite && !(space && locked(space)) ? w.beTheFirst : w.whenSomebodyPosts}
+            />
           ) : (
             <ul className="space-y-4">
               {shown.map((post) => (

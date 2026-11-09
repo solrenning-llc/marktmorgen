@@ -36,7 +36,8 @@
  * creator pasted, made in their own ad account; the token is sealed before it
  * is kept (lib/secret-box.ts) and never shown again.
  *
- * What goes with each: the order's id, time, amount, currency and products;
+ * What goes with each: an id made from the order's (adEventId), never the
+ * order's own; its time, amount, currency and products;
  * the buyer's email address hashed with SHA-256, as every platform requires;
  * the network address and browser of the request that opened the checkout;
  * the platforms' own first-party cookies when the browser had them (_fbp,
@@ -54,9 +55,10 @@
  */
 import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { seal, unseal } from "@/lib/secret-box";
+import { repliesFor } from "@/lib/redis-reply";
+import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { toMajor } from "@/lib/money";
@@ -195,7 +197,11 @@ export type ConversionKind = "purchase" | "renewal" | "lead";
 
 export type Conversion = {
   kind: ConversionKind;
-  /** The order's checkout id, the renewal's invoice id, or the lead's own id: the same as the browser's event. */
+  /**
+   * The event's id, the same as the browser's: made from the order's checkout
+   * id or the renewal's invoice id by adEventId, never either of them, or the
+   * lead's own random id (never a key to anything).
+   */
   id: string;
   /** When it happened, in seconds. */
   at: number;
@@ -206,6 +212,73 @@ export type Conversion = {
   /** Whether the buyer had paid this creator before; null when that could not be read. */
   customer: "new" | "returning" | null;
 };
+
+const AD_EVENT_LABEL = "marktmorgen/ad-event-id/v1";
+
+/**
+ * The id an order's ad event goes out with, to every pixel and from the
+ * server alike (506 [SG1], finding E-2). A checkout's id (cs_…) or a PayPal
+ * order's id is a key on this site: whoever has it opens the order's
+ * downloads, the buyer's address, a verified review, Discord, a call's room
+ * and, on PayPal, every purchase made with that address; a renewal's invoice
+ * id is proof of purchase for a review. So the platforms are never given one,
+ * only this: an HMAC-SHA256 of it under a key derived for this use alone from
+ * the server's root secret (lib/secret-box.ts deriveKey), cut to 128 bits.
+ *
+ * The same id in, the same id out, on the thanks page (which computes it on
+ * the server and hands it to the pixels) and in the conversions sent from
+ * here, so each platform still counts the browser's event and the server's
+ * as one purchase. A keyed hash rather than a plain one: a PayPal order id is
+ * short and partly predictable, and a plain hash of it could be checked
+ * against guesses; this cannot without the key, and cannot be turned back.
+ *
+ * Without a root secret it answers "" and nothing is sent with an id at all
+ * (the browser's purchase event and the server's conversion are both
+ * skipped), never the order's own id. That secret is what reads Stripe here
+ * in the first place, so a deployment that sells always has it.
+ */
+export function adEventId(id: string): string {
+  const key = id ? deriveKey(AD_EVENT_LABEL) : null;
+  return key ? `ev_${createHmac("sha256", key).update(id).digest("hex").slice(0, 32)}` : "";
+}
+
+const RELAY_CONTEXT = "marktmorgen/ad-event-relay/v1";
+/** How long a relay handle opens after the thanks page made it. */
+export const AD_EVENT_RELAY_SECONDS = 3600;
+/** The longest relay handle the route reads; a checkout's id at its longest seals to about 340 characters. */
+export const AD_EVENT_RELAY_MAX = 420;
+
+/**
+ * What the thanks page hands the pixels so the buyer's browser can ask this
+ * site's server to send the same purchase now (app/api/store/ads-event): an
+ * opaque handle, never the checkout's id. Review of #2557 (Codex O): every
+ * prop of a client component is serialized into the page, where the
+ * platforms' scripts run, and the checkout's id is a key to the order
+ * (adEventId above). This is sealed (lib/secret-box.ts, AES-256-GCM, a fresh
+ * nonce each time) with the store and this one purpose bound in, and it
+ * carries its own hour: it opens only in openAdEventRelay, for the same store,
+ * while fresh, untouched. Nothing else reads it, and every route that takes a
+ * checkout's id holds it to the cs_ shape (lib/store-checkout.ts readOrder),
+ * which this never has. "" when there is nothing to seal with, or the id is
+ * not a checkout's: the browser then asks nothing, and the five-minute pass
+ * sends the purchase instead.
+ */
+export function adEventRelay(sessionId: string, storeHandle: string, now = Date.now()): string {
+  if (!SESSION.test(sessionId) || !storeHandle || !canSeal()) return "";
+  return seal(`${Math.floor(now / 1000) + AD_EVENT_RELAY_SECONDS}|${sessionId}`, `${RELAY_CONTEXT}|${storeHandle}`);
+}
+
+/** The checkout's id inside a relay handle made for this store within its hour, or null. */
+export function openAdEventRelay(token: unknown, storeHandle: string, now = Date.now()): string | null {
+  if (typeof token !== "string" || !token || token.length > AD_EVENT_RELAY_MAX || !storeHandle) return null;
+  const opened = unseal(token, `${RELAY_CONTEXT}|${storeHandle}`);
+  if (!opened.ok) return null;
+  const cut = opened.value.indexOf("|");
+  const until = opened.value.slice(0, cut);
+  const sessionId = opened.value.slice(cut + 1);
+  if (cut < 1 || !/^\d{1,12}$/.test(until) || Number(until) * 1000 < now || !SESSION.test(sessionId)) return null;
+  return sessionId;
+}
 
 export const sha256 = (text: string) => createHash("sha256").update(text.trim().toLowerCase()).digest("hex");
 
@@ -424,7 +497,8 @@ async function post(platform: ServerPlatform, store: Store, stored: Stored, toke
 /** One conversion to each platform it can go to, and the answers kept for the studio. */
 async function deliver(store: Store, stored: Stored, c: Conversion, buyer: BuyerRequest, now: number): Promise<number> {
   const platforms = targets(store, stored, c);
-  if (!platforms.length || !store.statsId) return 0;
+  // No id made for it (adEventId without a secret): nothing goes, rather than the order's own.
+  if (!platforms.length || !store.statsId || !c.id) return 0;
   const answers: Answers = {};
   await Promise.all(
     platforms.map(async (platform) => {
@@ -569,7 +643,7 @@ function conversionOf(store: Store, session: AdsSession, customer: Conversion["c
   const meta = session.metadata ?? {};
   return {
     kind: "purchase",
-    id: session.id as string,
+    id: adEventId(session.id as string),
     at: typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000),
     cents: typeof session.amount_total === "number" ? session.amount_total : 0,
     currency: typeof session.currency === "string" ? session.currency : store.currency,
@@ -591,7 +665,23 @@ async function keepForRenewals(session: AdsSession, buyer: BuyerRequest): Promis
   await redisPipeline([["SET", subKey(sub), JSON.stringify(kept), "EX", SUB_SECONDS]]);
 }
 
-export type SendResult = "sent" | "already" | "off" | "invalid";
+export type SendResult = "sent" | "already" | "off" | "invalid" | "unknown";
+
+/**
+ * A sent mark taken with SET NX, read exactly (CX-123 rule 24): only the
+ * exact "OK" is this run's. nil is another run's; anything else (no reply,
+ * QUEUED, a list, a number) is not known, and nothing is sent on it, so a
+ * platform never gets one purchase twice on a guess. The mark is not let go
+ * either: it may be this run's, and it ends with its own time.
+ */
+export function markIsOurs(reply: unknown): boolean {
+  return reply === "OK";
+}
+
+/** An EXISTS of a sent mark, read exactly: 1 seen, 0 not seen, anything else unknown (null). */
+export function markSeen(reply: unknown): boolean | null {
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
 
 /**
  * The thanks page's faster way: the buyer's own browser, after its pixels
@@ -613,11 +703,17 @@ export async function sendServerPurchase(store: Store, sessionId: unknown, buyer
   }
   const created = typeof session.created === "number" ? session.created : 0;
   if (!ordinary(store, session) || created < now / 1000 - 86400) return "invalid";
-  const [claimed, keptRaw] = await redisPipeline([
-    ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
-    ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
+      ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
+    ]),
+    2,
+  );
+  if (!replies) return "unknown";
+  const [claimed, keptRaw] = replies;
   if (claimed === null) return "already";
+  if (!markIsOurs(claimed)) return "unknown";
   const kept = parse<BuyerRequest | null>(keptRaw, null);
   const used: BuyerRequest = kept ? { ...kept, cookies: { ...kept.cookies, ...buyer.cookies } } : buyer;
   const c = conversionOf(store, session, await customerType(store, emailOf(session), sessionId, created));
@@ -635,8 +731,10 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
   if (!store.statsId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const due = rows.filter((row) => typeof row.id === "string" && SESSION.test(row.id) && CTX_TOKEN.test(row.metadata?.ads ?? "") && ordinary(store, row));
   if (!due.length) return 0;
-  const sent = await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = due.filter((_, i) => Number(sent[i]) !== 1);
+  // Read exactly: an order whose mark cannot be read waits for the next pass.
+  const sent = repliesFor(await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)])), due.length);
+  if (!sent) return 0;
+  const left = due.filter((_, i) => markSeen(sent[i]) === false);
   if (!left.length) return 0;
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
@@ -647,8 +745,8 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
     const buyer = parse<BuyerRequest | null>(kept[i], null);
     // What the checkout kept is gone after four days, and an order that old is no longer worth an ad platform's while.
     if (!buyer) continue;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]);
-    if (claimed === null) continue;
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]), 1);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
     const created = typeof row.created === "number" ? row.created : 0;
     const c = conversionOf(store, row, await customerType(store, emailOf(row), row.id as string, created));
     if (await deliver(store, stored, c, buyer, now)) count += 1;
@@ -692,8 +790,10 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     const raw = row.parent?.subscription_details?.subscription ?? row.subscription;
     return typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
   };
-  const marks = await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = rows.filter((_, i) => Number(marks[i]) !== 1);
+  // Read exactly: a renewal whose mark cannot be read waits for the next pass.
+  const marks = repliesFor(await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)])), rows.length);
+  if (!marks) return 0;
+  const left = rows.filter((_, i) => markSeen(marks[i]) === false);
   if (!left.length) return 0;
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
@@ -707,13 +807,13 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     // A renewal's mark is kept forty days: only while the store's data room
     // has space for it (lib/store-data.ts), else renewals wait for room.
     if (!(await keepFor(store, RENEWAL_MARK_BYTES, 40 * 86400, now))) break;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400]]);
-    if (claimed === null) continue;
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400]]), 1);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     const paidAt = Number(row.status_transitions?.paid_at) || Number(row.created) || Math.floor(now / 1000);
     const c: Conversion = {
       kind: "renewal",
-      id: row.id as string,
+      id: adEventId(row.id as string),
       at: paidAt,
       cents: row.amount_paid as number,
       currency: typeof row.currency === "string" ? row.currency : store.currency,
@@ -750,8 +850,8 @@ export async function sendServerLead(store: Store, request: Requested, lead: { i
     customer: null,
   };
   if (!targets(store, stored, c).length) return false;
-  const [claimed] = await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]);
-  if (claimed === null) return false;
+  const claimed = repliesFor(await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]), 1);
+  if (!claimed || !markIsOurs(claimed[0])) return false;
   const buyer: BuyerRequest = {
     ip: addressOf(request),
     userAgent: (request.headers.get("user-agent") ?? "").slice(0, 500),

@@ -1,7 +1,7 @@
 import {reserveSwitchContractFunding} from '@/lib/contract-funding';
 import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
-import { isBillingConfigured, switchPlan } from "@/lib/billing";
+import { SwitchUnconfirmedError, isBillingConfigured, switchPlan } from "@/lib/billing";
 import { PRO_ON_SALE, parseCycle, parseTier } from "@/lib/plan";
 import { setSubscription } from "@/lib/store";
 import { limited } from "@/lib/request-guard";
@@ -39,15 +39,24 @@ export async function POST(request: NextRequest) {
   try {
     const result = await switchPlan(store.subscriptionId, { tier, cycle },grant);
     if (result.kind === "switched") {
+      // Stripe took the change but does not show the subscription active: its
+      // outcome is not confirmed, so neither "switched" nor "nothing changed".
+      if (result.state.state !== "active") return away(origin, studio("billing=switch-unconfirmed"));
       if (result.state.state === "active") {
-        await setSubscription(ref, {
+        const written = await setSubscription(ref, {
           active: true,
           tier: result.state.tier,
           cycle: result.state.cycle,
           trialEnds: result.state.trialing ? result.state.until : 0,
           shared: result.state.shared,
           period: result.state.period,
+        }).catch((failure) => {
+          console.error("recording the switched plan failed", failure);
+          return null;
         });
+        // Stripe has switched and will charge the new price: a store record not
+        // written is neither "switched" nor "nothing changed" (switch-error).
+        if (!written) return away(origin, studio("billing=cancel-error"));
       }
       const moved = result.state.state === "active" && result.state.tier !== store.tier ? `tier-${result.state.tier}` : cycle;
       return away(origin, studio(`billing=switched-${moved}`));
@@ -59,6 +68,9 @@ export async function POST(request: NextRequest) {
     return away(origin, studio(`billing=switch-${result.reason}`));
   } catch (error) {
     console.error("switching the plan failed", error);
+    // Sent to Stripe with no confirmed answer: it may have switched and billed.
+    if (error instanceof SwitchUnconfirmedError) return away(origin, studio("billing=switch-unconfirmed"));
+    // Refused by Stripe with its reason, or failed before the change was sent.
     return away(origin, studio("billing=switch-error"));
   }
 }

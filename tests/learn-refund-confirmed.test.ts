@@ -31,7 +31,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_learn_refund_confirmed";
 
 const OWNER = "teacher@example.com";
 const HANDLE = "glazeworks";
-const ACCOUNT = "acct_1TestRefundConfirmed";
+const ACCOUNT = "acct_1TestRefundOk";
 const NOW = Math.floor(Date.now() / 1000);
 const DAY = 86_400;
 const ONE_OFF_COURSE = "e".repeat(32);
@@ -43,6 +43,10 @@ const sessions: Record<string, Record<string, unknown>[]> = {};
 const refunds: Record<string, Record<string, unknown>[]> = {};
 /** A charge's disputes, by its id. */
 const disputes: Record<string, Record<string, unknown>[]> = {};
+/** A payment plan's first invoice's PaymentIntent, by the invoice id. */
+const planIntents: Record<string, string> = {};
+/** A PaymentIntent read on its own, with its latest charge expanded. */
+const intents: Record<string, Record<string, unknown>> = {};
 /** When true, the list of checkouts cannot be read. */
 let down = false;
 /** When true, the list of a payment's refunds cannot be read. */
@@ -71,6 +75,16 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     const data = disputes[url.searchParams.get("charge") ?? ""] ?? [];
     return answer({ object: "list", data, has_more: false, url: "/v1/disputes" });
   }
+  // A payment plan's first invoice, its payments, and each payment with its charge (lib/refunds.ts planRefundedInFull).
+  const invoice = /^\/invoices\/(in_\w+)$/.exec(path)?.[1];
+  if (invoice) return answer({ id: invoice, object: "invoice", payment_intent: null });
+  if (path === "/invoice_payments") {
+    const intent = planIntents[url.searchParams.get("invoice") ?? ""];
+    const data = intent ? [{ id: `inpay_${intent.slice(3)}`, object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: intent } }] : [];
+    return answer({ object: "list", data, has_more: false, url: "/v1/invoice_payments" });
+  }
+  const intent = /^\/payment_intents\/(pi_\w+)$/.exec(path)?.[1];
+  if (intent && intents[intent]) return answer(intents[intent]);
   return answer({ object: "list", data: [], has_more: false, url: path });
 }) as typeof fetch;
 
@@ -104,15 +118,33 @@ const membership = (id: string, product: string, created: number) => ({
   payment_intent: null,
   subscription: { id: `sub_${id.slice(8)}`, object: "subscription", status: "active" },
 });
-/** One refund row as GET /refunds lists it. */
-const refund = (id: string, intent: string, status: string, amount: number, created = NOW - DAY) => ({
+/**
+ * One refund row as GET /refunds lists it, in Stripe's real shape: its charge an id, since nothing expands it
+ * (Claude 6's focal review of #3376, MEDIUM A: a fixture with `charge: null` hid that every real row read as
+ * unreadable). `expanded` gives the charge as an object instead, as with `expand[]=data.charge`.
+ */
+const refund = (id: string, intent: string, status: string, amount: number, created = NOW - DAY, expanded = false) => ({
   id,
   object: "refund",
   status,
   amount,
   created,
   payment_intent: intent,
-  charge: null,
+  charge: expanded ? { object: "charge", id: `ch_${intent.slice(3)}`, refunded: true } : `ch_${intent.slice(3)}`,
+});
+/** A one-off course bought on a payment plan: a subscription checkout with kind=plan, its first invoice paid. */
+const onPlan = (id: string, product: string, created: number) => ({
+  id,
+  object: "checkout.session",
+  mode: "subscription",
+  status: "complete",
+  payment_status: "paid",
+  created,
+  customer: "cus_TestRefundConfirmed3",
+  metadata: { store: HANDLE, product, kind: "plan" },
+  payment_intent: null,
+  invoice: `in_${id.slice(8)}`,
+  subscription: { id: `sub_${id.slice(8)}`, object: "subscription", status: "active" },
 });
 
 async function main(): Promise<void> {
@@ -182,6 +214,11 @@ async function main(): Promise<void> {
   await recordEnrollment(store, "parts@example.com", one.id, T1, "stripe");
   is("refunded in two parts, both succeeded: shut", await stateOf("parts@example.com", one), "closed");
   is("and taken off the ledger", await written("parts@example.com", one.id), null);
+  sessions["wide@example.com"] = [oneOff("cs_test_wide00000001", one.id, T1, { refunded: true })];
+  refunds["pi_wide00000001"] = [refund("re_wide00000001", "pi_wide00000001", "succeeded", 4900, NOW - DAY, true)];
+  await recordEnrollment(store, "wide@example.com", one.id, T1, "stripe");
+  is("a refund row with its charge expanded reads too: shut", await stateOf("wide@example.com", one), "closed");
+  is("and taken off the ledger", await written("wide@example.com", one.id), null);
   await redis.pipeline([["HSET", ledgerKey("oldback@example.com"), one.id, String(T1)]]);
   sessions["oldback@example.com"] = [oneOff("cs_test_oldb00000001", one.id, T1, { refunded: true })];
   refunds["pi_oldb00000001"] = [refund("re_oldb00000001", "pi_oldb00000001", "succeeded", 4900)];
@@ -195,14 +232,15 @@ async function main(): Promise<void> {
   is("a dispute lost: shut", await stateOf("lost@example.com", one), "closed");
   is("and taken off the ledger", await written("lost@example.com", one.id), null);
 
-  part("A refund not confirmed takes nothing away for good");
+  part("A refund not confirmed takes nothing away, Stripe readable or not");
   for (const status of ["pending", "requires_action", "failed", "canceled"]) {
     const email = `refund-${status.replace(/_/g, "-")}@example.com`;
     const tag = status.slice(0, 4).padEnd(4, "x");
     sessions[email] = [oneOff(`cs_test_${tag}00000009`, one.id, T1, { refunded: true })];
     refunds[`pi_${tag}00000009`] = [refund(`re_${tag}00000009`, `pi_${tag}00000009`, status, 4900)];
     await recordEnrollment(store, email, one.id, T1, "stripe");
-    await stateOf(email, one);
+    // Stripe marks the charge refunded while its refund is still pending (Claude 6's focal review, MEDIUM B).
+    is(`a refund ${status}: open while Stripe reads whole`, await stateOf(email, one), "open");
     is(`a refund ${status}: the entry stays on the ledger`, await written(email, one.id), `${T1}:s`);
     down = true;
     is(`a refund ${status}: open while Stripe cannot be read`, await stateOf(email, one), "open");
@@ -213,6 +251,7 @@ async function main(): Promise<void> {
   await recordEnrollment(store, "short@example.com", one.id, T1, "stripe");
   await stateOf("short@example.com", one);
   is("only part of the money succeeded: the entry stays", await written("short@example.com", one.id), `${T1}:s`);
+  is("only part of the money succeeded: open while Stripe reads whole", await stateOf("short@example.com", one), "open");
   sessions["noread@example.com"] = [oneOff("cs_test_nord00000001", one.id, T1, { refunded: true })];
   refunds["pi_nord00000001"] = [refund("re_nord00000001", "pi_nord00000001", "succeeded", 4900)];
   await recordEnrollment(store, "noread@example.com", one.id, T1, "stripe");
@@ -222,6 +261,62 @@ async function main(): Promise<void> {
   refundsDown = false;
   await stateOf("noread@example.com", one);
   is("read again: now taken off", await written("noread@example.com", one.id), null);
+
+  part("A course bought on a payment plan is taken off only once its first payment's refund succeeded");
+  sessions["plan@example.com"] = [onPlan("cs_test_plan00000001", one.id, T1)];
+  planIntents["in_plan00000001"] = "pi_plan00000001";
+  intents["pi_plan00000001"] = {
+    id: "pi_plan00000001",
+    object: "payment_intent",
+    latest_charge: { object: "charge", id: "ch_plan00000001", amount: 4900, amount_refunded: 4900, refunded: true, disputed: false },
+  };
+  refunds["pi_plan00000001"] = [refund("re_plan00000001", "pi_plan00000001", "pending", 4900)];
+  await recordEnrollment(store, "plan@example.com", one.id, T1, "stripe");
+  is("a plan's refund pending: open while Stripe reads whole", await stateOf("plan@example.com", one), "open");
+  is("a plan's refund pending: the entry stays", await written("plan@example.com", one.id), `${T1}:s`);
+  refunds["pi_plan00000001"] = [refund("re_plan00000001", "pi_plan00000001", "succeeded", 4900)];
+  is("a plan's refund succeeded: shut", await stateOf("plan@example.com", one), "closed");
+  is("and taken off the ledger", await written("plan@example.com", one.id), null);
+  down = true;
+  is("so it stays shut while Stripe cannot be read", await stateOf("plan@example.com", one), "unknown");
+  down = false;
+
+  part("A Stripe refund never takes off an entry that also stands for a sale from another source (P7)");
+  sessions["mixed@example.com"] = [oneOff("cs_test_mixd00000001", one.id, T1, { refunded: true })];
+  refunds["pi_mixd00000001"] = [refund("re_mixd00000001", "pi_mixd00000001", "succeeded", 4900)];
+  await recordEnrollment(store, "mixed@example.com", one.id, T1, "stripe");
+  // Paid again through PayPal before any reading saw the Stripe refund: its own write stood for nothing (HSETNX).
+  await recordEnrollment(store, "mixed@example.com", one.id, T2, "paypal");
+  is("the entry now says PayPal, with the first start kept", await written("mixed@example.com", one.id), `${T1}:p`);
+  is("Stripe refunded, PayPal paid: open while Stripe reads whole", await stateOf("mixed@example.com", one), "open");
+  is("and the entry stays", await written("mixed@example.com", one.id), `${T1}:p`);
+  down = true;
+  is("and stays open while Stripe cannot be read", await stateOf("mixed@example.com", one), "open");
+  down = false;
+  await redis.pipeline([["HSET", ledgerKey("mixold@example.com"), one.id, String(T1)]]);
+  await recordEnrollment(store, "mixold@example.com", one.id, T2, "gift");
+  is("an old entry (no letter) a gift wrote over: says gift, first start kept", await written("mixold@example.com", one.id), `${T1}:g`);
+  await recordEnrollment(store, "mixold@example.com", one.id, T2, "stripe");
+  is("a Stripe write never takes another origin's place", await written("mixold@example.com", one.id), `${T1}:g`);
+
+  part("The entry is taken off only while it is still the one read (compare and delete)");
+  sessions["race@example.com"] = [oneOff("cs_test_race00000001", one.id, T1, { refunded: true })];
+  refunds["pi_race00000001"] = [refund("re_race00000001", "pi_race00000001", "succeeded", 4900)];
+  await recordEnrollment(store, "race@example.com", one.id, T1, "stripe");
+  const pipeline = redis.pipeline.bind(redis);
+  let raced = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // A sale of another source written between this request's read of the ledger and its delete.
+    if (!raced && commands.some((command) => command[0] === "HDEL" || String(command[1]).includes("learn-take-off-if"))) {
+      raced = true;
+      await pipeline([["HSET", ledgerKey("race@example.com"), one.id, `${T2}:p`]]);
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  await stateOf("race@example.com", one);
+  redis.pipeline = pipeline;
+  is("the race was run", raced, true);
+  is("what was written in between is not deleted", await written("race@example.com", one.id), `${T2}:p`);
 
   part("A long pending refund is logged, not acted on");
   const warned: string[] = [];

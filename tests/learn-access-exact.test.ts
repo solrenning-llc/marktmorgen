@@ -70,13 +70,14 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   }
   if (path === "/refunds") {
     // Rule 23, a fixture only (owner decision 18, C1-20261109-1054-C5-54): a charge refunded in full here has its
-    // refund succeeded, so the course is taken off the ledger and stays shut while Stripe cannot be read. Without
-    // a succeeded refund (pending) it would stay written down and open (tests/learn-refund-confirmed.test.ts).
+    // refund succeeded, its row in Stripe's real shape (its charge an id), so the course is taken off the ledger
+    // and stays shut while Stripe cannot be read. Without a succeeded refund (pending) it would stay written down
+    // and open (tests/learn-refund-confirmed.test.ts).
     const intent = url.searchParams.get("payment_intent") ?? "";
     const paid = Object.values(sessions).flat().find((row) => (row?.payment_intent as { id?: unknown } | null)?.id === intent);
     const charge = (paid?.payment_intent as { latest_charge?: { refunded?: unknown; amount?: unknown } } | undefined)?.latest_charge;
     const data = charge?.refunded === true
-      ? [{ id: `re_${intent.slice(3)}`, object: "refund", status: "succeeded", amount: charge.amount, created: NOW - 3_600, payment_intent: intent, charge: null }]
+      ? [{ id: `re_${intent.slice(3)}`, object: "refund", status: "succeeded", amount: charge.amount, created: NOW - 3_600, payment_intent: intent, charge: `ch_${intent.slice(3)}` }]
       : [];
     return answer({ object: "list", data, has_more: false, url: "/v1/refunds" });
   }

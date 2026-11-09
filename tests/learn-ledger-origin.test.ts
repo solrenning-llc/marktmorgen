@@ -26,7 +26,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_learn_ledger_origin";
 
 const OWNER = "teacher@example.com";
 const HANDLE = "inkhouse";
-const ACCOUNT = "acct_1TestLedgerOrigin";
+const ACCOUNT = "acct_1TestOrigin";
 const NOW = Math.floor(Date.now() / 1000);
 const START = NOW - 86_400;
 

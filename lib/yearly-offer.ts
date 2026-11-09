@@ -179,7 +179,9 @@ async function offerOnce(store: Store, plansOnSale: boolean): Promise<"sent" | "
   const subscription = store.subscriptionId;
   // While no plan is on sale the studio cannot switch one (app/api/billing/switch), so nothing is offered.
   if (!plansOnSale || !subscription || !isBillingConfigured() || !isSenderConfigured() || !store.email) return "no";
-  const live = await readSubscription(subscription);
+  // Every plan is checked out with contract funding, which reads as "unknown" without the store; this only decides an
+  // email, so its proof is read in mode "observe": confirmed when already committed, never activated or written.
+  const live = await readSubscription(subscription, store, "observe");
   if (live.state !== "active" || live.cycle !== "month" || live.cancelsAtEnd || live.changePending) return "no";
   // Once per subscription, for good: ours only on OK or our own value read back (CX-123 rule 24, L9).
   const offer = claimValue();

@@ -867,7 +867,10 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   let live;
   try {
     if (store.subscriptionId) {
-      const own = await readSubscription(store.subscriptionId);
+      // With the store, so a funded plan (every plan since the funded checkout) is read as it is, not as "unknown"
+      // held for good. In mode "activate", as the sync and observeStoreSubscriptions below read it: this check puts the
+      // store's record right from what Stripe says. An unconfirmed proof is still "unknown", so the store stays held.
+      const own = await readSubscription(store.subscriptionId, store, "activate");
       if (own.state === "unknown") return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
       if (own.state === "active") {
         await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period });

@@ -612,6 +612,40 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
  */
 export const CHECKOUT_TROUBLE_READ = { commands: 1, fields: 8, bytes: 4_096 } as const;
 /**
+ * A funded plan's contract proof read from Redis (lib/contract-funding.ts): one EVAL that sends its whole script, its
+ * seventeen or eighteen arguments and gets a reply of at most two numbers. Every plan is checked out with funding
+ * (app/api/billing/checkout), so every paying store's plan is read this way. Held against the production scripts,
+ * with the arguments measured, in tests/plan-card-funded.test.ts. Commands count the EVAL and every command the
+ * script runs inside; bytes count the script, the arguments and the reply (what the script reads inside stays in
+ * Redis, and is counted here anyway).
+ *
+ * - observe: OBSERVE_CONTRACT or OBSERVE_SWITCH_CONTRACT, read only (10 and 12 commands inside, 2,557 and 4,246
+ *   bytes of script). Sent by the studio's home page once a load of a store with a funded plan
+ *   (app/studio/page.tsx), inside the STUDIO_PAGE_UNITS the load takes (line studio; the page and this read at the
+ *   heavy shape stay under those units, held in tests/plan-card-funded.test.ts with STUDIO_HOME_COMMANDS); and by
+ *   the yearly offer at a store's first sale, once per subscription (lib/yearly-offer.ts), company work like its
+ *   email (EMAIL_SITES), not a plan's figure.
+ * - activate: ACTIVATE_CONTRACT or ACTIVATE_SWITCH_CONTRACT (13 and 15 inside, 2,923 and 4,523 bytes). Sent by the
+ *   closing day's own look at the store's plan (lib/plan-closing.ts), at most once a closing check, before and in
+ *   place of the subscription search it would otherwise make: company closing work, priced with
+ *   PLATFORM_SUBSCRIPTION_SEARCH's closing events and HELD_EXPOSURE's rechecks, whose figures do not certify this
+ *   script's commands; unknown, never zero.
+ */
+export const FUNDED_PLAN_READS = {
+  observe: { evals: 1, commands: 13, bytes: 8_192 },
+  activate: { evals: 1, commands: 16, bytes: 8_192 },
+} as const;
+/**
+ * The commands the studio's home page sends a load (app/studio/page.tsx), every command a script runs inside counted,
+ * measured with the real page on a store with one product and no plan and held there by
+ * tests/studio-today-trips.test.ts (9 November 2026: 84, with the commands inside its two scripts, about 24 KB through
+ * the database; 90 leaves six for a small change). The page with a
+ * funded plan's read-only proof (FUNDED_PLAN_READS.observe) at the heavy shape stays under STUDIO_PAGE_UNITS studio
+ * requests (tests/plan-card-funded.test.ts). A store with more products, people or calls reads more; that is not
+ * measured here, and is not certified by this figure.
+ */
+export const STUDIO_HOME_COMMANDS = 90;
+/**
  * An API reading that reads more than its request pays for (lib/api-read-rules.ts:
  * a course's students, the affiliates, the bookings) takes further API requests
  * for its work before it reads. What that work costs: each command; each byte
@@ -1222,6 +1256,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
+      // The home page confirms a funded plan with the read-only proof, one EVAL a load (FUNDED_PLAN_READS.observe), inside
+      // the page's units with the page's own commands (STUDIO_HOME_COMMANDS; tests/plan-card-funded.test.ts, 9 November 2026).
+      { file: "app/studio/page.tsx", names: ['readSubscription(store.subscriptionId, store, "observe")'] },
+      { file: "lib/contract-funding.ts", names: ["OBSERVE_CONTRACT", "OBSERVE_SWITCH_CONTRACT", "function observeOnly"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
   },

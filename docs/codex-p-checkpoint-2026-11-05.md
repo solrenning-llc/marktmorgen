@@ -3191,3 +3191,16 @@ Fresh3380 API OPEN/unmerged/6ee/base8679ebd3d3f9dddfd5786d3fe98fdcfe7390e346. Re
 Only read-only metadata reconciliation and this own exact-prefix checkpoint append. No source/diff/probe/test/runtime/review/claim/reservation/CI query/retry/queue/merge/foreign-product/ref/price/limit/commission/flag/gate/account/payment/terms/key/PII/contact/provider/automation/subagent mutation. Unknown cost stays unknown. Serial Medium, zero agents, no background watcher. Original four products already confirmed MERGED, not reopened or recreated.
 
 Next FIRST latest CP and authorized channel metadata→FULL UTF8. Reconcile latest PONTO/directed originals/C1/C6 replacement before dependent work; verify private evidence603d8dce and recover frozen artifacts before any P opinion. Do not repeat C6 focal/substitute reviews or relabel peer results as P. New remote PONTO remains undelivered; this own CP is not an alternate shared-channel write. End after exact own CP readback.
+
+
+## 2026-11-09 16:29 Fortaleza — unchanged heads; fresh channel still unread
+
+FIRST canonicalbf49cca3abb9a1b335498960c488459c1c50769f/blob92ad4f0a8201de200b68b8ce680f9a624c4a1bfe/FULL555728 successfully read metadata→FULL blob; latest15:32 section reconciled. Authorized ROOTmessages.md fresh metadata bcbcb3e513ae61a85799758ac930a6849f80c7c5 obtained only for SHA, required FULL fetch_blob explicitly Transport closed. This version UNREAD. No retry loop/partial-content/shared write fallback/channel mutation/claim/RES/new PONTO/receipt. No403/quota/reset inferred. Transient transport error, ongoing project; existing continuity preserved.
+
+One native ref batch completed exit0:94 own branches and29 followed PR refs, no added/missing ref against12:40 full snapshot. Against preceding15:32 state, main0e8b8c6b531738d55ae7f60ab96393289cdc2eaa, all29 PR heads and93 non-checkpoint own heads unchanged. Own checkpoint predecessorbf49cca3abb9a1b335498960c488459c1c50769f is the only own ref advance. Exact3360 head02e687ca553d2309c11ea9354e07f46034c6f3aa and3380 head6ee69ba31a08e99a2264f0cabdbfcc0ea1053d57; other28 followed identities and all non-checkpoint own identities remain12:40 exact snapshot. Refs do not certify CI/merge.
+
+Fresh targeted3360 and3380 API both OPEN/unmerged, same exact heads and bases as15:32. Both returned FULL8-item discussions unchanged. C6 focal6747388669, C6 substitute6745733680 and M5826017803 remain attributed peer results; no new P review or complete closure inferred. P historical PARTIAL scope and private evidence603d8dce FULL verification remain unresolved. Last verified remote STOP0529 still applies; no frozen local artifact recovery claimed.
+
+Only read-only reconciliation and own exact-prefix CP append. No source/diff/probe/test/runtime/CI/review/queue/merge/foreign product/ref/reservation document/commercial/account/payment/flag/gate/terms/key/PII/contact/provider/automation/subagent change. Unknown cost remains unknown. Serial Medium, zero agents, no background watcher. Do not recreate four already merged products or duplicate C6/M reviews.
+
+Next fresh CP plus authorized channel metadata→FULL UTF8, reconcile latest PONTO/directed originals/replacement scope, recover and verify evidence603d8dce before dependent P work. New remote PONTO remains undelivered. End after exact own CP readback.

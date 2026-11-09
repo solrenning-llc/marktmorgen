@@ -2,14 +2,19 @@
  * A like in a community is one step (CX-123 rule 24; the pre-review of
  * claude5/community-toggle-exact, 9 November 2026): whether the member liked
  * it, the like and its trace entry written or taken out, their room in the
- * store's data room taken or given back, and the author's point (+1 or -1)
- * all come from one atomic script, so no other press can land in between.
+ * store's data room taken or given back, and the point (+1 or -1) that goes
+ * with it all come from one atomic script, so no other press can land in
+ * between.
  *
  *   - Exact: the room counts exactly what is stored, never less, whichever
- *     presses of the same member cross; the author's points move by exactly
- *     what the likes set moved by (a like given +1, one taken back -1).
+ *     presses of the same member cross; the point each press answers is
+ *     exactly what the likes set moved by (a like given +1, one taken back -1).
  *   - The route applies the point the script answered, never one it deduces
- *     (app/api/store/community/route.ts).
+ *     (app/api/store/community/route.ts). Applying it (award) is a separate
+ *     step outside the script, so the author's points can still drift from
+ *     the likes by at most 1 for each answer lost before award (a timeout
+ *     after the script ran) and for each -1 that lands at zero (REMOVE_POINT
+ *     stops at zero, then the crossing +1 lands on top).
  *   - Unknown: a reply in any other shape throws UnknownReplyError and the
  *     route applies no point; what the script did is read by the next press.
  *   - Full: a new like past the room is refused (DataRoomError) with nothing
@@ -95,7 +100,7 @@ function pointOf(result: unknown): number {
   if (typeof result === "boolean") return result ? 1 : -1;
   return (result as { points: number }).points;
 }
-/** The author's points, moved only by presses that answered. */
+/** The sum of the points the presses answered (what the route hands to award), from presses that answered only. */
 let points = 0;
 async function press(who = ADA): Promise<string> {
   try {
@@ -133,7 +138,7 @@ async function main(): Promise<void> {
   await press();
   hooks = [];
   is("like gone", liked(), false);
-  is("the author's points moved by exactly -1 (one like taken back)", points, -1);
+  is("the answered points sum to exactly -1 (one like taken back)", points, -1);
   is("room back to base", room(), base);
 
   part("The pre-review's proof: three presses, another member's like stays paid");
@@ -164,7 +169,7 @@ async function main(): Promise<void> {
         hooks = [];
         const name = `${start ? "liked" : "not liked"}${withBob ? ", Bob's like there" : ""}, others before batch ${plan.join("+")}`;
         is(`${name}: answered`, outcome === "liked" || outcome === "unliked", true);
-        is(`${name}: the author's points moved by exactly what the likes moved`, points, Number(liked()) - Number(before));
+        is(`${name}: the answered points sum to exactly what the likes moved`, points, Number(liked()) - Number(before));
         is(`${name}: room equals what is stored`, room(), stored());
         is(`${name}: like and trace entry together`, liked(), traced());
       }

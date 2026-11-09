@@ -335,6 +335,8 @@ export async function POST(request: NextRequest) {
     if (action === "like") {
       if (!owner && !(await within(id, key, "like"))) return back(fromPage, "slow", `post-${post.id}`);
       // The point is the one the like's own step answered (lib/community.ts TOGGLE_LIKE), never deduced from a yes or a no.
+      // That point is exact; applying it (award) is a step of its own after the script, so the author's
+      // points can drift by at most 1 per answer lost before award and per -1 that REMOVE_POINT stops at zero.
       const like = await toggleLike(id, post.id, key, store);
       if (post.a !== key) await award(id, post.a, like.points, store);
       return back(fromPage, "liked", `post-${post.id}`);

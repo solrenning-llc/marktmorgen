@@ -31,6 +31,7 @@ export const KEY_PAUSED_WORDS: Readonly<Record<PauseWhy, string>> = {
   left: "This key is paused for good: it was made by someone who is no longer on the store's team. The store's owner can revoke it under API keys in the studio and make a new one.",
   role: "This key is paused: the role of the person who made it no longer allows it. The store's owner can turn it back on under API keys in the studio.",
   unmatched: "This key is paused: it could not be linked to anyone on the store's team, most likely because the server's secret changed. The store's owner can check whose key it is under API keys in the studio (its name and when it was last used help), then turn it back on for that person, or revoke it.",
+  unknown: "This key is refused for now: its state on the store could not be read. Try again in a moment. If this keeps happening, the store's owner can revoke it under API keys in the studio and make a new one.",
   unrecorded: "This key is paused: nobody is recorded as its maker (keys made before November 4, 2026), and after a change on the store's team (someone leaving, a role changed, or two-step login asked of everyone) such a key waits for the owner. The store's owner can turn it back on under API keys in the studio.",
 };
 

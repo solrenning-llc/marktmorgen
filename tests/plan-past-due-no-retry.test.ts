@@ -11,8 +11,14 @@
  * ended, and section 8 of the Terms applies. A subscription whose latest
  * invoice was not expanded says nothing either way: read on its own it is
  * unknown, and the daily job asks for the invoice.
+ *
+ * Pre-review M-a: `next_payment_attempt` is always null on an invoice sent to
+ * be paid by link (`send_invoice`), and 3DS or Billing automations can leave
+ * it null while Stripe still has something to do. So only an invoice charged
+ * automatically ends the plan, and only once it is older than Stripe's longest
+ * retry window (NO_TRY_WAIT_DAYS); before that the renewal is in its grace.
  */
-import { readSubscription, stateOf } from "@/lib/billing";
+import { NO_TRY_WAIT_DAYS, readSubscription, stateOf } from "@/lib/billing";
 import { failedPlan, failedPlanEmail, planEndedSeconds } from "@/lib/billing-reminders";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeRef } from "@/lib/store";
@@ -41,7 +47,9 @@ function subscription(id: string, handle: string, invoice: Record<string, unknow
     latest_invoice: invoice,
   };
 }
-const openInvoice = (next: number | null) => ({ id: "in_PastDueNoRetry01", object: "invoice", status: "open", amount_due: 6900, hosted_invoice_url: "https://invoice.stripe.com/i/x", next_payment_attempt: next, attempt_count: 4 });
+// Regra 23 (pre-review M-a): the invoice now says how it is collected and when it was made; with no try scheduled
+// only an automatic one older than Stripe's longest retry window ends the plan, and this one is.
+const openInvoice = (next: number | null, created = NOW - 70 * DAY) => ({ id: "in_PastDueNoRetry01", object: "invoice", status: "open", amount_due: 6900, hosted_invoice_url: "https://invoice.stripe.com/i/x", next_payment_attempt: next, attempt_count: 4, collection_method: "charge_automatically", created });
 
 const asked: string[] = [];
 let listed: Record<string, unknown>[] = [];
@@ -79,6 +87,19 @@ async function main() {
   const uncollectible = stateOf(subscription("sub_PastDueUncoll1", "uncollectible", { ...openInvoice(null), status: "uncollectible" }));
   is("an invoice Stripe marked uncollectible after its last try ends the plan too", uncollectible.state, "inactive");
 
+  part("(M-a) no try scheduled is not, on its own, a plan that ended");
+  const fresh = stateOf(subscription("sub_PastDueFresh01", "fresh", openInvoice(null, NOW - DAY)));
+  is("a day-old invoice with no try scheduled is the grace (3DS, automations): nothing ends", fresh.state === "active" && fresh.renewalUnpaid, true);
+  const almost = stateOf(subscription("sub_PastDueAlmost1", "almost", openInvoice(null, NOW - (NO_TRY_WAIT_DAYS - 1) * DAY)));
+  is("nor one a day short of the longest retry window", almost.state, "active");
+  const undated = stateOf(subscription("sub_PastDueUndated", "undated", { ...openInvoice(null), created: undefined }));
+  is("an invoice whose age cannot be read never ends the plan", undated.state, "active");
+  const manualInvoice = { ...openInvoice(null), collection_method: "send_invoice" };
+  const manual = subscription("sub_PastDueManual01", "manual", manualInvoice);
+  is("an invoice paid by link (send_invoice) always has no try scheduled: not an ended plan", stateOf({ ...manual, collection_method: "send_invoice" }).state, "active");
+  const pausedUncollectible = stateOf({ ...subscription("sub_PastDuePaused01", "paused", { ...openInvoice(null), status: "uncollectible" }), pause_collection: { behavior: "mark_uncollectible", resumes_at: null } });
+  is("(L-4) collection paused at Stripe, its invoices marked uncollectible: paused, not ended", pausedUncollectible.state === "active" && pausedUncollectible.renewalUnpaid, true);
+
   listed = [exhausted, retrying];
   asked.length = 0;
   const read = await readSubscription("sub_PastDueNoRetry1");
@@ -88,6 +109,8 @@ async function main() {
   ignoreExpand = true;
   is("past due read without its invoice says nothing either way: unknown", (await readSubscription("sub_PastDueNoRetry1")).state, "unknown");
   ignoreExpand = false;
+  listed = [{ ...manual, collection_method: "send_invoice" }];
+  is("(M-a) read from Stripe, a past-due plan paid by link is its grace, not unknown", (await readSubscription("sub_PastDueManual01")).state, "active");
 
   part("the daily job");
   redis.clear();
@@ -103,6 +126,14 @@ async function main() {
   is("its end is written down", after.planEndedAt !== "", true);
   is("and it is in the line of ended plans, to close as the Terms say", (await redis.pipeline([["ZSCORE", ENDED_INDEX, storeRef(after)]]))[0] !== null, true);
 
+  await claimHandle("fresh@example.com", "no-retry-fresh", "No retry fresh", "");
+  await ensureStatsId("fresh@example.com");
+  await setSubscription("fresh@example.com", { customerId: "cus_PastDueNoRetry1", subscriptionId: "sub_PastDueFresh02", active: true, tier: "creator", cycle: "month", period, renewalUnpaid: true });
+  listed = [subscription("sub_PastDueFresh02", "no-retry-fresh", openInvoice(null, NOW - DAY))];
+  await syncSubscriptions(Date.now() + 20_000);
+  const kept = (await storeForEmail("fresh@example.com"))!;
+  is("(M-a) the daily job does not end a plan whose invoice is a day old", [kept.subscriptionActive, (kept.renewalUnpaidSince ?? 0) > 0], [true, true]);
+
   part("the email when Stripe will not try again");
   const due = failedPlan(exhausted)!;
   is("the email knows there is no other try", due.nextTry, 0);
@@ -111,6 +142,14 @@ async function main() {
   is("it says Stripe will not try the card again", email.text.includes("Stripe will not try your card again"), true);
   const closing = new Date((NOW + CLOSING_DAYS * DAY) * 1000).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" });
   is("it gives the date before which nothing is removed", email.text.includes(closing), true);
+  const freshDue = failedPlan(subscription("sub_PastDueFresh03", "fresh-mail", openInvoice(null, NOW - DAY)))!;
+  const freshMail = failedPlanEmail(freshDue).text;
+  const endsOn = new Date((NOW - DAY + NO_TRY_WAIT_DAYS * DAY) * 1000).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" });
+  is("(M-a) a fresh invoice with no try scheduled: the email never says the plan has ended", freshMail.includes("has ended") || freshMail.includes("will not try your card again"), false);
+  is("(M-a) it says no try is scheduled and the day the plan ends if it is still unpaid", freshMail.includes("has not scheduled another try") && freshMail.includes(endsOn), true);
+  const manualMail = failedPlanEmail(failedPlan(manual)!).text;
+  is("(M-a) an invoice paid by link: no word of trying the card, or of a plan already ended", ["will not try your card again", "We will try your card again", "has ended"].some((words) => manualMail.includes(words)), false);
+  is("(M-a) it says the plan can end if it is not paid", manualMail.includes("If it is not paid, your plan can end"), true);
   const withTry = failedPlanEmail(failedPlan(retrying)!);
   is("with a try scheduled it still names that day", withTry.text.includes("We will try your card again on"), true);
 

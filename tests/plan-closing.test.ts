@@ -30,7 +30,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { syncSubscriptions } from "@/lib/billing-sync";
+import { MISSING_ENDS_KEY, syncSubscriptions } from "@/lib/billing-sync";
 import { readAllListings, readListing } from "@/lib/catalog";
 import { type Course, readCourse, saveCourse } from "@/lib/course";
 import { deleteFile, listFiles } from "@/lib/file-store";
@@ -89,7 +89,16 @@ const running = new Map<string, Record<string, unknown>>();
 let stripe: "up" | "down" = "up";
 /** Whether the key reads the stores' own customers: false is a key for another account or mode. */
 let customersReachable = true;
+/**
+ * What Stripe answers for a store's own plan that is not running. Stripe keeps every subscription it made, so an
+ * ended plan reads as canceled; "404" is a key for another account, or a plan Stripe truly does not have.
+ * Regra 23 (pre-review M-b): this world answered 404 for every ended plan, and a closing day now takes a 404 as
+ * Stripe's word only within the weekly brake on plans missing, which this world's many stores would exhaust.
+ */
+let endedAnswer: "canceled" | "404" = "canceled";
 const stripeAsked: string[] = [];
+/** What each search and each list by customer asked Stripe to expand. */
+const expandsAsked: string[][] = [];
 
 // --------------------------------------------------------------- the email
 
@@ -134,6 +143,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const path = url.pathname.replace(/^\/v1/, "");
     stripeAsked.push(`${method} ${path}`);
     if (stripe === "down") throw new TypeError("fetch failed");
+    if (path === "/subscriptions/search" || path === "/subscriptions") expandsAsked.push(url.searchParams.getAll("expand[]"));
     if (path === "/subscriptions/search") {
       const query = url.searchParams.get("query") ?? "";
       return json({ data: [...running.entries()].filter(([handle]) => query.includes(`'${handle}'`)).map(([, subscription]) => subscription), has_more: false });
@@ -147,6 +157,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     // the same key reads the store's own customer, so this world, whose ended plans answer 404, has its customers.
     const customer = /^\/customers\/(cus_[A-Za-z0-9]+)$/.exec(path);
     if (customer && method === "GET" && customersReachable) return json({ id: customer[1], object: "customer" });
+    const ended = /^\/subscriptions\/(sub_[A-Za-z0-9]+)$/.exec(path);
+    if (ended && method === "GET" && endedAnswer === "canceled") return json({ id: ended[1], object: "subscription", status: "canceled", cancel_at_period_end: false, metadata: {} });
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
 
@@ -406,18 +418,40 @@ async function main(): Promise<void> {
   const kaiNow = (await storeForEmail(kai.email))!;
   is("asked about by its own number first: running, so nothing is removed", [own.state, own.note, kaiNow.subscriptionActive, kaiNow.planEndedAt, [...objects.keys()].filter((path) => path.startsWith(`vault/${kai.folder}/`)).length, mailTo(kai.email).length], ["running", "Stripe says the plan runs", true, "", 1, 3]);
 
+  // Pre-review A1: a plan found on the closing day is read with its latest invoice, and one whose renewal is unpaid
+  // (Stripe still retries it) comes back as it is: running, its renewal unpaid, not a store paid up again.
+  is("(A1) the closing day's search and list by customer ask for each plan's latest invoice", expandsAsked.length > 0 && expandsAsked.every((asked) => asked.includes("data.latest_invoice")), true);
+  const liv = await storeWith("liv");
+  await productWith(liv, "Notes", 6 * GB);
+  await endPlan(liv.email);
+  const L = await endedAt(liv.email);
+  for (const day of [0, M, W]) await closeOne(liv.email, L + day * DAY, hands);
+  running.set("liv", { id: "sub_liv0002", status: "past_due", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_liv0001", email: liv.email }, metadata: { store: "liv" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] }, latest_invoice: { id: "in_liv0000001", object: "invoice", status: "open", billing_reason: "subscription_cycle", collection_method: "charge_automatically", next_payment_attempt: 1_900_000_000, created: 1_790_000_000 } });
+  const livBack = await closeOne(liv.email, L + C * DAY, hands);
+  const livNow = (await storeForEmail(liv.email))!;
+  is("(A1) running again with its renewal unpaid: costs stay paused", [livBack.state, livNow.subscriptionActive, (livNow.renewalUnpaidSince ?? 0) > 0], ["running", true, true]);
+  running.delete("liv");
+
   part("The day: what is removed, and what stays");
   const storeBefore = (await storeForEmail(ana.email))!;
   const listed = (await readAllListings(storeBefore)).map((listing) => [listing.title, listing.priceCents]);
   // Plan-lifecycle audit, M2: a key for another account or mode says 404 for the plan and finds nothing by search
   // either; with the store's own customer unreadable too, that is not Stripe saying the plan ended.
+  endedAnswer = "404";
   customersReachable = false;
   const keptBefore = objects.size;
   const wrongKey = await closeOne(ana.email, A + C * DAY, hands);
   is("a 404 on a key that does not read the store's customer removes nothing", [wrongKey.state, wrongKey.note, objects.size], ["held", "Stripe could not be asked", keptBefore]);
   customersReachable = true;
+  // Pre-review M-b: the closing day takes a 404 as Stripe's word under the daily job's brake too. With three other
+  // plans already ended as missing this week, a fourth is a key or account changed: nothing is removed.
+  await redis.pipeline(["a", "b", "c"].map((name) => ["ZADD", MISSING_ENDS_KEY, A + C * DAY, `brake-${name}`]));
+  const braked = await closeOne(ana.email, A + C * DAY, hands);
+  is("(M-b) past the brake on plans missing, the closing day removes nothing", [braked.state, objects.size], ["held", keptBefore]);
+  await redis.pipeline([["DEL", MISSING_ENDS_KEY]]);
   const removed = await closeOne(ana.email, A + C * DAY, hands);
   is("with no plan at Stripe, what the store kept is removed", [removed.state, removed.note], ["removed", "6 files"]);
+  endedAnswer = "canceled";
   const after = (await storeForEmail(ana.email))!;
   const now = await readAllListings(after);
   const byTitle = (title: string) => now.find((listing) => listing.title === title)!;

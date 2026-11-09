@@ -10,6 +10,12 @@
  * Here: a 404 read on its own is unknown; in the daily job it counts as ended
  * only when the same key reads the store's own customer (the key reaches the
  * account), and never when more than a few plans of one run say 404 at once.
+ *
+ * Pre-review M-b: that brake counted per run, so runs cut by the deadline and
+ * resumed ended every plan three at a time. It now counts across runs, at most
+ * MISSING_AT_MOST plans in MISSING_WINDOW_DAYS (kept in Redis), and a run ends
+ * none unless it read at least one subscription on the same key: a key that
+ * reads customers but no plan at all is not an account whose plans ended.
  */
 import { readSubscription } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
@@ -23,12 +29,16 @@ process.env.STRIPE_SECRET_KEY = "sk_test_plan_missing_not_ended";
 const NOW = Date.now();
 /** Which customers the key can read; every subscription read answers 404. */
 let customersReadable = false;
+/** What Stripe's list of every subscription answers (step 1 of the daily job). */
+let listedRows: Record<string, unknown>[] = [];
+/** A canceled plan of a store that is not here: a subscription the key reads, on the account. */
+const readableElsewhere = { id: "sub_readableElsewhere1", object: "subscription", status: "canceled", created: 1_700_000_000, customer: { id: "cus_readableElsewhere", email: "x@example.com" }, metadata: { store: "nowhere-shop" }, items: { data: [] } };
 const asked: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   asked.push(`${init?.method ?? "GET"} ${url.pathname}`);
   if (url.hostname === "api.stripe.com") {
-    if (url.pathname === "/v1/subscriptions") return Response.json({ object: "list", data: [], has_more: false, url: "/v1/subscriptions" });
+    if (url.pathname === "/v1/subscriptions") return Response.json({ object: "list", data: listedRows, has_more: false, url: "/v1/subscriptions" });
     const customer = /^\/v1\/customers\/(cus_[A-Za-z0-9]+)$/.exec(url.pathname);
     if (customer && customersReadable) return Response.json({ id: customer[1], object: "customer", email: "owner@example.com" });
     return new Response(JSON.stringify({ error: { code: "resource_missing", message: "No such object", type: "invalid_request_error" } }), { status: 404 });
@@ -83,11 +93,31 @@ async function main() {
   part("one plan genuinely missing on an account the key reaches");
   redis.clear();
   customersReadable = true;
+  // Regra 23 (pre-review M-b): the run now has to read some subscription on the same key; the list answered none before.
+  listedRows = [readableElsewhere];
   const lone = await paidStores(1, "lonemissing");
   asked.length = 0;
   await syncSubscriptions(Date.now() + 20_000);
   is("the store's own customer is read before a 404 ends its plan", asked.includes("GET /v1/customers/cus_lonemissingShop0"), true);
   is("a plan Stripe does not have, on an account the key reaches, still ends", await endedCount(lone), 1);
+
+  part("(M-b) a key that reads customers but not one subscription ends nothing");
+  redis.clear();
+  listedRows = [];
+  const none = await paidStores(1, "noreadable");
+  await syncSubscriptions(Date.now() + 20_000);
+  is("one plan answering 404 with no subscription read in the run is not ended", await endedCount(none), 0);
+
+  part("(M-b) the brake counts across runs");
+  redis.clear();
+  listedRows = [readableElsewhere];
+  const firstTwo = await paidStores(2, "windowa");
+  await syncSubscriptions(Date.now() + 20_000);
+  is("two missing in a first run end", await endedCount(firstTwo), 2);
+  const nextTwo = await paidStores(2, "windowb");
+  const later = await syncSubscriptions(Date.now() + 20_000);
+  is("two more in a later run of the same week would make four: none of them is ended", await endedCount(nextTwo), 0);
+  is("and they are failures of that run", later.failed >= 2, true);
   done();
 }
 main();

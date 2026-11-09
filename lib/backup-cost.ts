@@ -85,11 +85,18 @@ const ANSWER_FRAME_BYTES = 64;
 const GB = 1_000_000_000;
 
 /**
+ * The route's longest run, in seconds: app/api/cron/backup/route.ts's maxDuration (a literal there, as Next.js reads
+ * it; tests/bk1-backup-route.test.ts holds the two equal). A review is priced at this duration (Claude 5's LOW,
+ * 9 November 2026), never at a shorter one assumed.
+ */
+export const BACKUP_ROUTE_SECONDS = 800;
+
+/**
  * What the code cannot bound, each an open item of docs/backup-cost-2026-11-04.md
  * (sections 5 and 5d): while any is here, the fixed-cost line is not reviewed.
  */
 export const BACKUP_COST_UNKNOWNS = [
-  "vercel-route: no route runs the backup yet, so its maximum duration is the one assumed here, not a setting",
+  "vercel-route: the route's maxDuration of 800 s (BACKUP_ROUTE_SECONDS) needs Fluid compute, and no deployment has accepted it yet",
   "vercel-rates: the Vercel rates were read on 7 October 2026 and not since",
   "vercel-transfer: whether Vercel bills the function's bytes sent to R2 and Upstash",
   "upstash-overshoot: the last batch of DUMPs is read before the cap refuses it, and a key's size is not capped by the backup",

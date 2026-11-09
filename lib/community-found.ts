@@ -35,7 +35,7 @@ import { readListings } from "@/lib/catalog";
 import { type Course, findLesson, readCourse } from "@/lib/course";
 import { type CommunityConfig, type Member, readMembers } from "@/lib/community";
 import { type CommunityEvent, isOver, mayAttend, readEvents } from "@/lib/community-events";
-import { type Holdings, heldAnswer, holdingsOf } from "@/lib/community-access";
+import { type Holdings, heldAnswer, holdingsOf, unknownForGood } from "@/lib/community-access";
 import { readLessonRef } from "@/lib/community-index";
 
 export type FoundLesson = {
@@ -54,8 +54,11 @@ export type Viewer = {
   holdings?: Holdings | null;
 };
 
-/** What a reader may be shown of some matches, and how many could not be checked just now. */
-export type Found<T> = { found: T[]; unchecked: number };
+/**
+ * What a reader may be shown of some matches, how many could not be checked just now, and whether those will stay
+ * unchecked however often they are asked (`lasting`: more purchases than are read), so the page points to the creator.
+ */
+export type Found<T> = { found: T[]; unchecked: number; lasting: boolean };
 
 /**
  * The lessons among these refs that this reader holds, in the order the index
@@ -71,7 +74,7 @@ export async function lessonsFound(
   refs: string[],
   viewer: Viewer,
 ): Promise<Found<FoundLesson>> {
-  const none = { found: [], unchecked: 0 };
+  const none = { found: [], unchecked: 0, lasting: false };
   const communityId = store.community?.id;
   if (!communityId || !refs.length) return none;
   const parsed = refs.map(readLessonRef).filter((r): r is { productId: string; lessonId: string } => r !== null);
@@ -91,7 +94,8 @@ export async function lessonsFound(
     else if (answer === "unknown") unknown.add(productId);
   }
   const unchecked = parsed.filter((r) => unknown.has(r.productId)).length;
-  if (!allowed.size) return { found: [], unchecked };
+  const lasting = unchecked > 0 && unknownForGood(holdings);
+  if (!allowed.size) return { found: [], unchecked, lasting };
 
   // The courses behind them, each read once, so a lesson can be named.
   const courseIds = [...allowed].flatMap((id) => {
@@ -118,7 +122,7 @@ export async function lessonsFound(
     if (!found) continue;
     out.push({ product, lessonId, title: found.lesson.title, unit: found.unit.title });
   }
-  return { found: out, unchecked };
+  return { found: out, unchecked, lasting };
 }
 
 /**
@@ -139,7 +143,7 @@ export async function eventsFound(
   now = Date.now(),
 ): Promise<Found<FoundEvent>> {
   const communityId = store.community?.id;
-  if (!communityId || !ids.length) return { found: [], unchecked: 0 };
+  if (!communityId || !ids.length) return { found: [], unchecked: 0, lasting: false };
   const events: CommunityEvent[] = await readEvents(communityId, ids).catch(() => []);
   const byId = new Map(events.map((e) => [e.id, e]));
   const kept: FoundEvent[] = [];
@@ -154,7 +158,7 @@ export async function eventsFound(
     if (answer !== true) continue;
     kept.push({ event, state: event.cancelled ? "cancelled" : isOver(event, now) ? "over" : "upcoming" });
   }
-  return { found: kept, unchecked };
+  return { found: kept, unchecked, lasting: unchecked > 0 && unknownForGood(holdings) };
 }
 
 /** The members among these keys who are still listed, in the index's order. */

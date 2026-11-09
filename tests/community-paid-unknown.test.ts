@@ -182,6 +182,9 @@ async function main(): Promise<void> {
   garbledRow = true;
   is("nothing found, one row unreadable: unknown", await state("fay@example.com"), "unknown");
   garbledRow = false;
+  // Rule 23 (the pre-review of 9 November 2026, round 2): a "not known" that asking again will not change is kept a
+  // minute, as a "no" is, so the list read whole is asked once that minute is over.
+  redis.advance(61_000);
   is("the same list read whole: no", await state("fay@example.com"), false);
 
   part("Stripe down: not known, and not kept");
@@ -220,7 +223,9 @@ async function main(): Promise<void> {
   const locked = roomHtml.match(/<section[^>]*id="cm-locked"[\s\S]*?<\/section>/)?.[0] ?? "";
   is("the page is drawn", roomHtml.startsWith("PAGE_FAILED"), false);
   is("the space is listed, without 'Unlock with' a product jo may hold", [locked.includes("Inner room"), locked.includes("Unlock with")], [true, false]);
-  const lw = (lockedWordsModule.lockedWords("en") as Record<string, unknown>).unchecked;
+  // Rule 23 (round 2 of that pre-review): was `unchecked` ("Reload the page"); jo's purchases are more than are read,
+  // so reloading will not tell, and the space says to write to the creator.
+  const lw = (lockedWordsModule.lockedWords("en") as Record<string, unknown>).uncheckedLasting;
   is("it says the access could not be checked", typeof lw === "string" && locked.includes(lw.replace(/'/g, "&#x27;")), true);
 
   part("Words, in every language");

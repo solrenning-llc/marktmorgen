@@ -151,7 +151,7 @@ async function main(): Promise<void> {
   const h2 = await drawWith("loyal@example.com", {});
   is("control: the page shows the Inner room line", h1.includes("Inner room"), true);
   is("a second page within the minute reads nothing from Stripe (the reading was whole, and kept)", stripeReads - mid, 0);
-  is("the Inner room offers the product, never 'reload to try again' (the reading said no)", [h2.includes(html(lw.unchecked)), h2.includes(html(lw.unlockWith("Inner notes")))], [false, true]);
+  is("the Inner room offers the product, never 'reload to try again' (the reading said no)", [h2.includes(html(lw.unchecked)), h2.includes(html(lockedWords("en").unlockWith("Inner notes")))], [false, true]);
   is("no customer of a checkout without offers is read (none can hold a one-click addition)", customerReads, 0);
 
   part("N1b a buyer with twelve checkouts that carried offers: the addition on the twelfth customer opens the space");
@@ -168,7 +168,9 @@ async function main(): Promise<void> {
   is("the reading is whole and holds both products", [offers.whole, [...offers.held].sort()], [true, [ticket, inner].sort()]);
   is("each of the twelve customers was read once", customerReads, 12);
   is("a short page each (an offers customer holds its checkout and at most the funnel's additions)", paymentLimits.every((n) => n > 0 && n <= 10), true);
-  is("the customers read are many more than ten", cap >= 50, true);
+  // Rule 23: was cap >= 50; forty is what the sixteen requests a page pays cover with the groups of ten waited on one
+  // after another (tests/plan-cost-registry.test.ts), and four times the ten before.
+  is("the customers read are many more than ten", cap >= 40, true);
 
   part("N1c past TICKET_CUSTOMERS customers with offers: not known for good, never a 'no'");
   sessions["many@example.com"] = [
@@ -199,11 +201,14 @@ async function main(): Promise<void> {
     ["app/api/store/community/route.ts", /spaceunknownlasting[\s\S]*spaceunknownlasting/],
     ["app/api/store/community/rsvp/route.ts", /eventunknownlasting/],
     ["app/api/store/community/calendar/route.ts", /eventUncheckedLasting/],
-    ["app/[handle]/community/events/[event]/page.tsx", /eventUncheckedLasting[\s\S]*eventUncheckedLasting/],
+    // Rule 23: was /eventUncheckedLasting[\s\S]*eventUncheckedLasting/ (both places by name); the page picks the line once
+    // and draws it in both places, so both places are held by the check below instead.
+    ["app/[handle]/community/events/[event]/page.tsx", /eventUncheckedLasting/],
     ["app/[handle]/community/search/page.tsx", /uncheckedMoreLasting\(/],
     ["lib/community-found.ts", /lasting/],
     ["components/community-locked.tsx", /uncheckedLasting/],
   ];
+  is("the event page draws the passing line nowhere on its own", /\{w\.eventUnchecked\}|\? w\.eventUnchecked :/.test(read("app/[handle]/community/events/[event]/page.tsx")), false);
   is("every door that says 'not known' tells a lasting one apart", sources.filter(([file, pattern]) => !pattern.test(read(file))).map(([file]) => file), []);
   const languages = Object.keys(COMMUNITY_WORDS) as (keyof typeof COMMUNITY_WORDS)[];
   const lasting = (l: string) => {

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { fileHeaders } from "@/lib/request-guard";
-import { communityViewer } from "@/lib/community-access";
+import { communityViewer, unknownForGood } from "@/lib/community-access";
 import { eventIcs, mayAttend, readEvent } from "@/lib/community-events";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { speech } from "@/lib/buyer-words";
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   if (!event) return refuse();
   const may = await mayAttend(store, viewer.config, event, { owner: viewer.owner, email: viewer.email, holdings: viewer.holdings });
   // Not known is not "not found": said as not checked, and nothing given (the pre-review of 9 November 2026, P4).
-  if (may === "unknown") return new Response(communityWords(store.language).eventUnchecked, { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  if (may === "unknown") return new Response(communityWords(store.language)[unknownForGood(viewer.holdings) ? "eventUncheckedLasting" : "eventUnchecked"], { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   if (!may) return refuse();
   return new Response(eventIcs(store, event, viewer.config.name), {
     headers: fileHeaders("text/calendar; charset=utf-8", "event.ics"),

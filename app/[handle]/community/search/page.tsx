@@ -169,12 +169,14 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const holdings = owner || !checks ? viewer.holdings : await holdingsOf(store, config, email, lessonProducts, () => takePublicRequest(store, "buyer", undefined, checkUnits(checks)));
   if (holdings === "refused") redirect(`/@${store.handle}/resting`);
   const gate = { owner, email, key, holdings };
-  const lessonsRead = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : { found: [], unchecked: 0 };
-  const eventsRead = tab === "event" ? await eventsFound(store, config, page.posts, gate) : { found: [], unchecked: 0 };
+  const lessonsRead = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : { found: [], unchecked: 0, lasting: false };
+  const eventsRead = tab === "event" ? await eventsFound(store, config, page.posts, gate) : { found: [], unchecked: 0, lasting: false };
   const lessons = lessonsRead.found;
   const events = eventsRead.found;
   // Matches on this page whose answer was not known: not shown, and said as not checked, never as not theirs.
   const unchecked = lessonsRead.unchecked + eventsRead.unchecked;
+  // Not known for good (more purchases than are read): said with a way to the creator, never "reload the page".
+  const uncheckedForGood = lessonsRead.lasting || eventsRead.lasting;
   const people = tab === "member" ? await membersFound(id, page.posts) : [];
 
   const talk = tab === "room" ? (roomHits ?? []).slice(0, SHOWN_TALK) : [];
@@ -273,7 +275,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
                 {w.found(tab, shown, used.length === 1)}
                 {dropped && used.length ? ` ${w.searchedFor(used.join(", "))}` : ""}
                 {held > 0 ? ` ${w.heldMore(held)}` : ""}
-                {unchecked > 0 ? ` ${w.uncheckedMore(unchecked)}` : ""}
+                {unchecked > 0 ? ` ${uncheckedForGood ? w.uncheckedMoreLasting(unchecked) : w.uncheckedMore(unchecked)}` : ""}
               </p>
             )}
 

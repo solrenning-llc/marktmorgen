@@ -52,14 +52,28 @@ export const TICKET_SESSION_PAGE_ROWS = 100;
  * expanded, for TICKET_SESSION_PAGE_ROWS of them; a page heavier than that is refused, so the cost never passes it.
  */
 export const TICKET_SESSION_PAGE_BYTES = 2_400_000;
-/** Customers the address paid as whose one-click additions are read, side by side. */
-export const TICKET_CUSTOMERS = 10;
+/**
+ * Customers whose one-click additions are read: only the customer of a checkout that carried the offers after paying
+ * (metadata `upsell_key`, lib/store-checkout.ts and lib/cart-checkout.ts), since lib/upsell.ts takes no offer without
+ * it and charges it to that checkout's own customer. A checkout makes a customer of its own each time (customer_creation
+ * "always": offers, tax numbers, invoices), so a loyal buyer has many; it was ten, all of them read whatever made them,
+ * and an eleventh left every reading of a loyal buyer not whole, read again on every page (the pre-review of
+ * 9 November 2026, round 2). More than this leaves the answer not known, never "no".
+ */
+export const TICKET_CUSTOMERS = 40;
+/** Of those customers, how many are asked at once: the ten read side by side before, so Stripe's rate is not pressed harder. */
+export const TICKET_CUSTOMERS_SIDE_BY_SIDE = 10;
 /** Pages of one such customer's payments read, TICKET_PAYMENT_PAGE_ROWS to a page: one, as before 9 November 2026. */
 export const TICKET_PAYMENT_PAGES = 1;
-/** Payments on one such page. */
-export const TICKET_PAYMENT_PAGE_ROWS = 50;
+/**
+ * Payments on one such page. An offers checkout's customer holds that checkout's payment and one for each offer of its
+ * funnel taken or tried (lib/funnel.ts, MAX_FUNNEL_STEPS: five), nothing else, so ten hold it whole unless the funnel
+ * changed while the buyer was on it; a customer with more is not known, never "no". It was fifty, for every customer
+ * whatever made it.
+ */
+export const TICKET_PAYMENT_PAGE_ROWS = 10;
 /** The most bytes one such page is read to, as TICKET_SESSION_PAGE_BYTES: a premise of 6 KB a payment with its charge expanded. */
-export const TICKET_PAYMENT_PAGE_BYTES = 300_000;
+export const TICKET_PAYMENT_PAGE_BYTES = 60_000;
 /**
  * Purchases whose refund or lost dispute is asked of Stripe for one answer (lib/refunds.ts purchaseRefunded,
  * keptUnlessLost). Those answers are read by lib/refunds.ts, shared with every other door, with no ceiling of bytes:
@@ -72,8 +86,9 @@ export const TICKET_REFUND_CHECKS = 2;
  * payments, its first payments side by side, and their disputes side by side.
  */
 export const REFUND_CHECK_WAITS = 5;
-/** Every Stripe call one answer waits on, one after another, at the most: the pages of both ways of the address, the customers' pages read side by side, the refund questions. */
-export const TICKET_STRIPE_WAITS = 2 * TICKET_SESSION_PAGES + TICKET_PAYMENT_PAGES + TICKET_REFUND_CHECKS * REFUND_CHECK_WAITS;
+/** Every Stripe call one answer waits on, one after another, at the most: the pages of both ways of the address, the customers' pages read a group at a time, the refund questions. */
+export const TICKET_STRIPE_WAITS =
+  2 * TICKET_SESSION_PAGES + Math.ceil(TICKET_CUSTOMERS / TICKET_CUSTOMERS_SIDE_BY_SIDE) * TICKET_PAYMENT_PAGES + TICKET_REFUND_CHECKS * REFUND_CHECK_WAITS;
 
 export type SearchSize = {
   /** Whether the room is searched. */

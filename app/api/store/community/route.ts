@@ -28,7 +28,7 @@ import {
   within,
   withPin,
 } from "@/lib/community";
-import { communityViewer, spaceAnswer } from "@/lib/community-access";
+import { communityViewer, spaceAnswer, unknownForGood } from "@/lib/community-access";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
       // asks, asked again here, because a form can be sent from anywhere.
       // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
       const may = await spaceAnswer(store, config, chosen, { owner, email: viewer.email, holdings: viewer.holdings });
-      if (may !== true) return back(home, may === "unknown" ? "spaceunknown" : "spacelocked");
+      if (may !== true) return back(home, may === "unknown" ? (unknownForGood(viewer.holdings) ? "spaceunknownlasting" : "spaceunknown") : "spacelocked");
       // A space that opens for posting at a level (lib/community-points.ts).
       // Reading and commenting stay open to every member.
       if (!owner && chosen.level >= 2) {
@@ -259,7 +259,7 @@ export async function POST(request: NextRequest) {
     if (!post || (post.hid && !owner)) return back(home, "gone");
     const itsSpace = config.spaces.find((s) => s.id === post.sp);
     const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email, holdings: viewer.holdings }) : true;
-    if (may !== true) return back(home, may === "unknown" ? "spaceunknown" : "spacelocked");
+    if (may !== true) return back(home, may === "unknown" ? (unknownForGood(viewer.holdings) ? "spaceunknownlasting" : "spaceunknown") : "spacelocked");
 
     if (action === "comment") {
       const text = cleanText(form.get("text"), MAX_COMMENT_TEXT);

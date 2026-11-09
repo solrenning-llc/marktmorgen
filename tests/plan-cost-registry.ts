@@ -788,10 +788,13 @@ const TICKET_REFUND_READ_BYTES = 64_000;
  * and written, and every call to Stripe it may wait on one after another (TICKET_STRIPE_WAITS,
  * lib/community-read-rules.ts) at 2 GB, with every body it may read: both ways of the address, each
  * TICKET_SESSION_PAGES pages of checkouts of at most TICKET_SESSION_PAGE_BYTES each (a heavier page is refused as it
- * streams in, lib/stripe-account.ts); the customers' pages of payments read side by side, of at most
- * TICKET_PAYMENT_PAGE_BYTES each; TICKET_REFUND_CHECKS refund questions of REFUND_CHECK_WAITS calls. One reading answers
- * the door, the spaces, the events and the lessons of a page (the pre-review of 9 November 2026, P1). It was priced at
- * three calls of 64 KB while it read up to twelve pages; then at 24 KB a checkout with nothing holding a page to it.
+ * streams in, lib/stripe-account.ts); the pages of payments of TICKET_CUSTOMERS customers (only those of a checkout
+ * that carried the offers after paying), TICKET_CUSTOMERS_SIDE_BY_SIDE at a time, each group waited on in turn, of at
+ * most TICKET_PAYMENT_PAGE_BYTES each; TICKET_REFUND_CHECKS refund questions of REFUND_CHECK_WAITS calls. One reading
+ * answers the door, the spaces, the events and the lessons of a page (the pre-review of 9 November 2026, P1). It was
+ * priced at three calls of 64 KB while it read up to twelve pages; then at 24 KB a checkout with nothing holding a page
+ * to it; then for ten customers of 300 KB each, all side by side (round 2 of that pre-review: forty of 60 KB, four
+ * groups, cost the same within a hundredth of a request).
  */
 export const ACCESS_CHECK_READ = 4 * COMMAND + TICKET_STRIPE_WAITS * EXPORT_PAGE_SECONDS * MEMORY_SECOND
   + searchBodyWork(2 * TICKET_SESSION_PAGES * TICKET_SESSION_PAGE_BYTES)

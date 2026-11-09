@@ -44,7 +44,7 @@
  * twenty events or lessons asks Stripe once, not twenty times (the
  * pre-review of 9 November 2026, P1).
  *
- *   nl:cm:<id>:h:<address key>    what the address holds, read whole, with the settings' version and the products asked
+ *   nl:cm:<id>:h:<address key>    what the address holds, read whole (or not known for good, a minute), with the settings' version and the products asked
  *   nl:cm:<id>:ok:<address key>   Stripe's latest answer, with the settings' version
  *   nl:cm:link:<hash>             an emailed link: who, which store (1 hour)
  *   nl:cm:link:<hash>:opens       how often it was used (at most 10)
@@ -68,6 +68,7 @@ import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { readStripePage } from "@/lib/stripe-list";
 import {
   TICKET_CUSTOMERS,
+  TICKET_CUSTOMERS_SIDE_BY_SIDE,
   TICKET_PAYMENT_PAGES,
   TICKET_PAYMENT_PAGE_BYTES,
   TICKET_PAYMENT_PAGE_ROWS,
@@ -249,7 +250,9 @@ async function paidHoldings(store: Store, email: string, ids: ReadonlySet<string
         if (!handles.has(meta.store ?? "")) continue;
         if (!isSettled(session)) continue;
         if (refunded(session.payment_intent)) continue;
-        if (typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer)) customers.add(session.customer);
+        // Only a checkout that carried the offers after paying can have a one-click addition on its customer
+        // (lib/upsell.ts takes no offer without `upsell_key`, and charges the checkout's own customer).
+        if (carriedOffers(session) && typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer)) customers.add(session.customer);
         // A product in a bundle opens the door as if bought on its own; one already found held is not asked again.
         const bought = deliveredIds(meta).filter((id) => ids.has(id) && !held.has(id));
         if (!bought.length) continue;
@@ -272,19 +275,24 @@ async function paidHoldings(store: Store, email: string, ids: ReadonlySet<string
     }
   }
   // What was added in one click after paying is its own payment.
-  // At most TICKET_CUSTOMERS customers are asked, side by side (the reads stay bounded); more than that leaves the
-  // answer unread, not "no".
+  // At most TICKET_CUSTOMERS customers are asked, TICKET_CUSTOMERS_SIDE_BY_SIDE at a time (the reads stay bounded);
+  // more than that leaves the answer unread, not "no".
   if (customers.size > TICKET_CUSTOMERS) reading.whole = false;
-  const payments = await Promise.all(
-    [...customers].slice(0, TICKET_CUSTOMERS).map(async (customer) => {
-      const query = new URLSearchParams({ customer, limit: String(TICKET_PAYMENT_PAGE_ROWS) });
-      query.append("expand[]", "data.latest_charge");
-      const rows: Row[] = [];
-      for await (const page of pagesOf(account, "/payment_intents", query, isIntentRow, TICKET_PAYMENT_PAGES, reading, TICKET_PAYMENT_PAGE_BYTES)) rows.push(...page);
-      return rows;
-    }),
-  );
-  for (const intent of payments.flat()) {
+  const asked = [...customers].slice(0, TICKET_CUSTOMERS);
+  const payments: Row[] = [];
+  for (let from = 0; from < asked.length; from += TICKET_CUSTOMERS_SIDE_BY_SIDE) {
+    const group = await Promise.all(
+      asked.slice(from, from + TICKET_CUSTOMERS_SIDE_BY_SIDE).map(async (customer) => {
+        const query = new URLSearchParams({ customer, limit: String(TICKET_PAYMENT_PAGE_ROWS) });
+        query.append("expand[]", "data.latest_charge");
+        const rows: Row[] = [];
+        for await (const page of pagesOf(account, "/payment_intents", query, isIntentRow, TICKET_PAYMENT_PAGES, reading, TICKET_PAYMENT_PAGE_BYTES)) rows.push(...page);
+        return rows;
+      }),
+    );
+    payments.push(...group.flat());
+  }
+  for (const intent of payments) {
     const meta = (intent.metadata ?? {}) as Record<string, string>;
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
     if (intent.status !== "succeeded" || refunded(intent)) continue;
@@ -301,6 +309,12 @@ async function paidHoldings(store: Store, email: string, ids: ReadonlySet<string
     if (enough()) return { held, whole: true };
   }
   return { held, whole: reading.whole };
+}
+
+/** Whether a checkout carried the offers after paying (lib/store-checkout.ts, lib/cart-checkout.ts: metadata `upsell_key`). */
+function carriedOffers(session: Row): boolean {
+  const meta = session.metadata;
+  return isRecord(meta) && typeof meta.upsell_key === "string" && meta.upsell_key.length > 0;
 }
 
 /** Whether a payment's charge, as Stripe expanded it, is marked disputed: only then is a lost dispute asked about (lib/refunds.ts disputeLost). */
@@ -409,6 +423,15 @@ export function heldAnswer(holdings: Holdings, ids: readonly string[]): Ticket {
   return holdings.whole ? false : "unknown";
 }
 
+/**
+ * Whether a "not known" answered from this reading will be the same however often it is asked (Holdings `lasting`):
+ * every door that says it then says to write to the creator, never to reload or try again in a minute (the
+ * pre-review of 9 November 2026, round 2).
+ */
+export function unknownForGood(holdings: Holdings | null | undefined): boolean {
+  return Boolean(holdings && !holdings.whole && holdings.lasting);
+}
+
 const notRead = (error: unknown): Holdings => ({ held: new Set(), whole: false, lasting: askingAgainWontTell(error), unread: error });
 
 /**
@@ -448,15 +471,22 @@ async function readHoldings(store: Store, email: string, ids: readonly string[],
 
 const holdingsKey = (id: string, email: string) => `nl:cm:${id}:h:${emailKey(email)}`;
 
-/** A reading kept for this version that asked every one of `asked`, or null. */
+/**
+ * A reading kept for this version that asked every one of `asked`, or null. One kept `lasting` is a reading that was
+ * not whole and that asking again would not make whole (more purchases than are read): what it found held still
+ * stands, the rest is not known.
+ */
 function keptHoldings(raw: unknown, version: number, asked: readonly string[]): Holdings | null {
   if (typeof raw !== "string") return null;
   try {
-    const value = JSON.parse(raw) as { v?: unknown; ids?: unknown; held?: unknown };
+    const value = JSON.parse(raw) as { v?: unknown; ids?: unknown; held?: unknown; lasting?: unknown };
     if (value.v !== version || !Array.isArray(value.ids) || !Array.isArray(value.held)) return null;
+    if (value.lasting !== undefined && value.lasting !== true) return null;
     const ids = new Set(value.ids.filter((id): id is string => typeof id === "string"));
     if (!asked.every((id) => ids.has(id))) return null;
-    return { held: new Set(value.held.filter((id): id is string => typeof id === "string" && ids.has(id))), whole: true, lasting: false };
+    const held = new Set(value.held.filter((id): id is string => typeof id === "string" && ids.has(id)));
+    if (value.lasting === true) return { held, whole: false, lasting: true, unread: new UnreadPurchasesError("more than is read (kept a minute)", true) };
+    return { held, whole: true, lasting: false };
   } catch {
     return null;
   }
@@ -495,13 +525,14 @@ export async function holdingsOf(
   if (kept) return kept;
   if (pay && !(await pay())) return "refused";
   const read = await readHoldings(store, email, asked, false);
-  if (!read.whole) {
-    console.error("reading what a community member holds failed", read.unread);
-    return read;
-  }
-  const every = asked.every((pid) => read.held.has(pid));
+  if (!read.whole) console.error("reading what a community member holds failed", read.unread);
+  // A passing fault is not kept, so the next page asks again. One that asking again will not change (more purchases
+  // than are read) is kept a minute, as a "no" is, so a member past it does not cost every page a reading of Stripe.
+  if (!read.whole && !read.lasting) return read;
+  const every = read.whole && asked.every((pid) => read.held.has(pid));
+  const record = { v: config.v, ids: asked, held: [...read.held], ...(read.whole ? {} : { lasting: true }) };
   // Keeping it is a saving only: a failed write leaves the reading just made to decide.
-  await redisPipeline([["SET", holdingsKey(id, email), JSON.stringify({ v: config.v, ids: asked, held: [...read.held] }), "EX", every ? OPEN_SECONDS : SHUT_SECONDS]]).catch(
+  await redisPipeline([["SET", holdingsKey(id, email), JSON.stringify(record), "EX", every ? OPEN_SECONDS : SHUT_SECONDS]]).catch(
     (error) => console.error("keeping what a community member holds failed", error),
   );
   return read;
@@ -604,16 +635,19 @@ export async function visibleSpaces(
   return (await spaceChecks(store, config, viewer)).spaces;
 }
 
-/** visibleSpaces, with the ids of the kept spaces whose answer was not known kept apart (never shown, never said to be closed). */
+/**
+ * visibleSpaces, with the ids of the kept spaces whose answer was not known kept apart (never shown, never said to be
+ * closed), and whether that will stay so however often they are asked (`lasting`).
+ */
 export async function spaceChecks(
   store: Store,
   config: CommunityConfig,
   viewer: { owner: boolean; email: string; holdings?: Holdings | null },
-): Promise<{ spaces: Space[]; unchecked: Set<string> }> {
+): Promise<{ spaces: Space[]; unchecked: Set<string>; lasting: boolean }> {
   const unchecked = new Set<string>();
-  if (viewer.owner) return { spaces: config.spaces, unchecked };
+  if (viewer.owner) return { spaces: config.spaces, unchecked, lasting: false };
   const gated = config.spaces.filter((s) => s.only.length);
-  if (!gated.length) return { spaces: config.spaces, unchecked };
+  if (!gated.length) return { spaces: config.spaces, unchecked, lasting: false };
   // One reading for every kept space, never one per space.
   const holdings = viewer.holdings ?? (await holdingsOf(store, config, viewer.email));
   const answers = await Promise.all(gated.map((s) => spaceAnswer(store, config, s, { ...viewer, holdings })));
@@ -621,7 +655,8 @@ export async function spaceChecks(
   gated.forEach((s, i) => {
     if (answers[i] === "unknown") unchecked.add(s.id);
   });
-  return { spaces: config.spaces.filter((s) => !s.only.length || mine.has(s.id)), unchecked };
+  // `lasting`: the unchecked ones will stay so however often they are asked, and are said with a way to the creator.
+  return { spaces: config.spaces.filter((s) => !s.only.length || mine.has(s.id)), unchecked, lasting: unchecked.size > 0 && unknownForGood(holdings) };
 }
 
 /** Forgets Stripe's answer for one address, so the next request asks again. */

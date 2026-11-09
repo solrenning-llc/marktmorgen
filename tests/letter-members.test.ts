@@ -33,6 +33,7 @@ import { MAX_LETTER_PRODUCTS, membersOnly, parseLetter } from "@/lib/letter-rule
 import { letterIdFor, listLetters, publishLetter, publishedLetters, readLetter } from "@/lib/letters";
 import { letterReader } from "@/lib/letter-access";
 import { holdsProducts, holdsProductsOrThrow, paidForAny } from "@/lib/community-access";
+import { TICKET_CUSTOMERS } from "@/lib/community-read-rules";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { mintPass, passCookieName } from "@/lib/learn";
 import LetterPage, { generateMetadata } from "@/app/[handle]/letters/[letter]/page";
@@ -351,7 +352,9 @@ async function main(): Promise<void> {
       const url=new URL(String(input instanceof Request?input.url:input));
       if(url.hostname!=="api.stripe.com")return answer(input,init);
       if(url.pathname.endsWith(endpoint)) return new Response(JSON.stringify(payload),{status:200});
-      if(endpoint==="/payment_intents" && url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:[paid("cs_test_otherCust01",other.product.id)],has_more:false}));
+      // Rule 23 (the pre-review of 9 November 2026, round 2): the other purchase now carries the offers after paying
+      // (metadata upsell_key), since only such a checkout's customer can hold a one-click addition and is read.
+      if(endpoint==="/payment_intents" && url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:[{...paid("cs_test_otherCust01",other.product.id),metadata:{store:HANDLE,product:other.product.id,upsell_key:"offers1"}}],has_more:false}));
       return answer(input,init);
     }) as typeof fetch;
     try {
@@ -367,20 +370,24 @@ async function main(): Promise<void> {
       is(`${label}: strict throws`,thrown,true);
     } finally {globalThis.fetch=answer;forgetAnswers();}
   }
-  for(const count of [10,11]) {
+  // Rule 23 (the pre-review of 9 November 2026, round 2): the boundary was ten customers, all read whatever made them;
+  // it is TICKET_CUSTOMERS customers of checkouts that carried the offers after paying (metadata upsell_key), the only
+  // ones that can hold a one-click addition, and a customer made for anything else is not read at all.
+  for(const [count, offers] of [[TICKET_CUSTOMERS, true], [TICKET_CUSTOMERS + 1, true], [TICKET_CUSTOMERS + 1, false]] as const) {
     const answer=globalThis.fetch;
     let piCalls=0;
     globalThis.fetch=(async(input:string | URL | Request)=>{
       const url=new URL(String(input instanceof Request?input.url:input));
-      if(url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:Array.from({length:count},(_,i)=>({...paid(`cs_test_bound${i}`,other.product.id),customer:`cus_TestBoundary${i}`})),has_more:false}));
+      if(url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:Array.from({length:count},(_,i)=>({...paid(`cs_test_bound${i}`,other.product.id),customer:`cus_TestBoundary${i}`,metadata:{store:HANDLE,product:other.product.id,...(offers?{upsell_key:`offers${i}`}:{})}})),has_more:false}));
       piCalls+=1;
       return new Response(JSON.stringify({data:[],has_more:false}));
     }) as typeof fetch;
+    const label=`${count} customers${offers?" with offers":" without offers"}`;
     try {
       let result:unknown;
       try { result=await paidForAny(store,"ana@example.com",new Set([club])); } catch {result="unknown";}
-      is(`${count} customers: result`,result,count===10?false:"unknown");
-      is(`${count} customers: at most ten payment queries`,piCalls,10);
+      is(`${label}: result`,result,offers&&count>TICKET_CUSTOMERS?"unknown":false);
+      is(`${label}: at most ${TICKET_CUSTOMERS} payment queries, none without offers`,piCalls,offers?TICKET_CUSTOMERS:0);
     } finally {globalThis.fetch=answer;}
   }
   part("The link form: its field is named and described, and a notice after it is reached");

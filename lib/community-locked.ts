@@ -92,7 +92,8 @@ export async function unlocksOf(
  * The locked spaces one member sees, or null when the store's requests did
  * not cover reading their products (the caller shows the resting page).
  * `opened` is the ids of the spaces maySeeSpace let them into; `unchecked`
- * those whose answer was not known (spaceChecks), each said as such.
+ * those whose answer was not known (spaceChecks), each said as such, and
+ * `lasting` whether that will stay so however often it is asked.
  */
 export async function lockedSpaces(
   store: Store,
@@ -100,9 +101,10 @@ export async function lockedSpaces(
   opened: ReadonlySet<string>,
   take: (units: number) => Promise<boolean>,
   unchecked: ReadonlySet<string> = new Set(),
+  lasting = false,
 ): Promise<LockedSpace[] | null> {
   const locked = lockedOf(config, opened);
   if (locked.length === 0) return [];
   const unlocks = await unlocksOf(store, config, take);
-  return unlocks === null ? null : lockedList(locked, unlocks, unchecked);
+  return unlocks === null ? null : lockedList(locked, unlocks, unchecked, lasting);
 }

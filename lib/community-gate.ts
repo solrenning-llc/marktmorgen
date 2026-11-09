@@ -49,9 +49,10 @@ export function previewSpaces<S extends GatedSpace>(spaces: readonly S[], access
 /**
  * How a locked space can be opened: by buying a product, not now, or not known (542 [CM1]); "unchecked" when the
  * member's own access to it could not be checked just now, so no product is offered to somebody who may hold one
- * (CX-123 rule 24).
+ * (CX-123 rule 24); "uncheckedLasting" when asking again will not tell either (more purchases than are read), so the
+ * member is pointed to the creator instead of to the reload button (the pre-review of 9 November 2026, round 2).
  */
-export type Unlock = { title: string; href: string } | "none" | "unknown" | "unchecked";
+export type Unlock = { title: string; href: string } | "none" | "unknown" | "unchecked" | "uncheckedLasting";
 
 /** All a page draws of one locked space: never its id, address or anything from inside it. */
 export type LockedSpace = { name: string; about: string; unlock: Unlock };
@@ -70,13 +71,21 @@ export function lockedOf<S extends GatedSpace & { shown?: true }>(config: { spac
   });
 }
 
-/** What the page draws of them, with each one's way in (unlocksOf, lib/community-locked.ts); not read, or not there, is "unknown". */
+/**
+ * What the page draws of them, with each one's way in (unlocksOf, lib/community-locked.ts); not read, or not there, is
+ * "unknown". `lasting`: the unchecked ones stay so however often they are asked (spaceChecks).
+ */
 export function lockedList(
   locked: readonly { space: { id: string; name: string; about: string } }[],
   unlocks: Readonly<Record<string, Unlock>> | null,
   unchecked: ReadonlySet<string> = new Set(),
+  lasting = false,
 ): LockedSpace[] {
-  return locked.map(({ space }) => ({ name: space.name, about: space.about, unlock: unchecked.has(space.id) ? "unchecked" : unlocks?.[space.id] ?? "unknown" }));
+  return locked.map(({ space }) => ({
+    name: space.name,
+    about: space.about,
+    unlock: unchecked.has(space.id) ? (lasting ? "uncheckedLasting" : "unchecked") : unlocks?.[space.id] ?? "unknown",
+  }));
 }
 
 /**

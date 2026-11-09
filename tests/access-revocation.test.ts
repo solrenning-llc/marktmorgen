@@ -152,7 +152,9 @@ async function main(): Promise<void> {
   is("a membership canceled: not let in", await paidForAny(store, "gus@example.com", ids), false);
   sessions["hal@example.com"] = [member("cs_test_hal000000001", club, "active")];
   is("a membership running: let in", await paidForAny(store, "hal@example.com", ids), true);
-  sessions["ivy@example.com"] = [paid("cs_test_ivy000000001", "otherproduct1", { customer: "cus_TestIvy000001" })];
+  // Rule 23 (the pre-review of 9 November 2026, round 2): the checkout carried the offers after paying (upsell_key),
+  // as every real parent of a one-click addition does (lib/upsell.ts); only such a checkout's customer is read.
+  sessions["ivy@example.com"] = [paid("cs_test_ivy000000001", "otherproduct1", { customer: "cus_TestIvy000001", metadata: { store: "school", product: "otherproduct1", upsell_key: "offers1" } })];
   intents.cus_TestIvy000001 = [{ id: "pi_ivyup1", status: "succeeded", metadata: { kind: "upsell", store: "school", product: once }, latest_charge: charge(1900, 0) }];
   is("bought in one click after paying for something else: let in", await paidForAny(store, "ivy@example.com", ids), true);
   intents.cus_TestIvy000001 = [{ id: "pi_ivyup1", status: "succeeded", metadata: { kind: "upsell", store: "school", product: once }, latest_charge: charge(1900, 1900) }];

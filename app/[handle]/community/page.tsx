@@ -88,11 +88,11 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   // anybody else, and neither are their posts: the gate is asked here, once,
   // and everything below reads only what came back.
   // The kept spaces whose answer was not known are not shown, and are said as not checked, never as not theirs.
-  const { spaces, unchecked } = await spaceChecks(store, config, { owner, email: viewer.email, holdings: viewer.holdings });
+  const { spaces, unchecked, lasting } = await spaceChecks(store, config, { owner, email: viewer.email, holdings: viewer.holdings });
   const mineIds = new Set(spaces.map((s) => s.id));
   const askedSpace = typeof query.space === "string" && ITEM_ID.test(query.space) ? query.space : "";
   // A space they may not see answers the same as one that is not there.
-  if (askedSpace && !mineIds.has(askedSpace)) redirect(`${`/@${store.handle}/community`}?n=${unchecked.has(askedSpace) ? "spaceunknown" : "spacelocked"}`);
+  if (askedSpace && !mineIds.has(askedSpace)) redirect(`${`/@${store.handle}/community`}?n=${unchecked.has(askedSpace) ? (lasting ? "spaceunknownlasting" : "spaceunknown") : "spacelocked"}`);
   const space = askedSpace ? spaces.find((s) => s.id === askedSpace) ?? null : null;
   const beforeRaw = typeof query.before === "string" ? Number(query.before) : NaN;
   const before = Number.isInteger(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
@@ -128,7 +128,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const openTo = await accessProducts(store, config);
   // The kept spaces shown locked that this member was not let into (542 [CM1]): their names, lines and the way in,
   // on the first page of every space only, with what they read paid for first; nothing from inside them is read.
-  const lockedList = !owner && !space && !before ? await lockedSpaces(store, config, mineIds, (units) => takePublicRequest(store, "buyer", undefined, units), unchecked) : [];
+  const lockedList = !owner && !space && !before ? await lockedSpaces(store, config, mineIds, (units) => takePublicRequest(store, "buyer", undefined, units), unchecked, lasting) : [];
   if (lockedList === null) redirect(`/@${store.handle}/resting`);
 
   return (

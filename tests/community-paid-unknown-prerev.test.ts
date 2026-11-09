@@ -193,6 +193,9 @@ async function main(): Promise<void> {
   let heavyStrict: unknown = null;
   await access.holdsProductsOrThrow(await fresh(), [ticket], "oz@example.com", "nl:test:cpu:oz", "1").catch((error) => (heavyStrict = error));
   padding = 0;
+  // Rule 23 (round 2 of the pre-review): a page past the ceiling is not known for good, and kept a minute, as a "no" is;
+  // the control below asks once that minute is over.
+  redis.advance(61_000);
   is("a page past the ceiling is not known, never read", heavy, "unknown");
   is("a strict door is told asking again will not tell", [heavyStrict !== null, access.askingAgainWontTell(heavyStrict)], [true, true]);
   is("control: the same page within the ceiling opens", await state("oz@example.com"), true);

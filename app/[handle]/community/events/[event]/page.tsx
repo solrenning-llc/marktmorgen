@@ -6,6 +6,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readListings } from "@/lib/catalog";
 import { communityVisitor } from "@/lib/community-page";
+import { unknownForGood } from "@/lib/community-access";
 import { ITEM_ID } from "@/lib/community-text";
 import { isVideoRoom, roomKind, videoRoomNote } from "@/lib/call-rooms";
 import { MEET_NAMES } from "@/lib/call-setup";
@@ -86,6 +87,8 @@ export default async function CommunityEventPage({ params, searchParams }: Param
   const door = joinWindow(event, now);
   // Not known is never a way in, and never "not for you" either (the pre-review of 9 November 2026, P4).
   const unchecked = allowed === "unknown";
+  // Not known for good (more purchases than are read): the member is pointed to the creator, never to a reload.
+  const uncheckedWords = unknownForGood(viewer.holdings) ? w.eventUncheckedLasting : w.eventUnchecked;
   const way = wayInFor(event, { owner: viewer.owner, mayAttend: allowed === true, going: mine }, now, meeting?.link || null);
   const place = event.where === "meet" && event.meet && meeting?.made && !meeting.gone ? event.meet : null;
   const whereWords = place ? MEET_NAMES[place] : event.where === "link" ? w.onlineMeeting : w.privateRoom;
@@ -135,7 +138,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
 
           {unchecked ? (
             <div className="st-note mt-6" role="status">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.eventUnchecked}</p>
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{uncheckedWords}</p>
             </div>
           ) : !allowed ? (
             <div className="st-note mt-6" role="status">
@@ -239,7 +242,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
                   <VideoEmbed video={event.replay} title={event.title} poster={null} lang={store.language} />
                 </div>
               ) : (
-                <p className="st-muted mt-1 text-sm">{allowed === true ? w.noReplay(store.name) : unchecked ? w.eventUnchecked : w.replayForMembers}</p>
+                <p className="st-muted mt-1 text-sm">{allowed === true ? w.noReplay(store.name) : unchecked ? uncheckedWords : w.replayForMembers}</p>
               )}
             </section>
           ) : null}

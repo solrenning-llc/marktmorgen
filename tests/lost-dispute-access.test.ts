@@ -164,7 +164,9 @@ async function main(): Promise<void> {
   is("a dispute that still needs an answer: let in", await paidForAny(store, "ned@example.com", ids), true);
   sessions["oli@example.com"] = [paid("cs_test_oli000000001", course, "lost"), paid("cs_test_oli000000002", course, "won")];
   is("one lost, another won: let in", await paidForAny(store, "oli@example.com", ids), true);
-  sessions["pam@example.com"] = [paid("cs_test_pam000000001", guide.product.id, null, { customer: "cus_TestPam00001" })];
+  // Rule 23 (the pre-review of 9 November 2026, round 2): the checkout carried the offers after paying (upsell_key),
+  // as every real parent of a one-click addition does (lib/upsell.ts); only such a checkout's customer is read.
+  sessions["pam@example.com"] = [paid("cs_test_pam000000001", guide.product.id, null, { customer: "cus_TestPam00001", metadata: { store: "nightpaint", product: guide.product.id, upsell_key: "offers1" } })];
   intents.cus_TestPam00001 = [{ id: "pi_pamup1", object: "payment_intent", status: "succeeded", metadata: { kind: "upsell", store: "nightpaint", product: course }, latest_charge: chargeIn("ch_pamup1aaa", "lost") }];
   is("bought in one click after paying, that payment lost: not let in", await paidForAny(store, "pam@example.com", ids), false);
   intents.cus_TestPam00001 = [{ id: "pi_pamup1", object: "payment_intent", status: "succeeded", metadata: { kind: "upsell", store: "nightpaint", product: course }, latest_charge: chargeIn("ch_pamup1bbb", "won") }];

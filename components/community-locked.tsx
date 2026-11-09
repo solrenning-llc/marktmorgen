@@ -40,7 +40,7 @@ export function LockedSpaces({ spaces, language, level = 2 }: { spaces: LockedSp
                 </Link>
               </p>
             ) : (
-              <p className="mt-2 text-sm">{space.unlock === "none" ? w.notYet : space.unlock === "unchecked" ? w.unchecked : w.unknown}</p>
+              <p className="mt-2 text-sm">{space.unlock === "none" ? w.notYet : space.unlock === "unchecked" ? w.unchecked : space.unlock === "uncheckedLasting" ? w.uncheckedLasting : w.unknown}</p>
             )}
           </li>
         ))}

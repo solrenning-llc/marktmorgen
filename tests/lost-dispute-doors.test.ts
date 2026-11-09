@@ -211,7 +211,9 @@ async function main(): Promise<void> {
 
   part("A dispute that cannot be read keeps the door open, as a refund read does");
   const ids = new Set([guide.product.id]);
-  sessions["rae@example.com"] = [paid("cs_test_rae000000001", other.product.id, null, { customer: "cus_TestRae00001" })];
+  // Rule 23 (the pre-review of 9 November 2026, round 2): the checkout carried the offers after paying (upsell_key),
+  // as every real parent of a one-click addition does (lib/upsell.ts); only such a checkout's customer is read.
+  sessions["rae@example.com"] = [paid("cs_test_rae000000001", other.product.id, null, { customer: "cus_TestRae00001", metadata: { store: "kilnworks", product: other.product.id, upsell_key: "offers1" } })];
   intents.cus_TestRae00001 = [{ id: "pi_raeup1aaaa", object: "payment_intent", status: "succeeded", metadata: { kind: "upsell", store: "kilnworks", product: guide.product.id }, latest_charge: charge("ch_raeup1aaaa", "under_review") }];
   disputesDown = true;
   is("the community lets in", await paidForAny(store, "rae@example.com", ids).then((v) => v, () => "stopped"), true);

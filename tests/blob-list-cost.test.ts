@@ -24,7 +24,9 @@ for (const tier of ["creator", "pro", "scale"] as const) {
   const expected = PAID_UPLOAD_OPENS[tier] * 1 * pages * BLOB_PUT_TRIES * BLOB_ADVANCED_OP;
   is(`${tier}: ${PAID_UPLOAD_OPENS[tier]} opens`, Math.abs((line?.monthlyUsd(tier) ?? Number.NaN) - expected) < 1e-12, true);
 }
-is("Creator is US$ 0.077", Math.abs((line?.monthlyUsd("creator") ?? 0) - 0.077) < 1e-12, true);
+// Rule 23 (Claude 1 on #2848, comment 6708241908): US$ 0.055 before, at the iad1 rate (US$ 5.00 a million); now at
+// gru1's US$ 7.00, the dearest region, while the store's region is unreviewed: 0.055 × 7 / 5 = 0.077.
+is("Creator is US$ 0.077",Math.abs((line?.monthlyUsd("creator") ?? 0) - 0.077) < 1e-12, true);
 
 part("Sources and the callers left out are said");
 const sources = (line?.sources ?? []).map((source) => source.file);

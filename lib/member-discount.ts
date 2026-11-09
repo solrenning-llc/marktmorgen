@@ -50,12 +50,23 @@ const list = (value: unknown): Raw[] => (value && typeof value === "object" && A
  */
 function onePage(value: unknown, what: string): Raw[] {
   const page = value && typeof value === "object" ? (value as Raw) : null;
-  if (!page || !Array.isArray(page.data) || typeof page.has_more !== "boolean" || !page.data.every((row) => row && typeof row === "object")) {
+  if (!page || !Array.isArray(page.data) || typeof page.has_more !== "boolean" || !page.data.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
     throw new Error(`Stripe answered ${what} in an unknown shape`);
   }
   if (page.has_more) throw new Error(`Stripe has more ${what} than one page holds`);
   return page.data as Raw[];
 }
+
+/**
+ * Whether a row is one Stripe could have sent for a customer or a
+ * subscription: its id, and for a subscription its status and its metadata
+ * object, readable (Codex S second review of #2912, residual of M2). A row
+ * that is not is unknown, never left out as "not a membership": only a
+ * readable row is filtered by status, store or kind.
+ */
+const readableCustomer = (row: Raw): boolean => typeof row.id === "string" && CUSTOMER_PATTERN.test(row.id);
+const readableSub = (row: Raw): boolean =>
+  typeof row.id === "string" && SUB_PATTERN.test(row.id) && typeof row.status === "string" && row.status !== "" && !!row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata);
 
 /** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
 export function hasDiscount(sub: Raw): boolean {
@@ -103,9 +114,10 @@ export async function memberSubRows(store: Store, email: string): Promise<{ row:
     const customers = onePage(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), "customers");
     const out: { row: MemberSub; raw: Raw }[] = [];
     for (const customer of customers) {
-      if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) continue;
-      const subs = onePage(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION), "subscriptions");
+      if (!readableCustomer(customer)) throw new Error("Stripe answered a customer row in an unknown shape");
+      const subs = onePage(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id as string)}&status=all&limit=20`, undefined, API_VERSION), "subscriptions");
       for (const sub of subs) {
+        if (!readableSub(sub)) throw new Error("Stripe answered a subscription row in an unknown shape");
         const row = readMemberSub(sub, handles);
         if (row) out.push({ row, raw: sub });
       }

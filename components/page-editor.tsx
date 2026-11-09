@@ -270,8 +270,6 @@ function counter(value: string, max: number) {
  * and remove, and a preview drawn by the same components as the live page,
  * in the store's own look. Saved as a whole, the way the funnel editor is.
  */
-
-
 export function PageEditor({
   product,
   initial,

@@ -970,6 +970,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:traffic:n:@lib/traffic.ts": { what: "Visits in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:traffic:r:@lib/traffic.ts": { what: "Requests in the window", parts: [capped(2 * KEY, "One a window.")] },
   "nl:traffic:x:@lib/traffic.ts": { what: "The live room in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
+  "nl:traffic:spike:@lib/traffic-spike.ts": company("A store's early-use alarm, claimed for one mark of one window", "Written only when an INCRBY carries a store's window of requests across one of three marks before its share of the window's time: at most three keys a store a window (one a mark), each \"1\", kept until a day after the window ends; the company's own alarm, with the email it sends (at most SPIKE_ALERTS_PER_DAY a day in all)."),
+  "nl:traffic:spike-day:@lib/traffic-spike.ts": company("How many early-use alarms the company sent in a UTC day", "One counter a UTC day, kept two days; it caps the alarm's emails at SPIKE_ALERTS_PER_DAY a day, whatever the number of stores."),
   "nl:nudge:@lib/trial-nudges.ts": company("A trial's nudges sent", "The company's emails to a creator about their own plan."),
   "nl:2fa:@lib/two-step.ts": company("An account's second step", "An account's."),
   "nl:2fa:hold:@lib/two-step.ts": company("A second step held", "An account's."),

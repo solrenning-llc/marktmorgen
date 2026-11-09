@@ -37,7 +37,7 @@ import type { CommunityConfig } from "@/lib/community";
 import { type LockedSpace, type Unlock, lockedList, lockedOf } from "@/lib/community-gate";
 import { readListings } from "@/lib/catalog";
 import { productsBuyableNow } from "@/lib/mail-product-sellable";
-import { soonState } from "@/lib/preorders";
+import { soonState, type SoonState } from "@/lib/preorders";
 import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
 import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
 import { productSegment } from "@/lib/product-slug";
@@ -123,7 +123,7 @@ export async function unlocksOf(
   const known = new Map<string, Listing>();
   const buyable = new Set<string>();
   const items = new Set<string>();
-  let soon: ReadonlySet<string> | null = null;
+  let soon: SoonState | null = null;
   const pay = async (units: number) => units <= 0 || (await take(units));
   const readOnce = async (ids: readonly string[]): Promise<boolean> => {
     const fresh = ids.filter((id) => !asked.has(id));
@@ -149,7 +149,7 @@ export async function unlocksOf(
     if (!(await readOnce(fresh))) return {};
     for (const id of fresh) items.add(id);
     try {
-      soon ??= (await soonState(store)).soon;
+      soon ??= await soonState(store);
       for (const id of await productsBuyableNow(store, listings, Date.now(), { soon, listings: known })) buyable.add(id);
     } catch (error) {
       console.error("reading a locked space's products failed", error);

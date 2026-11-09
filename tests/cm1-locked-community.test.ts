@@ -178,8 +178,14 @@ async function main(): Promise<void> {
   store = (await storeForEmail(OWNER))!;
   const [guideListing] = await readListings(store, [guide]);
   const limited: Listing = { ...guideListing, stock: 5 };
-  const already = { soon: new Set<string>(), listings: new Map<string, Listing>() };
+  const already = { soon: { soon: new Set<string>(), days: new Map<string, string>() }, listings: new Map<string, Listing>() };
   is("control: its stock read, it is on sale", (await productsBuyableNow(store, [limited], Date.now(), already)).has(guide), true);
+  // main's soonState can read the pre-orders in part (knownNotSoon): given what was read, a product outside that part is
+  // unknown and throws, so the space says it could not tell; one inside it is known coming soon and only left out.
+  const partOutside = { soon: { soon: new Set<string>(["other"]), days: new Map<string, string>(), partial: true as const }, listings: new Map<string, Listing>() };
+  is("pre-orders read in part: unknown, never 'not available'", await productsBuyableNow(store, [limited], Date.now(), partOutside).then(() => "answered", () => "unknown"), "unknown");
+  const partInside = { soon: { soon: new Set<string>([guide]), days: new Map<string, string>(), partial: true as const }, listings: new Map<string, Listing>() };
+  is("pre-orders read in part, the product among them: coming soon, left out", (await productsBuyableNow(store, [limited], Date.now(), partInside)).has(guide), false);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands.some((c) => c[0] === "HGETALL" && String(c[1]).startsWith("nl:stock:"))) throw new Error("synthetic lost reply");
     return original(commands);

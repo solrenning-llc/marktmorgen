@@ -62,6 +62,9 @@ const UNKNOWN: ReadonlyArray<readonly [string, string]> = [
   ["minimum_deadline without status", shaped("active", { summary: { minimum_deadline: {} } })],
   ["minimum_deadline status a number", shaped("active", { summary: { minimum_deadline: { status: 3 } } })],
   // Codex Z on #3311 (review 5820295862): a status that is not one Stripe documents is not known either.
+  // "inactive" is a v1 Capability status, not one of the v2 card_payments statuses (stripe-node v22.6.0, API
+  // 2026-08-26.dahlia: active | pending | restricted | unsupported), so it is unknown here (Codex U on #3311).
+  ["card status 'inactive' (v1, not a v2 status)", shaped("inactive", { summary: {} })],
   ["card status a single space", shaped(" ", { summary: {} })],
   ["card status a value Stripe does not document", shaped("future_unknown", { summary: {} })],
   ["card status in other letter case", shaped("Active", { summary: {} })],
@@ -85,7 +88,6 @@ const HEALTHY: ReadonlyArray<readonly [string, string, { chargesEnabled: boolean
   ["active, minimum_deadline null (nothing due)", shaped("active", { summary: { minimum_deadline: null } }), { chargesEnabled: true, detailsSubmitted: true }],
   ["active, summary null (confirmed none)", shaped("active", { summary: null }), { chargesEnabled: true, detailsSubmitted: true }],
   ["active, requirements null (confirmed none)", shaped("active", null), { chargesEnabled: true, detailsSubmitted: true }],
-  ["inactive, nothing due", shaped("inactive", { summary: {} }), { chargesEnabled: false, detailsSubmitted: true }],
   ["unsupported, nothing due", shaped("unsupported", { summary: {} }), { chargesEnabled: false, detailsSubmitted: true }],
 ];
 

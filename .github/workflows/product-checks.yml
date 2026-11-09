@@ -227,6 +227,10 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_experiment_sale_redis.py
+      - name: Actual Redis community like checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_community_like_redis.py
 
   mobile-render:
     needs: documentation-scope

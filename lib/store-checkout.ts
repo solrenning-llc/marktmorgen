@@ -1150,6 +1150,7 @@ type SessionRecord = {
   id?: unknown;
   status?: unknown;
   payment_status?: unknown;
+  mode?: unknown;
   created?: unknown;
   amount_total?: unknown;
   currency?: unknown;
@@ -1178,7 +1179,9 @@ export async function listSales(store: Store): Promise<SaleList> {
     page = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}`,
+      // Only completed checkouts: this is one page, and a store's open and expired ones (a buyer who left the card form)
+      // would otherwise fill it and hide its recent orders (as lib/stats.ts, readPaidSales, asks).
+      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}&status=complete`,
     );
   } catch (error) {
     console.error("listing orders failed", error);
@@ -1201,6 +1204,9 @@ export async function listSales(store: Store): Promise<SaleList> {
     .filter(
       (row) =>
         isSettled(row) &&
+        // A checkout that only saved a card (setup mode, lib/card-update.ts) owes nothing and is no order, as the API reads
+        // it (lib/api-sales.ts, isSale).
+        row.mode !== "setup" && row.metadata?.kind !== "card" &&
         handles.has(row.metadata?.store ?? ""),
     )
     .map((row): Sale => {

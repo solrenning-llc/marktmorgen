@@ -136,7 +136,9 @@ export async function POST(request: NextRequest) {
         try {
           const done = await writePage(store, input, Date.now(), { run, onStep: (step, state) => send({ step, state }) });
           last = done.ok
-            ? { done: true, ok: true, value: done.value, left: done.left }
+            ? "returned" in done
+              ? { done: true, ok: true, value: done.value, left: done.left, returned: done.returned }
+              : { done: true, ok: true, value: done.value, left: done.left }
             : "returned" in done
               ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
               : { done: true, ok: false, error: done.reason };

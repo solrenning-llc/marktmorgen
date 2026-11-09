@@ -10,11 +10,18 @@
  *   - a page asked for with steps comes back as lines: a padding line big
  *     enough for browsers that hold small replies, each step as it starts
  *     and ends, then the result with what is left;
- *   - the same page asked for without steps still comes back as one answer.
+ *   - the same page asked for without steps still comes back as one answer;
+ *   - a stop whose mark is not confirmed kept says so (503 "unconfirmed");
+ *   - a page drafted from its PDF, stopped before it began: the reading runs
+ *     and says so, the writing step never starts, and the result line says
+ *     the stop and the one job given back, end to end through the route.
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
+import { PDFDocument } from "pdf-lib";
+import { addProduct, claimHandle, ensureStatsId, setProductFile, setSubscription, storeForEmail } from "@/lib/store";
+import { READ_PDF_JOBS } from "@/lib/ai-rules";
+import { aiLeft } from "@/lib/ai";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { POST } from "@/app/api/store/ai/route";
 import { store as redis } from "./redis-stub";
@@ -35,12 +42,27 @@ const DRAFT = {
   seoTitle: "Weeknight Recipe Pack",
   seoDescription: "Forty weeknight dinners.",
 };
+const FACTS = { parts: [{ title: "Week 1: Pantry basics", detail: "Ten dinners" }], format: "A printable PDF", for: "Busy parents" };
 let calls = 0;
-globalThis.fetch = (async (input: string | URL | Request) => {
-  if (new URL(String(input)).hostname !== "api.anthropic.com") return new Response("{}", { status: 404 });
+/** The product's PDF, as the synthetic file store hands it over. */
+let book: Uint8Array = new Uint8Array();
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const host = new URL(String(input)).hostname;
+  if (host.endsWith(".r2.cloudflarestorage.com")) return new Response(new Blob([book.slice()]), { status: 200, headers: { "content-length": String(book.length) } });
+  if (host !== "api.anthropic.com") return new Response("{}", { status: 404 });
   calls += 1;
-  return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(DRAFT) }] }));
+  // The reading is the call that carries the PDF; any other is the writing.
+  const text = String(init?.body ?? "").includes('"type":"document"') ? JSON.stringify(FACTS) : JSON.stringify(DRAFT);
+  return new Response(JSON.stringify({ content: [{ type: "text", text }] }));
 }) as typeof fetch;
+
+/** One reply that a check may swap for an unknown shape. */
+let unknownFor: ((command: (string | number)[]) => boolean) | null = null;
+const realPipeline = redis.pipeline.bind(redis);
+redis.pipeline = async (commands: (string | number)[][]) => {
+  const replies = await realPipeline(commands);
+  return commands.map((command, i) => (unknownFor?.(command) ? { unexpected: true } : replies[i]));
+};
 
 async function main(): Promise<void> {
   redis.clear();
@@ -94,6 +116,35 @@ async function main(): Promise<void> {
   calls = 0;
   is("refused before anything is asked", await json(await ask({ kind: "page", product: made.product.id, steps: true, run: "nope", notes: "" })), [400, { ok: false, error: "invalid" }]);
   is("no model call", calls, 0);
+
+  part("A stop whose mark is not confirmed kept");
+  unknownFor = (c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:");
+  is("says it could not be confirmed, never that it is taken", await json(await ask({ kind: "stop", run: "routerununsure01" })), [503, { ok: false, error: "unconfirmed" }]);
+  unknownFor = null;
+
+  part("A page from its PDF, stopped before it began, end to end");
+  // A synthetic file store: its address is answered by the stand-in above; nothing real is reached.
+  process.env.R2_ACCOUNT_ID = "0".repeat(32);
+  process.env.R2_ACCESS_KEY_ID = "synthetic-key-0000";
+  process.env.R2_SECRET_ACCESS_KEY = "synthetic-secret-".padEnd(40, "0");
+  process.env.R2_BUCKET = "synthetic-bucket";
+  const pdfDoc = await PDFDocument.create();
+  for (let i = 0; i < 3; i += 1) pdfDoc.addPage([300, 400]).drawText(`Page ${i + 1}`);
+  book = await pdfDoc.save();
+  const filed = await setProductFile(OWNER, made.product.id, { pathname: `vault/${"a".repeat(32)}/${made.product.id}/token0001/book.pdf`, name: "book.pdf", bytes: book.length, contentType: "application/pdf", addedAt: "2026-11-09" });
+  if (!filed.ok) throw new Error("no file");
+  const pdfRun = "routerunpdfstop1";
+  is("the stop is taken before the run", (await ask({ kind: "stop", run: pdfRun })).status, 200);
+  calls = 0;
+  const leftBefore = await aiLeft((await storeForEmail(OWNER))!);
+  const pdfStepped = await ask({ kind: "page", product: made.product.id, steps: true, run: pdfRun, readFile: true, notes: "" });
+  const pdfLines = (await pdfStepped.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+  is("the reading runs and says so; the writing step never starts", pdfLines.slice(1, -1), [
+    { step: "read", state: "started" },
+    { step: "read", state: "done" },
+  ]);
+  is("the result says the stop, the one job given back and what is left", pdfLines[pdfLines.length - 1], { done: true, ok: false, error: "stopped", returned: 1, left: leftBefore - READ_PDF_JOBS });
+  is("one model call: the reading", calls, 1);
 
   part("Without steps, one answer as before");
   calls = 0;

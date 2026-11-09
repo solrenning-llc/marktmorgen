@@ -47,7 +47,7 @@ import {
 import { type PageBlock, type SalesPage, emptyBlock, parsePage } from "@/lib/sales-page";
 import { MAX_TRANSLATE_PARTS, keepEveryBlock, pageWords, translateParts, withWords } from "@/lib/page-translate";
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
-import { AI_RUN_ID, AI_STOP_KEEP_SECONDS, type AiStepId, type AiStepState } from "@/lib/ai-steps";
+import { AI_RUN_ID, AI_STOP_KEEP_SECONDS, type AiGivenBack, type AiStepId, type AiStepState } from "@/lib/ai-steps";
 import { type DraftedQuestion, MAX_QUIZ_SOURCE, readDrafted, shuffleAnswers } from "@/lib/quiz-draft";
 import { type DraftedStep, readDraftedSteps } from "@/lib/sequence-draft";
 import { MAX_CHOICE_LENGTH, MAX_EXPLANATION_LENGTH, MAX_QUESTIONS, MAX_QUESTION_LENGTH } from "@/lib/quiz";
@@ -373,11 +373,15 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
 
 /**
  * A job told in named steps (lib/ai-steps.ts) that ended with a step that
- * never reached the model: "stopped" when the creator asked, "failed"
- * otherwise. `returned` is the jobs of those steps given back, and `left`
- * the month's after it; both null when the give-back could not be confirmed.
+ * never reached the model: "stopped" when the creator asked, "empty" when
+ * the product's PDF, read, gave nothing to write from, "failed" otherwise.
+ * `returned` is the jobs of those steps given back, and `left` the month's
+ * after it; both null when the give-back could not be confirmed.
  */
-export type AiStopped = { ok: false; reason: "stopped" | "failed"; returned: number | null; left: number | null };
+export type AiStopped = { ok: false; reason: AiGivenBack; returned: number | null; left: number | null };
+
+/** A job told in steps that still drafted while a step's jobs were given back: `returned` is those jobs, null when not confirmed. */
+export type AiDraftedGiven<T> = { ok: true; value: T; left: number; returned: number | null };
 
 /**
  * What a job told in steps leaves undone: the jobs of the steps whose call
@@ -385,9 +389,11 @@ export type AiStopped = { ok: false; reason: "stopped" | "failed"; returned: num
  * refused), and whether the creator asked for the stop (false when the
  * stop's mark could not be read, which starts no further step either).
  */
-type Unrun = { jobs: number; asked: boolean };
+type Unrun = { jobs: number; asked: boolean; empty?: boolean };
 
-async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped> {
+const givenReason = (unrun: Unrun): AiGivenBack => (unrun.asked ? "stopped" : unrun.empty ? "empty" : "failed");
+
+async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
   if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   if (!Number.isSafeInteger(jobs) || jobs <= 0) return { ok: false, reason: "notes" };
   const allowance = aiAllowance(store, now);
@@ -422,7 +428,7 @@ async function countedRun<T>(store: Store, now: number, run: () => Promise<T | n
     const after = back ? countOf(back[0]) : null;
     if (after === null) console.error("a writing job with no provider call could not be confirmed given back");
     if (!unrun) return { ok: false, reason: "failed" };
-    return settled(unrun.asked ? "stopped" : "failed", jobs, after);
+    return settled(givenReason(unrun), jobs, after);
   }
   // Provider work may cost money even when the response is unusable: a
   // started step stays counted. The jobs of steps whose call never reached
@@ -436,10 +442,12 @@ async function countedRun<T>(store: Store, now: number, run: () => Promise<T | n
     after = back ? countOf(back[0]) : null;
     if (after === null) console.error("the jobs of steps not run could not be confirmed given back");
   }
-  if (value === null) return give > 0 ? settled(unrun?.asked ? "stopped" : "failed", give, after) : { ok: false, reason: "failed" };
-  return { ok: true, value, left: Math.max(0, allowance - (give > 0 && after !== null ? after : count)) };
+  if (value === null) return give > 0 && unrun ? settled(givenReason(unrun), give, after) : { ok: false, reason: "failed" };
+  const left = Math.max(0, allowance - (give > 0 && after !== null ? after : count));
+  // A draft that came while a step's jobs were given back says how many, or that it could not be confirmed.
+  return give > 0 ? { ok: true, value, left, returned: after === null ? null : give } : { ok: true, value, left };
 
-  function settled(reason: "stopped" | "failed", returned: number, now: number | null): AiStopped {
+  function settled(reason: AiGivenBack, returned: number, now: number | null): AiStopped {
     return now === null ? { ok: false, reason, returned: null, left: null } : { ok: false, reason, returned, left: Math.max(0, allowance - now) };
   }
 }
@@ -1365,7 +1373,7 @@ export async function writePage(
   input: { title: string; price: string; kind: ProductKind | "free"; summary: string; about: string; notes: string; pdf?: Uint8Array | null },
   now = Date.now(),
   steps?: AiStepsRun,
-): Promise<AiResult<PageDraft> | AiStopped> {
+): Promise<AiResult<PageDraft> | AiStopped | AiDraftedGiven<PageDraft>> {
   // A run told in steps is named by the page; one that is not a run is refused before anything is taken.
   if (steps && !AI_RUN_ID.test(steps.run)) return { ok: false, reason: "off" };
   const notes = block(input.notes, MAX_AI_NOTES);
@@ -1395,16 +1403,21 @@ export async function writePage(
     };
     // What the product's own first pages hold, when the creator asked for them to be read.
     let fileFacts: string | null = null;
+    let read = false;
     if (pdf) {
       say("read", "started");
       const before = sent();
       fileFacts = await readPdfFacts(store, pdf);
-      if (reached(before)) say("read", "done");
+      read = reached(before);
+      if (read) say("read", "done");
       else unrun.jobs += READ_PDF_JOBS;
     }
-    // Nothing to write from: the writing step never starts, and its job is given back.
+    // Nothing to write from: the writing step never starts, and its job is
+    // given back. A run told in steps says the PDF, read, gave nothing, so
+    // the page can ask for a few words instead of a retry of the same.
     if (pdf && !fileFacts && !notes && !about && !summary) {
       unrun.jobs += 1;
+      unrun.empty = read && steps !== undefined;
       return null;
     }
     // Between the two steps, a stop asked for is honored: the page is not

@@ -711,8 +711,8 @@ export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStor
 /**
  * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
  * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts: the ZADD
- * that puts the order in pending and the EXPIRE that renews its record to thirty days, in one pipeline, each time a
- * capture is asked for. Inside that order's own work (line orders, ORDER_COMPUTE), besides settle's script; what the
+ * that puts the order in pending and the EXPIREAT that renews its record until thirty days from its opening, in one
+ * pipeline, each time a capture is asked for (none past those thirty days). Inside that order's own work (line orders, ORDER_COMPUTE), besides settle's script; what the
  * record keeps for those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:).
  */
 export const PAYPAL_CAPTURE_WATCH = { commandsPerCaptureAsked: 2 } as const;

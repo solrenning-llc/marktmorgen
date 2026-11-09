@@ -3,7 +3,7 @@
  * account, through PayPal's platform program (Multiparty), and nothing passes
  * through Marktmorgen.
  *
- *   nl:ppsell:o:<order>      an order opened: which store, which product, the price asked (3 days; 30 once its capture is asked for)
+ *   nl:ppsell:o:<order>      an order opened: which store, which product, the price asked (3 days; kept while pending, 30 from opening at most)
  *   nl:ppsell:paid:<order>   an order paid: the capture, the buyer's address (kept 400 days)
  *   nl:ppsell:watch:<stats>  paid orders inside PayPal's refund window, scored by when to ask next
  *   nl:ppsell:pending:<stats> orders whose payment PayPal holds as pending, or is being asked to take, until it completes or fails
@@ -595,37 +595,60 @@ function matches(opened: Opened, capture: CaptureRow, payee: unknown): boolean {
   );
 }
 
-/** How long an order whose capture was asked for is kept for the sweep to ask PayPal about. */
-const WATCHED_SECONDS = 30 * 86_400;
+/**
+ * How long an order whose capture was asked for may be kept for the sweep to ask PayPal about, counted from its
+ * opening, never from a later try (one rule for the record's ceiling, with the sweep's own; Claude 5).
+ */
+const ORDER_KEPT_FROM_OPENING_SECONDS = 30 * 86_400;
 
-/** Keeps an order PayPal has not settled for the sweep to ask about, for up to 30 days. */
-async function watchLater(order: string, opened: Opened): Promise<void> {
+/**
+ * When an order's record ends at the latest, in unix seconds: thirty days from its opening (`opened.at`, whole seconds,
+ * as openOrder writes it). A record without such a time is not known (rule 24): it throws, and PayPal is not asked.
+ */
+function keptUntil(opened: Opened): number {
+  if (!Number.isSafeInteger(opened.at) || opened.at <= 0) throw new UnknownReplyError("a PayPal order's opening time");
+  return opened.at + ORDER_KEPT_FROM_OPENING_SECONDS;
+}
+
+/**
+ * Keeps an order PayPal has not settled for the sweep to ask about, until thirty days from its opening. False, and
+ * nothing written, once that time has passed: the order is not kept past it (captureOrder answers as for a record
+ * that ended).
+ */
+async function watchLater(order: string, opened: Opened): Promise<boolean> {
+  const until = keptUntil(opened);
+  if (Math.floor(Date.now() / 1000) >= until) return false;
   await redisPipeline([
-    ["SET", orderKey(order), JSON.stringify(opened), "EX", WATCHED_SECONDS],
+    ["SET", orderKey(order), JSON.stringify(opened), "EXAT", String(until)],
     ["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order],
   ]);
+  return true;
 }
 
 /**
  * Puts an order in pending before PayPal is asked to take its payment (Claude 6's second money review of #3385,
  * MEDIUM, probe A): whatever happens after PayPal takes it (the step that writes it down not reaching Redis, its
  * answer lost), the sweep has the order to ask PayPal about and write down (watchPayPal), and settle's script takes it
- * off pending with the same step that writes it down. In the same step the order's record is renewed to thirty days,
- * as watchLater keeps it (Claude 3's first money review of #3404, LOW 1): the sweep reads the order by its record and
- * lets go of an entry whose record has ended, so a capture asked for late in the record's first three days keeps it
- * as long as the sweep may need it. Both answers read exactly (rule 24): the ZADD 0 or 1 and the EXPIRE 1 or 0;
- * anything else, or no answer, throws, and PayPal is not asked to take anything, so a buyer is never charged for an
- * order the sweep could not find. "gone" when the EXPIRE answers 0 (the record ended since it was read: PayPal is
- * not asked, and the sweep lets go of the entry), "added" when this call put it in pending (1), "there" when it was
- * there already (0: watched by an earlier try, whose outcome this one does not know). Two commands more an attempted
- * capture (Upstash: COMMAND in tests/plan-cost-registry.ts), inside the order's own work (ORDER_COMPUTE, line
- * "orders"); the record's thirty days are in tests/store-data-registry.ts (nl:ppsell:o:).
+ * off pending with the same step that writes it down. In the same step the order's record is renewed until thirty
+ * days from its opening, as watchLater keeps it (Claude 3's first money review of #3404, LOW 1; one rule for the
+ * ceiling, Claude 5): the sweep reads the order by its record and lets go of an entry whose record has ended, so a
+ * capture asked for late in the record's first three days keeps it as long as the sweep may need it, and never past
+ * thirty days from the opening. Past them, nothing is sent and the order is "gone". Both answers read exactly
+ * (rule 24): the ZADD 0 or 1 and the EXPIREAT 1 or 0; anything else, or no answer, throws, and PayPal is not asked to
+ * take anything, so a buyer is never charged for an order the sweep could not find. "gone" when the EXPIREAT answers 0
+ * (the record ended since it was read: PayPal is not asked, and the sweep lets go of the entry), "added" when this call
+ * put it in pending (1), "there" when it was there already (0: watched by an earlier try, whose outcome this one does
+ * not know). Two commands more an attempted capture (Upstash: COMMAND in tests/plan-cost-registry.ts), inside the
+ * order's own work (ORDER_COMPUTE, line "orders"); the record's thirty days are in tests/store-data-registry.ts
+ * (nl:ppsell:o:).
  */
 async function watchFirst(order: string, opened: Opened): Promise<"added" | "there" | "gone"> {
+  const until = keptUntil(opened);
+  if (Math.floor(Date.now() / 1000) >= until) return "gone";
   const replies = repliesFor(
     await redisPipeline([
       ["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order],
-      ["EXPIRE", orderKey(order), WATCHED_SECONDS],
+      ["EXPIREAT", orderKey(order), String(until)],
     ]),
     2,
   );
@@ -686,7 +709,7 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   const opened = await readOpened(order);
   if (!opened || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown,
-  // and its record ended since it was read is no order to take a payment for).
+  // and a record ended since it was read, or thirty days past its opening, is no order to take a payment for).
   const watched = await watchFirst(order, opened);
   if (watched === "gone") return { ok: false, reason: "unknown" };
   const watchedHere = watched === "added";
@@ -712,14 +735,14 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
       done = {};
     }
     if (!captureIn(done).capture) {
-      await watchLater(order, opened);
+      if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
       return { ok: false, reason: "error" };
     }
   }
   const { capture, payee, email } = captureIn(done);
   // Taken, but the answer does not say how: the buyer may have paid, so the sweep asks PayPal again (CX-123 rule 24).
   if (!capture) {
-    await watchLater(order, opened);
+    if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
     return { ok: false, reason: "pending" };
   }
   if (!matches(opened, capture, payee)) {
@@ -727,11 +750,11 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     return { ok: false, reason: "mismatch" };
   }
   if (!email || typeof capture.id !== "string") {
-    await watchLater(order, opened);
+    if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
     return { ok: false, reason: "error" };
   }
   if (capture.status === "PENDING") {
-    await watchLater(order, opened);
+    if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
     return { ok: false, reason: "pending" };
   }
   if (capture.status !== "COMPLETED") return { ok: false, reason: "declined" };

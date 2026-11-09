@@ -300,12 +300,24 @@ export async function readVersion(a: Pick<Agreement, "id" | "versions">, n: numb
 }
 
 /**
+ * A version's text that Redis answered as text, kept, but that does not read as its fingerprint says: damaged, not a
+ * reply of an unknown shape. Still an UnknownReplyError, so every page reads it as "can't be read right now"; the
+ * person's data copy alone tells it apart and names that version as unread (Claude 3 on #3467).
+ */
+export class VersionUnreadError extends UnknownReplyError {
+  constructor() {
+    super("reading an agreement's version");
+    this.name = "VersionUnreadError";
+  }
+}
+
+/**
  * Version n's text, read exactly (CX-123 rules 24 and 30), for the person's
  * data copy (lib/person-copy.ts): null when the version is not one the record
- * lists or is confirmed absent (GET null); a reply of any other shape, or a
- * kept text that does not read as its fingerprint says (Claude 5 on #3438),
- * throws UnknownReplyError, so a copy is never handed over with a version's
- * text silently missing.
+ * lists or is confirmed absent (GET null); a reply of any other shape throws
+ * UnknownReplyError, and a kept text that does not read as its fingerprint
+ * says (Claude 5 on #3438) throws VersionUnreadError, so a copy is never
+ * handed over with a version's text silently missing.
  */
 export async function readVersionExact(a: Pick<Agreement, "id" | "versions">, n: number): Promise<AgreementVersion | null> {
   const mark = a.versions.find((m) => m.n === n);
@@ -320,7 +332,7 @@ export async function readVersionExact(a: Pick<Agreement, "id" | "versions">, n:
   } catch {
     v = null;
   }
-  if (!v || v.n !== n || v.sha256 !== mark.sha256 || fingerprint(v.text) !== mark.sha256) throw new UnknownReplyError("reading an agreement's version");
+  if (!v || v.n !== n || v.sha256 !== mark.sha256 || fingerprint(v.text) !== mark.sha256) throw new VersionUnreadError();
   return v;
 }
 
@@ -571,7 +583,7 @@ export async function withdrawAgreement(store: Store, id: string, now = Date.now
  * Under the agreement's lock, as a withdraw does and as a person's erasure deletes (Claude 5 on #3438): the record is
  * read and its state decided under the lock, so a withdraw, a send written down, a signed copy noted or a new version
  * that read the record first finishes before it, and none can write it back after it. The lock taken by someone else
- * throws LockBusyError, nothing deleted (the studio says to try again).
+ * throws LockBusyError, nothing deleted (the studio answers "busy", try again in a moment, as a withdraw).
  */
 export async function deleteAgreement(store: Store, id: string, now = Date.now()): Promise<"deleted" | "open" | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
@@ -590,13 +602,16 @@ export async function deleteAgreement(store: Store, id: string, now = Date.now()
 
 /**
  * The record and every version's text deleted in one script only while the agreement's lock is still this delete's
- * own (deleteIfHeldOnly, as forgetAgreementsPerson); anything but a confirmed delete throws, with the store's list and
- * the person's set untouched, so the record is still found there (an Upstash pipeline is not atomic). Only then the
- * list and the set, each on its exact count, 0 or 1 (CX-123 rules 24 and 30, Claude 5 on #3268): any other reply throws
- * UnknownReplyError, so the studio never hears "deleted" on an unconfirmed removal.
+ * own (deleteIfHeldOnly, as forgetAgreementsPerson); anything but a confirmed delete throws UnknownReplyError, with the
+ * store's list and the person's set untouched (an Upstash pipeline is not atomic). The record may still be there (the
+ * lock was lost, or the script did not run) or already gone (only its reply was lost): a retry finds it, or answers
+ * gone, and the list entry left is pruned by listAgreements. Only then the list and the set, each on its exact count,
+ * 0 or 1 (CX-123 rules 24 and 30, Claude 5 on #3268): any other reply throws UnknownReplyError, so the studio never
+ * hears "deleted" on an unconfirmed removal.
  */
 async function forget(a: Agreement, held: Held): Promise<void> {
-  if (!(await deleteIfHeldOnly(held, agreementKeys(a.id)))) throw new LockBusyError("an agreement's lock was lost before its delete");
+  // UnknownReplyError, not LockBusyError: a lost reply is not someone signing, so the studio does not say so (#3467).
+  if (!(await deleteIfHeldOnly(held, agreementKeys(a.id)))) throw new UnknownReplyError("deleting an agreement's record");
   const replies = repliesFor(await redisPipeline([
     ["ZREM", storeKey(a.sid), a.id],
     ["SREM", personSet(a.sid, a.email), a.id],

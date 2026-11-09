@@ -53,7 +53,7 @@
  * that the address cannot be used to pour mail on a creator through us.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmailOutcome } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
 import { withinLimit } from "@/lib/request-guard";
 import { HANDLE_PATTERN, storeForHandle } from "@/lib/store";
@@ -236,8 +236,12 @@ async function files(id: string): Promise<{ sent: { filename: string; content: s
  *   "skipped"  there was nothing to send on: no such message, or one of ours
  *   "retry"    it could not be read or sent just now; the announcement should
  *              be answered with a failure, so Resend makes it again
+ *   "uncertain" it may have gone on (a timeout, a server error, a throw after
+ *              the request): acknowledged like "sent", never made again, so
+ *              the message is not sent on twice and no second email is taken
+ *              from the store's figure (rule 30, as 283 [HG2])
  */
-export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "retry"> {
+export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "retry" | "uncertain"> {
   const target = forwardTarget();
   if (!target || !ID.test(id)) return "skipped";
 
@@ -312,7 +316,7 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
   const site = writtenTo === platformDomain() || !/^[a-z0-9.-]{3,80}$/.test(writtenTo) ? "Marktmorgen" : writtenTo;
 
   // To a creator, one of their store's emails; to our own support, a company cost.
-  const ok = await sendEmail({ meter: store ? { by: "store", store, kind: "email" } : { by: "company" },
+  const outcome = await sendEmailOutcome({ meter: store ? { by: "store", store, kind: "email" } : { by: "company" },
     from: creator ? `"${shown} via ${creator.name}" <${creator.address}>` : `"${shown} via ${site}" <support@${platformDomain()}>`,
     to: creator ? creator.email : target,
     subject,
@@ -328,6 +332,10 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
     attachments: attached.sent,
     headers: { [FORWARD_HEADER]: "1" },
     idempotencyKey: `inbound-${id}`,
+  }).catch((error) => {
+    console.error("sending an inbound message on failed", error);
+    return "uncertain" as const;
   });
-  return ok ? "sent" : "retry";
+  if (outcome === "uncertain") console.error("an inbound message may have been sent on; acknowledged, not sent on again", id);
+  return outcome === "sent" ? "sent" : outcome === "uncertain" ? "uncertain" : "retry";
 }

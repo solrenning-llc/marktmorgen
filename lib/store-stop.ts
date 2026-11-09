@@ -78,8 +78,11 @@ export function stopCommand(set: string, store: StopOwner, off: boolean): string
  * Before the store lets go of `handle` (lib/store.ts releaseHandle): a stop
  * still under that address, in any of `sets`, moves to the store's id (or its
  * current address while it has no id), and the address's member is taken out.
- * One SISMEMBER a set, and two writes for each set it was in. An answer of any
- * other shape throws UnknownReplyError, so the caller lets nothing go on it.
+ * One SISMEMBER a set, then, for the sets it was in, the SADDs and, only once
+ * every one is confirmed, the SREMs: a pipeline is not atomic, and Redis may
+ * refuse a SADD (memory) and still run a SREM, which in one batch would leave
+ * the stop under neither member. An answer of any other shape throws
+ * UnknownReplyError, so the caller lets nothing go on it.
  */
 export async function carryStops(sets: readonly string[], store: StopOwner, handle: string): Promise<void> {
   if (!sets.length || handle === store.handle || !(store.previousHandles ?? []).includes(handle)) return;
@@ -87,8 +90,12 @@ export async function carryStops(sets: readonly string[], store: StopOwner, hand
   const flags = replies?.map(countOf);
   if (!flags || flags.some((flag) => flag !== 0 && flag !== 1)) throw new UnknownReplyError("a stop under an address about to be let go (SISMEMBER)");
   const sid = idOf(store);
-  const moves = sets.flatMap((set, i) => (flags[i] === 1 ? [["SADD", set, sid ? byId(sid) : store.handle], ["SREM", set, handle]] : []));
-  if (!moves.length) return;
-  const written = repliesFor(await redisPipeline(moves), moves.length);
-  if (!written || written.some((reply) => reply !== 0 && reply !== 1)) throw new UnknownReplyError("a stop carried to the store's id (SADD, SREM)");
+  const carried = sets.filter((_, i) => flags[i] === 1);
+  if (!carried.length) return;
+  const exact = async (commands: string[][], what: string) => {
+    const written = repliesFor(await redisPipeline(commands), commands.length);
+    if (!written || written.some((reply) => reply !== 0 && reply !== 1)) throw new UnknownReplyError(what);
+  };
+  await exact(carried.map((set) => ["SADD", set, sid ? byId(sid) : store.handle]), "a stop carried to the store's id (SADD)");
+  await exact(carried.map((set) => ["SREM", set, handle]), "a stop's old address taken out (SREM)");
 }

@@ -11,7 +11,10 @@
  *   A2: Resend answers 503, then Amazon is ready again: the next tries never go to Amazon;
  *   B:  Amazon's answer is lost, then no job runs for 25 hours: the late sweep sends nothing more;
  *   C:  Resend alone answers 503 for 26 hours of five-minute runs: one request, one body;
- *   D:  an order a concurrent run took off the list while its receipt was being tried is not put back.
+ *   D:  an order a concurrent run took off the list while its receipt was being tried is not put back;
+ *   E:  Amazon refuses it for the whole window: tried at most RECEIPT_TRIES_AT_MOST times, each try's Redis commands
+ *       at most the registry's (PAYPAL_HAND_OVER_RETRY in tests/plan-cost-registry.ts; the Resend side is held by
+ *       tests/paypal-handover-cost.test.ts).
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
@@ -21,6 +24,7 @@ import * as delivery from "@/lib/paypal-delivery";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { PAYPAL_HAND_OVER_RETRY } from "./plan-cost-registry";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
@@ -213,6 +217,40 @@ async function main(): Promise<void> {
   is("the order paid is the one watched", d, paidD);
   is("the receipt was tried once", resendTo(buyerD), 1);
   is("not put back on the list", (await listed()).includes(d), false);
+
+  part("E: Amazon refuses it for the whole window: bounded tries, each try's commands as the registry states");
+  startOfNextDay();
+  mail.configure();
+  await mail.setReady(true);
+  mail.setSesOutcome("refused");
+  const buyerE = "ses-refused@example.com";
+  const e = await pay(6, buyerE);
+  const paidKey = `nl:ppsell:paid:${e}`;
+  let mostATry = 0;
+  for (let run = 0; run < (26 * 3600) / 300; run += 1) {
+    ahead += 300_000;
+    const sent: (string | number)[][] = [];
+    const pipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands);
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await delivery.sweepPayPal(await fresh(), Date.now() + 10_000);
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    const from = sent.findIndex((c) => c[0] === "GET" && c[1] === paidKey);
+    if (from < 0) continue;
+    const to = sent.findLastIndex((c) => c[1] === handOverKey(statsId) && c[c.length - 1] === e);
+    mostATry = Math.max(mostATry, to - from + 1);
+  }
+  mail.setSesOutcome("ok");
+  console.log(`        tries: ${sesTo(buyerE)}, most commands a try: ${mostATry}`);
+  is("only Amazon was asked", resendTo(buyerE), 0);
+  is("tried more than once and at most RECEIPT_TRIES_AT_MOST times", sesTo(buyerE) > 1 && sesTo(buyerE) <= delivery.RECEIPT_TRIES_AT_MOST, true);
+  is("one try's Redis commands at most as the registry states", mostATry > 0 && mostATry <= Number((PAYPAL_HAND_OVER_RETRY as Record<string, number>).commandsPerReceiptTry), true);
+  is("then off the list", (await listed()).includes(e), false);
 
   done();
 }

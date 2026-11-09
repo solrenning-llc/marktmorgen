@@ -27,9 +27,9 @@ import { thanksWords } from "@/lib/buyer-words/thanks";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { givingWords } from "@/lib/buyer-words/giving";
 
-/** Every `sendEmail({ ... })` object in a file, braces balanced. */
+/** Every `sendEmail({ ... })` object in a file, braces balanced; `sendEmailPinned({ ... })` (lib/email.ts) is one too. */
 function sends(file: string): string[] {
-  const text = readFileSync(file, "utf8");
+  const text = readFileSync(file, "utf8").replaceAll("sendEmailPinned({", "sendEmail({");
   const out: string[] = [];
   let at = text.indexOf("sendEmail({");
   while (at >= 0) {

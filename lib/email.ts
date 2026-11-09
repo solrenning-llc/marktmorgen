@@ -26,6 +26,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
+import { repliesFor } from "@/lib/redis-reply";
 
 /**
  * What an email is counted against (added 17 October 2026), said by every
@@ -740,4 +741,77 @@ async function dispatchBatch(
     console.error("batch failed", error);
     return "retry";
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* One email its caller sends again under the same key                 */
+/* ------------------------------------------------------------------ */
+
+const pinKey = (key: string) => `nl:mail:pin:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+/** How long the sender a key's email went to is kept: a day, as long as SES's once-mark and Resend's own key. */
+export const PINNED_SENDER_SECONDS = 86_400;
+type Sender = "ses" | "resend";
+
+/**
+ * The sender kept for a key: `wanted` when none was (SET NX, read back by the same pipeline's GET), or the one kept
+ * before. Null when a reply is not exactly what those commands answer (CX-123 rule 24): no request is made then.
+ */
+async function keepSender(key: string, wanted: Sender): Promise<Sender | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["SET", pinKey(key), wanted, "NX", "EX", PINNED_SENDER_SECONDS], ["GET", pinKey(key)]]), 2);
+    if (!replies || (replies[0] !== "OK" && replies[0] !== null)) return null;
+    const kept = replies[1];
+    if (kept !== "ses" && kept !== "resend") return null;
+    return replies[0] === "OK" && kept !== wanted ? null : kept;
+  } catch {
+    return null;
+  }
+}
+
+/** The sender kept for a key, "none" when Redis answered that none is; null when the reply is not exact. */
+async function keptSender(key: string): Promise<Sender | "none" | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", pinKey(key)]]), 1);
+    const kept = replies ? replies[0] : undefined;
+    return kept === null ? "none" : kept === "ses" || kept === "resend" ? kept : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * sendEmail for an email its caller tries again under the same idempotencyKey until a sender takes it (a PayPal
+ * receipt, lib/paypal-delivery.ts). The sender is kept for the key (PINNED_SENDER_SECONDS) just before its first
+ * request, and every later try goes only to it, so an email whose answer was lost is never sent again by the other
+ * sender, which has never seen the key. A kept sender that is not ready now sends nothing, and neither does a
+ * refusal fall over to the other one: the caller tries again later. False without a key; without Redis it is
+ * sendEmail. Every other email goes through sendEmail, unchanged.
+ */
+export async function sendEmailPinned(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<boolean> {
+  const key = message.idempotencyKey;
+  if (typeof key !== "string" || !key.trim()) return false;
+  if (!isRedisConfigured()) return sendEmail(message, runtime);
+  const to = oneAddress(message.to);
+  if (!to) return false;
+  if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return false;
+  if (sesConfig() && (await sesReady())) {
+    const kept = await keepSender(key, "ses");
+    if (kept === "ses") {
+      if (!(await metered(message.meter, 1))) return false;
+      return (await viaAmazon(message, to, key)) === true;
+    }
+    if (kept !== "resend") return false;
+  } else {
+    // Kept as Amazon, which is not ready now, or not known: nothing goes to Resend.
+    const kept = await keptSender(key);
+    if (kept !== "resend" && kept !== "none") return false;
+  }
+  // Kept as Resend just before its request (the guard's last step before it), never in place of a kept Amazon.
+  const toResend = async () => (await keepSender(key, "resend")) === "resend";
+  if (isSesConfigured()) {
+    if (!(await metered(message.meter, 1))) return false;
+    return viaResend(message, key, runtime, { preflight: async () => true, beforePost: toResend });
+  }
+  const meter = lazyMeter(message.meter, 1);
+  return viaResend(message, key, runtime, { preflight: meter.preflight, beforePost: async () => (await meter.beforePost()) && (await toResend()) });
 }

@@ -50,7 +50,7 @@ import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
 import { saleOff, salePrice } from "@/lib/store-sale";
-import { sendEmail } from "@/lib/email";
+import { sendEmailPinned } from "@/lib/email";
 import { isPaidUp } from "@/lib/billing";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -675,7 +675,9 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
  * the link to the list of purchases. True only when the sender accepted the
  * receipt; false when it refused it, its answer is unknown or it threw, so
  * the caller keeps the order to send it again (lib/paypal-delivery.ts), under
- * the same idempotency key. Every other step is written once (HSETNX, SET NX).
+ * the same idempotency key, through the same sender (sendEmailPinned) and
+ * with the same words; false too when mayEmail said no, with no receipt sent.
+ * Every other step is written once (HSETNX, SET NX).
  */
 export async function deliverPayPal(input: {
   store: Store;
@@ -685,6 +687,8 @@ export async function deliverPayPal(input: {
   from: string;
   recordStart: (email: string, productId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
+  /** Asked just before the receipt, before its link: no sends no receipt this time (an unknown throws first). */
+  mayEmail?: () => Promise<boolean>;
 }): Promise<boolean> {
   const { store, paid, product, base } = input;
   if (!store.statsId) return false;
@@ -692,9 +696,10 @@ export async function deliverPayPal(input: {
   await grantImported(store.statsId, `paypal:${paid.order}`, [{ email: paid.email, productId: product.id, items }], paid.at, store.sid);
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
   for (const id of [product.id, ...(items ?? [])]) await input.recordStart(paid.email, id, paid.at);
-  const link = (await input.ordersLink(paid.email)) ?? `${base}/orders`;
+  const go = !input.mayEmail || (await input.mayEmail());
+  const link = go ? ((await input.ordersLink(paid.email)) ?? `${base}/orders`) : "";
   const g = givingWords(store.language);
-  const receipted = await sendEmail({ meter: { by: "order" },
+  const receipted = go && await sendEmailPinned({ meter: { by: "order" },
     from: input.from,
     to: paid.email,
     subject: g.ppSubject(product.title).slice(0, 200),

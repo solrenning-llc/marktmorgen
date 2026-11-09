@@ -6,7 +6,8 @@
  * credited, and the store's webhooks told: "sale.completed" with
  * `paid_with: "paypal"`, and "refund.issued" when PayPal refunds it in full.
  */
-import { ordersLinkFor } from "@/lib/buyer-orders";
+import { createHmac } from "node:crypto";
+import { ordersLinkWithToken } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { type Paid, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
@@ -16,6 +17,7 @@ import { fromStore, storeBase } from "@/lib/purchase-email";
 import type { Store } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
+import { deriveKey } from "@/lib/secret-box";
 
 /**
  * Paid PayPal orders still owed their hand-over (handOverKey in lib/paypal-sales.ts): settle puts each one there with
@@ -29,21 +31,66 @@ export const HAND_OVER_BATCH = 25;
 /** The score of an order to be tried at the next sweep: due now, behind those due before it. */
 const dueNow = () => String(Math.floor(Date.now() / 1000) - HAND_OVER_GRACE_SECONDS);
 /**
- * How long after the payment a receipt the sender did not accept is tried again (audit R48, finding 4): 22 hours. The
- * first try is made at the payment or after it, and both senders keep the receipt's idempotency key a day from it
- * (Resend's key; lib/email.ts viaAmazon's once-mark, SET NX EX 86400), so every try, the last one due at the window's
- * end (receiptDue) and reached by the five-minute job well inside the two hours left, falls under that key: a send
- * whose answer was lost is never sent a second time. Past it, the order leaves the list without its receipt, as before.
+ * How long after its first try a receipt the sender did not accept is tried again (audit R48, finding 4): 22 hours.
+ * Every key a try leaves is made at the first try or after it and kept a day (Resend's idempotency key; lib/email.ts
+ * viaAmazon's once-mark and the sender kept by sendEmailPinned, each EX 86400), and no try is sent once the window is
+ * over (checked before sending, receiptMayGo), so every try falls under those keys: a receipt whose answer was lost is
+ * never sent a second time. Past it, the order leaves the list without its receipt.
  */
 export const RECEIPT_RETRY_SECONDS = 22 * 3600;
 /**
- * When such a receipt is due again: after a wait as long as the payment is old, at least one five-minute run and at
- * most four hours, and never after the window's end. A refusal that lasts is tried about a dozen times in the window,
- * never every run (each try runs the hand-over again, whose writes find themselves already there, and makes one
- * purchases link, kept a day).
+ * How long the time of a receipt's first try is kept (receiptTryKey): a week. No receipt is sent once the payment is
+ * that old, so a mark that may have expired is never read as "not tried yet".
  */
-function receiptDue(paidAt: number, now: number): number {
-  return Math.min(now + Math.min(Math.max(now - paidAt, 300), 4 * 3600), paidAt + RECEIPT_RETRY_SECONDS);
+export const RECEIPT_MARK_SECONDS = 7 * 86_400;
+const receiptTryKey = (order: string) => `nl:ppsell:receipt:${order}`;
+/**
+ * When such a receipt is due again: after a wait as long as its first try is old, at least one five-minute run and at
+ * most four hours, and never after the window's end. A refusal that lasts is tried at most RECEIPT_TRIES_AT_MOST
+ * times in the window, never every run (each try runs the hand-over again, whose writes find themselves already there).
+ */
+function receiptDue(firstAt: number, now: number): number {
+  return Math.min(now + Math.min(Math.max(now - firstAt, 300), 4 * 3600), firstAt + RECEIPT_RETRY_SECONDS);
+}
+/** The most tries receiptDue allows in the window, the first one included (PAYPAL_HAND_OVER_RETRY in tests/plan-cost-registry.ts). */
+export const RECEIPT_TRIES_AT_MOST = (() => {
+  let tries = 0;
+  for (let at = 0; at < RECEIPT_RETRY_SECONDS; at = receiptDue(0, at)) tries += 1;
+  return tries;
+})();
+
+/**
+ * Whether a receipt may be sent now, before anything of it is: the time of its first try, kept on its first ask (SET NX,
+ * read back by the same pipeline's GET), and no for a try at or past RECEIPT_RETRY_SECONDS after it, or for a payment
+ * RECEIPT_MARK_SECONDS old. Throws UnknownReplyError when a reply is not exactly what those commands answer (CX-123
+ * rule 24): nothing is sent, and the order stays on the list.
+ */
+async function receiptMayGo(paid: Paid, now: number): Promise<{ go: boolean; firstAt: number }> {
+  if (now >= paid.at + RECEIPT_MARK_SECONDS) return { go: false, firstAt: paid.at };
+  const key = receiptTryKey(paid.order);
+  const replies = repliesFor(await redisPipeline([["SET", key, String(now), "NX", "EX", RECEIPT_MARK_SECONDS], ["GET", key]]), 2);
+  const kept = replies?.[1];
+  if (!replies || (replies[0] !== "OK" && replies[0] !== null) || typeof kept !== "string" || !/^[0-9]{1,12}$/.test(kept)) {
+    throw new UnknownReplyError("a PayPal receipt's first try");
+  }
+  const firstAt = Number(kept);
+  if (replies[0] === "OK" && firstAt !== now) throw new UnknownReplyError("a PayPal receipt's first try");
+  return { go: now < firstAt + RECEIPT_RETRY_SECONDS, firstAt };
+}
+
+/**
+ * The purchases link of an order's receipt, the same on every try so the receipt is the same email each time: its
+ * token made from the order with a key derived for it from the deployment's root secret (lib/secret-box.ts), kept
+ * nowhere, its grant written again each try. Null (the generic orders link, the same each time too) without that
+ * secret or Redis. Throws UnknownReplyError when the grant's write is not confirmed, so nothing is sent with it.
+ */
+async function receiptLink(store: Store, email: string, base: string, order: string): Promise<string | null> {
+  const secret = deriveKey("paypal-receipt-link");
+  if (!secret || !isRedisConfigured()) return null;
+  const token = createHmac("sha256", secret).update(`nimbus-paypal-receipt:${order}`).digest("hex");
+  const link = await ordersLinkWithToken(store, email, base, token);
+  if (!link) throw new UnknownReplyError("a PayPal receipt's purchases link");
+  return link;
 }
 
 /** Takes a handed-over order out of the list. Not known whether it left: it stays, and the next try finds it handed over. */
@@ -56,8 +103,10 @@ async function handedOver(statsId: string, order: string): Promise<void> {
  * its record is not there). Everything it hands over is read first, a bundle's products too; a read that is
  * unknown throws before anything is handed over, and the order is kept for the sweep to hand over, never taken
  * for a product that is gone. Handed over but its receipt not accepted by the sender (refused, unknown or thrown):
- * the order stays on the list, due again at receiptDue, until RECEIPT_RETRY_SECONDS after the payment; the
- * hand-over runs again then, and every step but the receipt finds itself already written (HSETNX, SET NX).
+ * the order stays on the list, due again at receiptDue, until RECEIPT_RETRY_SECONDS after its first try; the
+ * hand-over runs again then, and every step but the receipt finds itself already written (HSETNX, SET NX). The
+ * receipt is the same email each try (receiptLink), goes only through the sender of its first request
+ * (sendEmailPinned) and is never sent once its window is over (receiptMayGo).
  */
 export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean> {
   return (await handOver(store, paid)) !== "gone";
@@ -71,9 +120,9 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     product = await readListing(store, paid.product);
     bundled = new Map(product?.bundle?.length ? (await readListings(store, product.bundle)).map((listing) => [listing.id, listing]) : []);
   } catch (error) {
-    // Already in the list since it was written down (settle): this only makes it due at the next sweep, and the
-    // read's own error is the one thrown, whatever this answers.
-    if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), dueNow(), paid.order]]).catch(() => undefined);
+    // Already in the list since it was written down (settle): this only makes it due at the next sweep (XX: one a
+    // concurrent run took out is not put back), and the read's own error is the one thrown, whatever this answers.
+    if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), "XX", dueNow(), paid.order]]).catch(() => undefined);
     throw error;
   }
   if (!product) {
@@ -82,6 +131,8 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     return "gone";
   }
   const base = storeBase(store);
+  // What receiptMayGo answered, when the receipt was asked about (not when the hand-over stopped before it).
+  const asked: { window: { go: boolean; firstAt: number } | null } = { window: null };
   const receipted = await deliverPayPal({
     store,
     paid,
@@ -92,7 +143,12 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
       const course = productId === product.id ? product : bundled.get(productId);
       if (course?.course) await recordEnrollment(store, email, productId, start);
     },
-    ordersLink: (email) => ordersLinkFor(store, email, base),
+    ordersLink: (email) => receiptLink(store, email, base, paid.order),
+    mayEmail: async () => {
+      if (!isRedisConfigured()) return true;
+      asked.window = await receiptMayGo(paid, Math.floor(Date.now() / 1000));
+      return asked.window.go;
+    },
   });
   await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
   await emitEvent(store, "sale.completed", `paypal:${paid.order}`, {
@@ -110,15 +166,17 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     paid_at: new Date(paid.at * 1000).toISOString(),
   }, paid.at * 1000).catch((error) => console.error("telling the webhooks of a PayPal sale failed", error));
   if (!store.statsId) return "handed";
-  if (receipted || Math.floor(Date.now() / 1000) >= paid.at + RECEIPT_RETRY_SECONDS) {
+  const window = asked.window;
+  if (receipted || !window?.go) {
     if (!receipted) console.error("a PayPal purchase's receipt was not accepted within its retry window; no longer tried", store.handle, paid.order);
     await handedOver(store.statsId, paid.order);
   } else {
     // Still in the list since settle wrote it: this only sets when it is due again (receiptDue; the list's score is
-    // the due time less the grace handOverAgain waits). A ZADD that fails leaves it due as it was.
+    // the due time less the grace handOverAgain waits). XX: one a concurrent run took out is not put back. A ZADD that
+    // fails leaves it due as it was; its next try is still held to the window (receiptMayGo).
     console.error("a PayPal purchase's receipt was not accepted; tried again later", store.handle, paid.order);
-    const due = receiptDue(paid.at, Math.floor(Date.now() / 1000)) - HAND_OVER_GRACE_SECONDS;
-    await redisPipeline([["ZADD", handOverKey(store.statsId), String(due), paid.order]]).catch(() => undefined);
+    const due = receiptDue(window.firstAt, Math.floor(Date.now() / 1000)) - HAND_OVER_GRACE_SECONDS;
+    await redisPipeline([["ZADD", handOverKey(store.statsId), "XX", String(due), paid.order]]).catch(() => undefined);
     return "receipt owed";
   }
   return "handed";
@@ -161,9 +219,10 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
       // not accepted: kept and tried again later, inside RECEIPT_RETRY_SECONDS, and not counted as handed over yet.
       if ((await handOver(store, paid)) === "handed") handed += 1;
     } catch (error) {
-      // Still unknown: kept, moved behind the others, tried at the next sweep.
+      // Still unknown: kept, moved behind the others, tried at the next sweep (XX: one a concurrent run took out is not
+      // put back). A receipt is still sent only inside its window (receiptMayGo), whenever it is tried.
       console.error("handing over a PayPal purchase again failed; tried again at the next sweep", store.handle, order, error);
-      await redisPipeline([["ZADD", key, dueNow(), order]]).catch(() => undefined);
+      await redisPipeline([["ZADD", key, "XX", dueNow(), order]]).catch(() => undefined);
     }
   }
   return handed;

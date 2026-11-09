@@ -6,11 +6,13 @@
  * (consentEmailLines), so a receipt the sender did not take must not be dropped:
  *
  *   - healthy: one receipt, and the order leaves the hand-over list at once (unchanged);
- *   - the sender answers 503 on the return: the order stays on the list, and the next sweep with the service back
- *     sends the receipt once, under the same idempotency key, and then the order leaves the list;
- *   - the sender's answer is unknown (the request throws): the same;
+ *   - the sender refuses it (422) on the return: the order stays on the list, and the next sweep with the service
+ *     back sends the receipt once, under the same idempotency key, and then the order leaves the list;
+ *   - the sender's answer is unknown (the request throws): it may have been taken, so the same email under the same
+ *     key is never sent again (money review of #3387; tests/paypal-receipt-once.test.ts has the other senders' side),
+ *     and the order leaves the list at its window's end;
  *   - sent once, never twice: more sweeps send nothing more, the buyer's grant is written once;
- *   - bounded: past RECEIPT_RETRY_SECONDS (22 hours) after the payment, inside the providers' one-day idempotency window, an
+ *   - bounded: past RECEIPT_RETRY_SECONDS (22 hours) after its first try, inside the providers' one-day idempotency window, an
  *     order whose receipt is still refused leaves the list, so it is never retried forever nor sent twice.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -31,7 +33,7 @@ const BUYER = "buyer@example.com";
 const orders = new Map<string, Record<string, unknown>>();
 let made = 0;
 const orderId = (n: number) => `5O190127TN36471${String(n).padStart(2, "0")}`;
-let mail: "up" | "503" | "throws" = "up";
+let mail: "up" | "422" | "503" | "throws" = "up";
 const receipts: { to: string[]; text: string; key: string | null }[] = [];
 /** Every POST to the sender, accepted or not, by idempotency key. */
 const tries: string[] = [];
@@ -55,6 +57,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.resend.com") {
     if (url.pathname === "/emails") tries.push(idempotencyKeyOf(init) ?? "");
+    if (mail === "422") return json({ name: "validation_error", message: "synthetic refusal" }, 422);
     if (mail === "503") return json({ name: "service_unavailable", message: "synthetic outage" }, 503);
     if (mail === "throws") throw new TypeError("synthetic: fetch failed");
     receipts.push({ ...JSON.parse(String(init?.body)), key: idempotencyKeyOf(init) });
@@ -129,8 +132,8 @@ async function main(): Promise<void> {
   await sweep();
   is("a later sweep sends nothing more", toBuyer(first).length, 1);
 
-  part("The sender answers 503 on the return: kept, then sent once at the next sweep");
-  mail = "503";
+  part("The sender refuses it (422) on the return: kept, then sent once at the next sweep");
+  mail = "422";
   const second = await pay(2);
   mail = "up";
   is("paid and granted on the return", [Boolean(await readPaid(second)), (await importedFor(await fresh(), BUYER)).length >= 1], [true, true]);
@@ -143,7 +146,7 @@ async function main(): Promise<void> {
   await sweep();
   is("never sent twice", toBuyer(second).length, 1);
 
-  part("The sender's answer is unknown (the request throws): kept, then sent once");
+  part("The sender's answer is unknown (the request throws): kept, and the same email is never sent again");
   mail = "throws";
   const third = await pay(3);
   is("no receipt accepted", toBuyer(third).length, 0);
@@ -152,11 +155,11 @@ async function main(): Promise<void> {
   is("still unknown at the first sweep: still kept", (await listed()).includes(third), true);
   is("and not counted as handed over by that sweep", stillOwed, 0);
   mail = "up";
-  is("counted once, by the sweep that sends it", await sweep(), 1);
-  is("sent once with the service back", toBuyer(third).length, 1);
-  is("and taken off the list", (await listed()).includes(third), false);
   await sweep();
-  is("never twice", toBuyer(third).length, 1);
+  is("with the service back, no second request under its key: the first may have been taken", tries.filter((key) => key === `nimbus-paypal:${third}`).length, 1);
+  await sweep(22);
+  is("past its window it leaves the list", (await listed()).includes(third), false);
+  is("never a second request", tries.filter((key) => key === `nimbus-paypal:${third}`).length, 1);
   is("the buyer's grant is written once for the product", (await importedFor(await fresh(), BUYER)).filter((p) => p.productId === product.id).length, 1);
 
   // Read through the module so the file runs before the window exists (RED); 22 hours is what it must be.
@@ -175,7 +178,7 @@ async function main(): Promise<void> {
   is("nothing is sent for it afterward", toBuyer(fourth).length, 0);
 
   part("Paced: a refusal that lasts the whole window is tried about a dozen times, not every five-minute run");
-  mail = "503";
+  mail = "422";
   const fifth = await pay(5);
   const fifthPaidAt = (await readPaid(fifth))!.at;
   let lastTry = 0;

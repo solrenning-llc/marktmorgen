@@ -32,6 +32,12 @@
  * MAX_STEPS steps and the whole file at most ICS_MAX_WORK units. A file that
  * needs more is refused whole (CalendarTooComplex), never read in part: a
  * reading cut short would show times as free that the calendar holds busy.
+ *
+ * The busy stretches kept are capped too (maxIntervals, 2,000), and that cut is
+ * by time, never by the order of the file: every stretch before a cutoff is
+ * kept exactly, and everything from the cutoff to the end of the window is
+ * returned as one busy stretch, so no time whose busy state was not kept is
+ * ever offered for booking.
  */
 import { isTimeZone, partsIn } from "@/lib/call-setup";
 
@@ -44,7 +50,12 @@ export type ParsedCalendar = {
   events: number;
   /** Repeating events whose rule is beyond what is read here. */
   unsupported: number;
-  /** True when there were more busy stretches than are kept. */
+  /**
+   * True when there were more busy stretches (after merging) than are kept:
+   * the earliest are kept exactly, and the last stretch then runs from the
+   * first one left out to the end of the window (or past it), so a time whose
+   * busy state was not kept reads as busy, never as free.
+   */
   truncated: boolean;
   /** The calendar's own zone, when it names one. */
   zone: string | null;
@@ -578,16 +589,13 @@ export function parseIcs(
     replaced.set(e.uid, entry);
   }
 
+  // Every stretch is kept until the end, then cut by time (keptByTime): how
+  // many there can be is bounded by the work budget, one unit at least each.
   const busy: Interval[] = [];
-  let truncated = false;
   let unsupported = 0;
   let counted = 0;
   const add = (start: number, end: number) => {
     if (end <= options.from || start >= options.to || end <= start) return;
-    if (busy.length >= maxIntervals) {
-      truncated = true;
-      return;
-    }
     busy.push({ start, end });
   };
 
@@ -800,7 +808,24 @@ export function parseIcs(
     }
   }
 
-  return { busy: mergeIntervals(busy), events: counted, unsupported, truncated, zone: calendarZone, work };
+  const kept = keptByTime(mergeIntervals(busy), maxIntervals, options.to);
+  return { busy: kept.busy, events: counted, unsupported, truncated: kept.truncated, zone: calendarZone, work };
+}
+
+/**
+ * At most `max` stretches of a merged list, cut by time: the earliest
+ * `max - 1` exactly, then one from the start of the first left out to the end
+ * of the window (or the latest end left out, when later). Every time from the
+ * cutoff on reads busy, so a slot whose busy state was not kept is never
+ * offered; a list within `max` is returned as it is.
+ */
+function keptByTime(merged: Interval[], max: number, to: number): { busy: Interval[]; truncated: boolean } {
+  const cap = Math.max(1, Math.floor(max) || 1);
+  if (merged.length <= cap) return { busy: merged, truncated: false };
+  const cutoff = merged[cap - 1].start;
+  let end = to;
+  for (let i = cap - 1; i < merged.length; i += 1) end = Math.max(end, merged[i].end);
+  return { busy: [...merged.slice(0, cap - 1), { start: cutoff, end }], truncated: true };
 }
 
 /** Joins stretches that overlap or touch, soonest first. */

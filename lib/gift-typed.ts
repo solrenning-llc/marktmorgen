@@ -1,0 +1,75 @@
+/**
+ * What a buyer typed into a product page's gift form, kept in their own
+ * browser tab while the server checks it, so a refusal never makes them type
+ * it again (WCAG 3.3.7; audit 21, MEDIUM D). The form posts to
+ * app/api/store/checkout/route.ts, which either opens Stripe's page or sends
+ * the buyer back with `?gift=<reason>#gift`; the page is then drawn anew, so
+ * without this every field came back empty.
+ *
+ * Kept in the tab's sessionStorage only (gone when the tab closes), under one
+ * key per store and product, at most GIFT_TYPED_KEEP_MS, removed as soon as it
+ * is read back and whenever the page opens with no refusal to answer. Never
+ * sent to us. Privacy policy: #gift-typed. Browser-safe; no storage here, only
+ * the rules (components/gift-typed-keeper.tsx reads and writes).
+ */
+
+/** The gift form's own fields, in the order they are on the form. */
+export const GIFT_TYPED_FIELDS = ["option", "gift_to", "gift_from", "gift_message"] as const;
+export type GiftTypedField = (typeof GIFT_TYPED_FIELDS)[number];
+export type GiftTyped = Record<GiftTypedField, string>;
+
+/** At most what each field itself takes (components/store-product.tsx, EmailField's 254). */
+const CAPS: Record<GiftTypedField, number> = { option: 64, gift_to: 254, gift_from: 60, gift_message: 500 };
+
+/** Long enough to read the reason and fix one field; short enough not to linger in a shared tab. */
+export const GIFT_TYPED_KEEP_MS = 30 * 60_000;
+
+export const GIFT_TYPED_PREFIX = "mm:gift-typed:";
+
+export function giftTypedKey(handle: string, productId: string): string {
+  return `${GIFT_TYPED_PREFIX}${handle}:${productId}`;
+}
+
+/**
+ * The field a reason from the server belongs to, which is marked invalid and
+ * takes the focus; null when no field can fix it (the reason itself takes the
+ * focus) or, for "consent", when the consent box marks and focuses itself
+ * (components/digital-consent-box.tsx).
+ */
+export function giftProblemField(problem: string): GiftTypedField | null {
+  if (problem === "email") return "gift_to";
+  if (problem === "option") return "option";
+  return null;
+}
+
+/** The four fields only, each a string capped at what the form takes, with the time it was kept. */
+export function packGiftTyped(values: Partial<Record<string, unknown>>, now: number): string {
+  const v = {} as GiftTyped;
+  for (const field of GIFT_TYPED_FIELDS) {
+    const value = values[field];
+    v[field] = typeof value === "string" ? value.slice(0, CAPS[field]) : "";
+  }
+  return JSON.stringify({ at: now, v });
+}
+
+/** What was kept, or null when there is nothing, it is not ours, it is from the future or it is too old. */
+export function unpackGiftTyped(raw: string | null, now: number): GiftTyped | null {
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const { at, v } = parsed as { at?: unknown; v?: unknown };
+  if (typeof at !== "number" || !Number.isFinite(at) || at > now || now - at > GIFT_TYPED_KEEP_MS) return null;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const out = {} as GiftTyped;
+  for (const field of GIFT_TYPED_FIELDS) {
+    const value = (v as Record<string, unknown>)[field];
+    if (value !== undefined && typeof value !== "string") return null;
+    out[field] = (value ?? "").slice(0, CAPS[field]);
+  }
+  return out;
+}

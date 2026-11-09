@@ -1394,6 +1394,7 @@
     "components/funnel-sharing-review.tsx",
     "components/funnel-starter-gallery.tsx",
     "components/funnel-type-picker.tsx",
+    "components/gift-typed-keeper.tsx",
     "components/google-searches.tsx",
     "components/google-signin.tsx",
     "components/group-link-box.tsx",

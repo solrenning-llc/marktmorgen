@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   const email = draw(listing, "email");
   const emailInput = tagWithId(email, toId);
   is("the reason is drawn under its own id", tagWithId(email, errorId) !== "", true);
-  is("the reason's words say what to fix", email.includes(words.email), true);
+  is("the reason's words say what to fix", email.includes(words.email.replace(/'/g, "&#x27;")), true);
   is("the recipient's field says it is invalid", attr(emailInput, "aria-invalid"), "true");
   is("and points to the reason", (attr(emailInput, "aria-describedby") ?? "").split(" ").includes(errorId), true);
   const ok = draw(listing, "");

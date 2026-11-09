@@ -201,7 +201,9 @@ export async function POST(request: NextRequest) {
   let gift: string | undefined;
   if (giftTo.trim() && !preorder) {
     const started = await startGift(store, product, { to: giftTo, from: giftFrom, message: giftMessage }, optionId).catch(() => null);
-    if (!started) return away(`/@${store.handle}?status=error`);
+    // Either way back to the gift form, where the reason is tied to its field and what was typed is put back
+    // (GiftTypedKeeper, 3.3.7): a gift that could not be written down reads as gifts being unavailable.
+    if (!started) return away(`/@${store.handle}/p/${product.id}?gift=unavailable#gift`);
     if (!started.ok) return away(`/@${store.handle}/p/${product.id}?gift=${started.reason}#gift`);
     gift = started.gift.id;
   }

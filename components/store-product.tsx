@@ -1,4 +1,6 @@
 import { EmailField } from "@/components/email-field";
+import { GiftTypedKeeper } from "@/components/gift-typed-keeper";
+import { giftProblemField } from "@/lib/gift-typed";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
 import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
@@ -279,14 +281,14 @@ export function PackageOffer({ store, product }: { store: Store; product: Listin
  * a product sold at one price. The price charged is read on the server from
  * the option's id, never from this list.
  */
-function GivenOptionPicker({ store, product, each = false }: { store: Store; product: Listing; each?: boolean }) {
+function GivenOptionPicker({ store, product, each = false, id, invalid = false, describedBy }: { store: Store; product: Listing; each?: boolean; id?: string; invalid?: boolean; describedBy?: string }) {
   const options = optionsInPickOrder(givableOptions(product));
   if (options.length === 0) return null;
   const { w, money } = speech(store);
   return (
     <label className="block">
       <span className="st-label">{w.whichOne}</span>
-      <select className="st-field mt-2" name="option" required defaultValue="">
+      <select id={id} className="st-field mt-2" name="option" required defaultValue="" aria-invalid={invalid || undefined} aria-describedby={invalid ? describedBy : undefined}>
         <option value="" disabled>
           {w.chooseOne}
         </option>
@@ -308,6 +310,13 @@ function GivenOptionPicker({ store, product, each = false }: { store: Store; pro
 export function GiftBox({ store, product, problem = "", consentAgain = false }: { store: Store; product: Listing; problem?: string; consentAgain?: boolean }) {
   const { w, money } = speech(store);
   const problems = w.giftProblems;
+  // The server's reason, tied to the field it is about (3.3.1, 4.1.2): that field is marked invalid and points to
+  // the words, which say what to fix. A reason no field can fix takes the focus itself (GiftTypedKeeper).
+  const reason = problem && problems[problem] ? problems[problem] : "";
+  const reasonId = `gift-error-${product.id}`;
+  const toId = `gift-to-${product.id}`;
+  const optionId = `gift-option-${product.id}`;
+  const wrong = reason ? giftProblemField(problem) : null;
   return (
     <details id="gift" className="mt-4 scroll-mt-24 rounded-2xl px-4 py-3" style={{ border: "1px solid var(--st-line)" }} open={Boolean(problem)}>
       <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold" style={{ color: "var(--st-text)" }}>
@@ -316,13 +325,14 @@ export function GiftBox({ store, product, problem = "", consentAgain = false }: 
       <form action="/api/store/checkout" method="post" target="_top" className="mt-2 space-y-3 pb-1" data-checkout="">
         <input type="hidden" name="handle" value={store.handle} />
         <input type="hidden" name="product" value={product.id} />
-        {problem && problems[problem] ? (
-          <p className="st-note text-sm" role="alert">{problems[problem]}</p>
+        {reason ? (
+          <p id={reasonId} className="st-note text-sm" role="alert" tabIndex={-1}>{reason}</p>
         ) : null}
-        <GivenOptionPicker store={store} product={product} />
+        <GiftTypedKeeper handle={store.handle} productId={product.id} problem={problem} focusId={wrong === "gift_to" ? toId : wrong === "option" ? optionId : undefined} reasonId={reason ? reasonId : undefined} />
+        <GivenOptionPicker store={store} product={product} id={optionId} invalid={wrong === "option"} describedBy={reasonId} />
         <div>
-          <label htmlFor={`gift-to-${product.id}`} className="st-label">{w.theirEmail}</label>
-          <EmailField id={`gift-to-${product.id}`} name="gift_to" className="st-field mt-2" required autoComplete="off" placeholder={w.friendPlaceholder} language={store.language} />
+          <label htmlFor={toId} className="st-label">{w.theirEmail}</label>
+          <EmailField id={toId} name="gift_to" className="st-field mt-2" required autoComplete="off" placeholder={w.friendPlaceholder} language={store.language} invalid={wrong === "gift_to"} describedBy={wrong === "gift_to" ? reasonId : undefined} />
         </div>
         <label className="block">
           <span className="st-label">{w.yourNameShown}</span>

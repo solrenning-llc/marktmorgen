@@ -34,6 +34,7 @@ export function EmailField({
   placeholder,
   autoComplete = "email",
   describedBy,
+  invalid = false,
   defaultValue = "",
   store = true,
   maxLength = 254,
@@ -47,6 +48,8 @@ export function EmailField({
   placeholder?: string;
   autoComplete?: string;
   describedBy?: string;
+  /** Marked invalid as drawn, for a value the server refused (the form's own script unmarks it once changed). */
+  invalid?: boolean;
   defaultValue?: string;
   /** The store's own look (st-*) rather than the site's. */
   store?: boolean;
@@ -107,6 +110,7 @@ export function EmailField({
           setLeft(true);
         }}
         onInvalid={() => setLeft(true)}
+        aria-invalid={invalid || undefined}
         aria-describedby={[describedBy ?? "", left && suggestEmail(value) !== null ? line : ""].filter(Boolean).join(" ") || undefined}
         className={className}
       />

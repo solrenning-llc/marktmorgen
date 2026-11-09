@@ -13,6 +13,7 @@ const MESSAGES: Record<string, string> = {
   expired: "That took longer than ten minutes. Start again.",
   already: "Two-step login is already on. Reload the page.",
   limited: "That is a lot of codes in an hour. Try again later.",
+  stopped: "Too many wrong codes were typed, so your app's codes are off for now. Use one of your recovery codes instead. Logging in with a recovery code or a passkey turns your app's codes back on.",
   unreadable: "Your app's codes cannot be checked right now, after a security change on our side. Use a recovery code.",
   reauth: "Turning this on needs a login from the last 15 minutes. Log in again, then come back here.",
   busy: "Your account is being changed by another request right now. Try again in a moment.",

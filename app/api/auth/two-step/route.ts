@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "off") {
       const done = await turnOff(email, code);
-      if (done !== "app" && done !== "recovery") return refuse(done, done === "limited" ? 429 : 400);
+      if (done !== "app" && done !== "recovery") return refuse(done, done === "limited" || done === "stopped" ? 429 : 400);
       // What the app opened goes with it: other sessions it opened are logged out, this one loses its mark (lib/auth.ts).
       // The app is off either way; sessions that could not be read are said as not logged out (audit SG2, finding 6).
       const loggedOut = await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery", session).then(
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "codes") {
       const done = await replaceCodes(email, code);
-      return typeof done === "object" ? Response.json({ ok: true, codes: done.codes }, { headers: { "Cache-Control": "no-store" } }) : refuse(done, done === "limited" ? 429 : 400);
+      return typeof done === "object" ? Response.json({ ok: true, codes: done.codes }, { headers: { "Cache-Control": "no-store" } }) : refuse(done, done === "limited" || done === "stopped" ? 429 : 400);
     }
     return refuse("invalid");
   } catch (error) {

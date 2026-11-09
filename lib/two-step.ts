@@ -20,8 +20,10 @@
  * Turning it on needs a login from the last fifteen minutes and a right code
  * from the app; turning it off, or making new recovery codes, needs a right
  * code. Each of the three emails the account. Five wrong codes end a waiting
- * login, and an account answers ten codes an hour at most, so six digits
- * cannot be guessed by trying.
+ * login, an account answers ten codes an hour at most, and past
+ * APP_CODE_FAILS_IN_A_ROW wrong codes in a row the app's codes are off until
+ * a login with a recovery code or a passkey (both addresses told once), so six
+ * digits cannot be guessed by trying, however long somebody tries.
  *
  * Nobody is locked out, and nobody here has to unlock anybody by hand. Turning
  * it on asks for a recovery address — a second inbox, confirmed with a code
@@ -86,6 +88,17 @@ export const HOLD_SECONDS = 10 * 60;
 const SETUP_SECONDS = 10 * 60;
 const TRIES = 5;
 const CODES_PER_HOUR = 10;
+/**
+ * Wrong codes one account may take in a row, whatever the hours, before the
+ * app's codes are off for it (Claude 5's authentication audit, M2; NIST SP
+ * 800-63B §5.2.2 asks for at most 100). Kept on the account's record as `f`,
+ * counted before each comparison; a right code, a recovery code or a login
+ * with a passkey (cancelReset) starts it again. The ways back stay open with
+ * no test of any kind (AX274 3.3.9): recovery codes, passkeys, the link to the
+ * recovery address and the request to turn it off. Both addresses are told
+ * once, on the try that reaches it.
+ */
+export const APP_CODE_FAILS_IN_A_ROW = 50;
 export const RECOVERY_CODES = 10;
 const CODE_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789";
 /** How long a request to turn it off without a code waits before it does. */
@@ -189,7 +202,7 @@ const codeHash = (code: string) => sha(`nimbus-2fa-code:${code.toLowerCase().rep
  * `reset`: when a request to turn it off without a code takes effect, in ms; 0 for none.
  * `backup`: the recovery address, confirmed when it was turned on; "" on a record from before.
  */
-type TwoStep = { s: string; since: number; codes: string[]; last: number; reset: number; backup: string };
+type TwoStep = { s: string; since: number; codes: string[]; last: number; reset: number; backup: string; f: number };
 
 function parse(raw: unknown): TwoStep | null {
   if (typeof raw !== "string") return null;
@@ -203,6 +216,9 @@ function parse(raw: unknown): TwoStep | null {
       last: typeof v.last === "number" ? v.last : -1,
       reset: typeof v.reset === "number" && v.reset > 0 ? v.reset : 0,
       backup: typeof v.backup === "string" && EMAIL_PATTERN.test(v.backup) ? v.backup : "",
+      // Wrong codes in a row (APP_CODE_FAILS_IN_A_ROW): none on a record from before; one in another shape is read as
+      // the ceiling, so the app's codes stay off rather than count from zero (CX-123 rule 24).
+      f: v.f === undefined ? 0 : typeof v.f === "number" && Number.isSafeInteger(v.f) && v.f >= 0 ? v.f : APP_CODE_FAILS_IN_A_ROW,
     };
   } catch {
     return null;
@@ -612,8 +628,11 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
 export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean | "kept-locked"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
-    if (!record || record.reset === 0) return false;
-    return writeHeld(held, email, { ...record, reset: 0 });
+    if (!record || (record.reset === 0 && record.f === 0)) return false;
+    // A login with a code or a passkey, or the owner in a session opened with one, also lets the app's codes in again
+    // after too many wrong ones (APP_CODE_FAILS_IN_A_ROW).
+    if (!(await writeHeld(held, email, { ...record, reset: 0, f: 0 }))) return false;
+    return record.reset !== 0;
   });
   if (!called) return false;
   const ended = await endLocked(email);
@@ -834,33 +853,45 @@ export async function spendRescue(token: string): Promise<string | null> {
   return email;
 }
 
-export type CodeCheck = "app" | "recovery" | "wrong" | "unreadable" | "limited";
+/** "stopped": the app's codes are off after APP_CODE_FAILS_IN_A_ROW wrong ones; a recovery code or a passkey still opens. */
+export type CodeCheck = "app" | "recovery" | "wrong" | "unreadable" | "limited" | "stopped";
+
+/** What checkHeld found: `left`, the recovery codes left after one was used; `reached`, this try was the one that stopped the app's codes. */
+type Checked = { check: CodeCheck; left?: number; reached?: boolean };
 
 /**
  * Checks a code for an account that has it on: the app's code for now, used
- * once, or a recovery code, spent. Ten tries an hour per account. With the
- * record's lock already held (withTwoStep): what it writes is fenced, read
- * under the same lock.
+ * once, or a recovery code, spent. Ten tries an hour per account, and each
+ * try counted on the record before it is compared (APP_CODE_FAILS_IN_A_ROW):
+ * past the ceiling the app's codes are not compared at all. With the record's
+ * lock already held (withTwoStep): what it writes is fenced, read under the
+ * same lock.
  */
-async function checkHeld(held: Held, email: string, typed: string, now: number): Promise<{ check: CodeCheck; left?: number }> {
+async function checkHeld(held: Held, email: string, typed: string, now: number): Promise<Checked> {
   const record = await read(email);
   if (!record) return { check: "wrong" };
   if (!(await withinLimit("two-step", normaliseEmail(email), CODES_PER_HOUR, 60 * 60))) return { check: "limited" };
   const cleaned = typed.trim();
-  if (/^\d[\d\s]{4,8}$/.test(cleaned)) {
-    const opened = unseal(record.s, context(email));
-    if (!opened.ok) return { check: "unreadable" };
+  const app = /^\d[\d\s]{4,8}$/.test(cleaned);
+  if (app && record.f >= APP_CODE_FAILS_IN_A_ROW) return { check: "stopped" };
+  const opened = app ? unseal(record.s, context(email)) : null;
+  if (opened && !opened.ok) return { check: "unreadable" };
+  // The try is one more in a row before anything is compared; a write that did not land compares nothing.
+  const counted = { ...record, f: record.f + 1 };
+  if (!(await writeHeld(held, email, counted))) return { check: "wrong" };
+  const reached = counted.f === APP_CODE_FAILS_IN_A_ROW;
+  if (opened?.ok) {
     const step = stepOf(opened.value, cleaned, now, record.last);
-    if (step === null) return { check: "wrong" };
-    if (!(await spendOnce(email, `step:${step}`, 5 * 60))) return { check: "wrong" };
-    if (!(await writeHeld(held, email, { ...record, last: step }))) return { check: "wrong" };
+    if (step === null) return { check: "wrong", reached };
+    if (!(await spendOnce(email, `step:${step}`, 5 * 60))) return { check: "wrong", reached };
+    if (!(await writeHeld(held, email, { ...counted, last: step, f: 0 }))) return { check: "wrong", reached };
     return { check: "app" };
   }
   const hash = codeHash(cleaned);
-  if (!record.codes.includes(hash)) return { check: "wrong" };
-  if (!(await spendOnce(email, `code:${hash}`, 86_400))) return { check: "wrong" };
+  if (!record.codes.includes(hash)) return { check: "wrong", reached };
+  if (!(await spendOnce(email, `code:${hash}`, 86_400))) return { check: "wrong", reached };
   const left = record.codes.filter((c) => c !== hash);
-  if (!(await writeHeld(held, email, { ...record, codes: left }))) return { check: "wrong" };
+  if (!(await writeHeld(held, email, { ...counted, codes: left, f: 0 }))) return { check: "wrong", reached };
   return { check: "recovery", left: left.length };
 }
 
@@ -868,37 +899,64 @@ async function toldCodeUsed(email: string, left: number): Promise<void> {
   await tell(email, "A recovery code was used on your Marktmorgen account", `One of your recovery codes was used to log in to your Marktmorgen account. ${left} ${left === 1 ? "is" : "are"} left; you can make new ones under Two-step login in your studio.`);
 }
 
+/**
+ * The notices a check leaves, after the record's lock is let go: a recovery
+ * code used, and, once, the app's codes stopped (APP_CODE_FAILS_IN_A_ROW),
+ * told to the account and to its recovery address, whoever may hold the
+ * sign-in inbox. A recovery address that cannot be read is told nothing; the
+ * account still is.
+ */
+async function toldAfter(email: string, out: Checked): Promise<void> {
+  if (out.check === "recovery") await toldCodeUsed(email, out.left ?? 0);
+  if (out.reached) await toldStopped(email);
+}
+
+async function toldStopped(email: string): Promise<void> {
+  const backup = await recoveryAddressOf(email).catch((error: unknown) => {
+    console.error("reading the recovery address for a notice failed", error);
+    return "";
+  });
+  await tell(
+    email,
+    "Your app's codes are off for your Marktmorgen account",
+    `Someone typed a wrong code from your authenticator app ${APP_CODE_FAILS_IN_A_ROW} times in a row for your Marktmorgen account, so the app's codes are off for now. Nobody got in with them. To get back in, use one of your recovery codes, a passkey, or the link we send to your recovery address from the code page. After that, the app's codes work again.`,
+    backup,
+  );
+}
+
 /** Checks a code (checkHeld), under the record's lock. */
 export async function checkCode(email: string, typed: string, now = Date.now()): Promise<CodeCheck> {
   const out = await withTwoStep(email, (held) => checkHeld(held, email, typed, now));
-  if (out.check === "recovery") await toldCodeUsed(email, out.left ?? 0);
+  await toldAfter(email, out);
   return out.check;
 }
 
 /** Turns it off, with a right code, in one hold of the lock. */
 export async function turnOff(email: string, typed: string): Promise<CodeCheck> {
-  const out = await withTwoStep(email, async (held) => {
+  const out = await withTwoStep(email, async (held): Promise<Checked> => {
     const checked = await checkHeld(held, email, typed, Date.now());
     if (checked.check !== "app" && checked.check !== "recovery") return checked;
-    return (await deleteHeld(held, [recordKey(email)])) ? checked : { check: "wrong" as CodeCheck };
+    return (await deleteHeld(held, [recordKey(email)])) ? checked : { check: "wrong" };
   });
+  await toldAfter(email, out);
   if (out.check !== "app" && out.check !== "recovery") return out.check;
-  if (out.check === "recovery") await toldCodeUsed(email, out.left ?? 0);
   await tell(email, "Two-step login is off for your Marktmorgen account", "Two-step login was turned off for your Marktmorgen account. Logging in now needs only the emailed link or a passkey.");
   return out.check;
 }
 
 /** Ten new recovery codes in place of the old ones, with a right code, in one hold of the lock. */
 export async function replaceCodes(email: string, typed: string): Promise<{ codes: string[] } | CodeCheck> {
-  const out = await withTwoStep(email, async (held) => {
+  const out = await withTwoStep(email, async (held): Promise<{ checked: Checked; codes: string[] | null }> => {
     const checked = await checkHeld(held, email, typed, Date.now());
     if (checked.check !== "app" && checked.check !== "recovery") return { checked, codes: null };
     const record = await read(email);
-    if (!record) return { checked: { check: "wrong" as CodeCheck }, codes: null };
+    if (!record) return { checked: { check: "wrong" }, codes: null };
     const codes = newCodes();
-    if (!(await writeHeld(held, email, { ...record, codes: codes.map((c) => codeHash(c)) }))) return { checked: { check: "wrong" as CodeCheck }, codes: null };
+    if (!(await writeHeld(held, email, { ...record, codes: codes.map((c) => codeHash(c)) }))) return { checked: { check: "wrong" }, codes: null };
     return { checked, codes };
   });
+  // New codes are told below; a wrong code that stopped the app's codes is told as at the code page.
+  if (out.checked.reached) await toldStopped(email);
   if (!out.codes) return out.checked.check;
   await tell(email, "New recovery codes for your Marktmorgen account", "New recovery codes were made for your Marktmorgen account. The old ones no longer work.");
   return { codes: out.codes };
@@ -912,7 +970,7 @@ export async function holdSignIn(email: string, viaRecovery = false, byGoogle = 
   return token;
 }
 
-export type HoldAnswer = { ok: true; email: string; how: "app" | "recovery"; byGoogle: boolean } | { ok: false; reason: "expired" | "wrong" | "unreadable" | "limited" };
+export type HoldAnswer = { ok: true; email: string; how: "app" | "recovery"; byGoogle: boolean } | { ok: false; reason: "expired" | "wrong" | "unreadable" | "limited" | "stopped" };
 
 /** Finishes a waiting login with its code. Five wrong codes end it. */
 export async function finishSignIn(token: string, typed: string, now = Date.now()): Promise<HoldAnswer> {

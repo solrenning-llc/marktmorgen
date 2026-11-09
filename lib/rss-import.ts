@@ -11,12 +11,17 @@
  *   - all or nothing: one bad episode refuses the whole feed with a reason naming it, and a refusal carries no show,
  *     so nothing is ever half imported. Over a cap is refused too, never cut to fit;
  *   - an episode's audio is recorded as its https address only. Nothing here makes a request: copying the audio is
- *     a later unit, with its own address checks at fetch time, ceiling and cost line (MR).
+ *     a later unit, with its own address checks at fetch time, ceiling and cost line (MR). The https check here
+ *     reads the name only and is not SSRF protection: a public-looking name can resolve to a private address, so
+ *     the fetch must check the resolved IP of every hop, redirects included;
+ *   - a date is read only as RSS writes it, RFC 822 with a zone (lib/rfc822-date.ts); anything else is refused,
+ *     never guessed or read in the server's time zone.
  *
  * Unknown stays unknown (rule 24): a missing or zero size is null, never 0 bytes; a missing date is null, never the
  * epoch; a missing type is null. Something present and unreadable is refused.
  */
 import { MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE } from "./podcast-rules";
+import { parseRfc822Date } from "./rfc822-date";
 
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 export const MAX_IMPORT_ITEMS = MAX_EPISODES;
@@ -282,7 +287,8 @@ function isHttpsAddress(address: string): boolean {
   } catch {
     return false;
   }
-  const host = url.hostname.toLowerCase();
+  // One trailing dot names the same host ("localhost." is localhost), so it is dropped before the name checks.
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
   return (
     url.protocol === "https:" &&
     url.username === "" &&
@@ -330,9 +336,10 @@ function readEpisode(item: El, n: number): ImportedEpisode {
   const date = field(item, "pubDate", where) ?? "";
   let at: number | null = null;
   if (date !== "") {
-    const ms = Date.parse(date);
-    if (!Number.isFinite(ms) || ms <= 0) refuse("bad-date", `${where}'s date cannot be read.`);
-    at = Math.floor(ms / 1000);
+    at = parseRfc822Date(date);
+    if (at === null || at <= 0) {
+      refuse("bad-date", `${where}'s date cannot be read. RSS dates look like "Mon, 09 Nov 2026 10:00:00 GMT", with a time zone. Fix it in the feed, then import again.`);
+    }
   }
   const guid = field(item, "guid", where) ?? "";
   capped(guid, MAX_IMPORT_GUID, `${where}'s id`);
@@ -340,7 +347,7 @@ function readEpisode(item: El, n: number): ImportedEpisode {
   return {
     title,
     notes,
-    notesHaveMarkup: /<[A-Za-z/!][^>]*>/.test(notes),
+    notesHaveMarkup: /<[A-Za-z/!][^<>]*>/.test(notes),
     audioUrl: url,
     bytes: size > 0 ? size : null,
     contentType,

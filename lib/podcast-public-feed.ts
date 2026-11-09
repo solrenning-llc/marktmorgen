@@ -10,12 +10,14 @@
  * What may appear is decided only by an exact mark: an episode whose visibility is not exactly "public" is left out,
  * so a paid episode, a private one and one whose mark is missing or unreadable never appear (rule 24: unknown is never
  * public). A public episode whose size, type, date, title or id cannot be read is left out too, never written with a
- * size of zero, and the left-out list says why for the editor to show.
+ * size of zero, and the left-out list says why for the editor to show. A date is written only in RFC 822 form
+ * (lib/rfc822-date.ts); one that has none (past year 9999) is left out as date-unknown, never "Invalid Date".
  *
  * No route serves this yet and nothing here makes a request: serving a public feed opens audience bandwidth, a cost
  * that needs its own ceiling and cost line (MR) before it is switched on, in a later unit.
  */
 import { EPISODE_ID, EPISODE_TYPES, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, type Episode } from "./podcast-rules";
+import { formatRfc822Date } from "./rfc822-date";
 
 /** Apple Podcasts' top-level categories, which Spotify and the other directories read from the same tag. */
 export const PUBLIC_CATEGORIES = [
@@ -124,7 +126,7 @@ function why(candidate: PublicEpisodeCandidate): LeftOutReason | null {
   if (typeof e.notes !== "string" || e.notes.length > MAX_EPISODE_NOTES) return "notes-too-long";
   if (!Number.isSafeInteger(e.bytes) || e.bytes <= 0) return "size-unknown";
   if (!(EPISODE_TYPES as readonly string[]).includes(e.contentType)) return "type-unknown";
-  if (!Number.isSafeInteger(e.at) || e.at <= 0) return "date-unknown";
+  if (formatRfc822Date(e.at) === null) return "date-unknown";
   return null;
 }
 
@@ -165,7 +167,7 @@ export function publicFeedXml(input: PublicFeedInput): string {
       <title>${text(e.title.trim())}</title>
       <description>${text(e.notes)}</description>
       <guid isPermaLink="false">${text(e.id)}</guid>
-      <pubDate>${new Date(e.at * 1000).toUTCString()}</pubDate>
+      <pubDate>${formatRfc822Date(e.at)}</pubDate>
       <enclosure url="${text(audio)}" length="${e.bytes}" type="${text(e.contentType)}"/>
     </item>
 `;

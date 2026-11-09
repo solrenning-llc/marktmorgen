@@ -3138,12 +3138,13 @@ async function settlePayPalPending(store: Store, paid: Paid, title: string, now:
   if (outcome.kind === "share") return tell("share");
   const share = outcome.kind === "credit" ? saleShare(outcome.pending, paid.product, outcome.affiliate.rate) : 0;
   if (share === null) return tell("share");
-  if (outcome.kind === "credit" && share > 0) {
+  const rate = share;
+  if (outcome.kind === "credit" && rate > 0) {
     const sale = { ref, pi: paypalPaymentId(paid.capture), at: paid.at, product: paid.product, title: title.slice(0, 200), base: paid.cents, total: paid.cents, currency: readCurrencyCode(paid.currency) };
-    await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate: share, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
+    await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
     await rememberBuyer(store, paid.email, outcome.affiliate.id, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
-  await writePendingMark(statsId, ref, outcome.kind === "credit" && share > 0 ? `credited:${outcome.affiliate.id}` : "none");
+  await writePendingMark(statsId, ref, outcome.kind === "credit" && rate > 0 ? `credited:${outcome.affiliate.id}` : "none");
   await paypalDone(statsId, paid.order);
 }
 

@@ -432,9 +432,21 @@ function readUndo(raw: unknown): Undo | null {
   }
 }
 
-/** Ends the subscription at once. True once Stripe says it is ended. */
+/**
+ * Ends the subscription at once. True once Stripe says it is ended. Each reply is read for this subscription and in its
+ * exact shape (CX-123 rules 24 and 30): one for another id, with no status, or whose start is not a whole number of
+ * seconds throws, and settleOne keeps the plan in line. A start read as 0 would make the store's own plan a plan for a
+ * closing store and give back what it was rightly paid; a reply for another plan, settle this one on its word.
+ */
 async function endIt(id: string): Promise<{ ended: boolean; created: number }> {
-  const over = (sub: Record<string, unknown>) => ({ ended: sub.status === "canceled" || sub.status === "incomplete_expired", created: Number(sub.created) || 0 });
+  const over = (sub: unknown) => {
+    const status = plainObject(sub) ? ownField(sub, "status") : undefined;
+    const created = plainObject(sub) ? ownField(sub, "created") : undefined;
+    if (!plainObject(sub) || ownField(sub, "id") !== id || typeof status !== "string" || !wholeAtLeast(created, 1)) {
+      throw new Error(`Stripe answered the subscription ${id} in another shape`);
+    }
+    return { ended: status === "canceled" || status === "incomplete_expired", created };
+  };
   try {
     // A DELETE is idempotent at Stripe by itself; no key is sent with it.
     const ended = over(await onPlatform("DELETE", `/subscriptions/${encodeURIComponent(id)}`, undefined, { version: AT }));
@@ -620,8 +632,17 @@ export function planReturnedLetter(name: string, returned: number, disputed: num
 async function tell(id: string, entry: Undo, returned: number, disputed: number, currency: string): Promise<boolean> {
   let to = entry.to;
   if (!to && CUSTOMER_PATTERN.test(entry.c)) {
-    const customer = await onPlatform("GET", `/customers/${encodeURIComponent(entry.c)}`, undefined, { version: AT });
-    to = typeof customer.email === "string" ? customer.email : "";
+    // Read for this customer and its email in its exact shape (CX-123 rules 24 and 30): a reply for another customer
+    // is never written to, and one whose email does not read is never "no address" (the plan would be settled and its
+    // creator never told). A thrown read keeps the plan in line. Only a customer with no email, or a deleted one,
+    // has no address to tell.
+    const customer: unknown = await onPlatform("GET", `/customers/${encodeURIComponent(entry.c)}`, undefined, { version: AT });
+    const email = plainObject(customer) ? ownField(customer, "email") : undefined;
+    const deleted = plainObject(customer) && ownField(customer, "deleted") === true;
+    if (!plainObject(customer) || ownField(customer, "id") !== entry.c || (!deleted && email !== null && typeof email !== "string")) {
+      throw new Error(`Stripe answered the customer of ${id} in another shape`);
+    }
+    to = typeof email === "string" ? email : "";
   }
   const address = normaliseEmail(to);
   if (!EMAIL_PATTERN.test(address)) {

@@ -22,7 +22,7 @@
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { traceKey } from "@/lib/community-trace";
-import { forgetMemberRecord, readConfig, readMember } from "@/lib/community";
+import { DamagedConfigError, forgetMemberRecord, readConfigExact, readMember } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
@@ -55,10 +55,15 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
       failures.push(error);
     }
   };
-  // An unreadable configuration is not "no spaces": the access answers kept by space would stay behind.
-  const config = await readConfig(id).catch((error: unknown) => {
-    failures.push(error);
-    return null;
+  // Read before anything is deleted, and not swallowed (CX-123 rule 24): read as none, every space's record of the
+  // person would be skipped while the erasure said it was done, so a lost or unknown answer refuses the whole pass
+  // here and the retry starts over. Except a setup stored damaged (review of #3091 by Claude 2), which asking again
+  // never mends: while it cannot be read the community is off for everyone (communityViewer), so no space's answer
+  // about them is read or written, and those written before expire on their own within five minutes
+  // (lib/community-access.ts, OPEN_SECONDS). Everything else goes now.
+  const config = await readConfigExact(id).catch((error: unknown) => {
+    if (error instanceof DamagedConfigError) return null;
+    throw error;
   });
   // Their record is the only place that names their handle and their unsubscribe token: it is read first and
   // deleted last, and only once what it names is gone, so a step that fails leaves it for the retry (Claude 6 on #2957).

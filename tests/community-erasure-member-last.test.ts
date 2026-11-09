@@ -25,7 +25,8 @@ const call = (c: Command[]) => original.call(redis, c);
 
 async function seed() {
   redis.clear();
-  const record = { k: member, e: email, n: "Fictional Member", h: handle, dir: false, mail: true, at: 1, seen: 1, t: token };
+  // A whole record as lib/community.ts reads it exactly (its own yes or no on a mute and a removal).
+  const record = { k: member, e: email, n: "Fictional Member", h: handle, dir: false, mail: true, at: 1, seen: 1, t: token, removed: false, muted: false };
   await call([
     ["HSET", membersKey, member, JSON.stringify(record)],
     ["HSET", handlesKey, handle, member],

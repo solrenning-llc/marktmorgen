@@ -43,6 +43,7 @@ import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { cleanText, linkCount } from "@/lib/community-text";
 import { holdsAll } from "@/lib/community-search";
+import { stringList } from "@/lib/redis-reply";
 
 const base = (id: string) => `nl:cm:${id}`;
 const roomKey = (id: string) => `${base(id)}:ch`;
@@ -369,22 +370,34 @@ export async function roomSize(id: string): Promise<number> {
  */
 export async function searchRoom(id: string, used: string[]): Promise<ChatMessage[]> {
   if (!used.length) return [];
-  const [raw] = await redisPipeline([["ZREVRANGE", roomKey(id), 0, MAX_CHAT_KEPT - 1]]);
-  const rows = (Array.isArray(raw) ? raw : []).map(parse).filter((m): m is ChatMessage => m !== null);
+  // The room in its exact shape (CX-123 rule 24): a lost or off-shape reply is
+  // not "no match", so the search page says it could not search the room.
+  // Only an exact empty room has nothing to find.
+  const raw = stringList(repliesFor(await redisPipeline([["ZREVRANGE", roomKey(id), 0, MAX_CHAT_KEPT - 1]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("the room for a search");
+  const rows = raw.map(parse).filter((m): m is ChatMessage => m !== null);
   return rows.filter((message) => holdsAll(message.text, used));
 }
 
 /** Deletes what one member said in the room, and their cooldown (lib/community-erasure.ts). */
 export async function forgetChatPerson(id: string, who: string): Promise<number> {
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]);
-  const theirs = (Array.isArray(raw) ? raw : []).map(String).filter((row) => {
+  // The room in its exact shape (CX-123 rule 24): a lost or off-shape reply is
+  // not "they said nothing", so nothing is deleted and the erasure stays
+  // pending to be retried. Only an exact empty room has nothing of theirs.
+  const what = "a member's room messages forgotten";
+  const rows = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]), 1)?.[0]);
+  if (!rows) throw new UnknownReplyError(what);
+  const theirs = rows.filter((row) => {
     try {
       return (JSON.parse(row) as Partial<ChatMessage>).a === who;
     } catch {
       return false;
     }
   });
-  await redisPipeline([["DEL", spokeKey(id, who)], ...(theirs.length ? [["ZREM", roomKey(id), ...theirs]] : [])]);
+  const commands: (string | number)[][] = [["DEL", spokeKey(id, who)], ...(theirs.length ? [["ZREM", roomKey(id), ...theirs]] : [])];
+  // Each deletion answered with its count, or the erasure is not said done.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
   return theirs.length;
 }
 

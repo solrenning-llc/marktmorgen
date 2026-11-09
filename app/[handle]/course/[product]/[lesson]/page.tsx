@@ -13,7 +13,7 @@ import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor, studentQuiz } from "@/lib/quiz";
+import { type Attempt, attemptOf, heldBack, passedForGate, readQuizFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -34,6 +34,7 @@ import { LessonPlayer } from "@/components/lesson-player";
 import { devicePlaceKey } from "@/lib/lesson-position";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -111,7 +112,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (student && (await isResting(store, undefined, "buyer"))) redirect(`/@${store.handle}/resting`);
   if (student) await countDay(store);
   const [done, passed] = student
-    ? await Promise.all([doneLessons(course.id, student.email), passedQuizzes(course.id, who)])
+    ? await Promise.all([doneLessons(course.id, student.email), passedForGate(course.id, who)])
     : [new Set<string>(), new Set<string>()];
   // A quiz that has to be passed holds the lessons after it shut, for a student.
   const held = student ? heldBack(course, passed) : new Map<string, string>();
@@ -326,7 +327,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
             ) : null}
 
             {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task ? (
-              <p className="st-muted mt-6">{w.emptyLesson}</p>
+              <EmptyState title={said.w.nothingYet} body={w.emptyLesson} className="mt-6" />
             ) : null}
 
             {quiz ? (

@@ -39,6 +39,7 @@ import { rememberFolderOwner } from "@/lib/delivery";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { admitNonPaying } from "@/lib/free-pool";
+import { alertSpike } from "@/lib/traffic-spike";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
@@ -273,6 +274,8 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
   if (!Number.isSafeInteger(n) || n < units) return false;
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
+  // A window used up much faster than it passes tells the operator, once a mark; it changes nothing (lib/traffic-spike.ts).
+  await alertSpike(store, folder, window, n, units, limit, now);
   // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
   // read for it. A request refused as a page resting stays counted, as it always has.
   if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});

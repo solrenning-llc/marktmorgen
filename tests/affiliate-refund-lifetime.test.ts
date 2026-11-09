@@ -29,7 +29,9 @@
  */
 import { creditPayPalSale, readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
-import { type Paid, watchPayPal } from "@/lib/paypal-sales";
+import { readFileSync } from "node:fs";
+import { AFFILIATE_ENTRY_BYTES, BOOK_KEPT_REFUND_BYTES } from "@/lib/api-read-rules";
+import { PAYPAL_REFUNDS_READ, type Paid, readPayPalRefundsWithCoverage, watchPayPal } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -208,12 +210,71 @@ async function main(): Promise<void> {
   is("not checked", garbled.checked, false);
   is("nothing offered", garbled.to.size, 0);
 
+  // Changed in the second unit (pre-review of 50bc3b0f26, MEDIUM 2): the book no longer lists the set since its
+  // oldest line (a listing capped at PAYPAL_REFUNDS_READ, cut for good once a store passed it); it asks the set about
+  // its own orders only. The exact listing is still the store's numbers' (was: the book read through the listing).
   part("Unknown: the set's listing not exact is a reading that covered nothing, never \"no refunds\" (rule 24)");
   await setup();
   await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), ORDER]]);
-  const listing = await answering("ZRANGEBYSCORE", `nl:ppsell:refunded:${SID}`, "garbled", () => offered());
-  is("not checked", listing.checked, false);
-  is("nothing offered", listing.to.size, 0);
+  const listing = await answering("ZRANGEBYSCORE", `nl:ppsell:refunded:${SID}`, "garbled", () => readPayPalRefundsWithCoverage(SID, 0));
+  is("the numbers' reading is partial", listing.partial, true);
+
+  part("Unknown: the book's question to the set about its own orders not exact leaves it unchecked");
+  await setup();
+  await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), ORDER]]);
+  const asked = await answering("ZMSCORE", `nl:ppsell:refunded:${SID}`, "garbled", () => offered());
+  is("not checked", asked.checked, false);
+  is("nothing offered", asked.to.size, 0);
+
+  part("Pre-review A: more refunds than PAYPAL_REFUNDS_READ, all kept for good: the book stays checked");
+  await setup();
+  captures.set(CAPTURE, "REFUNDED");
+  await watch();
+  const crowd: (string | number)[][] = [];
+  for (let i = 0; i < PAYPAL_REFUNDS_READ; i += 1) {
+    const order = `7O${String(i).padStart(15, "0")}`;
+    const capture = `5C${String(i).padStart(14, "0")}`;
+    crowd.push(["SET", `nl:ppsell:paid:${order}`, JSON.stringify({ ...paid, order, capture, via: undefined })]);
+    crowd.push(["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW - 60), order]);
+    crowd.push(["HSET", `nl:ppsell:back:${SID}`, `paypal:${capture}`, String(NOW - 60)]);
+  }
+  await redis.pipeline(crowd);
+  const many = await offered();
+  is("checked", many.checked, true);
+  is("the other sale is offered", many.to.get(AFF), 1470);
+  is("the refunded one is not", (await lineOf(`paypal:${ORDER}`))?.status, "refunded");
+
+  part("A partial refund's member (part:<order>, the partial refund's unit) is not a cut of the numbers' reading");
+  await setup();
+  await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), `part:${OTHER_ORDER}`]]);
+  is("not partial", (await readPayPalRefundsWithCoverage(SID, 0)).partial, false);
+  is("and the book stays checked", (await offered()).checked, true);
+
+  part("The book's questions are cut in slices, never one command past BOOK_KEPT_SLICE fields");
+  await setup();
+  const sales: Paid[] = [];
+  for (let i = 0; i < 520; i += 1) sales.push({ ...paid, order: `8O${String(i).padStart(15, "0")}`, capture: `6C${String(i).padStart(14, "0")}`, email: `b${i}@example.com` } as Paid);
+  for (const sale of sales) await creditPayPalSale(store, sale, "Synthetic course");
+  const widths: number[] = [];
+  const original = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    for (const command of commands) if (command[0] === "HMGET" && String(command[1]).startsWith("nl:ppsell:back:")) widths.push(command.length - 2);
+    for (const command of commands) if (command[0] === "ZMSCORE") widths.push(command.length - 2);
+    return original.call(redis, commands);
+  };
+  try {
+    await readBook(store);
+  } finally {
+    redis.pipeline = original;
+  }
+  is("each question asks at most 500 fields", widths.length >= 4 && widths.every((n) => n > 0 && n <= 500), true);
+
+  part("Pre-review C: the public page's price of the book counts the new reads' bytes");
+  const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+  const page = registry.slice(registry.indexOf("export function affiliatePageRead("), registry.indexOf("export function affiliateLoadRead("));
+  is("affiliatePageRead counts BOOK_KEPT_REFUND_BYTES a field", page.includes("BOOK_KEPT_REFUND_BYTES"), true);
+  is("what one answer and its name weigh is counted, both questions (HMGET and ZMSCORE)", BOOK_KEPT_REFUND_BYTES >= 2 * (16 + 71 + 16 + 24), true);
+  is("the entry's own bytes are still counted", AFFILIATE_ENTRY_BYTES, 4_096);
 
   part("The refund seen twice, in the lasting record and in the set, counts once");
   await setup();

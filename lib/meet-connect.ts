@@ -49,6 +49,8 @@
  *                                       whatever `statsId` the caller passes.
  *   nl:meet:state:<hash>                one consent in progress, ten minutes
  *   nl:meet:user:<provider>:<hash>      the stores a Zoom user connected, for Zoom's uninstall notice
+ *   nl:meet:gone:<provider>:<hash>      when Zoom last told us a user removed the app, a day: a consent
+ *                                       flow begun before it keeps nothing (KEEP_UNLESS_GONE)
  *   nl:meet:log:<statsId>               the store's last problems, newest first
  */
 import { createHash, randomBytes } from "node:crypto";

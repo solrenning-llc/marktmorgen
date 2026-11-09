@@ -22,6 +22,8 @@ const world = {
   disputes: [] as Record<string, unknown>[],
   /** One exact /disputes page, whatever charge is asked for: another charge's row, or one with no charge. */
   disputesReply: undefined as Record<string, unknown>[] | undefined,
+  /** The /disputes page says there is more (has_more), or answers it in another shape. */
+  disputesMore: false as unknown,
   /** Every request answers 500. */
   down: false,
   /** The customer's charge list says there is more. */
@@ -97,7 +99,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const email = (q.get("query") ?? "").match(/email:"([^"]+)"/)?.[1];
     return searchPage([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
   }
-  if (path === "/disputes") return page(world.disputesReply ?? world.disputes.filter((d) => d.charge === q.get("charge")));
+  if (path === "/disputes") return json({ object: "list", data: world.disputesReply ?? world.disputes.filter((d) => d.charge === q.get("charge")), has_more: world.disputesMore });
   return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;
 
@@ -156,6 +158,31 @@ async function main() {
   const dPaid = pay(d, { at: NOW - 3 * DAY, disputed: true });
   world.disputes.push({ id: "du_dopen", charge: dPaid.id, status: "needs_response", amount: 6_900 });
   is("its own dispute open: no refund now", (await d.read()).refund, { kind: "none", reason: "dispute_open" });
+
+  part("A charge whose disputed flag does not read is unknown, never \"no dispute\" (rule 24; Claude 1's batch on #3405)");
+  for (const [label, value] of [["missing", undefined], ["null", null], ["the text \"true\"", "true"], ["a number", 1]] as const) {
+    const e = await shop();
+    const ePaid = pay(e, { at: NOW - 3 * DAY });
+    const row = world.charges.find((x) => x.id === ePaid.id)!;
+    if (value === undefined) delete row.disputed;
+    else row.disputed = value;
+    // A dispute this charge really has, lost: read as "no dispute", the guarantee would give the money back on it.
+    world.disputes.push({ id: `du_e${label.length}x${n}`, charge: ePaid.id, status: "lost", amount: 6_900 });
+    is(`disputed ${label}: unknown`, (await e.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  const f = await shop();
+  pay(f, { at: NOW - 3 * DAY, disputed: false });
+  is("control, disputed false: the guarantee applies", (await f.read()).refund, { kind: "guarantee", cents: 6_900 });
+
+  part("A dispute page that is not whole is unknown (has_more; Claude 1's batch on #3405)");
+  for (const [label, more] of [["more to come", true], ["has_more missing", undefined], ["has_more as text", "false"]] as const) {
+    const g = await shop();
+    const gPaid = pay(g, { at: NOW - 3 * DAY, disputed: true });
+    world.disputes.push({ id: `du_g${label.length}x${n}`, charge: gPaid.id, status: "won", amount: 6_900 });
+    world.disputesMore = more;
+    is(`dispute page ${label}: unknown`, (await g.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  world.disputesMore = false;
   is("nothing was written to Stripe", world.writes, 0);
   done();
 }

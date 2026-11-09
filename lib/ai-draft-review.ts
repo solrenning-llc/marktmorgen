@@ -166,9 +166,22 @@ const DIGITS = /(?<![\p{L}\p{N}_.,])[$€£]?\d+(?:[.,]\d+)*(?:\s?%|[kKmMbB](?![
 /**
  * Digits followed by these name an order or a shape, not a figure: "the 2nd
  * week", "the 1st draft", "3D printing". Ordinals in words ("second") are not
- * read either.
+ * read either. Only a capital "D" is a shape: "30d" and "3d" are days. An
+ * ordinal before a year, an anniversary or a count of people is still a
+ * figure: "our 10th year in business", "our 1000th customer" (Claude 6's
+ * focal return on #3437, review 5831982049).
  */
-const NOT_A_FIGURE_AFTER = /(?:(?:st|nd|rd|th)(?![\p{L}\p{N}])|D(?![\p{L}\p{N}]))/iuy;
+const ORDINAL = /(?:st|nd|rd|th)(?![\p{L}\p{N}])/iuy;
+const CLAIMED_ORDINAL = /(?:st|nd|rd|th)\s+(?:years?|anniversary|birthday|customers?|buyers?|clients?|students?|members?|subscribers?|followers?)(?![\p{L}\p{N}])/iuy;
+const SHAPE = /D(?![\p{L}\p{N}])/uy;
+const sticky = (pattern: RegExp, text: string, at: number) => ((pattern.lastIndex = at), pattern.test(text));
+const notAFigureAfter = (text: string, at: number) => (sticky(ORDINAL, text, at) && !sticky(CLAIMED_ORDINAL, text, at)) || sticky(SHAPE, text, at);
+
+/**
+ * A lowercase "m" is minutes or meters ("a 10m call"), but before a count of
+ * people or plays it is millions: "5m followers", "10m views".
+ */
+const AUDIENCE = /\s+(?:views|followers|downloads|users|subscribers|members|customers|readers|listeners|plays|streams|fans|visitors|installs|people|students|buyers)(?![\p{L}\p{N}])/iuy;
 
 /**
  * A link, with or without "https://": its digits are part of an address (a
@@ -181,10 +194,11 @@ const LINK = /(?:https?:\/\/|www\.)\S+|(?<![\p{L}\p{N}.-])[\p{L}\p{N}-]+(?:\.[\p
 
 /**
  * "Double" and "triple" claim a number only before what they multiply:
- * "double your sales", "triple the reach". "Double chocolate" and "triple
- * berry" are flavors, "double-check" asks for a check.
+ * "double your sales", "triple the reach", or a result named bare: "double
+ * sales", "triple conversions". "Double chocolate", "triple berry", "a double
+ * bed" are things, "double-check" asks for a check.
  */
-const MULTIPLIES = /\s+(?:your|the|their|our|my|his|her|its|it|them|that|this|what|in|up|down)(?![\p{L}\p{N}])/iuy;
+const MULTIPLIES = /\s+(?:your|the|their|our|my|his|her|its|it|them|that|this|what|in|up|down|sales|revenue|income|profits?|earnings|conversions?|traffic|leads|followers|subscribers|views|clicks|sign-?ups|customers|clients|bookings|orders|students|members|downloads|reach|results|growth|engagement|productivity|output|audience)(?![\p{L}\p{N}])/iuy;
 
 /** Number words, by store language, with what each stands for: a number, or "×2" and "½". */
 type Words = readonly (readonly [string, number | string])[];
@@ -267,17 +281,17 @@ function numbersIn(original: string, codes: readonly string[]): { written: strin
   const found: { written: string; key: string; at: number }[] = [];
   for (const match of text.matchAll(DIGITS)) {
     const written = match[0].replace(/[.,]+$/, "");
-    NOT_A_FIGURE_AFTER.lastIndex = (match.index ?? 0) + match[0].length;
-    if (NOT_A_FIGURE_AFTER.test(text)) continue;
-    found.push({ written, key: digitsKey(written), at: match.index ?? 0 });
+    const after = (match.index ?? 0) + match[0].length;
+    if (notAFigureAfter(text, after)) continue;
+    const millions = /\dm$/.test(written) && sticky(AUDIENCE, text, after);
+    found.push({ written, key: digitsKey(millions ? `${written.slice(0, -1)}M` : written), at: match.index ?? 0 });
   }
   for (const code of codes) {
     for (const match of text.matchAll(WORD_PATTERNS[code])) {
       const at = match.index ?? 0;
       // "Double-check it" asks for a check, it claims no number.
       if (/^double$/i.test(match[0]) && /^-check/i.test(text.slice(at + match[0].length))) continue;
-      MULTIPLIES.lastIndex = at + match[0].length;
-      if (code === "en" && /^(double|triple)$/i.test(match[0]) && !MULTIPLIES.test(text)) continue;
+      if (code === "en" && /^(double|triple)$/i.test(match[0]) && !sticky(MULTIPLIES, text, at + match[0].length)) continue;
       found.push({ written: match[0], key: wordKey(match[0], code), at });
     }
   }

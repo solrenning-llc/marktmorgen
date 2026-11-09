@@ -5,15 +5,31 @@
 # check and runs only on its schedule or by hand (scripts/stale_pr_report.mjs,
 # tests/stale-pr-report.test.ts). checks: read is there only to read the nine required final
 # check results of each head.
+#
+# The same workflow runs, every hour but the daily report's, the queue-health report (C1-20261109-
+# 1332-TODOS-60, scripts/queue_health_report.mjs, tests/queue-health-report.test.ts): read-only too,
+# it writes ONE issue labeled fila-doente, and closes it when there is nothing to warn about.
+# actions: read is there only to read runs and jobs. Skipping the daily report's hour keeps the two
+# reports from sharing the token's hourly calls. GitHub-hosted standard runners cost nothing in a
+# public repository (GitHub Docs, "About billing for GitHub Actions"; not re-read on 9 November 2026:
+# docs.github.com was out of this session's network).
 name: Stale PR report
 on:
   schedule:
     - cron: '17 11 * * *'
+    - cron: '43 0-10,12-23 * * *'
   workflow_dispatch:
+    inputs:
+      report:
+        description: Which report to run
+        type: choice
+        options: [daily, health]
+        default: daily
 permissions:
   contents: read
   pull-requests: read
   checks: read
+  actions: read
   issues: write
 concurrency:
   group: stale-pr-report
@@ -21,6 +37,7 @@ concurrency:
 jobs:
   report:
     name: Stale PR report
+    if: ${{ github.event.schedule == '17 11 * * *' || (github.event_name == 'workflow_dispatch' && inputs.report != 'health') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -36,3 +53,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/stale_pr_report.mjs
+  health:
+    name: Queue health report
+    if: ${{ github.event.schedule == '43 0-10,12-23 * * *' || (github.event_name == 'workflow_dispatch' && inputs.report == 'health') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/queue_health_report.mjs
+            .github/workflows/codeql.yml
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Read the queue's health and update the fila-doente issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/queue_health_report.mjs

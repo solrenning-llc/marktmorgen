@@ -24,14 +24,16 @@ const onBlock = "\n" + (/\non:\n((?: .*\n)+)/.exec(triggers)?.[1] ?? "");
 const events = [...onBlock.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]);
 is("its only triggers are schedule and workflow_dispatch", events, ["schedule", "workflow_dispatch"]);
 const crons = [...triggers.matchAll(/^ {4}- cron: '([^']+)'$/gm)].map((m) => m[1]);
-is("one daily cron, at a minute other than :00", [crons.length, /^([1-5]?[0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* \*$/.test(crons[0] ?? ""),
-  (crons[0] ?? "").split(" ")[0] !== "0"], [1, true, true]);
+// The second cron is the hourly queue-health report's (C1-TODOS-60, tests/queue-health-report.test.ts), which skips this hour.
+is("one daily cron, at a minute other than :00, and the queue-health report's hourly one", [crons.length, /^([1-5]?[0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* \*$/.test(crons[0] ?? ""),
+  (crons[0] ?? "").split(" ")[0] !== "0", crons[1]], [2, true, true, "43 0-10,12-23 * * *"]);
 is("no pull_request, push, merge_group or workflow_run trigger",
   /\n {2}(pull_request|pull_request_target|push|merge_group|workflow_run|issues|issue_comment):/.test(onBlock), false);
 
 part("minimal permissions, pinned actions, no secret, and not a required check");
-is("permissions are contents, pull-requests and checks read, and issues write, nothing else, and no job widens them",
-  [/\npermissions:\n {2}contents: read\n {2}pull-requests: read\n {2}checks: read\n {2}issues: write\n(?! )/.test(triggers),
+// actions: read is the queue-health report's, to read runs and jobs (C1-TODOS-60).
+is("permissions are contents, pull-requests, checks and actions read, and issues write, nothing else, and no job widens them",
+  [/\npermissions:\n {2}contents: read\n {2}pull-requests: read\n {2}checks: read\n {2}actions: read\n {2}issues: write\n(?! )/.test(triggers),
     (workflow.match(/permissions:/g) ?? []).length, (workflow.match(/: write/g) ?? []).length], [true, 1, 1]);
 is("every action is pinned by a full commit SHA already used in product-checks",
   [...workflow.matchAll(/uses: ([^@\s]+)@(\S+)/g)].every(([, action, sha]) =>

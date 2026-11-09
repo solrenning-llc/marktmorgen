@@ -49,10 +49,11 @@ const many = (file: string, bad: number, good: number, minutes = 60) => [
   ...Array.from({ length: good }, () => qrun(file, "success", minutes)),
 ];
 is("CodeQL 4 failed or canceled of 10: warned with its name", flakyChecks(many(CQ, 4, 6), NOW).map((f) => [f.name, f.bad, f.total]), [["CodeQL", 4, 10]]);
-is("3 of 10: under 30%, fine", flakyChecks(many(CQ, 3, 7), NOW), []);
+is("3 of 10 is 30%: warned (30% or more)", flakyChecks(many(CQ, 3, 7), NOW).map((f) => f.bad), [3]);
+is("2 of 10: under 30%, fine", flakyChecks(many(CQ, 2, 8), NOW), []);
 is("5 of 9: fewer than 10 runs, fine", flakyChecks(many(CQ, 5, 4), NOW), []);
 is("runs older than 6 h are not counted", flakyChecks(many(CQ, 10, 0, 7 * 60), NOW), []);
-is("runs still going are not counted", flakyChecks([...many(PC, 3, 7), ...Array.from({ length: 5 }, () => qrun(PC, null))], NOW), []);
+is("runs still going are not counted", flakyChecks([...many(PC, 2, 8), ...Array.from({ length: 5 }, () => qrun(PC, null))], NOW), []);
 is("a timed_out or startup_failure counts as a failure", flakyChecks([...Array.from({ length: 3 }, () => qrun(PC, "timed_out")), ...many(PC, 0, 7)], NOW).map((f) => f.bad), [3]);
 is("a workflow outside the nine is never named", flakyChecks(many(".github/workflows/other.yml", 10, 0), NOW), []);
 

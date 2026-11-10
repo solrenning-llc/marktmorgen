@@ -209,7 +209,7 @@ export function PodcastPublicFeed({ productId, episodes }: { productId: string; 
                           ) : (
                             <button
                               type="button"
-                              className="mt-2 min-h-11 text-sm font-semibold text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                              className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-ink-soft underline underline-offset-4 hover:text-violet-deep"
                               disabled={busy}
                               onClick={() =>
                                 audio ? void run({ action: "episode", episode: episode.id, public: false }, "Taken out of the public feed. It is for buyers only again.") : setAdding(episode.id)

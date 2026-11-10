@@ -83,7 +83,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
   "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-withdraw:", "nl:plan:closing:",
-  "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending",
+  "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending", "nl:pm:c:", "nl:pm:day:", "nl:pm:done:", "nl:pm:r:", "nl:pm:t:",
   "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:sales:",
   "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
@@ -298,6 +298,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:learn:rate:addr:": X(1), "nl:learn:rate:ip:": X(1),
   "nl:leave:": E,
   "nl:lib:": L, "nl:lib:joined:": L, "nl:lib:link:": X(1),
+  "nl:pm:c:": X(1), "nl:pm:day:": X(2), "nl:pm:done:": X(2), "nl:pm:r:": X(1), "nl:pm:t:": X(1),
   "nl:listed:": X(8),
   "nl:lostdispute:cursor:": X(30), // a job's place in a store's lost disputes (lib/refunds.ts), thirty days at the most
   // ---------------------------------------------------------------- m

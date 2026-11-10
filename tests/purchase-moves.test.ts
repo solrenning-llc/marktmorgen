@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   const everything = keys.map((k) => `${k} ${JSON.stringify(redis.run(["TYPE", k]) === "string" ? redis.run(["GET", k]) : "")}`).join("\n");
   is("the links' secrets are kept nowhere, only their fingerprints", [everything.includes(asked.fromToken), everything.includes(asked.toToken)], [false, false]);
   is("the day's count names no address", keys.filter((k) => k.startsWith("nl:pm:day:")).some((k) => k.includes("@") || k.includes("old")), false);
-  is("the request reads back, normalised, waiting for both", await readPurchaseMove(asked.id, t0), {
+  is("the request reads back, normalised, waiting for both", await readPurchaseMove(asked.id), {
     from: "old@example.com",
     to: "new@example.com",
     scope: { kind: "store", sid: SID },
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   is("not a link at all", await confirmPurchaseMove("../../etc", t0 + 1_000), { ok: false, reason: "link" });
   is("the old address confirms", await confirmPurchaseMove(asked.fromToken, t0 + 2_000), { ok: true, id: asked.id, side: "from", state: "waiting-to" });
   is("again: nothing changes", await confirmPurchaseMove(asked.fromToken, t0 + 3_000), { ok: true, id: asked.id, side: "from", state: "waiting-to" });
-  is("its time is the first press", (await readPurchaseMove(asked.id, t0 + 3_000))?.fromConfirmedAt, Math.floor((t0 + 2_000) / 1000));
+  is("its time is the first press", (await readPurchaseMove(asked.id))?.fromConfirmedAt, Math.floor((t0 + 2_000) / 1000));
   is("still not claimed", await claimPurchaseMove(asked.id, t0 + 3_000), { ok: false, reason: "not-ready" });
   is("the new address confirms", await confirmPurchaseMove(asked.toToken, t0 + 4_000), { ok: true, id: asked.id, side: "to", state: "ready" });
 
@@ -81,6 +81,13 @@ async function main(): Promise<void> {
   const twice = await Promise.all([claimPurchaseMove(both.id, t0 + 3_000), claimPurchaseMove(both.id, t0 + 3_000)]);
   is("two claims at once: neither moves it again", twice.map((c) => c.ok), [false, false]);
 
+  const race = await askPurchaseMove({ from: "r1@example.com", to: "r2@example.com", scope: "all", now: t0 });
+  if (!race.ok) throw new Error("not asked");
+  await confirmPurchaseMove(race.fromToken, t0 + 1_000);
+  await confirmPurchaseMove(race.toToken, t0 + 1_000);
+  const racing = await Promise.all([claimPurchaseMove(race.id, t0 + 2_000), claimPurchaseMove(race.id, t0 + 2_000)]);
+  is("two claims racing on a ready request: exactly one moves it, the other is told it is done", racing.map((c) => (c.ok ? "ok" : c.reason)).sort(), ["done", "ok"]);
+
   part("A request not finished in time");
   const late = await askPurchaseMove({ from: "c@example.com", to: "d@example.com", scope: "all", now: t0 });
   if (!late.ok) throw new Error("not asked");
@@ -88,7 +95,7 @@ async function main(): Promise<void> {
   is("past its day, a link still kept is refused", await confirmPurchaseMove(late.toToken, t0 + MOVE_CONFIRM_SECONDS * 1000), { ok: false, reason: "expired" });
   advance(MOVE_CONFIRM_SECONDS * 1000 + 1_000);
   is("and once its keys ended, the link is gone", await confirmPurchaseMove(late.toToken, t0 + MOVE_CONFIRM_SECONDS * 1000 + 1_000), { ok: false, reason: "link" });
-  is("the request is gone too", await readPurchaseMove(late.id, t0 + MOVE_CONFIRM_SECONDS * 1000 + 1_000), null);
+  is("the request is gone too", await readPurchaseMove(late.id), null);
 
   part("At most three a day for one address");
   redis.clear();
@@ -106,6 +113,12 @@ async function main(): Promise<void> {
   undo();
   undo = answer("GET", "nl:pm:t:", 42);
   is("a link that cannot be read", await confirmPurchaseMove(u.fromToken, t0 + 1_000), { ok: false, reason: "unknown" });
+  undo();
+  undo = answer("SET", "nl:pm:r:", "QUEUED");
+  is("a request not written exactly sends no links", await askPurchaseMove({ from: "i@example.com", to: "j@example.com", scope: "all", now: t0 }), { ok: false, reason: "unknown" });
+  undo();
+  undo = answer("GET", "nl:pm:c:", "yesterday");
+  is("a confirmation that cannot be read is unknown, never none", await confirmPurchaseMove(u.fromToken, t0 + 1_000), { ok: false, reason: "unknown" });
   undo();
   undo = answer("GET", "nl:pm:r:", "{broken");
   is("a request that cannot be read is not claimed", await claimPurchaseMove(u.id, t0 + 1_000), { ok: false, reason: "unknown" });

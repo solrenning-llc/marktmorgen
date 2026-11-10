@@ -63,7 +63,7 @@ import type { Listing, Store } from "@/lib/store";
 import { listingsNamed, readListing, recordListings } from "@/lib/catalog";
 import { recordEnrollment } from "@/lib/learn";
 import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preorders";
-import { speechFor } from "@/lib/buyer-words";
+import { everyPhrase, speechFor } from "@/lib/buyer-words";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { firstCharge } from "@/lib/move-rules";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
@@ -414,7 +414,8 @@ function paidLine(
     return w.introThen(money(intro.cents), intro.count, product.recurring.interval, `${money(intro.regular)} ${w.every(product.recurring.interval)}`);
   }
   if (product.recurring) {
-    const line = `${money(amount)} ${w.every(every)}`;
+    // Charged every few weeks or months (609 [WP8]): said as charged, never as a single one; a yearly payment is a year.
+    const line = `${money(amount)} ${every === "year" ? w.every("year") : everyPhrase({ language: store.language, currency }, every, product.recurring.every)}`;
     return endsAfter > 0 ? words.paymentsInAll(line, endsAfter) : line;
   }
   return money(amount);

@@ -29,7 +29,12 @@
  *   is still the member's right, and works exactly as before.
  *
  * Without either, a membership runs until somebody cancels it.
+ *
+ * And how often it charges (609 [WP8]): once every interval, or every 2 weeks,
+ * or every 2, 3 or 6 months (lib/recurring-every-rules.ts). Kept only when it
+ * is more than one, so every membership written before reads as it did.
  */
+import { everyPriceLine, parseEvery, readEvery } from "@/lib/recurring-every-rules";
 
 /** The schedules Stripe bills on, and the ones a creator may choose. */
 export const INTERVALS = ["day", "week", "month", "year"] as const;
@@ -50,7 +55,14 @@ export type Recurring = {
   trialDays: number;
   /** How many payments before it ends by itself. 0 is until cancelled. */
   payments: number;
+  /** How many intervals one charge covers, when more than one: 3 with "month" is every 3 months (609 [WP8]). Absent is 1. */
+  every?: number;
 };
+
+/** How many intervals one charge covers: 1 unless the membership says more (609 [WP8]). */
+export function everyOf(recurring: { interval: Interval; every?: number }): number {
+  return parseEvery(recurring.interval, recurring.every);
+}
 
 export function isInterval(value: unknown): value is Interval {
   return (
@@ -64,7 +76,7 @@ function within(raw: unknown, min: number, max: number): number {
   return typeof n === "number" && Number.isInteger(n) && n >= min && n <= max ? n : 0;
 }
 
-export type RecurringProblem = "trial" | "payments";
+export type RecurringProblem = "trial" | "payments" | "every";
 
 /**
  * Reads what the editor sent and returns a schedule, nothing, or which part
@@ -76,6 +88,7 @@ export function readRecurring(
   rawInterval: string,
   rawTrial: unknown = "",
   rawPayments: unknown = "",
+  rawEvery: unknown = "",
 ): Recurring | null | RecurringProblem {
   if (!isInterval(rawInterval)) return null;
   const typed = (value: unknown) => value !== "" && value !== null && value !== undefined && value !== 0 && value !== "0";
@@ -83,7 +96,9 @@ export function readRecurring(
   if (typed(rawTrial) && trialDays === 0) return "trial";
   const payments = within(rawPayments, MIN_MEMBER_PAYMENTS, MAX_MEMBER_PAYMENTS);
   if (typed(rawPayments) && payments === 0) return "payments";
-  return { interval: rawInterval, trialDays, payments };
+  const every = readEvery(rawInterval, rawEvery);
+  if (every === "every") return "every";
+  return { interval: rawInterval, trialDays, payments, ...(every > 1 ? { every } : {}) };
 }
 
 /** Whatever came back from storage, made safe to use. */
@@ -92,10 +107,12 @@ export function parseRecurring(raw: unknown): Recurring | null {
   const value = raw as Partial<Recurring>;
   if (!isInterval(value.interval)) return null;
   // Memberships written before trials and endings existed have neither.
+  const every = parseEvery(value.interval, value.every);
   return {
     interval: value.interval,
     trialDays: within(value.trialDays, MIN_TRIAL_DAYS, MAX_TRIAL_DAYS),
     payments: within(value.payments, MIN_MEMBER_PAYMENTS, MAX_MEMBER_PAYMENTS),
+    ...(every > 1 ? { every } : {}),
   };
 }
 
@@ -124,9 +141,6 @@ export function intervalAdjective(interval: Interval): string {
  * monthly payments of $9". `price` is already written as a person reads it.
  */
 export function membershipPrice(recurring: Recurring, price: string): string {
-  const trial = recurring.trialDays > 0 ? `${recurring.trialDays}-day free trial, then ` : "";
-  if (recurring.payments > 0) {
-    return `${trial}${recurring.payments} ${intervalAdjective(recurring.interval)} payments of ${price}`;
-  }
-  return `${trial}${price} ${everyLabel(recurring.interval)}`;
+  // Said with how often it charges (609 [WP8]): "$90 every 3 months", never "$90 a month" for it.
+  return everyPriceLine({ ...recurring, count: everyOf(recurring) }, price);
 }

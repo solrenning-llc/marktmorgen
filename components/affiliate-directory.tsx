@@ -13,7 +13,11 @@ const EVERY = { day: "daily", week: "weekly", month: "monthly", year: "yearly" }
 function earnWords(product: DirectoryRow["products"][number]): string {
   const after = product.intro ? ", after the introductory price" : "";
   if (product.months === undefined) return `${product.paidInFull ? "a sale paid in full" : "a sale"}${after}`;
-  const payment = `a ${product.interval ? EVERY[product.interval] : ""} payment`.replace("  ", " ");
+  // Charged every few weeks or months (609 [WP8]): "a payment every 3 months", never "a monthly payment".
+  const payment =
+    product.interval && (product.every ?? 1) > 1
+      ? `a payment every ${product.every} ${product.interval}s`
+      : `a ${product.interval ? EVERY[product.interval] : ""} payment`.replace("  ", " ");
   if (product.months >= RECURRING_ALWAYS) return `${payment}, while they pay${after}`;
   return `${payment}, for ${product.months} ${product.months === 1 ? "month" : "months"} from sign-up${product.trialDays ? ", free days included" : ""}${after}`;
 }

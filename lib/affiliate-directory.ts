@@ -78,6 +78,8 @@ export type DirectoryProduct = {
   months?: number;
   /** A membership's billing interval, so "a monthly payment" says how often (lib/product-recurring.ts). */
   interval?: "day" | "week" | "month" | "year";
+  /** How many intervals one payment covers, when more than one (609 [WP8]): "a payment every 3 months". */
+  every?: number;
   /** A membership's free days: the months above count from sign-up, the free days included (lib/affiliates.ts withinMonths). */
   trialDays?: number;
   /** Its first payments are at an introductory price, which earns less than the price shown. */
@@ -151,7 +153,7 @@ function earns(store: Store, listing: Listing): DirectoryProduct | null {
     priceCents: price,
     rate,
     earnCents: commissionOn(price, rate),
-    ...(listing.recurring ? { months, interval: listing.recurring.interval, ...(trialDays > 0 ? { trialDays } : {}) } : {}),
+    ...(listing.recurring ? { months, interval: listing.recurring.interval, ...((listing.recurring.every ?? 1) > 1 ? { every: listing.recurring.every } : {}), ...(trialDays > 0 ? { trialDays } : {}) } : {}),
     ...(activeIntro(listing, store.tiers) ? { intro: true } : {}),
     ...(!listing.recurring && activePlan(listing) && months <= 0 ? { paidInFull: true } : {}),
     image: listing.image ? imageUrl(listing.image.small ? { path: listing.image.small.path } : listing.image) : null,

@@ -169,7 +169,7 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
   // The free trial and the payments it ends after, read by the product route's own rule (lib/product-recurring.ts, readRecurring):
   // one it would refuse (out of range, not a whole number) is not reviewed, and the save says why.
   const recurring = every ? readRecurring(every, draft.trial?.trim() ?? "", draft.payments?.trim() ?? "") : null;
-  if (recurring === "trial" || recurring === "payments") return null;
+  if (recurring === "trial" || recurring === "payments" || recurring === "every") return null;
   const trial = recurring ? recurring.trialDays : 0;
   const payments = recurring ? recurring.payments : 0;
   // An introductory or yearly price the route refuses for the product as this save leaves it (lib/intro-price.ts, lib/yearly-price.ts):

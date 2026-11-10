@@ -6,7 +6,7 @@ import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
 import { fairOff } from "@/lib/fair-price";
-import { endsLine, membershipLine, planLine, speech, worthLine } from "@/lib/buyer-words";
+import { endsLine, everyPhrase, membershipLine, planLine, speech, worthLine } from "@/lib/buyer-words";
 import Link from "next/link";
 import { isFree, syncTakesBuyer, type Listing, type Store } from "@/lib/store";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
@@ -64,7 +64,8 @@ export function pricePill(store: Store, product: Listing): string {
   if (isFree(product)) return w.free;
   if (activePwyw(product)) return `${money(product.priceCents)}+`;
   const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
+  // How often, as charged: "a month", or "every 3 months" (609 [WP8]).
+  const every = product.recurring ? ` ${everyPhrase(store, product.recurring.interval, product.recurring.every)}` : "";
   // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
   const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
   if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));
@@ -628,7 +629,8 @@ export function BuyBox({
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
   const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
+  // How often, as charged: "a month", or "every 3 months" (609 [WP8]).
+  const every = product.recurring ? ` ${everyPhrase(store, product.recurring.interval, product.recurring.every)}` : "";
   // What one costs in each option whose name says how many (lib/option-units.ts); not for a membership's price.
   const units = product.recurring ? new Map<string, UnitLine>() : unitLines(options);
   const unitWords = (u: UnitLine) => [w.perUnit(money(u.perUnitCents), u.unit), u.savePercent ? w.unitSaving(u.savePercent) : ""].filter(Boolean).join(" · ");
@@ -1109,7 +1111,7 @@ export function pageAction(
       : trial
         ? w.startTrial(trial)
         : product.recurring
-          ? introButton(store, product) ?? w.subscribeFor(money(product.priceCents), w.every(product.recurring.interval))
+          ? introButton(store, product) ?? w.subscribeFor(money(product.priceCents), everyPhrase(store, product.recurring.interval, product.recurring.every))
           : w.buyFor(money(salePrice(product.priceCents, offNow(store, product)))),
   };
 }

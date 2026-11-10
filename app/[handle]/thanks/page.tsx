@@ -75,7 +75,7 @@ import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
-import { speech } from "@/lib/buyer-words";
+import { everyPhrase, speech } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
@@ -630,6 +630,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const thanksNote = order.state === "paid" && order.product.note ? await readThanksNote(store.statsId, order.product.id).catch(() => null) : null;
   // How often a membership charges as it was bought: a monthly one may have been paid yearly (lib/yearly-price.ts).
   const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
+  // And said as it is charged: "every 3 months" for one charged every few months (609 [WP8]).
+  const paidPhrase =
+    order.state === "paid" && order.product.recurring && paidEvery !== "year" ? everyPhrase(store, paidEvery, order.product.recurring.every) : speech(store).w.every(paidEvery);
   // A membership's introductory price, as its checkout carried it (lib/intro-price.ts).
   const introPaid = order.state === "paid" && order.product.recurring ? introOf((order.record.metadata ?? {}) as Record<string, string>) : null;
 
@@ -830,9 +833,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                               money(introPaid.cents, order.currency),
                               introPaid.count,
                               order.product.recurring.interval,
-                              t.priceEvery(money(introPaid.regular, order.currency), speech(store).w.every(paidEvery)),
+                              t.priceEvery(money(introPaid.regular, order.currency), paidPhrase),
                             )
-                          : t.priceEvery(money(order.amount, order.currency), speech(store).w.every(paidEvery))
+                          : t.priceEvery(money(order.amount, order.currency), paidPhrase)
                         : order.plan
                           ? t.priceToday(money(order.amount, order.currency))
                           : money(order.amount, order.currency),
@@ -879,8 +882,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   {canManage(store) ? (
                     <>
                       {order.endsAfter > 0
-                        ? t.renewsForSelf(speech(store).w.every(paidEvery), order.endsAfter)
-                        : t.renewsUntilSelf(speech(store).w.every(paidEvery))}
+                        ? t.renewsForSelf(paidPhrase, order.endsAfter)
+                        : t.renewsUntilSelf(paidPhrase)}
                       <Link href={`/@${store.handle}/manage`} className="font-semibold underline underline-offset-4">
                         {t.manageMembership}
                       </Link>
@@ -888,8 +891,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     </>
                   ) : (
                     order.endsAfter > 0
-                      ? t.renewsForReply(speech(store).w.every(paidEvery), order.endsAfter, store.name)
-                      : t.renewsUntilReply(speech(store).w.every(paidEvery), store.name)
+                      ? t.renewsForReply(paidPhrase, order.endsAfter, store.name)
+                      : t.renewsUntilReply(paidPhrase, store.name)
                   )}
                 </p>
               ) : null}

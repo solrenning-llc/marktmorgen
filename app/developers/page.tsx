@@ -193,6 +193,7 @@ export default function DevelopersPage() {
       "currency": "usd",
       "kind": "one_time",
       "interval": null,
+      "interval_count": null,
       "hidden": false,
       "url": "https://marktmorgen.com/@harbor/p/k3j9x2p1ab"
     }
@@ -203,7 +204,9 @@ export default function DevelopersPage() {
           <code className="font-mono">kind</code> is one of <code className="font-mono">one_time</code>,{" "}
           <code className="font-mono">free</code>, <code className="font-mono">membership</code>,{" "}
           <code className="font-mono">course</code> or <code className="font-mono">call</code>.{" "}
-          <code className="font-mono">interval</code> is set for a membership.
+          <code className="font-mono">interval</code> is set for a membership, and{" "}
+          <code className="font-mono">interval_count</code> says how many of them one charge covers: 3 with{" "}
+          <code className="font-mono">month</code> is every 3 months.
         </p>
       </LegalSection>
 

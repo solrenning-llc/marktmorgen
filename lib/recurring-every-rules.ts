@@ -124,19 +124,21 @@ export function stripeEveryFields(prefix: string, interval: Interval, count: num
 }
 
 /** What a membership billed every N cannot go with yet, each said to the creator by its reason. */
-export type EveryProblem = "intro" | "yearly" | "pause" | "tiers";
+export type EveryProblem = "intro" | "yearly" | "pause" | "tiers" | "payments";
 
 /**
  * Why a count above 1 cannot go on this membership, or null when it can.
  * Each of these is counted in single weeks or months today, so it would charge
  * or pause on a schedule the page does not say.
  */
-export function everyProblem(count: number, product: { intro?: unknown; yearly?: unknown; pauseOn?: boolean; inTiers?: boolean }): EveryProblem | null {
+export function everyProblem(count: number, product: { intro?: unknown; yearly?: unknown; pauseOn?: boolean; inTiers?: boolean; payments?: number }): EveryProblem | null {
   if (count <= 1) return null;
   if (product.intro) return "intro";
   if (product.yearly) return "yearly";
   if (product.pauseOn) return "pause";
   if (product.inTiers) return "tiers";
+  // A set number of payments is ended by lib/plans.ts counting single intervals (unit 2, 10 November 2026): not yet.
+  if ((product.payments ?? 0) > 0) return "payments";
   return null;
 }
 
@@ -147,4 +149,5 @@ export const EVERY_PROBLEM_WORDS: Readonly<Record<EveryProblem | "every", string
   yearly: "A yearly option works only on a membership that charges every month. Remove it, or charge every month.",
   pause: "Members can pause only a membership that charges every month. Turn off pausing, or charge every month.",
   tiers: "Switching plans works only between memberships that charge every week or every month. Take it out of the plans, or charge every month.",
+  payments: "A set number of payments works only on a membership that charges every week or every month. Leave the number of payments empty, or charge every month.",
 };

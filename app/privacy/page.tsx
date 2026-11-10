@@ -960,7 +960,10 @@ export default function PrivacyPage() {
           day, to hold them to their limits. Any key of a store, one that only
           reads included, can also list the store&apos;s sales with each
           buyer&apos;s email address and name, read from the creator&apos;s own
-          Stripe account when the tool asks; we do not keep that list.
+          Stripe account when the tool asks; we do not keep that list. When a
+          tool sends an Idempotency-Key with a request that gives a product or
+          puts somebody on the list, we keep our answer to that request, which
+          names the person, for 24 hours, so a repeat of it does not act twice.
         </p>
         <p id="code-links">
           <strong className="text-black">

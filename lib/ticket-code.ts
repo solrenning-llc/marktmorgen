@@ -10,13 +10,30 @@
  *     name or anything else about the person holding it;
  *   - end: when the code stops being good, in seconds, base 36;
  *   - signature: an HMAC-SHA256 of the rest, under a key derived from this
- *     deployment's own secret in the environment (lib/secret-box.ts,
- *     deriveKey), as lib/chat-pass.ts and lib/review-requests.ts sign theirs;
- *     160 bits, compared in constant time.
+ *     deployment's own NIMBUS_DATA_KEY (lib/secret-box.ts, deriveKey), as
+ *     lib/chat-pass.ts and lib/review-requests.ts sign theirs; 160 bits,
+ *     compared in constant time.
  * Anyone can read what a code says; only this deployment can make one. A
  * code someone changed, or made under another key, is refused as forged; one
  * past its end is refused as expired. With no key in the environment no code
  * is made and none is read as good (rule 24).
+ *
+ * Only NIMBUS_DATA_KEY, never the STRIPE_SECRET_KEY fallback of
+ * lib/secret-box.ts (Claude 3, MEDIUM 1 on #3457): a code is printed and
+ * good for up to MAX_TICKET_DAYS, and a key change would make every ticket
+ * sold read as forged at the door. Under the Stripe key alone no code is
+ * made or read ("no_key"), so neither rotating the Stripe key nor setting
+ * NIMBUS_DATA_KEY for the first time touches a ticket. NIMBUS_DATA_KEY itself
+ * must not change while a ticket is good; a rotation needs a new version
+ * that names its key, which this unit does not build.
+ *
+ * Event ids are unique across all stores (TICKET_EVENT_ID): the signature
+ * names the event and the ticket, not the store (Claude 3, LOW 3 on #3457).
+ *
+ * Before a door uses checkIn (a later unit), it must take an exact read of
+ * the ticket's state: a refunded, cancelled, disputed or transferred ticket,
+ * or one whose state cannot be read, never gets in (rule 24; Claude 3, LOW 2
+ * on #3457). Nothing calls checkIn today and no ticket is sold.
  *
  * Check-in is one-time: a mark per ticket taken with SET NX (lib/claim-mark.ts),
  * which admits only when the mark is ours (exactly "OK", or our own value read
@@ -27,13 +44,16 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { claimMark } from "@/lib/claim-mark";
-import { deriveKey } from "@/lib/secret-box";
+import { deriveKey, rootName } from "@/lib/secret-box";
 
 const VERSION = "t1";
 const KEY_LABEL = "event-ticket/v1";
 const SIGNATURE_HEX = 40;
 
-/** An event's id as a code carries it: opaque, never personal. */
+/**
+ * An event's id as a code carries it: opaque, never personal, and unique
+ * across every store (the signature does not name the store).
+ */
 export const TICKET_EVENT_ID = /^[a-z0-9]{6,32}$/;
 /** A ticket's id as a code carries it: opaque, never personal. */
 export const TICKET_ID = /^[a-z0-9]{16}$/;
@@ -52,7 +72,8 @@ export function newTicketId(): string {
 }
 
 function signature(event: string, ticket: string, expiresAt: number): string | null {
-  const key = deriveKey(KEY_LABEL);
+  // Only under NIMBUS_DATA_KEY: the Stripe key may be rotated at any time (see above).
+  const key = rootName() === "NIMBUS_DATA_KEY" ? deriveKey(KEY_LABEL) : null;
   return key ? createHmac("sha256", key).update(`${VERSION}|${event}|${ticket}|${expiresAt}`).digest("hex").slice(0, SIGNATURE_HEX) : null;
 }
 

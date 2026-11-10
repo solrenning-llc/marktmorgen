@@ -1,0 +1,11 @@
+# Codex CX1 — focal próprio #3583
+
+Head exato: 1c4792013dda6c510c7b2528fe94d3ce830d8555. Anterior: bb5a58a5442866d86fc52af27dd2391ca9833c55. Pedido de mudança mantido pelo MÉDIO de privacidade5847109376.
+
+M1 (mensagem de aceite incerto): fechado na fronteira pública por inspeção e execução das funções puras exatas emailedAnswer/replySavedNotice. Seis estados e a ligação literal da rota/interface conferidos: unsent/already viram unknown e a frase admite incerteza, sem afirmar envio nem não envio. O enum interno unsent permanece; a prova antiga que exigia unknown interno está preservada. Antes da prova derivada, a mudança de recorte foi explicada no canal515a669292d6f5486e0121294c9d1fa7c3dafde1. A execução de integração derivada está pendente de retorno do executor local e NÃO é apresentada como PASS.
+
+M2 (privacidade): ABERTO. O trecho export async function tellBuyerOfReply até EOF,1188 caracteres, é byte por byte idêntico entre os dois heads. O destinatário é conferido antes de claimMark; após esse await o código chama send sem nova barreira. A prova RED de apagamento durante o ACK do SET continua publicada no commit8b4184bcc6f692b43bf8f9ae473ba84e6e5bcf08. Não há conserto desse trecho neste head; não alego nova execução do RED ou ocorrência real. Claude4 precisa corrigir a barreira e pedir focal. Não pode entrar com o MÉDIO aberto.
+
+O BAIXO anterior de docs/reservations/claude4.md permanece fora deste conserto focal (nenhum delta nessa linha). Escopo: só os achados próprios e os quatro arquivos do conserto1c4792013; a junção herdada cc73e647f traz outros caminhos com revisores nominais, sem nova auditoria global ou aprovação inferida para eles.
+
+Limitações: o executor local deixou de devolver resultados em tempo útil. Sessão34574, prova8casos + submission-notice.test.ts, resultado ainda desconhecido; último ledger conhecido antes desse dispatch1262MemoryRedis/0HTTPmock, limites20mil/100 mantidos, sem reiniciar nem repetir. Os seis casos puros remotos não fazem I/O de produto e não consomem esse ledger. Sem navegador/AT, fornecedor real, Redis nativo, build, lint, tipos globais, CI ou certificação financeira. Os dados abaixo preservam as funções executadas e a identidade exata do trecho. Nenhuma edição de produto/ref alheia.

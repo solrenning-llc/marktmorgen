@@ -1,0 +1,47 @@
+{
+  "identity": {
+    "prior": "bb5a58a5442866d86fc52af27dd2391ca9833c55",
+    "head": "1c4792013dda6c510c7b2528fe94d3ce830d8555",
+    "body": "export async function tellBuyerOfReply(input: NoticeInput, send: (message: NoticeMessage) => Promise<boolean> = sendEmail): Promise<ReplyNotice> {\n  const { store, submission } = input;\n  if (submission.state !== \"reviewed\" || !submission.reply || submission.target.kind !== \"lesson\") return \"none\";\n  if (!ID.test(submission.folder) || !ID.test(submission.id)) return \"none\";\n  const to = oneAddress(submission.buyer);\n  if (!to) return \"none\";\n  const open = await recipient(store, to);\n  if (open !== \"open\") return open;\n  const claimed = await claimMark(toldKey(submission.folder, submission.id), SUBMISSION_TOLD_SECONDS);\n  if (claimed === \"taken\") return \"already\";\n  if (claimed === \"unknown\") return \"unknown\";\n  const message = replyNoticeMessage(input);\n  // The mark stays whatever happens next: a send that may have gone is never repeated.\n  const went = await send({\n    meter: { by: \"store\", store, kind: \"email\" },\n    from: noticeSender(store),\n    to,\n    subject: message.subject,\n    text: message.text,\n    html: message.html,\n    idempotencyKey: `submission-reply:${submission.folder}:${submission.id}`,\n  }).catch(() => false);\n  return went ? \"sent\" : \"unsent\";\n}\n",
+    "exact": true
+  },
+  "pure": {
+    "mapBody": "\n  if (told === \"sent\") return true;\n  if (told === \"unsent\" || told === \"already\") return \"unknown\";\n  return false;",
+    "wordsBody": "\n  if (emailed === true) return \"Reply saved with the file. The buyer was emailed.\";\n  if (emailed === false) return \"Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson.\";\n  return \"Reply saved with the file. We could not confirm whether the buyer was emailed, so they will see it when they open the lesson.\";",
+    "cases": [
+      {
+        "input": "sent",
+        "answer": true,
+        "words": "Reply saved with the file. The buyer was emailed."
+      },
+      {
+        "input": "unsent",
+        "answer": "unknown",
+        "words": "Reply saved with the file. We could not confirm whether the buyer was emailed, so they will see it when they open the lesson."
+      },
+      {
+        "input": "already",
+        "answer": "unknown",
+        "words": "Reply saved with the file. We could not confirm whether the buyer was emailed, so they will see it when they open the lesson."
+      },
+      {
+        "input": "stopped",
+        "answer": false,
+        "words": "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson."
+      },
+      {
+        "input": "none",
+        "answer": false,
+        "words": "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson."
+      },
+      {
+        "input": "unknown",
+        "answer": false,
+        "words": "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson."
+      }
+    ],
+    "routeWiring": true,
+    "uiWiring": true,
+    "scope": "Only exact pure function bodies evaluated; no new dispatch, no claim of completed pending integration run."
+  }
+}

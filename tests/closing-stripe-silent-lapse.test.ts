@@ -226,7 +226,9 @@ async function main(): Promise<void> {
   platform = "down";
   await quietly(() => closeOne(alive.email, alive.ended + (C + 1) * DAY, hands));
   platform = "up";
-  running.set(alive.handle, { id: `sub_${alive.handle}0001`, object: "subscription", status: "active", customer: `cus_${alive.handle}0001`, metadata: { store: alive.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } }, current_period_end: Math.floor((alive.ended + 60 * DAY) / 1000) }] }, current_period_end: Math.floor((alive.ended + 60 * DAY) / 1000) });
+  // A plan in good standing as Stripe sends it (lib/billing.ts reads a search row exactly: its created, its customer
+  // expanded, its one USD item and price, its period and its stop fields).
+  running.set(alive.handle, { id: `sub_${alive.handle}0001`, object: "subscription", status: "active", created: Math.floor((alive.ended - 30 * DAY) / 1000), cancel_at: null, cancel_at_period_end: false, customer: { id: `cus_${alive.handle}0001`, object: "customer", email: alive.email }, metadata: { store: alive.handle, tier: "creator" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 6900, recurring: { interval: "month", interval_count: 1 } }, current_period_start: Math.floor((alive.ended + 30 * DAY) / 1000), current_period_end: Math.floor((alive.ended + 60 * DAY) / 1000) }] }, current_period_end: Math.floor((alive.ended + 60 * DAY) / 1000) });
   const aliveAfter = await quietly(() => closeOne(alive.email, alive.ended + (C + SILENT + 1) * DAY, hands));
   is("the store runs: the deadline replaces a hold, never an answer", [aliveAfter.state, filesOf(alive), await inLine(alive), aliveAfter.lapsed], ["running", 1, false, undefined]);
 

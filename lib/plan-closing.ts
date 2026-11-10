@@ -160,9 +160,19 @@ type State = {
   silentLast?: number;
   /** When its members whose renewals were not stopped were told they may keep renewing (Claude 3's M2 on #3463). */
   renewalsTold?: number;
-  /** Why it was last kept past the published time, so a run that did not ask counts it under the same reason. */
-  overdueWhy?: OverdueReason;
+  /** Why it was last kept past the published time, so a run that did not ask counts it under the same reason: its index in OVERDUE_REASONS (overdueWhy). */
+  overdueAs?: number;
 };
+
+/**
+ * Why a store was last kept past the published time, kept as its index in OVERDUE_REASONS: a closing record holds only
+ * numbers (and buyersAfter), the shape lib/plan-closing.ts readState reads it in (CX-123 rule 24); a reason kept as
+ * text made the record unreadable. An index that names no reason is none.
+ */
+function overdueWhy(state: State): OverdueReason | undefined {
+  const at = state.overdueAs;
+  return at !== undefined && Number.isInteger(at) && at >= 0 && at < OVERDUE_REASONS.length ? OVERDUE_REASONS[at] : undefined;
+}
 
 /** Whether a plan that ended at `endedAt` has its buyers told before its store closes (lib/closing-buyers-rules.ts). */
 export function tellsBuyers(endedAt: number): boolean {
@@ -174,11 +184,11 @@ function parseState(raw: unknown): State {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     const out: State = {};
-    for (const name of ["of", "ended", "month", "week", "removed", "said", "fit", "renewals", "due", "erased", "hold", "holdFrom", "day", "buyersFrom", "buyersDone", "buyersPages", "buyersCapped", "untold", "refunds", "lapseFrom", "lapsed", "unstopped", "refusedFrom", "refusedLast", "silentFrom", "silentLast", "renewalsTold"] as const) {
+    for (const name of ["of", "ended", "month", "week", "removed", "said", "fit", "renewals", "due", "erased", "hold", "holdFrom", "day", "buyersFrom", "buyersDone", "buyersPages", "buyersCapped", "untold", "refunds", "lapseFrom", "lapsed", "unstopped", "refusedFrom", "refusedLast", "silentFrom", "silentLast", "renewalsTold", "overdueAs"] as const) {
       if (typeof value[name] === "number" && Number.isFinite(value[name] as number)) out[name] = value[name] as number;
     }
     if (typeof value.buyersAfter === "string" && /^(start|\d{1,3}\|[!-~]{0,800})$/.test(value.buyersAfter)) out.buyersAfter = value.buyersAfter;
-    if ((OVERDUE_REASONS as readonly unknown[]).includes(value.overdueWhy)) out.overdueWhy = value.overdueWhy as OverdueReason;
+    // `overdueAs` is read with the other numbers above; one that names no reason is left out (overdueWhy).
     return out;
   } catch {
     return {};
@@ -850,8 +860,8 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     try {
       const [raw] = await redisPipeline([["GET", stateKey(key)]]);
       const kept = parseState(raw);
-      if (result.note === "daily-recheck-budget") result.overdue = kept.overdueWhy ?? result.overdue;
-      else if (typeof raw === "string" && kept.overdueWhy !== result.overdue) await redisPipeline([["SET", stateKey(key), JSON.stringify({ ...kept, overdueWhy: result.overdue })]]);
+      if (result.note === "daily-recheck-budget") result.overdue = overdueWhy(kept) ?? result.overdue;
+      else if (typeof raw === "string" && overdueWhy(kept) !== result.overdue) await redisPipeline([["SET", stateKey(key), JSON.stringify({ ...kept, overdueAs: OVERDUE_REASONS.indexOf(result.overdue) })]]);
       await recordOverdue(key, result.overdue, now);
     } catch (error) {
       console.error("counting a closing store kept past its published time failed", error);

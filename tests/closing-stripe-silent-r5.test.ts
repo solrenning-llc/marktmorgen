@@ -220,6 +220,16 @@ async function main(): Promise<void> {
   const late = await quietly(() => closeOne(b.email, b.ended + (C + SILENT + 2) * DAY, hands));
   is("first silence after the gap, past the deadline: held, nothing removed", [late.state, filesOf(b), typeof (await record(b))?.lapsed], ["held", 1, "undefined"]);
 
+  part("The closing record stays in the shape main reads it in: every field a number, buyersAfter the only text");
+  // lib/plan-closing.ts readState on main (CX-123 rule 24) refuses any other field as an unknown reply, so a reason
+  // kept as text (`overdueWhy`) made every store held past its published time unreadable once merged.
+  // The store whose count started again: still silent, now past its published time, so it is counted with a reason.
+  const past = await quietly(() => closeOne(b.email, b.ended + (C + ERASE_WITHIN_DAYS + 2) * DAY, hands));
+  is("held past its published time, with a reason", [past.state, typeof past.overdue], ["held", "string"]);
+  const kept = await record(b);
+  is("a store held past its published time keeps why, as a number", Object.entries(kept ?? {}).filter(([name, value]) => name === "buyersAfter" ? typeof value !== "string" : typeof value !== "number" || !Number.isFinite(value)).map(([name]) => name), []);
+  is("…and it was kept", typeof (kept as Record<string, unknown> | null)?.overdueAs, "number");
+
   part("A platform outage too (our key silent in the same run): ours, held every day");
   fresh();
   const c = await withMember("outagesilent", "acct_1OutageSilent01");

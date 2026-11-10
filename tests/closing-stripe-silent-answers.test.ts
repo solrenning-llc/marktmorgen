@@ -155,7 +155,9 @@ const clockAt = (ms: number) => {
 };
 
 
-const activeSub = (made: Made, extra: Record<string, unknown> = {}) => ({ id: `sub_${made.handle}0001`, object: "subscription", status: "active", customer: `cus_${made.handle}0001`, metadata: { store: made.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } }, current_period_end: Math.floor((made.ended + 60 * DAY) / 1000) }] }, current_period_end: Math.floor((made.ended + 60 * DAY) / 1000), ...extra });
+// A plan in good standing as Stripe sends it (lib/billing.ts reads a search row exactly: its created, its customer
+// expanded, its one USD item and price, its period and its stop fields).
+const activeSub = (made: Made, extra: Record<string, unknown> = {}) => ({ id: `sub_${made.handle}0001`, object: "subscription", status: "active", created: Math.floor((made.ended - 30 * DAY) / 1000), cancel_at: null, cancel_at_period_end: false, customer: { id: `cus_${made.handle}0001`, object: "customer", email: made.email }, metadata: { store: made.handle, tier: "creator" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 6900, recurring: { interval: "month", interval_count: 1 } }, current_period_start: Math.floor((made.ended + 30 * DAY) / 1000), current_period_end: Math.floor((made.ended + 60 * DAY) / 1000) }] }, current_period_end: Math.floor((made.ended + 60 * DAY) / 1000), ...extra });
 
 async function main(): Promise<void> {
   redis.clear();

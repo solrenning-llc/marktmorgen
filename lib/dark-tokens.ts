@@ -1,10 +1,11 @@
 /**
  * The dark color tokens of the Marktmorgen site, studio and buyer area: stage 1 of dark mode (complement WG (a) of
- * 274 [AX1], 10 November 2026). DORMANT: they apply only under `:root[data-color-scheme="dark"]` (app/globals.css),
- * and nothing sets that attribute yet, so no page looks any different today. Stage 2 adds the switch ("Light",
- * "Dark", "Match my device") and the script that sets the attribute before the first paint; stage 3 replaces the
- * fixed light colors in the pages (bg-white, text-black, #fff) with tokens. Creators' stores keep their own themes
- * (lib/store-look.ts) and are not touched by any stage.
+ * 274 [AX1], 10 November 2026). They apply only under `:root[data-color-scheme="dark"]` (app/globals.css), which
+ * only a reader's own choice sets: stage 2 added the switch ("Light", "Dark", "Match my device",
+ * components/color-scheme-switch.tsx) and the script that applies it before the first paint (lib/color-scheme.ts),
+ * and limits them to the pages proved AAA (DARK_READY below). Nobody who has not chosen sees any change. Stage 3
+ * replaces the fixed light colors in the other pages (bg-white, text-black, #fff) with tokens and widens the proof.
+ * Creators' stores keep their own themes (lib/store-look.ts) and are not touched by any stage.
  *
  * Every pair a token is used in is listed below with its role, and tests/dark-tokens.test.ts holds each to the AAA
  * threshold of its role (WCAG 2.2): 7:1 for text (1.4.6), 4.5:1 for large text (1.4.6), 3:1 for the edges of
@@ -107,7 +108,71 @@ export function contrastRatio(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-export const DARK_BLOCK_START = "/* 274 [AX1] dark mode, stage 1: dormant dark tokens (lib/dark-tokens.ts). */";
+
+/**
+ * Stage 2: the pages the dark tokens are proved on. tests/dark-scheme-switch.test.ts reads every color pair these
+ * pages and their components draw and holds each to AAA with the tokens on. A page is covered when it has this
+ * class, which only the policy pages (components/legal-page.tsx) carry; every other page stays light even when the
+ * reader chose dark, until stage 3 moves it off its fixed light colors and the test proves it too. A browser that
+ * cannot read :has() keeps every page light.
+ */
+export const DARK_READY = ".legal-body";
+export const DARK_SELECTOR = `:root[data-color-scheme="dark"]:has(${DARK_READY})`;
+
+/**
+ * The light palette's own tokens, given their dark role on the covered pages. The light indigo is both a link's color
+ * and a button's fill; in the dark those are two tokens (above), so each light name takes the role it mostly plays:
+ * --violet-deep and --violet-ink are text (links, eyebrows, icons), --violet is a fill (a button, a toast).
+ */
+export const LEGACY_TOKENS: Record<string, DarkToken> = {
+  "violet-deep": "link",
+  "violet-ink": "link",
+  violet: "action-bg",
+};
+
+/**
+ * The rules a covered page needs besides its tokens: a fixed light color (#fff, text-black) or a light name used in
+ * its other role. Each is one class (and state) of app/globals.css or one Tailwind utility, written under
+ * `:where(DARK_SELECTOR)` so it weighs exactly what the rule it replaces weighs: it wins by coming later (and, over a
+ * Tailwind utility, by being outside its layer), while a :hover or :focus of the same class still wins over it.
+ */
+export const DARK_OVERRIDE_PREFIX = `:where(${DARK_SELECTOR}) `;
+export const DARK_OVERRIDES: readonly { selector: string; set: Record<string, string> }[] = [
+  // Fixed light utilities.
+  { selector: ".text-black", set: { color: "var(--ink)" } },
+  { selector: ".bg-white", set: { "background-color": "var(--sand)" } },
+  { selector: String.raw`.bg-white\/92`, set: { "background-color": "color-mix(in srgb, var(--paper) 92%, transparent)" } },
+  { selector: String.raw`.focus\:bg-white:focus`, set: { "background-color": "var(--sand-deep)" } },
+  { selector: ".bg-ink", set: { "background-color": "var(--sand-deep)" } },
+  // Red text is error copy: its own token, not the red of a mark.
+  { selector: ".text-danger", set: { color: "var(--danger-text)" } },
+  // Boxes drawn on white: a raised surface instead.
+  { selector: ".card", set: { background: "var(--sand)" } },
+  { selector: ".card-flat", set: { background: "var(--sand)" } },
+  { selector: ".notice", set: { background: "var(--sand)" } },
+  { selector: ".chip", set: { background: "var(--sand-deep)" } },
+  { selector: ".field", set: { background: "var(--sand-deep)", "border-color": "var(--line-off)" } },
+  { selector: ".btn-secondary", set: { "background-color": "var(--sand-deep)" } },
+  { selector: ".btn-light", set: { "background-color": "var(--sand-deep)" } },
+  // Coming later in the sheet at the same weight, the overrides above would win over a variant's own fill, so each
+  // variant says its fill again. A state (:hover, :focus) weighs more and keeps its own.
+  { selector: ".chip-brand", set: { background: "var(--lilac)" } },
+  { selector: ".chip-dark", set: { background: "var(--fill-dark)" } },
+  { selector: ".notice-success", set: { background: "var(--mint-soft)" } },
+  { selector: ".notice-warn", set: { background: "var(--amber-soft)" } },
+  { selector: ".notice-error", set: { background: "var(--danger-soft)" } },
+  { selector: ".notice-info", set: { background: "var(--lilac)" } },
+  // White labels on the indigo or the red, which turn light: the dark label instead.
+  { selector: ".btn-primary", set: { color: "var(--action-on)" } },
+  { selector: ".btn-danger-solid", set: { color: "var(--action-on)" } },
+  { selector: ".btn-danger-solid:hover", set: { "background-color": "var(--danger-text)" } },
+  { selector: ".nb-toast", set: { color: "var(--action-on)" } },
+  { selector: ".nb-toast-close", set: { color: "var(--action-on)" } },
+  // Selected text on a dark band keeps the band's white.
+  { selector: ".on-dark ::selection", set: { color: "var(--on-dark)", background: "rgba(255, 255, 255, 0.2)" } },
+];
+
+export const DARK_BLOCK_START = "/* 274 [AX1] dark mode: dark tokens (lib/dark-tokens.ts). */";
 export const DARK_BLOCK_END = "/* end dark tokens */";
 
 /** The CSS block app/globals.css carries, exactly. */
@@ -115,13 +180,15 @@ export function darkTokensCss(): string {
   const lines = Object.entries(DARK_TOKENS).map(([name, hex]) => `  --${name}: ${hex};`);
   return [
     DARK_BLOCK_START,
-    "/* Nothing sets data-color-scheme yet, so no page changes. tests/dark-tokens.test.ts holds every pair to AAA. */",
-    ':root[data-color-scheme="dark"] {',
+    "/* Only for a reader who chose dark (lib/color-scheme.ts), only on the pages DARK_READY names. Generated: edit the module. */",
+    `${DARK_SELECTOR} {`,
     "  color-scheme: dark;",
     ...lines,
+    ...Object.entries(LEGACY_TOKENS).map(([name, token]) => `  --${name}: var(--${token});`),
     "  --background: var(--paper);",
     "  --foreground: var(--ink);",
     "}",
+    ...DARK_OVERRIDES.map((o) => `${DARK_OVERRIDE_PREFIX}${o.selector} { ${Object.entries(o.set).map(([k, v]) => `${k}: ${v};`).join(" ")} }`),
     DARK_BLOCK_END,
   ].join("\n");
 }

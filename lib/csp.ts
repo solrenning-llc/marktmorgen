@@ -61,6 +61,7 @@ import { VIDEO_FRAME_ORIGINS } from "./sales-page";
 import { AUDIO_FRAME_ORIGINS } from "./audio-embed";
 import { STREAM_API_ORIGIN, STREAM_PLAYER_ORIGIN } from "./stream-rules";
 import { VAULT_FILES } from "./vault-rules";
+import { COLOR_SCHEME_HASH } from "./color-scheme";
 import { REVEAL_HASHES } from "./reveal-scripts";
 
 /** Where the ad platforms' own scripts send what they measure. */
@@ -146,8 +147,9 @@ export function dynamicPolicy(nonce: string, options: { store?: boolean; room?: 
     // 'self', https: and 'unsafe-inline' are only for browsers too old to
     // know nonces; every current one ignores them when a nonce is present.
     // The layout's two small scripts carry no nonce, and are allowed by their
-    // hashes instead (lib/reveal-scripts.ts).
-    "script-src": [`'nonce-${nonce}'`, ...REVEAL_HASHES, "'strict-dynamic'", "'self'", "https:", "'unsafe-inline'", ...(dev() ? ["'unsafe-eval'"] : [])],
+    // hashes instead (lib/reveal-scripts.ts), and so is the color scheme
+    // script in <head> (lib/color-scheme.ts).
+    "script-src": [`'nonce-${nonce}'`, ...REVEAL_HASHES, COLOR_SCHEME_HASH, "'strict-dynamic'", "'self'", "https:", "'unsafe-inline'", ...(dev() ? ["'unsafe-eval'"] : [])],
     // The video service's own address is where the studio sends a lesson
     // video's pieces, and its player the one a lesson page frames
     // (lib/stream.ts); the player, like the other three, on a store's pages only.

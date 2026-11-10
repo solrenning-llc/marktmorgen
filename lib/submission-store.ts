@@ -372,8 +372,23 @@ export async function closeSubmissionDoor(
   if (note.length > MAX_SUBMISSION_NOTE) return { ok: false, reason: "note" };
   const door = await ownDoor(pathname, where.folder, where.courseId, where.lessonId, where.who);
   if (!door) return { ok: false, reason: "unknown" };
+  // One close of an upload at a time (review of #3568, Codex C2): the door is taken off Redis in one step before
+  // the vault is asked, so another close of the same upload finds it gone and stops there. No other close can then
+  // write a record for this file, and the read-back below, when it reads "no record", cannot be overtaken by one.
+  const taken = repliesFor(await redisPipeline([["GETDEL", doorKey(pathname)]]), 1);
+  if (!taken) throw new UnknownReplyError("a submission upload taken to close");
+  if (taken[0] === null) return { ok: false, reason: "unknown" };
+  if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to close");
   const closed = await steps.closeReservedVault(pathname, etags);
-  if (!closed.ok) return { ok: false, reason: closed.reason };
+  if (!closed.ok) {
+    // Nothing was kept: the door is put back for the rest of its day, so the buyer can close it again.
+    const left = door.at + UPLOAD_SECONDS - nowSeconds;
+    if (left > 0) {
+      const back = repliesFor(await redisPipeline([["SET", doorKey(pathname), JSON.stringify(door), "EX", left, "NX"]]), 1);
+      if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
+    }
+    return { ok: false, reason: closed.reason };
+  }
   const drop = async () => {
     const gone = await steps.deleteVault([pathname]).catch(() => false);
     if (gone) await givePlace(liveKey(door.folder, door.courseId, door.lessonId, door.who), door.id).catch(() => undefined);
@@ -423,15 +438,14 @@ export async function closeSubmissionDoor(
       ["ZSCORE", live, door.id],
       ["EXPIRE", live, LIVE_SECONDS],
       ["SET", key, json, "EX", until - nowSeconds, "NX"],
-      ["DEL", doorKey(pathname)],
     ]),
-    5,
+    4,
   );
-  if (!replies || countOf(replies[0]) !== 0 || String(replies[1]) !== String(keepUntil) || replies[2] !== 1 || replies[3] !== "OK" || countOf(replies[4]) === null) {
-    // Answered out of shape, or the record's place taken by another close of the same upload first: a record may
-    // name this file, so it is read back exactly, and the file deleted only when Redis confirms there is none.
-    // A record there (this close's, or the other close's, at the same path) keeps it; a read-back that does not
-    // read keeps it too, never deleted on a guess.
+  if (!replies || countOf(replies[0]) !== 0 || String(replies[1]) !== String(keepUntil) || replies[2] !== 1 || replies[3] !== "OK") {
+    // Answered out of shape, or the record's place taken: a record may name this file, so it is read back exactly,
+    // and the file deleted only when Redis confirms there is none. This close holds the door alone (taken above),
+    // so no other close can write that record after the read. A record there keeps the file; a read-back that
+    // does not read keeps it too, never deleted on a guess.
     const back = await redisPipeline([["GET", key]]).then((answer) => repliesFor(answer, 1), () => null);
     if (back && back[0] === null) await drop();
     throw new UnknownReplyError("a submission record's write");

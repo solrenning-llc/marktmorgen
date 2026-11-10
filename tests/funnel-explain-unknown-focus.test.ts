@@ -33,11 +33,13 @@ const issue = { code: "disabled" as const, title: "The funnel address is disable
 const loose = (value: unknown) => value as never;
 
 let asked = 0;
+const shown = { ok: true, value: { why: "Visitors cannot open it while it is off.", todo: ["Open the funnel settings."] }, left: 4 };
+let explainReply: unknown = shown;
 const reply = "{}";
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input), "https://marktmorgen.com");
   if (url.pathname === "/api/store/funnel-explain") {
-    return Response.json({ ok: true, value: { why: "Visitors cannot open it while it is off.", todo: ["Open the funnel settings."] }, left: 4 });
+    return Response.json(explainReply);
   }
   if (url.hostname === "api.anthropic.com") {
     asked += 1;
@@ -88,6 +90,39 @@ async function main(): Promise<void> {
   (button(view.tree(), "Hide the explanation")!.props!.onClick as () => void)();
   await view.settle();
   is("after hiding it, focus is back on the button that shows it", focusedThrough(button(view.tree(), "Explain this with AI")), true);
+
+  part("N1 (Claude 6's focal on #3454): focus never goes to a button that is off");
+  const cost = (tree: unknown) => find(tree, (n) => n.type === "p" && typeof n.props?.id === "string" && String(n.props.id).endsWith("-cost"))[0] as Node | undefined;
+  // The page holds `left` and hands it back down: onLeft sets the props the next drawing reads.
+  const lastProps = { funnelId: "abcdefghij", issue, left: 1, onLeft(next: number) { lastProps.left = next; } };
+  const last = await mount(FunnelIssueExplain as (p: typeof lastProps) => unknown, lastProps);
+  explainReply = { ...shown, left: 0 };
+  await (button(last.tree(), "Explain this with AI")!.props!.onClick as () => Promise<void>)();
+  await last.settle();
+  is("the last job is used: the page is told none is left", lastProps.left, 0);
+  (button(last.tree(), "Hide the explanation")!.props!.onClick as () => void)();
+  await last.settle();
+  const off = button(last.tree(), "Explain this with AI");
+  is("after hiding it, the button is off and focus goes to the sentence that says why", [off?.props?.disabled, focusedThrough(off), cost(last.tree())?.props?.tabIndex, focusedThrough(cost(last.tree()))], [true, false, -1, true]);
+  const usedProps = { funnelId: "abcdefghij", issue, left: 3, onLeft(next: number) { usedProps.left = next; } };
+  const used = await mount(FunnelIssueExplain as (p: typeof usedProps) => unknown, usedProps);
+  explainReply = { ok: false, error: "used" };
+  await (button(used.tree(), "Explain this with AI")!.props!.onClick as () => Promise<void>)();
+  await used.settle();
+  const usedOff = button(used.tree(), "Explain this with AI");
+  is("a 'used' refusal: the button is off and focus goes to the sentence that says why", [usedProps.left, usedOff?.props?.disabled, focusedThrough(usedOff), focusedThrough(cost(used.tree()))], [0, true, false, true]);
+  explainReply = { ok: false, error: "busy" };
+  const againProps = { funnelId: "abcdefghij", issue, left: 3, onLeft() {} };
+  const again = await mount(FunnelIssueExplain as (p: typeof againProps) => unknown, againProps);
+  await (button(again.tree(), "Explain this with AI")!.props!.onClick as () => Promise<void>)();
+  await again.settle();
+  is("a refusal that leaves the button on brings focus back to it", focusedThrough(button(again.tree(), "Explain this with AI")), true);
+  explainReply = shown;
+  const draftPanel = renderToStaticMarkup(createElement(FunnelAiDraftPanel, { type: FUNNEL_TYPES[0], picked: {}, sid: "store-1", ai: loose({ on: true, left: null }), emailsPossible: false, onDraft() {} }));
+  const draftTags = [...draftPanel.matchAll(/<button\b[^>]*>/g)].map((m) => m[0]).filter((tag) => /btn-(primary|secondary)/.test(tag));
+  const statusId = /<p[^>]*id="([^"]+)"[^>]*role="status"|<p[^>]*role="status"[^>]*id="([^"]+)"/.exec(draftPanel);
+  const sid = statusId?.[1] ?? statusId?.[2] ?? "";
+  is("the funnel AI draft panel's buttons point at the sentence that says why they are off", [sid !== "", draftTags.length, draftTags.every((tag) => tag.includes(`aria-describedby="${sid}"`))], [true, 2, true]);
 
   part("L1: the route says an unread allowance could not be checked");
   redis.clear();

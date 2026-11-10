@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const deps = (over: Partial<BulkResendDeps> = {}): BulkResendDeps => ({
     used: async () => 0,
     figure: () => 100,
-    within: async () => true,
+    limit: async () => "within",
     resend: async (_store, reference) => {
       calls.push(reference);
       return "sent";
@@ -182,14 +182,22 @@ async function main(): Promise<void> {
     store,
     { references: [ref(1), ref(2)], skipped: 0 },
     deps({
-      within: async (scope, who, limit, seconds) => {
+      limit: async (scope, who, limit, seconds) => {
         asked.push(`${scope}:${limit}:${seconds}`);
-        return !(scope === "resend-store" && who === "s1" && asked.length > 2);
+        return scope === "resend-store" && who === "s1" && asked.length > 2 ? "exceeded" : "within";
       },
     }),
   );
   is("the single resend's limits, per sale then per store, for each row", asked, ["resend-sale:3:86400", "resend-store:30:3600", "resend-sale:3:86400", "resend-store:30:3600"]);
   is("a row past a limit is not sent and says so", [limited.ok && limited.tally.sent, limited.ok && limited.tally.couldNot, calls], [[ref(1)], [{ reference: ref(2), why: "limited" }], [ref(1)]]);
+
+  calls.length = 0;
+  const blindCounters = await bulkResend(
+    store,
+    { references: [ref(1), ref(2), ref(3)], skipped: 0 },
+    deps({ limit: async (scope, who) => (who === ref(1) ? "unknown" : who === ref(2) ? ("yes" as "within") : scope === "resend-store" ? Promise.reject(new Error("lost")) : "within") }),
+  );
+  is("a counter not known, strange or throwing: not sent, 'not confirmed'", [blindCounters.ok && blindCounters.tally.couldNot.map((c) => c.why), calls], [["failed", "failed", "failed"], []]);
 
   part("The studio's route (app/api/store/sales-bulk), through the real session, store and purchase email");
   redis.clear();

@@ -23,6 +23,21 @@ for (const label of [
   "  PLEASE ENTER YOUR PASSWORD:  ",
   "Please\tenter\nyour password",
   "Please enter your password manager's password",
+  // Claude 3, review 6774623744: naming a service or asking a question is still a request.
+  "Enter your Instagram password",
+  "Enter your login password",
+  "Enter your bank password",
+  "Your Instagram password",
+  "Enter the password",
+  "What is your password?",
+  "Kindly enter your password",
+  "Input your password",
+  "Write your password",
+  "Share your password",
+  "Enter your passwords",
+  "What is my account passphrase?",
+  "Please enter the Instagram password",
+  "Please share your bank account passcode",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -41,6 +56,11 @@ for (const label of [
   "Describe how to create a password",
   "Please enter your postal code",
   "Type your name",
+  "Choose a password manager you like",
+  "What is your password manager's name?",
+  "Your preferred password manager",
+  "What is a password?",
+  "How do you choose a passphrase?",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");

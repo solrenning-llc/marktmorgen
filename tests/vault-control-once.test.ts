@@ -4,9 +4,10 @@
  * (lib/spend-cost-table.ts: one completion and one cancellation, each with
  * one file measurement, and UPLOAD_REQUESTS_PER_OPEN requests in all).
  *
- * The first finish and the first cancel of an upload are written down with
- * their answer; every later one gets that same answer back without asking R2
- * again. And no upload takes more finish-or-cancel requests than are priced
+ * The first finish and the first confirmed cancel of an upload are written
+ * down with their answer; every later one gets that same answer back without
+ * asking R2 again. A cancel R2 did not confirm is not written down, so a
+ * retry inside the priced requests asks R2 again and can free the bytes. And no upload takes more finish-or-cancel requests than are priced
  * for it: past that, a plain refusal, with no request to R2 at all.
  *
  * R2 bills by operation class (https://developers.cloudflare.com/r2/pricing/):
@@ -114,14 +115,25 @@ test("a finish that worked, asked for again, is answered the same with no reques
   assert.equal(billed.length, asked, "no request to R2 for the repeat");
 });
 
-test("a cancellation R2 did not confirm, asked for again, asks R2 once", async () => {
+test("a cancellation R2 did not confirm is asked again inside the priced requests, and a confirmed one is not", async () => {
   const pathname = await opened();
   deleteFails = true;
   try {
     assert.equal(await abortReservedVault(pathname), false);
-    assert.equal(await abortReservedVault(pathname), false, "the second cancel is told what the first one was");
   } finally { deleteFails = false; }
-  assert.equal(count("AbortMultipartUpload"), 1, `R2 asked: ${billed.map(row => row.what).join(", ")}`);
+  assert.equal(await abortReservedVault(pathname), true, "the retry asks R2 again, which confirms it");
+  assert.equal(count("AbortMultipartUpload"), 2, `R2 asked: ${billed.map(row => row.what).join(", ")}`);
+  const asked = billed.length;
+  assert.equal(await abortReservedVault(pathname), "tries", "past the priced requests, a plain refusal");
+  assert.equal(billed.length, asked, "and R2 is not asked");
+});
+
+test("a confirmed cancellation, asked for again inside the priced requests, is answered the same with no request to R2", async () => {
+  const pathname = await opened();
+  assert.equal(await abortReservedVault(pathname), true);
+  const asked = billed.length;
+  assert.equal(await abortReservedVault(pathname), true);
+  assert.equal(billed.length, asked, "no request to R2 for the repeat");
 });
 
 test("no upload takes more finish-or-cancel requests than are priced for it, and past them R2 is not asked", async () => {

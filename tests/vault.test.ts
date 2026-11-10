@@ -23,7 +23,6 @@ import {
   listVault,
   openVaultUpload,
   readVault,
-  retireVaultSession,
   signPieces,
   vaultHeld,
   vaultOrigin,
@@ -264,9 +263,8 @@ async function main() {
   is("an unreachable provider does not falsely confirm cancellation", await abortVaultUpload(cancelled.upload.pathname), false);
   service = "up";
   is("a failed cancellation keeps the session available to retry", (await signPieces(cancelled.upload.pathname, [1]))?.length, 1);
-  const askedCancel = asked.length;
-  is("a repeat is given the first cancellation's answer, the store not asked again", [await abortVaultUpload(cancelled.upload.pathname), asked.length], [false, askedCancel]);
-  is("the session is canceled at the provider once it is retired", await retireVaultSession(cancelled.upload.pathname, cancelled.sessionId), true);
+  // Only a confirmed cancellation is written down (lib/vault.ts): a retry inside the priced requests asks the provider again.
+  is("a retry confirms cancellation at the provider", await abortVaultUpload(cancelled.upload.pathname), true);
   is("a part URL from an aborted session cannot create a file", (await fetch(cancelPart.url, { method: "PUT", body: sessionBytes as BodyInit })).status, 404);
   is("the canceled file does not exist", objects.has(cancelled.upload.pathname), false);
 

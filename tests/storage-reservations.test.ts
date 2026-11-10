@@ -3,7 +3,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { store } from "./redis-stub";
 import { reserveStorage, bindStorage, releaseStorage, retireStorage } from "@/lib/storage-reservations";
-import { UPLOAD_SECONDS } from "@/lib/vault-rules";
 
 const original = store.run.bind(store);
 let unavailable = false;
@@ -102,19 +101,12 @@ test("R2 opens reserve capacity and failed provider cancellation cannot free it"
     await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
     assert.equal(await abortReservedVault(opened.upload.pathname), false);
     await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    // A repeat is given the first cancel's answer (lib/vault.ts, one cancel
-    // per upload): the provider is not asked again, and nothing is freed.
-    missingSession = true;
+    // An unconfirmed cancel is not written down (lib/vault.ts): a retry,
+    // inside the requests one upload is priced for, asks the provider again,
+    // and once it confirms, the bytes come back at once.
     cancel = true;
-    assert.equal(await abortReservedVault(opened.upload.pathname), false);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    missingSession = false;
-    // Its bytes come back once the session has expired: the next open retires it at the provider first.
-    const realNow = Date.now;
-    Date.now = () => realNow() + UPLOAD_SECONDS * 1000 + 1;
-    let reopened: Awaited<ReturnType<typeof openReservedVault>>;
-    try { reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })); }
-    finally { Date.now = realNow; }
+    assert.equal(await abortReservedVault(opened.upload.pathname), true);
+    const reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }));
     assert.equal(reopened.ok, true);
     if (!reopened.ok) throw new Error("reopen failed");
     missingSession = true;

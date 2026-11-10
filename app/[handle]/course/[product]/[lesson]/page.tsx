@@ -39,7 +39,7 @@ import { videoStampText } from "@/lib/video-stamp";
 import { LessonNotes } from "@/components/lesson-notes";
 import { readNote } from "@/lib/lesson-notes";
 import { EmptyState } from "@/components/empty-state";
-import { NEXT_STEP_NO_SECONDS, nextStepCookie, nextStepFor } from "@/lib/course-next-step";
+import { nextStepCookie, nextStepFor } from "@/lib/course-next-step";
 import { finishedNow, nextStepPlace } from "@/lib/course-next-step-rules";
 import { CourseNextStepCard } from "@/components/course-next-step-card";
 import { pricePill, productPath } from "@/components/store-product";
@@ -428,8 +428,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
             </div>
             {nextProduct && course.nextStep ? (
               <CourseNextStepCard
-                cookie={nextCookie}
-                seconds={NEXT_STEP_NO_SECONDS}
+                handle={store.handle}
+                courseId={course.id}
+                productId={product.id}
                 href={productPath(store, nextProduct)}
                 title={nextProduct.title}
                 price={pricePill(store, nextProduct)}

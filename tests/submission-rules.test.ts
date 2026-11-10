@@ -31,7 +31,10 @@ import {
   SUBMISSION_KIND_TYPES,
   type Submission,
   type SubmissionSetup,
+  MAX_SUBMISSION_RECORD_BYTES,
   applySubmissionEvent,
+  checkSubmissionFile,
+  submissionRecordJson,
   mayOpenSubmission,
   maySubmit,
   nextSubmissionState,
@@ -229,6 +232,32 @@ part("Who may open it");
   is("a withdrawn file is not opened by the team", mayOpenSubmission({ ...sub, state: "withdrawn" }, { kind: "team", mayReview: true }), false);
   is("nor by the buyer who withdrew it", mayOpenSubmission({ ...sub, state: "withdrawn" }, { kind: "buyer", email: "ana@example.com" }), false);
   is("nobody else", mayOpenSubmission(sub, { kind: "public" } as never), false);
+}
+
+part("The file alone, and the kept record's ceiling (unit 2)");
+{
+  const setup: SubmissionSetup = { instruction: "a", kinds: ["video"], maxBytes: 200 * MiB, keepDays: 30 };
+  const facts = { limits: setup, declared: { bytes: 50 * MiB, type: "video/mp4", name: "a.mp4" }, standing: "paid" as const, tier: "pro" as const };
+  is("the file checked without counts", checkSubmissionFile(facts), { ok: true, bytes: 50 * MiB, type: "video/mp4", extension: ".mp4", name: "a.mp4", limitBytes: PAID_STORAGE_BYTES.pro });
+  is("says the same no as the whole decision", checkSubmissionFile({ ...facts, standing: "trial" }), preauthorizeSubmission({ ...facts, standing: "trial", usedBytes: 0, pendingBytes: 0 }));
+  is("and the same yes, with the room left to it", preauthorizeSubmission({ ...facts, usedBytes: 0, pendingBytes: 0 }).ok, true);
+  const worst = "\u0001".repeat(MAX_SUBMISSION_NOTE);
+  const record: Submission = {
+    id: "f".repeat(32),
+    target: { kind: "call", productId: "p".repeat(64), bookingId: "b".repeat(64) },
+    buyer: "x".repeat(254),
+    file: { name: "\u0001".repeat(120), bytes: MAX_SUBMISSION_BYTES, type: "application/pdf" },
+    note: worst,
+    at: 1_800_000_000,
+    keepUntil: 1_900_000_000,
+    state: "reviewed",
+    reply: { text: "\u0002".repeat(MAX_SUBMISSION_REPLY), file: { name: "\u0003".repeat(120), bytes: MAX_SUBMISSION_BYTES, type: "video/quicktime" }, at: 1_800_000_001 },
+    closedAt: 1_800_000_001,
+  };
+  const kept = { ...record, path: "vault/" + "f".repeat(32) + "/sub_" + "f".repeat(32) + "/0123456789abcdef-" + "n".repeat(120), who: "w".repeat(32), folder: "f".repeat(32) };
+  is("a record at its worst still fits the ceiling", submissionRecordJson(kept) !== null, true);
+  is("one past the ceiling is never written", submissionRecordJson({ ...kept, note: worst + "\u0001".repeat(800) }), null);
+  is("the ceiling is a few tens of kilobytes", MAX_SUBMISSION_RECORD_BYTES < 64 * 1024, true);
 }
 
 done();

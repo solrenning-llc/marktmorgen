@@ -39,7 +39,7 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
-import { NEXT_STEP_NO_SECONDS, nextStepCookie, nextStepFor } from "@/lib/course-next-step";
+import { nextStepCookie, nextStepFor } from "@/lib/course-next-step";
 import { CourseNextStepCard } from "@/components/course-next-step-card";
 import { pricePill, productPath } from "@/components/store-product";
 
@@ -355,8 +355,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
 
         {nextProduct && course.nextStep ? (
           <CourseNextStepCard
-            cookie={nextCookie}
-            seconds={NEXT_STEP_NO_SECONDS}
+            handle={store.handle}
+            courseId={course.id}
+            productId={product.id}
             href={productPath(store, nextProduct)}
             title={nextProduct.title}
             price={pricePill(store, nextProduct)}

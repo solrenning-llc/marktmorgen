@@ -43,6 +43,7 @@ export function CourseNextStep({
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    if (!dirty || busy || over) return;
     setBusy(true);
     setError(null);
     try {
@@ -78,7 +79,7 @@ export function CourseNextStep({
           ))}
         </select>
         <span id={`${id}-product-help`} className="mt-1 block text-sm text-ink-soft">
-          Students who already have it, or said &quot;No thanks&quot;, never see it. Nor does anyone while it is a draft or sold out.
+          Students who already have it never see it, nor those who said &quot;No thanks&quot; in the browser they use. Nobody sees it while it is a draft or sold out.
         </span>
       </label>
       {picked ? (
@@ -103,13 +104,17 @@ export function CourseNextStep({
           </span>
         </label>
       ) : null}
-      {dirty ? (
-        <p>
-          <button type="submit" className="btn btn-secondary btn-sm" disabled={busy || over} aria-busy={busy}>
-            Save
-          </button>
-        </p>
-      ) : null}
+      {/* Always there, so focus is never lost with it after a save (review of #3530, WCAG 2.4.3); it says when there is nothing to save. */}
+      <p>
+        <button type="submit" className="btn btn-secondary btn-sm" aria-disabled={!dirty || busy || over || undefined} aria-busy={busy} aria-describedby={dirty ? undefined : `${id}-saved`}>
+          Save
+        </button>
+        {dirty ? null : (
+          <span id={`${id}-saved`} className="ml-3 text-sm text-ink-soft">
+            Nothing to save.
+          </span>
+        )}
+      </p>
       {error ? (
         <p className="notice notice-error" role="alert">
           {error}

@@ -364,6 +364,8 @@ Ordem anterior à MQ2, preservada como histórico — Localizadores do Grupo A s
 
 **Entrada posterior IR1 — 08/11/2026, 02h20 Fortaleza:** **753 [IR1]** (impostos e recibos no piloto automático, para criadores do mundo inteiro, sem o Marktmorgen ser vendedor responsável), na fila, **ACIMA DO MARCO MQ1, Grupo A, logo depois de 568 [GD2] e antes de 571 [VS1]** na ordem vigente da MQ2/MQ3, pelo critério (a) da MQ2 (obrigação legal e direitos do cliente: documento fiscal correto para o comprador, nota de crédito no reembolso e alerta antes de o criador passar de um limite de registro). As partes que geram receita (b) e retenção (c) não mudam a posição, porque o item inteiro é executado como uma frente só. Como todo o Grupo A, vem depois da AV1 e do Bloco de abertura e não entra neles. As unidades que estendem 492 [DE1], 601 [KB22], 655 [WG15] e 335 [FR1] seguem a dependência descrita no item. Inserir somente este novo item nessa posição; os demais conservam entre si a ordem. O número 753 é o próximo livre (752 era o maior no main e nos ramos da fila conferidos). Texto integral na seção IR, no fim deste arquivo.
 
+**Entrada posterior STN — 09/11/2026, por volta das 13h55 Fortaleza:** aprendizados da pesquisa da área interna da Stan, por pedido do dono. **754 [STN1], 755 [STN2], 756 [STN3], 757 [STN4], 758 [STN5], 759 [STN6], 760 [STN7], 761 [STN8], 762 [STN9]**, na fila, ACIMA DO MARCO MQ1, Grupo A, logo depois de 753 [IR1], nesta ordem, pelos critérios (a) e (b) da MQ2. **763 [STN10], 764 [STN11], 765 [STN12], 766 [STN13], 767 [STN14], 768 [STN15]**, na fila, Grupo B, ao fim do grupo e antes da cauda FIM1, nesta ordem, pelos critérios (c), (e) e (f). Inserir somente estes novos itens nessas posições; os demais não mudam.
+
 ## MARCO — DAQUI EM DIANTE, OS MENOS IMPORTANTES (MQ1, 29/10/2026)
 
 ### Grupo B — abaixo do marco
@@ -22010,6 +22012,7 @@ Contexto (leitura feita pelo Claude em 01/11/2026, com fontes oficiais da própr
 Ordem: Grupo B, critério (e) da MQ2, no fim da ordem do Grupo B, na ordem abaixo, com 624 [SZ8] por último; 617 [SZ1], 618 [SZ2] e 619 [SZ3] tratam de lei e direitos do cliente e passam ao Grupo A, critério (a), logo depois dos itens de lei já em andamento, se o dono não disser o contrário.
 
 617. [SZ1] Store policy pages and legal notice built from the store's settings
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; unidade 1 (a parte factual das políticas, só regras, nada mostrado ao comprador) incorporada no PR #1776 (commit aeb11013e8a851a836b0f950e077ebe3f380d5d1, 02/11/2026 18h52 Fortaleza); unidades 2 e 3 (traduções e a página de políticas da loja) no PR aberto #1824; o restante na fila (o "Estado inicial: na fila." da seção SZ vale para os outros itens dela).
 cada loja ganha páginas de políticas (reembolso e cancelamento, termos de venda, aviso de privacidade do criador, envio e contato/aviso legal), montadas em duas partes: a parte factual é gerada pelo próprio código a partir das configurações reais da loja (quem cobra e onde, como cada tipo de produto é entregue, o consentimento de conteúdo digital, o cancelamento das assinaturas pelo próprio membro, as regiões e prazos de envio, os pixels ligados e o que eles fazem, o contato), e muda sozinha quando a configuração muda; a parte do criador é texto dele, conferido pelas regras de lib/terms-check-rules.ts antes de publicar. As páginas aparecem no rodapé de toda página da loja, no e-mail de confirmação e num link "Terms and policies" no checkout, com data e versão guardadas; o texto diz que não é aconselhamento jurídico e nunca promete conformidade legal. Teste de aceitação: mudar uma configuração (por exemplo, ligar pixels ou mudar o país de envio) muda a frase gerada na página e cria nova versão com data; uma política do criador com "no refunds" num produto que a lei europeia não permite recusar mostra o aviso já existente; nenhuma página mostra recurso desligado (VR); o link aparece no checkout simulado. Estende, sem duplicar: lib/site-pages.ts (páginas da loja), lib/terms-check-rules.ts e 493 [DE2], lib/digital-consent.ts, 414 [KX1] (avisos de renovação), 588 [KB9] (botão de desistência), 568 [GD2](a) (identificação do vendedor: o aviso legal mostra o que aquele estudo concluir que a lei exige), lib/pixels.ts (frase dos pixels). Fonte na Shopify: help.md, checkout-settings/refund-privacy-tos (políticas automáticas sincronizadas com as configurações, versões exportáveis); site.md, Fall '26 Operations ("auto-generated return/contact/shipping/ToS policies kept in sync") e changelog 2026-10-08 e 2026-10-26 (link único "Terms and policies" no rodapé do checkout); help.md, intro-to-shopify/initial-setup (checklists legais por país). Custo: nenhuma chamada de IA nem fornecedor; só texto na sala de dados da loja (já com teto) e leituras das configurações já feitas na renderização.
 Complemento WG (05/11/2026, pesquisa nova da Whop, pedido do dono pela mensagem C1-20261105-1801-C4-1; C1-20261105-1917-C4-1 e C1-20261105-1919-C4-1 para HubSpot, GoHighLevel e chat embutido): Aceite dos termos da loja antes de pagar, guardado com versão e data (estende 617 [SZ1], MQ2 grupo a). Solicitação do dono (05/11/2026, recebida pela mensagem C1-20261105-1801-C4-1 do Claude 1, 18h01, horário de Fortaleza): "coloca tudo de bom na fila" (pesquisa nova da Whop). Origem: pesquisa nova do Claude 4 de 05/11/2026 (site, blog e changelog, docs.whop.com, App Store 5.30.0 e Google Play), sem copiar as auditorias anteriores. Pedidos repetidos: conferidos o main e a fila. 617 [SZ1] gera as páginas de políticas da loja e 492 [DE1] usa "a versão exata dos termos aceitos", mas nenhum checkout pede o aceite: no main, consent_collection só aparece como consent_collection[promotions] em lib/recovery-setting.ts, e terms_of_service não aparece em nenhuma sessão; 387 [TB13] é uma caixa de pergunta, não um aceite com prova. Complemento, sem refazer o 617. As pesquisas do site e da central de ajuda traziam a mesma proposta, aqui unidas. Descrição: interruptor por loja "Require buyers to accept my terms", desligado por padrão. Ligado, as sessões de checkout abertas na conta Stripe do criador (lib/store-checkout.ts, lib/cart-checkout.ts e lib/payment-requests.ts, por um ponto único) pedem o aceite pelo campo oficial do Stripe Checkout para termos de serviço, apontando para as páginas do 617; o parâmetro e o requisito de URL de termos numa conta Standard conectada são confirmados em fonte oficial datada do Stripe antes de construir. A caixa nunca vem marcada. O pedido guarda a versão (hash) das páginas de termos e de reembolso aceitas, com data e hora; essa versão entra no pacote de provas de 492 [DE1] e aparece no pedido para o criador e para o comprador. Se o Stripe recusar o campo na conta do criador, o estúdio não liga o interruptor e diz por quê; a venda nunca falha por isso. Teste de aceitação: com Stripe simulado e o interruptor ligado, a sessão leva o campo e o pedido sem aceite não é concluído; o aceite grava versão e hora; mudar o texto dos termos gera versão nova e os pedidos antigos mantêm a anterior; desligado, a sessão é idêntica à de hoje; recusa do Stripe deixa o interruptor desligado, com o motivo. Estende, sem duplicar: 617 [SZ1], 492 [DE1], 387 [TB13], lib/digital-consent.ts, lib/dispute-evidence-rules.ts, lib/store-checkout.ts, lib/cart-checkout.ts, lib/payment-requests.ts. Fonte na Whop: https://docs.whop.com/manage-your-business/manage-business/legal-documents.md e as frases do checkout em https://whop.com/ ("Buyer Terms of Service" e "Privacy Policy"), lidas em 05/11/2026. Custo: o campo vai na mesma chamada que já cria a sessão, sem chamada nova; uma escrita pequena por pedido, dentro das escritas do plano; nenhum fornecedor. Dono sugerido: a definir pelo Claude 1.
 
@@ -22017,7 +22020,10 @@ Complemento WG (05/11/2026, pesquisa nova da Whop, pedido do dono pela mensagem 
 no produto físico, campos para o que a lei exige mostrar antes da compra: nome e endereço do fabricante e da pessoa responsável na UE, identificação do produto e avisos de segurança (Regulamento (UE) 2023/988, GPSR), avisos exigidos nos EUA (por exemplo, Proposition 65 da Califórnia) e preço por unidade para produto vendido por peso ou volume; o produto físico enviado à UE sem os campos obrigatórios não abre venda para lá, com a explicação. Na venda da loja com preço riscado, o código guarda o histórico de preço e mostra, para compradores da UE, o menor preço dos 30 dias anteriores (Diretiva 98/6/CE, art. 6-A); estudar, com fonte oficial datada, se algum país estende a regra a conteúdo digital. Conferir cada regra em fonte oficial datada na execução e registrar a divergência em "Depende do dono" quando não for possível conferir. Teste de aceitação: produto físico para a UE sem fabricante não publica para a UE; com os campos, a página e o e-mail de confirmação os mostram; um desconto mostra o menor preço dos 30 dias anteriores calculado do histórico, e o teste falha se mostrar o preço do dia anterior ao desconto quando houve preço menor no período. Estende, sem duplicar: lib/shipping.ts e 513–519 [PF1–PF7] (produto físico), lib/store-sale.ts (preço riscado), 207 [SH4] (os mesmos campos alimentam os feeds), 568 [GD2](a) e (b). Fonte na Shopify: help.md, products/product-disclosures (avisos legais em todos os canais) e compliance/legal (Diretiva de Indicação de Preços: menor preço dos 30 dias anteriores); help.md, international (GPSR, dezembro de 2024); site.md, changelog 2026-06-17 ("Product listings support a disclosures field") e unit pricing (Winter '26). Custo: histórico de preço por produto na sala de dados (limitado a 30 dias por produto) e campos curtos; nenhum fornecedor.
 
 619. [SZ3] Self-serve copy of a person's data (access and portability)
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; a cópia dos dados lê todos os módulos (unidades 1 a 5, COPY_COMPLETE verdadeiro): PR #1843 (unidade 1) e PR #1854 (unidades 2 a 5, commit b7d17247839e24f837e40c4a0ce9d3f821d46c05, 03/11/2026 07h04 Fortaleza), mais os PRs #2083 e #2609 e, depois da auditoria, os PRs #2629 (commit e48d114daaa25fe547e6a09c40ca1b259cd6bcb8, 06/11/2026 02h10 Fortaleza) e #2627 (commit 138eec869865a2f77159639cfc3dc4c53bd9848e, 06/11/2026 16h51), que endurecem leitores da cópia; falta a porta da cópia, que deve ser construída atrás da trava COPY_DOOR_OPEN, com teste, e essa trava ainda não existe no código (ver o complemento abaixo). (Atualizado em 07/11/2026 na revisão do PR #2718.)
 espelho da exclusão que já existe: pelo mesmo link do rodapé da loja e por marktmorgen.com/privacy, a pessoa digita o endereço e recebe um link de uso único que baixa, num arquivo legível (JSON e CSV), tudo o que aquela loja guarda sobre ela segundo o registro de lib/person-data.ts (lista, campos, notas visíveis a ela por lei, respostas de formulários, progresso de cursos, comunidade, pedidos importados, consentimentos com data e versão); o criador é avisado e pode gerar o mesmo arquivo na página do comprador. A página responde igual exista ou não o endereço. Teste de aceitação: o arquivo contém cada família de dado do registro de person-data e nenhuma de outra pessoa; um módulo novo que guarde dado pessoal sem entrar na cópia faz o teste falhar (como já acontece com a exclusão); o link expira e não abre duas vezes; limites por pessoa e por dia. Estende, sem duplicar: lib/person-data.ts e tests/person-data-registry.test.ts, lib/erasure-request.ts, app/privacy/delete, a página do comprador no estúdio, app/privacy/page.tsx (seção 8, que hoje manda escrever ao criador). Fonte na Shopify: help.md, privacy-and-security/privacy/processing-customer-data-requests (pedidos de acesso/portabilidade e exclusão pelo painel). Custo: leituras limitadas como as da exclusão, um e-mail transacional por pedido e um arquivo temporário apagado depois do download; limites por pessoa e por dia antes do gasto.
+
+Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta registrar em docs/codex-queue.md, no item 619 [SZ3] e no Bloco de abertura, o que a mensagem C3-12 (docs/agent-inbox.md:367) mandou gravar na fila: a porta da cópia (página, link de uso único, JSON e CSV, limites, aviso ao criador e botão no estúdio) deve ser construída atrás da trava COPY_DOOR_OPEN, com teste (a trava ainda não existe no código; hoje só a mensagem C3-12 a descreve), e a abertura dela depende de COPY_COMPLETE e da aprovação, pelo dono, da política de exposição (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); hoje nenhuma linha da fila cita COPY_DOOR_OPEN nem o estado do item. Falta documental pequena; a porta em si continua prevista como próxima unidade.
 
 620. [SZ4] Member and past-buyer prices (automatic discounts for eligible buyers)
 o criador define "quem tem a assinatura X (ou comprou Y) paga Z% a menos nos produtos A e B"; na página do produto, depois de o comprador provar o endereço pelo mesmo caminho que já abre cursos e a biblioteca (o cookie do navegador que pagou ou o link enviado ao e-mail), aparece "Member price" com o preço real e o desconto é aplicado pelo Stripe na conta do criador, sem código para digitar. O preço de membro só aparece para quem foi conferido no servidor naquele momento; quem não é membro vê o preço normal, sem contagem regressiva nem escassez. Teste de aceitação: membro ativo recebe o desconto no checkout simulado; assinatura cancelada ou reembolsada não recebe; outro e-mail não recebe; o desconto nunca soma com a venda da loja além do maior dos dois (mesma regra do preço justo); o MRR e o relatório por desconto registram a origem "Member price". Estende, sem duplicar: lib/discount.ts e 554 [DS1] (applies_to e regras do cupom), lib/membership-access.ts, lib/learn.ts (prova do endereço), lib/discount-impact.ts, 587 [KB8] (cupons únicos por automação). Fonte na Shopify: site.md, Winter '26 Online ("automatic discounts for eligible customers") e /discounts ("segment-targeted unique discounts"); help.md, discounts/discount-methods (elegibilidade por segmento ou clientes específicos). Custo: cupons na conta Stripe do criador (sem custo para o Marktmorgen); uma leitura de acesso por visita do membro, dentro das requisições do plano.
@@ -22032,6 +22038,7 @@ novo gatilho de automação "viewed a product and didn't buy": vale somente para
 (a) um produto com quantidade limitada que esgota mostra "Email me when it's back": o endereço é confirmado pela própria caixa de entrada, e quando o criador repõe o estoque sai um único e-mail para cada confirmado, depois os endereços são apagados (o mesmo padrão da lista de espera); (b) o criador escolhe um número de "poucas unidades" e é avisado por e-mail e no celular quando o estoque chega nele; (c) limite opcional de unidades por comprador num produto limitado, conferido pelo endereço que paga, para lançamentos justos. Nada de "only 3 left" inventado: a página já mostra o número real. Teste de aceitação: reposição envia um e-mail por endereço confirmado e apaga a lista; endereço não confirmado não recebe; o aviso ao criador sai uma vez por cruzamento do limite; uma segunda compra acima do limite pelo mesmo endereço é recusada antes do checkout. Estende, sem duplicar: lib/stock.ts, lib/waitlist.ts e lib/waitlist-tokens.ts (confirmação e exclusão), lib/store-alerts.ts e lib/phone-alerts.ts, 205 [SH2] (estoque por variante, quando existir). Fonte na Shopify: site.md, /inventory-management e /flow (avisos de reposição e de estoque baixo); help.md, checkout-settings/add-to-cart-limit e Flow (gatilhos back-in-stock/out-of-stock). Custo: um e-mail por endereço confirmado por reposição, contado nos e-mails da loja e conferido antes do envio, com teto de inscritos por produto; um aviso ao criador por cruzamento.
 
 624. [SZ8] Recursos menores da Shopify, no fim da fila
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; incorporados os subitens (9) no PR #1778 (commit 1aa5e55d0b0b76337689a44276c75eceb0f3062b, 02/11/2026 18h45 Fortaleza), (5) no #1777, (42) no #1877, (29) no #1891, (47) no #1875 e (35) no #1925 (04/11/2026 04h04); o (23) foi incorporado depois da auditoria, no PR #1928 (commit c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92, 06/11/2026 19h35 Fortaleza), e os demais seguem na fila. (Atualizado em 07/11/2026 na revisão do PR #2718.)
 Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de benefício menor, num único item no fim do Grupo B, cada um conferido de novo contra o código e a fila antes de construir e construído só no que ainda faltar, com teste sintético, custo no pior caso com teto antes do gasto, AX274, MR/TX e VR. O que depender de conta ou termos de terceiros vai para "Depende do dono" e nunca é criado pelo agente.
 1. Visualizador de modelo 3D no produto físico, com alternativa em texto e sem movimento automático (estende lib/sales-page.ts; espaço dentro do armazenamento do plano).
 2. Filtros e ordenação na busca da loja (tipo, faixa de preço) e relatório das buscas mais feitas (estende searchStore em lib/catalog.ts e lib/customer-voice.ts).
@@ -22212,6 +22219,7 @@ Solicitação do dono (02/11/2026, 02h15, horário de Fortaleza), ao ver a pági
 Pedidos repetidos: absorve e substitui a posição de 27 [E10] e 258 [KJ3] (ações de escrita no MCP, sempre com confirmação), 614 [WP13] (documentação para agentes), 616 [WP15](24) (linha de comando) e (25) (listagem do conector); reaproveita lib/mcp-tools.ts, app/api/mcp, lib/api-write.ts, lib/api-read.ts, as chaves de API e os tetos existentes, sem duplicar. Decisão do dono que supera, apenas neste ponto, as exclusões anteriores "sem código personalizado" das listas "Não gravado" de KB, WP, SZ e HN: a IA da Marktmorgen pode gerar código, com as proteções do passo (d).
 
 Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 571 [VS1].
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; unidade 1 (inventário de cobertura) incorporada no PR #1743 (commit 8fcc9bf771b00691b119550855bef15b12c56da8, 02/11/2026 15h11 Fortaleza), e também os PRs #1745, #1746, #1749, #1751, #1753, #1754, #1759 e #1760 (regras de proposta e desfazer, chaves de agente, conferência do código gerado, /llms.txt, linha de comando, isolamento dos apps gerados e OAuth do MCP); depois da auditoria, também incorporados o #1821 (commit 835b70a531c45271c2e8fc7517b53dc0df302f3d, 06/11/2026 10h32 Fortaleza) e o #1856 (commit 7903ae96aa2b4218086d3250b2e44c0a43990426, 07/11/2026 01h58); em PR aberto: #1929 e #1933; o que falta no documento do item está no complemento no fim desta seção. (Atualizado em 07/11/2026 na revisão do PR #2718.)
 
 Objetivo: tudo o que o criador faz no estúdio pode ser feito por um agente de IA, pelo assistente dentro do estúdio, pelo Claude ou pelo ChatGPT do criador e pela linha de comando, com mais segurança, mais clareza e mais facilidade do que no Whop, e o cliente sabe disso pela página pública quando funcionar (VR). Comparação com fonte oficial datada da página do Whop CLI (whop.com, lida em 01/11/2026), sem copiar textos.
 
@@ -22233,6 +22241,8 @@ Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_RE
 
 Aplicar a regra VR.
 
+Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar em docs/ai-agent-store.md (seção Units, linhas 21-23 e seguintes) as palavras de estado das unidades já incorporadas: unidade 1 (#1743), regras de proposta/confirmação/desfazer (#1745) e chaves de agente por escopo (#1746) como 'merged' em vez de 'Tested in a PR'/'On the queue', e registrar como incorporadas a conferência do código gerado (#1749), /llms.txt (#1751), a linha de comando (#1753), as regras de isolamento dos apps gerados (#1754) e o plano e as regras de OAuth do MCP (#1759, #1760); nenhum código muda.
+
 ## AA2 — Anúncios lançados de dentro da Marktmorgen (02/11/2026)
 
 Etiqueta: [AA2], item 632.
@@ -22242,6 +22252,7 @@ Solicitação do dono (02/11/2026, 02h17, horário de Fortaleza), ao ver no Whop
 Pedidos repetidos: absorve e substitui a posição de 42 [G4] (criação de anúncios dentro do produto, desligada), 401 [WX2] (estudo de anúncios Meta) e da parte de criativos de anúncio de 376 [TB2]; reaproveita lib/meta-ads.ts e lib/meta-ads-rules.ts (conta de anúncios da Meta ligada, gasto lido por dia), lib/ad-spend-rules.ts (gasto, resultado depois de reembolsos e dias para se pagar por canal), lib/pixels.ts, lib/ad-events.ts e lib/ad-consent.ts (pixels e conversões pelo servidor com consentimento), 613 [WP12] (X e Reddit), 631 [AA1] (o agente de IA também lança e ajusta campanhas, com confirmação); sem duplicar.
 
 Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 631 [AA1].
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; o estudo (a) incorporado no PR #1758 (commit 3c5edc1131423105e304b4c69d548f60ca39206e, 02/11/2026 17h39 Fortaleza), e também os PRs #1766, #1770, #1769, #1869, #1894, #1893 e #1941 (conferência oficial, textos de anúncio, plano de campanha pausado, proteções de gasto, teste de criativos e piloto automático); depois da auditoria, também incorporados o #1990 (commit 9bca8b16b12721c07b6a21aea1b187ad9c384ccd, 06/11/2026 02h38 Fortaleza) e o #2581 (commit 7760b146fa645849bfefa357dc4c17f7c76d8ea3, 06/11/2026 08h35); em PR aberto: #1947 e #1950; as revisões de aplicativo nas plataformas de anúncio dependem das contas do dono. (Atualizado em 07/11/2026 na revisão do PR #2718.)
 
 Objetivo: o criador lança e acompanha campanhas de anúncio sem sair da Marktmorgen e vê, por campanha e por produto, quanto gastou, quanto vendeu depois dos reembolsos e em quantos dias o anúncio se pagou; de forma evidentemente melhor que o Whop, que roda os anúncios em contas da própria plataforma (a conta, o histórico e os públicos ficam com ela). Aqui a conta de anúncios, o cartão, os públicos e o histórico são sempre do criador; a Marktmorgen nunca paga, adianta, recebe ou guarda dinheiro de anúncio.
 
@@ -22298,6 +22309,7 @@ Descrição: estudo, só com fontes oficiais datadas (EUR-Lex: Regulamento (UE) 
 634. [GL2] Agreements v2: templates, several signers in order, placed fields, drawn signature, expiry, countersignature and payment at signing
 Andamento (Claude 2, 02/11/2026): unidade 1, modelos salvos, **testada num PR** (ramo claude2/gl2-agreement-templates; arquivos reservados: lib/agreement-template-rules.ts, tests/agreement-templates.test.ts e a exportação de clean em lib/agreement-rules.ts; tests/agreements.test.ts não foi tocado porque o PR #1502 do Codex o altera). As regras: um modelo guarda o tipo, o título, o texto e as linhas, conferidos pelo próprio readDraft ao salvar e de novo depois de preenchido, então modelo que um acordo recusaria nunca é guardado e o guardado sempre gera um rascunho aceito ou diz por quê (com a linha); só {client_name} e {store_name}, escritos exatamente assim, são preenchidos; outro campo entre chaves, ou chave colada a um deles, é recusado dizendo qual e onde; o texto é lido como o acordo o guarda (espaços, caracteres de controle, chaves de largura cheia) antes de conferir e preencher; no máximo 20 por loja. O nome do cliente é o mesmo que o acordo grava e mostra depois de "To:", e o da loja é o nome da própria loja, o de "From:"; o preenchimento é numa passada (um nome com um campo ou com $ continua palavras); faltando um nome onde o modelo pede, diz qual, nunca deixa lacuna. O rascunho ainda passa pelo endereço e pela caixa de consentimento como qualquer outro; modelo nunca envia, assina ou cobra, e editá-lo não muda acordo já feito. Revisão independente aplicada (modelo salvo que sempre falharia, nome separado do nome do acordo, recusas sem motivo, chaves que escapavam). Próximas unidades: guardar na loja e escolher no estúdio; depois os vários signatários em ordem, os campos posicionados, a assinatura desenhada com a digitada sempre válida, a validade com lembrete e a contra-assinatura.
 Andamento (Claude 2, 02/11/2026): unidade 2a, quanto tempo um modelo fica guardado e quanto ele ocupa, as regras, **testada num PR** (ramo claude2/gl2-template-keep, empilhado no #1837; arquivos reservados: lib/agreement-template-rules.ts e tests/agreement-template-keep.test.ts). Pela decisão do dono de 02/11/2026, 23h36 (C2-11): na sala de dados da loja, no máximo 20 modelos, cada um guardado na forma simples em que um acordo o lê (keptTemplate: espaços juntados, caracteres de controle tirados, quantidade como número, valor como lido), contado pelo tamanho exato antes de gravar e recusado acima de MAX_TEMPLATE_BYTES (um modelo em todos os limites, com os caracteres mais pesados, caracteres invisíveis ou espaços sobrando, cabe; maior é recusado, nunca cortado); guardado 400 dias desde a última vez que foi salvo ou usado para fazer um acordo; o estúdio diz no modelo até quando ele fica guardado se não for usado; a exportação da loja leva o modelo, sem o id. A gravação e a exportação de verdade esperam lib/data-families.ts, lib/closed-store-data.ts e tests/store-data-registry.ts, hoje alterados pelo #1502 do Codex e pelo #1856 do Claude 3. Teste sintético: tests/agreement-template-keep.test.ts (16 verificações; revisão independente feita, achados corrigidos).
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; as duas unidades acima, marcadas "testada num PR", já estão no main: unidade 1 no PR #1837 (commit 78d4cf51d4a7842ca840b41c98503fdd934e8596, 03/11/2026 00h06 Fortaleza) e unidade 2a no PR #1871 (commit bdbf26de374d3640c654f8093b6ece94f5eb3b61, 04/11/2026 05h58), mais o PR #2027; a gravação na loja, a escolha no estúdio, vários signatários, campos, assinatura desenhada, validade, contra-assinatura e pagamento seguem por fazer.
 Descrição: sobre o acordo que já existe (uma pessoa assina por nome digitado, texto e linhas com SHA-256): modelos salvos com as variáveis da loja e da pessoa; até 5 signatários com ordem opcional (cada um recebe depois do anterior) e cópia só para leitura; campos posicionados (data, iniciais, caixa, texto curto), obrigatórios ou não; assinatura digitada ou desenhada, com a digitada sempre válida para quem usa teclado (AX274 2.5.7); validade com um lembrete; contra-assinatura de alguém da equipe; e, depois da última assinatura, o pagamento abre na conta Stripe do criador (pedido de pagamento já anexável, o plano de entrada e parcelas de 627 [HN3] ou a cobrança recorrente de 605 [WP4]). O acordo pode ser enviado por uma automação e tem os gatilhos "visto" e "assinado" (Proposta 3). Cada versão continua imutável; editar cria versão nova e cancela as assinaturas pendentes; a cópia assinada sai em HTML e em PDF marcado (PDF/UA). Nunca dizer "legally binding". Teste de aceitação: com ordem ligada, o segundo signatário só recebe depois do primeiro; campo obrigatório vazio impede assinar; acordo vencido não abre; o pagamento só abre depois da última assinatura e nunca cobra sozinho; leitor de tela e teclado completam a assinatura inteira. Estende, sem duplicar: lib/agreements.ts, lib/agreement-rules.ts, lib/agreement-store.ts, app/[handle]/sign/[agreement]/page.tsx, app/api/store/agreement-sign/route.ts, lib/payment-requests.ts, 627 [HN3], 605 [WP4], 582 [KB3] (duplicar). Fonte na HighLevel: help.md (Documents & Contracts, artigo 155000000594: modelos, campos de assinatura, texto, data, iniciais e caixa, pagamento único ou recorrente dentro do contrato, validade, ordem de assinatura); help-gaps.md (vários signatários com links próprios 155000001300, ordem opcional 155000002624, desenho ou digitação 155000005910, filtros do gatilho 155000001491, modelos com tabela de preços 155000001301); site.md, changelog (26-08-04 Multi-role signing in templates; 26-03-31 Collect card details in documents; 26-02-18 Staff selection in templates). Custo: um e-mail por signatário e um lembrete, contados nos e-mails da loja e conferidos antes do envio; registros na sala de dados da loja; PDF gerado no servidor com teto de páginas; nenhuma IA.
 
 635. [GL3] Workflow triggers and actions HighLevel has that the queue does not
@@ -22310,7 +22322,10 @@ Descrição: gatilhos novos: "replied" (respondeu a um e-mail da loja ou no chat
 Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): o gatilho "replied" não foi construído na unidade 5 (02/11/2026), por dois motivos: as respostas vão direto ao Reply-To do criador, e o endereço digitado no chat não é confirmado; o ponto ficou em Depende do dono. Quando 502 [RX1] (respostas aos e-mails do criador também no estúdio) estiver incorporado e ligado pela loja, o Claude 1 confere se o caminho do RX1 resolve o motivo registrado. Se resolver, o gatilho dispara só para respostas a e-mails da própria loja recebidas por esse caminho, ligadas à mensagem original por um token de uso único e com remetente igual ao endereço do contato; o chat continua fora. Isso não decide nada que esteja em Depende do dono. Os gatilhos "affiliate approved" e "affiliate's first sale" continuam na descrição deste item e não contam como concluídos sem estarem construídos. Teste de aceitação: uma resposta com token válido e remetente igual dispara uma vez por sequência; uma resposta sem token, com remetente diferente ou vinda do chat não dispara; a pessoa sem consentimento nunca entra na lista. Custo: nenhum envio novo além dos passos da sequência, já contados nos e-mails da loja; a leitura do evento recebido é a do RX1, dentro do custeio dele.
 
 636. [GL4] More honest reviews: one reminder, a QR for in-person buyers, a reviews overview and an AI summary held to what buyers wrote
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; (b) QR e (c) avaliações por mês incorporados no PR #1795 (commit 652c0de4cd65be826de82be2994e67d36187097d, 02/11/2026 20h52 Fortaleza), (a) lembrete no #1792, (c) temas no #1873, (d) resumo por IA, só no estúdio, no #1973, e os PRs #2066 e #2138; falta mostrar o resumo aos compradores (complemento abaixo).
 Descrição: (a) um único lembrete opcional do pedido de avaliação, alguns dias depois do primeiro, só para quem ainda não avaliou, contado nos e-mails da loja e respeitando descadastro; (b) QR e link curto da página de avaliação para quem atende ou vende pessoalmente, sempre só para comprador verificado; (c) painel de avaliações: média e quantidade por mês e por produto e os temas repetidos nas próprias palavras dos compradores (reaproveitando lib/customer-voice.ts), sem nota inventada; (d) resumo por IA na página do produto, rotulado como IA, só com o que as avaliações dizem (regra heldToFacts), refeito no máximo uma vez por semana. Nunca filtrar quem pode avaliar pela satisfação (regra da FTC, 16 CFR Part 465) e a avaliação negativa pesa igual. Teste de aceitação: no máximo um lembrete por pedido, nunca a quem já avaliou; resumo com fato que não está nas avaliações não aparece; uma avaliação de uma estrela entra na média e nos temas como as outras; o QR leva à página certa da loja. Estende, sem duplicar: lib/review-ask.ts, lib/review-requests.ts, lib/reviews.ts, lib/review-elsewhere.ts, lib/review-summary.ts, lib/short-links.ts, lib/customer-voice.ts, 93 [D2-VERIFIED-SOCIAL], 606 [WP5] (página de avaliações com filtro), 284 [HG3] (depoimento em vídeo). Fonte na HighLevel: help.md (pedidos de avaliação, artigo 48000980328: momento, intervalo de repetição e máximo de tentativas; Reviews AI, 155000001074); help-gaps.md (painel com tendências e sentimento, 48001222767; QR do pedido de avaliação, 155000002775; widgets com resumo por IA, 155000005684); site.md (/online-reputation-management-software). Custo: lembretes contados nos e-mails da loja; resumo: um trabalho de IA por produto e semana, reservado antes, com teto mensal da loja; painel lê o que a loja já guarda.
+
+Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta desenhar para os compradores o resumo por IA das avaliações de 636 [GL4](d), já feito e guardado (lib/review-ai-summary.ts, lib/review-ai-summary-rules.ts) mas mostrado só no estúdio: na página do produto app/[handle]/p/[product]/page.tsx (e na página de avaliações app/[handle]/p/[product]/reviews/page.tsx), com o rótulo de IA desenhado pela página, só os temas e contagens guardados, sem nova chamada de IA ao abrir a página e com teste de que um resumo apagado ou fora das avaliações não aparece; o próprio lib/review-ai-summary.ts:10-11 diz que isso ficou para depois porque a página do produto estava reservada pelo PR #1730 (513 [PF1]) da Claude 2, que estava em andamento na auditoria e foi incorporado depois dela (commit 8f73f9d31b1cc912bb127ce9259601d739732981, 06/11/2026 18h51 Fortaleza); o resumo continua só no estúdio.
 
 637. [GL5] Bookings the way coaches sell: several lengths, one-time personal links, recurring sessions, add-ons and the calendar on the creator's own site
 Andamento (Claude 2, 02/11/2026): unidade 1, várias durações numa chamada, as regras, **testada num PR** (ramo claude2/gl5-call-lengths; arquivos reservados: lib/call-lengths.ts e tests/call-lengths.test.ts; lib/calls.ts e lib/call-setup.ts não foram tocados, porque os PRs abertos #1755–#1762 do LB1 os alteram). De uma a três durações, cada uma das que uma chamada já pode ter (15 a 120 minutos), nenhuma repetida, guardadas da mais curta à mais longa, cada uma com o próprio preço, dentro da faixa de preço de um produto (chamada nunca é grátis; a chamada de apresentação grátis do 551 [FB1] tem caminho próprio); só para horário semanal com uma pessoa por vez (sessão com data tem a própria duração, e grupo divide o mesmo horário), e cada duração tem de caber em algum trecho do horário semanal. Recusadas por enquanto: várias durações com pacote de chamadas (as sessões do pacote saem grátis, e uma longa sairia pelo preço da curta), com reserva em equipe (os horários dos anfitriões são lidos numa duração) e com sinal pago on-line que não fique abaixo do preço de todas as durações. A base guardada na configuração e no produto é a mais curta; o "a partir de" é o menor preço. Os horários oferecidos para uma duração são os da própria chamada naquela duração (openSlots), então uma chamada mais longa só aparece onde cabe inteira; o preço cobrado é o da duração escolhida, e uma duração que a chamada não tem mais é recusada. Revisão independente aplicada (preço zero aceito, combinações que precisavam ser recusadas, duração que nunca seria oferecida). O que a unidade de reserva tem de mudar está listado no cabeçalho de lib/call-lengths.ts, pela revisão: segurar e conferir a reserva nova na duração escolhida, dentro da trava; cobrar o preço dela e dizer a duração na linha do Stripe; mover reserva paga sempre na duração dela, nunca na da configuração; oferecer horários e preços por duração na página de reserva; dizer todas as durações onde hoje se diz uma. Já certos: horários ocupados, lembretes, convites e o feed do calendário leem o fim de cada reserva. Próximas unidades: o editor, a página de reserva e a cobrança da duração escolhida, depois do LB1.
@@ -22330,6 +22345,7 @@ Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): os restos registr
 Descrição: primeiro um estudo com fontes oficiais datadas (Marketing API do Meta para Lead Ads e webhooks "leadgen"; webhooks de formulários de lead do Google Ads; TikTok Lead Generation), com o passo exato de cada revisão de aplicativo em "Depende do dono". Depois, pela conta de anúncios do próprio criador: cada lead entra como contato com a campanha de origem; se o formulário do anúncio tiver a caixa de marketing (texto e versão guardados), a pessoa recebe o e-mail de confirmação e só entra na lista ao confirmar; sem a caixa, entra apenas no CRM (negócio ou nota), sem nenhum e-mail de marketing. Opcional: botão "Book a time" na tela de obrigado do formulário do Meta, abrindo a agenda do criador com os dados preenchidos por token de uso único, sem dado pessoal na URL. Webhooks verificados por assinatura e idempotentes. Teste de aceitação: o mesmo lead duas vezes não cria duas pessoas; sem consentimento, nenhum e-mail de marketing sai; webhook com assinatura inválida é recusado; a origem aparece nos números por campanha; nenhuma chamada real nos testes. Estende, sem duplicar: 632 [AA2] (complemento; não refaz a criação de campanhas nem os públicos), lib/contacts.ts, lib/crm.ts, lib/came-from.ts, lib/campaign-results.ts, lib/calls.ts, lib/meta-ads.ts, lib/meta-ads-rules.ts. Fonte na HighLevel: help.md (gatilhos "Facebook Lead Form Submitted" e "Instagram Lead Form Submitted", artigo 155000002292); help-gaps.md (formulários de lead criados na campanha, com mapeamento de campos, 155000002439); site.md, changelog (25-12-16 Google Lead Ads integration; 26-10-27 TikTok Ads); blog.md (Meta Embedded Appointment Booking, 24/06/2026). Custo: cada webhook recebido conta nas requisições do plano; o e-mail de confirmação conta nos e-mails da loja; nenhum gasto de anúncio passa pelo Marktmorgen; revisão de aplicativo e chaves dependem do dono.
 
 639. [GL7] Recursos menores da HighLevel, no fim da fila
+Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; o primeiro recurso, (8), incorporado no PR #1796 (commit c686aa325549447179bfbd39f4b1b7af71553615, 03/11/2026 07h12 Fortaleza), e também (2) #1903, (3) #1968, (6) #1954, #1959 e #1960, (7) #1972 e #2007, (9) #1952, (20) #2063, (22) #1961, (26) #1910, #1911 e #1912, (30) #1804, (31) #1937, (32) #1838, (34) #1966, (38) #1840 e (40) #1939, #1949 e #1951; depois da auditoria, também incorporados (22) #1962 (commit 6c8f5c40918311bd81a7e29344f080ddafb323c5, 06/11/2026 16h36 Fortaleza) e #1963 (commit 749dac81607b76156be9eea039e34eb1f733c081, 06/11/2026 17h26) e (34) #1969 (commit 0ade0faf3478ca554226b3f80e1866de82276ca9, 07/11/2026 02h22); em PR aberto: #1927, #1965, #2036, #2048, #2571 e #2574; os demais recursos seguem na fila. (Atualizado em 07/11/2026 na revisão do PR #2718.)
 Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de benefício menor, num único item no fim do Grupo B, cada um conferido de novo contra o código e a fila antes de construir e construído só no que ainda faltar, com teste sintético, custo no pior caso com teto antes do gasto, AX274, MR/TX e VR. O que depender de conta ou termos de terceiros vai para "Depende do dono" e nunca é criado pelo agente.
 1. Oferta de retorno para criadores que cancelaram o plano do Marktmorgen, um único e-mail com consentimento, com desconto e duração decididos pelo dono (estende lib/winback.ts e o fluxo de cancelamento do plano; preço depende do dono).
 2. Mais tipos de campo no CRM (URL, várias escolhas, telefone), agrupamento em pastas e campo que só aparece em certas etapas (estende lib/crm-rules.ts).
@@ -22651,3 +22667,447 @@ Perguntas da pesquisa, por parceiro e por país:
 Proibido nesta fase: criar conta, aceitar termos, contatar parceiros, contratar, pagar ou mudar qualquer código. O resultado é um estudo datado apresentado ao dono, com a recomendação em "Depende do dono".
 
 Aplicar a regra VR.
+
+## STN1 — Nada publicado sem entrega nem com texto de modelo; prévia privada do rascunho (09/11/2026)
+
+Etiqueta: [STN1], item 754.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 487 [IT4] já impede publicar post de blog com colchetes; 479 [SB2] confere a entrega antes de publicar e todo dia; 485 [IT2] traz o desfazer. Este item estende essas proteções, sem refazê-las. As buscas por "link privado de prévia" e "private preview" não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Na Stan (capturas 267-269, 278 e 303), textos-modelo com colchetes e promessas vazias podem ser publicados no checkout, e uma isca foi publicada e recebeu cadastro sem nenhum arquivo, sem aviso ao criador. O Marktmorgen já tem as proteções citadas acima, mas não em todos os lugares.
+
+O que fazer, em unidades pequenas:
+1. Estender o bloqueio de publicação com texto de modelo a e-mail, descrição de produto, página de venda e funil, com mensagem que diga onde está o trecho e como corrigir.
+2. Impedir publicar isca ou produto digital sem arquivo ou link de entrega, reaproveitando a conferência de 479 [SB2].
+3. Mostrar em cada aula o estado "Hidden — course is draft" enquanto o curso for rascunho.
+4. Link privado de prévia do rascunho, sem indexação, que expira e pode ser revogado pelo criador.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: mensagens de erro ligadas ao campo, foco movido ao primeiro erro, prevenção de erro antes de publicar (3.3.6).
+
+Testes automáticos: somente sintéticos: cada tipo de conteúdo com e sem texto de modelo; isca sem entrega recusada; prévia expirada ou revogada não abre; prévia com noindex; rascunho nunca aparece na loja pública.
+
+Custo: Prévia e conferências sem chamada a fornecedor externo; leituras limitadas por requisição, com linha no registro de custos. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN2 — Entrega imediata da isca e e-mail de entrega mais completo (09/11/2026)
+
+Etiqueta: [STN2], item 755.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 479 [SB2] traz "Send my access again"; 541 [FC4], 592 [KB13], 624 [SZ8] item 18 e 570 [DR1] tratam de entrega e downloads; 547 [ER1] não conta aberturas; lib/purchase-email.ts já envia o e-mail com o nome da loja. Este item acrescenta só o que falta na isca e no e-mail de entrega.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Na Stan (capturas 294-306), o botão "Submit & Download" não entrega nada na tela, só o aviso de cadastro; o e-mail traz o nome completo da conta do criador como remetente, resposta para o endereço da plataforma, link com rastreio de clique, pixel de abertura, nenhum contato de suporte, assunto que cola o texto do botão e logo sem texto alternativo.
+
+O que fazer, em unidades pequenas:
+1. Depois do cadastro, botão para baixar na própria tela, com o mesmo link no e-mail.
+2. Aceite de promoções separado do recebimento do material, sem impedir a entrega.
+3. Separar lead de cliente nas contagens: isca sem pagamento não conta como compra.
+4. E-mail de entrega com o nome escolhido pela loja, resposta que chegue ao criador (conferir o Reply-To atual antes), contato de suporte, versão em texto, texto alternativo em toda imagem e sem rastreio de clique por padrão.
+5. Assunto montado sem colar o texto do botão.
+6. Aviso a quem comprou quando sair versão nova do arquivo, se o criador pedir.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: botão com nome claro do benefício, HTML acessível com versão em texto, foco ao mostrar a confirmação, sem rastreamento por padrão.
+
+Testes automáticos: somente sintéticos, sem envio real: download na tela e no e-mail com o mesmo destino; cadastro sem aceite de promoções recebe o material e não entra em marketing; lead fora da contagem de compras; e-mail sem pixel e sem redirecionamento de clique; Reply-To correto.
+
+Custo: Cada e-mail contado no consumo da loja com reserva antes do envio; download limitado por pessoa e por dia; armazenamento e transferência no registro de custos. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Rastrear clique ou abertura em e-mail de entrega sem aviso.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN3 — Selo de rascunho de IA, número estimado e aviso em tema sensível (09/11/2026)
+
+Etiqueta: [STN3], item 756.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. lib/ai.ts:178 e :657 já proíbem depoimento e número inventados; components/funnel-ai-draft.tsx exige aprovação; 631 [AA1] traz prévia e desfazer; 625 [HN1] traz o rótulo de IA do art. 50 da lei europeia; 390 [CX1] traz fonte e data. As buscas por "AI draft" não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: A Stan monta um produto inteiro com 2 ações (capturas 90-96), mas com texto e arquivo publicáveis sem revisão clara. O Marktmorgen deve manter a facilidade e superar no cuidado.
+
+O que fazer, em unidades pequenas:
+1. Selo visível "AI draft" em todo conteúdo gerado, com lista de conferência (fatos, imagem, preço) concluída pelo criador antes de publicar.
+2. Selo "Estimate" para número sem fonte.
+3. Aviso em tema sensível (saúde, dinheiro, direito), pedindo revisão antes de publicar.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: selos em texto, não só por cor; lista de conferência operável por teclado e anunciada por leitor de tela.
+
+Testes automáticos: somente sintéticos: conteúdo de IA não publica sem a lista concluída; número sem fonte recebe o selo; tema sensível exibe o aviso; depoimento pedido à IA continua recusado.
+
+Custo: Sem chamada nova de IA além das já contadas em lib/ai-rules.ts e lib/ai-spend.ts; classificação de tema por regra local ou dentro da mesma chamada, com custo registrado. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN4 — Conta: aparelhos conectados, segunda etapa depois da primeira venda e aba de privacidade (09/11/2026)
+
+Etiqueta: [STN4], item 757.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. Já existem exclusão pelo comprador, exportação da loja, verificação em duas etapas, chaves de acesso, "Log out of all devices" e aviso de aparelho novo (lib/two-step.ts, lib/totp.ts, lib/passkeys.ts, lib/account-notice.ts). 619 [SZ3], 612 [WP11] e 307 [EC1] seguem válidos. As buscas por "lista de aparelhos" e "depois da primeira venda" não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Na conta de teste da Stan, a verificação em duas etapas vinha desligada e não apareceu pedido para ligá-la nas telas vistas.
+
+O que fazer, em unidades pequenas:
+1. Lista de aparelhos conectados, com cidade aproximada e data, e "sair dos outros".
+2. Pedido claro para ligar a segunda etapa depois da primeira venda, sem bloquear a venda.
+3. Aba única "Privacy" do criador, reunindo baixar dados e excluir conta (conferir o estado de 307 [EC1] antes).
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: lista em tabela com cabeçalhos, confirmação acessível antes de encerrar sessões, nenhum limite de tempo.
+
+Testes automáticos: somente sintéticos: encerrar outras sessões invalida os tokens; o pedido aparece uma vez depois da 1ª venda e pode ser dispensado; a aba só mostra dados do próprio criador; cidade aproximada, nunca endereço.
+
+Custo: Leituras de sessão limitadas; geolocalização só por fonte já contratada ou sem custo comprovado, senão a cidade não aparece. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Guardar IP completo além do necessário ou sem previsão na política de privacidade.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN5 — IA que cria produto: etapas visíveis, ideias de produto e arquivo entregável (09/11/2026)
+
+Etiqueta: [STN5], item 758.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. lib/ai.ts já escreve loja, produto, curso, quiz, sequência e página. 219 [OP5] monta a loja como rascunho; 577 [MT1] traz os 8 passos; 390 [CX1] e 199 [HT14] seguem válidos. As buscas por "Get product ideas" não acharam registro. O 95 [D2] é radar de demanda, outro assunto.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: A Stan mostra o andamento em etapas e gera um PDF de 89 páginas com 1 pedido e 1 clique (capturas 90-96), guardado em servidor de terceiros. É o principal ponto de facilidade dela.
+
+O que fazer, em unidades pequenas:
+1. Etapas nomeadas durante a geração, com tempo decorrido e botão para parar sem cobrar o que não rodou.
+2. "Get product ideas": 5 ideias a partir do perfil do criador, cada uma com o motivo, sem promessa de ganho.
+3. Arquivo do produto (PDF marcado) gerado pela IA, guardado na conta do criador e sujeito às proteções de 756 [STN3].
+4. Assistente que lê um PDF enviado pelo criador e propõe título e benefícios.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: andamento anunciado por região ao vivo educada, botão parar por teclado, PDF marcado (lib/tagged-pdf.ts).
+
+Testes automáticos: somente sintéticos, com IA simulada: parar interrompe e devolve a reserva; ideias sem número de ganho; arquivo fica na conta do criador; sem rascunho aprovado nada publica.
+
+Custo: Dentro de AI_MONTHLY (lib/ai-rules.ts), sem criar crédito nem limite novo. Pior caso de geração longa com PDF por plano, com reserva antes da chamada; se não couber na margem, o item volta ao dono com o número. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN6 — AutoDM com fluxo, relatório por post e conexão explicada (09/11/2026)
+
+Etiqueta: [STN6], item 759.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 39 [G1], 480 [SB3] e 591 [KB12] seguem válidos; lib/autodm-rules.ts tem AUTODM_LIVE=false. 480 já prevê contagem de envios, cliques e vendas por post. Fluxo com pergunta é novo.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: O AutoDM da Stan (capturas 240-259) é o melhor gancho de aquisição dela, mas simples: palavra-chave, resposta e uma mensagem com link. A palavra solta pode disparar sem querer, e a conexão passa por várias telas do Instagram sem aviso.
+
+O que fazer, em unidades pequenas:
+1. Fluxo com pergunta, botão e lembrete a quem não clicou, dentro das regras da Meta conferidas em fonte oficial datada.
+2. Palavra exata por padrão.
+3. Relatório por post: quem comentou, clicou e comprou.
+4. Assistente de conexão que avisa antes quais telas aparecem.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: editor de fluxo operável por teclado, com alternativa em lista à visão em árvore.
+
+Testes automáticos: somente sintéticos, com a Meta simulada: palavra exata não dispara em frase parecida; sem envio com AUTODM_LIVE=false; lembrete uma vez por pessoa; relatório sem dados pessoais expostos.
+
+Custo: Pior caso de mensagens e leituras por loja, com teto antes do envio, e conferência oficial de custos e limites da Meta. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Ligar AUTODM_LIVE ou enviar mensagem real.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN7 — Cupom por post e por AutoDM, relatório por cupom e painel do afiliado (09/11/2026)
+
+Etiqueta: [STN7], item 760.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. lib/discount.ts e app/api/store/discount/route.ts já têm validade, mínimo, primeira compra e limite de usos; lib/affiliates.ts não guarda dinheiro. 554 [DS1], 587 [KB8], 624 [SZ8] item 23, 589 [KB10], 608 [WP7], 216 [OP2], 220 [HL1] e 267 [KT1] seguem válidos.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Na Stan (capturas 261-265), cupom é só porcentagem e afiliado é só quem já comprou, com comissão única.
+
+O que fazer, em unidades pequenas:
+1. Cupom exclusivo de um post ou de um AutoDM.
+2. Relatório de vendas por cupom (hoje é por tipo de desconto).
+3. Painel do afiliado com ganhos reais e posição, sem projeção (conferir antes o ranking citado em 630 [HN6]).
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: tabelas em vez de gráficos sem alternativa; valores com moeda e rótulo.
+
+Testes automáticos: somente sintéticos: cupom limitado ao canal certo; relatório bate com os pedidos; painel só com valores reais e sem dinheiro guardado pelo Marktmorgen.
+
+Custo: Leituras por relatório limitadas por página, com linha no registro de custos. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Simulador de ganho ou projeção de receita (225 [HL6]).
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN8 — Produto sob encomenda com fila, prazo, estado e reembolso se atrasar (09/11/2026)
+
+Etiqueta: [STN8], item 761.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 518 [PF6] já traz campos do comprador e prazo. As buscas por "fila de pedidos" não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: O produto personalizado da Stan (capturas 281-286) é só um checkout com campos extras, sem prazo, fila nem entrega.
+
+O que fazer, em unidades pequenas:
+1. Fila de pedidos do criador com prazo prometido e estado (recebido, em produção, entregue).
+2. Aviso ao comprador a cada mudança de estado.
+3. Reembolso oferecido se o prazo vencer, sempre feito na conta Stripe do próprio criador e com confirmação dele.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: estados em texto, avisos em região ao vivo, ordenação por teclado.
+
+Testes automáticos: somente sintéticos: prazo vencido gera aviso; reembolso só com confirmação; e-mails contados; nenhum dinheiro passa pelo Marktmorgen.
+
+Custo: Cada aviso contado no consumo de e-mails da loja, com reserva antes do envio. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN9 — Estudo: vídeo e série por IA como produto, sem prejuízo (09/11/2026)
+
+Etiqueta: [STN9], item 762.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 21 [E4] deixou gerador de vídeo fora do escopo; 478 [SB1] só reaproveita vídeo do criador; 35 [F4] é dublagem; 346 [FL1] só recomenda ferramentas; 629 [HN5] é guia. Item novo de estudo, por pedido do dono de oferecer vídeo por IA com lucro.
+
+Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Nas telas vistas, a Stan só hospeda vídeo. Fornecedores desse mercado mudam depressa, e nenhum preço pode ser dado por conhecido.
+
+O que fazer, em unidades pequenas:
+1. Estudo datado, com fontes oficiais: fornecedores vigentes, preço, direitos autorais, consentimento de voz e rosto e rótulo de IA.
+2. Pior caso por plano, com créditos e teto antes do gasto.
+3. Desenho de três usos: vídeo de venda a partir da página do produto, produto "Série" e primeiro episódio como isca.
+4. Levar ao dono o número e a decisão. Sem o "sim" dele, nada é construído.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: no estudo, exigir legendas, audiodescrição e transcrição como condição de qualquer construção futura.
+
+Testes automáticos: estudo sem código; se houver protótipo, somente sintético e sem chamada paga.
+
+Custo: O estudo não gasta com fornecedor. Fornecedor novo só com fonte oficial datada e "sim" do dono. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Construir, contratar fornecedor, gravar percentual de comissão ou citar ganho estimado ao cliente.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN10 — Cancelamento claro, com oferta ligada ao motivo e exportação na saída (09/11/2026)
+
+Etiqueta: [STN10], item 763.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. app/api/store/leaving/route.ts e lib/leave-rules.ts já perguntam o motivo ao membro; lib/dunning-rules.ts e a pausa existem; 641 [WG1], 642 [WG2], 649 [WG9] e 307 [EC1] seguem válidos. As buscas por "oferta de retenção" e "save offer" não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo B, ao fim do grupo, ABAIXO DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Na Stan (capturas 307-310), cancelar leva 3 cliques, com recusa clara da oferta, motivo opcional e data final na tela, mas a oferta é a mesma para todos.
+
+O que fazer, em unidades pequenas:
+1. Cancelar com o mesmo número de cliques de assinar, com data final e o que acontece com a loja e os clientes.
+2. Motivo opcional, com ajuda ligada ao motivo escolhido, usando só o que já existe (pausa, troca de plano, ajuda para montar a loja).
+3. Exportação dos dados oferecida na saída.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: recusa tão visível quanto a oferta, sem padrão enganoso; foco controlado a cada passo.
+
+Testes automáticos: somente sintéticos: cancelar sem responder o motivo funciona; data final correta; exportação disponível; nenhuma oferta com desconto novo.
+
+Custo: Sem custo novo além da exportação já contada. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Criar desconto ou mês grátis novo sem decisão do dono; dificultar o cancelamento.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN11 — Consumo de e-mails sempre à vista e melhor horário por pessoa (09/11/2026)
+
+Etiqueta: [STN11], item 764.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 544 [SQ9], 546 [EB1], 547 [ER1], 537 [PH1], 590 [KB11], 356 [ES2] e 599 [KB20] seguem válidos.
+
+Estado inicial: na fila. Posição: Grupo B, ao fim do grupo, ABAIXO DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Na Stan (capturas 179 e 217-223), há limites escondidos e destinatários só por tag.
+
+O que fazer, em unidades pequenas:
+1. Mostrar sempre o consumo do limite já existente, sem mudar o número.
+2. Melhor horário por pessoa, sem usar pixel de abertura (coerente com 547 [ER1]).
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: consumo em texto, não só em barra.
+
+Testes automáticos: somente sintéticos: número igual ao do medidor; sem dado de abertura; desconhecido aparece como desconhecido.
+
+Custo: Cálculo sem fornecedor novo, com leituras limitadas. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN12 — Gerente do negócio: alertas de renda, meta do mês e estudo de assistente por WhatsApp (09/11/2026)
+
+Etiqueta: [STN12], item 765.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. app/api/store/numbers/ask/route.ts, components/today-panel.tsx e lib/mcp-catalog.ts existem; 631 [AA1], 598 [KB19], 11 [D8] e 219 seguem válidos. As buscas por "meta do mês" e por assistente no WhatsApp não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo B, ao fim do grupo, ABAIXO DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: A Stan oferece um cartão de assistente com QR, SMS e Telegram, mas nas telas vistas ele respondeu de forma genérica e não conhecia os limites do plano (capturas 190, 199, 301).
+
+O que fazer, em unidades pequenas:
+1. Alertas que protegem a renda, baseados em dados reais da loja.
+2. Meta do mês definida pelo criador, com andamento.
+3. Estudo do assistente por WhatsApp ou Telegram: custo, regras da Meta e conta necessária. Construção só com "sim" do dono.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: alertas em texto, barra de andamento com valor legível por leitor de tela.
+
+Testes automáticos: somente sintéticos: alerta só com dado conhecido; meta sem promessa de resultado; nenhuma mensagem real.
+
+Custo: Alertas contados nos e-mails da loja; estudo sem gasto com fornecedor. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Executar ação sem confirmação do criador; prometer resultado.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN13 — Navegação do estúdio: busca global, etapas e ajuda da tela atual (09/11/2026)
+
+Etiqueta: [STN13], item 766.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 571 [VS1], 484 [IT1], 653 [WG13], 656 [WG16], 651 [WG11], 652 [WG12] e 491 [PP2] seguem válidos; existe só components/help-search.tsx. As buscas por "busca global" e "Step N of N" não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo B, ao fim do grupo, ABAIXO DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: A busca da Stan cobre páginas, clientes e produtos, mas não achou uma ferramenta dela pelo nome (captura 301); vídeos abrem por cima da tela (202-203) e o cartão do assistente cobre o menu (240, 301).
+
+O que fazer, em unidades pequenas:
+1. Busca global do estúdio em páginas, clientes e produtos.
+2. Migalhas e "Step 2 of 4" em toda criação.
+3. Ajuda da tela atual, sem vídeo que abra sozinho.
+4. Sino que separe o que exige ação do que é novidade.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: busca com padrão combobox acessível, sem armadilha de teclado; nenhum conteúdo cobrindo o menu.
+
+Testes automáticos: somente sintéticos: a busca só retorna dados da própria loja; digitação não gera leitura por tecla sem limite; nenhum vídeo em reprodução automática.
+
+Custo: Leituras por busca limitadas, com espera entre teclas e teto por loja. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN14 — Clientes e receita: filtros salvos, ações em massa com desfazer e origem (09/11/2026)
+
+Etiqueta: [STN14], item 767.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 392 [CX3], 595 [KB16], 593 [KB14], 268 [KT2] e 649 [WG9] seguem válidos. As buscas por "filtros salvos" e "ações em massa" não acharam registro.
+
+Estado inicial: na fila. Posição: Grupo B, ao fim do grupo, ABAIXO DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: A receita da Stan tem 9 filtros e CSV, sem origem, afiliado ou país (capturas 287-293).
+
+O que fazer, em unidades pequenas:
+1. Filtros salvos.
+2. Total e tíquete médio ao filtrar.
+3. Ações em massa com contador e desfazer.
+4. Origem por post, AutoDM e cupom na ficha do cliente.
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: tabela acessível, seleção por teclado, contador em região ao vivo, confirmação antes de ação em massa (3.3.6).
+
+Testes automáticos: somente sintéticos: total bate com os pedidos filtrados; desfazer restaura o estado; ação em massa respeita limites e consentimento.
+
+Custo: Leituras paginadas com teto por requisição; e-mails em massa contados com reserva antes do envio. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## STN15 — Estudos restantes da pesquisa (09/11/2026)
+
+Etiqueta: [STN15], item 768.
+
+Solicitação do dono (09/11/2026, por volta das 13h55, horário de Fortaleza), palavras do dono: "Coloca na fila os aprendizados stan para melhorar marktmorgen". Origem: pesquisa da área interna da Stan feita em conta de teste de 06 a 09/11/2026 (capturas 1 a 310, relatório local do Claude 1) e conferência de duplicidade contra a fila e o código de 09/11/2026.
+
+Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos o main (fe39815c2), a fila pela data, pelo nome da seção, pela etiqueta [STN] (livre) e pelo conteúdo, e o código. 481 [SB4], 251 [ST4], 483 [SB6] e 310 [AX2] seguem válidos. Os estudos abaixo não têm item próprio.
+
+Estado inicial: na fila. Posição: Grupo B, ao fim do grupo, ABAIXO DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
+
+Contexto: Parte da área interna da Stan só aparece com venda real ou Stripe ligado, e não foi vista.
+
+O que fazer, em unidades pequenas:
+1. Conferir, quando houver como fazer legalmente e sem conta nova, o que não foi visto: AutoDM enviado, painel do afiliado, order bump no checkout, sala de webinar e entrega com arquivo enviado.
+2. Conferir se 637 [GL5] e 585 [KB6] cobrem pacotes de sessões, lista de espera de agenda e lembrete por WhatsApp ou SMS; o que faltar vira complemento nesses itens.
+3. Reconferir a pesquisa do ClickFunnels registrada em 06/11/2026.
+4. Medir o custo real de gerar um produto em cerca de 60 segundos (dentro de 219).
+
+Acessibilidade (AX274, Parte A, integral): máxima acessibilidade em tudo o que este item criar ou alterar — WCAG 2.2 nível AAA em todos os critérios aplicáveis, ATAG 2.0 no estúdio, inglês americano simples no nível do ensino fundamental final (3.1.5), contraste de 7:1, alvos de 44 × 44 px, operação completa por teclado e por leitores de tela, regiões ao vivo nos avisos, nenhum limite de tempo, prefers-reduced-motion, reflow em 320 px e zoom de 400%. Nenhum overlay de acessibilidade e nenhuma alegação de conformidade sem auditoria. Cada PR registra a seção "Acessibilidade" com os critérios conferidos, o método, o resultado, o que ficou de fora e os passos e decisões da tarefa principal antes e depois. Verificações deste item: estudos registram também as barreiras de acessibilidade observadas.
+
+Testes automáticos: estudo sem código.
+
+Custo: Sem gasto com fornecedor. Custo desconhecido reprova, nunca é zero; nenhuma cota grátis de fornecedor conta como zero; teto automático e reserva antes de cada gasto. Todo cálculo de lucro mostrado ao dono segue a regra LC.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 100% de todos os direitos do plano e de cada complemento no pior mês, no mensal e no anual, pode dar prejuízo depois de todos os custos e impostos, com as taxas de recebimento mais caras de lib/receiving-costs.ts e as reservas de reembolso e de contestação; lucro maior que zero por unidade, com a folga do spend floor, garantido pelo código com tetos antes de cada gasto. Comissão não subsidia o resultado. A empresa cobre 100% dos custos fixos (FX275) a partir da base mínima; meta de 60% no relatório mensal real. Leitura tributária pela política TX; SR menos favorável enquanto a pergunta do Stripe Tax estiver sem resposta.
+
+Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Assinar plano, fazer compra real ou criar conta para concluir o estudo.
+
+Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.

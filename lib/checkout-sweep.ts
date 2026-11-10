@@ -401,8 +401,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   if (!worthAsking(store, requesting)) return;
   // A membership's renewals, sent to the creator's ad platforms as purchases
-  // of their own (lib/ad-events.ts): one read of the day's invoices, only on
-  // a store that sends from the server.
+  // of their own (lib/ad-events.ts): the day's paid invoices, read page by
+  // page up to its cap and within the pass's deadline, only on a store that
+  // sends from the server.
   if (store.stripeAccountId && sendsFromServer(store)) {
     await sendRenewals(store, Date.now(), deadline).catch((error) => console.error("sending renewals to ad platforms failed", store.handle, error));
   }
@@ -643,6 +644,11 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   let skip = Number(savedDone) || 0;
   // The stores with open payment requests, read once a run.
   const requesting = await storesWithRequests().catch(() => new Set<string>());
+  // Redis's SCAN may hand back the same key on more than one page (and a store
+  // moving between addresses is seen under both), so each store is swept at
+  // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and
+  // NOT_A_COST.PAYPAL_WATCH_BATCH in tests/plan-cost-registry.ts) hold.
+  const swept = new Set<string>();
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
@@ -653,6 +659,12 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
         continue;
       }
       if (Date.now() >= deadline) break;
+      const id = store.sid ? `sid:${store.sid}` : `handle:${store.handle}`;
+      if (swept.has(id)) {
+        done += 1;
+        continue;
+      }
+      swept.add(id);
       const reviewed = Boolean(store.stripeAccountId) && (await storeHasReviews(store).catch(() => false));
       const asks = Boolean(store.sid) && requesting.has(store.sid);
       if (worthAsking(store, asks) || reviewed || store.paypalSeller) {

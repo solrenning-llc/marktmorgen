@@ -12,4 +12,8 @@ for (const required of [
   "não certifica", "custo desconhecido", "sem contato externo",
   "fontes das próprias bandeiras", "Nenhuma pausa ou liberação",
 ]) is(`source review preserves ${required}`, text.includes(required), true);
+is("Mastercard source conflict stays explicit and unresolved",
+  /FAQ[^\n]*ECP[^\n]*1%/.test(text)
+    && /ECM[^\n]*1,5%/.test(text)
+    && /divergência[^\n]*pendente/.test(text), true);
 done();

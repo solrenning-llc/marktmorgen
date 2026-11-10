@@ -24,7 +24,9 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
-import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { canSellProduct } from "@/lib/store-checkout";
+import { HeldInSaleError, createCheckoutUnlessHeld } from "@/lib/held-checkout";
+import { heldOrUnreadable, touchesHeld } from "@/lib/child-safety-holds";
 import { withStockHold } from "@/lib/stock";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
@@ -57,6 +59,10 @@ export async function welcomeFor(store: Store, claim: Pick<Claim, "e" | "p" | "a
   if (!welcomeOn(store) || !store.statsId || !isRedisConfigured() || claim.p === store.welcomeOffer.product) return null;
   const product = await readListing(store, store.welcomeOffer.product).catch(() => null);
   if (!canOfferWelcome(store, product ?? null)) return null;
+  // A bundle holding a product kept for a child-safety report is neither
+  // offered nor sold (lib/child-safety-holds.ts); a hold that cannot be read
+  // counts as held, so it is not offered either. One read, for a bundle only.
+  if (product.bundle?.length && touchesHeld(product, await heldOrUnreadable(store, product.bundle))) return null;
   const asked = Math.floor(Date.parse(claim.at) / 1000);
   const start = Number.isFinite(asked) && asked > 0 && asked <= nowSeconds ? asked : nowSeconds;
   const key = startKey(store.statsId, claim.e);
@@ -199,7 +205,7 @@ export async function openWelcome(
   if (!product || !canOfferWelcome(store, offer.product)) return { ok: false, reason: "unavailable" };
   try {
     const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: holding, digitalConsent: consent }),
+      createCheckoutUnlessHeld(store, product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: holding, digitalConsent: consent }),
     );
     if (!held.ok) return { ok: false, reason: "unavailable" };
     return { ok: true, url: held.value.url };
@@ -207,6 +213,8 @@ export async function openWelcome(
     // A coupon the creator deleted in their own dashboard, most likely.
     // The store's orders for the month are reached (lib/order-admission.ts): not open right now, nothing charged.
     if (error instanceof OrdersPausedError) return { ok: false, reason: "unavailable" };
+    // It would hand over a product kept for a child-safety report, or a hold could not be read (lib/held-checkout.ts): nothing opened.
+    if (error instanceof HeldInSaleError) return { ok: false, reason: "unavailable" };
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a welcome offer checkout failed", store.handle, error);

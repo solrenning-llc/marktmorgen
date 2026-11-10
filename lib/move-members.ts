@@ -21,7 +21,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
-import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { canSellProduct } from "@/lib/store-checkout";
+import { HeldInSaleError, createCheckoutUnlessHeld } from "@/lib/held-checkout";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { onAccount } from "@/lib/stripe-account";
@@ -286,13 +287,15 @@ export async function openMove(
   const option = product.options.length ? invite.o : undefined;
   try {
     const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent }),
+      createCheckoutUnlessHeld(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent }),
     );
     if (!held.ok) return { ok: false, reason: "unavailable" };
     return { ok: true, url: held.value.url };
   } catch (error) {
     // The store's orders for the month are reached (lib/order-admission.ts): not open right now, nothing charged.
     if (error instanceof OrdersPausedError) return { ok: false, reason: "unavailable" };
+    // It would hand over a product kept for a child-safety report, or a hold could not be read (lib/held-checkout.ts): nothing opened.
+    if (error instanceof HeldInSaleError) return { ok: false, reason: "unavailable" };
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a moved member's checkout failed", store.handle, error);

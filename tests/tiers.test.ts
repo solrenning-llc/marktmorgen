@@ -228,6 +228,10 @@ async function main(): Promise<void> {
   unreadable = false;
   // The card may have been charged: the member is told it could not be confirmed, never that nothing changed.
   is("an answer that cannot be read: not confirmed, and nobody is told it happened", [unsure.ok ? "switched" : unsure.reason, emails.length], ["unconfirmed", 0]);
+  // The lock is left to run out at its own expiry, not let go: a new switch is "busy" while the first may still run at Stripe.
+  const [lockLeft] = await redisPipeline([["GET", "nl:tier:sub_Member0001:lock"]]);
+  is("an unconfirmed switch keeps the membership's lock to its expiry", typeof lockLeft === "string" && lockLeft.length > 0, true);
+  await redisPipeline([["DEL", "nl:tier:sub_Member0001:lock"]]);
   is("said in every language without claiming nothing changed", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => {
     const notice = membershipWords(l).manageNotices.unconfirmed;
     return Boolean(notice && notice.title.length > 10 && notice.body.length > 40) && notice.body !== membershipWords(l).manageNotices.error.body;

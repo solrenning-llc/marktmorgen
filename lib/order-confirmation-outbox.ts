@@ -224,7 +224,10 @@ export async function reserveDigitalOptionRetention(receipt: unknown, runtime: S
       body: selected.body, preintent, snapshot }, runtime, undefined, false, true);
     if (!result.ok) return result;
     const saved = await readDigitalOptionRetention(result.id, runtime);
-    if (!saved || !readDigitalOptionPreintent(receipt) || saved.payload.preintentToken !== preintent.token ||
+    // Initial preparation and the atomic enqueue already enforce expiry.
+    // A matching persisted winner reports retention only; a later expired
+    // receipt cannot revoke that evidence or grant payment/access authority.
+    if (!saved || saved.payload.preintentToken !== preintent.token ||
         JSON.stringify(saved.payload.snapshot) !== JSON.stringify(snapshot)) return { ok: false };
     return { ...result, admitted: false, permitsCheckout: false, grantsAccess: false };
   } catch { return { ok: false }; }

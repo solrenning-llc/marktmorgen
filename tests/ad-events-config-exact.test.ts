@@ -36,7 +36,7 @@ const OWNER = "adconfig@example.com";
 const TOKENS = { meta: "EAAB" + "m".repeat(60), tiktok: "t".repeat(40), google: "g".repeat(22), pinterest: "pina_" + "p".repeat(40) };
 
 /** What Stripe's list of checkouts answers for the next customerType. */
-let listed: unknown = { object: "list", data: [] };
+let listed: unknown = { object: "list", data: [], has_more: false };
 globalThis.fetch = (async () => new Response(JSON.stringify(listed), { status: 200 })) as typeof fetch;
 
 /**
@@ -216,9 +216,9 @@ async function main(): Promise<void> {
     listed = body;
     is(`${label}: null, not new`, await customerType(store, "buyer@example.com", "cs_test_adc0000000001", 2_000_000_000), null);
   }
-  listed = { object: "list", data: [] };
+  listed = { object: "list", data: [], has_more: false };
   is("an empty list: new", await customerType(store, "buyer@example.com", "cs_test_adc0000000001", 2_000_000_000), "new");
-  listed = { object: "list", data: [{ id: "cs_test_adc0000000000", payment_status: "paid", created: 1_000 }] };
+  listed = { object: "list", data: [{ id: "cs_test_adc0000000000", payment_status: "paid", created: 1_000 }], has_more: false };
   is("an earlier paid checkout: returning", await customerType(store, "buyer@example.com", "cs_test_adc0000000001", 2_000_000_000), "returning");
   done();
 }

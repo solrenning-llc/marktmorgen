@@ -171,7 +171,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       : [];
   const shares = canShare ? await listShares(store.statsId).then((list) => list.map((entry) => ({ id: entry.id, name: entry.name, funnelId: entry.funnelId, createdAt: entry.createdAt, expiresAt: entry.expiresAt, hint: entry.hint }))).catch(() => null) : null;
   // Writing with AI where this store's plan has it (lib/ai.ts, aiAvailableFor), and whether a drafted follow-up can be saved as a switched-off sequence.
-  const aiOn = aiAvailableFor(store) && can(view.role, "page") ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  const aiOn = aiAvailableFor(store) && can(view.role, "page") ? { on: true, left: await aiLeft(store).catch(() => null) } : { on: false, left: 0 };
   const sequences = !can(view.role, "send")
     ? { canSave: false, note: "Your role cannot save sequences. Copy these emails for someone who can, or into a broadcast draft." }
     : !store.listId || !store.mail

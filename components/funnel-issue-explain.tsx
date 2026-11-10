@@ -1,6 +1,7 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import type { FunnelLaunchIssue } from "@/lib/funnel-launch-review";
 import type { FunnelExplanation } from "@/lib/funnel-explain";
 
@@ -14,6 +15,10 @@ export function explainErrorText(reason: string): string {
       return "You have used this month's AI writing jobs. They come back when your plan's month renews.";
     case "off":
       return "AI writing is not part of this store's plan right now.";
+    case "allowance":
+      return "We could not check your AI allowance just now. Nothing was used. Reload the page in a minute to try again.";
+    case "long":
+      return "This funnel has too much text to explain in one go. Shorten its step names, then try again. Nothing was used.";
     case "stale":
       return "This check has changed since the page loaded. Reload the page to see the current checks.";
     case "gone":
@@ -45,14 +50,23 @@ const readExplanation = (value: unknown): FunnelExplanation | null => {
 export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
   funnelId: string;
   issue: FunnelLaunchIssue;
-  /** The month's AI writing jobs left, as the studio last read them. */
-  left: number;
+  /** The month's AI writing jobs left, as the studio last read them; null when they could not be read (VR2). */
+  left: number | null;
   onLeft: (left: number) => void;
 }) {
   const id = useId();
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
   const [answer, setAnswer] = useState<FunnelExplanation | null>(null);
+  // Where focus goes once the next view is drawn: the explanation after a press, the button after hiding it
+  // (WCAG 2.4.3; Claude 6 on #3454). Nothing takes focus on the first drawing.
+  const focusNext = useRef<"answer" | "button" | null>(null);
+  const takeFocus = (which: "answer" | "button") => (element: { focus: () => void } | null) => {
+    if (element && focusNext.current === which) {
+      focusNext.current = null;
+      element.focus();
+    }
+  };
 
   async function ask() {
     if (busy) return;
@@ -67,13 +81,14 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
       const body = (await response.json().catch(() => null)) as { ok?: unknown; value?: unknown; left?: unknown; error?: unknown } | null;
       const value = body?.ok === true ? readExplanation(body.value) : null;
       if (value) {
+        focusNext.current = "answer";
         setAnswer(value);
         setSaid("The explanation is shown below this check.");
         if (typeof body?.left === "number" && Number.isSafeInteger(body.left) && body.left >= 0) onLeft(body.left);
       } else {
         const reason = typeof body?.error === "string" ? body.error : "";
         setSaid(explainErrorText(reason));
-        if (reason === "failed") onLeft(Math.max(0, left - 1));
+        if (reason === "failed" && left !== null) onLeft(Math.max(0, left - 1));
         if (reason === "used") onLeft(0);
       }
     } catch {
@@ -86,23 +101,23 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
   return (
     <div className="mt-2">
       {answer ? (
-        <div role="group" aria-labelledby={`${id}-label`} className="mt-1 rounded-lg border border-line p-3">
+        <div ref={takeFocus("answer")} tabIndex={-1} role="group" aria-labelledby={`${id}-label`} className="mt-1 rounded-lg border border-line p-3">
           <p id={`${id}-label`} className="text-xs font-semibold text-ink-soft">{EXPLAIN_LABEL}</p>
           <p className="mt-2 text-ink">{answer.why}</p>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-ink">
             {answer.todo.map((step, index) => <li key={index}>{step}</li>)}
           </ol>
-          <button type="button" className="btn btn-ghost mt-2 inline-flex min-h-11 items-center" onClick={() => { setAnswer(null); setSaid("The explanation was hidden."); }}>
+          <button type="button" className="btn btn-ghost mt-2 inline-flex min-h-11 items-center" onClick={() => { focusNext.current = "button"; setAnswer(null); setSaid("The explanation was hidden."); }}>
             Hide the explanation
           </button>
         </div>
       ) : (
         <>
-          <button type="button" className="btn btn-ghost inline-flex min-h-11 items-center" aria-describedby={`${id}-cost`} disabled={busy || left < 1} onClick={ask}>
+          <button ref={takeFocus("button")} type="button" className="btn btn-ghost inline-flex min-h-11 items-center" aria-describedby={`${id}-cost`} disabled={busy || left === null || left < 1} onClick={ask}>
             {busy ? "Writing an explanation…" : "Explain this with AI"}
           </button>
           <p id={`${id}-cost`} className="mt-1 text-xs text-ink-soft">
-            {left < 1 ? "No AI writing jobs are left this month." : `Uses 1 of your ${left} AI writing jobs left this month.`} The check above stays as it is.
+            {left === null ? AI_ALLOWANCE_UNKNOWN : `${left < 1 ? "No AI writing jobs are left this month." : `Uses 1 of your ${left} AI writing jobs left this month.`} The check above stays as it is.`}
           </p>
         </>
       )}

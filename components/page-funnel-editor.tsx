@@ -75,7 +75,7 @@ export function PageFunnelEditor({
   paymentReview?: FunnelPaymentReview;
   formsHref?: string | null;
   /** AI writing for explaining each funnel check (26 [E9]): on only for a plan with it and a role that may edit pages. */
-  ai?: { on: boolean; left: number };
+  ai?: { on: boolean; left: number | null };
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);

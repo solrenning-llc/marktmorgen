@@ -28,7 +28,8 @@ export async function POST(request: NextRequest) {
   // Off (Store, a trial, an unpaid renewal) or nothing left: refused before any funnel is read.
   if (!aiAvailableFor(store)) return fail("off");
   const left = await aiLeft(store).catch(() => null);
-  if (left === null) return fail("off");
+  // An allowance that cannot be read is said to be unknown, never that the plan has no AI writing (rule 24).
+  if (left === null) return fail("allowance", 503);
   if (left < FUNNEL_EXPLAIN_JOBS) return fail("used");
   // Reading the funnel again costs what drawing the funnels page does: the rest of a page's studio requests, taken first.
   const taken = await countStudio(store, null, FUNNEL_EXPLAIN_READ_UNITS);

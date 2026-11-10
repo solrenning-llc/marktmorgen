@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Icon } from "@/components/icons";
 import { readAiAnswer } from "@/lib/ai-response";
+import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import type { FunnelType } from "@/lib/funnel-types";
 import {
@@ -47,7 +48,8 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   type: FunnelType;
   picked: Record<string, string>;
   sid: string;
-  ai: { on: boolean; left: number };
+  /** null when the month's AI uses could not be read (VR2): said in words, with the buttons off. */
+  ai: { on: boolean; left: number | null };
   /** Whether a follow-up sequence fits this funnel's journey at all (lib/funnel-ai-rules.ts, followUpMoment). */
   emailsPossible: boolean;
   onDraft: (draft: FunnelAiDraft) => void;
@@ -59,8 +61,8 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   const [emails, setEmails] = useState(emailsPossible);
   const [busy, setBusy] = useState<"draft" | "research" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [left, setLeft] = useState(ai.left);
-  const [known, setKnown] = useState(true);
+  const [left, setLeft] = useState(ai.left ?? 0);
+  const [known, setKnown] = useState(ai.left !== null);
   const [research, setResearch] = useState<FunnelResearch | null>(null);
   const [drafted, setDrafted] = useState(false);
   if (!ai.on) return null;
@@ -153,7 +155,7 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
       <p className="mt-2 text-xs text-ink-soft" role="status">
         {known
           ? `The draft uses ${draftJobs} of your monthly AI uses; the summary uses ${FUNNEL_RESEARCH_JOBS}. ${left} left this month. Each request also sets aside the most it could cost from your plan's monthly AI budget, which can run out before the uses do. Started attempts count, even if they fail.`
-          : "Reload to check your AI uses before trying again."}
+          : AI_ALLOWANCE_UNKNOWN}
         {drafted ? " Drafting again replaces the words below." : ""}
       </p>
       {error ? (

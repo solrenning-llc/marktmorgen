@@ -56,7 +56,7 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
   funnelsLeft: number;
   sid: string;
   /** Whether writing with AI is on for this person, and the month's uses left (lib/ai.ts). */
-  ai?: { on: boolean; left: number };
+  ai?: { on: boolean; left: number | null };
   /** Whether a drafted follow-up can be saved as a switched-off sequence, and why not. */
   sequences?: { canSave: boolean; note: string };
 }) {

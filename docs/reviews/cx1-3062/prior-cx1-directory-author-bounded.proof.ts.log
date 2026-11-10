@@ -1,0 +1,150 @@
+
+The ceiling is named, exported and priced
+  FAIL  DIRECTORY_BUILDS_PER_TEN_MINUTES is exported, 10 builds in a window
+        expected 10
+        got      undefined
+  FAIL  DirectoryBusyError is exported
+        expected "function"
+        got      "undefined"
+  FAIL  the window's count and the last good build have their keys
+        expected ["nl:dir:builds","nl:dir:last"]
+        got      [null,null]
+  ok    the registry prices the builds by name
+  ok    with the worst build, the builds in 30 days, the commands and the dollars
+  ok    and with what a visit costs when it is not built
+  ok    the scan line no longer says the rate is not bounded
+
+#2921 inside the ceiling: a save, then the next visit builds at once
+  ok    the first visit builds
+  FAIL  its place is counted in the window, which ends by itself
+        expected ["1",true]
+        got      [null,false]
+  FAIL  the finished build kept the page and the last good build, and dropped the mark
+        expected ["string","string",null]
+        got      ["string","object",null]
+  ok    a save drops the page and the next visit builds at once
+  ok    a kept page is still one GET alone
+
+Past the ceiling: the last good build, without a store taken out, and nothing built or kept
+  ok    the window's builds are spent
+  ok    the creator's save took the page down
+  ok    the next visit is the last good build without the store just taken out
+  FAIL  with no SSCAN, one GET of the last build and one SMISMEMBER
+        expected [0,1]
+        got      [1,0]
+  FAIL  it keeps no page from it and leaves no mark held
+        expected [null,null]
+        got      ["[{\"handle\":\"breadhouse\",\"name\":\"Bread House\",\"language\":\"en\",\"currency\":\"usd\",\"percent\":30,\"topRate\":30,\"topEarnCents\":600,\"days\":30,\"rule\":\"last\",\"lifetime\":false,\"payday\":0,\"hold\":0,\"buyers\":false,\"products\":[{\"id\":\"a068c21e88\",\"title\":\"Guide\",\"priceCents\":2000,\"rate\":30,\"earnCents\":600,\"image\":null}],\"earning\":1,\"numbers\":null}]",null]
+  ok    a store whose creator says yes again is shown again, from the last build
+  ok    the next window builds again
+
+Past the ceiling with no last build: unavailable just now, never an empty list
+  FAIL  the visit is told the list is unavailable
+        expected ["busy",0]
+        got      [["breadhouse","cakeshop"],1]
+  FAIL  and nothing is kept
+        expected null
+        got      "[{\"handle\":\"breadhouse\",\"name\":\"Bread House\",\"language\":\"en\",\"currency\":\"usd\",\"percent\":30,\"topRate\":30,\"topEarnCents\":600,\"days\":30,\"rule\":\"last\",\"lifetime\":false,\"payday\":0,\"hold\":0,\"buyers\":false,\"products\":[{\"id\":\"a068c21e88\",\"title\":\"Guide\",\"priceCents\":2000,\"rate\":30,\"earnCents\":600,\"image\":null}],\"earning\":1,\"numbers\":null},{\"handle\":\"cakeshop\",\"name\":\"Cake Shop\",\"language\":\"en\",\"currency\":\"usd\",\"percent\":30,\"topRate\":30,\"topEarnCents\":600,\"days\":30,\"rule\":\"last\",\"lifetime\":false,\"payday\":0,\"hold\":0,\"buyers\":false,\"products\":[{\"id\":\"c922142750\",\"title\":\"Guide\",\"priceCents\":2000,\"rate\":30,\"earnCents\":600,\"image\":null}],\"earning\":1,\"numbers\":null}]"
+
+The window's count is read exactly (rule 24): unknown is no build
+  ok    control before INCR missing: a healthy build
+  FAIL  INCR missing: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before INCR null: a healthy build
+  FAIL  INCR null: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before INCR QUEUED: a healthy build
+  FAIL  INCR QUEUED: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before INCR a numeric string: a healthy build
+  FAIL  INCR a numeric string: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before INCR 0: a healthy build
+  FAIL  INCR 0: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before INCR a fraction: a healthy build
+  FAIL  INCR a fraction: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before TTL missing: a healthy build
+  FAIL  TTL missing: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before TTL text: a healthy build
+  FAIL  TTL text: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before TTL -2 (the count gone): a healthy build
+  FAIL  TTL -2 (the count gone): nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before EXPIRE 0 on a count with no end: a healthy build
+  FAIL  EXPIRE 0 on a count with no end: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  ok    control before a pipeline that throws: a healthy build
+  FAIL  a pipeline that throws: nothing built, the last good build shown
+        expected [["breadhouse","cakeshop"],0,null]
+        got      [["breadhouse","cakeshop"],1,null]
+  FAIL  an unknown count with no last build is unknown, never an empty list
+        expected ["UnknownReplyError",0]
+        got      [["breadhouse","cakeshop"],1]
+
+A count left with no end gets the window's ten minutes, and the window then ends
+  ok    control: the count has no end
+  FAIL  past the ceiling it builds nothing and sets the end
+        expected [[],0,1,600]
+        got      [["breadhouse"],1,0,-1]
+  ok    and once the window ended, it builds again
+
+The last build's own read and the listed-set check are exact
+  FAIL  an SMISMEMBER answering missing is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  an SMISMEMBER answering null is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  an SMISMEMBER answering a number is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  an SMISMEMBER answering a shorter list is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  an SMISMEMBER answering a longer list is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  an SMISMEMBER answering a string flag is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  an SMISMEMBER answering a flag of 2 is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  an SMISMEMBER answering QUEUED is unknown, never the list unfiltered or empty
+        expected "UnknownReplyError"
+        got      ["breadhouse","cakeshop"]
+  FAIL  a last build answering a number is unknown, and nothing is filtered from it
+        expected ["UnknownReplyError",0]
+        got      [["breadhouse","cakeshop"],0]
+  FAIL  a last build answering a list is unknown, and nothing is filtered from it
+        expected ["UnknownReplyError",0]
+        got      [["breadhouse","cakeshop"],0]
+  FAIL  a last build answering text that is not the build is unknown, and nothing is filtered from it
+        expected ["UnknownReplyError",0]
+        got      [["breadhouse","cakeshop"],0]
+  FAIL  a last build answering sids that do not match the rows is unknown, and nothing is filtered from it
+        expected ["UnknownReplyError",0]
+        got      [["breadhouse","cakeshop"],0]
+  FAIL  a last build answering an empty sid is unknown, and nothing is filtered from it
+        expected ["UnknownReplyError",0]
+        got      [["breadhouse","cakeshop"],0]
+  ok    healthy control: the last build, checked, is the list
+
+#2921's mark still comes first: a held or failed mark builds nothing and counts nothing
+  ok    the read is unknown, as on #2921, with no count taken
+
+62 checks, 35 failing.

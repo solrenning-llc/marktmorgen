@@ -1,0 +1,14 @@
+{
+  "cx1-directory-author-bounded.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  a last build answering a list is unknown, and nothing is filtered from it",
+      "  FAIL  a last build answering text that is not the build is unknown, and nothing is filtered from it",
+      "  FAIL  a last build answering sids that do not match the rows is unknown, and nothing is filtered from it",
+      "  FAIL  a last build answering an empty sid is unknown, and nothing is filtered from it",
+      "#2921's mark still comes first: a held or failed mark builds nothing and counts nothing",
+      "62 checks, 35 failing."
+    ]
+  }
+}

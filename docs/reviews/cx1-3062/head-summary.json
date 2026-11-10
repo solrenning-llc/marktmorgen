@@ -1,0 +1,31 @@
+{
+  "cx1-directory-last-shape.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  malformed fallback null",
+      "  FAIL  malformed fallback 1",
+      "  FAIL  malformed fallback {}",
+      "  FAIL  malformed fallback {\"handle\":\"cx1program\",\"name\":\"CX1\",\"language\":\"en\",\"currency\":\"usd\",\"percent\":30,\"topRate\":30,\"topEarnCents\":300,\"days\":30,\"rule\":\"last\",\"lifetime\":false,\"payday\":1,\"hold\":30,\"buyers\":false,\"products\":null,\"earning\":1,\"numbers\":null}",
+      "  FAIL  malformed fallback {\"handle\":\"cx1program\",\"name\":\"CX1\",\"language\":\"unknown-language\",\"currency\":\"usd\",\"percent\":30,\"topRate\":30,\"topEarnCents\":300,\"days\":30,\"rule\":\"last\",\"lifetime\":false,\"payday\":1,\"hold\":30,\"buyers\":false,\"products\":[],\"earning\":1,\"numbers\":null}",
+      "6 checks, 5 failing."
+    ]
+  },
+  "cx1-directory-author-bounded.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "#2921's mark still comes first: a held or failed mark builds nothing and counts nothing",
+      "62 checks, all passing."
+    ]
+  },
+  "directory-index.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "✔ an SREM reply in an unknown shape counts as listed: the kept rows are dropped and the failure is said (49.093ms)",
+      "ℹ tests 13",
+      "ℹ fail 0"
+    ]
+  }
+}

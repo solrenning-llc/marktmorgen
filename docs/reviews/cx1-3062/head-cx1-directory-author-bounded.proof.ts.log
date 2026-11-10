@@ -1,0 +1,80 @@
+
+The ceiling is named, exported and priced
+  ok    DIRECTORY_BUILDS_PER_TEN_MINUTES is exported, 10 builds in a window
+  ok    DirectoryBusyError is exported
+  ok    the window's count and the last good build have their keys
+  ok    the registry prices the builds by name
+  ok    with the worst build, the builds in 30 days, the commands and the dollars
+  ok    and with what a visit costs when it is not built
+  ok    the scan line no longer says the rate is not bounded
+
+#2921 inside the ceiling: a save, then the next visit builds at once
+  ok    the first visit builds
+  ok    its place is counted in the window, which ends by itself
+  ok    the finished build kept the page and the last good build, and dropped the mark
+  ok    a save drops the page and the next visit builds at once
+  ok    a kept page is still one GET alone
+
+Past the ceiling: the last good build, without a store taken out, and nothing built or kept
+  ok    the window's builds are spent
+  ok    the creator's save took the page down
+  ok    the next visit is the last good build without the store just taken out
+  ok    with no SSCAN, one GET of the last build and one SMISMEMBER
+  ok    it keeps no page from it and leaves no mark held
+  ok    a store whose creator says yes again is shown again, from the last build
+  ok    the next window builds again
+
+Past the ceiling with no last build: unavailable just now, never an empty list
+  ok    the visit is told the list is unavailable
+  ok    and nothing is kept
+
+The window's count is read exactly (rule 24): unknown is no build
+  ok    control before INCR missing: a healthy build
+  ok    INCR missing: nothing built, the last good build shown
+  ok    control before INCR null: a healthy build
+  ok    INCR null: nothing built, the last good build shown
+  ok    control before INCR QUEUED: a healthy build
+  ok    INCR QUEUED: nothing built, the last good build shown
+  ok    control before INCR a numeric string: a healthy build
+  ok    INCR a numeric string: nothing built, the last good build shown
+  ok    control before INCR 0: a healthy build
+  ok    INCR 0: nothing built, the last good build shown
+  ok    control before INCR a fraction: a healthy build
+  ok    INCR a fraction: nothing built, the last good build shown
+  ok    control before TTL missing: a healthy build
+  ok    TTL missing: nothing built, the last good build shown
+  ok    control before TTL text: a healthy build
+  ok    TTL text: nothing built, the last good build shown
+  ok    control before TTL -2 (the count gone): a healthy build
+  ok    TTL -2 (the count gone): nothing built, the last good build shown
+  ok    control before EXPIRE 0 on a count with no end: a healthy build
+  ok    EXPIRE 0 on a count with no end: nothing built, the last good build shown
+  ok    control before a pipeline that throws: a healthy build
+  ok    a pipeline that throws: nothing built, the last good build shown
+  ok    an unknown count with no last build is unknown, never an empty list
+
+A count left with no end gets the window's ten minutes, and the window then ends
+  ok    control: the count has no end
+  ok    past the ceiling it builds nothing and sets the end
+  ok    and once the window ended, it builds again
+
+The last build's own read and the listed-set check are exact
+  ok    an SMISMEMBER answering missing is unknown, never the list unfiltered or empty
+  ok    an SMISMEMBER answering null is unknown, never the list unfiltered or empty
+  ok    an SMISMEMBER answering a number is unknown, never the list unfiltered or empty
+  ok    an SMISMEMBER answering a shorter list is unknown, never the list unfiltered or empty
+  ok    an SMISMEMBER answering a longer list is unknown, never the list unfiltered or empty
+  ok    an SMISMEMBER answering a string flag is unknown, never the list unfiltered or empty
+  ok    an SMISMEMBER answering a flag of 2 is unknown, never the list unfiltered or empty
+  ok    an SMISMEMBER answering QUEUED is unknown, never the list unfiltered or empty
+  ok    a last build answering a number is unknown, and nothing is filtered from it
+  ok    a last build answering a list is unknown, and nothing is filtered from it
+  ok    a last build answering text that is not the build is unknown, and nothing is filtered from it
+  ok    a last build answering sids that do not match the rows is unknown, and nothing is filtered from it
+  ok    a last build answering an empty sid is unknown, and nothing is filtered from it
+  ok    healthy control: the last build, checked, is the list
+
+#2921's mark still comes first: a held or failed mark builds nothing and counts nothing
+  ok    the read is unknown, as on #2921, with no count taken
+
+62 checks, all passing.

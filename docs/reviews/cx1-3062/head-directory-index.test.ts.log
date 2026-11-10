@@ -1,0 +1,21 @@
+✔ consent is necessary and not sufficient (3.1149ms)
+✔ saying yes puts a store in the list (15.7976ms)
+✔ saying yes twice is one store, not two (17.3853ms)
+✔ saying no takes it out again, which is the half that gets forgotten (8.4106ms)
+✔ switching the whole programme off takes it out too (16.9752ms)
+✔ a store being deleted leaves no row behind (21.3769ms)
+✔ the list can be read back, or keeping it was pointless (29.9444ms)
+✔ a save drops the directory's kept rows, so taking a store out is immediate (15.0719ms)
+✔ a save from a store that was not in the listed set and stays out keeps the kept rows (Claude 6 on #3062) (10.0304ms)
+✔ an SREM reply in an unknown shape counts as listed: the kept rows are dropped and the failure is said (49.093ms)
+✔ search engines are asked to show it only once there is a catalog (0.3396ms)
+✔ the index is written where the program is saved (2.2542ms)
+✔ only the directory and the index read the consent (4144.1798ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4352.1394

@@ -1,0 +1,20 @@
+
+CX1: a listed sid does not validate its cached display row
+  FAIL  malformed fallback null
+        expected {"unknown":true,"accepted":false,"renders":false}
+        got      {"unknown":false,"accepted":true,"renders":false}
+  FAIL  malformed fallback 1
+        expected {"unknown":true,"accepted":false,"renders":false}
+        got      {"unknown":false,"accepted":true,"renders":false}
+  FAIL  malformed fallback {}
+        expected {"unknown":true,"accepted":false,"renders":false}
+        got      {"unknown":false,"accepted":true,"renders":false}
+  FAIL  malformed fallback {"handle":"cx1program","name":"CX1","language":"en","currency":"usd","percent":30,"topRate":30,"topEarnCents":300,"days":30,"rule":"last","lifetime":false,"payday":1,"hold":30,"buyers":false,"products":null,"earning":1,"numbers":null}
+        expected {"unknown":true,"accepted":false,"renders":false}
+        got      {"unknown":false,"accepted":true,"renders":false}
+  FAIL  malformed fallback {"handle":"cx1program","name":"CX1","language":"unknown-language","currency":"usd","percent":30,"topRate":30,"topEarnCents":300,"days":30,"rule":"last","lifetime":false,"payday":1,"hold":30,"buyers":false,"products":[],"earning":1,"numbers":null}
+        expected {"unknown":true,"accepted":false,"renders":false}
+        got      {"unknown":false,"accepted":true,"renders":false}
+  ok    a valid fallback still renders
+
+6 checks, 5 failing.

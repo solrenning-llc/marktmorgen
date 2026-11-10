@@ -51,7 +51,7 @@ export function StudioPrivacy({
             <form action="/api/store/export" method="get" className="mt-4 max-w-full">
               <input type="hidden" name="store" value={sid} />
               <input type="hidden" name="what" value="store" />
-              <button type="submit" className="btn btn-primary min-h-11">
+              <button type="submit" className="btn btn-primary">
                 Download my store&rsquo;s data
               </button>
             </form>
@@ -78,7 +78,7 @@ export function StudioPrivacy({
           </li>
           <li>
             <form action="/api/auth/signout-all" method="post">
-              <button type="submit" className="btn btn-secondary min-h-11">
+              <button type="submit" className="btn btn-secondary">
                 Log out of all devices
               </button>
             </form>

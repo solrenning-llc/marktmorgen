@@ -94,7 +94,8 @@ part("markup: AX274 targets, link purpose, no timer");
 const targets = [...owner.matchAll(/<(a|button)\s[^>]*class="([^"]*)"/g)];
 is("every link and button is drawn", targets.length >= 9, true);
 for (const [, tag, cls] of targets) {
-  is(`${tag} ${cls.slice(0, 40)}: at least 44px tall`, /\bmin-h-11\b/.test(cls), true);
+  // .btn is inline-flex, centered, with a 48px minimum (app/globals.css), so tests/tap-targets.test.ts wants no min-h-11 beside it.
+  is(`${tag} ${cls.slice(0, 40)}: at least 44px tall`, /\bmin-h-11\b/.test(cls) || /(^|\s)btn(\s|$)/.test(cls), true);
 }
 const names = [...owner.matchAll(/<a [^>]*>([\s\S]*?)<\/a>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
 is("no link named by a bare word", names.filter((n) => /^(here|more|click here|link|this)$/i.test(n)), []);

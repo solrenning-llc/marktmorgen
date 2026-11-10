@@ -31,7 +31,8 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UNSUB_TOKEN, leadsKey, mailable, parseContact, readUnsubToken, takeBackClicks } from "@/lib/contacts";
+import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
+import { UNSUB_TOKEN, leadsKey, mailable, readUnsubToken, takeBackClicks } from "@/lib/contacts";
 
 /** How long a used link is remembered after the last one, in days. */
 export const CLICK_DAYS = 90;
@@ -83,8 +84,14 @@ export async function usedLinkIn(listId: string, campaign: string, emails: strin
   const out = new Set<string>();
   if (!emails.length || !isRedisConfigured()) return out;
   const answers = await redisPipeline(emails.map((email) => ["SISMEMBER", usedKey(listId, email), campaign]));
+  // A missing or malformed answer is not evidence that somebody did not use
+  // the link.  Callers use absence from this set for an `unclicked` branch,
+  // so fail the whole read and let the sequence retry without sending.
+  if (answers.length !== emails.length || answers.some((answer) => answer !== 0 && answer !== 1)) {
+    throw new Error("link use could not be read");
+  }
   emails.forEach((email, i) => {
-    if (Number(answers[i]) === 1) out.add(email);
+    if (answers[i] === 1) out.add(email);
   });
   return out;
 }
@@ -120,11 +127,25 @@ export async function stopCounting(token: string): Promise<boolean> {
 export async function forgetClicksPerson(listId: string | null, rawEmail: string): Promise<number> {
   if (!listId || !isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
-  const token = parseContact(raw)?.t ?? "";
+  const read = repliesFor(await redisPipeline([["HGET", leadsKey(listId), email]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a link-use contact");
+  const raw = read[0];
+  let token = "";
+  if (raw !== null) {
+    let value: unknown;
+    try { value = JSON.parse(raw as string); } catch { throw new UnknownReplyError("a link-use contact"); }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a link-use contact");
+    const kept = value as Record<string, unknown>;
+    // Legacy Lead rows have no token. rememberLinkKeys only writes a marker
+    // for UNSUB_TOKEN, so an absent/invalid field has no possible marker.
+    // Still erase the known click set; unknown transport/JSON stays unknown.
+    token = typeof kept.t === "string" && UNSUB_TOKEN.test(kept.t) ? kept.t : "";
+  }
   const keys = [usedKey(listId, email), ...(UNSUB_TOKEN.test(token) ? [keyIndex(linkKeyOf(token))] : [])];
-  const [gone] = await redisPipeline([["DEL", ...keys]]);
-  return Number(gone) || 0;
+  const deleted = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
+  const gone = deleted ? countOf(deleted[0]) : null;
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("a link-use deletion");
+  return gone;
 }
 
 /**
@@ -134,6 +155,10 @@ export async function forgetClicksPerson(listId: string | null, rawEmail: string
  */
 export async function clicksOf(listId: string | null, rawEmail: string): Promise<string[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", usedKey(listId, normaliseEmail(rawEmail))]]);
-  return (Array.isArray(members) ? members : []).map(String).sort();
+  const read = repliesFor(await redisPipeline([["SMEMBERS", usedKey(listId, normaliseEmail(rawEmail))]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members || members.some((member) => !STEP_CAMPAIGN.test(member)) || new Set(members).size !== members.length) {
+    throw new UnknownReplyError("a person's used links");
+  }
+  return members.slice().sort();
 }

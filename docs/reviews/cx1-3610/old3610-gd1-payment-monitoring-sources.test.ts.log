@@ -1,0 +1,61 @@
+
+GD1(b): retain the source limitations before any monitoring automation
+  FAIL  source review preserves 10/11/2026
+        expected true
+        got      false
+  FAIL  source review preserves https://docs.stripe.com/disputes/monitoring-programs
+        expected true
+        got      false
+  FAIL  source review preserves https://support.stripe.com/questions/monitoring-program-faq
+        expected true
+        got      false
+  FAIL  source review preserves mês anterior
+        expected true
+        got      false
+  FAIL  source review preserves 30/90 dias
+        expected true
+        got      false
+  FAIL  source review preserves TC40
+        expected true
+        got      false
+  FAIL  source review preserves TC15
+        expected true
+        got      false
+  FAIL  source review preserves disputas ocultas
+        expected true
+        got      false
+  FAIL  source review preserves 1.500
+        expected true
+        got      false
+  FAIL  source review preserves 1,5%
+        expected true
+        got      false
+  FAIL  source review preserves CEMEA
+        expected true
+        got      false
+  FAIL  source review preserves 100–299
+        expected true
+        got      false
+  FAIL  source review preserves 300+
+        expected true
+        got      false
+  FAIL  source review preserves exceeds
+        expected true
+        got      false
+  FAIL  source review preserves não certifica
+        expected true
+        got      false
+  FAIL  source review preserves custo desconhecido
+        expected true
+        got      false
+  FAIL  source review preserves sem contato externo
+        expected true
+        got      false
+  FAIL  source review preserves fontes das próprias bandeiras
+        expected true
+        got      false
+  FAIL  source review preserves Nenhuma pausa ou liberação
+        expected true
+        got      false
+
+19 checks, 19 failing.

@@ -1,0 +1,17 @@
+{
+  "gd1-payment-monitoring-sources.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "19 checks, all passing."
+    ]
+  },
+  "cx1-monitoring-ecp-source-gap.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  the study records the FAQ's one-percent ECP rate as well as the guide's ECM rate",
+      "1 checks, 1 failing."
+    ]
+  }
+}

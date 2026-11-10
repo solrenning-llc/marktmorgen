@@ -1,0 +1,7 @@
+
+The cited provider pages disagree about the ECP rate; retain that concrete gap before implementation
+  FAIL  the study records the FAQ's one-percent ECP rate as well as the guide's ECM rate
+        expected true
+        got      false
+
+1 checks, 1 failing.

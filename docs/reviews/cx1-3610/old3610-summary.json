@@ -1,0 +1,14 @@
+{
+  "gd1-payment-monitoring-sources.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  source review preserves não certifica",
+      "  FAIL  source review preserves custo desconhecido",
+      "  FAIL  source review preserves sem contato externo",
+      "  FAIL  source review preserves fontes das próprias bandeiras",
+      "  FAIL  source review preserves Nenhuma pausa ou liberação",
+      "19 checks, 19 failing."
+    ]
+  }
+}

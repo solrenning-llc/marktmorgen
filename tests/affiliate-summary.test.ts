@@ -64,6 +64,23 @@ async function main(): Promise<void> {
   is("an unchecked book says so", programSummary({ ...book, refundsChecked: false }, "month", now)!.refundsChecked, false);
   is("a period that is not one gives nothing", programSummary(book, "week", now), null);
 
+  part("One sale with several shares is sold once (Codex U on #3510)");
+  // readBook writes a partner's standing share of a sale as one more line, ref `${sale.ref}:${partner}` (lib/affiliates.ts),
+  // beside the affiliate's own commission on that sale and beside other partners' shares.
+  const shared = [
+    line({ ref: "cs_shared", pi: "pi_synthetic", aff: "s1", how: "click", commission: 2_000 }),
+    line({ ref: "cs_shared:s2", pi: "pi_synthetic", aff: "s2", how: "partner", commission: 1_000 }),
+    line({ ref: "cs_shared:s3", pi: "pi_synthetic", aff: "s3", how: "partner", commission: 500 }),
+    line({ ref: "cs_alone:s2", pi: "pi_alone", aff: "s2", how: "partner", commission: 700 }), // a partner's share of a sale nobody referred
+    line({ ref: "cs_other", pi: "pi_other", aff: "s1", how: "click", commission: 3_000 }), // another sale: counted on its own
+  ];
+  const once = programSummary({ ...book, rows: [], lines: shared }, "month", now)!;
+  is("each sale's base once, however many share in it", [once.soldCents, once.sales], [30_000, 3]);
+  is("every share's commission still earned", once.earnedCents, 7_200);
+  is("each one sharing is active", once.active, 3);
+  const halfBack = programSummary({ ...book, rows: [], lines: shared.slice(0, 3).map((l) => ({ ...l, refunded: 12_000, status: "refunded" as const, commission: 0 })) }, "month", now)!;
+  is("a sale refunded in full is no sale, for every share of it", [halfBack.soldCents, halfBack.sales, halfBack.active], [0, 0, 0]);
+
   part("On the page");
   const Summary = (view as unknown as { AffiliateSummary?: (p: unknown) => unknown }).AffiliateSummary;
   is("the component exists", typeof Summary, "function");

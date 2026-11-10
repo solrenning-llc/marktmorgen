@@ -23,6 +23,7 @@
  *   https://vercel.com/docs/pricing/regional-pricing (page dated 2026-09-14)
  */
 import { BLOB_LIST_PAGES } from '@/lib/storage-rules';
+import { STREAM_HELD_REQUESTS } from '@/lib/stream-rules';
 import { VAULT_CONTROL_CALLS_PER_UPLOAD, VAULT_LIST_PAGES, VAULT_MEASURE_REQUESTS } from '@/lib/vault-rules';
 export const COST_TABLE_VERSION = 'cost-table-2026-10-17';
 
@@ -103,6 +104,18 @@ export const R2_CLASS_B_MICRO_USD_PER_MILLION = 360_000;
  * (read 2026-11-10) counts every list as one. */
 export const BLOB_ADVANCED_MICRO_USD_PER_MILLION = 7_000_000;
 
+/** Bunny Stream API reads (lib/stream.ts: the store's collection, read to
+ * measure what it keeps): a deliberately high allowance, not a measured
+ * rate. Bunny Stream's price page (bunny.net/pricing/stream) could not be
+ * read on 2026-11-10 from where this was written, so no rate and no "not
+ * billed" is cited for an API read, and an unknown cost is not zero. Each
+ * read is priced instead at the dearest per-operation rate this table holds,
+ * a Vercel Blob Advanced Operation: at the dearest delivery rate Bunny Stream
+ * lists ($0.060 a GB, docs/pack-cost-decomposition-2026-10-18.md), that pays
+ * for some 116 KB a read, many times a collection's reply. Replace it with
+ * the cited figure once the page is read. */
+export const STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION = BLOB_ADVANCED_MICRO_USD_PER_MILLION;
+
 /** Upload doors (lib/upload-budget.ts): each request is a function call held
  * at 2 GB for up to 10 seconds with one CPU-second and twenty database
  * commands. An upload start is priced at the R2 operations its own path makes
@@ -115,7 +128,9 @@ export const BLOB_ADVANCED_MICRO_USD_PER_MILLION = 7_000_000;
  * cancellation after a completion whose measurement could not be read. Each
  * signed piece is one Class A part upload. Vercel Blob: every page of the
  * host file store's listing that admission reads (BLOB_LIST_PAGES, Vercel
- * Blob list, an Advanced Operation). */
+ * Blob list, an Advanced Operation). Bunny Stream: the read of the store's
+ * collection that admission makes (STREAM_HELD_REQUESTS), at
+ * STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION. */
 export const UPLOAD_REQUEST_WAIT_SECONDS = 10;
 export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   ceilDiv(BigInt(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR * VERCEL_FUNCTION_GB * UPLOAD_REQUEST_WAIT_SECONDS), BigInt(3600))
@@ -125,6 +140,7 @@ export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
 export const UPLOAD_OPEN_CLASS_A_OPS = VAULT_LIST_PAGES + 2;
 export const UPLOAD_OPEN_CLASS_B_OPS = 3 * VAULT_MEASURE_REQUESTS;
 export const UPLOAD_OPEN_BLOB_ADVANCED_OPS = BLOB_LIST_PAGES;
+export const UPLOAD_OPEN_STREAM_API_READS = STREAM_HELD_REQUESTS;
 /** Requests one upload start is priced for: the start, and the finish and
  * cancel requests lib/vault.ts lets one upload make in all
  * (VAULT_CONTROL_CALLS_PER_UPLOAD: a repeat past them is refused before any
@@ -142,8 +158,10 @@ export function uploadOperationsMicroUsd(opens: number, controlRequests: number,
   const classB = BigInt(opens) * BigInt(UPLOAD_OPEN_CLASS_B_OPS);
   const requests = BigInt(opens) * BigInt(UPLOAD_REQUESTS_PER_OPEN) + BigInt(controlRequests);
   const blobAdvanced = BigInt(opens) * BigInt(UPLOAD_OPEN_BLOB_ADVANCED_OPS);
+  const streamReads = BigInt(opens) * BigInt(UPLOAD_OPEN_STREAM_API_READS);
   const total = ceilDiv(classA * BigInt(R2_CLASS_A_MICRO_USD_PER_MILLION), million) + ceilDiv(classB * BigInt(R2_CLASS_B_MICRO_USD_PER_MILLION), million)
     + ceilDiv(blobAdvanced * BigInt(BLOB_ADVANCED_MICRO_USD_PER_MILLION), million)
+    + ceilDiv(streamReads * BigInt(STREAM_API_ALLOWANCE_MICRO_USD_PER_MILLION), million)
     + requests * BigInt(UPLOAD_REQUEST_INFRA_MICRO_USD);
   return total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
 }

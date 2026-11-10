@@ -27,6 +27,14 @@
 
 /** The service's own address: where the studio's browser sends a video's pieces (lib/tus-upload.ts). */
 export const STREAM_API_ORIGIN = "https://video.bunnycdn.com";
+/**
+ * Requests one measurement of what a store keeps at the service makes
+ * (lib/stream.ts, streamHeld): one API read of the store's collection. The
+ * cost table prices an upload start from this (lib/spend-cost-table.ts,
+ * UPLOAD_OPEN_STREAM_API_READS), because admission measures it every time
+ * (lib/storage-quota.ts).
+ */
+export const STREAM_HELD_REQUESTS = 1;
 /** Where the service's player is framed from: the one address a lesson page frames for it (lib/csp.ts). */
 export const STREAM_PLAYER_ORIGIN = "https://player.mediadelivery.net";
 

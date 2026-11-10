@@ -1,12 +1,13 @@
 /**
- * "Do this next" rules (complement WG of 484 [IT1], unit 1; lib/next-actions-rules.ts). Pure; synthetic counts; the
- * real role table (lib/team-roles.ts). Checked:
+ * "Do this next" rules (complement WG of 484 [IT1], units 1 and 2; lib/next-actions-rules.ts). Pure; synthetic
+ * counts; the real role table (lib/team-roles.ts). Checked:
  *
- *   - the item's acceptance case: 86 failed payments show "86", first, with a button that prepares and never sends;
+ *   - the item's acceptance case: 86 failed payments show "86", first, as a link to the screen that deals with them;
  *   - with no data, or every count at zero, no action is invented;
  *   - a count that cannot be read is "unknown", never zero: no action on it, and the view names it;
- *   - a role without the permissions sees neither the action nor that its number is missing;
- *   - at most three, money owed first, then recorded money highest first, money not known or in another currency
+ *   - a role without the permissions, or a screen the studio does not have for this person, shows neither the
+ *     action nor that its number is missing;
+ *   - at most three, money at risk first, then recorded money highest first, money not known or in another currency
  *     after, then by count, then the fixed order;
  *   - the time each count was made, or that it is not known; no forecast, no percentage in any words.
  */
@@ -18,6 +19,7 @@ import {
   asOfWords,
   nextActions,
   unknownWords,
+  type NextActionId,
   type NextFacts,
   type NextView,
 } from "@/lib/next-actions-rules";
@@ -27,11 +29,19 @@ import { done, is, part } from "./check";
 const NOW = Date.UTC(2026, 10, 10, 12, 0, 0);
 const AT = Date.UTC(2026, 10, 10, 6, 0, 0);
 const usd = (amount: number) => ({ amount, currency: "usd" });
-const as = (role: Role) => ({ may: (p: Parameters<typeof can>[1]) => can(role, p), currency: "usd", now: NOW });
+const EVERYWHERE: Record<NextActionId, string> = {
+  failed_payments: "/studio/memberships",
+  yearly_switch: "#yearly-ask-title",
+  winback: "#winback-title",
+  course_next: "#courses",
+  welcome: "#mail",
+};
+const as = (role: Role, where: Partial<Record<NextActionId, string>> = EVERYWHERE) => ({ may: (p: Parameters<typeof can>[1]) => can(role, p), where, currency: "usd", now: NOW });
 const ids = (view: NextView) => (view.kind === "actions" ? view.actions.map((a) => a.id) : []);
+const first = (view: NextView) => (view.kind === "actions" ? view.actions[0] : null);
 
 const full: NextFacts = {
-  failedPayments: { count: 86, owed: usd(258_000), at: AT },
+  failedPayments: { count: 86, monthly: usd(258_000), at: AT },
   monthlyMembers: { count: 40, monthly: usd(120_000), at: AT },
   formerMembers: { count: 12, monthly: usd(36_000), at: AT },
   courseNext: { count: 9, from: "Course A", to: "Course B", at: AT },
@@ -40,26 +50,27 @@ const full: NextFacts = {
 
 part("The item's acceptance case");
 {
-  const view = nextActions({ failedPayments: { count: 86, owed: usd(258_000), at: AT } }, as("owner"));
+  const view = nextActions({ failedPayments: { count: 86, monthly: usd(258_000), at: AT } }, as("owner"));
   is("one action", view.kind === "actions" ? view.actions.length : -1, 1);
-  const first = view.kind === "actions" ? view.actions[0] : null;
-  is("it says 86", first?.words, "86 card payments for memberships failed this week and are still unpaid.");
-  is("with the recorded money", first?.money, "$2,580 unpaid.");
-  is("where the number comes from", first?.source, "From your failed membership payments in Stripe.");
-  is("when it was counted", first?.asOf, "Counted November 10, 2026 (UTC).");
-  is("it prepares a draft", first?.prepare, "draft");
-  is("the button prepares, never sends", /send/i.test(first?.button ?? "send"), false);
+  const one = first(view);
+  is("it says 86", one?.words, "86 members' latest payment failed, and Stripe is trying again.");
+  is("with the recorded money", one?.money, "Together they pay $2,580 a month.");
+  is("where the number comes from", one?.source, "From your membership numbers, read from your Stripe account.");
+  is("when it was counted", one?.asOf, "Counted November 10, 2026 (UTC).");
+  is("a link named by where it goes", [one?.link, one?.href], ["See your membership numbers", "/studio/memberships"]);
+  is("the link never sends, switches on or charges", /^(send|turn on|charge|start)\b/i.test(one?.link ?? "send"), false);
   is("nothing missing", view.kind === "actions" ? [view.unknown, view.note] : null, [[], null]);
 }
 
 part("Nothing is invented");
-is("no data at all", nextActions({}, as("owner")), { kind: "nothing", words: NOTHING_NEXT });
+is("no data at all: nothing, and nothing looked at", nextActions({}, as("owner")), { kind: "nothing", words: NOTHING_NEXT, looked: false });
 is(
-  "every count at zero",
-  nextActions({ failedPayments: { count: 0, owed: usd(0), at: AT }, monthlyMembers: { count: 0, at: AT }, formerMembers: { count: 0, at: AT }, courseNext: { count: 0, from: "A", to: "B", at: AT }, noWelcome: { count: 0, at: AT } }, as("owner")),
-  { kind: "nothing", words: NOTHING_NEXT },
+  "every count at zero: nothing, and it says it looked",
+  nextActions({ failedPayments: { count: 0, monthly: usd(0), at: AT }, monthlyMembers: { count: 0, at: AT }, formerMembers: { count: 0, at: AT }, courseNext: { count: 0, from: "A", to: "B", at: AT }, noWelcome: { count: 0, at: AT } }, as("owner")),
+  { kind: "nothing", words: NOTHING_NEXT, looked: true },
 );
-is("one person: singular words", nextActions({ noWelcome: { count: 1, at: AT } }, as("owner")).kind === "actions" ? (nextActions({ noWelcome: { count: 1, at: AT } }, as("owner")) as { actions: { words: string }[] }).actions[0].words : "", "1 person joined your list and never got a welcome email.");
+is("one person: singular words", first(nextActions({ noWelcome: { count: 1, at: AT } }, as("owner")))?.words, "1 person joined your list and never got a welcome email.");
+is("one member: singular words", [first(nextActions({ failedPayments: { count: 1, monthly: usd(900), at: AT } }, as("owner")))?.words, first(nextActions({ failedPayments: { count: 1, monthly: usd(900), at: AT } }, as("owner")))?.money], ["1 member's latest payment failed, and Stripe is trying again.", "They pay $9 a month."]);
 
 part("A count that cannot be read is unknown, never zero");
 for (const bad of [null, -1, 1.5, Number.NaN, "3", Number.MAX_SAFE_INTEGER + 2] as unknown[]) {
@@ -75,37 +86,36 @@ is("an entry that is not an object: unknown", nextActions({ monthlyMembers: null
 is("three names read as a list", unknownWords(["failed_payments", "winback", "welcome"]), "Some numbers could not be read just now (failed payments, former members and welcome emails), so these suggestions may not be complete. Reload the page in a moment.");
 is("a course without both titles: unknown", nextActions({ courseNext: { count: 4, from: "  ", to: "Course B", at: AT } }, as("owner")).kind, "unknown");
 is("a course pointing to itself: unknown", nextActions({ courseNext: { count: 4, from: "Course A", to: " Course  A ", at: AT } }, as("owner")).kind, "unknown");
-{
-  const view = nextActions({ failedPayments: { count: 3, owed: { amount: 1.5, currency: "usd" }, at: AT } }, as("owner"));
-  is("money that is not whole: the action stays, without money", view.kind === "actions" ? view.actions[0].money : "x", null);
-  const odd = nextActions({ failedPayments: { count: 3, owed: { amount: 500, currency: "zzz" }, at: AT } }, as("owner"));
-  is("money in a currency that is not one: without money", odd.kind === "actions" ? odd.actions[0].money : "x", null);
-}
+is("money that is not whole: the action stays, without money", first(nextActions({ failedPayments: { count: 3, monthly: { amount: 1.5, currency: "usd" }, at: AT } }, as("owner")))?.money, null);
+is("money in a currency that is not one: without money", first(nextActions({ failedPayments: { count: 3, monthly: { amount: 500, currency: "zzz" }, at: AT } }, as("owner")))?.money, null);
 
-part("Only for a role that may act on it");
+part("Only for a role that may act on it, and only where the studio has the screen");
 is("every action needs the numbers", NEXT_ACTION_ORDER.every((id) => NEXT_ACTION_NEEDS[id].includes("stats")), true);
+is("the come-back email is a setting", NEXT_ACTION_NEEDS.winback.includes("settings"), true);
 for (const role of ["owner", "admin", "editor", "support"] as Role[]) {
-  const shown = ids(nextActions(full, as(role)));
+  const view = nextActions(full, as(role));
   const allowed = NEXT_ACTION_ORDER.filter((id) => NEXT_ACTION_NEEDS[id].every((p) => can(role, p)));
-  is(`${role}: only what the role may prepare`, shown.every((id) => allowed.includes(id)), true);
-  if (!allowed.length) is(`${role}: nothing at all, not even "nothing"`, nextActions(full, as(role)).kind, "nothing");
+  is(`${role}: only what the role may use`, ids(view).every((id) => allowed.includes(id)), true);
+  if (!allowed.length) is(`${role}: nothing, and nothing looked at`, view, { kind: "nothing", words: NOTHING_NEXT, looked: false });
 }
 {
-  const noSend = { may: (p: Parameters<typeof can>[1]) => p !== "send", currency: "usd", now: NOW };
-  is("without send: no welcome automation", ids(nextActions({ noWelcome: { count: 9, at: AT } }, noSend)), []);
+  const noSend = { may: (p: Parameters<typeof can>[1]) => p !== "send", where: EVERYWHERE, currency: "usd", now: NOW };
+  is("without send: no welcome email", ids(nextActions({ noWelcome: { count: 9, at: AT } }, noSend)), []);
   is("and its missing number is not told either", nextActions({ noWelcome: { count: null, at: AT } }, noSend).kind, "nothing");
-  const noDraft = { may: (p: Parameters<typeof can>[1]) => p !== "draft", currency: "usd", now: NOW };
-  is("without draft: no draft actions", ids(nextActions(full, noDraft)), ["welcome"]);
+  const noSettings = { may: (p: Parameters<typeof can>[1]) => p !== "settings", where: EVERYWHERE, currency: "usd", now: NOW };
+  is("without settings: no come-back or yearly email", ids(nextActions(full, noSettings)), ["failed_payments", "welcome", "course_next"]);
+  is("a screen the studio does not have: left out", ids(nextActions(full, as("owner", { failed_payments: "/studio/memberships", welcome: "" }))), ["failed_payments"]);
+  is("nor its missing number", nextActions({ formerMembers: { count: null, at: AT } }, as("owner", { failed_payments: "/studio/memberships" })), { kind: "nothing", words: NOTHING_NEXT, looked: false });
 }
 
 part("At most three, in order");
 is("at most three", ids(nextActions(full, as("owner"))).length, NEXT_ACTIONS_MAX);
-is("money owed first, then the most money", ids(nextActions(full, as("owner"))), ["failed_payments", "yearly_switch", "winback"]);
+is("money at risk first, then the most money", ids(nextActions(full, as("owner"))), ["failed_payments", "yearly_switch", "winback"]);
 {
-  const owedSmall: NextFacts = { ...full, failedPayments: { count: 1, owed: usd(500), at: AT } };
-  is("money owed first even when smaller", ids(nextActions(owedSmall, as("owner")))[0], "failed_payments");
-  const owedUnknown: NextFacts = { ...full, failedPayments: { count: 2, owed: null, at: AT } };
-  is("money owed first even when its amount is not known", ids(nextActions(owedUnknown, as("owner")))[0], "failed_payments");
+  const atRiskSmall: NextFacts = { ...full, failedPayments: { count: 1, monthly: usd(500), at: AT } };
+  is("money at risk first even when smaller", ids(nextActions(atRiskSmall, as("owner")))[0], "failed_payments");
+  const atRiskUnknown: NextFacts = { ...full, failedPayments: { count: 2, monthly: null, at: AT } };
+  is("money at risk first even when its amount is not known", ids(nextActions(atRiskUnknown, as("owner")))[0], "failed_payments");
   const swapped: NextFacts = { monthlyMembers: { count: 2, monthly: usd(1_000), at: AT }, formerMembers: { count: 1, monthly: usd(9_000), at: AT } };
   is("more recorded money first, whatever the count", ids(nextActions(swapped, as("owner"))), ["winback", "yearly_switch"]);
   const unknownMoney: NextFacts = { monthlyMembers: { count: 500, monthly: null, at: AT }, formerMembers: { count: 1, monthly: usd(100), at: AT } };
@@ -129,18 +139,20 @@ is("a little ahead (clock skew) is fine", asOfWords(NOW + 60 * 1000, NOW), "Coun
 
 part("Words: facts, never a forecast");
 {
-  const view = nextActions(full, { may: () => true, currency: "usd", now: NOW });
-  const all = view.kind === "actions" ? view.actions.flatMap((a) => [a.words, a.money ?? "", a.source, a.asOf, a.button]) : [];
+  const view = nextActions(full, { may: () => true, where: EVERYWHERE, currency: "usd", now: NOW });
+  const all = view.kind === "actions" ? view.actions.flatMap((a) => [a.words, a.money ?? "", a.source, a.asOf, a.link]) : [];
   const course = nextActions({ courseNext: { count: 9, from: "Course A", to: "Course B", at: AT } }, as("owner"));
-  if (course.kind === "actions") all.push(course.actions[0].words, course.actions[0].button);
+  if (course.kind === "actions") all.push(course.actions[0].words, course.actions[0].link);
+  const left = nextActions({ formerMembers: { count: 4, monthly: usd(8_000), at: AT } }, as("owner"));
+  if (left.kind === "actions") all.push(left.actions[0].words, left.actions[0].money ?? "", left.actions[0].link);
   is("there are words to check", all.length > 10, true);
   is("no percentage", all.filter((w) => w.includes("%")), []);
   is("no forecast or promise", all.filter((w) => /could earn|you could make|estimat|expected|forecast|guarantee|\bwill earn/i.test(w)), []);
-  is("no button sends, switches on or charges", all.filter((w) => /^(send|turn on|charge|start)\b/i.test(w)), []);
+  is("no link sends, switches on or charges", all.filter((w) => /^(send|turn on|charge|start)\b/i.test(w)), []);
   is("the course action names both courses", course.kind === "actions" ? course.actions[0].words : "", '9 students finished "Course A" and do not have "Course B".');
+  is("the members who left, and that the come-back email is off", left.kind === "actions" ? [left.actions[0].words, left.actions[0].money, left.actions[0].link] : null, ["4 members left in the last 30 days, and your come-back email is off.", "Together they paid $80 a month before leaving.", "Set up the come-back email"]);
   const long = nextActions({ courseNext: { count: 1, from: "x".repeat(200), to: "B", at: AT } }, as("owner"));
   is("a long title is cut, not dropped", long.kind === "actions" ? long.actions[0].words.includes(`${"x".repeat(79)}…`) : false, true);
-  is("the welcome action prepares a paused automation", nextActions({ noWelcome: { count: 2, at: AT } }, as("owner")).kind === "actions" ? (nextActions({ noWelcome: { count: 2, at: AT } }, as("owner")) as { actions: { prepare: string }[] }).actions[0].prepare : "", "paused_automation");
 }
 
 done();

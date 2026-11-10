@@ -1446,6 +1446,7 @@
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",
     "components/new-tab.tsx",
+    "components/next-actions-panel.tsx",
     "components/next-offer-box.tsx",
     "components/next-offer-card.tsx",
     "components/no-count-toggle.tsx",

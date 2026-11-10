@@ -146,6 +146,9 @@ import { PaymentsPanel } from "@/components/payments-panel";
 import { chargeableCurrencies, readWaysToPay } from "@/lib/payment-methods";
 import { formatMoney } from "@/lib/money";
 import { TodayPanel } from "@/components/today-panel";
+import { NextActionsPanel } from "@/components/next-actions-panel";
+import { nextActions } from "@/lib/next-actions-rules";
+import { nextFactsOf } from "@/lib/next-actions-read";
 import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
@@ -833,6 +836,9 @@ export default async function StudioPage({
     read.catch(() => undefined);
     return read;
   };
+  // "Do this next" (484 [IT1] complement WG, unit 2): the store's kept memberships reading, one GET sent with the
+  // page's first reads, never Stripe (lib/next-actions-read.ts); only for a role that sees the numbers. Never throws.
+  const nextFactsRead = store && may("stats") ? early(nextFactsOf(store)) : null;
   // Google Calendar and Zoom (lib/meet-connect.ts): which accounts calls can
   // make meetings on, for the call editor, and what was made for each booked
   // time, for the list below. Nothing is read when the deployment has neither.
@@ -1211,6 +1217,20 @@ export default async function StudioPage({
     ...(todayCounts.bookingsToday !== undefined ? { calls: "#calls-title" } : {}),
   };
   const todayScreen = current ? todayView(todayCounts, may) : null;
+  // Each action leads to the screen that deals with it, only where this page has it for this person.
+  const nextScreen =
+    current && nextFactsRead
+      ? nextActions(await nextFactsRead, {
+          may,
+          where: {
+            ...(sellsMemberships(current) ? { failed_payments: studioPath(current, "", "memberships") } : {}),
+            // The come-back email's editor, further down this page (shown with the settings, to a store with memberships).
+            ...(may("settings") && sellsMemberships(current) ? { winback: "#winback-title" } : {}),
+          },
+          currency: current.currency,
+          now: Date.now(),
+        })
+      : null;
   // The list of products: all of a short one, a page of a long one, found by
   // name when the creator searched (lib/catalog.ts reads only that page in full).
   const shelf = firstReads.shelf ? await firstReads.shelf : null;
@@ -1442,6 +1462,7 @@ export default async function StudioPage({
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
+            {nextScreen ? <NextActionsPanel view={nextScreen} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.left} /> : null}

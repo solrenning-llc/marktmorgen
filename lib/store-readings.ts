@@ -401,3 +401,33 @@ export async function forgetReadingsPerson(statsId: string | null): Promise<numb
   if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of the store's kept sales and memberships readings");
   return gone;
 }
+
+/**
+ * The store's kept memberships reading as it is, never read again ("Do this next", 484 [IT1] complement WG, unit 2;
+ * lib/next-actions-read.ts): one GET, no supplier, nothing taken from the day's readings, so it is inside the three
+ * kept readings KEPT_READINGS_SHAPE already prices for a studio page (lib/read-ceilings.ts). null when no copy is
+ * kept (none read yet, or it expired); "unknown" when the database did not answer or the copy is not in its shape,
+ * never taken for none (CX-123 rule 24).
+ */
+export async function keptMembersCopy(store: Pick<Store, "statsId">): Promise<{ at: number; value: Numbers | null } | null | "unknown"> {
+  if (!store.statsId || !isRedisConfigured()) return null;
+  let replies: unknown;
+  try {
+    replies = await redisPipeline([["GET", copyKey("members", store.statsId)]]);
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(replies) || replies.length !== 1) return "unknown";
+  const raw: unknown = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw) return "unknown";
+  try {
+    const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown };
+    if (typeof parsed.at !== "number" || !Number.isFinite(parsed.at)) return "unknown";
+    if (parsed.value === null) return { at: parsed.at, value: null };
+    if (!parsed.value || typeof parsed.value !== "object") return "unknown";
+    return { at: parsed.at, value: parsed.value as Numbers };
+  } catch {
+    return "unknown";
+  }
+}

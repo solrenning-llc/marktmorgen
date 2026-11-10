@@ -3769,6 +3769,35 @@ export async function setProductImage(
   return { ok: true, store: done.store, removed: done.before.image };
 }
 
+/**
+ * Points a product's picture at the copies of its files under new names (lib/picture-withdraw.ts), only while the
+ * product still shows exactly the files the copies were made from: "changed" when the creator replaced or removed
+ * the picture since, and nothing is written. A smaller copy with no new name (`to.small` null) is dropped. Everything
+ * else about the picture is kept as it is now; it is no longer marked as copied to the pictures' own bucket, which
+ * holds the old names only, and it is marked `withdrawn`. A "changed" answer names the files the product shows now,
+ * which are never deleted.
+ */
+export async function moveProductImage(
+  email: string,
+  id: string,
+  from: { path: string; small: string | null },
+  to: { path: string; small: string | null },
+): Promise<{ ok: true } | { ok: false; reason: "none" | "unknown" } | { ok: false; reason: "changed"; shown: string[] }> {
+  let shown: string[] = [];
+  const done = await onProduct<"changed">(email, id, (product) => {
+    const image = product.image;
+    shown = image ? [image.path, ...(image.small ? [image.small.path] : [])] : [];
+    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small) {
+      return { ok: false, reason: "changed" } as const;
+    }
+    const { r2: _r2, ...rest } = image;
+    void _r2;
+    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, withdrawn: true as const } };
+  });
+  if (done.ok) return { ok: true };
+  return done.reason === "changed" ? { ok: false, reason: "changed", shown } : { ok: false, reason: done.reason };
+}
+
 /** Changes the words a screen reader says instead of the picture. */
 export async function setImageAlt(email: string, id: string, alt: string): Promise<ProductPartResult> {
   return changeProduct(email, id, (product) =>

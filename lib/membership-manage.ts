@@ -32,13 +32,13 @@ import { readListings, sellsAny } from "@/lib/catalog";
 import { canOffer, saveOn } from "@/lib/save-offer";
 import { productOfSub } from "@/lib/tier-rules";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { membershipWords } from "@/lib/buyer-words/membership";
+import { type MembershipWords, membershipWords } from "@/lib/buyer-words/membership";
 import { type PauseSub, cannotPause, pauseOf, periodEndOf } from "@/lib/membership-pause-rules";
 import { isOwnReasonId, offers } from "@/lib/leave-rules";
 import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
-import { currentPeriodEnd, hasSoldEnd, onlySoldEnd } from "@/lib/fixed-end-rules";
+import { currentPeriodEnd, hasSoldEnd, onlySoldEnd, soldEndOf } from "@/lib/fixed-end-rules";
 
 /** How long the emailed link keeps working. */
 export const MANAGE_LINK_SECONDS = 60 * 60;
@@ -424,8 +424,9 @@ async function cancelSoldEnd(store: Store, grant: Grant, sub: SubRow, token: str
     console.error(refused ? "Stripe refused cancelling a fixed-end membership" : "cancelling a fixed-end membership got no answer from Stripe", error);
     return { ok: false, reason: refused ? "error" : "unsure" };
   }
-  if (made.cancel_at !== stopAt) {
-    console.error("Stripe's answer to cancelling a fixed-end membership does not carry the end asked for", sub.id);
+  // The answer is this subscription's, with the end asked for (rule 30, Claude 3's L2 on #3488); anything else is not known.
+  if (made.id !== sub.id || made.cancel_at !== stopAt) {
+    console.error("Stripe's answer to cancelling a fixed-end membership is not this one's, with the end asked for", sub.id);
     return { ok: false, reason: "unsure" };
   }
   if (store.leaving.on) {
@@ -460,6 +461,12 @@ export type Membership = {
   endsAt: number | null;
   /** That end, while it is still only the one that was sold and the member may still cancel; null otherwise. */
   soldEnd: number | null;
+  /**
+   * How it ends, for the words the page shows (endLine): "canceled" when the member or the creator stopped it,
+   * "last-payment" when it ends with the end it was sold with, "set" when a fixed end's own date cannot be read
+   * (neither is claimed); null while it runs on.
+   */
+  ending: Ending;
   /** A pause the member chose (lib/membership-pause-rules.ts), started or still to start; null when there is none. */
   pause: { from: number; until: number } | null;
   /** Whether the member may pause it now, as the store allows. */
@@ -517,6 +524,33 @@ export async function grantOf(store: Store, token: string): Promise<Grant | null
  * counts as running on while payments are still to come: the member may still
  * cancel it (lib/fixed-end-rules.ts).
  */
+export type Ending = "canceled" | "last-payment" | "set" | null;
+
+/**
+ * How a subscription ends, as the member's page says it (Claude 3 on #3488): the "unsure" notice after a
+ * Cancel whose answer was lost tells the member to look for "Canceled", so only a stop before the end that
+ * was sold, or any stop of an ordinary membership, reads that way. The end that was sold reads as the end
+ * after the last payment; a fixed end whose own date cannot be read claims neither.
+ */
+export function endingOf(sub: SubRow): Ending {
+  if (onlySoldEnd(sub)) return "last-payment";
+  const at = endsAtOf(sub);
+  if (!at) return null;
+  if (!hasSoldEnd(sub)) return "canceled";
+  const sold = soldEndOf(sub);
+  if (!sold) return "set";
+  return at < sold ? "canceled" : "last-payment";
+}
+
+/** The line under a membership saying when it ends, in the store's words; null while it runs on. */
+export function endLine(m: MembershipWords, one: Pick<Membership, "endsAt" | "soldEnd" | "ending">, date: (at: number) => string): string | null {
+  const at = one.endsAt ?? one.soldEnd;
+  if (!at || !one.ending) return null;
+  if (one.ending === "canceled") return m.endsCanceled(date(at));
+  if (one.ending === "last-payment") return m.endsAfterLast(date(at));
+  return m.ends(date(at));
+}
+
 export function endsAtOf(sub: SubRow): number | null {
   if (onlySoldEnd(sub)) return null;
   const at = typeof sub.cancel_at === "number" && sub.cancel_at > 0 ? sub.cancel_at : 0;
@@ -588,6 +622,7 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
       intervalCount: typeof price?.recurring?.interval_count === "number" ? price.recurring.interval_count : 1,
       endsAt: endsAtOf(sub),
       soldEnd: onlySoldEnd(sub) ? (sub.cancel_at as number) : null,
+      ending: endingOf(sub),
       pause: pauseOf(sub as PauseSub),
       canPause: cannotPause(sub as PauseSub, store.pause) === null,
       periodEnd: periodEndOf(sub as PauseSub),

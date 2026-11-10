@@ -26,7 +26,7 @@ let sub: Record<string, unknown> = {};
 const portalSessions: URLSearchParams[] = [];
 const updates: URLSearchParams[] = [];
 let updateFails: "none" | "refused" | "down" | "other-end" = "none";
-let listFails = false;
+let otherId = false;
 
 class Down extends Error {}
 
@@ -40,7 +40,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ id: SESSION, status: "complete", subscription: "sub_Fixed00000001", metadata: { store: "club", product: (sub.metadata as Record<string, string>).product, ends_after: "12", ends_interval: "month", trial_days: "7" } });
   }
   if (path === "/subscriptions" && method === "GET") {
-    if (listFails) return json({ error: { message: "down" } }, 500);
     return json({ object: "list", data: [sub], has_more: false });
   }
   if (path === "/subscriptions/sub_Fixed00000001" && method === "GET") return json(sub);
@@ -54,6 +53,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     for (const [k, v] of body) if (k.startsWith("metadata[")) meta[k.slice(9, -1)] = v;
     if (body.get("cancel_at")) sub = { ...sub, cancel_at: Number(body.get("cancel_at")) };
     sub = { ...sub, metadata: meta };
+    if (otherId) return json({ ...sub, id: "sub_Other00000001" });
     return json(updateFails === "other-end" ? { ...sub, cancel_at: Number(sub.cancel_at) + 86_400 } : sub);
   }
   if (path === "/billing_portal/configurations" && method === "POST") return json({ id: "bpc_Test000001" });
@@ -98,7 +98,6 @@ async function main(): Promise<void> {
     ]);
   };
   await link();
-  const back = `https://marktmorgen.com/@club/manage?status=cancelled&token=${token}`;
 
   type Line = (m: MembershipWords, one: manage.Membership, date: (at: number) => string) => string | null;
   const endLine = (manage as unknown as { endLine?: Line }).endLine;
@@ -118,7 +117,7 @@ async function main(): Promise<void> {
   is("the update did not land", sub.cancel_at, sold);
   one = (await membershipsFor(store, token))?.[0];
   const shown = line(one) ?? "";
-  is("the unsure notice names the word a cancelled membership shows", MEMBERSHIP_WORDS.en.manageNotices.unsure.body.includes(`"${mark}"`), true);
+  is("the unsure notice names the word a cancelled membership shows", MEMBERSHIP_WORDS.en.manageNotices.unsure.body.includes(`“${mark}”`), true);
   is("and the line of this membership, not cancelled, does not show it", shown.includes(mark) || shown === "no endLine", false);
 
   part("Cancel that went through: the page says Canceled");
@@ -138,6 +137,13 @@ async function main(): Promise<void> {
   await link();
   one = (await membershipsFor(store, token))?.[0];
   is("Canceled. Ends …", line(one), `Canceled. Ends day ${TRIAL_END + 9}`);
+
+  part("Claude 3's L2: an answer for another subscription with the same end is not taken as done");
+  sub = { ...fresh(), cancel_at: sold };
+  await link();
+  otherId = true;
+  is("unsure", await openCancel(store, token, "sub_Fixed00000001", "https://marktmorgen.com"), { ok: false, reason: "unsure" });
+  otherId = false;
 
   part("Every language: the notice points at the word only a cancelled membership shows");
   for (const [lang, words] of Object.entries(MEMBERSHIP_WORDS)) {

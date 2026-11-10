@@ -195,7 +195,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/manage/page.tsx", "utf8");
   const leave = readFileSync("app/[handle]/manage/leave/page.tsx", "utf8");
   is("manage page: fixed end cancels behind a confirmation (data-fixed-cancel)", page.includes("data-fixed-cancel") && page.includes("fixedCancelNote"), true);
-  is("manage page: shows the sold end", page.includes("one.soldEnd"), true);
+  is("manage page: shows the sold end (endLine reads one.soldEnd)", page.includes("endLine(m, one, endDate)") && readFileSync("lib/membership-manage.ts", "utf8").includes("one.endsAt ?? one.soldEnd"), true);
   is("leave page: no 'Stripe's page opens' for a fixed end", leave.includes("one.fixedEnd ? m.fixedCancelNote"), true);
 
   part("Change card: the portal is held to the card while a fixed end is set");

@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { MANAGE_LINK_SECONDS, type Membership, canManage, membershipsFor } from "@/lib/membership-manage";
+import { MANAGE_LINK_SECONDS, type Membership, canManage, endLine, membershipsFor } from "@/lib/membership-manage";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
@@ -138,7 +138,7 @@ export default async function ManagePage({ params, searchParams }: Params) {
                         <p className="font-bold" style={{ color: "var(--st-text)" }}>{one.title}</p>
                         <p className="st-muted text-sm">
                           {one.amount ? `${formatMoney(one.amount, one.currency, say.lang.locale)} ${every(one)}` : null}
-                          {(one.endsAt ?? one.soldEnd) ? `${one.amount ? " · " : ""}${m.ends(endDate((one.endsAt ?? one.soldEnd) as number))}` : null}
+                          {endLine(m, one, endDate) ? `${one.amount ? " · " : ""}${endLine(m, one, endDate)}` : null}
                         </p>
                       </div>
                       {one.pause ? (

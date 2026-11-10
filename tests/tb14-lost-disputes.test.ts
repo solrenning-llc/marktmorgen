@@ -43,7 +43,7 @@ let eventReads = 0;
 /** The store's completed checkouts, newest first, as Stripe lists them with their payment's latest charge. */
 let sessions: Record<string, unknown>[] = [];
 /** A charge's disputes, by charge id; a charge listed in `disputesFail` cannot be asked about. */
-const disputes: Record<string, { status: string }[]> = {};
+const disputes: Record<string, { charge: string; status: string }[]> = {};
 const disputesFail = new Set<string>();
 let disputeReads = 0;
 
@@ -420,8 +420,8 @@ async function main(): Promise<void> {
   });
   const sessionsOf = (rows: { session: string }[]) => rows.map((row) => row.session).sort();
   sessions = [call(1, true), call(2, true), call(3, true), call(4, false)];
-  disputes["ch_tb14call00000001"] = [{ status: "lost" }];
-  disputes["ch_tb14call00000002"] = [{ status: "won" }];
+  disputes["ch_tb14call00000001"] = [{ charge: "ch_tb14call00000001", status: "lost" }];
+  disputes["ch_tb14call00000002"] = [{ charge: "ch_tb14call00000002", status: "won" }];
   disputesFail.add("ch_tb14call00000003");
   disputeReads = 0;
   is("the lost one no longer holds its time; the won one, the one Stripe could not be asked about, and the undisputed one do", sessionsOf(await paidCalls(store)), [call(2, true).id, call(3, true).id, call(4, false).id].sort());
@@ -429,7 +429,10 @@ async function main(): Promise<void> {
   is("read alone, the lost one is not a paid booking", await paidCall(store, call(1, true).id), null);
   is("and the won one is", (await paidCall(store, call(2, true).id))?.session, call(2, true).id);
   sessions = Array.from({ length: 7 }, (_, i) => call(10 + i, true));
-  for (let i = 0; i < 7; i += 1) disputes[`ch_tb14call${String(10 + i).padStart(8, "0")}`] = [{ status: "lost" }];
+  for (let i = 0; i < 7; i += 1) {
+    const id = `ch_tb14call${String(10 + i).padStart(8, "0")}`;
+    disputes[id] = [{ charge: id, status: "lost" }];
+  }
   disputeReads = 0;
   const left = await paidCalls(store);
   is("past the reading's five questions, a disputed booking keeps its time (never more questions)", [disputeReads, left.length], [5, 2]);

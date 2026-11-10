@@ -216,10 +216,14 @@ export const APPEAL_NUMBER = /^LA-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
  */
 export function appealNumber(bytes: Uint8Array): string {
   if (bytes.length < 5) throw new Error("an appeal number needs at least 5 random bytes");
-  let bits = 0n;
-  for (let i = 0; i < 5; i++) bits = (bits << 8n) | BigInt(bytes[i]);
+  // 40 bits fit a Number exactly (below 2^53), so plain arithmetic, no BigInt (the build targets below ES2020).
+  let bits = 0;
+  for (let i = 0; i < 5; i++) bits = bits * 256 + bytes[i];
   let out = "";
-  for (let i = 0; i < 8; i++) out = BASE32[Number((bits >> BigInt(5 * i)) & 31n)] + out;
+  for (let i = 0; i < 8; i++) {
+    out = BASE32[bits % 32] + out;
+    bits = Math.floor(bits / 32);
+  }
   return `LA-${out.slice(0, 4)}-${out.slice(4)}`;
 }
 

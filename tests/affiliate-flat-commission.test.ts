@@ -116,3 +116,18 @@ test("the studio is told when the amount cannot be set, or when the cap would cu
   assert.equal(flatProblem(2_500, 10_000, Number.NaN), "unknown");
   assert.equal(flatProblem(2_500, Number.NaN, 0), "unknown");
 });
+
+test("an amount past the safe whole-number range is unknown, never read as exact cents", () => {
+  const u = Number.MAX_SAFE_INTEGER + 1;
+  assert.deepEqual(
+    [flatCommissionOn(u, 2_500, 0), flatAfterRefund(u, 10_000, 0, 0), flatAfterRefund(2_500, 10_000, u, 0), flatProblem(2_500, u, 0)],
+    [null, null, null, "unknown"],
+  );
+  assert.equal(flatAfterRefund(2_500, u, 0, 0), null);
+  assert.equal(flatCommissionOn(-u, 2_500, 0), null);
+  // Controls: the largest safe amounts still read as numbers.
+  const s = Number.MAX_SAFE_INTEGER;
+  assert.equal(flatCommissionOn(s, 2_500, 0), 2_500);
+  assert.equal(flatAfterRefund(2_500, s, 0, 0), 2_500);
+  assert.equal(flatProblem(2_500, s, 0), null);
+});

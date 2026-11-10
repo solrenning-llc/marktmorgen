@@ -63,7 +63,8 @@ import { cartWords } from "@/lib/buyer-words/cart";
 import { saleOff, salePrice } from "@/lib/store-sale";
 import { cartAskIds } from "@/lib/checkout-ask-cart";
 import type { Listing } from "@/lib/store";
-import { membershipLine, speech } from "@/lib/buyer-words";
+import { membershipLine, planLine, speech } from "@/lib/buyer-words";
+import { activePlan } from "@/lib/product-extras";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { isTimeZone, readableTime, zoneName } from "@/lib/call-setup";
@@ -593,6 +594,8 @@ async function deliver(
     : product.recurring
       ? from(membershipLine(store, product.recurring, price, activeIntro(product, store.tiers)))
       : from(price);
+  // The plan the product page offers today (lib/product-extras.ts activePlan: one-off products only, covering every price).
+  const plan = activePlan(product);
   subject = how.subject ?? g.recoverSubject(product.title);
   text = [
     how.lead ?? g.recoverLead(product.title, name),
@@ -602,6 +605,9 @@ async function deliver(
     productLink(store, product.id),
     "",
     g.recoverPrice(priceWords),
+    // A payment plan the product already offers on that page (630 [HN6](15)): said as the page says it, at today's
+    // amounts; never one it does not offer (a membership, a price the buyer chooses, a plan paused or short).
+    ...(plan ? [g.recoverPlan(planLine(store, plan))] : []),
     "",
     ...foot,
   ].join("\n");

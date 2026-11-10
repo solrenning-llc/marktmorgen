@@ -166,7 +166,7 @@ const controlKey = (pathname: string, part: "n" | ControlKind) => `nl:vault:ctl:
  * operations. So the first finish and the first cancel of an upload are
  * written down, with their answer, before R2 is asked; a repeat is given
  * that answer and R2 is not asked again. And every finish or cancel request
- * for an upload that is open (or was finished or cancelled here) is counted
+ * for an upload that is open (or was finished or canceled here) is counted
  * before R2 is asked or anything is written: past
  * VAULT_CONTROL_CALLS_PER_UPLOAD it is refused with nothing else done. A
  * request for a path with neither is answered from those reads alone, so it
@@ -258,7 +258,7 @@ async function readUpload(pathname: string): Promise<Upload | null> {
   }
   // Every field in exactly the shape openVaultUpload writes it. A session id
   // read as "" would be taken for a file sent whole (the object deleted in
-  // place of the session cancelled), and a reservation read as none would
+  // place of the session canceled), and a reservation read as none would
   // never be given back: anything else is an unknown record, not a guess.
   if (
     !value ||
@@ -317,7 +317,7 @@ export async function openVaultUpload(input: {
   const record: Upload = { reservation: input.reservation, pathname, uploadId, bytes: input.bytes, type: input.type, at: Date.now() };
   const written = repliesFor(await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]), 1);
   if (written?.[0] !== "OK") {
-    // Not handed out: nothing can be signed for it, so its session is cancelled now.
+    // Not handed out: nothing can be signed for it, so its session is canceled now.
     if (uploadId) await retireVaultSession(pathname, uploadId).catch(() => false);
     throw new UnknownReplyError("a vault upload record's write");
   }
@@ -437,7 +437,7 @@ async function joinAndMeasure(config: Config, upload: Upload, etags: string[]): 
 
 /**
  * Forgets an upload only after the provider confirms its cancellation.
- * True when it is cancelled or was never open; "tries" past the finish and
+ * True when it is canceled or was never open; "tries" past the finish and
  * cancel requests one upload may make; "busy" while its first cancel is
  * still running. A repeat is given the first cancel's answer, R2 not asked.
  */
@@ -447,7 +447,7 @@ export async function abortVaultUpload(pathname: string): Promise<boolean | "tri
   if (!isVaultPath(pathname)) return true;
   const before = await readControl(pathname, "abort");
   const upload = before ? null : await readUpload(pathname);
-  // Nothing open and nothing cancelled here: nothing to count or keep.
+  // Nothing open and nothing canceled here: nothing to count or keep.
   if (!before && !upload) return true;
   if (!(await countControl(pathname))) return "tries";
   if (before) {

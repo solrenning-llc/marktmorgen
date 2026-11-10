@@ -266,7 +266,7 @@ async function main() {
   is("a failed cancellation keeps the session available to retry", (await signPieces(cancelled.upload.pathname, [1]))?.length, 1);
   const askedCancel = asked.length;
   is("a repeat is given the first cancellation's answer, the store not asked again", [await abortVaultUpload(cancelled.upload.pathname), asked.length], [false, askedCancel]);
-  is("the session is cancelled at the provider once it is retired", await retireVaultSession(cancelled.upload.pathname, cancelled.sessionId), true);
+  is("the session is canceled at the provider once it is retired", await retireVaultSession(cancelled.upload.pathname, cancelled.sessionId), true);
   is("a part URL from an aborted session cannot create a file", (await fetch(cancelPart.url, { method: "PUT", body: sessionBytes as BodyInit })).status, 404);
   is("the canceled file does not exist", objects.has(cancelled.upload.pathname), false);
 

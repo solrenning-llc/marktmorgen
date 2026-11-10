@@ -3,6 +3,7 @@
 // Each pipeline is given up after REDIS_TIMEOUT_MS (lib/fetch-timeout.ts),
 // failing as a network failure does, so no page or job hangs on Redis.
 import { REDIS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type Command = (string | number)[];
 
@@ -17,18 +18,19 @@ function getConfig() {
 
 /** Upstash REST returns one single-field result/error envelope per command, in order.
  * https://upstash.com/docs/redis/features/restapi (checked November 5, 2026).
- * A malformed or incomplete batch is unknown, even if an earlier write succeeded.
+ * A malformed or incomplete batch is unknown, even if an earlier write succeeded: UnknownReplyError, so a route that
+ * tells it apart answers "unavailable", while a real Redis error stays an Error (Claude 5 on #2509).
  */
 function pipelineResults(value: unknown, expected: number): unknown[] {
-  if (!Array.isArray(value) || value.length !== expected) throw new Error("Incomplete Redis pipeline response");
+  if (!Array.isArray(value) || value.length !== expected) throw new UnknownReplyError("a pipeline with a missing or extra reply");
   const results: unknown[] = [];
   for (let i = 0; i < expected; i += 1) {
     const entry: unknown = value[i];
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).length !== 1) throw new Error("Invalid Redis response envelope");
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).length !== 1) throw new UnknownReplyError("a reply envelope");
     const error = Object.getOwnPropertyDescriptor(entry, "error");
     if (error && "value" in error && typeof error.value === "string" && error.value.length > 0) throw new Error(`Redis error: ${error.value}`);
     const result = Object.getOwnPropertyDescriptor(entry, "result");
-    if (!result || !("value" in result) || result.value === undefined) throw new Error("Redis result is unconfirmed");
+    if (!result || !("value" in result) || result.value === undefined) throw new UnknownReplyError("a reply with no result");
     results.push(result.value);
   }
   return results;

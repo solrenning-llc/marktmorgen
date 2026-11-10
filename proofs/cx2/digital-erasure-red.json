@@ -1,0 +1,15 @@
+{
+  "runtime": "Lua 5.1 / Lupa 2.6",
+  "boundaries": "Redis/cjson synthetic; actual application Lua, no provider or native Redis",
+  "tests": 5,
+  "passed": 4,
+  "failed": 1,
+  "syntheticCommands": 55,
+  "sourceSha256": "928f65f02423a80872eb7db4dfcb24aa2fa01c293b22a2dd0f3c2cbde6112bd2",
+  "result": {
+    "exit": 1
+  },
+  "stdout": "actual Lua sha256 928f65f02423a80872eb7db4dfcb24aa2fa01c293b22a2dd0f3c2cbde6112bd2\r\nsynthetic Redis admissions 55\r\n",
+  "stderr": "...F.\r\n======================================================================\r\nFAIL: test_unbound_digital_option_keeps_no_buyer_hash (__main__.DigitalErasure.test_unbound_digital_option_keeps_no_buyer_hash)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"<workspace>\\.cx2-worktrees\\digital\\proofs\\cx2\\digital-erasure.py\", line 76, in test_unbound_digital_option_keeps_no_buyer_hash\r\n    self.assertEqual(reply, \"other\")\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^\r\nAssertionError: 'marked' != 'other'\r\n- marked\r\n+ other\r\n\r\n\r\n----------------------------------------------------------------------\r\nRan 5 tests in 0.385s\r\n\r\nFAILED (failures=1)\r\n",
+  "pathsRedacted": true
+}

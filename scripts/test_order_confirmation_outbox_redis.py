@@ -470,8 +470,8 @@ def main():
         made.add(option_fence)
         assert db.command("EVAL", erasure_script, 2, option_keys[3], option_fence, "begin", request, recipient, "SYNTHETIC")[0] == "begun"
         assert db.command("EVAL", erasure_script, 3, option_keys[0], option_keys[1], option_fence,
-            "mark", request, recipient, "SYNTHETIC") == ["marked"]
-        assert json.loads(db.command("GET", option_keys[0]))["erasedPeople"] == recipient
+            "mark", request, recipient, "SYNTHETIC") == ["other"]
+        assert json.loads(db.command("GET", option_keys[0]))["erasedPeople"] == ""
         assert db.command("EVAL", shared, 10, *option_keys, "cancel", db.command("GET", option_keys[0]), "", now,
             131072, "null", "") == ["canceled"]
         assert db.command("GET", option_keys[0]) is None and db.command("GET", option_keys[1]) == source_option

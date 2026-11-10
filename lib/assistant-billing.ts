@@ -20,7 +20,8 @@ import { ADD_ON_MARK, BillingError, onPlatform, onPlatformAt, setCancelAtPeriodE
 export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
-import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_LIST_PAGES, type AssistantPlan } from "@/lib/store-assistant-rules";
+import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, type AssistantPlan } from "@/lib/store-assistant-rules";
+import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const ASSISTANT_PRODUCT_ID = "nimbus_labs_store_assistant";
@@ -198,9 +199,14 @@ export type AssistantStart =
  * the customer's subscriptions are read from Stripe first; a live add-on for this store is adopted, and one Stripe may
  * still charge opens nothing. Then an open page for this store's add-on is given again. A checkout is created only
  * when both lists were read to their end and hold none; any other reply throws, and nothing opens (rule 24: unknown
- * is never "none").
+ * is never "none"). The whole start runs inside one cutoff, ASSISTANT_START_CUTOFF_MS (lib/store-assistant-rules.ts):
+ * its cost is bounded by that, not by how many calls it makes.
  */
-export async function startAssistant(store: Store, origin: string): Promise<AssistantStart> {
+export function startAssistant(store: Store, origin: string): Promise<AssistantStart> {
+  return withCutoff(Date.now() + ASSISTANT_START_CUTOFF_MS, () => startWithinCutoff(store, origin));
+}
+
+async function startWithinCutoff(store: Store, origin: string): Promise<AssistantStart> {
   if (assistantRefusal(store)) throw new Error("the add-on cannot be sold to this store now");
   const customer = store.stripeCustomerId!;
   const subscriptions = await readCustomerList("/subscriptions", new URLSearchParams({ customer, status: "all", limit: "100" }), (row) => {
@@ -242,6 +248,8 @@ export async function startAssistant(store: Store, origin: string): Promise<Assi
     // Stripe answers 409 while another tab's request under the same key is still running: that tab's page is read
     // from the open pages once, after a moment. Not there yet, the error stands and nothing more is opened.
     if (!(error instanceof BillingError) || error.status !== 409) throw error;
+    // A wait that would end past the start's cutoff is not begun: the error stands.
+    if (timeLeft() <= ASSISTANT_IN_PROGRESS_WAIT_MS) throw error;
     await new Promise((resolve) => setTimeout(resolve, ASSISTANT_IN_PROGRESS_WAIT_MS));
     const page = await openPage();
     if (!page) throw error;

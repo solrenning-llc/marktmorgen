@@ -60,6 +60,8 @@ let lists: string[] = [];
 /** How long a checkout POST stays in progress at the fake Stripe before its session exists. */
 let postDelayMs = 0;
 const IN_PROGRESS = "in-progress";
+/** When true, every checkout POST answers 409 as for a key still in progress. */
+let answer409 = false;
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const period = paidPeriod(Date.now());
@@ -114,7 +116,7 @@ function install(): void {
       posts.push({ key });
       const replay = key ? keys.get(key) : undefined;
       // Stripe does not replay a key whose first request is still running: it answers 409.
-      if (replay === IN_PROGRESS) return json({ error: { type: "idempotency_error", code: "idempotency_key_in_use", message: "There is currently another in-progress request using this idempotent key." } }, 409);
+      if (replay === IN_PROGRESS || answer409) return json({ error: { type: "idempotency_error", code: "idempotency_key_in_use", message: "There is currently another in-progress request using this idempotent key." } }, 409);
       const known = replay ? sessions.find((s) => s.id === replay) : undefined;
       if (known) return json(known);
       if (key) keys.set(key, IN_PROGRESS);
@@ -343,11 +345,51 @@ async function main(): Promise<void> {
   is("the most calls a start makes", [typeof pages === "number" && pages > 0, startCalls === 3 * (pages as number) + 5], [true, true]);
   const line = COST_LINES.find((row) => row.id === "assistant-start-reads");
   is("a cost line cites the start and its count", Boolean(line?.sources.some((s) => s.file === "lib/assistant-billing.ts" && s.names.includes("startAssistant")) && line?.sources.some((s) => s.names.includes("ASSISTANT_START_STRIPE_CALLS"))), true);
+  const wait = (assistantRules as Record<string, unknown>).ASSISTANT_IN_PROGRESS_WAIT_MS as number;
+  const cutoff = (assistantRules as Record<string, unknown>).ASSISTANT_START_CUTOFF_MS as number;
+  is("the start has one hard end, cited by the line", [typeof cutoff === "number" && cutoff > 0, Boolean(line?.sources.some((s) => s.names.includes("ASSISTANT_START_CUTOFF_MS")))], [true, true]);
+  // Held for the smaller of its calls each waited on for Stripe's timeout (plus the wait) and its cutoff, less the two
+  // GETs platform-subscription-search already prices for the same essential event.
+  const held = Math.min((startCalls as number) * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds + wait / 1000, cutoff / 1000);
+  const extra = held - PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds;
+  is("the cutoff is the smaller bound, and it is longer than what is already priced", [cutoff / 1000 < (startCalls as number) * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds, extra > 0], [true, true]);
   for (const tier of ["creator", "pro", "scale"] as const) {
-    const wait = (assistantRules as Record<string, unknown>).ASSISTANT_IN_PROGRESS_WAIT_MS as number;
-    const waited = (wait / 1000) * PLATFORM_SUBSCRIPTION_SEARCH.memoryGb * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGbHour / 3600;
-    const expected = (((startCalls as number) - PLATFORM_SUBSCRIPTION_SEARCH.maxGets) * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet + waited) * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow;
-    is(`${tier}: the calls past the two already priced, at every essential event of the month`, [line ? line.monthlyUsd(tier) : null, expected > 0], [expected, true]);
+    const expected = extra * PLATFORM_SUBSCRIPTION_SEARCH.memoryGb * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGbHour / 3600 * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow;
+    is(`${tier}: the seconds past the two GETs already priced, at every essential event of the month`, [line ? line.monthlyUsd(tier) : null, expected > 0], [expected, true]);
+  }
+
+  part("The start's cutoff holds: no Stripe request is sent past it, and no wait is begun that would end past it");
+  const realNow = Date.now;
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  try {
+    store = await freshStore();
+    // The open pages answer after the start's whole time has gone by: nothing more is asked of Stripe.
+    sessionList = () => {
+      skew = cutoff + 1_000;
+      return json({ object: "list", data: [], has_more: false });
+    };
+    const late = await outcome(store);
+    is("past the cutoff the start is refused, with no price read and no POST", [late, lists, posts.length], ["refused", ["subscriptions", "sessions"], 0]);
+    store = (await storeForEmail(OWNER))!;
+    is("nothing is written down for the store", store.assistantPlan ?? null, null);
+
+    store = await freshStore();
+    skew = 0;
+    // Half a second is left when Stripe answers 409 for a key in progress: the one-second wait is not begun.
+    sessionList = () => {
+      skew = cutoff - wait / 2;
+      return json({ object: "list", data: [], has_more: false });
+    };
+    answer409 = true;
+    const before = realNow();
+    const near = await outcome(store);
+    is("the 409 stands without the wait: refused, the open pages not read again", [near, lists, posts.length], ["refused", ["subscriptions", "sessions"], 1]);
+    is("the start did not wait the in-progress second", realNow() - before < wait, true);
+  } finally {
+    Date.now = realNow;
+    answer409 = false;
+    sessionList = null;
   }
 
   part("Control: a store whose record already says on is refused locally, without asking Stripe");

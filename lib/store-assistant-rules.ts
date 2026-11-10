@@ -78,8 +78,17 @@ export const ASSISTANT_START_LIST_PAGES = 2;
  * (assistant-start-reads).
  */
 export const ASSISTANT_START_STRIPE_CALLS = 3 * ASSISTANT_START_LIST_PAGES + 5;
-/** How long a start waits, when Stripe answers that another tab's request under the same key is in progress, before it reads the open pages again; priced with the calls. */
+/** How long a start waits, when Stripe answers that another tab's request under the same key is in progress, before it reads the open pages again; inside the start's cutoff. */
 export const ASSISTANT_IN_PROGRESS_WAIT_MS = 1_000;
+/**
+ * The hard end of one start of the add-on (lib/assistant-billing.ts, startAssistant, run inside withCutoff from
+ * lib/fetch-timeout.ts): no request is sent after it, one still waiting is given up at it, and the in-progress wait is
+ * not begun when it would end past it. So a start holds the function for at most this long, whatever Stripe does,
+ * well under ASSISTANT_START_STRIPE_CALLS calls each waited on for STRIPE_TIMEOUT_MS; the cost line
+ * (assistant-start-reads, tests/plan-cost-registry.ts) is priced at the smaller of the two. A start that meets it fails
+ * as a network failure does: nothing is written down, and the creator is told something went wrong.
+ */
+export const ASSISTANT_START_CUTOFF_MS = 45_000;
 
 /** The model: the cheapest current one, fixed here so no deployment setting can make a message dearer than priced. */
 export const ASSISTANT_MODEL = "claude-haiku-5-5" as const;

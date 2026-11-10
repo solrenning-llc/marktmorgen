@@ -39,6 +39,7 @@ import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
+import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
@@ -100,6 +101,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
+  "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
@@ -277,6 +279,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       }
     }
     return out;
+  },
+  "lib/lesson-notes.ts": async (s) => {
+    // Named by the course's product as the other course records are; a course since deleted by its own id.
+    const productOf = new Map(s.courses.map((c) => [c.courseId, c.productId]));
+    return (await notesOf(s.statsId, s.learner)).map((n) => ({ course: productOf.get(n.course) ?? n.course, lesson: n.lesson, text: n.text, at: iso(n.at) }));
   },
   "lib/affiliate-bond.ts": async (s) => {
     const affiliate = await bondRecordOf(s.statsId, s.email);

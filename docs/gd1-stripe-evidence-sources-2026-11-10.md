@@ -22,7 +22,7 @@ Segundo a referência de atualização, os nomes abaixo pertencem a `evidence`. 
 | Comunicação relevante | `customer_communication` — arquivo |
 | Contexto sem campo próprio | `uncategorized_text` |
 
-A API de atualização informa limite combinado de 150.000 caracteres. `submit=false` prepara provas; `submit=true` as envia ao banco e é o padrão quando omitido. Não inferir envio seguro da presença de `has_evidence`. Fonte: referência de atualização acima.
+A API de atualização informa limite combinado de 150.000 caracteres; campos como `access_activity_log`, `product_description` e `refund_policy_disclosure` também têm teto individual de 20.000. `submit=false` prepara provas; `submit=true` as envia ao banco e é o padrão quando omitido. Não inferir envio seguro da presença de `has_evidence`. Fonte: referência de atualização acima.
 
 O guia da API distingue campos de texto de campos que recebem identificador de arquivo, com upload de propósito `dispute_evidence`. Um pagamento pode ter várias contestações: responder pelo identificador de cada contestação, sem assumir relação um a um. Fonte: guia da API acima.
 
@@ -40,6 +40,6 @@ O consentimento do item 91, a versão/hora da política, os downloads, aulas e e
 
 Antes de implementar: revisão pelo criador do conteúdo exato; preparação separada do envio; prazo e resposta do provedor validados; submissão de resultado desconhecido reconciliada antes de repetir; testes de conta errada, histórico ausente, prazo desconhecido e perda de confirmação. Nenhuma dessas proteções novas é afirmada como implementada aqui.
 
-Leituras, arquivos, armazenamento, reserva e submissão exigem custeio e teto anterior ao gasto. Custo desconhecido nunca é zero. Este documento não calcula margem nem base mínima; CI e tempo da empresa pertencem integralmente a FX275. Próximo responsável: CX3 confere as fontes históricas disponíveis e o custeio em recorte próprio, sem tomar arquivos reservados.
+Leituras, arquivos, armazenamento, reserva e submissão exigem custeio e teto anterior ao gasto; custo desconhecido nunca é zero. Este documento não calcula margem nem base mínima; CI e tempo da empresa pertencem integralmente a FX275. Próximo responsável: CX3 confere as fontes históricas disponíveis e o custeio em recorte próprio, sem tomar arquivos reservados.
 
 Acessibilidade: títulos e tabela textual; nenhuma tela, passo ou decisão do cliente muda (0→0). Sem prova humana, navegador ou conformidade AAA. O teste verifica presença das fronteiras documentadas, não a correção jurídica, o envio real ou a autorização de uma conta.

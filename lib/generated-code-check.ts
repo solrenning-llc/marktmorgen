@@ -148,12 +148,20 @@ export function tagsOf(html: string): Tag[] {
 
 /** Whether a URL in a loading place points away from the store: another host, or a scheme that is not a plain file. */
 export function outsideUrl(raw: string, allowedHosts: readonly string[]): boolean {
-  // Browsers ignore control characters and spaces inside a scheme ("java\tscript:").
-  const url = raw.trim().replace(/[\u0000-\u001f\u007f\s]+/g, "");
+  // Browsers remove tabs and line breaks; spaces inside an authority are not removed.
+  const url = raw.trim().replace(/[\t\r\n]/g, "");
   if (!url || url.startsWith("#")) return false;
   if (/^data:image\/(?:png|jpeg|gif|webp|avif);/i.test(url)) return false;
-  const host = url.match(/^(?:(?:https?|wss?):)?\/\/([^/?#:@]+)(?::\d+)?(?:[/?#]|$)/i);
-  if (host) return !allowedHosts.map((h) => h.toLowerCase()).includes(host[1].toLowerCase());
+  // A failed authority match must not turn //user@host, ///host or an invalid port into a relative file.
+  // URL parsing is local: it normalizes the destination without fetching it.
+  if (/^(?:https?|wss?):/i.test(url) || url.startsWith("//")) {
+    try {
+      const destination = new URL(url, "https://generated-code.invalid/");
+      return !allowedHosts.some((host) => host.toLowerCase() === destination.hostname.toLowerCase());
+    } catch {
+      return true;
+    }
+  }
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return true;
   // A relative address on the apps domain itself ("/files/a.png", "a.png", "./a.png"); "\\host" reads as "//host" to browsers.
   return url.startsWith("\\") || url.startsWith("/\\");

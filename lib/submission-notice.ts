@@ -25,7 +25,7 @@
  *   - In the store's language (lib/buyer-words/submissions.ts).
  */
 import { normaliseEmail } from "@/lib/auth";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { NIMBUS_FROM, oneAddress, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -40,11 +40,13 @@ import type { Store } from "@/lib/store";
 /** How long the once-only mark is kept: past any retry of the reply that sent it. */
 export const SUBMISSION_TOLD_SECONDS = 2 * 86_400;
 /**
- * Redis commands this file sends for one reply, at most: the contact and the
- * deletion check (one batch of two), the mark and its read-back. The email's
- * own allowance take is lib/email.ts's, priced with each store email.
+ * Redis commands this file sends for one reply, at most: the mark and its
+ * read-back, the contact and the deletion check (one batch of two, read after
+ * the mark, as the last step before the send), and the mark given back when
+ * that check did not read. The email's own allowance take is lib/email.ts's,
+ * priced with each store email.
  */
-export const SUBMISSION_NOTICE_COMMANDS = 4;
+export const SUBMISSION_NOTICE_COMMANDS = 5;
 
 export type NoticeMessage = Parameters<typeof sendEmail>[0];
 export type ReplyNotice = "sent" | "unsent" | "already" | "stopped" | "unknown" | "none";
@@ -162,11 +164,20 @@ export async function tellBuyerOfReply(input: NoticeInput, send: (message: Notic
   if (!ID.test(submission.folder) || !ID.test(submission.id)) return "none";
   const to = oneAddress(submission.buyer);
   if (!to) return "none";
-  const open = await recipient(store, to);
-  if (open !== "open") return open;
-  const claimed = await claimMark(toldKey(submission.folder, submission.id), SUBMISSION_TOLD_SECONDS);
+  const mark = toldKey(submission.folder, submission.id);
+  const ours = claimValue();
+  const claimed = await claimMark(mark, SUBMISSION_TOLD_SECONDS, ours);
   if (claimed === "taken") return "already";
   if (claimed === "unknown") return "unknown";
+  // The address is checked after the mark, as the last step before the send (Codex CX1, MÉDIO 2 on #3583): a deletion
+  // or a bounce that lands while the mark is taken is seen, and nothing is sent to it. A stopped address keeps the
+  // mark (it is never written to); a check that did not read gives the mark back, so a later try can still tell.
+  const open = await recipient(store, to);
+  if (open === "unknown") {
+    await releaseMark(mark, ours);
+    return "unknown";
+  }
+  if (open !== "open") return open;
   const message = replyNoticeMessage(input);
   // The mark stays whatever happens next: a send that may have gone is never repeated.
   const went = await send({

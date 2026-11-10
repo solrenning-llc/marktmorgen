@@ -5,8 +5,8 @@ import {renderToStaticMarkup} from "react-dom/server";
 import {STUDIO_MESSAGES} from "@/lib/studio-messages";
 import PageError from "@/app/error";
 test("shared studio microcopy preserves every persisted refusal code and gives a next step",()=>{
- assert.deepEqual(Object.keys(STUDIO_MESSAGES).sort(),["files_unavailable","locked","page_unread","page_unread_counted","plan_disputed","renewal_unpaid","role","slow_down","storage_full","storage_setup","storage_trial","store_full","store_gone","upload_budget_unavailable","upload_refresh","upload_stopped","uploads_pending"]);
- for(const key of ["role","locked","store_gone","storage_full","storage_trial","upload_refresh","store_full","uploads_pending","upload_stopped","slow_down","files_unavailable","renewal_unpaid","plan_disputed","page_unread","page_unread_counted"]){
+ assert.deepEqual(Object.keys(STUDIO_MESSAGES).sort(),["files_unavailable","locked","on_hold","page_unread","page_unread_counted","plan_disputed","renewal_unpaid","role","slow_down","storage_full","storage_setup","storage_trial","store_full","store_gone","upload_budget_unavailable","upload_refresh","upload_stopped","uploads_pending"]);
+ for(const key of ["role","locked","store_gone","storage_full","storage_trial","upload_refresh","store_full","uploads_pending","upload_stopped","slow_down","files_unavailable","renewal_unpaid","plan_disputed","page_unread","page_unread_counted","on_hold"]){
   const text=STUDIO_MESSAGES[key];assert.match(text,/ask|check|reload|review|choose|try|finish|cancel|keep/i,key);
   assert.doesNotMatch(text,/successfully saved|has been saved|guaranteed|the page will be back shortly|that is a lot/i,key);
  }

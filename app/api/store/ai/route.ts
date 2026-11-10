@@ -34,7 +34,7 @@ import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
-import { heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
+import { heldPictureRefusal, heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
@@ -197,6 +197,10 @@ export async function POST(request: NextRequest) {
     const product = sitePage ? { title: sitePage.title } : await readListing(store, text(body.product, 40));
     if (!product) return fail("unknown", 404);
     const path = text(body.path, 200);
+    // A held product's picture, or one on its sales page, goes to no AI provider, whichever product or page names it
+    // (lib/child-safety.ts, heldPictureRefusal); a hold that cannot be read is not a yes.
+    const heldPicture = path ? await heldPictureRefusal(store, path) : null;
+    if (heldPicture) return heldPicture;
     const folder = await imageFolder(guarded.ref);
     if (!path || !ownsImagePath(path, folder)) return fail("invalid");
     const found = await get(path, { access: "private" }).catch(() => null);

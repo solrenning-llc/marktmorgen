@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { done, is, part } from "./check";
+import TrustAndSafetyPage, { metadata } from "../app/help/trust-and-safety/page";
 
 const pagePath = "app/help/trust-and-safety/page.tsx";
 const source = existsSync(pagePath) ? readFileSync(pagePath, "utf8") : "";
@@ -17,4 +18,20 @@ is("the guide states detection limits", source.includes("may miss misleading wor
 is("review ownership stays with the buyer", source.includes("cannot rewrite a buyer"), true);
 is("safety guidance does not promise unfinished automatic protections", /(?:automatically (?:refund|block|pause)|within 7 days|guaranteed (?:safe|refund)|registered DMCA agent)/i.test(source), false);
 is("the new guide does not add a provider call", /\b(?:fetch|redis|sendEmail)\s*\(/.test(source), false);
+
+part("The actual page returns the guide and its help links");
+const page = TrustAndSafetyPage();
+is("the rendered layout has the guide title", page.props.title, "Trust and safety");
+is("the rendered layout has no contract effective date", page.props.effective, null);
+is("metadata identifies this guide", metadata.title, "Trust and safety — Marktmorgen");
+function links(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(links);
+  if (!node || typeof node !== "object" || !("props" in node)) return [];
+  const props = (node as { props: { href?: unknown; children?: unknown } }).props;
+  return [...(typeof props.href === "string" ? [props.href] : []), ...links(props.children)];
+}
+const destinations = links(page);
+for (const path of ["/report", "/copyright", "/terms", "/help/buyers"]) {
+  is(`the actual page includes ${path}`, destinations.includes(path), true);
+}
 done();

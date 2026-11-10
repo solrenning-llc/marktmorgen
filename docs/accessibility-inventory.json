@@ -761,6 +761,12 @@
       "parameters": []
     },
     {
+      "source": "app/help/trust-and-safety/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/trust-and-safety",
+      "parameters": []
+    },
+    {
       "source": "app/help/zoom/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/zoom",
@@ -2071,6 +2077,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

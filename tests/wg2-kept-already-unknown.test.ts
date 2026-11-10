@@ -35,6 +35,23 @@ async function main(): Promise<void> {
   subscriptions = { object: "list", data: [], has_more: false };
   customers = { object: "list" };
   is("the customers without their list", await ask(), "threw");
+  part("A list cut short, or that does not say whether it is whole, is unknown (Claude 4's LEVE on #2685)");
+  customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
+  subscriptions = { object: "list", data: [], has_more: true };
+  is("the subscriptions with more beyond the page", await ask(), "threw");
+  subscriptions = { object: "list", data: [] };
+  is("the subscriptions without has_more", await ask(), "threw");
+  subscriptions = { object: "list", data: [], has_more: false };
+  customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: true };
+  is("the customers with more beyond the page", await ask(), "threw");
+  customers = { object: "list", data: [{ id: "cus_kept000001" }] };
+  is("the customers without has_more", await ask(), "threw");
+  customers = { object: "list", data: Array.from({ length: 11 }, (_, n) => ({ id: `cus_kept0000${String(n).padStart(2, "0")}` })), has_more: false };
+  is("more customers than were asked for", await ask(), "threw");
+  part("Controls, still");
+  customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
+  subscriptions = { object: "list", data: [{ status: "active", metadata: { product: "club000001" } }], has_more: false };
+  is("a whole list with a live membership: kept", await ask(), true);
   done();
 }
 

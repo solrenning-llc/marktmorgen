@@ -39,7 +39,7 @@ import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId, storeIdGone } from "@/lib/store";
 import { type CheckedRequest, type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
-import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, requestOf, requestRecordKey } from "@/lib/payment-request-store";
+import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf, requestRecordKey } from "@/lib/payment-request-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 
@@ -148,8 +148,8 @@ async function reminderGone(sid: string, id: string): Promise<boolean> {
  * The daily job's part: every reminder now due is sent, once, to a request
  * still open, of a store that can still take its payment. Bounded by the
  * deadline and a batch at a time; a reminder whose store or request is
- * confirmed gone is dropped, one that cannot be read waits a day, and the
- * next one, if any, waits its day.
+ * confirmed gone is dropped, one that could not be read just now is put off a
+ * day, and the next one, if any, waits its day.
  */
 export async function sendDueReminders(deadline: number, now = Date.now()): Promise<{ sent: number; skipped: number }> {
   const counts = { sent: 0, skipped: 0 };
@@ -160,12 +160,13 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
       if (Date.now() >= deadline) return counts;
       // Rule 24: a read that fails (a Redis timeout) is an unknown answer, never
       // "gone". The reminder stays on the list, moved later so this run does not
-      // loop on it, and is tried again; only a confirmed null drops it.
+      // loop on it, and is tried again; only a confirmed null drops it. The request's record is read exactly
+      // (reminderRequestOf): one in an unknown shape is put off the same way, never dropped for good.
       let store: Store | null;
-      let request: Awaited<ReturnType<typeof requestOf>>;
+      let request: PaymentRequest | null;
       try {
         store = await storeForId(sid);
-        request = store ? await requestOf(store, id) : null;
+        request = store ? await reminderRequestOf(store, id) : null;
       } catch (error) {
         console.error(`payment request reminder ${sid}|${id}: store or request could not be read; tried again later`, error);
         await delayReminder(sid, id, now + RETRY_MS);

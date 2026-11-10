@@ -294,7 +294,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 <h2 id="ai-summaries-title" className="font-semibold text-ink">AI review summaries</h2>
                 <p role="status" className="mt-2 text-sm text-ink-soft">Review summaries couldn&apos;t be loaded. Reload to try again.</p>
               </section>
-            ) : <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} />}
+            ) : <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} canAsk={can(view.role, "settings")} />}
 
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>

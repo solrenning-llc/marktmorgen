@@ -1,0 +1,14 @@
+{
+  "z-chat-counter-refusal.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "ℹ fail 4",
+      "✖ failing tests:",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "✖ stop remains possible after ten refused supplier tests (412.4157ms)",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {"
+    ]
+  }
+}

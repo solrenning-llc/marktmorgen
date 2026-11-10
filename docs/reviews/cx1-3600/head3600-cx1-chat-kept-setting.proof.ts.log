@@ -1,0 +1,14 @@
+✔ a real sealed setting is removed despite unknown provider counter "" (259.6557ms)
+✔ a real sealed setting is removed despite unknown provider counter "  " (62.1782ms)
+✔ a real sealed setting is removed despite unknown provider counter "\n\t" (85.3509ms)
+✔ a refused save preserves an existing sealed setting false (101.0966ms)
+✔ a refused save preserves an existing sealed setting true (83.0618ms)
+✔ authorization still protects a real sealed setting during counter failure (92.4138ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 724.3896

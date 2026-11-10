@@ -1,0 +1,89 @@
+{"mode":"timeout","status":429,"error":"rate_limited","posts":0,"writes":0}
+✖ unknown counter timeout offers retry instead of blaming rate (138.4701ms)
+{"mode":"malformed","status":429,"error":"rate_limited","posts":0,"writes":0}
+✖ unknown counter malformed offers retry instead of blaming rate (12.6207ms)
+{"mode":"unconfigured","status":429,"error":"rate_limited","posts":0,"writes":0}
+✖ unknown counter unconfigured offers retry instead of blaming rate (2.7074ms)
+✔ confirmed exceeded counter retains its genuine rate refusal (11.4556ms)
+✔ healthy save retains one supplier POST and one sealed setting (72.9505ms)
+{"mode":"stop-after-refused","status":429,"posts":10,"writes":0}
+✖ stop remains possible after ten refused supplier tests (412.4157ms)
+{"syntheticCommands":31,"syntheticPosts":11,"requestBytes":1243,"externalRequests":0}
+ℹ tests 6
+ℹ suites 0
+ℹ pass 2
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 673.1687
+
+✖ failing tests:
+
+test at .cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2730:29
+✖ unknown counter timeout offers retry instead of blaming rate (138.4701ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  429 !== 503
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3600\.cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2744:27)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 429,
+    expected: 503,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2730:29
+✖ unknown counter malformed offers retry instead of blaming rate (12.6207ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  429 !== 503
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3600\.cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2744:27)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 429,
+    expected: 503,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2730:29
+✖ unknown counter unconfigured offers retry instead of blaming rate (2.7074ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  429 !== 503
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3600\.cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2744:27)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 429,
+    expected: 503,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2766:27
+✖ stop remains possible after ten refused supplier tests (412.4157ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  429 !== 200
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3600\.cx1-evidence\z-chat-counter-refusal.proof.ts.cjs:2777:25)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 429,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

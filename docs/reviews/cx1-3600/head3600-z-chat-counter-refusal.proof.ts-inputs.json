@@ -1,0 +1,264 @@
+{
+  "inputs": {
+    ".git/cx1-review-3600/lib/money.ts": {
+      "bytes": 11100,
+      "imports": [],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/paid-coverage.ts": {
+      "bytes": 257,
+      "imports": [],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/payment-ledger-coverage.ts": {
+      "bytes": 652,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/lib/paid-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/paid-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/sales-goal-rules.ts": {
+      "bytes": 4167,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/lib/payment-ledger-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/payment-ledger-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/path-rules.ts": {
+      "bytes": 30688,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/lib/money.ts",
+          "kind": "import-statement",
+          "original": "@/lib/money"
+        },
+        {
+          "path": ".git/cx1-review-3600/lib/sales-goal-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/sales-goal-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/path-board-rules.ts": {
+      "bytes": 2328,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/lib/path-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/redis-memory.ts": {
+      "bytes": 134396,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": ".git/cx1-review-3600/lib/path-board-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-board-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/tests/chat-counter-admission-world.ts": {
+      "bytes": 2201,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/lib/redis-memory.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-memory"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/redis-reply.ts": {
+      "bytes": 6384,
+      "imports": [],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/secret-box.ts": {
+      "bytes": 8595,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/chat-kind.ts": {
+      "bytes": 950,
+      "imports": [],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/chat-summary.ts": {
+      "bytes": 5524,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        },
+        {
+          "path": ".git/cx1-review-3600/lib/redis-reply.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-reply"
+        },
+        {
+          "path": ".git/cx1-review-3600/lib/secret-box.ts",
+          "kind": "import-statement",
+          "original": "@/lib/secret-box"
+        },
+        {
+          "path": ".git/cx1-review-3600/lib/chat-kind.ts",
+          "kind": "import-statement",
+          "original": "@/lib/chat-kind"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/lib/request-guard.ts": {
+      "bytes": 16493,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/app/api/store/chat-summary/route.ts": {
+      "bytes": 2565,
+      "imports": [
+        {
+          "path": ".git/cx1-review-3600/tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/store-request"
+        },
+        {
+          "path": ".git/cx1-review-3600/lib/chat-summary.ts",
+          "kind": "import-statement",
+          "original": "@/lib/chat-summary"
+        },
+        {
+          "path": ".git/cx1-review-3600/lib/request-guard.ts",
+          "kind": "import-statement",
+          "original": "@/lib/request-guard"
+        },
+        {
+          "path": ".git/cx1-review-3600/tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/store"
+        }
+      ],
+      "format": "esm"
+    },
+    ".git/cx1-review-3600/tests/z-chat-counter-refusal.proof.ts": {
+      "bytes": 3899,
+      "imports": [
+        {
+          "path": "node:assert/strict",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:test",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": ".git/cx1-review-3600/app/api/store/chat-summary/route.ts",
+          "kind": "import-statement",
+          "original": "@/app/api/store/chat-summary/route"
+        },
+        {
+          "path": ".git/cx1-review-3600/tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "./chat-counter-admission-world"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    ".git/cx1-review-3600/.cx1-evidence/z-chat-counter-refusal.proof.ts.cjs": {
+      "imports": [
+        {
+          "path": "node:assert/strict",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:test",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        }
+      ],
+      "exports": [],
+      "entryPoint": ".git/cx1-review-3600/tests/z-chat-counter-refusal.proof.ts",
+      "inputs": {
+        ".git/cx1-review-3600/tests/z-chat-counter-refusal.proof.ts": {
+          "bytesInOutput": 3942
+        },
+        ".git/cx1-review-3600/lib/redis-memory.ts": {
+          "bytesInOutput": 117688
+        },
+        ".git/cx1-review-3600/lib/money.ts": {
+          "bytesInOutput": 1600
+        },
+        ".git/cx1-review-3600/lib/path-board-rules.ts": {
+          "bytesInOutput": 590
+        },
+        ".git/cx1-review-3600/tests/chat-counter-admission-world.ts": {
+          "bytesInOutput": 1646
+        },
+        ".git/cx1-review-3600/lib/redis-reply.ts": {
+          "bytesInOutput": 1593
+        },
+        ".git/cx1-review-3600/lib/secret-box.ts": {
+          "bytesInOutput": 1537
+        },
+        ".git/cx1-review-3600/lib/chat-kind.ts": {
+          "bytesInOutput": 346
+        },
+        ".git/cx1-review-3600/lib/chat-summary.ts": {
+          "bytesInOutput": 1591
+        },
+        ".git/cx1-review-3600/lib/request-guard.ts": {
+          "bytesInOutput": 1572
+        },
+        ".git/cx1-review-3600/app/api/store/chat-summary/route.ts": {
+          "bytesInOutput": 1708
+        }
+      },
+      "bytes": 136574
+    }
+  }
+}

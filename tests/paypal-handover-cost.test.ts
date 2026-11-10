@@ -18,6 +18,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
+import { readsKey } from "./listing-reads";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
@@ -67,6 +68,8 @@ const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
 type Commands = (string | number)[][];
 type Fault = (c: Commands) => Promise<unknown[]> | null;
 const single = (c: Commands, op: string, key: string) => c.length === 1 && c[0][0] === op && c[0][1] === key;
+/** One read of a product's listing alone: a GET, or the one-key MGET lib/catalog.ts getMany sends since 10 November 2026. */
+const readsListing = (c: Commands, key: string) => c.length === 1 && readsKey(c[0], key);
 const timeout = async (): Promise<unknown[]> => {
   throw new Error("Synthetic: Redis timed out");
 };
@@ -117,7 +120,7 @@ async function main(): Promise<void> {
   const statsId = store.statsId!;
   const id = added.product.id;
   const listingKey = `nl:catalog:${store.catalog.id}:l:${id}`;
-  const slowListing: Fault = (c) => (single(c, "GET", listingKey) ? timeout() : null);
+  const slowListing: Fault = (c) => (readsListing(c, listingKey) ? timeout() : null);
 
   const returnFor = (s: Store, order: string) =>
     paypalReturn(new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=${s.handle}&token=${order}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": `198.51.100.${made}` } }));

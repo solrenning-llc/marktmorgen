@@ -30,7 +30,7 @@
  * when its units cost less than it. Commands are counted from the code, read
  * by read; sizes no code caps are review ceilings, said so where they are set.
  */
-import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { MAX_PRODUCTS, listingReads } from "@/lib/catalog-rules";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { CALENDAR_FILE_MAX_BYTES, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-sync";
@@ -97,8 +97,9 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * the day's retry (4) and the making given back (DECRBY, INCRBY, EXPIRE: 3; the same
  * 3 when the copy's step found a deleted person instead, a making that did not fail); the store (its handle and its record: 2 GET) and its settings
  * written again when it was renamed (lib/calendar-sync.ts, ensureFeedToken:
- * GET and SET, 2); its Stripe pages; every call listing (one GET each, up to
- * MAX_PRODUCTS, the catalog's head aside); the bookings' moves
+ * GET and SET, 2); its Stripe pages; every call listing (up to MAX_PRODUCTS,
+ * the catalog's head aside, read LISTINGS_PER_MGET at one MGET: lib/catalog.ts,
+ * getMany, listingReads; one GET each until 10 November 2026); the bookings' moves
  * (lib/call-records.ts, readMoves: MOVES_PER_MGET a command); the four keys
  * of each booking's room (lib/call-rooms.ts, roomsFor: ROOM_KEYS_PER_MGET a
  * command, roomReads) and, for a video room not made yet, its making (SET NX
@@ -121,7 +122,7 @@ export function calendarBuildCommands(listings: number, calls: number): number {
   // + 1: the bookers looked up among the store's deleted people (withoutErasedBookers, one HMGET); the copy kept, 4:
   // KEEP_COPY looks them up again where it writes (review of #2111). + LIST_TRY_COMMANDS: a store with no list, the
   // day's try mark (lib/store-readings.ts, listForNaming; the try itself is priced once a day in store-readings).
-  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + moveReads(calls) + roomReads(calls) + 4 + 2 + 1 + LIST_TRY_COMMANDS;
+  return 4 + 8 + 4 + 3 + 2 + 2 + listingReads(listings) + CALENDAR_BUILD_PER_BOOKING * calls + moveReads(calls) + roomReads(calls) + 4 + 2 + 1 + LIST_TRY_COMMANDS;
 }
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
@@ -269,8 +270,10 @@ export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands:
  * lib/store.ts, ensureListId: the record read (GET), its lock (SET NX, tried
  * again every 20 to 250 ms for LOCK_WAIT_MS, 8 seconds: at most
  * STORE_LOCK_TRIES), the record read again (GET), its first page's product
- * records and their order bumps read for its head (one GET each,
- * STORE_PAGE_SIZE x (1 + MAX_BUMPS)), the lock held longer (EVAL, GET,
+ * records and their order bumps read for its head (STORE_PAGE_SIZE x (1 +
+ * MAX_BUMPS) records, in two reads, the page's and then its bumps', each
+ * LISTINGS_PER_MGET at one MGET: lib/catalog.ts, buildHead, getMany; one GET
+ * each until 10 November 2026), the lock held longer (EVAL, GET,
  * EXPIRE), the record written while held (EVAL, GET, EXISTS, SET) and the lock
  * let go (EVAL, GET, DEL); the record at its largest read twice and written
  * once. tests/read-ceilings.test.ts measures it and fails when one of the
@@ -281,10 +284,12 @@ export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands:
 export const STORE_LOCK_TRIES = 4 + Math.ceil((8_000 - (20 + 40 + 80 + 160)) / 250) + 1;
 /** The head's reads: STORE_PAGE_SIZE (24, lib/catalog.ts) products and MAX_BUMPS (3, lib/product-extras.ts) bumps each. */
 export const LIST_MADE_HEAD_READS = 24 * (1 + 3);
+/** The commands those reads take: the page's records in one read, then their bumps' in another (buildHead's two fills). */
+export const LIST_MADE_HEAD_COMMANDS = listingReads(24) + listingReads(24 * 3);
 export const LIST_MADE_SHAPE: ReadShape = {
   seconds: 9,
   cpu: 0.5,
-  commands: 1 + STORE_LOCK_TRIES + 1 + LIST_MADE_HEAD_READS + 3 + 4 + 3,
+  commands: 1 + STORE_LOCK_TRIES + 1 + LIST_MADE_HEAD_COMMANDS + 3 + 4 + 3,
   dbBytes: 3 * MAX_STORE_BYTES + LIST_MADE_HEAD_READS * LISTING_READ_BYTES,
   outBytes: 0,
   stripePages: 0,

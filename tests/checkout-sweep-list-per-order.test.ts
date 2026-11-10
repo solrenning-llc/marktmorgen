@@ -10,6 +10,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, 
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { listingKeysRead } from "./listing-reads";
 import { installSesMailFixture } from "./ses-mail-fixture";
 
 let sessions: unknown[] = [];
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
   const real = redis.pipeline.bind(redis);
   let throws = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:") && String(c[1]).endsWith(`:l:${hidden.product.id}`))) {
+    if (commands.some((c) => listingKeysRead(c).some((key) => key.endsWith(`:l:${hidden.product.id}`)))) {
       throws += 1;
       throw new Error("a record that does not read");
     }
@@ -87,7 +88,7 @@ async function main(): Promise<void> {
   sessions = [paid(C, "cat@example.com", hidden.product.id, 30), ...sessions];
   throws = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:") && String(c[1]).endsWith(`:l:${hidden.product.id}`))) {
+    if (commands.some((c) => listingKeysRead(c).some((key) => key.endsWith(`:l:${hidden.product.id}`)))) {
       throws += 1;
       throw new Error("a record that does not read");
     }

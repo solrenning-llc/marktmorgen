@@ -8,15 +8,10 @@
  * answer throws UnknownReplyError, never a product taken to be missing.
  * Synthetic stores only.
  */
-import * as catalog from "@/lib/catalog";
+import { LISTINGS_PER_MGET, listingReads, readListings, readProducts, readProductsStrict } from "@/lib/catalog";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
-
-// Read through the module, so a catalog without them fails here as checks, not as a build that does not start.
-const { readListings, readProducts, readProductsStrict } = catalog;
-const LISTINGS_PER_MGET = (catalog as { LISTINGS_PER_MGET?: number }).LISTINGS_PER_MGET ?? 1;
-const listingReads = (catalog as { listingReads?: (keys: number) => number }).listingReads ?? ((keys: number) => keys);
 import { done, is, part } from "./check";
 
 type Batch = (string | number)[][];

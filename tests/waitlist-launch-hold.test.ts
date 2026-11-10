@@ -17,6 +17,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, removeProduct, st
 import { readListing } from "@/lib/catalog";
 import { launch, runLaunches, setSoon, waitlistViews } from "@/lib/waitlist";
 import { store as redis } from "./redis-stub";
+import { readsKeyWhere } from "./listing-reads";
 import { done, is, part } from "./check";
 
 type Sent = { to: string[] };
@@ -118,7 +119,8 @@ async function main(): Promise<void> {
     is("the product's listing is read from its own record", (await current()).catalog.head.some((l) => l.id === item.id), false);
     return item;
   };
-  await holds("listing", (pid) => (command) => command[0] === "GET" && typeof command[1] === "string" && command[1].startsWith("nl:catalog:") && command[1].endsWith(`:l:${pid}`), offHead);
+  // Its record read alone (GET) or in an MGET (lib/catalog.ts getMany since 10 November 2026): either reply bent.
+  await holds("listing", (pid) => (command) => readsKeyWhere(command, (key) => key.startsWith("nl:catalog:") && key.endsWith(`:l:${pid}`)), offHead);
 
   part("What is gone, exactly, is still finished as before");
   {

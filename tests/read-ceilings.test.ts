@@ -34,14 +34,14 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, MEMBER_WORDS_NAMES, LIST_MADE_HEAD_READS, LIST_MADE_SHAPE, STORE_LOCK_TRIES, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
+  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, MEMBER_WORDS_NAMES, LIST_MADE_HEAD_COMMANDS, LIST_MADE_HEAD_READS, LIST_MADE_SHAPE, STORE_LOCK_TRIES, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { TOP_BUYERS } from "@/lib/stats";
 import { COMMENT_ADDRESSES, SHOWN_COMMENTS } from "@/lib/membership-numbers";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { createHash } from "node:crypto";
-import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { MAX_PRODUCTS, listingReads } from "@/lib/catalog-rules";
 import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading } from "@/lib/store-readings";
 import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
 import { PRICES_WITHOUT_COMMISSION } from "@/lib/plan";
@@ -293,9 +293,10 @@ async function main(): Promise<void> {
     is(`each booking adds what the count gives it (${perBooking.toFixed(2)} <= ${CALENDAR_BUILD_PER_BOOKING})`, perBooking <= CALENDAR_BUILD_PER_BOOKING, true);
     is(`forty bookings, measured (${forty}), within the count for forty (${calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands})`, forty <= calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands, true);
     // Measured, not the shape's own expression again (review C4-33 (c)): the fixed part measured here, with every
-    // listing (one GET each) and every booking at the measured rate, is within the shape.
+    // listing (LISTINGS_PER_MGET at one MGET, measured in tests/catalog-listings-mget.test.ts) and every booking at the
+    // measured rate, is within the shape.
     const fixedMeasured = forty - 40 * perBooking - CALENDAR_POLL_SHAPE.commands;
-    is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + MAX_PRODUCTS + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
+    is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + listingReads(MAX_PRODUCTS) + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
   }
 
   part("Each booking's room is read in shared MGETs, not four GETs a booking: the feed's making at its worst (calendar-feed room, 10 November 2026)");
@@ -333,10 +334,10 @@ async function main(): Promise<void> {
     const made = await counted(() => ensureListId(OWNER));
     const again = await counted(() => ensureListId(OWNER));
     // Uncontended, with no product on its first page: what is left of the shape is the lock's whole wait and the head's reads.
-    const room = LIST_MADE_SHAPE.commands - (STORE_LOCK_TRIES - 1) - LIST_MADE_HEAD_READS;
+    const room = LIST_MADE_SHAPE.commands - (STORE_LOCK_TRIES - 1) - LIST_MADE_HEAD_COMMANDS;
     is(`made, measured (${made.commands}), within LIST_MADE_SHAPE less the lock's other tries and the head's reads (${room})`, [typeof made.value?.listId, made.commands <= room], ["string", true]);
     is("once there is one, nothing is written: one read", again.commands, 1);
-    is("the figures the shape is built from are the code's own", [read("lib/store.ts").includes("const LOCK_WAIT_MS = 8_000;"), read("lib/redis-lock.ts").includes("for (let wait = 20; ; wait = Math.min(wait * 2, 250))"), LIST_MADE_HEAD_READS === STORE_PAGE_SIZE * (1 + MAX_BUMPS)], [true, true, true]);
+    is("the figures the shape is built from are the code's own", [read("lib/store.ts").includes("const LOCK_WAIT_MS = 8_000;"), read("lib/redis-lock.ts").includes("for (let wait = 20; ; wait = Math.min(wait * 2, 250))"), LIST_MADE_HEAD_READS === STORE_PAGE_SIZE * (1 + MAX_BUMPS), LIST_MADE_HEAD_COMMANDS === listingReads(STORE_PAGE_SIZE) + listingReads(STORE_PAGE_SIZE * MAX_BUMPS)], [true, true, true, true]);
     const readingsLine = COST_LINES.find((l) => l.id === "store-readings");
     is("priced every day of the month, once a day a store, in the store-readings line", (readingsLine?.monthlyUsd("creator") ?? 0) >= DAY_WINDOWS * readShapeCost(LIST_MADE_SHAPE), true);
     is("and no longer as a one-time line beside it", PER_PAYMENT_LINES.some((l) => l.id === "reading-list-made"), false);

@@ -3,7 +3,9 @@
  * Claude 4, after Claude 5's proof tests/f-paypal-listing-unknown.test.ts on claude5/f-buyer-profile-listing):
  *
  *   - readListings / readListing: a reply cut short, of another shape, a record that is not JSON, not a listing, or
- *     another product's throws UnknownReplyError, never "the store has no such product"; only a GET nil is none;
+ *     another product's throws UnknownReplyError, never "the store has no such product"; only a nil is none (the records
+ *     are read LISTINGS_PER_MGET at one MGET since 10 November 2026, so what is cut short or of another shape here is
+ *     an MGET's own list of values, and tests/catalog-listings-mget.test.ts holds the list of replies around them);
  *   - handOverPayPal: everything it hands over is read before anything is, so a bundle's item that does not read
  *     throws before the buyer is given part of it, and the order is kept to be handed over by the sweep.
  *
@@ -69,7 +71,10 @@ async function withRecord<T>(key: string, raw: string, run: () => Promise<T>): P
     redis.run(["SET", key, String(kept)]);
   }
 }
-const listingGets = (batch: Batch) => batch.length > 0 && batch.every((c) => c[0] === "GET" && String(c[1]).includes(":l:"));
+/** A pipeline of the MGETs that read product records (lib/catalog.ts, getMany). */
+const listingGets = (batch: Batch) => batch.length > 0 && batch.every((c) => c[0] === "MGET" && c.slice(1).every((k) => String(k).includes(":l:")));
+/** Each MGET's list of values, as `alter` makes it. */
+const eachValues = (answers: unknown[], alter: (values: unknown[]) => unknown[]) => answers.map((values) => alter(values as unknown[]));
 
 test("a listing past the first page reads, in the order asked", async () => {
   const { store, guide, notes } = await fixture;
@@ -77,9 +82,9 @@ test("a listing past the first page reads, in the order asked", async () => {
   assert.deepEqual((await readListings(store, [notes, guide])).map((l) => l.id), [notes, guide]);
 });
 
-test("a listing whose record is confirmed gone (GET nil) is no such product", async () => {
+test("a listing whose record is confirmed gone (a nil) is no such product", async () => {
   const { store, guide, notes, key } = await fixture;
-  const result = await withReplies((batch, answers) => (listingGets(batch) ? batch.map((c, i) => (c[1] === key(guide) ? null : answers[i])) : answers), async () => ({
+  const result = await withReplies((batch, answers) => (listingGets(batch) ? batch.map((c, i) => (answers[i] as unknown[]).map((v, j) => (c[j + 1] === key(guide) ? null : v))) : answers), async () => ({
     one: await readListing(store, guide),
     many: (await readListings(store, [guide, notes])).map((l) => l.id),
   }));
@@ -95,9 +100,9 @@ for (const [label, alter] of [
 ] as [string, (a: unknown[]) => unknown[]][]) {
   test(`readListings: ${label} throws, never "no such product"`, async () => {
     const { store, guide, notes } = await fixture;
-    const one = await withReplies((b, a) => (listingGets(b) ? alter(a) : a), () => readListing(store, guide));
+    const one = await withReplies((b, a) => (listingGets(b) ? eachValues(a, alter) : a), () => readListing(store, guide));
     assert.ok(one.error, `readListing rejected, not ${JSON.stringify(one.value)}`);
-    const many = await withReplies((b, a) => (listingGets(b) ? alter(a) : a), () => readListings(store, [guide, notes]));
+    const many = await withReplies((b, a) => (listingGets(b) ? eachValues(a, alter) : a), () => readListings(store, [guide, notes]));
     assert.ok(many.error, `readListings rejected, not ${JSON.stringify(many.value)}`);
   });
 }

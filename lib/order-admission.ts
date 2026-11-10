@@ -131,14 +131,13 @@ const pendingKey = (folder: string) => `nl:orders:pending:${folder}`;
 const COUNT_KEEP_SECONDS = 400 * 86_400;
 
 /**
- * Holds one paid order of a paying store whose billing window is unknown
- * (lib/orders.ts, countOrder): never counted in the calendar month, which the
- * admission below never reads for it, but kept to be counted in the window
- * once it is known (countHeldOrders). Throws when it cannot be written.
+ * Where one paid order of a paying store whose billing window is unknown is
+ * held (lib/orders.ts, countOrder, which marks and holds it in one step):
+ * never counted in the calendar month, which the admission below never reads
+ * for it, but kept to be counted in the window once it is known
+ * (countHeldOrders), as long as a window's count (lib/orders.ts, KEEP_SECONDS).
  */
-export async function holdUncountedOrder(folder: string): Promise<void> {
-  await redisPipeline([["INCR", pendingKey(folder)], ["EXPIRE", pendingKey(folder), COUNT_KEEP_SECONDS]]);
-}
+export const heldOrdersKey = (folder: string) => pendingKey(folder);
 
 /**
  * KEYS[1] the orders held while the window was unknown, KEYS[2] the window's

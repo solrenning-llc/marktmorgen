@@ -8,6 +8,7 @@
  */
 import { BUMP_CHOICES, cachedCards, idsOfKind, productIds, readCards, readListings, readListingsExact } from "@/lib/catalog";
 import { whyNotInBundle } from "@/lib/bundle-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 
 /** Products one page of the picker shows. */
@@ -104,6 +105,16 @@ export const SEARCH_PAGE = PICKER_PAGE - 1;
  * null at the end; `matches` is how many may go in by their kind, without a
  * search, and null with one (each stretch is searched as it comes).
  */
+/** readListingsExact, with an answer that is not Redis's exact one as null (unknown), never a page with products left out. */
+async function listingsOrUnknown(store: Store, ids: string[]) {
+  try {
+    return await readListingsExact(store, ids);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  }
+}
+
 export async function bundleChoicesPage(store: Store, input: { owner: string; query: string; after: number }): Promise<{ products: BundleChoice[]; matches: number | null; next: number | null; unsearched: number } | null> {
   const ruledOut = new Set([...idsOfKind(store, "recurring"), ...idsOfKind(store, "call")]);
   const withOptions = new Set(store.catalog.items.filter((item) => item.options.length > 0).map((item) => item.id));
@@ -111,7 +122,7 @@ export async function bundleChoicesPage(store: Store, input: { owner: string; qu
   const from = Math.min(Math.max(0, input.after), ids.length);
   if (!input.query) {
     // Read on exact answers only: a page that could not be read whole is unknown, never a page with products left out.
-    const listed = await readListingsExact(store, ids.slice(from, from + PICKER_PAGE));
+    const listed = await listingsOrUnknown(store, ids.slice(from, from + PICKER_PAGE));
     if (!listed) return null;
     return { products: listed.map(choiceOf), matches: ids.length, next: from + PICKER_PAGE < ids.length ? from + PICKER_PAGE : null, unsearched: 0 };
   }
@@ -129,7 +140,7 @@ export async function bundleChoicesPage(store: Store, input: { owner: string; qu
     if (!card) unsearched += 1;
     else if (card.title.toLowerCase().includes(input.query)) found.push(id);
   }
-  const listed = await readListingsExact(store, found);
+  const listed = await listingsOrUnknown(store, found);
   if (!listed) return null;
   return { products: listed.map(choiceOf), matches: null, next: at < ids.length ? at : null, unsearched };
 }

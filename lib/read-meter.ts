@@ -40,35 +40,3 @@ export function noteRead(commands: number, answer: unknown): void {
     meter.bytes = Number.POSITIVE_INFINITY;
   }
 }
-
-/**
- * A read whose size is known only once measured, such as the proposals book under its lock (lib/agent-book.ts):
- * inside `withAdmission`, it is admitted before it is read (`admitRead` with the bytes it weighs); refused, it is not
- * read. Outside one, every read is admitted, as it always was.
- */
-type Admit = (bytes: number) => Promise<boolean>;
-type AdmitStore = { getStore(): Admit | undefined; run<R>(store: Admit, fn: () => R): R };
-const admits: AdmitStore | null = (() => {
-  const g = globalThis as { AsyncLocalStorage?: new () => AdmitStore };
-  if (typeof g.AsyncLocalStorage === "function") return new g.AsyncLocalStorage();
-  const node = typeof process === "undefined" ? undefined : (process as { getBuiltinModule?: (id: string) => unknown }).getBuiltinModule;
-  const hooks = node?.("node:async_hooks") as { AsyncLocalStorage?: new () => AdmitStore } | undefined;
-  return hooks?.AsyncLocalStorage ? new hooks.AsyncLocalStorage() : null;
-})();
-
-/** Runs `work` with `admit` deciding each measured read inside it. */
-export function withAdmission<T>(admit: Admit, work: () => Promise<T>): Promise<T> {
-  if (!admits) throw new Error("reads cannot be admitted here");
-  return admits.run(admit, work);
-}
-
-/** Whether a read of `bytes` is admitted; true outside withAdmission. */
-export async function admitRead(bytes: number): Promise<boolean> {
-  const admit = admits?.getStore();
-  return admit ? admit(bytes) : true;
-}
-
-/** Whether reads are being admitted, so a measure taken only for that (one more command) is taken. */
-export function admitting(): boolean {
-  return admits?.getStore() !== undefined;
-}

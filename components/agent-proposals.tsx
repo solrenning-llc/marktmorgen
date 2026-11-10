@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 
@@ -31,29 +31,42 @@ const WHY: Record<string, string> = {
 export function AgentProposals({ waiting, history }: { waiting: ProposalRow[]; history: DoneRow[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; failed: boolean } | null>(null);
+  // The pressed button is disabled while its request runs, so focus would fall to the page: it goes to what
+  // answered instead, the message, or the section's heading when the answer was a toast (Claude 5 on #1856).
+  const said = useRef<HTMLParagraphElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [land, setLand] = useState(0);
+  useEffect(() => {
+    if (land) (said.current ?? heading.current)?.focus();
+  }, [land]);
 
   async function run(key: string, body: Record<string, unknown>, ok: string) {
     setBusy(key);
     setMessage(null);
     const answer = await post(body);
     setBusy("");
+    setLand((n) => n + 1);
     if (!answer.ok) {
-      setMessage(answer.message ?? "That could not be done just now. Try again in a moment.");
+      setMessage({ text: answer.message ?? "That could not be done just now. Try again in a moment.", failed: true });
       return;
     }
     const refused = answer.refused ?? [];
-    if (refused.length) setMessage(`${answer.done?.length ?? 0} carried out. Not carried out: ${refused.map((r) => WHY[r.why] ?? r.why).join("; ")}.`);
+    if (refused.length) setMessage({ text: `${answer.done?.length ?? 0} carried out. Not carried out: ${refused.map((r) => WHY[r.why] ?? r.why).join("; ")}.`, failed: false });
     else toast(ok);
     router.refresh();
   }
 
   return (
     <div>
-      {message ? <p className="notice notice-info mt-4" role="status">{message}</p> : null}
+      {message ? (
+        <p ref={said} tabIndex={-1} className={`notice ${message.failed ? "notice-warn" : "notice-info"} mt-4`} role={message.failed ? "alert" : "status"}>
+          {message.text}
+        </p>
+      ) : null}
       <section aria-labelledby="waiting-title" className="card mt-6 p-6 sm:p-8">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h2 id="waiting-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Waiting for you (${waiting.length})`}</h2>
+          <h2 id="waiting-title" ref={heading} tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Waiting for you (${waiting.length})`}</h2>
           {waiting.length > 1 ? (
             <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== ""} aria-busy={busy === "all"} onClick={() => void run("all", { action: "confirm", ids: waiting.map((w) => w.id) }, "Carried out.")}>
               {`Confirm all ${waiting.length}`}
@@ -66,7 +79,7 @@ export function AgentProposals({ waiting, history }: { waiting: ProposalRow[]; h
           <ul className="mt-4 space-y-5">
             {waiting.map((p) => (
               <li key={p.id} className="rounded-2xl border border-line bg-paper p-4">
-                <h3 className="font-semibold text-ink">{p.label}</h3>
+                <h3 id={`proposal-${p.id}`} className="font-semibold text-ink">{p.label}</h3>
                 <p className="mt-0.5 text-xs text-ink-soft">{`Prepared by ${p.asked}, ${p.at}. Nothing has changed yet.`}</p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <div>
@@ -79,10 +92,10 @@ export function AgentProposals({ waiting, history }: { waiting: ProposalRow[]; h
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" className="btn btn-primary btn-sm" disabled={busy !== ""} aria-busy={busy === p.id} onClick={() => void run(p.id, { action: "confirm", ids: [p.id] }, "Carried out. You can undo it below.")}>
+                  <button type="button" className="btn btn-primary btn-sm" disabled={busy !== ""} aria-busy={busy === p.id} aria-describedby={`proposal-${p.id}`} onClick={() => void run(p.id, { action: "confirm", ids: [p.id] }, "Carried out. You can undo it below.")}>
                     Confirm
                   </button>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== ""} onClick={() => void run(`d-${p.id}`, { action: "decline", id: p.id }, "Declined. Nothing was changed.")}>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== ""} aria-busy={busy === `d-${p.id}`} aria-describedby={`proposal-${p.id}`} onClick={() => void run(`d-${p.id}`, { action: "decline", id: p.id }, "Declined. Nothing was changed.")}>
                     Decline
                   </button>
                 </div>
@@ -99,12 +112,12 @@ export function AgentProposals({ waiting, history }: { waiting: ProposalRow[]; h
           <ul className="mt-3 divide-y divide-line">
             {history.map((d) => (
               <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
-                <span className="text-ink">
+                <span id={`done-${d.id}`} className="text-ink">
                   {d.label}
                   <span className="text-ink-soft">{` · ${d.confirmed}${d.undone ? ` · put back ${d.undone}` : ""}`}</span>
                 </span>
                 {d.undo && !d.undone ? (
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== ""} aria-busy={busy === `u-${d.id}`} onClick={() => void run(`u-${d.id}`, { action: "undo", id: d.id }, "Put back as it was.")}>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== ""} aria-busy={busy === `u-${d.id}`} aria-describedby={`done-${d.id}`} onClick={() => void run(`u-${d.id}`, { action: "undo", id: d.id }, "Put back as it was.")}>
                     Undo
                   </button>
                 ) : null}

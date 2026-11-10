@@ -459,6 +459,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/withdraw/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/withdraw",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/p/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/p/[product]",
@@ -738,6 +749,12 @@
       "parameters": []
     },
     {
+      "source": "app/help/buyers/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/buyers",
+      "parameters": []
+    },
+    {
       "source": "app/help/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help",
@@ -925,6 +942,18 @@
       "parameters": []
     },
     {
+      "source": "app/status/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/status",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/add/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/add",
+      "parameters": []
+    },
+    {
       "source": "app/studio/affiliates/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/affiliates",
@@ -958,6 +987,12 @@
       "source": "app/studio/calendar/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/calendar",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/card/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/card",
       "parameters": []
     },
     {
@@ -1169,6 +1204,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/tax/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/tax",
+      "parameters": []
+    },
+    {
       "source": "app/studio/team/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/team",
@@ -1226,6 +1267,7 @@
   ],
   "componentSources": [
     "components/ad-spend-editor.tsx",
+    "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
     "components/affiliate-click.tsx",
     "components/affiliate-commission-history.tsx",
@@ -1242,6 +1284,7 @@
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
+    "components/arrival-notice.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
@@ -1265,6 +1308,7 @@
     "components/call-editor.tsx",
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
+    "components/cart-link-builder.tsx",
     "components/certificate-actions.tsx",
     "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
@@ -1284,6 +1328,7 @@
     "components/community-push-toggle.tsx",
     "components/community-room.tsx",
     "components/community-studio.tsx",
+    "components/company-owner-report.tsx",
     "components/confirm-action.tsx",
     "components/contact-box-editor.tsx",
     "components/copy-link.tsx",
@@ -1297,12 +1342,15 @@
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
+    "components/creator-card-editor.tsx",
+    "components/creator-card-view.tsx",
     "components/creator-research-form.tsx",
     "components/creator-showcase.tsx",
     "components/custom-range.tsx",
     "components/customer-voice.tsx",
     "components/daily-cashflow.tsx",
     "components/deal-agenda.tsx",
+    "components/deal-channels-table.tsx",
     "components/deals-board.tsx",
     "components/deals-unavailable.tsx",
     "components/demo-notes.tsx",
@@ -1314,21 +1362,25 @@
     "components/dispute-purchase-review.tsx",
     "components/domain-editor.tsx",
     "components/dunning-editor.tsx",
+    "components/email-code-form.tsx",
     "components/email-field.tsx",
     "components/email-input.tsx",
     "components/email-studio.tsx",
     "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",
     "components/embed-messenger.tsx",
+    "components/empty-state.tsx",
     "components/exit-offer-editor.tsx",
     "components/exit-offer-slot.tsx",
     "components/exit-offer.tsx",
     "components/fair-price-editor.tsx",
     "components/faq-editor.tsx",
     "components/faq-from-inbox.tsx",
+    "components/feature-captures.tsx",
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
+    "components/forget-lesson-positions.tsx",
     "components/form-answers.tsx",
     "components/form-branching.tsx",
     "components/form-keep.tsx",
@@ -1367,15 +1419,20 @@
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
+    "components/lesson-notes-kept.tsx",
+    "components/lesson-notes.tsx",
+    "components/lesson-player.tsx",
     "components/lesson-quiz.tsx",
     "components/lesson-task.tsx",
     "components/lesson-text.tsx",
     "components/letter-publish-control.tsx",
+    "components/library-continue.tsx",
     "components/licence-key-box.tsx",
     "components/licence-key-editor.tsx",
     "components/link-editor.tsx",
     "components/link-picture.tsx",
     "components/link-request-form.tsx",
+    "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
     "components/look-editor.tsx",
@@ -1418,15 +1475,18 @@
     "components/path-certificates.tsx",
     "components/path-checkout-notice.tsx",
     "components/path-growth-missions.tsx",
+    "components/path-milestone.tsx",
     "components/path-missions.tsx",
     "components/path-onboarding.tsx",
     "components/path-reminder-button.tsx",
     "components/path-share-card.tsx",
     "components/path-social-scripts.tsx",
     "components/path-studio-reminder.tsx",
+    "components/path-weekly-summary.tsx",
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",
+    "components/payment-received.tsx",
     "components/payment-requests-studio.tsx",
     "components/payments-panel.tsx",
     "components/paypal-payouts.tsx",
@@ -1464,6 +1524,7 @@
     "components/recovery-address-manager.tsx",
     "components/recovery-editor.tsx",
     "components/refund-activity.tsx",
+    "components/remember-last-lesson.tsx",
     "components/rename-form.tsx",
     "components/renewal-unpaid-notice.tsx",
     "components/report-download.tsx",
@@ -1496,6 +1557,7 @@
     "components/site-footer.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
+    "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
     "components/stats-panel.tsx",
@@ -1539,9 +1601,11 @@
     "components/takedown-actions.tsx",
     "components/task-editor.tsx",
     "components/tasks-agenda.tsx",
+    "components/tax-collected.tsx",
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
+    "components/team-two-step-switch.tsx",
     "components/template-library.tsx",
     "components/terms-check-panel.tsx",
     "components/test-counts-notice.tsx",
@@ -1559,6 +1623,8 @@
     "components/url-field.tsx",
     "components/usage-meter.tsx",
     "components/video-embed.tsx",
+    "components/video-stamp.tsx",
+    "components/video-window.tsx",
     "components/visit-us-block.tsx",
     "components/visit-us-editor.tsx",
     "components/waitlist-panel.tsx",
@@ -1568,7 +1634,9 @@
     "components/weekly-team-picker.tsx",
     "components/welcome-countdown.tsx",
     "components/welcome-offer-editor.tsx",
+    "components/who-answers.tsx",
     "components/winback-editor.tsx",
+    "components/withdrawal-where.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],
@@ -1576,6 +1644,7 @@
     "app/api/affiliate/route.ts",
     "app/api/auth/callback/route.ts",
     "app/api/auth/code/route.ts",
+    "app/api/auth/email-code/route.ts",
     "app/api/auth/google/route.ts",
     "app/api/auth/join/route.ts",
     "app/api/auth/lost/confirm/route.ts",
@@ -1596,6 +1665,7 @@
     "app/api/billing/refund/route.ts",
     "app/api/billing/return/route.ts",
     "app/api/billing/switch/route.ts",
+    "app/api/billing/withdraw/route.ts",
     "app/api/creators/route.ts",
     "app/api/cron/affiliates/route.ts",
     "app/api/cron/closed-data/route.ts",
@@ -1663,6 +1733,7 @@
     "app/api/store/answers/route.ts",
     "app/api/store/api-keys/route.ts",
     "app/api/store/ask/route.ts",
+    "app/api/store/assistant-memory/route.ts",
     "app/api/store/assistant-next/route.ts",
     "app/api/store/assistant-settings/route.ts",
     "app/api/store/assistant/route.ts",
@@ -1707,6 +1778,7 @@
     "app/api/store/course/comment/route.ts",
     "app/api/store/course/file/route.ts",
     "app/api/store/course/link/route.ts",
+    "app/api/store/course/note/route.ts",
     "app/api/store/course/open/route.ts",
     "app/api/store/course/progress/route.ts",
     "app/api/store/course/quiz/route.ts",
@@ -1714,6 +1786,7 @@
     "app/api/store/course/start/route.ts",
     "app/api/store/course/task/route.ts",
     "app/api/store/course/task/upload/route.ts",
+    "app/api/store/creator-card/route.ts",
     "app/api/store/crm/route.ts",
     "app/api/store/currency/route.ts",
     "app/api/store/depth/route.ts",
@@ -1880,6 +1953,7 @@
     "app/api/store/welcome-offer/route.ts",
     "app/api/store/welcome/open/route.ts",
     "app/api/store/why-not-ask/route.ts",
+    "app/api/store/withdraw/route.ts",
     "app/api/store/yearly-ask/route.ts",
     "app/api/stream/hook/route.ts",
     "app/api/stripe/check/route.ts",
@@ -1899,6 +1973,7 @@
     "app/api/v1/leads/route.ts",
     "app/api/v1/members/route.ts",
     "app/api/v1/products/route.ts",
+    "app/api/v1/sales/route.ts",
     "app/api/v1/stats/route.ts",
     "app/api/v1/store/route.ts",
     "app/api/v1/students/route.ts"
@@ -1965,8 +2040,16 @@
       "status": "not yet reviewed for this programme"
     },
     {
+      "source": "app/help/layout.tsx",
+      "status": "AAA review not completed"
+    },
+    {
       "source": "app/layout.tsx",
       "status": "not yet reviewed for this programme"
+    },
+    {
+      "source": "app/platform/[slug]/layout.tsx",
+      "status": "AAA review not completed"
     },
     {
       "source": "app/signin/layout.tsx",
@@ -1980,6 +2063,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 135
+    "pageTemplates": 141
   }
 }

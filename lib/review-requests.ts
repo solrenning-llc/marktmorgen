@@ -36,6 +36,8 @@ import { deriveKey } from "@/lib/secret-box";
 import { normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -49,7 +51,9 @@ import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
-import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+// Kept apart from the reply helpers imported above by other work, so the two never collide by name.
+import * as exactReply from "@/lib/redis-reply";
+import { suppressedCommand } from "@/lib/suppression";
 
 /** Orders looked at in one run of the job. */
 export const MAX_ASKS_PER_RUN = 50;
@@ -90,38 +94,62 @@ async function stopLink(store: Store, email: string): Promise<string> {
   return token;
 }
 
-/** Who a stop link belongs to, without acting on it. */
-export async function readReviewStop(token: string): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
-  if (!REVIEW_STOP.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+type StopGrant = { s: string; e: string; n?: unknown; h?: unknown };
+
+/**
+ * A stop link's grant, read from its GET reply only in its exact shape
+ * (CX-123 rule 24, as lib/checkout-recovery.ts reads a reminder's): one
+ * reply, text or nothing. Nothing, or text that is not a grant, is a link we
+ * do not know (null); any other reply is unknown and throws, never "no such
+ * link".
+ */
+function stopGrantOf(replies: unknown): StopGrant | null {
+  const reply = exactReply.repliesFor(replies, 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new exactReply.UnknownReplyError("a review stop link");
+  const raw = reply[0];
+  if (!raw) return null;
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; n?: unknown; h?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string" || !grant.s || !grant.e) return null;
-    const [off] = await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]);
-    // The store's handle, so the page can speak the store's language.
-    const handle = typeof grant.h === "string" ? grant.h : "";
-    return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: Number(off) === 1, handle };
+    const grant = JSON.parse(raw) as unknown;
+    if (!grant || typeof grant !== "object") return null;
+    const { s, e, n, h } = grant as { s?: unknown; e?: unknown; n?: unknown; h?: unknown };
+    return typeof s === "string" && typeof e === "string" && s && e ? { s, e, n, h } : null;
   } catch {
     return null;
   }
 }
 
-/** Stops every review request from that store to that address, for good. Safe to press twice. */
+/** Who a stop link belongs to, without acting on it. Throws when Redis answers in an unknown shape. */
+export async function readReviewStop(token: string): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
+  if (!REVIEW_STOP.test(token) || !isRedisConfigured()) return null;
+  const grant = stopGrantOf(await redisPipeline([["GET", stopKey(token)]]));
+  if (!grant) return null;
+  // The stop mark is there (1) or not (0); anything else is unknown, never "not stopped".
+  const off = exactReply.repliesFor(await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]), 1);
+  const count = off ? exactReply.countOf(off[0]) : null;
+  if (count !== 0 && count !== 1) throw new exactReply.UnknownReplyError("a review stop mark");
+  // The store's handle, so the page can speak the store's language.
+  const handle = typeof grant.h === "string" ? grant.h : "";
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle };
+}
+
+/**
+ * Stops every review request from that store to that address, for good.
+ * Safe to press twice. True only when the stop mark's write answered "OK";
+ * a reply of any other shape, or a write that failed, throws, never
+ * "stopped" and never "no such link" (CX-123 rule 24).
+ */
 export async function stopReviewRequests(token: string): Promise<boolean> {
   if (!REVIEW_STOP.test(token) || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return false;
-  try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string" || !grant.s || !grant.e) return false;
-    // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
-    const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
-    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]);
-    return true;
-  } catch {
-    return false;
-  }
+  const grant = stopGrantOf(await redisPipeline([["GET", stopKey(token)]]));
+  if (!grant) return false;
+  // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
+  const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
+  const written = exactReply.repliesFor(
+    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]),
+    1,
+  );
+  if (!written || written[0] !== "OK") throw new exactReply.UnknownReplyError("a review stop mark");
+  return true;
 }
 
 /** The words of the email, for one order and the products in it not reviewed yet, in the store's language. `stage` "again" is the one reminder. */
@@ -201,7 +229,7 @@ export function afterSent(
   ];
 }
 
-type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again" };
+type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim?: string };
 
 /**
  * Sends the review requests that are due, until the deadline or fifty
@@ -242,7 +270,10 @@ export async function sendReviewRequests(
       continue;
     }
     // Asked already: only the one reminder may follow, when the creator chose it; anything else is done.
-    const [mark] = await redisPipeline([["GET", sentKey(entry.reference)]]);
+    // Read exactly (CX-123 rule 24, L9): one reply, nil or text. Anything else is unknown and waits, never "not asked".
+    const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) continue;
+    const mark = read[0];
     const stage = askStage(mark, store.reviewAsk.again);
     if (!stage) {
       await drop(member);
@@ -271,13 +302,18 @@ export async function sendReviewRequests(
       continue;
     }
     const email = proof.proof.email;
-    const [off, contact, deleted] = await redisPipeline([
+    const checks = await redisPipeline([
       ["EXISTS", offKey(entry.statsId, email)],
       store.listId ? ["HGET", leadsKey(store.listId), normaliseEmail(email)] : ["EXISTS", "nl:none"],
       suppressedCommand(store.listId, email),
-    ]);
+    ]).catch(() => null);
+    const recipient = reviewRecipientState(checks, Boolean(store.listId));
+    if (recipient === "unknown") {
+      await later(member, nowSeconds + RETRY_SECONDS.stripe);
+      continue;
+    }
     // Nobody who pressed stop, left the list, or was deleted from the store (lib/suppression.ts).
-    if (Number(off) === 1 || (store.listId && parseContact(contact)?.unsub) || wasSuppressed(deleted)) {
+    if (recipient === "stopped") {
       await drop(member);
       continue;
     }
@@ -291,15 +327,25 @@ export async function sendReviewRequests(
     }
     // Claimed before anything is sent, so two runs never send one email twice: the first by its mark,
     // the reminder by taking the order off the list (only one run takes it).
-    if (stage === "first") {
-      const [claimed] = await redisPipeline([["SET", sentKey(entry.reference), "sending", "NX", "EX", SENT_MARK_SECONDS]]);
-      if (claimed === null) {
+    // Ours only on OK or our own value read back (lib/claim-mark.ts); its value still reads as "being sent" to
+    // askStage. Taken by another run: dropped as before. Not known: let go if ours, left for the next run, nothing sent.
+    const claim = stage === "first" ? `sending:${claimValue()}` : undefined;
+    if (claim) {
+      const claimed = await claimMark(sentKey(entry.reference), SENT_MARK_SECONDS, claim);
+      if (claimed === "taken") {
         await drop(member);
         continue;
       }
+      if (claimed === "unknown") {
+        // It may have landed, and its "sending:" value would make the next run drop the order (askStage) though
+        // nothing was sent (Claude 5 on #2722). Nothing is sent on it, so it is let go if it still holds our own
+        // value (never another run's), and the order, still due, is asked again by the next run.
+        await releaseMark(sentKey(entry.reference), claim);
+        continue;
+      }
     } else {
-      const [taken] = await redisPipeline([["ZREM", ASK_DUE_KEY, member]]);
-      if (Number(taken) !== 1) continue;
+      const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
+      if (!taken || countOf(taken[0]) !== 1) continue;
     }
     const token = await mintReviewLink(store, entry.reference, email);
     const stop = await stopLink(store, email);
@@ -322,6 +368,7 @@ export async function sendReviewRequests(
       entry,
       member,
       stage,
+      claim,
       message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
     });
     groups.set(entry.handle, group);
@@ -332,10 +379,9 @@ export async function sendReviewRequests(
     const unclaim = async (at: number | null) => {
       const firsts = ready.filter((item) => item.stage === "first");
       const agains = ready.filter((item) => item.stage === "again");
-      await redisPipeline([
-        ...firsts.map((item) => ["DEL", sentKey(item.entry.reference)]),
-        ...(at === null ? [] : agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member])),
-      ]);
+      // Only this run's own first marks are let go (releaseMark), never one another run holds now.
+      for (const item of firsts) if (item.claim) await releaseMark(sentKey(item.entry.reference), item.claim);
+      if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
@@ -363,5 +409,29 @@ export async function sendReviewRequests(
     counts.sent += ready.length;
   }
   return counts;
+}
+
+/** A missing/malformed opt-out or erasure response never grants permission to send. */
+function reviewRecipientState(checks: unknown, hasList: boolean): "unknown" | "stopped" | "open" {
+  if (!Array.isArray(checks) || checks.length !== 3) return "unknown";
+  for (let i = 0; i < 3; i++) if (!Object.hasOwn(checks, i)) return "unknown";
+  const [off, raw, erased] = checks;
+  if ((off !== 0 && off !== 1) || (erased !== 0 && erased !== 1)) return "unknown";
+  let unsubscribed = false;
+  if (hasList) {
+    if (raw !== null) {
+      if (typeof raw !== "string") return "unknown";
+      try {
+        const value: unknown = JSON.parse(raw);
+        // Legacy contacts can omit unsub; a present value must be boolean.
+        if (!value || typeof value !== "object" || Array.isArray(value) ||
+            ("unsub" in value && typeof value.unsub !== "boolean")) return "unknown";
+      } catch { return "unknown"; }
+      const contact = parseContact(raw);
+      if (!contact) return "unknown";
+      unsubscribed = contact.unsub;
+    }
+  } else if (raw !== 0 && raw !== 1) return "unknown";
+  return off === 1 || unsubscribed || erased === 1 ? "stopped" : "open";
 }
 

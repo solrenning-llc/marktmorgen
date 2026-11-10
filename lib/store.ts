@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -859,6 +860,13 @@ const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
+/**
+ * Whether a handle's key, as read, still leads to a store: not free, not held
+ * back after a store was deleted or closed. For a reader that asks along with
+ * other keys, such as the private calendar feed (lib/calendar-sync.ts).
+ */
+export const storeHandleKey = handleKey;
+export const handleLeadsToStore = (raw: unknown): boolean => typeof raw === "string" && raw !== "" && !raw.startsWith(RELEASED_PREFIX);
 
 /** The ids of an account's other stores. Deliberately not under nl:store:owner:. */
 const accountKey = async (email: string) =>
@@ -1080,8 +1088,21 @@ function parseStore(raw: unknown): Store | null {
 export async function storeForEmail(
   email: string | null,
 ): Promise<Store | null> {
+  return storeForEmailSeen(email, null);
+}
+
+/**
+ * storeForEmail, handing the one read it makes (its commands and its reply) to `seen`, for a caller that pays for
+ * what that read moved (lib/affiliates.ts, the 90% cap's reads).
+ */
+export async function storeForEmailSeen(
+  email: string | null,
+  seen: ((commands: (string | number)[][], reply: unknown) => void) | null,
+): Promise<Store | null> {
   if (!email || !isRedisConfigured()) return null;
-  const reply = await redisPipeline([["GET", await ownerKey(email)]]);
+  const commands: (string | number)[][] = [["GET", await ownerKey(email)]];
+  const reply = await redisPipeline(commands);
+  seen?.(commands, reply);
   if (!Array.isArray(reply) || reply.length !== 1) return null;
   const store = parseStore(reply[0]);
   // A readable record must belong to this exact owner key. Preserve legacy
@@ -1201,6 +1222,16 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
  * the one answer. Only for pages; anything that writes reads afresh.
  */
 export const storeForPage = cache(storeForHandle);
+
+/**
+ * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of
+ * another shape is not "gone" (CX-123 rule 24), so what would be deleted because the store is gone is kept.
+ */
+export async function storeIdGone(sid: string): Promise<boolean> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
+  const reply = repliesFor(await redisPipeline([["EXISTS", storeIdKey(sid)]]), 1);
+  return reply !== null && countOf(reply[0]) === 0;
+}
 
 /**
  * Whether a store with this id still exists: one command, the id's own key,
@@ -1960,6 +1991,20 @@ export async function setStripeAccount(
     stripeCheckedAt: new Date().toISOString(),
   }));
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
+}
+
+/**
+ * Writes down what Stripe now says about card payments on the store's account,
+ * read without the creator asking (lib/stripe-charges.ts): only while the
+ * store still points at that account, so one connected meanwhile is never
+ * written over. The store as it now is; null with no store or another account.
+ */
+export async function noteStripeCharges(ref: string, accountId: string, chargesEnabled: boolean): Promise<Store | null> {
+  return withStore(ref, async (store, save) => {
+    if (store.stripeAccountId !== accountId) return null;
+    if (store.stripeChargesEnabled === chargesEnabled) return store;
+    return save({ ...store, stripeChargesEnabled: chargesEnabled, stripeCheckedAt: new Date().toISOString() });
+  });
 }
 
 /**
@@ -3181,16 +3226,21 @@ export async function editProduct(
  * everything else stay exactly as they are. Empty is refused, as on the
  * studio's own form. The words checks are the caller's (descriptionRefusal).
  */
-export async function setProductTitle(email: string, id: string, rawTitle: string): Promise<ProductResult> {
+export async function setProductTitle(email: string, id: string, rawTitle: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
   const title = rawTitle.trim().slice(0, MAX_TITLE_LENGTH);
-  const result = await onProduct<"title">(email, id, (product) => (title ? { ...product, title } : { ok: false, reason: "title" }));
+  // `only.expected`: written only while the title is still that, checked under the store's lock (an agent's
+  // proposal confirmed or undone, lib/agent-kinds.ts); "changed" when it is not, and nothing is written.
+  const result = await onProduct<"title" | "changed">(email, id, (product) =>
+    only && product.title !== only.expected ? { ok: false, reason: "changed" } : title ? { ...product, title } : { ok: false, reason: "title" },
+  );
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
 /** A product's short summary alone, as setProductTitle: everything else stays. Empty is allowed, as on the studio's form. */
-export async function setProductSummary(email: string, id: string, rawSummary: string): Promise<ProductResult> {
+export async function setProductSummary(email: string, id: string, rawSummary: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
   const summary = rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH);
-  const result = await onProduct<never>(email, id, (product) => ({ ...product, summary }));
+  // `only.expected`, as setProductTitle: written only while the summary is still that.
+  const result = await onProduct<"changed">(email, id, (product) => (only && (product.summary ?? "") !== only.expected ? { ok: false, reason: "changed" } : { ...product, summary }));
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
@@ -3198,10 +3248,14 @@ export async function setProductSummary(email: string, id: string, rawSummary: s
 export async function removeProduct(
   email: string,
   id: string,
-): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" }> {
+  before?: (product: Product, store: Store) => Promise<boolean>,
+): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "unavailable" }> {
   const result = await withStore(email, async (store, save) => {
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    if (before && !(await before(product, store))) {
+      return { ok: false as const, reason: "unavailable" as const };
+    }
     // A bundle that held it holds it no more, in the same write, so no bundle
     // goes on promising a product the store no longer has. Whoever bought the
     // bundle before kept its list on their order (lib/bundle-rules.ts).

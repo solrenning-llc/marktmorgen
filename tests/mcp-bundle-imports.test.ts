@@ -76,18 +76,21 @@ async function main(): Promise<void> {
     if (!made.ok) throw new Error("No synthetic drafts");
     const original = redis.pipeline.bind(redis);
     const listingGet = (c: (string | number)[]) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]));
-    const measured = async (args: Record<string, unknown>) => {
+    const measured = async (args: Record<string, unknown>, tool = "list_bundle_choices") => {
       const commands: (string | number)[][] = [];
       redis.pipeline = async (batch) => {
         commands.push(...batch);
         return original(batch);
       };
       try {
-        return { answer: await call("list_bundle_choices", args), commands };
+        return { answer: await call(tool, args), commands };
       } finally {
         redis.pipeline = original;
       }
     };
+    // The door's own commands (the key, the minute's limit, the store, the month's allowance), as get_store spends them
+    // reading nothing past it: measured, so a door that grows does not read as a page reading more.
+    const door = (await measured({}, "get_store")).commands.length;
     const walk = async (args: Record<string, unknown>) => {
       const seen = new Set<string>();
       const reads: number[] = [];
@@ -115,7 +118,7 @@ async function main(): Promise<void> {
     is("without the cached names, a page still reads its own 20 listings and nothing more", [cold.commands.filter(listingGet).length <= 20, cold.commands.some((c) => c[0] === "HGETALL" || c[0] === "HSET")], [true, false]);
     const coldSearch = await measured({ search: "synthetic guide" });
     is("a search then reads no listing it cannot match, and says what it could not search", [coldSearch.commands.filter(listingGet).length, (coldSearch.answer.value.unsearched as number) > 0, coldSearch.commands.some((c) => c[0] === "HGETALL" || c[0] === "HSET")], [0, true, false]);
-    is("every call stays inside one API request's commands", Math.max(cold.commands.length, coldSearch.commands.length, ...everything.all) <= 20 + 4 + 8, true);
+    is("every call stays inside one API request's commands", Math.max(cold.commands.length, coldSearch.commands.length, ...everything.all) <= door + 4 + 20, true);
 
     part("Codex A3 (#1933) 2: imports that cannot be read are said so, never an empty history");
     for (const [label, broken] of [["the list", "LRANGE"], ["a job", "GET"]] as const) {

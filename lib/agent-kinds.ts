@@ -10,7 +10,7 @@
  * (confirmed in a batch is fine), with undo.
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
-import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, writeAbout } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact, writeAboutIf } from "@/lib/product-about";
 import { setProductAbout, setProductSummary, setProductTitle, type Store } from "@/lib/store";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
@@ -20,11 +20,21 @@ export type AgentKind = ProposalKind & {
   /** What the store holds now for this target, as the proposal's "before" is compared with. */
   current: (store: Store, target: string) => Promise<Json>;
   /**
-   * Writes `value` in; false when it could not be written, "terms" when the
+   * The same, read only in exact shapes: throws when anything it reads was
+   * answered in another shape. What decides whether a write whose answer was
+   * lost was made (lib/agent-confirm.ts undoFor); a kind without it is never
+   * reconciled, its outcome stays unknown.
+   */
+  currentExact?: (store: Store, target: string) => Promise<Json>;
+  /**
+   * Writes `value` in, only while the store still holds `expected` (what the
+   * proposal or the undo was decided on), checked in the same step as the
+   * write: "changed" when it holds something else now and nothing was written
+   * (Codex G on #1929). False when it could not be written, "terms" when the
    * words are not allowed where they would go (refusal). `ref` is the store's
    * owner, as studio writes use.
    */
-  write: (store: Store, ref: string, target: string, value: Json) => Promise<boolean | "terms">;
+  write: (store: Store, ref: string, target: string, value: Json, expected: Json) => Promise<boolean | "terms" | "changed">;
   /**
    * Why `value` may not be written on this target now, in words for the agent
    * and the creator, or null. The studio's own screen refuses the same
@@ -79,15 +89,28 @@ export const PRODUCT_DESCRIPTION: AgentKind = {
     if (!listing || !store.statsId) return null;
     return listing.about ? await readAbout(store.statsId, target) : "";
   },
+  async currentExact(store, target) {
+    const listing = await readListing(store, target);
+    if (!listing || !store.statsId) return null;
+    return listing.about ? await readAboutExact(store.statsId, target) : "";
+  },
   refusal: descriptionRefusal,
-  async write(store, ref, target, value) {
+  async write(store, ref, target, value, expected) {
     if (typeof value !== "string" || !store.statsId) return false;
+    // A product gone since (current read null) is changed, never written to.
+    if (typeof expected !== "string") return "changed";
     // Checked again here: the product may have been published since it was proposed.
     if (await descriptionRefusal(store, target, value)) return "terms";
     const text = cleanAbout(value);
+    // The words first, only over the ones it was decided on; then the product's mark that it has some.
+    const written = await writeAboutIf(store.statsId, target, expected, text, store);
+    if (written !== true) return written;
     const marked = await setProductAbout(ref, target, text !== "");
-    if (!marked.ok || !marked.store.statsId) return false;
-    await writeAbout(marked.store.statsId, target, text, marked.store);
+    if (!marked.ok) {
+      // The mark could not follow: the words go back to what they were, so the two never disagree.
+      await writeAboutIf(store.statsId, target, text, expected, store).catch((error: unknown) => console.error("putting back a description failed", error));
+      return false;
+    }
     return true;
   },
 };
@@ -103,10 +126,14 @@ export const PRODUCT_TITLE: AgentKind = {
     return listing ? listing.title : null;
   },
   refusal: titleRefusal,
-  async write(store, ref, target, value) {
+  async write(store, ref, target, value, expected) {
     if (typeof value !== "string" || !value.trim()) return false;
+    // A product gone since (current read null) is changed, never written to.
+    if (typeof expected !== "string") return "changed";
     if (await titleRefusal(store, target, value)) return "terms";
-    return (await setProductTitle(ref, target, value)).ok;
+    // Compared with what it holds under the store's own lock, in the same write (Codex G on #1929).
+    const written = await setProductTitle(ref, target, value, { expected });
+    return written.ok ? true : written.reason === "changed" ? "changed" : false;
   },
 };
 
@@ -121,10 +148,12 @@ export const PRODUCT_SUMMARY: AgentKind = {
     return listing ? listing.summary : null;
   },
   refusal: summaryRefusal,
-  async write(store, ref, target, value) {
+  async write(store, ref, target, value, expected) {
     if (typeof value !== "string") return false;
+    if (typeof expected !== "string") return "changed";
     if (await summaryRefusal(store, target, value)) return "terms";
-    return (await setProductSummary(ref, target, value)).ok;
+    const written = await setProductSummary(ref, target, value, { expected });
+    return written.ok ? true : written.reason === "changed" ? "changed" : false;
   },
 };
 

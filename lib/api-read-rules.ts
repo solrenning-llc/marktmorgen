@@ -29,18 +29,17 @@
  * figure under a request's price and every reading's units above its cost at
  * every size. Pure: no reads here.
  */
-import { MAX_LESSONS } from "@/lib/course";
-import { MAX_PAGE_BYTES, MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
-import { AB_RECORD_BYTES, MAX_VERSIONS } from "@/lib/sales-page-store";
-import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
+import { MAX_BODY_LENGTH, MAX_LESSONS } from "@/lib/course";
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
-import { COURSE_READ_MOST_BYTES, MAX_BODY_LENGTH, READ_COURSE_WITHIN_CALLS } from "@/lib/course";
-import { MAX_QUESTIONS } from "@/lib/quiz";
+import { MAX_BLOCKS, MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
+import { MAX_VERSIONS } from "@/lib/sales-page-store";
+import { MAX_CHOICES, MAX_CHOICE_LENGTH, MAX_EXPLANATION_LENGTH, MAX_QUESTIONS, MAX_QUESTION_LENGTH } from "@/lib/quiz";
 import { MAX_TASK_PROMPT } from "@/lib/assignment-rules";
-import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
+import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
+import { MAX_SECTION_BYTES, MAX_SECTION_NAME } from "@/lib/saved-blocks";
 import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, LIVE_READ_MOST, STATS_DAYS } from "@/lib/stats";
-import { LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
+import { DELIVERY_MAX_BYTES, LOG_SIZE, READ_DELIVERIES_CALLS_EACH, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
 import { MOVE_BYTES, MOVE_KEY_BYTES, moveReads } from "@/lib/call-moves-read";
@@ -367,8 +366,13 @@ export const MEMBERSHIP_NUMBERS_BYTES = 256_000;
 export function membershipsWork(keptBytes = MEMBERSHIP_NUMBERS_BYTES): ReadWork {
   return { commands: 2, bytes: keptBytes, sent: MEMBERSHIP_NUMBERS_BYTES, stripePages: 0, roundTrips: 2 };
 }
-/** And when they are not kept: every page of subscriptions and invoices, and the numbers kept again. */
-export const MEMBERSHIPS_COLD_WORK: ReadWork = { commands: 1, bytes: MEMBERSHIP_NUMBERS_BYTES, sent: 0, stripePages: MEMBERSHIP_PAGES, roundTrips: 1 };
+/**
+ * And when they are not kept: every page of subscriptions and invoices, and the numbers kept again; with what members
+ * wrote looked up among the store's deleted people (one HMGET) and kept by a script that looks them up again where it
+ * writes (2 more beside its SET), for up to 70 comments and three addresses each (lib/membership-numbers.ts,
+ * SHOWN_COMMENTS, COMMENT_ADDRESSES; Codex E2 on #2111).
+ */
+export const MEMBERSHIPS_COLD_WORK: ReadWork = { commands: 1 + 1 + 2, bytes: MEMBERSHIP_NUMBERS_BYTES + 2 * 70 * 3 * (64 + 64), sent: 0, stripePages: MEMBERSHIP_PAGES, roundTrips: 1 + 1 };
 
 // ---------------------------------------------------------------- emails
 
@@ -379,30 +383,40 @@ export const EMAIL_SENT_BYTES = 1_024;
 export const FLOW_STATS_BYTES = 20 * 1024;
 /** Pages of sales what the emails sold reads when not kept (lib/mail-revenue.ts, PAGES): checkouts and charges side by side. */
 export const MAIL_REVENUE_PAGES = 2 * 10;
-/** What the emails sold, as kept: by campaign (a review ceiling). */
+/**
+ * What the emails sold, as kept (by campaign), counted when it is not kept yet
+ * and is about to be made. Not a ceiling: a kept copy is measured (STRLEN)
+ * before it is read and every reading is settled at the bytes it read or kept
+ * (lib/mcp-tools.ts, emailsTool).
+ */
 export const MAIL_REVENUE_BYTES = 64_000;
 
 /**
  * What get_emails reads, sized first: its broadcasts and its sequences
  * measured by their bytes (one LRANGE and a STRLEN each), then the list's
  * counts, the records, each sequence's counts at the most and what they sold
- * as kept, and every one told back.
+ * at the size it is kept at (`revenueBytes`, measured: 0 when it is not kept),
+ * and every one told back.
  */
-export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flowBytes: number }): ReadWork {
+export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flowBytes: number; revenueBytes: number }): ReadWork {
   return {
     commands: 2 + s.broadcasts + 3 + 1 + 1 + s.broadcasts + MAX_FLOWS + 1,
-    bytes: s.broadcastBytes + s.flowBytes + MAX_FLOWS * FLOW_STATS_BYTES + MAIL_REVENUE_BYTES,
+    bytes: s.broadcastBytes + s.flowBytes + MAX_FLOWS * FLOW_STATS_BYTES + s.revenueBytes,
     sent: (s.broadcasts + MAX_FLOWS) * EMAIL_SENT_BYTES,
     stripePages: 0,
     roundTrips: 2 + 4,
   };
 }
-/** What get_emails looks up before it takes: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
+/** What get_emails looks up before it sets aside: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
 export const EMAILS_PROBE_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 1 };
-/** And when what they sold is not kept: every page of sales, the PayPal sales counted first, kept again. */
-export function mailRevenueColdWork(paypalSales: number): ReadWork {
+/**
+ * And when what they sold is not kept: every page of sales, the PayPal sales
+ * counted first, kept again. The copy kept is known only once it is made, so
+ * it is set aside at MAIL_REVENUE_BYTES and settled at its size (`keptBytes`).
+ */
+export function mailRevenueColdWork(paypalSales: number, keptBytes = MAIL_REVENUE_BYTES): ReadWork {
   const paypal = Math.min(paypalSales, 10 * 100);
-  return { commands: 3, bytes: paypal * PAYPAL_PAID_BYTES + MAIL_REVENUE_BYTES, sent: 0, stripePages: MAIL_REVENUE_PAGES, roundTrips: 2 };
+  return { commands: 3, bytes: paypal * PAYPAL_PAID_BYTES + keptBytes, sent: 0, stripePages: MAIL_REVENUE_PAGES, roundTrips: 2 };
 }
 
 // ---------------------------------------------------------------- what buyers bought next
@@ -425,16 +439,169 @@ export function boughtNextWork(pathBytes: number, sent = (Math.ceil(pathBytes / 
 
 // ---------------------------------------------------------------- events and codes
 
-/** A delivery as the store's data registry prices one (4 KB); the events read the newest LOG_SIZE and send RECENT_MESSAGES_MAX (lib/webhooks.ts). */
-export const DELIVERY_BYTES = 4 * 1024;
-export function eventsWork(): ReadWork {
-  return { commands: 1 + LOG_SIZE, bytes: LOG_SIZE * (64 + DELIVERY_BYTES), sent: RECENT_MESSAGES_MAX * DELIVERY_BYTES, stripePages: 0, roundTrips: 2 };
+/** An entry of a store's delivery log (a delivery's id), with room. */
+export const LOG_ENTRY_BYTES = 64;
+
+/**
+ * The size of a reading of the recent events (lib/api-read.ts, recentEvents):
+ * the deliveries in the store's log, the bytes read (the log and each
+ * delivery as kept) and the bytes sent.
+ */
+export type EventsSize = { deliveries: number; bytes: number; sent: number };
+
+/**
+ * The most a reading of the recent events can be: LOG_SIZE deliveries, each
+ * kept at DELIVERY_MAX_BYTES at most (bounded where it is made,
+ * lib/webhooks.ts, emitEvent), and RECENT_MESSAGES_MAX of them sent.
+ */
+export const EVENTS_MOST: EventsSize = {
+  deliveries: LOG_SIZE,
+  bytes: LOG_SIZE * (LOG_ENTRY_BYTES + DELIVERY_MAX_BYTES),
+  sent: RECENT_MESSAGES_MAX * (DELIVERY_MAX_BYTES + 1),
+};
+
+/**
+ * What the recent events do: the store's log read (LRANGE), each delivery in
+ * it measured (STRLEN), then all read in one script (lib/webhooks.ts,
+ * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH)
+ * and the messages of the type asked for sent. Without an argument, its most.
+ */
+export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
+  return { commands: s.deliveries > 0 ? 2 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
+}
+
+/**
+ * The measuring alone at its most, set aside before the log is read (Codex
+ * G2, #2192: fifty sizes were looked up before any request beyond the first
+ * was taken): the log and a size for each delivery it can hold. Part of
+ * eventsWork, which the whole reading is settled at (lib/api-read.ts,
+ * recentEvents).
+ */
+export const EVENTS_PROBE_MOST: ReadWork = { commands: 1 + LOG_SIZE, bytes: LOG_SIZE * LOG_ENTRY_BYTES, sent: 0, stripePages: 0, roundTrips: 2 };
+
+/**
+ * The most a reading of the recent events can send, from the sizes looked up
+ * first: the `most` largest deliveries, since a message is never longer than
+ * the delivery it is kept in (escaped once more there), with a comma each.
+ */
+export function eventsSentMost(sizes: readonly number[], most: number): number {
+  return [...sizes].sort((a, b) => b - a).slice(0, Math.max(0, most)).reduce((n, size) => n + size + 1, 0);
 }
 
 /** A discount code as sent; the codes are one page of the creator's Stripe account (lib/discount.ts, MAX_CODES a page). */
 export const CODE_SENT_BYTES = 1_024;
 export function codesWork(): ReadWork {
   return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 1, roundTrips: 0 };
+}
+/** Making a code (POST /api/v1/codes): two calls to the creator's Stripe account (the coupon, then its code), and the code sent. */
+export function codeMakeWork(): ReadWork {
+  return { commands: 0, bytes: 0, sent: CODE_SENT_BYTES, stripePages: 2, roundTrips: 0 };
+}
+/** Switching a code off (DELETE /api/v1/codes): the codes read to find it, the call that switches it off and the codes read again and sent, at their most. */
+export function codeStopWork(): ReadWork {
+  return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 3, roundTrips: 0 };
+}
+
+// ---------------------------------------------------------------- the store's pages and courses (MCP read tools, 631 [AA1] (a))
+
+/** A product's long description, read whole: its longest, three bytes a UTF-16 unit at most (lib/product-about.ts). */
+export const ABOUT_BYTES = MAX_ABOUT_LENGTH * 3;
+/** A sales page as stored, read whole (lib/sales-page.ts). */
+export const PAGE_BYTES = MAX_STORED_PAGE_BYTES;
+/** A version of a sales page as kept: the page and its time (lib/sales-page-store.ts, "<at>\n<page>"). */
+export const PAGE_VERSION_BYTES = MAX_STORED_PAGE_BYTES + 32;
+/** A course's record, read whole: the same ceiling the community walk reads it at (lib/community-walk.ts WALK_COURSE_BYTES). */
+export const COURSE_BYTES = 512_000;
+/** A lesson's text in any script (lib/course.ts MAX_BODY_LENGTH). */
+export const BODY_BYTES = MAX_BODY_LENGTH * 3;
+/** A lesson's quiz, every question, choice and explanation at its longest in any script, with room for its fields. */
+export const QUIZ_BYTES = MAX_QUESTIONS * (MAX_QUESTION_LENGTH + MAX_CHOICES * MAX_CHOICE_LENGTH + MAX_EXPLANATION_LENGTH) * 3 + 16_384;
+/** A lesson's task: its prompt at its longest in any script, with room for its setup (lib/assignment-rules.ts). */
+export const TASK_BYTES = MAX_TASK_PROMPT * 3 + 4_096;
+/** A page test's counts (views, checkouts, sales and money of each version), with room. */
+export const TEST_COUNTS_BYTES = 1_024;
+/** What a page test's answer sends besides its counts: the tested headline and line, with room. */
+export const TEST_SENT_BYTES = 8_192;
+/** What a reading of a page's depth sends: each block's share and the depth record's figures, with room. */
+export const READING_SENT_BYTES = MAX_BLOCKS * 256 + DEPTH_RECORD_BYTES;
+/** Saved sections a store's library holds at the most, on any plan (lib/funnel-share-rules.ts, savedBlocks; the write refuses past it). */
+export const SAVED_SECTIONS_MAX = Math.max(...Object.values(SHARE_LIMITS).map((limits) => limits.savedBlocks));
+/**
+ * One saved section as stored and as sent (lib/saved-blocks.ts): the write
+ * measures its blocks in characters (MAX_SECTION_BYTES), and a character is at
+ * most three bytes of UTF-8 for each unit JavaScript counts; with its name
+ * (MAX_SECTION_NAME) and its id and time.
+ */
+export const SECTION_BYTES = (MAX_SECTION_BYTES + MAX_SECTION_NAME + 256) * 3;
+/** What an answer's own fields send besides what it read: names, ids, notes. */
+export const TOOL_NOTE_BYTES = 2_048;
+
+/** get_product_description: the listing (listingsWork) and then the description. */
+export function productTextWork(): ReadWork {
+  return { commands: 1, bytes: ABOUT_BYTES, sent: ABOUT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+}
+
+/** get_sales_page: the listing and then the page, sent block by block. */
+export function salesPageWork(): ReadWork {
+  return { commands: 1, bytes: PAGE_BYTES, sent: PAGE_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+}
+
+/** get_course_outline: the listing and then the course's record, its outline sent. */
+export function courseOutlineWork(): ReadWork {
+  return { commands: 1, bytes: COURSE_BYTES, sent: COURSE_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+}
+
+/** get_lesson: the listing, the course's record, then the lesson's text, quiz and task in one go. */
+export function lessonWork(): ReadWork {
+  return { commands: 4, bytes: COURSE_BYTES + BODY_BYTES + QUIZ_BYTES + TASK_BYTES, sent: BODY_BYTES + QUIZ_BYTES + TASK_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+}
+
+/** get_page_test: the listing, the page, then the test's counts. */
+export function pageTestWork(): ReadWork {
+  return { commands: 2, bytes: PAGE_BYTES + TEST_COUNTS_BYTES, sent: TEST_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+}
+
+/** get_page_reading: the listing, then the page and its depth record in one go. */
+export function pageReadingWork(): ReadWork {
+  return { commands: 2, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+}
+
+/** get_page_versions: the listing, how many versions are kept (LLEN), then those versions; one sent whole, or the list. */
+/** What a count command (LLEN, HLEN) answers: one integer, never more than this. */
+export const COUNT_REPLY_BYTES = 32;
+
+export function pageVersionsWork(versions: number, one: boolean): ReadWork {
+  const n = Math.min(Math.max(versions, 0), MAX_VERSIONS);
+  return { commands: 2, bytes: COUNT_REPLY_BYTES + n * PAGE_VERSION_BYTES, sent: (one ? PAGE_BYTES : n * 256) + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+}
+
+/** list_saved_blocks: how many sections the library holds (HLEN), then those sections, read and sent. */
+export function savedBlocksWork(sections: number): ReadWork {
+  const n = Math.min(Math.max(sections, 0), SAVED_SECTIONS_MAX);
+  return { commands: 2, bytes: COUNT_REPLY_BYTES + n * SECTION_BYTES, sent: n * SECTION_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+}
+
+/** What a proposal adds to the agent's book beyond its "before" and "after": its id, kind, target, who asked and when. */
+export const PROPOSAL_ENTRY_BYTES = 1_024;
+
+/**
+ * propose_product_description (631 [AA1] (c)): the product's current
+ * description read, the store's lock on its book of proposals taken, the book
+ * measured under it (STRLEN, where no other change can make it grow), read,
+ * and written back whole with the new proposal in it, the lock let go, and
+ * the data room around it. The listing, read three times (to find the
+ * product, to check its words and with its description), is counted apart
+ * (listingsWork). `bookBytes` 0 is what is taken before the book is measured.
+ */
+export function proposeWork(bookBytes: number, kindMaxBytes: number): ReadWork {
+  const book = Math.max(bookBytes, 0);
+  return {
+    commands: 10,
+    bytes: COUNT_REPLY_BYTES + ABOUT_BYTES + book,
+    sent: book + kindMaxBytes + PROPOSAL_ENTRY_BYTES + TOOL_NOTE_BYTES,
+    stripePages: 0,
+    roundTrips: 8,
+  };
 }
 
 // ---------------------------------------------------------------- the MCP tools of the creator's own records (631 [AA1])
@@ -454,41 +621,6 @@ export const IMPORT_JOB_BYTES = 16_384;
 export const IMPORT_SENT_BYTES = 1_024;
 /** get_imports at its most: the index (IMPORTS_LIST_SIZE, 10, ids of 64 bytes at most) and each import's record, in two trips. */
 export const IMPORTS_MOST: ReadWork = { commands: 1 + 10, bytes: 10 * 64 + 10 * IMPORT_JOB_BYTES, sent: 10 * IMPORT_SENT_BYTES + 2_048, stripePages: 0, roundTrips: 2 };
-
-/**
- * A record of text read whole, as the REST API answers it: JSON, in which a character may be escaped to six bytes.
- * What a record of `chars` characters at its most can weigh read.
- */
-export const readAtMost = (chars: number) => 6 * chars;
-/** A product's long description read (lib/product-about.ts, MAX_ABOUT_LENGTH characters). */
-export const ABOUT_READ_BYTES = readAtMost(MAX_ABOUT_LENGTH);
-/** A sales page read (lib/sales-page-store.ts): it is never kept longer than MAX_STORED_PAGE_BYTES characters. */
-export const PAGE_READ_BYTES = readAtMost(MAX_STORED_PAGE_BYTES);
-/** A sales page as get_sales_page and get_page_versions send it: blocks of a page of MAX_PAGE_BYTES, each character escaped. */
-export const PAGE_SENT_BYTES = readAtMost(MAX_PAGE_BYTES);
-/** get_product_description at its most: the product's listing (when the store's record does not hold it), then its description. */
-export const PRODUCT_TEXT_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + ABOUT_READ_BYTES, sent: ABOUT_READ_BYTES + 4_096, stripePages: 0, roundTrips: 2 };
-/** get_sales_page at its most: the listing, then the page. */
-export const SALES_PAGE_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + PAGE_READ_BYTES, sent: PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
-/** get_page_test at its most: the listing, the page, then the test's counts (AB_RECORD_BYTES). */
-export const PAGE_TEST_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PAGE_READ_BYTES + readAtMost(AB_RECORD_BYTES), sent: 8_192, stripePages: 0, roundTrips: 3 };
-/** get_page_reading at its most: the listing, then the page and how far it is read (DEPTH_RECORD_BYTES) side by side. */
-export const PAGE_READING_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PAGE_READ_BYTES + readAtMost(DEPTH_RECORD_BYTES), sent: 64_000, stripePages: 0, roundTrips: 2 };
-/** get_page_versions at its most: the listing, then the MAX_VERSIONS versions kept, each a page at its most. */
-export const PAGE_VERSIONS_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + MAX_VERSIONS * PAGE_READ_BYTES, sent: PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
-/** A course's record read by an agent, at its most (lib/course.ts, COURSE_READ_MOST_BYTES), a JSON text escaped once more. */
-export const COURSE_READ_BYTES = 2 * COURSE_READ_MOST_BYTES;
-/** get_course_outline at its most: the listing, then the course read within its bound (an EVAL and the two calls inside). */
-export const COURSE_OUTLINE_MOST: ReadWork = { commands: 2 + READ_COURSE_WITHIN_CALLS, bytes: LISTING_BYTES + COURSE_READ_BYTES, sent: COURSE_READ_BYTES, stripePages: 0, roundTrips: 2 };
-/**
- * get_lesson at its most: as the outline, then the lesson's text (MAX_BODY_LENGTH characters), quiz (MAX_QUESTIONS
- * questions of a 300-character question, six 160-character choices and a 600-character explanation) and task
- * (MAX_TASK_PROMPT characters) side by side.
- */
-export const LESSON_TEXT_BYTES = readAtMost(MAX_BODY_LENGTH) + readAtMost(MAX_QUESTIONS * (300 + 6 * 160 + 600)) + readAtMost(MAX_TASK_PROMPT);
-export const LESSON_MOST: ReadWork = { commands: 5 + READ_COURSE_WITHIN_CALLS, bytes: LISTING_BYTES + COURSE_READ_BYTES + LESSON_TEXT_BYTES, sent: LESSON_TEXT_BYTES + 4_096, stripePages: 0, roundTrips: 3 };
-/** list_saved_blocks at its most: every saved section of a store, never more than the largest plan keeps, each MAX_SECTION_BYTES, escaped once more. */
-export const SAVED_BLOCKS_MOST: ReadWork = { commands: 1, bytes: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, sent: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, stripePages: 0, roundTrips: 1 };
 /** One view kept for the live box (lib/stats.ts): who, where from and when, with its score, as answered. */
 export const LIVE_VIEW_BYTES = 128;
 /**
@@ -521,11 +653,3 @@ export function rangeMost(span: number, beforeKept: boolean, sales: boolean, str
     roundTrips: 1 + (sales ? 2 : 0) + 1,
   };
 }
-/**
- * A proposal by an agent (the MCP propose tools, lib/agent-propose.ts) at its most, before the proposals book: up to
- * three reads of the product's listing and its long description, the book's lock taken, the book measured under it,
- * written and the lock let go. The book's own read is admitted once measured, at what it weighs (lib/agent-book.ts).
- */
-export const PROPOSE_MOST: ReadWork = { commands: 10, bytes: 3 * LISTING_BYTES + ABOUT_READ_BYTES, sent: 2_048, stripePages: 0, roundTrips: 9 };
-/** What reading a measured record of `bytes` adds, escaped once more as it is answered. */
-export const measuredReadWork = (bytes: number): ReadWork => ({ commands: 1, bytes: 2 * bytes, sent: 0, stripePages: 0, roundTrips: 1 });

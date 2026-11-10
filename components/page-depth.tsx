@@ -25,6 +25,17 @@ function quartile(percent: number): string {
 }
 
 /**
+ * Which player a message came from, by its exact origin: the page's videos
+ * are framed from these (embedUrl, VIDEO_FRAME_ORIGINS in lib/sales-page.ts).
+ * Any other origin, "https://evilyoutube.example" among them, is no player.
+ */
+export function playerOfOrigin(origin: string): "youtube" | "vimeo" | null {
+  if (origin === "https://www.youtube-nocookie.com" || origin === "https://www.youtube.com") return "youtube";
+  if (origin === "https://player.vimeo.com") return "vimeo";
+  return null;
+}
+
+/**
  * How a sales page was read, for one visitor in READ_SAMPLE, chosen here at
  * random, so the measure stays inside what a visit costs (lib/page-read.ts):
  * sent once, when they leave the page or switch away from it, as one count.

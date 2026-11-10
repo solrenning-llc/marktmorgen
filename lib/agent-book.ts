@@ -20,7 +20,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { admitRead, admitting } from "@/lib/read-meter";
+import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import {
@@ -40,6 +40,7 @@ import {
   propose,
   recordDone,
   recordUndone,
+  sameValue,
   tidy,
 } from "@/lib/agent-proposal-rules";
 
@@ -54,6 +55,14 @@ export class BookBusy extends Error {
   constructor() {
     super("the store's agent book is being changed");
     this.name = "BookBusy";
+  }
+}
+
+/** A change to the book whose write Redis did not confirm: it may or may not be kept. */
+export class BookWriteUnconfirmed extends Error {
+  constructor() {
+    super("the agent book's write could not be confirmed");
+    this.name = "BookWriteUnconfirmed";
   }
 }
 
@@ -91,50 +100,120 @@ export function parseBook(raw: unknown): Book | null {
 /** The store's book now, tidied (expired proposals and old history gone). Throws when it cannot be read. */
 export async function readBook(statsId: string, now = Date.now()): Promise<Book> {
   if (!STATS_ID.test(statsId) || !isRedisConfigured()) throw new Error("the agent book is not available");
-  const [raw] = await redisPipeline([["GET", bookKey(statsId)]]);
-  const book = parseBook(raw);
+  // Exactly one answer, a text or null (no book yet): [] or [undefined] is not "no book", and a waiting proposal is
+  // never dropped by writing over a book that could not be read (Codex G on #1929).
+  const reply: unknown = await redisPipeline([["GET", bookKey(statsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new Error("the agent book could not be read");
+  const book = parseBook(reply[0]);
   if (!book) throw new Error("the agent book could not be read");
   return tidy(book, now);
 }
 
 /**
- * Changes the book under the store's lock: `change` gets the book as it is
- * and answers the new one (or null to keep it) and a result. The new book
- * takes its room first; one that does not fit is refused (DataRoomError).
+ * The book written only while this change still holds the store's lock, in
+ * one step (Codex G on #1856): a change whose lock ran out and was taken by
+ * another never writes over that one's book. 1 written, 0 not ours.
  */
-export async function changeBook<T>(store: DataStore & { statsId: string }, change: (book: Book) => Promise<{ book: Book | null; result: T }> | { book: Book | null; result: T }, now = Date.now()): Promise<T> {
-  const statsId = store.statsId;
-  const owner = randomBytes(8).toString("hex");
-  const [held] = await redisPipeline([["SET", lockKey(statsId), owner, "NX", "EX", LOCK_SECONDS]]);
-  if (held === null) throw new BookBusy();
+export const AGENT_BOOK_WRITE = `-- marktmorgen:agent-book-write:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[2], ARGV[2])
+return 1`;
+
+/** Waited for the lock when an applied change is written into the book again (recordAgain). */
+const RECORD_WAIT_MS = 2_000;
+/** Tries at writing an applied change into the book before it is said as not kept. */
+const RECORD_TRIES = 3;
+
+/** The store's lock, only on Redis's exact "OK" (lib/redis-lock.ts takeLock): an unknown answer is never ours. */
+async function holdBook(statsId: string, waitMs = 0): Promise<Held> {
   try {
-    // Read by an agent (the MCP propose tools), the book is measured under its lock, where it cannot grow, and its
-    // read admitted before it is made (lib/read-meter.ts; Codex G2 on #1933); refused, nothing of it is read.
-    if (admitting()) {
-      const [size] = await redisPipeline([["STRLEN", bookKey(statsId)]]);
-      if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || !(await admitRead(size))) throw new BookReadRefused();
-    }
-    const book = await readBook(statsId, now);
-    const { book: next, result } = await change(book);
-    if (next) {
-      const json = JSON.stringify(next);
-      await needData(store, [{ slot: SLOT, bytes: dataBytes([json], 1), set: true }], now);
-      await redisPipeline([["SET", bookKey(statsId), json]]);
-    }
-    return result;
-  } finally {
-    // Only our own hold is let go: one that ran out and was taken by another change is left to it.
-    const [mine] = await redisPipeline([["GET", lockKey(statsId)]]);
-    if (mine === owner) await redisPipeline([["DEL", lockKey(statsId)]]);
+    return await takeLock(lockKey(statsId), LOCK_SECONDS, waitMs);
+  } catch (error) {
+    if (error instanceof LockBusyError) throw new BookBusy();
+    throw error;
   }
 }
 
-/** The proposals book could not be read: its read was not admitted (an agent's requests did not cover it) or not measured. */
+/** Writes `next` while `held` is still ours: "written", "lost" (not ours any more), or "unknown" (the answer was not exact). */
+async function writeBook(store: DataStore & { statsId: string }, held: Held, next: Book, now: number): Promise<"written" | "lost" | "unknown"> {
+  const json = JSON.stringify(next);
+  await needData(store, [{ slot: SLOT, bytes: dataBytes([json], 1), set: true }], now);
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["EVAL", AGENT_BOOK_WRITE, 2, held.key, bookKey(store.statsId), held.token, json]]);
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(reply) || reply.length !== 1) return "unknown";
+  if (reply[0] === 1) return "written";
+  if (reply[0] === 0) return "lost";
+  return "unknown";
+}
+
+/** The book's read was not admitted: the caller's requests did not cover what it weighs, or it could not be measured. Nothing of it was read. */
 export class BookReadRefused extends Error {
   constructor() {
-    super("the proposals book's read was not admitted");
+    super("the agent book's read was not admitted");
     this.name = "BookReadRefused";
   }
+}
+
+/** Decides, once the book is measured under its lock, whether a read of that many bytes may be made (an agent's requests pay for it first). */
+export type AdmitBook = (bytes: number) => Promise<boolean>;
+
+/**
+ * Changes the book under the store's lock: `change` gets the book as it is
+ * and answers the new one (or null to keep it) and a result. The new book
+ * takes its room first; one that does not fit is refused (DataRoomError).
+ * Nothing outside the book is changed here, so a write that is not
+ * confirmed is said as such (BookWriteUnconfirmed) and nothing else is done.
+ */
+export async function changeBook<T>(store: DataStore & { statsId: string }, change: (book: Book) => Promise<{ book: Book | null; result: T }> | { book: Book | null; result: T }, now = Date.now(), admit?: AdmitBook): Promise<T> {
+  const held = await holdBook(store.statsId);
+  try {
+    // Measured under the lock, where no other change can make it grow, and admitted before it is read (an agent pays first).
+    if (admit) {
+      const reply: unknown = await redisPipeline([["STRLEN", bookKey(store.statsId)]]);
+      const size = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
+      if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || !(await admit(size))) throw new BookReadRefused();
+    }
+    const book = await readBook(store.statsId, now);
+    const { book: next, result } = await change(book);
+    if (next && (await writeBook(store, held, next, now)) !== "written") throw new BookWriteUnconfirmed();
+    return result;
+  } finally {
+    // Only our own hold is let go: one that ran out and was taken by another change is left to it.
+    await releaseLock(held);
+  }
+}
+
+/**
+ * A change already carried out on the store (a confirmation or an undo) whose
+ * book was not written as ours: it is written again, on the book as it is now,
+ * under a new hold of the lock (Codex G on #1856). `record` answers the book
+ * with the change in it, or the same book when it is there already (a write
+ * that landed though its answer was lost, or another change recorded it).
+ * Throws BookWriteUnconfirmed when it still cannot be written.
+ */
+async function recordAgain(store: DataStore & { statsId: string }, record: (book: Book) => Book, now: number): Promise<void> {
+  for (let attempt = 0; attempt < RECORD_TRIES; attempt += 1) {
+    let held: Held;
+    try {
+      held = await holdBook(store.statsId, RECORD_WAIT_MS);
+    } catch (error) {
+      if (error instanceof BookBusy) continue;
+      throw error;
+    }
+    try {
+      const book = await readBook(store.statsId, now);
+      const next = record(book);
+      if (next === book) return;
+      if ((await writeBook(store, held, next, now)) === "written") return;
+    } finally {
+      await releaseLock(held);
+    }
+  }
+  throw new BookWriteUnconfirmed();
 }
 
 /** A new proposal's id: 16 random hex characters. */
@@ -146,6 +225,7 @@ export function addProposal(
   kind: ProposalKind,
   input: { target: string; before: Json; after: Json; asked: Asked },
   now = Date.now(),
+  admit?: AdmitBook,
 ): Promise<{ ok: true; proposal: Proposal; replaced: string | null } | { ok: false; error: ProposeError }> {
   type Made = { ok: true; proposal: Proposal; replaced: string | null } | { ok: false; error: ProposeError };
   return changeBook<Made>(
@@ -155,6 +235,7 @@ export function addProposal(
       return made.ok ? { book: made.book, result: { ok: true as const, proposal: made.proposal, replaced: made.replaced } } : { book: null, result: made };
     },
     now,
+    admit,
   );
 }
 
@@ -180,51 +261,112 @@ export type Confirmed = { done: string[]; refused: { id: string; why: ConfirmRef
  * waiting, for the creator to decline). All under the lock, so the same proposal is never carried out
  * twice.
  */
-export function confirmProposals(
+export async function confirmProposals(
   store: DataStore & { statsId: string },
   ids: string[],
   kinds: ReadonlyMap<string, ProposalKind>,
   current: (proposal: Proposal) => Json,
-  apply: (proposal: Proposal) => Promise<boolean | "terms">,
+  apply: (proposal: Proposal) => Promise<boolean | "terms" | "changed">,
   who: string,
   now = Date.now(),
 ): Promise<Confirmed> {
-  return changeBook(
+  const held = await holdBook(store.statsId);
+  const applied: Proposal[] = [];
+  let result: Confirmed;
+  try {
+    const book = await readBook(store.statsId, now);
+    const plan = planConfirm(book, ids, kinds, current, now);
+    let next = book;
+    result = { done: [], refused: [] };
+    for (const refusal of plan.refused) {
+      // Already carried out by an earlier confirmation whose history could not be written (Codex G on #1856): the store
+      // holds exactly what the proposal asked for, so it is recorded as done, never carried out again. Not for a kind
+      // that acts outside the store (scope "execute"), whose effect the store does not hold.
+      const proposal = refusal.why === "changed_since" ? tidy(book, now).waiting.find((p) => p.id === refusal.id) : undefined;
+      const kind = proposal ? kinds.get(proposal.kind) : undefined;
+      if (proposal && kind && kind.scope !== "execute" && sameValue(current(proposal), proposal.after)) {
+        next = recordDone(next, proposal, kind, who, now);
+        result.done.push(proposal.id);
+        applied.push(proposal);
+      } else result.refused.push(refusal);
+    }
+    for (const proposal of plan.apply) {
+      const done = await apply(proposal);
+      if (done === true) {
+        next = recordDone(next, proposal, kinds.get(proposal.kind)!, who, now);
+        result.done.push(proposal.id);
+        applied.push(proposal);
+      } else result.refused.push({ id: proposal.id, why: done === "terms" ? "terms" : done === "changed" ? "changed_since" : "failed" });
+    }
+    if (!applied.length || (await writeBook(store, held, next, now).catch(() => "unknown" as const)) === "written") return result;
+  } finally {
+    await releaseLock(held);
+  }
+  // Carried out, but the book was not written as ours: each applied proposal still waiting on the book as it is now is
+  // recorded as done there, so the change and its history agree, and another change's history is kept.
+  await recordAgain(
     store,
-    async (book) => {
-      const plan = planConfirm(book, ids, kinds, current, now);
-      let next = book;
-      const result: Confirmed = { done: [], refused: [...plan.refused] };
-      for (const proposal of plan.apply) {
-        const applied = await apply(proposal);
-        if (applied === true) {
-          next = recordDone(next, proposal, kinds.get(proposal.kind)!, who, now);
-          result.done.push(proposal.id);
-        } else result.refused.push({ id: proposal.id, why: applied === "terms" ? "terms" : "failed" });
-      }
-      return { book: result.done.length ? next : null, result };
-    },
+    (book) => applied.reduce((b, p) => (b.waiting.some((w) => w.id === p.id) ? recordDone(b, p, kinds.get(p.kind)!, who, now) : b), book),
     now,
   );
+  return result;
 }
 
-/** Puts back a confirmed change, through `restore`, when the rules allow it. */
-export function undoDone(
+/**
+ * Puts back a confirmed change, through `restore`, when the rules allow it.
+ * The history says undone first (Codex G on #1856): the change is put back
+ * only once that is written as ours, so a book that cannot be written never
+ * hides a restore. A restore that did not happen takes the mark back, on the
+ * book as it is now; where even that cannot be written, the history says
+ * undone though nothing was put back (BookWriteUnconfirmed), never the
+ * other way round. A restore whose outcome is unknown (`restore` answering
+ * "unknown" or throwing) keeps the mark and is said as not confirmed.
+ */
+export async function undoDone(
   store: DataStore & { statsId: string },
   id: string,
   current: (done: Done) => Json,
-  restore: (done: Done, value: Json) => Promise<boolean>,
+  restore: (done: Done, value: Json) => Promise<boolean | "changed" | "unknown">,
   who: string,
   now = Date.now(),
 ): Promise<{ ok: true } | { ok: false; error: UndoRefusal | "failed" }> {
-  return changeBook<{ ok: true } | { ok: false; error: UndoRefusal | "failed" }>(
-    store,
-    async (book) => {
-      const plan = planUndo(book, id, current, now);
-      if (!plan.ok) return { book: null, result: plan };
-      if (!(await restore(plan.done, plan.restore))) return { book: null, result: { ok: false as const, error: "failed" as const } };
-      return { book: recordUndone(book, id, who, now), result: { ok: true as const } };
-    },
-    now,
-  );
+  const held = await holdBook(store.statsId);
+  let answer: { ok: true } | { ok: false; error: UndoRefusal | "failed" };
+  try {
+    const book = await readBook(store.statsId, now);
+    const plan = planUndo(book, id, current, now);
+    if (!plan.ok) return plan;
+    const marked = await writeBook(store, held, recordUndone(book, id, who, now), now).catch(() => "unknown" as const);
+    if (marked === "lost") return { ok: false, error: "failed" };
+    if (marked === "written") {
+      // A restore whose answer was lost may have been made (Codex G on #1856): unknown, never taken for "not made".
+      const restored = await restore(plan.done, plan.restore).catch(() => "unknown" as const);
+      if (restored === true) return { ok: true };
+      // The mark stays, so a restore that was made is never left out of the history; said as not confirmed.
+      if (restored === "unknown") throw new BookWriteUnconfirmed();
+      // Changed again between the check and the write: refused as the rules refuse it, nothing put back.
+      answer = { ok: false, error: restored === "changed" ? "changed_since" : "failed" };
+    } else answer = { ok: false, error: "failed" };
+  } finally {
+    await releaseLock(held);
+  }
+  // Nothing was put back: this undo's own mark is taken back where the book holds it (a mark that was never written
+  // is read as absent, and nothing is written).
+  await recordAgain(store, (book) => withoutUndone(book, id, who, now), now);
+  return answer;
+}
+
+/** The book without this undo's own mark on `id` (the same book when it does not hold it). */
+function withoutUndone(book: Book, id: string, who: string, at: number): Book {
+  const entry = book.history.find((d) => d.id === id);
+  if (!entry?.undone || entry.undone.who !== who || entry.undone.at !== at) return book;
+  return {
+    ...book,
+    history: book.history.map((d) => {
+      if (d.id !== id) return d;
+      const kept: Done = { ...d };
+      delete kept.undone;
+      return kept;
+    }),
+  };
 }

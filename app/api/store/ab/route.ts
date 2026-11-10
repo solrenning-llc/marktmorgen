@@ -12,7 +12,9 @@ export async function GET(request: NextRequest) {
   const store = access.store;
   if (!store || !id) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   try {
-    const page = await readPage(store.statsId, id);
+    // A page read whose answer is not known is said so, never taken for a page running no test (unit B).
+    const page = await readPage(store.statsId, id).catch(() => null);
+    if (!page) return Response.json({ ok: false, error: "page_unread" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
     const test = runningTest(page);
     if (!test) return Response.json({ ok: false, error: "none" }, { status: 404 });
     const counts = await readCounts(store.statsId, id, test);

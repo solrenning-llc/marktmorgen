@@ -27,9 +27,11 @@ import { paidForAny } from "@/lib/community-access";
 import { purchasesFor } from "@/lib/buyer-orders";
 import { checkKey, keyForSale, revokeRefunded } from "@/lib/licence-keys";
 import { syncMeetings } from "@/lib/call-meetings";
+import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
 import { lostDisputesSince } from "@/lib/refunds";
 import { callScope, readRecord, writeRecord, type MeetRecord } from "@/lib/meet-records";
 import { MEET_STORES } from "@/lib/meet-links";
+import { bookedCalendarFeed, ensureFeedToken } from "@/lib/calendar-sync";
 import { markRefundedReviews, provePurchase } from "@/lib/review-proof";
 import { readReview, saveReview, visibleReviews } from "@/lib/reviews";
 import { readListing } from "@/lib/catalog";
@@ -242,6 +244,38 @@ async function main(): Promise<void> {
   is("the job looks up the calls lost, not the won one", [...lookedUp].sort(), ["pi_TestCallLost01", "pi_TestCallPart01"]);
   const gone = async (pi: string) => (await readRecord(scopeOf(pi)))?.gone;
   is("and their meetings end; the won call's stays", [await gone("pi_TestCallLost01"), await gone("pi_TestCallPart01"), await gone("pi_TestCallWon001")], [true, true, false]);
+  // A lost dispute leaves the booking in the private calendar feed (it reads the payment, which the dispute does not
+  // show refunded), so no making is spent on a file that would come out the same (review of #2111).
+  const today = new Date().toISOString().slice(0, 10);
+  const [changedAfterDisputes, creditsAfterDisputes] = await redis.pipeline([["GET", bookingsChangedKey(callsId)], ["GET", bookingCreditsKey(callsId, today)]]);
+  is("a lost dispute spends no making of the store's calendar feed", [changedAfterDisputes, creditsAfterDisputes], [null, null]);
+  closings = [];
+  // A call refunded in full (a cancellation included), in a store with no meeting room at all, so not in MEET_STORES
+  // by its bookings (review C4-33, M3): its feed being read puts it there, and the feed is made again at the app's
+  // next check (inbox C4-18, M3).
+  const plainId = "e".repeat(16);
+  const plainStore: Store = { ...store, callsId: plainId };
+  const plainFor = async (handle: string) => (handle === "kilnworks" ? plainStore : null);
+  sessionsByPayment.pi_TestCallRefd01 = call("pi_TestCallRefd01");
+  const refund = { id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestCallRefd01", charge: { object: "charge", amount: 4900, amount_refunded: 4900, refunded: true } };
+  is("the store is not in MEET_STORES by its bookings", await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]), [null]);
+  refunds = [refund];
+  await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");
+  is("so before its feed is read, its refunds are not", (await redis.pipeline([["GET", bookingsChangedKey(plainId)]]))[0], null);
+  // A feed is answered only while the store's calendar settings exist (lib/calendar-sync.ts, KEEP_COPY; inbox C4-48):
+  // the store subscribed, as a creator does from the studio.
+  await ensureFeedToken(store);
+  const fed = await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", listId: null, named: [] }));
+  const [listedAt] = await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]);
+  is("its feed made, the store's refunds are read for two days", [fed.state, Number(listedAt) > Date.now() + 86_400_000], ["made", true]);
+  await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");
+  refunds = [];
+  const [changed, credits] = await redis.pipeline([["GET", bookingsChangedKey(plainId)], ["GET", bookingCreditsKey(plainId, today)]]);
+  is("a call refunded in full tells the store's calendar feed its bookings changed, one making", [Number(changed) > 0, Number(credits)], [true, 1]);
+  await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 30 * 86_400_000, `${plainId}|kilnworks`]]);
+  await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", listId: null, named: [] }), Date.now() + 1);
+  const [kept] = await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]);
+  is("a meeting further ahead keeps its later score: the feed never lowers it", Number(kept) > Date.now() + 29 * 86_400_000, true);
   closings = [];
 
   part("A review's verified buyer");

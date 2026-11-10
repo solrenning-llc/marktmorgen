@@ -179,10 +179,10 @@ async function main(): Promise<void> {
     return { error: got.isError, data: JSON.parse(got.content[0].text) as Record<string, unknown>, text: got.content[0].text };
   };
   // Every tool, read: none answers with an address, the store owner's included.
-  // A stretch of days needs its two ends (631 [AA1] unit 8); every other tool answers with no arguments.
-  const ends = { from: new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) };
   // The tool that prepares a change needs a key allowed to (tests/agent-propose.test.ts); this read key is refused there.
   const readers = tools.filter((t) => t.annotations.readOnlyHint);
+  // A stretch of days needs its two ends (631 [AA1] unit 8); every other tool answers with no arguments.
+  const ends = { from: new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) };
   const everything = await Promise.all(readers.map((t) => call(t.name, t.name === "get_numbers_for_days" ? ends : {})));
   // Tools about one product, page or lesson (631 [AA1] units 9 to 14) need it named: with nothing, they say so as an error.
   const needs = new Set(["get_product_description", "get_sales_page", "get_course_outline", "get_lesson", "get_page_test", "get_page_reading", "get_page_versions"]);

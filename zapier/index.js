@@ -40,8 +40,49 @@ const explain = (response, z) => {
     const message = (body && body.message) || `Marktmorgen answered ${response.status}. Try again in a moment.`;
     throw new z.errors.Error(message, (body && body.error) || "api_error", response.status);
   }
+  if (!Number.isInteger(response.status) || response.status < 200 || response.status >= 300) {
+    unconfirmed(z);
+  }
   return response;
 };
+
+/** An unknown write result must not be reported as success or retried here. */
+const unconfirmed = (z) => {
+  throw new z.errors.Error(
+    "Marktmorgen could not confirm this operation. Check its status in your store before trying again.",
+    "unconfirmed_response",
+    502,
+  );
+};
+
+/** Keep a write's answer whole, but require the fields that identify its effect; anything else is unconfirmed. */
+const hookResult = (response, z, matches) => {
+  const body = response.data;
+  const data = body && typeof body === "object" && !Array.isArray(body) ? body.data : null;
+  if (!data || typeof data !== "object" || Array.isArray(data) || !matches(data)) unconfirmed(z);
+  return data;
+};
+
+const plain = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const text = (value) => typeof value === "string" && value.length > 0;
+
+/** A read whose answer is not the shape the API gives is unknown, never empty or nobody. */
+const unknownRead = (z) => {
+  throw new z.errors.Error("Marktmorgen's answer could not be read. Try again in a moment.", "unknown_response", 502);
+};
+
+/** The `data` of a read: a list of objects, or (`one`) one object that `matches`. */
+const readResult = (response, z, { one = false, matches = () => true } = {}) => {
+  const body = response.data;
+  const data = plain(body) ? body.data : undefined;
+  if (one ? !(plain(data) && matches(data)) : !(Array.isArray(data) && data.every(plain))) unknownRead(z);
+  return data;
+};
+
+/** What each action's answer must be, exactly as lib/api-write.ts gives it. */
+const SUBSCRIBER = (data) => text(data.email) && (data.status === "added" || data.status === "already");
+const LABELS = (data) => text(data.email) && Array.isArray(data.labels) && data.labels.every((label) => typeof label === "string");
+const ACCESS = (data) => text(data.email) && text(data.product) && (data.status === "given" || data.status === "already") && typeof data.emailed === "boolean";
 
 const authentication = {
   type: "custom",
@@ -57,7 +98,7 @@ const authentication = {
   ],
   test: async (z) => {
     const response = await z.request({ url: `${API}/store` });
-    return response.data.data;
+    return readResult(response, z, { one: true, matches: (data) => text(data.handle) });
   },
   connectionLabel: "{{name}} (@{{handle}})",
 };
@@ -206,12 +247,15 @@ const hookTrigger = (spec) => ({
     type: "hook",
     performSubscribe: async (z, bundle) => {
       const response = await z.request({ url: `${API}/hooks`, method: "POST", body: { url: bundle.targetUrl, events: [spec.event] } });
-      return response.data.data;
+      return hookResult(response, z, (data) =>
+        typeof data.id === "string" && /^we_[0-9a-f]{16}$/.test(data.id) &&
+        Array.isArray(data.events) && data.events.length === 1 && data.events[0] === spec.event,
+      );
     },
     performUnsubscribe: async (z, bundle) => {
       const id = bundle.subscribeData && bundle.subscribeData.id;
       const response = await z.request({ url: `${API}/hooks`, method: "DELETE", body: { id } });
-      return response.data.data;
+      return hookResult(response, z, (data) => typeof id === "string" && /^we_[0-9a-f]{16}$/.test(id) && data.id === id && data.status === "removed");
     },
     perform: async (z, bundle) => {
       const body = bundle.cleanedRequest;
@@ -219,7 +263,7 @@ const hookTrigger = (spec) => ({
     },
     performList: async (z) => {
       const response = await z.request({ url: `${API}/events`, params: { type: spec.event, limit: 3 } });
-      return response.data.data;
+      return readResult(response, z);
     },
     sample: message(spec),
   },
@@ -238,7 +282,7 @@ const productList = {
       // The API pages products 200 at a time, its cursor the count already read.
       const cursor = bundle.meta && bundle.meta.page ? String(bundle.meta.page * 200) : undefined;
       const response = await z.request({ url: `${API}/products`, params: cursor ? { cursor } : {} });
-      return response.data.data;
+      return readResult(response, z);
     },
     sample: { id: "p_8f2c1a", title: "The Weeknight Cookbook", price: 2900, currency: "usd", kind: "one_time", interval: null, hidden: false, url: "https://marktmorgen.com/@harbor/p_8f2c1a" },
   },
@@ -273,7 +317,7 @@ const addSubscriber = {
         method: "POST",
         body: { email: bundle.inputData.email, name: bundle.inputData.name || "", tags, agreed: bundle.inputData.agreed === true || bundle.inputData.agreed === "true" },
       });
-      return response.data.data;
+      return hookResult(response, z, SUBSCRIBER);
     },
     sample: { email: "ada@example.com", status: "added" },
   },
@@ -296,7 +340,7 @@ const changeLabels = {
         method: "POST",
         body: { email: bundle.inputData.email, add: list(bundle.inputData.add), remove: list(bundle.inputData.remove) },
       });
-      return response.data.data;
+      return hookResult(response, z, LABELS);
     },
     sample: { email: "ada@example.com", labels: ["vip"] },
   },
@@ -321,7 +365,7 @@ const giveAccess = {
         method: "POST",
         body: { email: bundle.inputData.email, product: bundle.inputData.product, notify: bundle.inputData.notify === true || bundle.inputData.notify === "true" },
       });
-      return response.data.data;
+      return hookResult(response, z, ACCESS);
     },
     sample: { email: "ada@example.com", product: "p_8f2c1a", status: "given", emailed: false },
   },

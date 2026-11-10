@@ -4,7 +4,7 @@
  * (lib/agent-kinds.ts) under the book's lock (lib/agent-book.ts). Kept out of
  * the route so the studio and the tests use the same steps.
  */
-import type { Json } from "@/lib/agent-proposal-rules";
+import { type Json, sameValue } from "@/lib/agent-proposal-rules";
 import { AGENT_KINDS } from "@/lib/agent-kinds";
 import { type Confirmed, confirmProposals, declineProposal, readBook, undoDone } from "@/lib/agent-book";
 import type { Store } from "@/lib/store";
@@ -29,7 +29,8 @@ export async function confirmFor(store: Store & { statsId: string }, ref: string
     ids,
     AGENT_KINDS,
     (p) => (now.has(p.id) ? (now.get(p.id) as Json) : null),
-    async (p) => (await AGENT_KINDS.get(p.kind)?.write(store, ref, p.target, p.after)) ?? false,
+    // Written only over what the proposal was made on (`before`), checked in the write itself.
+    async (p) => (await AGENT_KINDS.get(p.kind)?.write(store, ref, p.target, p.after, p.before)) ?? false,
     who,
   );
 }
@@ -47,7 +48,22 @@ export async function undoFor(store: Store & { statsId: string }, ref: string, i
     store,
     id,
     (d) => (now.has(d.id) ? (now.get(d.id) as Json) : null),
-    async (d, value) => (await AGENT_KINDS.get(d.kind)?.write(store, ref, d.target, value)) === true,
+    // Put back only over what was confirmed (`after`), checked in the write itself.
+    async (d, value) => {
+      const kind = AGENT_KINDS.get(d.kind);
+      try {
+        const written = await kind?.write(store, ref, d.target, value, d.after);
+        return written === "changed" ? "changed" : written === true;
+      } catch (error) {
+        // The write's answer was lost (Codex G on #1856): what the store holds now says whether it was made.
+        console.error("putting back an agent's change could not be confirmed", error);
+        // Read only in exact shapes: a reply that says nothing is unknown, never taken for a value (Codex G on #1856).
+        const now = kind?.currentExact ? await kind.currentExact(store, d.target).catch(() => undefined) : undefined;
+        if (now !== undefined && sameValue(now, value)) return true;
+        if (now !== undefined && sameValue(now, d.after)) return false;
+        return "unknown";
+      }
+    },
     who,
   );
 }

@@ -90,13 +90,13 @@ const DRAFTS: readonly ToolDraft[] = [
   })),
   {
     name: "get_memberships",
-    description: "Memberships as the Membership numbers page shows them: MRR and ARR, paying and trialing members, churn, trials that converted, each membership, each channel's members and how long they stay, why members left (counted), MRR month by month by what moved it, ARPU, net revenue retention and a three-month forecast.",
+    description: "Memberships as the Membership numbers page shows them: MRR and ARR, paying and trialing members, churn, trials that converted, each membership, each channel's members and how long they stay, why members left (counted), MRR month by month by what moved it, ARPU, net revenue retention and a three-month forecast. mrr_by_month and by_channel are null when they could not be read; null is not an empty list.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_emails",
-    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought, in the store's currency, with sales_in_another_currency counted apart and never added to revenue.",
+    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought, in the store's currency, with sales_in_another_currency counted apart and never added to revenue. A sequence's started, emails_sent and reached_the_end are null, with counts_unavailable true, when they could not be read just now; null is not zero.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
@@ -108,13 +108,13 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "get_live",
-    description: "Who is on the store right now (visitors in the last few minutes, each once, by where they came from) and today so far: visitors, page views, checkouts started, sales and revenue. No visitor is identified.",
+    description: "Who is on the store right now (visitors in the last few minutes, each once, by where they came from) and today so far: visitors, page views, checkouts started, sales and revenue. No visitor is identified. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_numbers_for_days",
-    description: "The store's numbers for any stretch of UTC days, up to 400 days back: visitors, page views, checkouts, sales and revenue, day by day, by channel and by product, beside the same number of days just before. Paid figures are null when the sales reading was incomplete.",
+    description: "The store's numbers for any stretch of UTC days, up to 400 days back: visitors, page views, checkouts, sales and revenue, day by day, by channel and by product, beside the same number of days just before. Paid figures are null when the sales reading was incomplete. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: {
       type: "object",
       properties: {
@@ -127,25 +127,25 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "get_product_description",
-    description: "One product's long description, exactly as the creator wrote it, with its title. Use list_products for the ids.",
+    description: "One product's long description, exactly as the creator wrote it, with its title. Use list_products for the ids. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_sales_page",
-    description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted.",
+    description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_course_outline",
-    description: "A course's modules and lessons in order, with each lesson's title, whether it is a free preview, whether it has text, its video and files by name, and when each module opens.",
+    description: "A course's modules and lessons in order, with each lesson's title, whether it is a free preview, whether it has text, its video and files by name, and when each module opens. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The course's product id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_lesson",
-    description: "One lesson of a course as the creator wrote it: its text, its quiz with the right answers, and its task.",
+    description: "One lesson of a course as the creator wrote it: its text, its quiz with the right answers, and its task. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: {
       type: "object",
       properties: {
@@ -158,19 +158,19 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "get_page_test",
-    description: "How a product's page test is going (a second headline or a second version of the whole page): views, checkouts, sales and money of each version, and whether it has been won by the studio's own rule.",
+    description: "How a product's page test is going (a second headline or a second version of the whole page): views, checkouts, sales and money of each version, and whether it has been won by the studio's own rule. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_page_reading",
-    description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched.",
+    description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_page_versions",
-    description: "A product's sales page as it was before its last saves: the list of earlier versions, newest first, or one version block by block. Testimonials are counted, never quoted.",
+    description: "A product's sales page as it was before its last saves: the list of earlier versions, newest first, or one version block by block. Testimonials are counted, never quoted. It counts as a few of the store's API requests, more as more versions are kept.",
     inputSchema: {
       type: "object",
       properties: {
@@ -183,14 +183,14 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "list_saved_blocks",
-    description: "The sections the creator saved to reuse on any page, each with its name and its blocks, newest change first. Testimonials are counted, never quoted.",
+    description: "The sections the creator saved to reuse on any page, each with its name and its blocks, newest change first. Testimonials are counted, never quoted. It counts as a few of the store's API requests, more as more sections are saved.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "list_bundle_choices",
     description:
-      "The store's products a bundle may be made of, 20 a page in the creator's order, each with whether it can go in and why it cannot (a membership, a call, several prices, free, a limited number, nothing to hand over yet), by the same rule as the creator's bundle picker. Each call reads one page; pass cursor: next_cursor from the last answer for the next one, until next_cursor is null.",
+      "The store's products a bundle may be made of, 20 a page in the creator's order, each with whether it can go in and why it cannot (a membership, a call, several prices, free, a limited number, nothing to hand over yet), by the same rule as the creator's bundle picker. Each call reads one page; pass cursor: next_cursor from the last answer for the next one, until next_cursor is null. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: {
       type: "object",
       properties: {
@@ -205,14 +205,14 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "get_imports",
     description:
-      "The store's latest imports from another platform (contacts, products, purchases or members), newest first: how far each is and what its rows came to, as counts. Never the file's name, who started it or the rows themselves.",
+      "The store's latest imports from another platform (contacts, products, purchases or members), newest first: how far each is and what its rows came to, as counts. Never the file's name, who started it or the rows themselves. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "propose_product_description",
     description:
-      "Prepares a new long description for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one.",
+      "Prepares a new long description for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
     inputSchema: {
       type: "object",
       properties: {
@@ -227,7 +227,7 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "propose_product_title",
     description:
-      "Prepares a new title for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one.",
+      "Prepares a new title for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
     inputSchema: {
       type: "object",
       properties: {
@@ -242,7 +242,7 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "propose_product_summary",
     description:
-      "Prepares a new short summary for one product (the line under its title), for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one.",
+      "Prepares a new short summary for one product (the line under its title), for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
     inputSchema: {
       type: "object",
       properties: {

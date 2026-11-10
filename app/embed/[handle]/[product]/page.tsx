@@ -24,6 +24,7 @@ import { speech } from "@/lib/buyer-words";
 import { scriptMode, withTags } from "@/lib/embed-sites";
 import { type ScriptOpen, readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
+import { StoreBeacon } from "@/components/store-beacon";
 import { SlotPicker } from "@/components/slot-picker";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { payBookTimes } from "@/lib/book-page-admission";
@@ -186,23 +187,27 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   }
 
   const selling = canSell(store);
+  // A failed stock read is its own mark (rule 24): stockLeft's null means no limit, so its failure is UNREAD.
+  const UNREAD = "unread" as const;
   const [coming, stock, noKeys, related, summary] = await Promise.all([
     // Unknown is null, never "not coming soon" (CX-123 rule 24): the card then draws no buy button.
     soonOne(store, product.id).catch(() => null),
-    stockLeft(store, product).catch(() => null),
+    // A failed stock read is UNREAD, never stockLeft's own null, which means "no limit" (rule 24): no buy button either.
+    stockLeft(store, product).catch(() => UNREAD),
     // Unknown is null, never "keys left" (CX-123 rule 24; Claude 4 on #2910): the card then draws no buy button.
     outOfKeys(store, product).catch(() => null),
     product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
   const soon = coming?.soon ?? false;
-  // With the key count unknown, how many are left is not said either.
-  const count = noKeys === null ? null : noKeys ? 0 : stock;
+  const stockUnread = stock === UNREAD;
+  // With the key count or the stock unknown, how many are left is not said either.
+  const count = noKeys === null || stockUnread ? null : noKeys ? 0 : stock;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  // Whether it is coming soon, or whether a key is left, could not be read: buying, the waitlist or the pre-order cannot
-  // be told apart, or the product may be sold out, so the card says buying is not available just now, and its title
-  // still leads to the product's page.
-  const computed = coming && noKeys !== null
+  // Whether it is coming soon, whether a key is left or how many are in stock could not be read: buying, the waitlist or
+  // the pre-order cannot be told apart, or the product may be sold out, so the card says buying is not available just
+  // now, and its title still leads to the product's page.
+  const computed = coming && noKeys !== null && !stockUnread
     ? pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day))
     : { action: { kind: "none" as const, text: speech(store).w.cardBuyUnread }, label: "" };
   const page = tag(productPath(store, product));
@@ -272,6 +277,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     return (
       <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} h-screen overflow-y-auto`} style={lookStyle(store.look) as React.CSSProperties} data-embed-times="">
         <main id="content" className="p-4">
+          {open ? <StoreBeacon handle={store.handle} front={false} /> : null}
           {/* Where focus starts once the times open in the frame (2.4.3): the frame's address names it. */}
           <h1 id="times-title" tabIndex={-1} className="font-display text-[1.0625rem] font-semibold leading-snug">{product.title}</h1>
           <p className="st-price mt-1 text-sm">{say.money(cents)}</p>
@@ -379,6 +385,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
 
   const card = (
       <article className={`st-card flex ${soldBy ? "min-h-full" : "h-full"} flex-col overflow-hidden p-4`} style={{ boxShadow: "none" }}>
+        {/* Opened by the checkout script: the visit, counted by the page itself through the host's browser check (lib/embed-open.ts). */}
+        {open ? <StoreBeacon handle={store.handle} front={false} /> : null}
         {image ? (
           <a href={page} {...aside} tabIndex={-1} className="em-cover -mx-4 -mt-4 mb-4 h-[160px] shrink-0 overflow-hidden" style={{ background: "var(--st-item)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}

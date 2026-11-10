@@ -16,6 +16,11 @@
  *
  * Without the header nothing changes. An unknown record (a read that failed or a reply of another shape) runs
  * nothing: it is never taken for "no record" (rule 24), since that would run the write twice.
+ *
+ * Rules for the caller: the record's key must be scoped by the store (one store's answer is never replayed to another
+ * that sends the same key); `path` is the path with its query string, so two requests that differ only in the query
+ * are not the same; and a try whose claim was taken reads the record once more and runs nothing, which keeps a keyed
+ * write within IDEMPOTENCY_COMMANDS.
  */
 import { createHash } from "node:crypto";
 import { UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS } from "@/lib/spend-cost-table";
@@ -29,8 +34,13 @@ export const IDEMPOTENCY_SECONDS = 24 * 3_600;
 export const MAX_KEPT_ANSWER_BYTES = 8_192;
 /** Room for the record's own fields beyond the answer: state, fingerprint (64), status, times. */
 const RECORD_ROOM_BYTES = 256;
-/** The most one record can weigh. */
+/**
+ * The most one record can weigh, as stored: the UTF-8 bytes of its whole JSON, escapes included (an answer's quotes
+ * and backslashes are escaped again inside the record, so the answer alone does not bound it). afterWrite keeps
+ * nothing larger and readRecord reads nothing larger, so the cost ceiling below is a true upper bound.
+ */
 export const MAX_IDEMPOTENCY_RECORD_BYTES = MAX_KEPT_ANSWER_BYTES + RECORD_ROOM_BYTES;
+const recordBytes = (record: string) => new TextEncoder().encode(record).length;
 /** Database commands one keyed write adds at most: read the record, claim it, keep the answer. */
 export const IDEMPOTENCY_COMMANDS = 3;
 
@@ -88,7 +98,7 @@ export type IdempotencyRecord =
 
 /** A kept record read exactly, or null when it is not one (a record of any other shape is unknown, never absent). */
 export function readRecord(raw: unknown): IdempotencyRecord | null {
-  if (typeof raw !== "string" || raw.length > MAX_IDEMPOTENCY_RECORD_BYTES * 2) return null;
+  if (typeof raw !== "string" || recordBytes(raw) > MAX_IDEMPOTENCY_RECORD_BYTES) return null;
   let v: unknown;
   try { v = JSON.parse(raw); } catch { return null; }
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -160,7 +170,10 @@ export function afterWrite(fp: string, startedAt: number, status: number, body: 
   { action: "release" } | { action: "keep"; record: string } | { action: "hold" } {
   if (effect === "none") return { action: "release" };
   if (new TextEncoder().encode(body).length > MAX_KEPT_ANSWER_BYTES || !Number.isInteger(status) || status < 200 || status > 599) return { action: "hold" };
-  return { action: "keep", record: JSON.stringify({ state: "done", fp, at: startedAt, status, body }) };
+  const record = JSON.stringify({ state: "done", fp, at: startedAt, status, body });
+  // Measured as it will be stored: an answer full of quotes or control characters grows once escaped.
+  if (recordBytes(record) > MAX_IDEMPOTENCY_RECORD_BYTES) return { action: "hold" };
+  return { action: "keep", record };
 }
 
 /**

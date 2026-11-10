@@ -17,6 +17,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLin
 import { readListing } from "@/lib/catalog";
 import { resendGroupReceipt, settleGroup, startGroup } from "@/lib/group-buy";
 import { newUpsellKey, readUpsell, settleUpsells, takeUpsell } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -176,7 +177,7 @@ async function offers(): Promise<void> {
     piOver = over;
     emails.length = 0;
     const session = order(n);
-    const outcome = await takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+    const outcome = await takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
     piOver = {};
     const letter = emails.find((e) => e.to[0] === buyerOf(n))?.text ?? "";
     return { outcome: outcome.kind, letter };
@@ -205,7 +206,7 @@ async function offers(): Promise<void> {
   piStatus = "requires_action";
   const pending = order(7);
   piOver = { amount: undefined };
-  const asked = await takeUpsell({ store, session: pending, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+  const asked = await takeUpsell({ store, session: pending, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
   piOver = {};
   piStatus = "succeeded";
   is("sent to confirm with the bank first", asked.kind, "confirm");

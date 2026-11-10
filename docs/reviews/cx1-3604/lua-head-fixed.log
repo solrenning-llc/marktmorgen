@@ -1,0 +1,12 @@
+Lua implementation Lua 5.1 scriptSHA 3e3e3f9df614c9793e3862876aa7afc38df53f19a0325023c290c96bb79d9d8f
+author commands 54 aggregate {'http': 0, 'redisCommands': 54, 'httpLimit': 100, 'redisLimit': 20000}
+test_lost_fence_does_not_mutate (cx1_lua_focal.DigitalErasure.test_lost_fence_does_not_mutate) ... ok
+test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) ... ok
+test_resolved_unrelated_buyer_stays_unchanged (cx1_lua_focal.DigitalErasure.test_resolved_unrelated_buyer_stays_unchanged) ... ok
+test_unbound_digital_option_keeps_no_buyer_hash (cx1_lua_focal.DigitalErasure.test_unbound_digital_option_keeps_no_buyer_hash) ... ok
+test_unreadable_row_does_not_mutate (cx1_lua_focal.DigitalErasure.test_unreadable_row_does_not_mutate) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 2.187s
+
+OK

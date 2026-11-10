@@ -1,0 +1,215 @@
+Lua implementation Lua 5.1 scriptSHA 3e3e3f9df614c9793e3862876aa7afc38df53f19a0325023c290c96bb79d9d8f
+author commands 0 aggregate {'http': 0, 'redisCommands': 0, 'httpLimit': 100, 'redisLimit': 20000}
+test_lost_fence_does_not_mutate (cx1_lua_focal.DigitalErasure.test_lost_fence_does_not_mutate) ... ERROR
+test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) ... 
+  test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='course_reserved') ... ERROR
+  test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='awaiting_creation') ... ERROR
+  test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='creating') ... ERROR
+  test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='creation_unknown') ... ERROR
+  test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='awaiting_payment') ... ERROR
+test_resolved_unrelated_buyer_stays_unchanged (cx1_lua_focal.DigitalErasure.test_resolved_unrelated_buyer_stays_unchanged) ... ERROR
+test_unbound_digital_option_keeps_no_buyer_hash (cx1_lua_focal.DigitalErasure.test_unbound_digital_option_keeps_no_buyer_hash) ... ERROR
+test_unreadable_row_does_not_mutate (cx1_lua_focal.DigitalErasure.test_unreadable_row_does_not_mutate) ... ERROR
+
+======================================================================
+ERROR: test_lost_fence_does_not_mutate (cx1_lua_focal.DigitalErasure.test_lost_fence_does_not_mutate)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 97, in test_lost_fence_does_not_mutate
+    self.assertEqual(reply, "changed")
+                             ^^^^^^^^^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='course_reserved')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 85, in test_pending_binding_still_gets_its_recipient_fence
+    self.assertEqual(reply, "marked")
+                                    ^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='awaiting_creation')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 85, in test_pending_binding_still_gets_its_recipient_fence
+    self.assertEqual(reply, "marked")
+                                    ^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='creating')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 85, in test_pending_binding_still_gets_its_recipient_fence
+    self.assertEqual(reply, "marked")
+                                    ^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='creation_unknown')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 85, in test_pending_binding_still_gets_its_recipient_fence
+    self.assertEqual(reply, "marked")
+                                    ^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) (phase='awaiting_payment')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 85, in test_pending_binding_still_gets_its_recipient_fence
+    self.assertEqual(reply, "marked")
+                                    ^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_resolved_unrelated_buyer_stays_unchanged (cx1_lua_focal.DigitalErasure.test_resolved_unrelated_buyer_stays_unchanged)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 91, in test_resolved_unrelated_buyer_stays_unchanged
+    self.assertEqual(reply, "other")
+                               ^^^^^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_unbound_digital_option_keeps_no_buyer_hash (cx1_lua_focal.DigitalErasure.test_unbound_digital_option_keeps_no_buyer_hash)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 76, in test_unbound_digital_option_keeps_no_buyer_hash
+    self.assertEqual(reply, "other")
+    
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+======================================================================
+ERROR: test_unreadable_row_does_not_mutate (cx1_lua_focal.DigitalErasure.test_unreadable_row_does_not_mutate)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 102, in test_unreadable_row_does_not_mutate
+    self.assertEqual(reply, "unknown")
+                             ^^^^^^^^^
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 72, in invoke
+    return result[1], json.loads(data["row"]) if not bad_json else None, writes, original, person
+             ^^^^^^^^^^^^^^^^^^^
+  File "lupa/lua51.pyx", line 466, in lupa.lua51.LuaRuntime.execute
+  File "lupa/lua51.pyx", line 1897, in lupa.lua51.run_lua
+  File "lupa/lua51.pyx", line 1911, in lupa.lua51.call_lua
+  File "lupa/lua51.pyx", line 1937, in lupa.lua51.execute_lua_call
+  File "lupa/lua51.pyx", line 416, in lupa.lua51.LuaRuntime.reraise_on_exception
+  File "lupa/lua51.pyx", line 2150, in lupa.lua51.py_call_with_gil
+  File "lupa/lua51.pyx", line 2136, in lupa.lua51.call_python
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 49, in call
+    if TOTAL >= 1000:
+    ^^^^^^^^^^^
+NameError: name '_DigitalErasure__cx1_spend' is not defined
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.119s
+
+FAILED (errors=9)

@@ -1,0 +1,24 @@
+Lua implementation Lua 5.1 scriptSHA 928f65f02423a80872eb7db4dfcb24aa2fa01c293b22a2dd0f3c2cbde6112bd2
+author commands 55 aggregate {'http': 0, 'redisCommands': 109, 'httpLimit': 100, 'redisLimit': 20000}
+test_lost_fence_does_not_mutate (cx1_lua_focal.DigitalErasure.test_lost_fence_does_not_mutate) ... ok
+test_pending_binding_still_gets_its_recipient_fence (cx1_lua_focal.DigitalErasure.test_pending_binding_still_gets_its_recipient_fence) ... ok
+test_resolved_unrelated_buyer_stays_unchanged (cx1_lua_focal.DigitalErasure.test_resolved_unrelated_buyer_stays_unchanged) ... ok
+test_unbound_digital_option_keeps_no_buyer_hash (cx1_lua_focal.DigitalErasure.test_unbound_digital_option_keeps_no_buyer_hash) ... FAIL
+test_unreadable_row_does_not_mutate (cx1_lua_focal.DigitalErasure.test_unreadable_row_does_not_mutate) ... ok
+
+======================================================================
+FAIL: test_unbound_digital_option_keeps_no_buyer_hash (cx1_lua_focal.DigitalErasure.test_unbound_digital_option_keeps_no_buyer_hash)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\proofs\cx2\digital-erasure.py", line 77, in test_unbound_digital_option_keeps_no_buyer_hash
+    self.assertEqual(row["erasedPeople"], "")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'marked' != 'other'
+- marked
++ other
+
+
+----------------------------------------------------------------------
+Ran 5 tests in 3.882s
+
+FAILED (failures=1)

@@ -1,0 +1,11 @@
+Lua implementation Lua 5.1 scriptSHA 3e3e3f9df614c9793e3862876aa7afc38df53f19a0325023c290c96bb79d9d8f
+author commands 35 aggregate {'http': 0, 'redisCommands': 969, 'httpLimit': 100, 'redisLimit': 20000}
+test_bound_buyer_stays_matched_without_another_hash (__main__.Own.test_bound_buyer_stays_matched_without_another_hash) ... ok
+test_cross_store_row_stays_unknown_and_unwritten (__main__.Own.test_cross_store_row_stays_unknown_and_unwritten) ... ok
+test_no_extra_hash_is_appended_to_a_legacy_print (__main__.Own.test_no_extra_hash_is_appended_to_a_legacy_print) ... ok
+test_source_mismatch_stays_unknown_and_unwritten (__main__.Own.test_source_mismatch_stays_unknown_and_unwritten) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 1.811s
+
+OK

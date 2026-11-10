@@ -1,0 +1,13 @@
+✔ the original request snapshot is detached, bounded, and grants no authority (41.6404ms)
+✔ original nonce, recipe marker, own hash, byte envelope and coupled rights are mandatory (39.6127ms)
+✔ capture never runs root/store/product accessors or serialization hooks (2.6439ms)
+✔ inherited global JSON hooks are refused before any selected values are encoded (5.4706ms)
+✔ Proxy traps are not invoked while inspecting original request, choice or file (4.5393ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 148.5706

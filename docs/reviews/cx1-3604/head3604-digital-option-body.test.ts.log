@@ -1,0 +1,15 @@
+✔ the exact selected original amount/file namespace and duplicated consent metadata agree (27.8816ms)
+✔ identity, currency, consent and selected line cannot be substituted (21.2932ms)
+✔ coupled delivery, extra entitlement, discount and duplicate keys refuse (17.6728ms)
+✔ the original identity cannot execute getters or inherit its values (2.0058ms)
+✔ canonical byte bounds and original file owner/selection are required (6.4551ms)
+✔ a digital option cannot silently inherit any of the three checkout bump slots (36.5943ms)
+✔ description is bound to the original summary, including absence and substituted copies (9.5425ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 170.2801

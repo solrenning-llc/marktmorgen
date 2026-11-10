@@ -1,0 +1,19 @@
+✔ digital option retention needs its own complete funding scope before IO (2203.8717ms)
+✔ only the actual private prepared receipt supplies original values (918.9894ms)
+✔ a sealed immutable option source is retained without polling or payment authority (2548.7557ms)
+✔ lost enqueue acknowledgement keeps the original source and cannot replace its file (1782.9148ms)
+✔ an enqueue-looking response without a persisted winner cannot report success (795.0696ms)
+✔ confirmed retention remains evidence when its receipt expires after EVAL (+0ms) (1129.568ms)
+✔ confirmed retention remains evidence when its receipt expires after EVAL (+1ms) (1127.9177ms)
+✔ a receipt already expired before reservation cannot spend or write (1359.542ms)
+✔ an unknown local clock after the server read cannot create a new retained liability (561.4419ms)
+✔ retained option sources follow the existing erasure protocol (1067.531ms)
+﹣ actual shared Lua retains one immutable option winner and charges it once (1.3755ms) # SKIP
+ℹ tests 11
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 13696.5866

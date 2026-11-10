@@ -1,0 +1,49 @@
+✔ digital option retention needs its own complete funding scope before IO (1336.9182ms)
+✔ only the actual private prepared receipt supplies original values (1262.6405ms)
+✔ a sealed immutable option source is retained without polling or payment authority (1548.2448ms)
+✔ lost enqueue acknowledgement keeps the original source and cannot replace its file (2095.9187ms)
+✔ an enqueue-looking response without a persisted winner cannot report success (1862.8525ms)
+✖ confirmed retention remains evidence when its receipt expires after EVAL (+0ms) (2198.1612ms)
+✖ confirmed retention remains evidence when its receipt expires after EVAL (+1ms) (1721.8495ms)
+✔ a receipt already expired before reservation cannot spend or write (1309.6762ms)
+✔ an unknown local clock after the server read cannot create a new retained liability (1551.9002ms)
+✔ retained option sources follow the existing erasure protocol (1618.1065ms)
+﹣ actual shared Lua retains one immutable option winner and charges it once (0.7624ms) # SKIP
+ℹ tests 11
+ℹ suites 0
+ℹ pass 8
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 16592.9328
+
+✖ failing tests:
+
+test at .cx1-evidence\digital-option-retention.test.ts.cjs:62581:63
+✖ confirmed retention remains evidence when its receipt expires after EVAL (+0ms) (2198.1612ms)
+  AssertionError [ERR_ASSERTION]: the immutable persisted winner confirms retention after its receipt expires
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\.cx1-evidence\digital-option-retention.test.ts.cjs:62595:26)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\digital-option-retention.test.ts.cjs:62581:63
+✖ confirmed retention remains evidence when its receipt expires after EVAL (+1ms) (1721.8495ms)
+  AssertionError [ERR_ASSERTION]: the immutable persisted winner confirms retention after its receipt expires
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3604\.cx1-evidence\digital-option-retention.test.ts.cjs:62595:26)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

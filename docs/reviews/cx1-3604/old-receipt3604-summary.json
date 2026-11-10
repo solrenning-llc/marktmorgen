@@ -1,0 +1,13 @@
+{
+  "digital-option-retention.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "ℹ tests 11",
+      "ℹ fail 2",
+      "✖ failing tests:",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {"
+    ]
+  }
+}

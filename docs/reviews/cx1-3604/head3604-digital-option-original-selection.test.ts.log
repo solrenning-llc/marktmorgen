@@ -1,0 +1,10 @@
+✔ explicit original selection is bounded by the actual catalog limit and detached from later edits (39.0429ms)
+✔ missing, duplicate, inherited and executable original choices never guess or execute (2.9076ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 97.8678

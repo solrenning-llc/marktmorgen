@@ -1,5 +1,6 @@
 import Link from "next/link";
-import type { NextView } from "@/lib/next-actions-rules";
+import type { NextActionId, NextView } from "@/lib/next-actions-rules";
+import { NextActionDraft } from "@/components/next-action-draft";
 
 /**
  * "Do this next" on the studio's Today (484 [IT1] complement WG, unit 2): one to three actions from numbers the
@@ -7,9 +8,11 @@ import type { NextView } from "@/lib/next-actions-rules";
  * list item in plain words: the count, the recorded money with it, where the number comes from and when it was
  * counted, and a link named by where it goes (2.4.9), the size of a button (2.5.5). Nothing is sent, switched on or
  * charged from here. A number that could not be read is said, never drawn as zero; with nothing read for this
- * person, nothing is drawn at all. No script: it works the same with a keyboard, a pointer, touch or voice.
+ * person, nothing is drawn at all. The block itself needs no script; where the studio allows it (`draftable`: the
+ * role writes drafts and the store has the writing help), an action has "Write a draft with AI" under its link
+ * (components/next-action-draft.tsx, unit 3), which costs `jobs` of the month's AI uses and sends nothing.
  */
-export function NextActionsPanel({ view }: { view: NextView }) {
+export function NextActionsPanel({ view, draftable = [], jobs = 1 }: { view: NextView; draftable?: readonly NextActionId[]; jobs?: number }) {
   if (view.kind === "nothing" && !view.looked) return null;
   return (
     <section aria-labelledby="next-actions-title" className="card mt-8 p-6 sm:p-8" data-next-actions={view.kind}>
@@ -30,6 +33,7 @@ export function NextActionsPanel({ view }: { view: NextView }) {
                 <Link href={action.href} className="btn btn-secondary btn-sm mt-3">
                   {action.link}
                 </Link>
+                {draftable.includes(action.id) ? <NextActionDraft action={action.id} jobs={jobs} /> : null}
               </li>
             ))}
           </ol>

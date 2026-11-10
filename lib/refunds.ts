@@ -60,6 +60,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
+import { disputeMoneyGone } from "@/lib/retained-revenue";
 
 type ChargeLike = {
   id?: unknown;
@@ -124,6 +125,18 @@ const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 const DISPUTE_STATUSES = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
 const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 
+/**
+ * Whether one dispute takes the payment back for good: "lost" does; a "prevented" one (stopped before it opened, an
+ * issuer's early resolution) does only when its own money was withdrawn and not put back (disputeMoneyGone, the rule
+ * main's readers use since #3321), and does not when nothing was withdrawn or all of it was reinstated; any other
+ * status does not. null when a prevented dispute's money cannot be read (CX-123 rule 24): never lost, never not lost.
+ */
+function lostBy(dispute: Record<string, unknown>): boolean | null {
+  if (dispute.status === "lost") return true;
+  if (dispute.status === "prevented") return disputeMoneyGone(dispute);
+  return false;
+}
+
 /** A time Stripe sends: whole seconds. */
 const secondsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
@@ -165,7 +178,10 @@ function closingKnown(event: unknown): boolean {
   // An id that names a payment, as text or on the expanded payment, or null: an empty id names none (Codex Q, review 5794829222).
   const paymentKnown = payment === null || (typeof payment === "string" && !!payment) || (!!payment && typeof payment === "object" && !Array.isArray(payment) && typeof (payment as { id?: unknown }).id === "string" && !!(payment as { id: string }).id);
   if (!paymentKnown) return false;
-  return status !== "lost" || CHARGE_ID.test(idOf(charge));
+  // A prevented dispute decides by its money: unreadable is unknown. A lost one, by either way, names its charge.
+  const lost = lostBy(dispute as Record<string, unknown>);
+  if (lost === null) return false;
+  return !lost || CHARGE_ID.test(idOf(charge));
 }
 
 /**
@@ -197,7 +213,9 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
     if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("a dispute listed for this charge could not be read");
     // Another charge's lost dispute, or one naming none, would close the doors on a buyer who paid.
     if (idOf((row as { charge?: unknown }).charge) !== id) throw new Error("Stripe listed another charge's dispute");
-    if ((row as { status?: unknown }).status === "lost") lost = true;
+    const taken = lostBy(row as Record<string, unknown>);
+    if (taken === null) throw new Error("a prevented dispute's money could not be read");
+    if (taken) lost = true;
   }
   // Its own lost dispute is lost whatever else there is; "not lost" only from a list that says, exactly, there is no more.
   if (lost) return true;
@@ -355,7 +373,7 @@ export async function lostDisputesSince(
     const events = page as Record<string, unknown>[];
     for (const event of events) {
       const dispute = (event.data as { object: Record<string, unknown> }).object;
-      if (dispute.status !== "lost") continue;
+      if (lostBy(dispute) !== true) continue;
       const chargeId = idOf(dispute.charge);
       const created = event.created as number;
       newest = Math.max(newest, created);

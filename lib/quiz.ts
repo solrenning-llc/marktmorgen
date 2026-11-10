@@ -372,6 +372,22 @@ export async function readQuizFor(courseId: string, lessonId: string): Promise<Q
 }
 
 /**
+ * One lesson's quiz, read only in its exact shape (CX-123 rule 24): the quiz, or null when Redis answers there is none
+ * (nil). A reply of another shape, a record that does not read as a quiz, a lesson id that cannot be one or no Redis
+ * throws UnknownReplyError, never "this lesson has no quiz". readQuizFor stays as it is for its other callers.
+ */
+export async function readQuizForExact(courseId: string, lessonId: string): Promise<Quiz | null> {
+  const what = "a lesson's quiz";
+  if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) throw new UnknownReplyError(what);
+  const reply = repliesFor(await redisPipeline([["GET", quizKey(courseId, lessonId)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError(what);
+  if (reply[0] === null) return null;
+  const quiz = parseQuiz(reply[0]);
+  if (!quiz) throw new UnknownReplyError(what);
+  return quiz;
+}
+
+/**
  * Where a course's quizzes are counted in the store's data room
  * (lib/store-data.ts): the quizzes the creator writes, and what students'
  * tries leave (their last answers and marks, their count, what they passed).

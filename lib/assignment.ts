@@ -81,6 +81,19 @@ export async function readTaskFor(courseId: string, lessonId: string): Promise<T
 }
 
 /**
+ * One lesson's task, read only in its exact shape (CX-123 rule 24): the task, or null when Redis answers there is none
+ * (nil). A reply of another shape, a record without its prompt (saveTask never writes one), a lesson id that cannot be
+ * one or no Redis throws UnknownReplyError, never "this lesson has no task". readTaskFor stays as it is for its other
+ * callers.
+ */
+export async function readTaskForExact(courseId: string, lessonId: string): Promise<Task | null> {
+  // readTaskFor already reads exactly (only nil is none; another shape, or a record not as saveTask wrote it, throws);
+  // here no Redis or a lesson id that cannot be one is unknown too, never "no assignment".
+  if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) throw new UnknownReplyError("a lesson's task");
+  return readTaskFor(courseId, lessonId);
+}
+
+/**
  * Where a course's assignments are counted in the store's data room
  * (lib/store-data.ts): the prompts the creator writes, the work students hand
  * in and what comes back, with their places in the lists. A student's file is

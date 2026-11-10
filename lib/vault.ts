@@ -161,12 +161,15 @@ const controlKey = (pathname: string, part: "n" | ControlKind) => `nl:vault:ctl:
 // ------------------------------------------------- finishing and cancelling
 
 /**
- * One upload start is priced for one finish and one cancel
- * (lib/spend-cost-table.ts, UPLOAD_REQUESTS_PER_OPEN), each with its own R2
- * operations. So the first finish and the first cancel of an upload are
- * written down, with their answer, before R2 is asked; a repeat is given
- * that answer and R2 is not asked again. And every finish or cancel request
- * for an upload that is open (or was finished or canceled here) is counted
+ * One upload start is priced for VAULT_CONTROL_CALLS_PER_UPLOAD finish or
+ * cancel requests (lib/spend-cost-table.ts, UPLOAD_REQUESTS_PER_OPEN), one
+ * completion at R2 and the file measurements UPLOAD_OPEN_CLASS_B_OPS counts.
+ * So the first finish and the first cancel of an upload are claimed before
+ * R2 is asked. A finish's answer is always written down, so R2 joins an
+ * upload once; a cancel's only when R2 confirmed it, and an unconfirmed one
+ * gives its claim back, so a retry may ask R2 again. A repeat after a
+ * written-down answer is given that answer and R2 is not asked again. And
+ * every finish or cancel request for an upload that is open (or was finished or canceled here) is counted
  * before R2 is asked or anything is written: past
  * VAULT_CONTROL_CALLS_PER_UPLOAD it is refused with nothing else done. A
  * request for a path with neither is answered from those reads alone, so it
@@ -225,15 +228,31 @@ async function answerControl(pathname: string, kind: ControlKind, answer: unknow
   if (replies?.[0] !== "OK") console.error("a vault upload's first " + kind + " was not written down");
 }
 
-/** Runs `act` as the one first finish (or cancel) of an upload, and writes its answer down, also when it throws. */
-async function firstControl<T>(pathname: string, kind: ControlKind, failed: T, act: () => Promise<T>): Promise<T | "busy"> {
+/**
+ * Gives a claim back when its request's answer is not to be written down, so
+ * a later request (still counted by countControl) may ask R2 again. A reply
+ * other than 0 or 1 is unknown: the claim may still be there, and a repeat
+ * is then answered as from a pending one, never by asking R2.
+ */
+async function releaseControl(pathname: string, kind: ControlKind): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["DEL", controlKey(pathname, kind)]]), 1);
+  if (!replies || !(replies[0] === 0 || replies[0] === 1)) console.error("a vault upload's " + kind + " claim was not given back");
+}
+
+/**
+ * Runs `act` as the one first finish (or cancel) of an upload. Its answer is
+ * written down, also when it throws, when `kept` says so; otherwise the claim
+ * is given back, so only the answers `kept` takes are final.
+ */
+async function firstControl<T>(pathname: string, kind: ControlKind, failed: T, act: () => Promise<T>, kept: (answer: T) => boolean = () => true): Promise<T | "busy"> {
   if (!(await claimControl(pathname, kind))) return "busy";
   let answer = failed;
   try {
     answer = await act();
     return answer;
   } finally {
-    await answerControl(pathname, kind, answer).catch((error) => console.error("a vault upload's first " + kind + " was not written down", error));
+    const settle = kept(answer) ? answerControl(pathname, kind, answer) : releaseControl(pathname, kind);
+    await settle.catch((error) => console.error("a vault upload's first " + kind + " was not settled", error));
   }
 }
 
@@ -438,8 +457,9 @@ async function joinAndMeasure(config: Config, upload: Upload, etags: string[]): 
 /**
  * Forgets an upload only after the provider confirms its cancellation.
  * True when it is canceled or was never open; "tries" past the finish and
- * cancel requests one upload may make; "busy" while its first cancel is
- * still running. A repeat is given the first cancel's answer, R2 not asked.
+ * cancel requests one upload may make; "busy" while a cancel is still
+ * running. A repeat after a confirmed cancel is given that answer, R2 not
+ * asked; one after an unconfirmed cancel asks R2 again.
  */
 export async function abortVaultUpload(pathname: string): Promise<boolean | "tries" | "busy"> {
   const config = vaultConfig();
@@ -456,7 +476,12 @@ export async function abortVaultUpload(pathname: string): Promise<boolean | "tri
     return before.answer;
   }
   if (!upload) return true;
-  return firstControl(pathname, "abort", false, () => cancelAtStore(config, upload));
+  // Only a confirmed cancel is final. One R2 did not confirm frees nothing
+  // and is not written down: a retry, still counted above, asks R2 again
+  // (AbortMultipartUpload and DeleteObject are free; a 404 is measured, which
+  // UPLOAD_OPEN_CLASS_B_OPS prices), so its bytes come back without waiting
+  // for the session to be retired.
+  return firstControl(pathname, "abort", false, () => cancelAtStore(config, upload), (answer) => answer === true);
 }
 
 /** The one cancel of an upload, at the store. */

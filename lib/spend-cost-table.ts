@@ -128,8 +128,10 @@ export const UPLOAD_OPEN_BLOB_ADVANCED_OPS = BLOB_LIST_PAGES;
 /** Requests one upload start is priced for: the start, and the finish and
  * cancel requests lib/vault.ts lets one upload make in all
  * (VAULT_CONTROL_CALLS_PER_UPLOAD: a repeat past them is refused before any
- * other work, and a repeat inside them is answered from the first one's
- * record, with no request to R2; tests/vault-control-once.test.ts). */
+ * other work; inside them, a repeat finish or a repeat of a confirmed cancel
+ * is answered from the first one's record with no request to R2, and an
+ * unconfirmed cancel is asked again, a free operation plus at most one
+ * measurement, inside UPLOAD_OPEN_CLASS_B_OPS; tests/vault-control-once.test.ts). */
 export const UPLOAD_REQUESTS_PER_OPEN = 1 + VAULT_CONTROL_CALLS_PER_UPLOAD;
 
 /** The most a month of upload starts and signed pieces can cost, in whole micro-USD. */

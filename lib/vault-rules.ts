@@ -123,12 +123,13 @@ export const VAULT_LIST_PAGES = 20;
 export const VAULT_MEASURE_REQUESTS = 2;
 /**
  * Finish ("done") and cancel ("abort") requests one upload may make in all
- * (lib/vault.ts, closeVaultUpload and abortVaultUpload): one of each, which
- * is what one upload start is priced for (lib/spend-cost-table.ts,
+ * (lib/vault.ts, closeVaultUpload and abortVaultUpload), which is what one
+ * upload start is priced for (lib/spend-cost-table.ts,
  * UPLOAD_REQUESTS_PER_OPEN). Each is counted before anything else is done
  * for it; past this many, the request is refused and R2 is not asked. The
- * first finish and the first cancel are written down with their answer, so
- * a repeat inside the count is answered from that record, never from R2.
+ * first finish is written down with its answer, and a cancel once R2
+ * confirmed it, so a repeat inside the count is answered from that record,
+ * never from R2; a cancel R2 did not confirm may be asked again inside it.
  */
 export const VAULT_CONTROL_CALLS_PER_UPLOAD = 2;
 

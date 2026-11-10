@@ -69,11 +69,12 @@ import { type SaleRecord, noteSale } from "@/lib/sale-events";
 import { BundleDelivery } from "@/components/bundle-delivery";
 import type { BundleContents } from "@/lib/bundles";
 import { thanksWords } from "@/lib/buyer-words/thanks";
+import { PaymentReceived } from "@/components/payment-received";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
-import { groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
+import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { speech } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
@@ -114,6 +115,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   failed: { always: false },
   checking: { always: false },
   unavailable: { always: true },
+  changed: { always: true },
 };
 
 /**
@@ -185,7 +187,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.sessionsReady(Number(bought?.total ?? packageMeta.sessions))}</h1>
             <p className="st-muted mt-4 text-lg">
               {t.youBought}
@@ -242,7 +244,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{p.thanksTitle}</h1>
             <p className="st-muted mt-4 text-lg">{p.thanksBought(order.product.title, store.name, money(order.amount, order.currency))}</p>
             <p className="mt-4">
@@ -303,7 +305,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.giftOnWay}</h1>
             <p className="st-muted mt-4 text-lg">
               {t.youBought}
@@ -370,7 +372,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">
               {group ? t.placesReadyCount(group.people) : t.placesReady}
             </h1>
@@ -692,16 +694,23 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           .filter(reviewable)
           .filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i)
       : [];
-  const reviewed = new Map<string, Review | null>();
+  // A review of theirs that could not be read is unknown (CX-123 rule 24, inventory R24 item 13): the section says so
+  // instead of a blank form that would post over the review they already wrote.
+  const reviewed = new Map<string, Review | null | "unknown">();
   if (toReview.length && store.statsId && order.state === "paid" && order.email) {
     const statsId = store.statsId;
     const email = order.email;
     await Promise.all(
       toReview.map(async (p) => {
-        reviewed.set(p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, email)).catch(() => null));
+        reviewed.set(p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, email)).catch(() => "unknown" as const));
       }),
     );
   }
+  const reviewedKnown = (id: string): Review | null => {
+    const review = reviewed.get(id);
+    return review === "unknown" ? null : (review ?? null);
+  };
+  const giving = givingWords(store.language);
   const reviewStatus = typeof query.review === "string" && REVIEW_NOTICES[query.review] ? query.review : "";
   const reviewProduct = typeof query.product === "string" ? query.product : "";
 
@@ -780,9 +789,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         <div className="st-card p-7 sm:p-10">
           {order.state === "paid" ? (
             <>
-              <p className="st-price text-sm">
-                {order.product.recurring && order.firstChargeAt > 0 ? t.movedStarted : order.product.recurring && order.trialDays > 0 ? t.trialStarted : t.paid}
-              </p>
+              {/* A payment Stripe confirmed, of an amount, gets the drawn mark (654 [WG14]); a trial, a moved membership or
+                  a free order keeps its words, since no payment was received. */}
+              {!(order.product.recurring && (order.firstChargeAt > 0 || order.trialDays > 0)) && order.amount > 0 ? (
+                <PaymentReceived label={t.paymentReceived} />
+              ) : (
+                <p className="st-price text-sm">
+                  {order.product.recurring && order.firstChargeAt > 0 ? t.movedStarted : order.product.recurring && order.trialDays > 0 ? t.trialStarted : t.paid}
+                </p>
+              )}
               <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">
                 {booked ? t.youAreBooked : t.thankYou}
               </h1>
@@ -1216,7 +1231,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   <form action="/api/store/upsell" method="post" className="px-5 py-5 sm:px-6">
                     <input type="hidden" name="handle" value={store.handle} />
                     <input type="hidden" name="session_id" value={sessionId} />
-                    <input type="hidden" name="step" value={offer.step.id} />
+                    <input type="hidden" name="step" value={offer.ref} />
                     <p className="st-label">{offer.afterNo ? t.beforeYouGo : t.oneMoreThing}</p>
                     <h2 id="offer-title" className="mt-1 text-xl font-semibold leading-snug tracking-[-0.01em]">
                       {offer.step.headline || t.titleFor(offer.target.title, money(offer.step.priceCents, store.currency))}
@@ -1365,19 +1380,25 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               {t.reviewWhenever(store.name)}
             </p>
             <div className="mt-6 space-y-10">
-              {toReview.map((product) => (
-                <ReviewForm
-                  key={product.id}
-                  handle={store.handle}
-                  door={{ session_id: sessionId }}
-                  product={{ id: product.id, title: product.title }}
-                  existing={reviewed.get(product.id) ?? null}
-                  storeName={store.name}
-                  back="thanks"
-                  notice={reviewProduct === product.id ? reviewStatus || null : null}
-                  lang={store.language}
-                />
-              ))}
+              {toReview.map((product) =>
+                reviewed.get(product.id) === "unknown" ? (
+                  <p key={product.id} role="status" className="st-note text-sm">
+                    {giving.reviewUnread(product.title)}
+                  </p>
+                ) : (
+                  <ReviewForm
+                    key={product.id}
+                    handle={store.handle}
+                    door={{ session_id: sessionId }}
+                    product={{ id: product.id, title: product.title }}
+                    existing={reviewedKnown(product.id)}
+                    storeName={store.name}
+                    back="thanks"
+                    notice={reviewProduct === product.id ? reviewStatus || null : null}
+                    lang={store.language}
+                  />
+                ),
+              )}
             </div>
           </section>
         ) : null}

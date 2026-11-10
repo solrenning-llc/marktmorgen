@@ -12,7 +12,7 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { canBeBumped } from "@/lib/product-extras";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
-import { imageUrl } from "@/lib/product-image";
+import { imageUrl, picturedFrom } from "@/lib/product-image";
 import { FunnelEditor } from "@/components/funnel-editor";
 import { offerableAfterPaying } from "@/lib/bundles";
 import { PageFunnelEditor, type SavedFunnel, type StepChoice } from "@/components/page-funnel-editor";
@@ -106,8 +106,9 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       bundle: Boolean(p.bundle),
       draft: p.hidden,
     }));
+  // The same rule as the offer itself (lib/upsell.ts funnelView), so the preview shows what buyers get.
   const pictures = listings
-    .filter((p) => p.image)
+    .filter((p) => picturedFrom(p))
     .map((p) => ({ id: p.id, title: p.title, src: imageUrl(p.image!) }));
 
   // Funnels of pages (lib/page-funnel.ts): every saved one, each step as the
@@ -160,7 +161,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
   // What a kind of funnel can be built with (lib/funnel-types.ts): every product, and what it is.
   const courseKinds = new Set(idsOfKind(store,"course"));
   const bundleKinds = new Set(idsOfKind(store,"bundle"));
-  const typeProducts: TypeProduct[] = [...cards.values()].map((p) => ({ id: p.id, title: p.title, free: free.has(p.id), call: calls.has(p.id), draft: drafts.has(p.id) }));
+  const typeProducts: TypeProduct[] = [...cards.values()].map((p) => ({ id: p.id, title: p.title, free: free.has(p.id), call: calls.has(p.id), bundle: bundleKinds.has(p.id), draft: drafts.has(p.id) }));
   // Copying, sharing and bringing in funnels (lib/funnel-bundle.ts): the store's links, never their codes.
   const canShare = can(view.role, "page");
   // The account's other stores, for its owner alone: where a funnel can be copied to (app/api/store/funnel-share).

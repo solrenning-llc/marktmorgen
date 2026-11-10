@@ -15,7 +15,7 @@ import { readSoldCounts } from "@/lib/sold-count";
 import { cartWords } from "@/lib/buyer-words/cart";
 import type { Store } from "@/lib/store";
 import { salePrice } from "@/lib/store-sale";
-import { soonState } from "@/lib/preorders";
+import { knownNotSoon, soonState } from "@/lib/preorders";
 import { outOfKeys } from "@/lib/licence-keys";
 import { readCountry } from "@/lib/fair-price";
 import { formatMoney } from "@/lib/money";
@@ -29,6 +29,7 @@ import { countHit } from "@/lib/visit";
 import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { productSegment } from "@/lib/product-slug";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
+import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
 import { assistReminderShown, keepAssistReminder } from "@/lib/assistant-reminder";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { cartOfferOwner } from "@/lib/cart-offers";
@@ -305,6 +306,9 @@ export async function POST(request: NextRequest) {
   if (!coming) return away(`/@${store.handle}?cart=error#cart`);
   const fit = products.length === ids.length && products.every((p) => cartable(p) && p.fields.length === 0 && !coming.soon.has(p.id));
   if (!fit) return away(`/@${store.handle}?cart=changed#cart`);
+  // Read in part: a product outside what was read may be coming soon, so it is unknown and never sent to Stripe;
+  // back to the cart to try again, nothing charged.
+  if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
   for (const product of products) {
     // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
     const out = await outOfKeys(store, product).catch(() => null);
@@ -362,6 +366,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof CartShippingRefused) return away(`/@${store.handle}?cart=changed#cart`);
     console.error("a cart's checkout failed", error);
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
+    // Stripe says the account cannot take card payments: written down, and said on the store page (lib/stripe-charges.ts).
+    if (await chargesOffAfterRefusal(store, error)) return away(`/@${store.handle}?status=nocharges`);
     return away(`/@${store.handle}?cart=error#cart`);
   }
 }

@@ -84,7 +84,7 @@ import { MAX_ROOM_LENGTH, readSetup } from "@/lib/call-setup";
 import { MAX_GROUPS, MAX_GROUP_LENGTH, MAX_PREFIX_LENGTH } from "@/lib/key-setup";
 import { MAX_KEY_LENGTH } from "@/lib/licence-keys";
 import { MAX_TITLE as MAX_AGREEMENT_TITLE, readDraft as readAgreementDraft } from "@/lib/agreement-rules";
-import { createAgreement, saveAgreement } from "@/lib/agreement-store";
+import { changeAgreement, createAgreement } from "@/lib/agreement-store";
 import { createRequest, changeRequest } from "@/lib/payment-request-store";
 import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { requestsIn } from "@/lib/traffic";
@@ -691,7 +691,7 @@ async function everyLimit(shape: CardShape): Promise<string[]> {
     assert.ok(draft.ok);
     const made = await createAgreement(full, draft.draft);
     assert.ok(made.ok);
-    await saveAgreement({ ...made.agreement, sent: [Date.now()] });
+    await changeAgreement(full, made.agreement.id, (current) => ({ ...current, sent: [Date.now()] }));
   }
   const ids = drafts.ids;
   checkouts = [

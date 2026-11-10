@@ -57,7 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -73,6 +73,7 @@ import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { communityWords } from "@/lib/buyer-words/community";
+import { eventFileWords } from "@/lib/buyer-words/event-file";
 import { LANGUAGES } from "@/lib/store-language";
 import {
   EVENT_LENGTHS,
@@ -219,6 +220,21 @@ export async function readEvent(id: string, event: string): Promise<CommunityEve
   return parseEvent(raw);
 }
 
+/**
+ * The event, read exactly (rules 24 and 30): null only when its GET answered exactly nil, so the event is gone (or
+ * its id names none). A lost reply, one in another shape or a value that does not parse throws UnknownReplyError:
+ * an event that did not read is not one that is gone, so what would be closed because it is gone is kept.
+ */
+export async function readEventExact(id: string, event: string): Promise<CommunityEvent | null> {
+  if (!ITEM_ID.test(event)) return null;
+  const replies = repliesFor(await redisPipeline([["GET", eventKey(id, event)]]), 1);
+  if (!replies) throw new UnknownReplyError("a live event");
+  if (replies[0] === null) return null;
+  const parsed = parseEvent(replies[0]);
+  if (!parsed) throw new UnknownReplyError("a live event");
+  return parsed;
+}
+
 export async function readEvents(id: string, ids: string[]): Promise<CommunityEvent[]> {
   const wanted = ids.filter((e) => ITEM_ID.test(e));
   if (!wanted.length) return [];
@@ -252,14 +268,42 @@ export async function upcomingEvents(id: string, now = Date.now()): Promise<Comm
 
 /**
  * Every event a community holds, soonest first, for the one-time walk that
- * puts what already exists into the search index (lib/community-index.ts).
+ * puts what already exists into the search index (lib/community-walk.ts).
  * Bounded by what a community keeps, which is what the index holds anyway.
+ *
+ * Read exactly (CX-123 rule 24, Claude 4 on #3263): the walk is marked done once, ever, so an unread calendar must
+ * never pass for an empty one. Only a list confirmed empty is no events, and only an event whose GET answered nil is
+ * one that is gone. A list or a row in any other shape (an id that is not an event's, text that is not an event)
+ * throws UnknownReplyError, and the walk stops unmarked. The walk is its only caller.
  */
 export async function allEvents(id: string): Promise<CommunityEvent[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MAX_KEPT_EVENTS]]);
-  const { ids } = flatIds(raw);
-  return readEvents(id, ids);
+  const what = "a community's calendar";
+  const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MAX_KEPT_EVENTS]]), 1)?.[0]);
+  // Member and score in pairs.
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
+  const ids = flat.filter((_, i) => i % 2 === 0);
+  if (!ids.length) return [];
+  if (ids.some((e) => !ITEM_ID.test(e))) throw new UnknownReplyError(what);
+  const rows = repliesFor(await redisPipeline(ids.map((e) => ["GET", eventKey(id, e)])), ids.length);
+  if (!rows) throw new UnknownReplyError(what);
+  return rows.flatMap((raw) => {
+    if (raw === null) return [];
+    const event = parseEvent(raw);
+    if (!event) throw new UnknownReplyError(what);
+    return [event];
+  });
+}
+
+/**
+ * How many events the walk of the archive reads, and pays for before it reads them (lib/community-walk.ts), read
+ * exactly (CX-123 rule 24, Claude 4 on #3263): ZCARD's own count, or UnknownReplyError, never 0 from an unknown answer.
+ */
+export async function eventCountExact(id: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the community's events count");
+  return Math.min(n, MAX_KEPT_EVENTS);
 }
 
 export type PastPage = { events: CommunityEvent[]; next: number | null };
@@ -595,13 +639,15 @@ export async function mayAttend(
   config: CommunityConfig,
   event: CommunityEvent,
   viewer: { owner: boolean; email: string },
+  /** `strict`, for deciding who a reminder goes to (lib/community-event-mail.ts): an answer not had throws, never a no. */
+  options: { strict?: boolean } = {},
 ): Promise<boolean> {
   if (viewer.owner) return true;
   if (!event.only.length) return true;
   const ids = event.only.filter((p) => config.access.includes(p));
   if (!ids.length) return false;
   const id = store.community?.id as string;
-  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`);
+  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
 }
 
 export type JoinWindow = {
@@ -702,27 +748,49 @@ export async function rsvpNumbers(id: string, events: CommunityEvent[], member: 
   return out;
 }
 
-/** Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time. */
+/** The most pages of who is coming one read takes (a thousand asked for a page). */
+const RSVP_PAGES = 200;
+
+/**
+ * Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time.
+ *
+ * Everyone or not at all (rules 24 and 30, review of #2921): a page that does not read, or a walk not at its end
+ * after RSVP_PAGES before `limit` is reached, throws UnknownReplyError, never fewer people coming. A reminder, move
+ * or cancellation is then not sent to a short list as if it were everyone (lib/community-event-mail.ts, startJob).
+ */
 export async function rsvpList(id: string, eventId: string, limit = 100_000): Promise<{ key: string; at: number }[]> {
-  const out: { key: string; at: number }[] = [];
+  // By member: HSCAN may hand the same field back twice during a walk, and a person coming is one person, counted
+  // once and emailed once (a send's readers must not repeat, lib/community-event-mail.ts recipientBatch). The latest
+  // reading of the field is kept.
+  const seen = new Map<string, number>();
   let cursor = "0";
-  for (let page = 0; page < 200; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
-    for (let i = 0; i + 1 < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
-    cursor = String(reply[0]);
-    if (cursor === "0" || out.length >= limit) break;
+  for (let page = 0; ; page += 1) {
+    if (page >= RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
+    const read = scanPage(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]));
+    // A hash answers field and value: an odd page is not one.
+    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
+    const flat = read.items;
+    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], Number(flat[i + 1]) || 0);
+    cursor = read.next;
+    if (cursor === "0" || seen.size >= limit) break;
   }
-  return out.slice(0, limit).sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
+  return [...seen]
+    .slice(0, limit)
+    .map(([key, at]) => ({ key, at }))
+    .sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
 }
 
-/** Which of these members are still coming, asked when an email to them goes out. */
+/**
+ * Which of these members are still coming, asked when an email to them goes out, read exactly (rules 24 and 30): one
+ * is not coming only when its field answered exactly nil. A reply lost, cut short or in another shape, or a field that
+ * is not a string, throws UnknownReplyError: a list that did not read is not a list of nobody coming.
+ */
 export async function stillGoing(id: string, eventId: string, members: string[]): Promise<Set<string>> {
   if (!members.length) return new Set();
-  const [raw] = await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]);
-  const rows = Array.isArray(raw) ? raw : [];
-  return new Set(members.filter((_, i) => rows[i] !== null && rows[i] !== undefined));
+  const replies = repliesFor(await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]), 1);
+  const rows = replies && repliesFor(replies[0], members.length);
+  if (!rows || rows.some((row) => row !== null && typeof row !== "string")) throw new UnknownReplyError("who is coming to an event");
+  return new Set(members.filter((_, i) => rows[i] !== null));
 }
 
 // ------------------------------------------------------------------ words and files
@@ -787,15 +855,17 @@ export function lengthWords(minutes: number): string {
  * The calendar file for an event: the page to join from, never the room —
  * the page asks who is opening it, a calendar cannot. Same UID for every
  * version, and a sequence that goes up with each move, so a calendar that
- * imports it again moves the event rather than adding a second one.
+ * imports it again moves the event rather than adding a second one. Its
+ * words are the store's language (lib/buyer-words/event-file.ts).
  */
-export function eventIcs(store: Pick<Store, "handle" | "name">, event: CommunityEvent, communityName: string): string {
+export function eventIcs(store: Pick<Store, "handle" | "name" | "language">, event: CommunityEvent, communityName: string): string {
   const page = eventAddress(store, event.id);
+  const w = eventFileWords(store.language);
   const description = [
     event.about,
     "",
-    `Join from the event page: ${page}`,
-    `The way in shows there ${JOIN_EARLY_MINUTES} minutes before the start.`,
+    w.joinFrom(page),
+    w.wayIn(JOIN_EARLY_MINUTES),
   ].join("\n").trim();
   const lines = [
     "BEGIN:VCALENDAR",
@@ -816,22 +886,25 @@ export function eventIcs(store: Pick<Store, "handle" | "name">, event: Community
     `STATUS:${event.cancelled ? "CANCELLED" : "CONFIRMED"}`,
     ...(event.cancelled
       ? []
-      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:${icsText(`${event.title} in 15 minutes`)}`, "END:VALARM"]),
+      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:${icsText(w.alarm(event.title, 15))}`, "END:VALARM"]),
     "END:VEVENT",
     "END:VCALENDAR",
   ];
   return `${lines.map(fold).join("\r\n")}\r\n`;
 }
 
-/** The words for the feed post that announces an event, with the link to it. */
-export function announcementText(store: Pick<Store, "handle">, event: CommunityEvent): { title: string; text: string } {
+/** The words for the feed post that announces an event, with the link to it, in the store's language. */
+export function announcementText(store: Pick<Store, "handle" | "language">, event: CommunityEvent): { title: string; text: string } {
   const about = event.about.length > 600 ? `${event.about.slice(0, 600).replace(/\s+\S*$/, "")}…` : event.about;
+  const w = eventFileWords(store.language);
+  // A length that already ends in a period ("1 Std. 30 Min.") takes no second one.
+  const length = lengthIn(store, event.minutes);
   return {
-    title: cleanLine(`Live: ${event.title}`, 120),
+    title: cleanLine(w.liveTitle(event.title), 120),
     text: [
-      `${eventTime(event)}, ${lengthWords(event.minutes)}.`,
+      `${eventTimeIn(store, event)}, ${length}${length.endsWith(".") ? "" : "."}`,
       about,
-      `RSVP, add it to your calendar and join here: ${eventAddress(store, event.id)}`,
+      w.rsvpJoin(eventAddress(store, event.id)),
     ].filter(Boolean).join("\n\n"),
   };
 }

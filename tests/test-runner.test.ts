@@ -251,10 +251,13 @@ const running = (pid: number) => {
   try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
   try { return !/^State:\s*Z/m.test(readFileSync(`/proc/${pid}/status`, 'utf8')); } catch { return true; }
 };
-async function gone(pid: number, ms = 3000): Promise<boolean> {
+async function gone(pid: number, ms = 3000, isRunning: (pid: number) => boolean = running): Promise<boolean> {
   const until = Date.now() + ms;
-  while (running(pid) && Date.now() < until) await new Promise(done => setTimeout(done, 10));
-  return !running(pid);
+  while (Date.now() < until) {
+    if (!isRunning(pid)) return true;
+    await new Promise(done => setTimeout(done, 10));
+  }
+  return !isRunning(pid);
 }
 
 test('a timed-out file\'s descendants in its process group go with it, a throwing diagnose still counts the failure, and the next file runs', async () => {
@@ -283,6 +286,21 @@ test('a timed-out file\'s descendants in its process group go with it, a throwin
     for (const pid of owned) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
     rmSync(directory, {recursive: true, force: true});
   }
+});
+
+test('a confirmed terminal observation is retained instead of probing the numeric PID again', async () => {
+  let observations = 0;
+  assert.equal(await gone(123456, 500, () => {
+    observations += 1;
+    // A confirmed zombie/absent PID can be followed by an unreadable /proc entry or a reused PID.
+    return observations > 1;
+  }), true, 'the original descendant was confirmed gone');
+  assert.equal(observations, 1, 'no second observation can reverse a confirmed terminal state');
+});
+
+test('an unconfirmed live or unreadable process is not reported gone at the deadline', async () => {
+  // running() deliberately returns true when /proc cannot be read. Keep that conservative result.
+  assert.equal(await gone(123456, 0, () => true), false);
 });
 
 test('once the runner has finished, nothing it started holds its output open', async () => {

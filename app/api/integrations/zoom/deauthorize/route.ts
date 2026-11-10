@@ -1,6 +1,6 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
-import { ACCOUNT_NAMES, forgetUser } from "@/lib/meet-connect";
+import { ACCOUNT_NAMES, IncompleteForget, forgetUser } from "@/lib/meet-connect";
 import { isConfigured, zoomClientId, zoomSigned, zoomValidation } from "@/lib/meet-providers";
 import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -79,8 +79,7 @@ export async function POST(request: NextRequest) {
     const user = typeof payload.user_id === "string" ? payload.user_id : "";
     const client = typeof payload.client_id === "string" ? payload.client_id : "";
     if (!user || (client && client !== zoomClientId())) return Response.json({ ok: true });
-    try {
-      const forgot = await forgetUser("zoom", user);
+    const tell = (forgot: Awaited<ReturnType<typeof forgetUser>>) => {
       for (const one of forgot) {
         if (!one.owner.email) continue;
         after(() =>
@@ -90,9 +89,14 @@ export async function POST(request: NextRequest) {
           ),
         );
       }
+    };
+    try {
+      tell(await forgetUser("zoom", user));
       return Response.json({ ok: true });
     } catch (error) {
       console.error("forgetting a Zoom user failed", error);
+      // The stores this pass did forget are told now: the next pass reads them as gone (Claude 5 on #2869).
+      if (error instanceof IncompleteForget) tell(error.forgot);
       // Zoom tries again when it is not answered with a success.
       // Only while it is still ours: a mark that ran out and was taken by another request is that one's.
       await releaseMark(seenKey, mine);

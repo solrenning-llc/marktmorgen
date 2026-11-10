@@ -55,6 +55,12 @@ export type StoreState = {
   sources: Record<BackupFilesSource, SourceState>;
   /** Bytes and objects copied, by day (the 4R in 32 days and the 10,000 objects a month). */
   copied: DayCount[];
+  /**
+   * Source bytes read, by day, charged and saved before each read whatever its
+   * outcome (the 4R in 32 days, docs section 5b): a refused or unknown write
+   * keeps its read counted, never refunded as zero (Codex H2 M1 on #3340).
+   */
+  read: DayCount[];
   /** Objects whose etag changed, by day (objects = the count; bytes unused). */
   etagChanges: DayCount[];
 };
@@ -179,6 +185,7 @@ export const emptyStore = (id: string): StoreState => ({
   roomBytes: null,
   sources: { r2: emptySource(), blob: emptySource(), bunny: emptySource() },
   copied: [],
+  read: [],
   etagChanges: [],
 });
 
@@ -191,7 +198,7 @@ export function parseStoreState(raw: string | null, id: string): StoreState {
   } catch {
     return fail("a store's state is not JSON");
   }
-  const o = exact(value, ["version", "store", "roomBytes", "sources", "copied", "etagChanges"], "store");
+  const o = exact(value, ["version", "store", "roomBytes", "sources", "copied", "read", "etagChanges"], "store");
   if (o.version !== 1) fail("store.version is not 1");
   if (store(o.store, "store.store") !== id) fail("store.store is another store");
   return {
@@ -200,6 +207,7 @@ export function parseStoreState(raw: string | null, id: string): StoreState {
     roomBytes: orNull(o.roomBytes, (r) => whole(r, "store.roomBytes", 1)),
     sources: bySource(o.sources, "store.sources", sourceState),
     copied: dayCounts(o.copied, "store.copied"),
+    read: dayCounts(o.read, "store.read"),
     etagChanges: dayCounts(o.etagChanges, "store.etagChanges"),
   };
 }
@@ -209,7 +217,7 @@ export function storeStateText(state: StoreState): string {
     const src = state.sources[s];
     return [s, { objects: [...src.objects.values()], versions: src.versions, pending: src.pending, listings: src.listings, received: src.received, upload: src.upload }];
   }));
-  return JSON.stringify({ version: 1, store: state.store, roomBytes: state.roomBytes, sources, copied: state.copied, etagChanges: state.etagChanges });
+  return JSON.stringify({ version: 1, store: state.store, roomBytes: state.roomBytes, sources, copied: state.copied, read: state.read, etagChanges: state.etagChanges });
 }
 
 function alarm(v: unknown, what: string): Alarm {

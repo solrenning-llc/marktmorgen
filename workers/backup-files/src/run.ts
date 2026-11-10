@@ -33,7 +33,8 @@
  * days, held while etags of more than 20% of the store changed in 30 days, and
  * deleted on its 90th day anyway.
  * Ceilings (items 4a and 5b), before each copy, never by deleting: 5R held,
- * 4R copied in 32 days, 10,000 objects copied in 30 days, per store.
+ * 4R of source bytes read in 32 days (each read charged and saved before it is
+ * made, whatever the copy's outcome), 10,000 objects copied in 30 days, per store.
  * Budget (item 4): every fetch and every bucket operation is a subrequest,
  * counted before it is made, inside BACKUP_FILES_RUN_SUBREQUESTS (the paid
  * plan's 10,000 less room) and BACKUP_FILES_RUN_MS (its 15 minutes less room);
@@ -679,16 +680,17 @@ function heldBytes(state: StoreState): number {
   }
   return total;
 }
-const uploadsBytes = (state: StoreState, except: string) =>
-  BACKUP_FILES_SOURCES.reduce((n, s) => n + (state.sources[s].upload && state.sources[s].upload!.key !== except ? state.sources[s].upload!.size : 0), 0);
+/** The bytes other uploads in progress still have to read (what they read already is in `read`). */
+const uploadsLeft = (state: StoreState, except: string) =>
+  BACKUP_FILES_SOURCES.reduce((n, s) => n + (state.sources[s].upload && state.sources[s].upload!.key !== except ? state.sources[s].upload!.size - state.sources[s].upload!.next : 0), 0);
+const readSince = (ctx: Ctx, state: StoreState) => sumSince(state.read, ctx.day - BACKUP_FILES_COPY_WINDOW_DAYS + 1).bytes;
 
 /** The store's own ceilings before a copy (items 4a, 5b); never relieved by a deletion. */
 function ceilingOf(ctx: Ctx, state: StoreState, object: ObjectState): string | null {
   const room = state.roomBytes;
   if (room === null) return "files_room";
   if (heldBytes(state) + object.size > BACKUP_FILES_ROOM_TIMES * room) return "files_room";
-  const copied = sumSince(state.copied, ctx.day - BACKUP_FILES_COPY_WINDOW_DAYS + 1).bytes + uploadsBytes(state, object.key);
-  if (copied + object.size > BACKUP_FILES_COPY_TIMES * room) return "files_copy_ceiling";
+  if (readSince(ctx, state) + uploadsLeft(state, object.key) + object.size > BACKUP_FILES_COPY_TIMES * room) return "files_copy_ceiling";
   if (sumSince(state.copied, ctx.day - BACKUP_FILES_OBJECT_WINDOW_DAYS + 1).objects + 1 > BACKUP_FILES_OBJECTS_PER_MONTH) return "files_objects_ceiling";
   return null;
 }
@@ -731,6 +733,23 @@ async function readPart(ctx: Ctx, entry: BackupFilesEntry, object: ObjectState, 
 const isPart = (reply: unknown, partNumber: number): reply is PartState =>
   !!reply && typeof reply === "object" && (reply as PartState).partNumber === partNumber && typeof (reply as PartState).etag === "string" && (reply as PartState).etag.length > 0;
 
+/**
+ * Charges `bytes` of a source read against the store's 4R in 32 days and saves
+ * the charge before the read is made (Codex H2 M1 on #3340). A read is paid
+ * whatever follows it (a refused, unknown or failed write, a changed version),
+ * so the charge is never refunded; past the ceiling nothing is read.
+ */
+async function chargeRead(ctx: Ctx, state: StoreState, source: BackupFilesSource, bytes: number): Promise<boolean> {
+  const room = state.roomBytes;
+  if (room === null || readSince(ctx, state) + bytes > BACKUP_FILES_COPY_TIMES * room) {
+    raise(ctx, room === null ? "files_room" : "files_copy_ceiling", { source, store: state.store, bytes });
+    return false;
+  }
+  state.read = addDay(state.read, ctx.day, 1, bytes);
+  await saveStore(ctx, state);
+  return true;
+}
+
 function copied(ctx: Ctx, state: StoreState, object: ObjectState): void {
   object.copied = true;
   state.copied = addDay(state.copied, ctx.day, 1, object.size);
@@ -751,6 +770,7 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
   };
 
   if (object.size <= BACKUP_FILES_PART_BYTES) {
+    if (!(await chargeRead(ctx, state, source, object.size))) return;
     const body = await readPart(ctx, entry, object, 0, object.size - 1);
     if (typeof body === "string") return refuse(body);
     ctx.run.spend();
@@ -787,6 +807,8 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
     ctx.run.boundary(4);
     if (entry.expiresAt - ctx.opts.now() < BACKUP_FILES_URL_MARGIN_MS) return;
     const end = Math.min(upload.next + BACKUP_FILES_PART_BYTES, object.size) - 1;
+    // Past the ceiling the upload is kept, its parts already paid; it resumes when the 32 days allow.
+    if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) return;
     const body = await readPart(ctx, entry, object, upload.next, end);
     if (typeof body === "string") return refuse(body);
     const partNumber = upload.parts.length + 1;

@@ -102,7 +102,7 @@ async function main(): Promise<void> {
 
   part("takeCalls: a call to the creator's Stripe account is taken only on a whole number");
   for (const [label, reply] of [...BAD_TOTALS, ["a Redis that cannot be asked", "throw"] as [string, unknown]]) {
-    await startCallBudget("calls-shape", 10);
+    await startCallBudget("calls-shape", 10, 1);
     rule = { when: first("HINCRBY", "nl:closing:work:"), reply };
     const from = sent.length;
     is(`takeCalls, ${label}: refused as unknown, never taken`, await outcome(() => takeCalls("calls-shape", 2)), "rejected");
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     is("takeCalls: and given back, as before", sentSince(from + 1, "HINCRBY", "nl:closing:work:"), true);
   }
   rule = null;
-  await startCallBudget("calls-real", 3);
+  await startCallBudget("calls-real", 3, 1);
   is("takeCalls: the real budget still takes", [await takeCalls("calls-real", 2), await takeCalls("calls-real", 2), await takeCalls("calls-real", 1, "calls")], [true, false, true]);
   is("takeCalls: nothing asked is nothing taken, without asking Redis", await takeCalls("calls-real", 0), true);
 

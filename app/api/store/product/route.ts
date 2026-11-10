@@ -1,3 +1,4 @@
+import { dropPublicShow } from "@/lib/podcast-public-show";
 import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
@@ -343,6 +344,13 @@ export async function POST(request: NextRequest) {
           // before that course identity can be detached.
           const handed = await applyCourseTaskDrops(removedCourse, taskDrops, storeKey(removed.store), removed.store);
           had.push(...handed.map((pathname) => ({ pathname })));
+        }
+        // A podcast's public feed settings, and their room in the store's data (lib/podcast-public-show.ts): best
+        // effort, as the others; one not confirmed gone is erased with the store's closing.
+        if (going.podcast) {
+          await dropPublicShow(removed.store, going.podcast.id).catch((error: unknown) => {
+            console.error("could not drop a removed podcast's public feed settings", error);
+          });
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
         if (going.note) await dropThanksNote(removed.store.statsId, id, removed.store).catch(() => {});

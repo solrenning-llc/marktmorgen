@@ -47,10 +47,11 @@ function said(answer: Answer): string {
 
 /**
  * What the creator still has to give before "on" (or a save while it is on) is sent; null when nothing. The
- * server checks the same again.
+ * box saying the feed is public is shown, and so asked for, only while the feed is off: once it is on, the yes was
+ * given when it was turned on (review of #3544, Claude 3). The server checks the same again.
  */
 export function turnOnMissing(state: { on: boolean; understood: boolean; category: string; explicit: boolean | null }): "understood" | "category" | "explicit" | null {
-  if (!state.understood) return "understood";
+  if (!state.on && !state.understood) return "understood";
   if (!state.category) return "category";
   if (state.explicit === null) return "explicit";
   return null;

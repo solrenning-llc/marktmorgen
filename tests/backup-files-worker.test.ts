@@ -326,6 +326,47 @@ async function main(): Promise<void> {
   report = await runAt(0);
   is("300 + 150 bytes copied in 32 days against 4 × 100: the second waits", [copies().length, has(report, "files_copy_ceiling"), has(report, "files_room")], [1, true, false]);
 
+  part("every source read counts against the 4R before it is made, whatever the copy's outcome (Codex H2 M1 on #3340)");
+  const chargedNow = (): number => {
+    const saved = files.json(`state/stores/${S}.json`) as { read?: { bytes: number }[] } | null;
+    return Array.isArray(saved?.read) ? saved.read.reduce((n, d) => n + d.bytes, 0) : -1;
+  };
+  const rangeBytes = (range: string | null) => {
+    const m = range ? /^bytes=(\d+)-(\d+)$/.exec(range) : null;
+    return m ? Number(m[2]) - Number(m[1]) + 1 : 0;
+  };
+  const originBytes = () => world.calls.filter((c) => c.url.startsWith("https://src.test/")).reduce((n, c) => n + rangeBytes(c.range), 0);
+  const chargedAtRead: [number, number][] = [];
+  const watched = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (href.startsWith("https://src.test/")) chargedAtRead.push([chargedNow(), originBytes() + rangeBytes(new Headers(init?.headers).get("range"))]);
+    return fakeFetch(input, init);
+  };
+  const R = 1_000_000;
+  fresh([{ store: S, roomBytes: R }]);
+  setListing("blob", S, [{ key: `stores/${S}/same.bin`, etag: '"same1"', bytes: big(R, 3) }]);
+  files.putFault = (key) => (key.startsWith("copies/") ? "null" : undefined);
+  for (let hour = 1; hour <= 5; hour++) report = await runAt(0, hour, { fetch: watched });
+  is("five hourly runs whose copy write is refused read the source at most 4R, and the fifth is refused files_copy_ceiling", [originBytes() <= BACKUP_FILES_COPY_TIMES * R, has(report, "files_copy_ceiling"), copies().length], [true, true, 0]);
+  is("each read was charged and saved in the store's state before it was made", chargedAtRead.length > 0 && chargedAtRead.every(([charged, upTo]) => charged >= upTo), true);
+  is("the refused reads stay counted (unknown is never zero): 4R charged, 0 copied", [chargedNow(), (files.json(`state/stores/${S}.json`) as { copied?: unknown[] } | null)?.copied?.length], [BACKUP_FILES_COPY_TIMES * R, 0]);
+  files.putFault = () => undefined;
+  report = await runAt(1, 1, { fetch: watched });
+  is("the next day, inside the same 32 days, the ceiling still holds: no read, nothing copied", [originBytes() <= BACKUP_FILES_COPY_TIMES * R, copies().length, has(report, "files_copy_ceiling")], [true, 0, true]);
+  fresh([{ store: S, roomBytes: R }]);
+  setListing("blob", S, [{ key: `stores/${S}/same.bin`, etag: '"same1"', bytes: big(R, 3) }]);
+  report = await runAt(0, 1, { fetch: watched });
+  is("healthy control: one read of R, charged R, copied once", [originBytes(), chargedNow(), copies().length, report.heartbeat], [R, R, 1, true]);
+  const two = 2 * BACKUP_FILES_PART_BYTES + 1_000_000;
+  fresh([{ store: S, roomBytes: two / 2 }]);
+  chargedAtRead.length = 0;
+  setListing("blob", S, [{ key: `stores/${S}/twice.mp4`, etag: '"t1"', bytes: big(two, 5) }]);
+  files.partFault = (n) => (n === 2 ? null : undefined);
+  for (let hour = 1; hour <= 10; hour++) report = await runAt(0, hour, { fetch: watched });
+  is("a large file whose second part keeps failing: its parts' reads stay within 4R across runs, then files_copy_ceiling", [originBytes() <= BACKUP_FILES_COPY_TIMES * (two / 2), has(report, "files_copy_ceiling"), copies().length], [true, true, 0]);
+  is("and every part read was charged and saved before it was made", chargedAtRead.length > 0 && chargedAtRead.every(([charged, upTo]) => charged >= upTo), true);
+  files.partFault = () => undefined;
+
   part("a large file is copied in parts that resume across runs, state saved after each part");
   fresh([{ store: S, roomBytes: 100_000_000 }]);
   const video = { key: `stores/${S}/lesson.mp4`, etag: '"v1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000_000, 7) };
@@ -526,6 +567,52 @@ async function main(): Promise<void> {
   const inbox = (files.json(`state/stores/${S}.json`) as { sources?: { blob?: { pending?: unknown[] } } } | null)?.sources?.blob?.pending?.length;
   is("61 pages of 1,000 records, 1,000 named twice: 60,000 pending, each once", inbox, 60_000);
   is(`in well under the Worker's CPU limit (took ${Math.round(tookMs)} ms; a scan of the inbox for each record takes many seconds)`, tookMs < 6_000, true);
+
+  // Claude 3's second review of #3340 (HIGH 1): a live object's copy is never deleted as a version it once was.
+  part("an etag that comes back (A, then B, then A): the live A's copy is never pruned as the old version A");
+  fresh();
+  const twenty = objects("blob", S, 20);
+  setListing("blob", S, twenty);
+  await runAt(0);
+  const genB = objects("blob", S, 1, 16, 2)[0];
+  setListing("blob", S, [genB, ...twenty.slice(1)]);
+  await runAt(1);
+  setListing("blob", S, twenty);
+  await runAt(2);
+  const nameA = await copyName("blob", S, twenty[0].key, twenty[0].etag, 16);
+  is("control: day 2, the copy of A is in the bucket", files.objects.has(nameA), true);
+  for (const day of [31, 32, 33]) await runAt(day);
+  is("day 33: the live A's copy is still in the bucket", bytesEqual(files.objects.get(nameA)?.bytes, twenty[0].bytes), true);
+
+  // Claude 3's second review of #3340 (HIGH 2): the site's clock alone never skips the holds.
+  part("records dated long before they arrive are held and counted from their arrival, never deleted the day they arrive");
+  fresh();
+  const tenOld = objects("blob", S, 10);
+  setListing("blob", S, tenOld);
+  await runAt(0);
+  world.records = tenOld.map((o) => ({ source: "blob", key: o.key, recordedAt: DAY0 - 100 * DAY, reason: "creator_deleted" as const }));
+  setListing("blob", S, []);
+  report = await runAt(1);
+  is("control: the report raises records_share", has(report, "records_share"), true);
+  is("no copy deleted on the day they arrive", [deletesIn(files).length, copies().length], [0, 10]);
+
+  // Claude 3's second review of #3340 (MEDIUM): a record received and archived is never lost with the Worker's state.
+  part("a deletion record archived on a day whose state could not be saved is still applied");
+  fresh();
+  const pairPrivacy = objects("blob", S, 2);
+  setListing("blob", S, pairPrivacy);
+  await runAt(0);
+  const privacyName = await copyName("blob", S, pairPrivacy[0].key, pairPrivacy[0].etag, 16);
+  world.records = [{ source: "blob", key: pairPrivacy[0].key, recordedAt: DAY0 + DAY, reason: "privacy_request" }];
+  world.storesStatus = 503;
+  files.putFault = (key) => (key === "state/worker.json" ? "throw" : undefined);
+  await runAt(1);
+  files.putFault = () => undefined;
+  world.storesStatus = 200;
+  is("control: the record was archived in deletions/", files.under(`deletions/${iso(DAY0 + DAY)}/`).length, 1);
+  setListing("blob", S, pairPrivacy.slice(1));
+  for (const day of [2, 31, 32, 35]) await runAt(day);
+  is("day 35: the erasure was applied, the copy is gone", files.objects.has(privacyName), false);
 
   done();
 }

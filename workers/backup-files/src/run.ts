@@ -41,7 +41,8 @@
  * days, held while etags of more than 20% of the store changed in 30 days, and
  * deleted on its 90th day anyway.
  * Ceilings (items 4a and 5b), before each copy, never by deleting: 5R held,
- * 4R copied in 32 days, 10,000 objects copied in 30 days, per store.
+ * 4R of source bytes read in 32 days (each read charged and saved before it is
+ * made, whatever the copy's outcome), 10,000 objects copied in 30 days, per store.
  * Budget (item 4): every fetch and every bucket operation is a subrequest,
  * counted before it is made, inside BACKUP_FILES_RUN_SUBREQUESTS (the paid
  * plan's 10,000 less room) and BACKUP_FILES_RUN_MS (its 15 minutes less room);
@@ -72,6 +73,7 @@ import {
   type DayCount,
   type ObjectState,
   type PartState,
+  type PendingRecord,
   type StepState,
   type StoreState,
   type WorkerState,
@@ -116,6 +118,14 @@ export const BACKUP_FILES_RECORD_FILE_DAYS = BACKUP_FILES_HOLD_MAX_DAYS + 2;
 const HISTORY_DAYS = 40;
 const DAY_MS = 86_400_000;
 const WORKER_KEY = "state/worker.json";
+/**
+ * The archives of deletion records (deletions/<day>/...) whose records may not be in the saved Worker state yet
+ * (review of #3340, Claude 3, MEDIUM): written before a page of records counts as received, emptied only once the
+ * Worker's state that holds them is saved. Every run reads the archives it names again, so a record received on a
+ * run whose state could not be saved is never lost; one read twice is the same pending record, and counted twice it
+ * only holds deletions longer.
+ */
+const JOURNAL_KEY = "state/deletions-journal.json";
 
 export type BackupBucket = {
   get(key: string): Promise<unknown>;
@@ -196,6 +206,8 @@ type Ctx = {
   dirty: Set<string>;
   fresh: Map<string, Fresh>;
   recordsHold: boolean;
+  /** The journal's archive names, once read in this run (JOURNAL_KEY). */
+  journal: string[] | null;
 };
 
 const dayOf = (ms: number) => Math.floor(ms / DAY_MS);
@@ -325,11 +337,16 @@ async function loadStore(ctx: Ctx, store: string): Promise<StoreState> {
       const pendingByKey = byKey.get(rec.source)!;
       const known = pendingByKey.get(rec.key);
       if (!known) {
-        const pending = { key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason };
+        const pending = { key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason, receivedAt: rec.receivedAt };
         src.pending.push(pending);
         pendingByKey.set(rec.key, pending);
         src.received = addDay(src.received, dayOf(rec.receivedAt), 1, src.objects.get(rec.key)?.size ?? 0);
-      } else if (rec.recordedAt < known.recordedAt) known.recordedAt = rec.recordedAt;
+      } else {
+        // The same record again (resent, or read again from its archive): its first arrival keeps counting, so a
+        // resend never postpones a deletion, and it is not counted twice in the store's share.
+        if (rec.recordedAt < known.recordedAt) known.recordedAt = rec.recordedAt;
+        if (rec.receivedAt < known.receivedAt) known.receivedAt = rec.receivedAt;
+      }
     }
     ctx.state.inbox = ctx.state.inbox.filter((r) => r.store !== store);
     ctx.dirty.add(store);
@@ -337,11 +354,19 @@ async function loadStore(ctx: Ctx, store: string): Promise<StoreState> {
   return state;
 }
 
+/**
+ * The time a record's 30 and 90 days are counted from (review of #3340, Claude 3, HIGH 2): the later of the site's
+ * recordedAt and the Worker's receivedAt, and never more than a day past its arrival. A record dated long before it
+ * arrived (a bug or a compromised site) therefore waits its 30 days and every hold like any other; one dated in the
+ * future cannot put itself off for good.
+ */
+const recordClock = (rec: PendingRecord) => Math.max(rec.receivedAt, Math.min(rec.recordedAt, rec.receivedAt + DAY_MS));
+
 function updateForced(ctx: Ctx, state: StoreState): void {
   let due = Infinity;
   for (const source of BACKUP_FILES_SOURCES) {
     const src = state.sources[source];
-    for (const rec of src.pending) due = Math.min(due, rec.recordedAt + BACKUP_FILES_HOLD_MAX_DAYS * DAY_MS);
+    for (const rec of src.pending) due = Math.min(due, recordClock(rec) + BACKUP_FILES_HOLD_MAX_DAYS * DAY_MS);
     for (const v of src.versions) due = Math.min(due, v.supersededAt + BACKUP_FILES_HOLD_MAX_DAYS * DAY_MS);
   }
   if (Number.isFinite(due)) ctx.state.forcedDue[state.store] = due;
@@ -413,11 +438,12 @@ async function applyDeletions(ctx: Ctx, state: StoreState, source: BackupFilesSo
   const applied = new Set<(typeof src.pending)[number]>();
   try {
     for (const rec of [...src.pending]) {
-      const age = ctx.now - rec.recordedAt;
+      const since = recordClock(rec);
+      const age = ctx.now - since;
       if (age < after) continue;
       if (age < end && (rule.held || rule.forcedOnly)) {
         held += 1;
-        heldOn = Math.min(heldOn, rec.recordedAt + end);
+        heldOn = Math.min(heldOn, since + end);
         continue;
       }
       if (await eraseKey(ctx, state, source, rec.key)) applied.add(rec);
@@ -434,6 +460,13 @@ async function applyDeletions(ctx: Ctx, state: StoreState, source: BackupFilesSo
   let versionsHeld = 0;
   let versionsOn = Infinity;
   for (const version of [...src.versions]) {
+    // A name a current object has again (its etag came back: A, then B, then A) is that object's copy, never pruned
+    // as the old version (review of #3340, Claude 3, HIGH 1); the version entry goes.
+    if ([...src.objects.values()].some((o) => o.name === version.name)) {
+      src.versions = src.versions.filter((v) => v !== version);
+      ctx.dirty.add(state.store);
+      continue;
+    }
     const age = ctx.now - version.supersededAt;
     if (age < keep) continue;
     if (age < end && (rule.held || rule.etagHeld || rule.forcedOnly)) {
@@ -484,13 +517,83 @@ async function forcedPass(ctx: Ctx): Promise<void> {
   }
 }
 
+function parseJournal(text: string | null): string[] {
+  if (text === null) return [];
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new BackupFilesStateError(`${JOURNAL_KEY} did not read as JSON`);
+  }
+  const o = value as { version?: unknown; files?: unknown } | null;
+  if (!o || typeof o !== "object" || Object.keys(o).sort().join() !== "files,version" || o.version !== 1 || !Array.isArray(o.files)) {
+    throw new BackupFilesStateError(`${JOURNAL_KEY} did not read as a journal`);
+  }
+  if (o.files.some((f) => typeof f !== "string" || !f.startsWith("deletions/"))) throw new BackupFilesStateError(`${JOURNAL_KEY} named something not an archive`);
+  return o.files as string[];
+}
+
+/** An archive of one page of records, read exactly with the contract's own parser; anything else stops the run. */
+function parseArchive(text: string, name: string): { receivedAt: number; records: ReturnType<typeof parseDeletionPage>["records"] } {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new BackupFilesStateError(`${name} did not read as JSON`);
+  }
+  const o = value as { version?: unknown; receivedAt?: unknown; records?: unknown } | null;
+  if (!o || typeof o !== "object" || Object.keys(o).sort().join() !== "receivedAt,records,version" || o.version !== 1 || !Number.isSafeInteger(o.receivedAt) || (o.receivedAt as number) < 1) {
+    throw new BackupFilesStateError(`${name} did not read as an archive of records`);
+  }
+  try {
+    // Wrapped as a finished page so the contract reads each record; a page of records always carries a point to resume
+    // from (#3349), so a placeholder one, never used.
+    const page = parseDeletionPage(JSON.stringify({ version: 1, kind: "deletions", records: o.records, cursor: "archive", complete: true, reason: "done" }));
+    return { receivedAt: o.receivedAt as number, records: page.records };
+  } catch {
+    throw new BackupFilesStateError(`${name} did not hold records as the contract reads them`);
+  }
+}
+
+/** Records of one page, received at `receivedAt`: into the inbox, counted in the source's share. */
+function receive(ctx: Ctx, records: ReturnType<typeof parseDeletionPage>["records"], receivedAt: number, waiting: Set<string>): void {
+  let unmapped = 0;
+  for (const rec of records) {
+    const store = storeOfKey(rec.source, rec.key);
+    if (store === null) {
+      unmapped += 1;
+      continue;
+    }
+    // A record the site named twice (a file deleted twice, or a page read again from its archive) counts once.
+    const named = `${rec.source}\u0000${rec.key}`;
+    if (waiting.has(named)) continue;
+    waiting.add(named);
+    ctx.state.inbox.push({ ...rec, store, receivedAt });
+    ctx.state.received[rec.source] = addDay(ctx.state.received[rec.source], dayOf(receivedAt), 1, 0);
+  }
+  if (unmapped) raise(ctx, "record_unmapped", { count: unmapped });
+}
+
 /** 2. The deletion records, each page written into the backup bucket before it counts as received. */
 async function readRecords(ctx: Ctx): Promise<void> {
-  const c = ctx.cycle;
-  if (c.records === "failed") c.records = "pending";
   // The records waiting in the inbox, by source and key, made once a run: a record the site named twice is found in
   // constant time, never by a scan of the inbox for each record (100 pages of 1,000 on a day of mass deletions).
   const waiting = new Set(ctx.state.inbox.map((r) => `${r.source}\u0000${r.key}`));
+  // First, the archives received on a run whose state may not have been saved (JOURNAL_KEY): read again, every run.
+  if (ctx.journal === null) {
+    ctx.run.boundary(2);
+    const journal = parseJournal(await readText(ctx.run, ctx.env.FILES_BUCKET, JOURNAL_KEY));
+    for (const name of journal) {
+      ctx.run.boundary(2);
+      const text = await readText(ctx.run, ctx.env.FILES_BUCKET, name);
+      if (text === null) throw new BackupFilesStateError(`${name} is named by the journal and missing`);
+      const archive = parseArchive(text, name);
+      receive(ctx, archive.records, archive.receivedAt, waiting);
+    }
+    ctx.journal = journal;
+  }
+  const c = ctx.cycle;
+  if (c.records === "failed") c.records = "pending";
   while (c.records === "pending") {
     if (c.recordsPages >= BACKUP_FILES_INDEX_PAGES) {
       c.records = "failed";
@@ -520,24 +623,16 @@ async function readRecords(ctx: Ctx): Promise<void> {
     if (page.records.length) {
       // Named by the day and the page's index (below BACKUP_FILES_INDEX_PAGES), so a page read again is written over
       // and the day's files can be deleted by name once their days end (sweepRecordFiles), without a listing.
+      const name = recordFileName(ctx.day, c.recordsPages);
       noteRecordFile(ctx, ctx.day, c.recordsPages);
-      await writeText(ctx.run, ctx.env.FILES_BUCKET, recordFileName(ctx.day, c.recordsPages), JSON.stringify({ version: 1, receivedAt: ctx.now, records: page.records }));
+      await writeText(ctx.run, ctx.env.FILES_BUCKET, name, JSON.stringify({ version: 1, receivedAt: ctx.now, records: page.records }));
+      // Named in the journal before it counts as received, so it is read again until the state holding it is saved; a
+      // page read again is written over under the same name, and named once.
+      const journal: string[] = ctx.journal?.includes(name) ? ctx.journal : [...(ctx.journal ?? []), name];
+      await writeText(ctx.run, ctx.env.FILES_BUCKET, JOURNAL_KEY, JSON.stringify({ version: 1, files: journal }));
+      ctx.journal = journal;
     }
-    let unmapped = 0;
-    for (const rec of page.records) {
-      const store = storeOfKey(rec.source, rec.key);
-      if (store === null) {
-        unmapped += 1;
-        continue;
-      }
-      // A record the site named twice (a file deleted twice) counts once.
-      const named = `${rec.source}\u0000${rec.key}`;
-      if (waiting.has(named)) continue;
-      waiting.add(named);
-      ctx.state.inbox.push({ ...rec, store, receivedAt: ctx.now });
-      ctx.state.received[rec.source] = addDay(ctx.state.received[rec.source], ctx.day, 1, 0);
-    }
-    if (unmapped) raise(ctx, "record_unmapped", { count: unmapped });
+    receive(ctx, page.records, ctx.now, waiting);
     c.recordsPages += 1;
     c.recordsCursor = page.cursor;
     if (page.complete) {
@@ -674,7 +769,11 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
       if (known.copied) src.versions.push({ key: known.key, etag: known.etag, size: known.size, name: known.name, supersededAt: ctx.now });
       if (src.upload?.key === known.key) await abortUpload(ctx, state, source);
     }
-    src.objects.set(entry.key, { key: entry.key, etag: entry.etag, size: entry.size, name, copied: false, missingSince: null, page, refusedDay: null });
+    // Its name may be a version kept from before (the etag came back): that copy is this object's again, already in
+    // the bucket, and leaves the versions so it is never pruned (review of #3340, Claude 3, HIGH 1).
+    const back = src.versions.some((v) => v.key === entry.key && v.name === name);
+    if (back) src.versions = src.versions.filter((v) => !(v.key === entry.key && v.name === name));
+    src.objects.set(entry.key, { key: entry.key, etag: entry.etag, size: entry.size, name, copied: back, missingSince: null, page, refusedDay: null });
   }
   if (changes) state.etagChanges = addDay(state.etagChanges, today, changes, 0);
   ctx.dirty.add(store);
@@ -781,16 +880,17 @@ function heldBytes(state: StoreState): number {
   }
   return total;
 }
-const uploadsBytes = (state: StoreState, except: string) =>
-  BACKUP_FILES_SOURCES.reduce((n, s) => n + (state.sources[s].upload && state.sources[s].upload!.key !== except ? state.sources[s].upload!.size : 0), 0);
+/** The bytes other uploads in progress still have to read (what they read already is in `read`). */
+const uploadsLeft = (state: StoreState, except: string) =>
+  BACKUP_FILES_SOURCES.reduce((n, s) => n + (state.sources[s].upload && state.sources[s].upload!.key !== except ? state.sources[s].upload!.size - state.sources[s].upload!.next : 0), 0);
+const readSince = (ctx: Ctx, state: StoreState) => sumSince(state.read, ctx.day - BACKUP_FILES_COPY_WINDOW_DAYS + 1).bytes;
 
 /** The store's own ceilings before a copy (items 4a, 5b); never relieved by a deletion. */
 function ceilingOf(ctx: Ctx, state: StoreState, object: ObjectState): string | null {
   const room = state.roomBytes;
   if (room === null) return "files_room";
   if (heldBytes(state) + object.size > BACKUP_FILES_ROOM_TIMES * room) return "files_room";
-  const copied = sumSince(state.copied, ctx.day - BACKUP_FILES_COPY_WINDOW_DAYS + 1).bytes + uploadsBytes(state, object.key);
-  if (copied + object.size > BACKUP_FILES_COPY_TIMES * room) return "files_copy_ceiling";
+  if (readSince(ctx, state) + uploadsLeft(state, object.key) + object.size > BACKUP_FILES_COPY_TIMES * room) return "files_copy_ceiling";
   if (sumSince(state.copied, ctx.day - BACKUP_FILES_OBJECT_WINDOW_DAYS + 1).objects + 1 > BACKUP_FILES_OBJECTS_PER_MONTH) return "files_objects_ceiling";
   return null;
 }
@@ -833,6 +933,23 @@ async function readPart(ctx: Ctx, entry: BackupFilesEntry, object: ObjectState, 
 const isPart = (reply: unknown, partNumber: number): reply is PartState =>
   !!reply && typeof reply === "object" && (reply as PartState).partNumber === partNumber && typeof (reply as PartState).etag === "string" && (reply as PartState).etag.length > 0;
 
+/**
+ * Charges `bytes` of a source read against the store's 4R in 32 days and saves
+ * the charge before the read is made (Codex H2 M1 on #3340). A read is paid
+ * whatever follows it (a refused, unknown or failed write, a changed version),
+ * so the charge is never refunded; past the ceiling nothing is read.
+ */
+async function chargeRead(ctx: Ctx, state: StoreState, source: BackupFilesSource, bytes: number): Promise<boolean> {
+  const room = state.roomBytes;
+  if (room === null || readSince(ctx, state) + bytes > BACKUP_FILES_COPY_TIMES * room) {
+    raise(ctx, room === null ? "files_room" : "files_copy_ceiling", { source, store: state.store, bytes });
+    return false;
+  }
+  state.read = addDay(state.read, ctx.day, 1, bytes);
+  await saveStore(ctx, state);
+  return true;
+}
+
 function copied(ctx: Ctx, state: StoreState, object: ObjectState): void {
   object.copied = true;
   state.copied = addDay(state.copied, ctx.day, 1, object.size);
@@ -853,6 +970,7 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
   };
 
   if (object.size <= BACKUP_FILES_PART_BYTES) {
+    if (!(await chargeRead(ctx, state, source, object.size))) return;
     const body = await readPart(ctx, entry, object, 0, object.size - 1);
     if (typeof body === "string") return refuse(body);
     ctx.run.spend();
@@ -889,6 +1007,8 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
     ctx.run.boundary(4);
     if (entry.expiresAt - ctx.opts.now() < BACKUP_FILES_URL_MARGIN_MS) return;
     const end = Math.min(upload.next + BACKUP_FILES_PART_BYTES, object.size) - 1;
+    // Past the ceiling the upload is kept, its parts already paid; it resumes when the 32 days allow.
+    if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) return;
     const body = await readPart(ctx, entry, object, upload.next, end);
     if (typeof body === "string") return refuse(body);
     const partNumber = upload.parts.length + 1;
@@ -1061,6 +1181,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     dirty: new Set(),
     fresh: new Map(),
     recordsHold: false,
+    journal: null,
   };
   let stoppedBy: RunReport["stoppedBy"] = null;
   try {
@@ -1080,7 +1201,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
   } catch (error) {
     if (error instanceof OutOfRun) stoppedBy = error.why;
     else {
-      console.error("backup files: the run stopped", error instanceof Error ? error.name : "unknown");
+      console.error("backup files: the run stopped", error instanceof Error ? error.name : "unknown", process.env.DBG3349 ? error : "");
       raise(ctx, "run_failed");
     }
   }
@@ -1109,6 +1230,11 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     }
     cycle.sent = await sendAlarms(env, opts, run, day, cycle.alarms, cycle.sent);
     await writeText(run, files, WORKER_KEY, JSON.stringify({ ...state, cycle }));
+    // The state now holds every record the journal named: emptied only after it is saved (JOURNAL_KEY).
+    if (ctx.journal?.length) {
+      await writeText(run, files, JOURNAL_KEY, JSON.stringify({ version: 1, files: [] }));
+      ctx.journal = [];
+    }
     const report = reportOf(day, cycle, cycle.alarms, run, heartbeat, stoppedBy);
     await writeText(run, files, `reports/${isoDay(day)}.json`, JSON.stringify({ version: 1, ...report, subrequests: run.used + 1 }));
   } catch (error) {

@@ -42,7 +42,7 @@ export function size(bytes: number): string {
 }
 
 /** One kept file: what the buyer sent, and the reply, written and then checked before it is sent. */
-function ReviewEntry({ productId, item }: { productId: string; item: Extract<ReviewItem, { unread?: undefined }> }) {
+export function ReviewEntry({ productId, item }: { productId: string; item: Extract<ReviewItem, { unread?: undefined }> }) {
   const [state, setState] = useState(item.state);
   const [reply, setReply] = useState(item.reply);
   const [text, setText] = useState("");

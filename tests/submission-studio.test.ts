@@ -126,6 +126,26 @@ async function main(): Promise<void> {
   const all = [...((await get("id=prod1&list=1")).body.rows as { id: string; unread?: boolean }[])];
   const rest = (await get(`id=prod1&list=1&before=${(await get("id=prod1&list=1")).body.next}`)).body.rows as { id: string; unread?: boolean }[];
   is("a record that does not read is said, never left out", [...all, ...rest].find((row) => row.id === ids[0])?.unread, true);
+  // Review of #3571 (Claude 3, MEDIUM 1): files closed in the same second share their score, and none may be lost between pages.
+  resetWorld();
+  const listKey = `nl:sub:list:${FOLDER}:${COURSE}`;
+  const before = (await redis.pipeline([["ZRANGEBYSCORE", listKey, "-inf", "+inf", "WITHSCORES"]]))[0] as string[];
+  await redis.pipeline([["DEL", listKey]]);
+  const tied: string[] = [];
+  for (let i = 0; i < SUBMISSION_LIST_PAGE + 2; i += 1) tied.push(await sent(`${String(i).padStart(2, "0")}${"t".repeat(30)}`, LESSONS[i % 2], NOW + 50));
+  const tiedFirst = await get("id=prod1&list=1");
+  const tiedSecond = await get(`id=prod1&list=1&before=${tiedFirst.body.next}`);
+  const tiedListed = [...(tiedFirst.body.rows as { id: string }[]), ...(tiedSecond.body.rows as { id: string }[])].map((row) => row.id);
+  is(
+    "every one of twelve files closed in the same second is listed across the pages, once",
+    [(tiedFirst.body.rows as unknown[]).length, (tiedSecond.body.rows as unknown[]).length, new Set(tiedListed).size, tiedSecond.body.next],
+    [SUBMISSION_LIST_PAGE, 2, SUBMISSION_LIST_PAGE + 2, null],
+  );
+  is("and they are the twelve sent", [...tiedListed].sort(), [...tied].sort());
+  // The list as it was before this case, for the cases after it.
+  const kept: (string | number)[] = [];
+  for (let i = 0; i < before.length; i += 2) kept.push(Number(before[i + 1]), before[i]);
+  await redis.pipeline([["DEL", listKey], ["ZADD", listKey, ...kept]]);
 
   part("A reply, once");
   resetWorld();

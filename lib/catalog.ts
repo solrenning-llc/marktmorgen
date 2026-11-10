@@ -739,9 +739,10 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
  * missing from Redis, a reply that is not one exact answer per GET
  * (repliesFor), a record that is not that product's listing, or one whose
  * `recurring` is there but not a schedule makes the whole read unknown, never
- * a shorter list or a membership read as none (Codex G's review of #1824).
+ * a shorter list or a membership read as none (Codex G's review of #1824). Stricter than readListingsExact below,
+ * which leaves out a record Redis confirms is not there.
  */
-export async function readListingsExact(store: Store, ids: readonly string[]): Promise<Listing[]> {
+export async function readListingsAll(store: Store, ids: readonly string[]): Promise<Listing[]> {
   const asked = wanted(store, ids);
   if (asked.length !== ids.length) throw new UnknownReplyError("a listing read for products the store does not have");
   const catalog = store.catalog;

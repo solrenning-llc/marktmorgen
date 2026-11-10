@@ -11,6 +11,10 @@
  */
 import * as summaryLib from "@/lib/affiliate-summary";
 import type { Book, Line, Row } from "@/lib/affiliates";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import * as view from "@/components/affiliate-summary";
 import { done, is, part } from "./check";
 
 type Summary = { active: number; activeBy: "sales" | "clicks or sales"; soldCents: number; earnedCents: number; sales: number; elsewhere: number; refundsChecked: boolean };
@@ -59,6 +63,21 @@ async function main(): Promise<void> {
   part("Totals agree with the lines and refunds are said");
   is("an unchecked book says so", programSummary({ ...book, refundsChecked: false }, "month", now)!.refundsChecked, false);
   is("a period that is not one gives nothing", programSummary(book, "week", now), null);
+
+  part("On the page");
+  const Summary = (view as unknown as { AffiliateSummary?: (p: unknown) => unknown }).AffiliateSummary;
+  is("the component exists", typeof Summary, "function");
+  if (!Summary) return done();
+  const summaries = { month, days90: ninety, all };
+  const html = renderToStaticMarkup(createElement(Summary as never, { summaries, currency: "usd" } as never));
+  is("a named section with a heading", [/<section aria-labelledby="[^"]+"/.test(html), html.includes("Your program at a glance")], [true, true]);
+  is("three periods to choose, as radio buttons in a fieldset with a legend", [(html.match(/type="radio"/g) ?? []).length, /<fieldset[\s\S]*<legend[^>]*>Period<\/legend>/.test(html)], [3, true]);
+  is("the month is shown first, its numbers exact", [html.includes(">2<"), html.includes(">$150<"), html.includes(">$74<")], [true, true, true]);
+  is("each number is said in words, never by color", [html.includes("Affiliates active"), html.includes("Sold through affiliates"), html.includes("Earned by affiliates"), html.includes("Clicks are kept as all-time totals")], [true, true, true, true]);
+  is("another currency is said", html.includes("in another currency is left out of these totals"), true);
+  is("unchecked refunds are said", renderToStaticMarkup(createElement(Summary as never, { summaries: { ...summaries, month: { ...month, refundsChecked: false } }, currency: "usd" } as never)).includes("Refunds could not all be checked"), true);
+  const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
+  is("the page works it out from the book it already read, nothing read again", [page.includes("programSummary(book, period)"), (page.match(/readBook\(/g) ?? []).length], [true, 1]);
   done();
 }
 

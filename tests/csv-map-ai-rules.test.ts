@@ -15,8 +15,8 @@
  *     nothing is confirmed.
  */
 import {
-  MAP_FIELDS, MAP_MODEL, MAP_OUTPUT_TOKENS, MAX_COLUMNS, NAME_MAX, looksLikeData, mapHoldMicroUsd, mapRequest, needsModel, readMapAnswer,
-  requestShape, safeHeader, suggestedMapping,
+  MAP_FIELDS, MAP_MODEL, MAP_OUTPUT_TOKENS, MAX_COLUMNS, NAME_MAX, type MapRequest, clearHeader, labelLike, looksLikeData, mapHoldMicroUsd, mapRequest,
+  needsModel, readMapAnswer, requestOf, requestShape, safeHeader, suggestedMapping,
 } from "@/lib/csv-map-ai-rules";
 import { COLUMNS } from "@/lib/imports";
 import { guessColumn, parseCsv } from "@/lib/csv";
@@ -29,11 +29,29 @@ is("each import, each field, in order", Object.fromEntries(Object.entries(MAP_FI
 part("Only the names go, never a cell");
 const file = "Correo,Nombre completo,Opt-in status\nana.example@mail.test,Ana Pérez,yes\n";
 const read = parseCsv(file);
-const req = mapRequest("contacts", read.header);
+const req = mapRequest("contacts", read.header) as MapRequest;
+is("a clear header: a request", req !== null, true);
 is("the names are in the request", ["Correo", "Nombre completo", "Opt-in status"].every((n) => req.prompt.includes(n)), true);
 is("no cell of the row below is", ["ana.example", "Ana Pérez", "mail.test"].some((c) => req.prompt.includes(c) || req.system.includes(c)), false);
 is("a header that is someone's data (a file with no header) goes as Column N", safeHeader(["ana.example@mail.test", "Row 88213377", "https://shop.test/p/1", "Name", ""]), { names: ["Column 1", "Column 2", "Column 3", "Name", "Column 5"], hidden: [0, 1, 2] });
-is("and never reaches the request", mapRequest("contacts", ["ana.example@mail.test", "Name"]).prompt.includes("ana"), false);
+is("and such a first row sends nothing at all", mapRequest("contacts", ["ana.example@mail.test", "Name"]), null);
+
+part("A file with no header: its first row is a person, and nothing is sent (review of #3555)");
+const person = parseCsv("Ana Pérez,Fortaleza,1990-04-12,49.00,yes\nBen Ortiz,Recife,1988-01-30,19.00,no\n");
+is("a fictitious person's row as the header: not a header, no request", [clearHeader(person.header), mapRequest("contacts", person.header)], [false, null]);
+is(
+  "each cell of it alone already stops it: a name, a city, a date, an amount, a yes",
+  ["Ana Pérez", "Fortaleza", "1990-04-12", "49.00", "yes", "Maria da Silva", "Rua das Flores", "$49", "John"].map((cell) => clearHeader(["Email", cell])),
+  [false, false, false, false, false, false, false, false, false],
+);
+is("one data cell among real labels: nothing sent", mapRequest("contacts", ["Email", "Name", "ana.example@mail.test"]), null);
+is(
+  "real headers, in the languages files come in, and identifiers, are clear",
+  [["Email", "First name", "Tags"], ["Correo", "Nombre completo", "Opt-in status"], ["e_mail", "firstName", "opt_in"], ["Courriel", "Prénom"], ["E-Mail-Adresse", "Vorname"], ["Nome", "Telefone", "Cidade"], ["Email", ""]].map(clearHeader),
+  [true, true, true, true, true, true, true],
+);
+is("nothing named at all: not a header", [clearHeader([]), clearHeader(["", " "])], [false, false]);
+is("label-like, one by one", ["Subscriber", "Opt-in status", "Order date", "Ana", "Fortaleza", "Column 2", "Address 2"].map(labelLike), [true, true, true, false, false, true, true]);
 is("what looks like data", ["a@b", "www.x.test", "12345678", "Order 123456", "Email", "Phone", "Zip 60"].map(looksLikeData), [true, true, true, true, false, false, false]);
 is("control characters out, names cut, at most the columns sent", [safeHeader(["E\u0000mail\n"]).names[0], Array.from(safeHeader(["x".repeat(200)]).names[0]).length, safeHeader(Array.from({ length: 90 }, (_, i) => `c${String.fromCharCode(97 + (i % 26))}`)).names.length], ["E mail", NAME_MAX, MAX_COLUMNS]);
 
@@ -46,13 +64,13 @@ is("a field open but every column used: not asked", needsModel("contacts", { ema
 part("The most, before the call");
 const shape = requestShape();
 is("the widest request: every column at the longest name, 4 bytes a character", shape.inputBytes > MAX_COLUMNS * NAME_MAX * 4, true);
-const fits = (h: string[]) => (["contacts", "products", "purchases", "members"] as const).every((k) => { const r = mapRequest(k, h); return new TextEncoder().encode(r.system + r.prompt).length <= shape.inputBytes; });
+const fits = (h: string[]) => (["contacts", "products", "purchases", "members"] as const).every((k) => { const r = requestOf(k, h); return new TextEncoder().encode(r.system + r.prompt).length <= shape.inputBytes; });
 is(
   "names JSON writes longer (lone surrogate halves, quotes, backslashes) still fit, at the most columns",
   [fits(Array(MAX_COLUMNS).fill("\uD800".repeat(NAME_MAX))), fits(Array(MAX_COLUMNS).fill("\uDC00".repeat(NAME_MAX))), fits(Array(MAX_COLUMNS).fill('"\\'.repeat(NAME_MAX)))],
   [true, true, true],
 );
-is("and every real request fits in it",["contacts", "products", "purchases", "members"].every((k) => { const r = mapRequest(k as "contacts", read.header); return new TextEncoder().encode(r.system + r.prompt).length <= shape.inputBytes; }), true);
+is("and every real request fits in it",["contacts", "products", "purchases", "members"].every((k) => { const r = mapRequest(k as "contacts", read.header) as MapRequest; return new TextEncoder().encode(r.system + r.prompt).length <= shape.inputBytes; }), true);
 const hold = mapHoldMicroUsd();
 is("held at that shape, from the price table, on the answering model", [hold, MAP_MODEL, shape.maxTokens], [aiRequestHoldMicroUsd(MAP_MODEL, shape), "claude-haiku-5-5", MAP_OUTPUT_TOKENS]);
 is("no more than a few answers' worth", (hold as number) < ANSWER_MICRO_USD * 5 && (hold as number) > 0, true);

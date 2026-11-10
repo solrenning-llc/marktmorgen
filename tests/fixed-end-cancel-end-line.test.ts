@@ -117,8 +117,8 @@ async function main(): Promise<void> {
   is("the update did not land", sub.cancel_at, sold);
   one = (await membershipsFor(store, token))?.[0];
   const shown = line(one) ?? "";
-  is("the unsure notice names the word a cancelled membership shows", MEMBERSHIP_WORDS.en.manageNotices.unsure.body.includes(`“${mark}”`), true);
-  is("and the line of this membership, not cancelled, does not show it", shown.includes(mark) || shown === "no endLine", false);
+  is("the unsure notice names the word a canceled membership shows", MEMBERSHIP_WORDS.en.manageNotices.unsure.body.includes(`“${mark}”`), true);
+  is("and the line of this membership, not canceled, does not show it", shown.includes(mark) || shown === "no endLine", false);
 
   part("Cancel that went through: the page says Canceled");
   await link();
@@ -126,13 +126,13 @@ async function main(): Promise<void> {
   one = (await membershipsFor(store, token))?.[0];
   is("the line says Canceled and the day it ends", line(one), `Canceled. Ends day ${TRIAL_END}`);
 
-  part("The last period of a fixed end: not cancelled, nothing left to cancel");
+  part("The last period of a fixed end: not canceled, nothing left to cancel");
   sub = { ...fresh(), status: "active", cancel_at: sold, items: { data: [{ current_period_end: sold, price: { unit_amount: 900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
   await link();
   one = (await membershipsFor(store, token))?.[0];
   is("the line says the end after the last payment, not Canceled", line(one), `Ends day ${sold}, after the last payment`);
 
-  part("An ordinary membership cancelled on Stripe's page reads Canceled");
+  part("An ordinary membership canceled on Stripe's page reads Canceled");
   sub = { ...fresh(), status: "active", metadata: { store: "club", product: made.product.id }, cancel_at_period_end: true, items: { data: [{ current_period_end: TRIAL_END + 9, price: { unit_amount: 900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
   await link();
   one = (await membershipsFor(store, token))?.[0];
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   is("unsure", await openCancel(store, token, "sub_Fixed00000001", "https://marktmorgen.com"), { ok: false, reason: "unsure" });
   otherId = false;
 
-  part("Every language: the notice points at the word only a cancelled membership shows");
+  part("Every language: the notice points at the word only a canceled membership shows");
   for (const [lang, words] of Object.entries(MEMBERSHIP_WORDS)) {
     const w = words as MembershipWords & { canceledMark?: string; endsCanceled?: (d: string) => string; endsAfterLast?: (d: string) => string };
     const ok =
@@ -154,7 +154,7 @@ async function main(): Promise<void> {
       w.manageNotices.unsure.body.includes(w.canceledMark) &&
       w.endsCanceled("May 1").includes(w.canceledMark) && w.endsCanceled("May 1").includes("May 1") &&
       !w.endsAfterLast("May 1").includes(w.canceledMark) && w.endsAfterLast("May 1").includes("May 1");
-    is(`${lang}: canceledMark in the notice and the cancelled line, never in the sold end's`, ok, true);
+    is(`${lang}: canceledMark in the notice and the canceled line, never in the sold end's`, ok, true);
   }
 
   part("The manage page draws the line from endLine");

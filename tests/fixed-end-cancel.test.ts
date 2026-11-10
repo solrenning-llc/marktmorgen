@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   is("Stripe's cancellation page not used for it", portalSessions.length, 0);
   listed = await membershipsFor(store, token);
   is("the page now says when it ends", listed?.[0]?.endsAt, TRIAL_END);
-  is("cancelled is not shown as the sold end", listed?.[0]?.soldEnd, null);
+  is("canceled is not shown as the sold end", listed?.[0]?.soldEnd, null);
   updates.length = 0;
   result = await openCancel(store, token, "sub_Fixed00000001", "https://marktmorgen.com");
   is("a second Cancel is refused, nothing written", [result.ok, updates.length], [false, 0]);
@@ -188,10 +188,10 @@ async function main(): Promise<void> {
       Boolean(words.manageNotices.unsure?.title && words.manageNotices.unsure?.body) &&
       typeof words.fixedCancelNote === "function" &&
       words.fixedCancelNote("May 1").includes("May 1");
-    is(`${lang}: cancelled, unsure, fixedCancelNote`, ok, true);
+    is(`${lang}: canceled, unsure, fixedCancelNote`, ok, true);
   }
 
-  part("The pages ask for the confirmation before a fixed end is cancelled");
+  part("The pages ask for the confirmation before a fixed end is canceled");
   const page = readFileSync("app/[handle]/manage/page.tsx", "utf8");
   const leave = readFileSync("app/[handle]/manage/leave/page.tsx", "utf8");
   is("manage page: fixed end cancels behind a confirmation (data-fixed-cancel)", page.includes("data-fixed-cancel") && page.includes("fixedCancelNote"), true);

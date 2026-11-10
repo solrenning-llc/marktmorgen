@@ -421,12 +421,12 @@ async function cancelSoldEnd(store: Store, grant: Grant, sub: SubRow, token: str
   } catch (error) {
     // A refusal changed nothing; no answer at all may have changed it.
     const refused = error instanceof StripeError && error.status >= 400 && error.status < 500;
-    console.error(refused ? "Stripe refused cancelling a fixed-end membership" : "cancelling a fixed-end membership got no answer from Stripe", error);
+    console.error(refused ? "Stripe refused canceling a fixed-end membership" : "canceling a fixed-end membership got no answer from Stripe", error);
     return { ok: false, reason: refused ? "error" : "unsure" };
   }
   // The answer is this subscription's, with the end asked for (rule 30, Claude 3's L2 on #3488); anything else is not known.
   if (made.id !== sub.id || made.cancel_at !== stopAt) {
-    console.error("Stripe's answer to cancelling a fixed-end membership is not this one's, with the end asked for", sub.id);
+    console.error("Stripe's answer to canceling a fixed-end membership is not this one's, with the end asked for", sub.id);
     return { ok: false, reason: "unsure" };
   }
   if (store.leaving.on) {

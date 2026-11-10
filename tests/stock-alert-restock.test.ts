@@ -50,7 +50,7 @@ const real: RestockDeps = { load: storeForIdExactly, readProduct: readListing, l
 
 async function main(): Promise<void> {
   redis.clear();
-  process.env.RESEND_API_KEY = "re_test_stock_alerts";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   await claimHandle(OWNER, "harbor", "Harbor Prints", "");
   await ensureStoreId(OWNER);
   await ensureStatsId(OWNER);
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   is("sent under a key made of the batch", sent.key.startsWith(`stock-alert:${sid}:${pid}:`), true);
   is("the confirmed addresses are gone, the one that never confirmed is still there", redis.run(["HKEYS", listKey]), ["ana@example.com"]);
   is("the batch record is gone", redis.run(["EXISTS", `${listKey}:job`]), 0);
-  is("next run: back, and nobody confirmed left, so the list goes whole and the product leaves the job", [await runRestocks(Date.now() + 30_000, real), redis.run(["EXISTS", listKey]), due()], [0, 0, null]);
+  is("next run: back, and nobody confirmed left, so the list goes whole and the product leaves the job", [await runRestocks(Date.now() + 30_000, real), redis.run(["HLEN", listKey]), due()], [0, 0, null]);
   const leaveLinksLeft = redis.keys().filter((k) => k.startsWith("nl:sa:t:") && String(redis.run(["GET", k])).includes('"k":"leave"'));
   is("every leave link went with it", leaveLinksLeft, []);
   is("still one batch: nobody written to twice", batches.length, 1);

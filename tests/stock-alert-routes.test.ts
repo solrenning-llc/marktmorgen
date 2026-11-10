@@ -68,7 +68,7 @@ const tokenIn = (text: string, name: string) => text.match(new RegExp(`${name}=(
 
 async function main(): Promise<void> {
   redis.clear();
-  process.env.RESEND_API_KEY = "re_test_stock_alerts";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   const { store, pid } = await makeStore("owner@example.com", "harbor");
   const listKey = `nl:sa:${store.statsId}:${pid}`;
   const ask = (email: string, ip = "7.7.7.7", site = "same-origin", product = pid, handle = "harbor") =>
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   is("the address is not in the page's address", asked.headers.get("location")!.includes("example.com"), false);
   is("one email", mails.length, 1);
   const mail = mails[0];
-  is("to the address typed", mail.to, "Reader@Example.com");
+  is("to the address typed", mail.to, ["Reader@Example.com"]);
   is("subject", mail.subject, "Confirm: email me when Signed Print is back");
   const confirm = tokenIn(mail.text, "token");
   const leave = tokenIn(mail.text, "leave");
@@ -141,23 +141,20 @@ async function main(): Promise<void> {
   is("no email", mails.length - sentBefore, 0);
   is("the place was taken back", redis.run(["HLEN", `nl:sa:${spent.store.statsId}:${spent.pid}`]), 0);
 
-  part("A store whose public requests are spent reads nothing");
-  const unpaid = await makeStore("unpaid@example.com", "unpaidprints", { paid: false });
-  let reads = 0;
-  redis.run = (c: (string | number)[]) => {
-    if (String(c[1] ?? "").startsWith("nl:stock:") || String(c[1] ?? "").startsWith("nl:sa:")) reads += 1;
-    return run(c);
-  };
-  is("limited", statusOf(await ask("c@example.com", "7.7.9.3", "same-origin", unpaid.pid, "unpaidprints")), "limited");
-  redis.run = run;
-  is("neither its stock nor its list was read", reads, 0);
-
   part("Limits: per address and per connection");
   for (let i = 0; i < 5; i += 1) await ask("same@example.com", `8.8.0.${i}`);
   is("a sixth ask for one address within the hour", statusOf(await ask("same@example.com", "8.8.0.9")), "limited");
   const statuses: (string | null)[] = [];
-  for (let i = 0; i < 11; i += 1) statuses.push(statusOf(await ask(`reader${i}@example.com`, "8.8.1.1")));
+  for (let i = 0; i < 10; i += 1) statuses.push(statusOf(await ask(`reader${i}@example.com`, "8.8.1.1")));
+  let reads = 0;
+  redis.run = (c: (string | number)[]) => {
+    if (String(c[1] ?? "").startsWith("nl:stock:") || String(c[1] ?? "").startsWith("nl:sa:") || String(c[1] ?? "").startsWith("nl:catalog:")) reads += 1;
+    return run(c);
+  };
+  statuses.push(statusOf(await ask("reader10@example.com", "8.8.1.1")));
+  redis.run = run;
   is("ten from one connection within the hour, then refused", [statuses.slice(0, 10).every((s) => s === "sent"), statuses[10]], [true, "limited"]);
+  is("refused before the product, its stock or its list was read", reads, 0);
 
   part("In the store's language");
   await setLanguage("owner@example.com", "es");

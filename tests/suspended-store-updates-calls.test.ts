@@ -298,7 +298,8 @@ test("call reminder: a switched-off store still reminds the buyer of a paid call
   assert.equal(counts.reminded, 1);
   const toCaller = mailed.filter((m) => m.to === caller);
   assert.equal(toCaller.length, 1);
-  assert.match(toCaller[0].text, /https:\/\/example\.com\/room/);
+  // The room link stands as a whole word, never as a part of another address.
+  assert.ok(toCaller[0].text.split(/\s+/).includes("https://example.com/room"));
   assert.match(toCaller[0].text, /\/api\/store\/ics\?handle=offcall/);
   // Every link to the store goes to this booking's own page (moving it), never to the store's switched-off pages.
   for (const link of toCaller[0].text.match(/https:\/\/marktmorgen\.com\/@offcall[^\s]*/g) ?? []) {

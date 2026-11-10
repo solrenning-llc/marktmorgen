@@ -222,7 +222,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/apply-first-store.ts": async (s) => (await applicationsOfPerson(s.sid, s.email)).map((a) => {
     // Its times are kept in milliseconds; iso reads seconds.
     const when = (ms: number) => iso(Math.floor(ms / 1000));
-    return { offer: a.offer, state: a.state, applied: when(a.at), decided: when(a.decidedAt), linkEnds: when(a.expiresAt), linkUsed: when(a.usedAt) };
+    return { offer: a.offer, state: a.state, applied: when(a.at), decided: when(a.decidedAt), linkEnds: when(a.expiresAt), linkUsed: when(a.usedAt), agreed: a.consent.text, agreedVersion: a.consent.version };
   }),
   "lib/payment-request-store.ts": async (s) => {
     const list = await listRequests(s.store);

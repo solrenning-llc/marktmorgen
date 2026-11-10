@@ -208,6 +208,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/path": row("settings", read),
   "POST store/path": row("settings", draft),
   "POST store/pause": row("settings", draft),
+  "POST store/applications": row("buyers", never("Who may buy is the creator's own decision (604 [WP3]): an applicant's address never passes through an assistant's conversation (app/api/mcp/route.ts); the creator approves or declines in the studio.")),
   "POST store/payment-requests": row("buyers", execute, "A request for payment reaches the buyer; the money goes through the creator's own Stripe checkout, never the agent."),
   "POST store/paypal/connect": row("money", never(MONEY)),
   "POST store/paypal/disconnect": row("money", never(MONEY)),

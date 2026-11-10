@@ -92,7 +92,7 @@ test("an application is kept from the plain form, with the sentence agreed to, a
 });
 
 test("another site is refused before anything is read", async () => {
-  for (const headers of [{ origin: "https://evil.example" }, { origin: "", "sec-fetch-site": "cross-site" }]) {
+  for (const headers of [{ origin: "https://evil.example" }, { origin: "", "sec-fetch-site": "cross-site" }] as Record<string, string>[]) {
     redis.sent = [];
     const response = await apply(form({}, headers));
     assert.equal(response.status, 403);
@@ -133,7 +133,9 @@ test("without the box, with an old version, for a product that does not ask, or 
   // A hidden field only a program fills: told it worked, nothing kept.
   assert.equal(statusOf(await apply(form({ website: "https://spam.example" }))), "sent");
   assert.deepEqual(await listApplications(store), []);
-  // One connection, ten an hour.
+  // One connection, ten tries an hour, each counted before the mode or the box is read.
+  memory.clear();
+  await setUp();
   for (let i = 0; i < 10; i++) assert.equal(statusOf(await apply(form({ email: `p${i}@example.invalid` }))), "sent");
   assert.equal(statusOf(await apply(form({ email: "p10@example.invalid" }))), "limited");
   // Unknown is never "closed" or "sent": a mode read in another shape is an error.
@@ -177,6 +179,9 @@ test("the studio approves and declines, says a change or an unknown as such, and
   const changed = await studio({ action: "decline", id: bob.id });
   assert.deepEqual([changed.status, changed.body.error, changed.body.message], [409, "changed", DECIDE_WORDS.changed]);
   assert.equal(redis.run(["GET", `nl:apply:r:${store.sid}:${bob.id}`]), "written by another press");
+  // A record not written here makes the whole list unknown, never a shorter one.
+  assert.equal(await listApplications(store), null);
+  redis.run(["DEL", `nl:apply:r:${store.sid}:${bob.id}`]);
   // Whether it was saved is not known: said as unknown, never as done.
   await apply(form({ email: "cy@example.invalid" }));
   const cy = (await listApplications(store))!.find((a) => a.email === "cy@example.invalid")!;
@@ -199,12 +204,14 @@ test("each door's commands stay inside the requests it takes before it reads", a
   const priced = APPLY_SUBMIT_REQUEST_UNITS * laterPageCost();
   const needed = laterPageCost() + submit * COMMAND + 3 * 3_072 * DB_BYTE;
   assert.ok(priced >= needed, `submit: ${submit} commands, $${needed.toFixed(7)} > $${priced.toFixed(7)}`);
+  console.log(`# an application: ${submit} commands, $${needed.toFixed(7)} at most, inside ${APPLY_SUBMIT_REQUEST_UNITS} public requests at $${priced.toFixed(7)}`);
   const id = (await listApplications(store))![0].id;
   redis.sent = [];
   await studio({ action: "approve", id, days: 7 });
   const decided = commandsRun(redis.sent);
   // The door's studio request and the decision's own, against one request running every command the route sent.
   assert.ok((1 + APPLY_DECIDE_STUDIO_UNITS) * UNIT_COST.studio >= costOf("studio", decided, 50_000), `decide: ${decided} commands`);
+  console.log(`# a decision: ${decided} commands, $${costOf("studio", decided, 50_000).toFixed(7)} at most, inside ${1 + APPLY_DECIDE_STUDIO_UNITS} studio requests at $${((1 + APPLY_DECIDE_STUDIO_UNITS) * UNIT_COST.studio).toFixed(7)}`);
 });
 
 test("the studio page shows each answer beside its application, with no buttons for a role that may not decide", () => {

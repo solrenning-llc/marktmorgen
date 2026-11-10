@@ -28,12 +28,10 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 
+import { APPLY_LINK_DAYS_MAX, APPLY_LINK_DAYS_MIN } from "@/lib/apply-first-days";
+export { APPLY_LINK_DAYS_DEFAULT, APPLY_LINK_DAYS_MAX, APPLY_LINK_DAYS_MIN } from "@/lib/apply-first-days";
+
 const DAY_MS = 86_400_000;
-/** The link's life when the creator chooses nothing. */
-export const APPLY_LINK_DAYS_DEFAULT = 7;
-/** The shortest and longest life the creator may choose, in whole days. */
-export const APPLY_LINK_DAYS_MIN = 1;
-export const APPLY_LINK_DAYS_MAX = 30;
 /** A link token: 24 random bytes, lower-case hex. */
 export const APPLY_TOKEN = /^[0-9a-f]{48}$/;
 /** An application's own id (16 random bytes, hex), made by whoever stores it. */

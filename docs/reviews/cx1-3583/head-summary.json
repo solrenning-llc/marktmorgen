@@ -1,0 +1,25 @@
+{
+  "submission-notice.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "66 checks, all passing."
+    ]
+  },
+  "submission-studio.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "40 checks, all passing."
+    ]
+  },
+  "cx1-submission-notice-boundaries.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  uncertain acceptance remains unknown",
+      "  FAIL  no dispatch after the erasure print",
+      "6 checks, 2 failing."
+    ]
+  }
+}

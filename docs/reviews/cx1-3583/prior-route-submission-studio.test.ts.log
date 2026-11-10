@@ -1,0 +1,62 @@
+
+It stays off until the buyer's side works
+  ok    the switch in the code is off
+  ok    the trainers' page still says it is not built
+
+Only a role that may change products, before anything is read
+  ok    a read is refused
+  ok    a change is refused
+  ok    and nothing was read
+
+A lesson's settings
+  ok    nothing asked yet
+  ok    saved
+  ok    read back
+  ok    settings that do not read are refused by name
+  ok    a lesson not in the course
+  ok    a product that is not this store's course
+  ok    stopping answers what it had, for an undo
+  ok    so nothing is asked
+  ok    and the undo saves it again
+  ok    a product that could not be read is unknown
+  ok    settings kept but unreadable are unknown, never none
+
+The "To review" list
+  ok    empty
+  ok    its studio requests are taken after the course is found and before the list is read
+  ok    a page at a time
+  ok    newest first
+  ok    each says the lesson, the buyer, the file and the note
+  ok    the next page has the rest
+  ok    and no page after it
+  ok    no studio requests left: refused before the list is read
+  ok    a record that does not read is said, never left out
+
+A reply, once
+  ok    the buyer's place is held while it waits
+  ok    an empty reply is refused
+  ok    it is answered
+  ok    with the words
+  FAIL  the studio is told whether the buyer was emailed
+        expected false
+        got      undefined
+  FAIL  the reply is marked told, so it is never emailed twice
+        expected 1
+        got      0
+  ok    the reply and its notice stay inside the studio requests taken (20 commands each)
+  ok    its studio requests were taken first
+  ok    the buyer's place is let go
+  ok    a second reply is refused
+  ok    the list shows it answered
+  ok    a file that is not there
+  ok    two at once: one is sent, the other refused
+  ok    a file whose buyer was deleted is gone
+  ok    and off the list
+
+40 checks, 2 failing.
+the studio's submissions could not be read UnknownReplyError: Redis answered a lesson's submission settings in an unknown shape
+    at readSetupFor (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3583\.cx1-evidence\submission-studio.test.ts.cjs:12874:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3583\.cx1-evidence\submission-studio.test.ts.cjs:13312:36)
+    at async get (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3583\.cx1-evidence\submission-studio.test.ts.cjs:13403:20)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3583\.cx1-evidence\submission-studio.test.ts.cjs:13457:62)

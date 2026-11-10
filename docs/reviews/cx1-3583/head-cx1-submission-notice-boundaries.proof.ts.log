@@ -1,0 +1,16 @@
+
+CX1: uncertainty after dispatch is not a proven non-send
+  ok    the synthetic sender accepted before the receipt was lost
+  FAIL  uncertain acceptance remains unknown
+        expected "unknown"
+        got      "unsent"
+  ok    a retry never dispatches a second copy
+  ok    still one synthetic acceptance
+
+CX1: deletion confirmed while claiming the mark must fence dispatch
+  ok    the real erasure-print writer ran before dispatch
+  FAIL  no dispatch after the erasure print
+        expected 0
+        got      1
+
+6 checks, 2 failing.

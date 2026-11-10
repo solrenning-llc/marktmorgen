@@ -1,0 +1,11 @@
+{
+  "submission-studio.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  the studio is told whether the buyer was emailed",
+      "  FAIL  the reply is marked told, so it is never emailed twice",
+      "40 checks, 2 failing."
+    ]
+  }
+}

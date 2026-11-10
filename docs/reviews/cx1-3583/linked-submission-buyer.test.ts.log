@@ -1,0 +1,109 @@
+
+The file the buyer picks, checked before anything is sent
+  ok    a video of a kind asked for
+  ok    a browser that names no type: read by the extension
+  ok    a PDF
+  ok    a photo when only video and PDF are asked
+  ok    a .jpeg named by extension when photos are asked
+  ok    never an SVG
+  ok    a type the browser names that the extension contradicts is not guessed
+  ok    larger than the creator's largest file
+  ok    exactly the largest file
+  ok    an empty file
+
+Sending: open, sign, the pieces, done with the note
+  ok    it is sent
+  ok    open, sign, done, in that order
+  ok    the open names the lesson, the file and the type read from its name
+  ok    done carries the pieces and the note
+  ok    every step names the lesson
+  ok    it says how far it got, to the end
+  ok    the record it answers
+  ok    a file of a kind not asked for is refused before anything is sent
+  ok    nothing posted
+  ok    the door's own reason is said
+  ok    nothing after the refused open
+  ok    stopped, it says so
+  ok    the upload is given up at the door, never closed
+  ok    the one it opened
+  ok    stopped before it began: nothing is opened
+  ok    a piece that never arrives stops the upload
+  ok    and gives it up
+
+The buyer's own files on the lesson
+  ok    Ana's three on this lesson, newest first
+  ok    the one still sending says so, with its upload's path
+  ok    a waiting one with its note and keeping time
+  ok    its reads paid before, by how many there are
+  ok    inside its commands
+  ok    the most a list can read is held
+  ok    nothing of another buyer's or the buyer's address in any row
+  ok    no request left to pay with: resting
+  ok    and no record was read
+  ok    nothing sent on another lesson is asked for
+  ok    Bob pays for his one
+  ok    a list of none costs nothing more
+  ok    one record at its largest fits the units it pays
+  ok    the creator replies
+  ok    reviewed, with the creator's words
+  ok    a record that does not read is said, never left out
+
+Withdrawing a waiting file
+  ok    Bob cannot withdraw Ana's
+  ok    nor on another lesson
+  ok    nothing was deleted for them
+  ok    a file the vault did not delete is not withdrawn
+  ok    it still waits
+  ok    withdrawn
+  ok    its file deleted first
+  ok    kept as withdrawn
+  ok    its place on the lesson let go
+  ok    off the sweep's list
+  ok    inside its commands
+  ok    once only
+  ok    a reviewed file is not withdrawn
+  ok    nor one past its keeping time
+  ok    an id that is no record
+
+The route: only the signed-in buyer, after its request
+  ok    signed out, nothing listed
+  ok    the creator has no files of their own here
+  ok    Ana's files on the lesson, newest first, the unread one last
+  ok    the store's public request first, then the reads' own, before they were made
+  ok    a buyer whose access ended still sees their own files
+  ok    no request left: resting, nothing read
+  ok    no buyer action left: nothing withdrawn
+  ok    it still waits
+  ok    another buyer cannot withdraw it
+  ok    signed out, nothing withdrawn
+  ok    its buyer withdraws it
+  ok    after one buyer action, and its file deleted
+  ok    kept as withdrawn
+  ok    a second time: it no longer waits
+  ok    a lesson the course does not have
+
+The lesson page, and the box on it
+  ok    the settings are read only while the switch is on, for a student with the lesson open on a paid course
+  ok    settings that could not be read are said as unknown
+  ok    the box is shown only when the creator asked
+  ok    the switch is still off
+  ok    a section named by its heading
+  ok    what the creator asked
+  ok    a real file input, with its label
+  ok    it takes only the kinds asked
+  ok    the kinds and the largest file are said beside it
+  ok    and how long the file is kept
+  ok    the hint is tied to the input
+  ok    the note has its own label
+  ok    its list says it is loading, politely
+  ok    no time limit or countdown in the box
+  ok    a withdrawal is checked before it is sent
+  ok    errors are alerts
+  ok    progress is a real progress bar
+  ok    settings that could not be read: said, and no file input
+  ok    every language says all English says
+  ok    a German store's box is in German
+  ok    Portuguese is Portugal's: no Brazilian word or number format
+  ok    and says ficheiro, as the store's other Portuguese does
+
+95 checks, all passing.

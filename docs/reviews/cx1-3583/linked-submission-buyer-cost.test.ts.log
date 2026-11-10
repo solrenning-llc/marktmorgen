@@ -1,0 +1,9 @@
+
+A buyer's list of their files, paid before it is read
+  ok    at every count, what it pays covers what it costs
+  ok    its commands beyond the route's are the index and two a record
+  ok    a list of none pays nothing beyond its first request
+  ok    more records never pay less
+  a list of 20: 14 public requests at $0.000063
+
+4 checks, all passing.

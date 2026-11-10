@@ -1,0 +1,145 @@
+
+Settings: instruction, kinds, largest file, keeping time
+  ok    a plain setup reads, with the defaults for size and keeping time
+  ok    no instruction is refused
+  ok    an instruction that is not text is refused
+  ok    nothing at all is refused
+  ok    a long instruction is refused, never cut
+  ok    an instruction at the maximum is kept whole
+  ok    no kinds is refused
+  ok    kinds that are not a list are refused
+  ok    an unknown kind is refused, not dropped
+  ok    a kind in other letters is refused
+  ok    a kind named twice is kept once, in a fixed order
+  ok    the largest file is read as given
+  ok    the code's maximum is accepted
+  ok    over the code's maximum is refused, never lowered
+  ok    under the smallest maximum is refused
+  ok    a size that is not a whole number is refused
+  ok    a size given as text is refused
+  ok    the longest keeping time is accepted
+  ok    longer than the code allows is refused
+  ok    zero days is refused
+  ok    part of a day is refused
+  ok    the code's maximum fits inside what one upload may be
+  ok    the code's maximum fits inside the smallest plan's storage
+  ok    the default size is inside the range
+
+Kinds map to exact MIME types the upload path already takes
+  ok    video
+  ok    photo
+  ok    PDF
+  ok    every type is one the store's files already take
+  ok    no picture that can carry a script
+  ok    the types a setup takes, with their extensions
+  ok    the file picker's list
+
+Where a submission belongs
+  ok    a lesson
+  ok    a paid call
+  ok    a lesson without its course is nothing
+  ok    an id with a slash is nothing
+  ok    another kind is nothing
+
+Who may send: only the buyer, on exact facts
+  ok    the signed-in buyer of the course may send
+  ok    not turned on
+  ok    settings not read
+  ok    not signed in
+  ok    no purchase found
+  ok    purchases not read
+  ok    somebody else's purchase
+  ok    a free enrollment is not a purchase
+  ok    an amount that is not a whole number is unknown
+  ok    a refunded purchase
+  ok    a disputed purchase
+  ok    a payment not finished
+  ok    a state nobody knows
+  ok    an empty purchase email is unknown
+  ok    waiting count not read
+  ok    one under the waiting limit
+  ok    at the waiting limit
+  ok    a negative waiting count is unknown
+  ok    after the paid call ended
+  ok    before the call ended
+  ok    the call's end not known
+  ok    a call with no end given
+
+Before any byte: the file and the plan's room
+  ok    a video that fits is reserved at its declared size
+  ok    a kind the creator did not ask for
+  ok    a type in other letters
+  ok    a type the store never takes
+  ok    an empty file
+  ok    a size that is not a whole number
+  ok    a size not given
+  ok    bigger than the creator allows
+  ok    exactly the creator's largest
+  ok    a trial store takes no buyer files
+  ok    a store with no plan
+  ok    an ended plan
+  ok    the plan's standing not known
+  ok    stored bytes not known
+  ok    reserved uploads not known
+  ok    a negative count is unknown, never zero
+  ok    a count past safe numbers is unknown
+  ok    exactly the room left fits
+  ok    one byte more than the room left is refused
+  ok    room held by uploads still open says so
+  ok    a full store is refused
+  ok    a store past its storage is refused, not wrapped
+  ok    a bigger plan has more room
+  ok    a name with path parts is cleaned
+  ok    no name gives a plain one
+  ok    the creator's reply file takes any of the three kinds
+  ok    the reply file keeps the code's maximum
+
+The review: submitted, then reviewed or withdrawn, once
+  ok    the creator reviews what was sent
+  ok    the buyer withdraws what was sent
+  ok    a buyer cannot review
+  ok    the creator cannot withdraw the buyer's file
+  ok    a review is not given twice
+  ok    a reviewed file is not withdrawn
+  ok    a withdrawn file is not reviewed
+  ok    a state nobody knows moves nowhere
+  ok    kept for the creator's days from when it was sent
+  ok    keeping time past the code's maximum is held to it
+  ok    a review keeps the reply and when
+  ok    the record given is not changed
+  ok    a review without a reply is refused
+  ok    a withdrawal
+  ok    nothing after the keeping time
+  ok    the wrong person
+  ok    a reviewed one is not reviewed again
+
+The creator's reply
+  ok    text alone
+  ok    no text is refused
+  ok    too long is refused, never cut
+  ok    text with a file
+  ok    a reply file of another kind is refused
+  ok    a reply file too big is refused
+  ok    a reply file with no size is refused
+  ok    the buyer's note has its own maximum
+
+Who may open it
+  ok    the buyer who sent it
+  ok    another buyer never
+  ok    a buyer with no address never
+  ok    a team member allowed to review
+  ok    a team member who is not
+  ok    a team member whose permission is unknown
+  ok    a withdrawn file is not opened by the team
+  ok    nor by the buyer who withdrew it
+  ok    nobody else
+
+The file alone, and the kept record's ceiling (unit 2)
+  ok    the file checked without counts
+  ok    says the same no as the whole decision
+  ok    and the same yes, with the room left to it
+  ok    a record at its worst still fits the ceiling
+  ok    one past the ceiling is never written
+  ok    the ceiling is a few tens of kilobytes
+
+125 checks, all passing.

@@ -1,0 +1,84 @@
+
+One email for a reply, from the store's own emails
+  ok    it is sent
+  ok    exactly one
+  ok    to the buyer's own address
+  ok    counted against the store's own emails, taken before it is sent
+  ok    from the store's course sender
+  ok    the same From line as every course email (lib/learn.ts)
+  ok    an honest subject
+  ok    the lead says which file and where
+  ok    the reply, whole
+  ok    the way back to the lesson
+  ok    why it came
+  ok    the creator's name and postal address
+  ok    who sent it
+  ok    a once-only key for the sender
+  ok    an HTML version too
+  ok    in the page's language
+  ok    the reply escaped, never markup
+  ok    no image, so no tracking pixel
+  ok    a link that says where it goes
+  ok    the postal address in the HTML
+  ok    no postal address line when the store has none
+
+Once, and never twice
+  ok    a second call for the same reply sends nothing
+  ok    still one email
+  ok    the mark is kept for its time
+  ok    a send that did not go (allowance spent) says so
+  ok    and is never tried again: it may have gone
+  ok    two tries, one a refusal
+
+Addresses that cannot or may not be written to are skipped
+  ok    an address that bounced is skipped
+  ok    an address that complained is skipped
+  ok    an address deleted from the store is skipped
+  ok    none of them was sent
+  ok    one who only left the creator's list is still told about their own file
+  ok    so three emails
+  ok    a contact that does not read is unknown: nothing sent
+  ok    a check answered in another shape is unknown: nothing sent
+  ok    a mark that cannot be read is unknown: nothing sent
+  ok    still three emails
+
+Nothing for a file that was not answered
+  ok    waiting
+  ok    withdrawn
+  ok    no address
+  ok    still three
+
+Its Redis commands, at most
+  ok    inside SUBMISSION_NOTICE_COMMANDS (the email's own allowance take is lib/email.ts's)
+
+In the store's language
+  ok    the subject
+  ok    the page's language
+  ok    en: every word of the email and the badge is there
+  ok    es: every word of the email and the badge is there
+  ok    fr: every word of the email and the badge is there
+  ok    de: every word of the email and the badge is there
+  ok    it: every word of the email and the badge is there
+  ok    nl: every word of the email and the badge is there
+  ok    pt: every word of the email and the badge is there
+
+The studio's reply tells the buyer
+  ok    after the reply is kept, the buyer is told
+  ok    and the studio is told whether the email went
+  ok    the studio says so in words
+
+On the lesson page, a reply not shown yet is marked
+  ok    nothing seen on this device: every reply is new
+  ok    one seen: the other is new
+  ok    a remembered list that does not read: no badge, never a guess
+  ok    so nothing is marked new
+  ok    only ids are kept, never another value
+  ok    what this device remembers: the replies it has shown
+  ok    one key per lesson
+  ok    the badge is said in words, not color alone
+  ok    the list says how many are new
+  ok    the browser's storage is read and written only inside try
+  ok    the email's link lands on the box
+  ok    English
+
+66 checks, all passing.

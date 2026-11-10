@@ -1,0 +1,23 @@
+{
+  "submission-buyer.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "95 checks, all passing."
+    ]
+  },
+  "submission-buyer-cost.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "4 checks, all passing."
+    ]
+  },
+  "submission-rules.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "125 checks, all passing."
+    ]
+  }
+}

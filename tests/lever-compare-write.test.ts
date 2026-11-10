@@ -126,8 +126,8 @@ test("another tab's change is never lost to the card's switch, and the card asks
   const page = await read();
   const recovery = toggle(page, "recovery");
   const next = toggle(page, "next");
-  // Another tab: a new address; the next offer on with its email line.
-  assert.equal((await send("/api/store/recovery", { enabled: true, address: C, expect: { enabled: true, address: A } })).status, 200);
+  // Another tab: a new address (saved as its route saves it once its checks pass: no email sender is set up here); the next offer on with its email line.
+  assert.ok((await setRecovery(OWNER, { enabled: true, address: C, asks: true }, { enabled: true, address: A })).ok);
   assert.equal((await send("/api/store/assistant-settings", { next: { on: true, email: true }, expect: { on: false, email: false } })).status, 200);
 
   const post = async (route: LeverRoute, body: Record<string, unknown>) => (await send(route, body)).body;

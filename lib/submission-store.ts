@@ -62,7 +62,7 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  * tests/submission-store.test.ts. Each is far inside the hundred a buyer
  * action is priced at (tests/plan-cost-registry.ts, UNIT_COST.buyer).
  */
-export const SUBMISSION_STEP_COMMANDS = { open: 14, sign: 1, done: 11, abort: 5 } as const;
+export const SUBMISSION_STEP_COMMANDS = { open: 14, sign: 1, done: 12, abort: 5 } as const;
 /** Kept files the daily sweep deletes at most in one run; the rest wait for the next. */
 export const SUBMISSION_SWEEP_PER_RUN = 200;
 /** A file the sweep could not delete is tried again this much later, so it never holds back the files behind it. */
@@ -445,18 +445,35 @@ export async function closeSubmissionDoor(
   // One close of an upload at a time (review of #3568, Codex C2): the door is taken off Redis in one step before
   // the vault is asked, so another close of the same upload finds it gone and stops there. No other close can then
   // write a record for this file, and the read-back below, when it reads "no record", cannot be overtaken by one.
-  const taken = repliesFor(await redisPipeline([["GETDEL", doorKey(door.folder, door.id)]]), 1);
+  // In the same request, the file's end is set before the vault completes it (review of #3570, Codex C2): it goes on
+  // the sweep's list at its keeping time first, so a file completed whose record and its recovery both fail is still
+  // deleted when that time ends. A record written later sets the same entry again; an upload never completed costs
+  // the sweep one delete.
+  const keepUntil = submissionKeepUntil(nowSeconds, Math.min(door.keepDays, MAX_SUBMISSION_KEEP_DAYS));
+  const putBack = async () => {
+    // Nothing was kept: the door is put back for the rest of its day, so the buyer can close it again.
+    const left = door.at + UPLOAD_SECONDS - nowSeconds;
+    if (left <= 0) return;
+    const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
+    if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
+  };
+  const taken = repliesFor(
+    await redisPipeline([
+      ["GETDEL", doorKey(door.folder, door.id)],
+      ["ZADD", DUE_KEY, "NX", keepUntil, dueMember(door.folder, pathname)],
+    ]),
+    2,
+  );
   if (!taken) throw new UnknownReplyError("a submission upload taken to close");
   if (taken[0] === null) return { ok: false, reason: "unknown" };
   if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to close");
+  if (countOf(taken[1]) === null) {
+    await putBack();
+    throw new UnknownReplyError("a submission file put on the sweep's list");
+  }
   const closed = await steps.closeReservedVault(pathname, etags);
   if (!closed.ok) {
-    // Nothing was kept: the door is put back for the rest of its day, so the buyer can close it again.
-    const left = door.at + UPLOAD_SECONDS - nowSeconds;
-    if (left > 0) {
-      const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
-      if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
-    }
+    await putBack();
     return { ok: false, reason: closed.reason };
   }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
@@ -468,7 +485,6 @@ export async function closeSubmissionDoor(
     await drop();
     return { ok: false, reason: "invalid" };
   }
-  const keepUntil = submissionKeepUntil(nowSeconds, Math.min(door.keepDays, MAX_SUBMISSION_KEEP_DAYS));
   const kept: KeptSubmission = {
     id: door.id,
     target: { kind: "lesson", courseId: door.courseId, lessonId: door.lessonId },

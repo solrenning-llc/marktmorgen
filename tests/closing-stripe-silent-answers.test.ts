@@ -46,6 +46,9 @@ let fileStore: "up" | "down" = "up";
 const platform: "up" | "down" = "up";
 let connected: "up" | "down" = "up";
 const running = new Map<string, Record<string, unknown>>();
+/** Ended plan subscriptions the platform reads by id only: a store's own, so our key is confirmed (H1 on #3463). */
+const ownPlans = new Map<string, Record<string, unknown>>();
+const ownPlan = (handle: string) => ownPlans.set(handle, { id: `sub_${handle}0001`, object: "subscription", status: "canceled", customer: `cus_${handle}0001`, metadata: { store: handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
 const posted: string[] = [];
 let breakAfterRead = false;
 let breakRedis = false;
@@ -73,7 +76,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
     if (path === "/subscriptions") return json({ object: "list", data: [], has_more: false });
     if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
-    const one = [...running.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
+    const one = [...running.values(), ...ownPlans.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
     if (one) { if (breakAfterRead) { breakAfterRead = false; breakRedis = true; } return json(one); }
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
@@ -210,14 +213,18 @@ async function main(): Promise<void> {
   if (!memberStore) throw new Error("no member store");
   // A member who paid for 60 days from 10 days before the plan ended: time is left after the closing day.
   await savePaidPeriod(memberStore, "sub_member0000001", { inv: "in_member0000001", amt: 6000, cur: "usd", ps: Math.floor((member.ended - 10 * DAY) / 1000), pe: Math.floor((member.ended + 50 * DAY) / 1000), e: "paid-member@example.com" });
+  ownPlan(member.handle);
   connected = "down";
   const memberHeld = await quietly(() => closeOne(member.email, member.ended + (C + 1) * DAY, hands));
   is("its renewals cannot be stopped: held", memberHeld.state, "held");
+  // Silent on every daily run until the deadline (Claude 3's H1 on #3463: a streak, never one silence).
+  for (let d = C + 2; d <= C + SILENT; d += 1) await quietly(() => closeOne(member.email, member.ended + d * DAY, hands));
   const before = sent.length;
   const memberGone = await quietly(() => closeOne(member.email, member.ended + (C + SILENT + 1) * DAY, hands));
   const toMember = sent.slice(before).filter((mail) => mail.to.includes("paid-member@example.com"));
   is("past the deadline it closes without Stripe", [memberGone.state, memberGone.lapsed, filesOf(member)], ["removed", true, 0]);
-  is("the member is emailed once that the refund was not made, before the records go", toMember.length, 1);
+  is("the member is emailed once that the refund was not made, before the records go", toMember.filter((mail) => /may not have been made/.test(mail.subject)).length, 1);
+  is("and once that the membership may keep renewing (M2 on #3463)", toMember.filter((mail) => /may keep renewing/.test(mail.subject)).length, 1);
   is("the dated record says how many known renewals were left running at Stripe", (await record(member))?.unstopped, 1);
   connected = "up";
 
@@ -226,8 +233,11 @@ async function main(): Promise<void> {
   const lockedStore = await storeForEmail(locked.email);
   if (!lockedStore) throw new Error("no locked store");
   await savePaidPeriod(lockedStore, "sub_locked0000001", { inv: "in_locked0000001", amt: 6000, cur: "usd", ps: Math.floor((locked.ended - 10 * DAY) / 1000), pe: Math.floor((locked.ended + 50 * DAY) / 1000), e: "locked-member@example.com" });
+  ownPlan(locked.handle);
+  // The member store's account was silent on these same days: two accounts silent together would read as ours.
+  for (const k of redis.keys()) if (k.startsWith("nl:held:silent:")) redis.run(["DEL", k]);
   connected = "down";
-  await quietly(() => closeOne(locked.email, locked.ended + (C + 1) * DAY, hands));
+  for (let d = C + 1; d <= C + SILENT; d += 1) await quietly(() => closeOne(locked.email, locked.ended + d * DAY, hands));
   // The members' payments, read under the refunds' lock: our own Redis fails on it.
   breakRead = "nl:closing:paid:";
   const lockedLate = await quietly(() => closeOne(locked.email, locked.ended + (C + SILENT + 1) * DAY, hands));

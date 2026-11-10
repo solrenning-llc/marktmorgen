@@ -11,10 +11,12 @@
  * walk's room (ERASE_EVERY_DAYS) is left inside it for the deletion itself, so Stripe gets the rest:
  * ERASE_WITHIN_DAYS - ERASE_EVERY_DAYS days after the day. What these hold, against stand-ins only:
  *
- *   - Stripe silent until then: held every day before it, nothing removed; on it, the store closes without
- *     Stripe, its files go, it is put in line for the walk, the case is written down (`lapsed`), and after the
- *     walk only its dated closing record is left;
- *   - the same when the silence is on its closing day's own steps (a late plan's check, its renewals);
+ *   - our platform key silent (whether a plan runs, a late plan's check): ours or Stripe's, never the creator's, so
+ *     held with no deadline and nothing removed (Claude 3's H1 on #3463);
+ *   - the creator's own account silent on its closing day's own steps (its renewals) on every daily run until
+ *     then, our key reading the store's own plan: on it, the store closes without Stripe, its files go, it is put
+ *     in line for the walk, the case is written down (`lapsed`), and after the walk only its dated closing record
+ *     is left;
  *   - Stripe that answers before then is the ordinary closing, with no `lapsed`;
  *   - Stripe that answers after it, that the plan runs, still keeps the store: the deadline replaces a hold,
  *     never an answer;
@@ -51,6 +53,8 @@ let fileStore: "up" | "down" = "up";
 let platform: "up" | "down" = "up";
 let connected: "up" | "down" = "up";
 const running = new Map<string, Record<string, unknown>>();
+/** Ended plan subscriptions the platform reads by id only (never in a search): a store's own, so our key is confirmed. */
+const ownPlans = new Map<string, Record<string, unknown>>();
 const posted: string[] = [];
 const sent: { to: string[]; subject: string }[] = [];
 
@@ -74,7 +78,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
     if (path === "/subscriptions") return json({ object: "list", data: [], has_more: false });
     if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
-    const one = [...running.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
+    const one = [...running.values(), ...ownPlans.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
     if (one) return json(one);
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
@@ -170,7 +174,7 @@ async function main(): Promise<void> {
   for (const made of [mute, back, alive, late, renew]) await told(made);
   is("every store was told three times", sent.length, 15);
 
-  part("Stripe silent from the closing day until the deadline");
+  part("Our platform key silent from the closing day: ours, held past the deadline, nothing removed (H1 on #3463)");
   platform = "down";
   const firstDay = await quietly(() => closeOne(mute.email, mute.ended + (C + 1) * DAY, hands));
   is("on its day Stripe cannot be asked: held, nothing removed", [firstDay.state, firstDay.note, filesOf(mute), await inLine(mute)], ["held", "Stripe could not be asked", 1, false]);
@@ -179,12 +183,12 @@ async function main(): Promise<void> {
   const budget = await quietly(() => closeOne(mute.email, mute.ended + (C + SILENT + 1) * DAY, hands, Number.POSITIVE_INFINITY, async () => false));
   is("past it, a store not asked at all today (the daily budget) is not taken for a silent one", [budget.state, budget.note, filesOf(mute)], ["held", "daily-recheck-budget", 1]);
   const lapsed = await quietly(() => closeOne(mute.email, mute.ended + (C + SILENT + 1) * DAY, hands));
-  is("past the deadline, still silent: the store closes without Stripe", [lapsed.state, lapsed.lapsed], ["removed", true]);
-  is("its files are gone, it is in line for the walk, and its closing is seen through", [filesOf(mute), await inLine(mute), await closingFinal(mute)], [0, true, true]);
-  is("the case is written down on its closing record", typeof (await record(mute))?.lapsed, "number");
+  is("past the deadline, our key still silent: held, never lapsed", [lapsed.state, lapsed.lapsed], ["held", undefined]);
+  is("its files are kept and it is not in line for the walk", [filesOf(mute), await inLine(mute)], [1, false]);
+  is("no lapse is written down on its closing record", typeof (await record(mute))?.lapsed, "undefined");
   is("nothing was changed at Stripe for it", posted.length, 0);
 
-  part("Stripe silent on the closing day's own steps");
+  part("Silent on the closing day's own steps");
   // A late plan's check (its closing day began, then the file store failed, then Stripe went silent).
   platform = "up";
   fileStore = "down";
@@ -195,13 +199,17 @@ async function main(): Promise<void> {
   const checking = await quietly(() => closeOne(late.email, late.ended + (C + 2) * DAY, hands));
   is("then a late plan cannot be checked: held", [checking.state, checking.note, filesOf(late)], ["held", "its plan subscriptions could not all be checked", 1]);
   const lateGone = await quietly(() => closeOne(late.email, late.ended + (C + SILENT + 1) * DAY, hands));
-  is("past the deadline it closes without Stripe, written down", [lateGone.state, lateGone.lapsed, filesOf(late), await inLine(late), typeof (await record(late))?.lapsed], ["removed", true, 0, true, "number"]);
-  // Its renewals (the creator's connected account is silent, the platform answers).
+  is("past the deadline, a late plan's check is still our key's: held, never lapsed", [lateGone.state, lateGone.lapsed, filesOf(late), await inLine(late), typeof (await record(late))?.lapsed], ["held", undefined, 1, false, "undefined"]);
+  // Its renewals (the creator's connected account is silent on every daily run, the platform answers and reads
+  // the store's own plan).
   platform = "up";
   await setStripeAccount(renew.email, "acct_1SilentLapse01");
+  ownPlans.set(renew.handle, { id: `sub_${renew.handle}0001`, object: "subscription", status: "canceled", customer: `cus_${renew.handle}0001`, metadata: { store: renew.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
   connected = "down";
   const renewDay = await quietly(() => closeOne(renew.email, renew.ended + (C + 1) * DAY, hands));
   is("its renewals cannot be stopped: held", [renewDay.state, renewDay.note, filesOf(renew)], ["held", "Stripe could not be asked to stop its renewals", 1]);
+  for (let d = C + 2; d <= C + SILENT; d += 1) await quietly(() => closeOne(renew.email, renew.ended + d * DAY, hands));
+  is("silent every day until the deadline: still held", filesOf(renew), 1);
   const renewGone = await quietly(() => closeOne(renew.email, renew.ended + (C + SILENT + 1) * DAY, hands));
   is("past the deadline it closes without Stripe, written down", [renewGone.state, renewGone.lapsed, filesOf(renew), await inLine(renew), typeof (await record(renew))?.lapsed], ["removed", true, 0, true, "number"]);
   connected = "up";
@@ -224,9 +232,9 @@ async function main(): Promise<void> {
 
   part("The walk: personal records go, the dated record stays");
   const walked = await quietly(() => eraseClosed(Date.now() + 20_000, finishClosed, renew.ended + (C + SILENT + 1) * DAY + 3_600_000));
-  is("the walk deletes the four closed stores", [walked.done, walked.finished, ...(await Promise.all([mute, late, renew, back].map(async (made) => (await storeForEmail(made.email))?.handle ?? null)))], [true, 4, null, null, null, null]);
-  is("the store that runs stays", (await storeForEmail(alive.email))?.handle, alive.handle);
-  for (const made of [mute, late, renew]) {
+  is("the walk deletes the two closed stores", [walked.done, walked.finished, ...(await Promise.all([renew, back].map(async (made) => (await storeForEmail(made.email))?.handle ?? null)))], [true, 2, null, null]);
+  is("the store that runs stays, and so do the two our key could not ask", (await Promise.all([alive, mute, late].map(async (made) => (await storeForEmail(made.email))?.handle ?? null))), [alive.handle, mute.handle, late.handle]);
+  for (const made of [renew]) {
     const kept = await record(made);
     const values = Object.values(kept ?? {});
     is(`${made.handle}: only dates are left, the case and the deletion among them`, [values.length > 0 && values.every((value) => typeof value === "number"), typeof kept?.lapsed, typeof kept?.erased], [true, "number", "number"]);

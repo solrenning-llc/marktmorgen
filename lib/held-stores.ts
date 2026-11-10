@@ -170,11 +170,13 @@ export async function recordOverdue(ref: string, reason: OverdueReason, now: num
  * accounts refusing together is ours (Connect suspended for the platform, account ids gone wrong), never a lapse.
  */
 export const ACCOUNT_NOTE_SECONDS = 3 * 86400;
-const accountsKey = (kind: "refused" | "answered", day: string) => (kind === "refused" ? "nl:held:refused:" : "nl:held:answered:") + day;
-export async function noteAccountReply(account: string, refused: boolean, now: number): Promise<void> {
+/** How a creator account replied on a day: refused us, gave no answer at all (Claude 3's H1 on #3463), or answered. */
+export type AccountReply = "refused" | "silent" | "answered";
+const accountsKey = (kind: AccountReply, day: string) => (kind === "refused" ? "nl:held:refused:" : kind === "silent" ? "nl:held:silent:" : "nl:held:answered:") + day;
+export async function noteAccountReply(account: string, reply: AccountReply | boolean, now: number): Promise<void> {
   const day = dayOf(now);
   if (!refValid(account) || day === null) throw new Error("account reply identity or clock is unknown");
-  const key = accountsKey(refused ? "refused" : "answered", day);
+  const key = accountsKey(reply === true ? "refused" : reply === false ? "answered" : reply, day);
   const values = exactArray(await redisPipeline([["HSET", key, identity(account), 1], ["EXPIRE", key, ACCOUNT_NOTE_SECONDS]]));
   if (!values || values.length !== 2 || number(values[0]) === null || values[1] !== 1) throw new Error("account reply note is unknown");
 }
@@ -183,10 +185,17 @@ export async function noteAccountReply(account: string, refused: boolean, now: n
  * and more than answered. Not known is together: it never lets a refusal delete.
  */
 export async function accountsRefuseTogether(now: number): Promise<boolean> {
+  return accountsTogether("refused", now);
+}
+/** The same for accounts that gave no answer at all (Claude 3's H1 on #3463): several silent together is ours. */
+export async function accountsSilentTogether(now: number): Promise<boolean> {
+  return accountsTogether("silent", now);
+}
+async function accountsTogether(kind: "refused" | "silent", now: number): Promise<boolean> {
   const today = dayOf(now), yesterday = dayOf(now - 86400_000);
   if (today === null || yesterday === null) return true;
   try {
-    const values = exactArray(await redisPipeline([["HLEN", accountsKey("refused", today)], ["HLEN", accountsKey("answered", today)], ["HLEN", accountsKey("refused", yesterday)], ["HLEN", accountsKey("answered", yesterday)]]));
+    const values = exactArray(await redisPipeline([["HLEN", accountsKey(kind, today)], ["HLEN", accountsKey("answered", today)], ["HLEN", accountsKey(kind, yesterday)], ["HLEN", accountsKey("answered", yesterday)]]));
     const n = values?.map(number);
     if (!n || n.length !== 4 || n.some((value) => value === null)) return true;
     const together = (refused: number, answered: number) => refused >= 3 || (refused >= 2 && refused > answered);

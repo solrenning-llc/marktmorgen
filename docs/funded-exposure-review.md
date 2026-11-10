@@ -25,7 +25,12 @@ counted once a month by reason in the owner's report ("retidas além do prazo pu
 A creator account refusing us (403 account_invalid) lapses only after STRIPE_SILENT_DAYS of
 refusals seen on daily runs at most REFUSAL_GAP_MS apart, with the platform reading the store's
 own subscription in the same run, and never while several distinct accounts refuse together
-(`nl:held:refused:`/`nl:held:answered:`); its work is CLOSING_DEADLINE_WORK in
+(`nl:held:refused:`/`nl:held:answered:`). Since Claude 3's review of #3463, the creator's own
+account giving no answer has the same shape (`nl:held:silent:`): STRIPE_SILENT_DAYS of silence on
+daily runs, the platform reading the store's own subscription in the same run, never with several
+accounts silent together; our platform key giving no answer is never the creator's and holds with
+no deadline; and before a store closed without its members' renewals stopped is deleted, each
+member with a known subscription is told the membership may keep renewing. Its work is CLOSING_DEADLINE_WORK in
 tests/plan-cost-registry.ts. The deadline is the earliest moment, not a guaranteed
 latest: a store already in the held recheck line waits its turn among the50 rechecks a
 day, and the walk then runs at most every WALK_GAP_MS, so deletion within

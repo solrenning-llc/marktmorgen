@@ -59,6 +59,10 @@ let connected: "up" | "down" | "revoked" = "up";
 const running = new Map<string, Record<string, unknown>>();
 /** Ended plan subscriptions the platform reads by id only (never in a search): a store's own, so our key is confirmed. */
 const ownPlans = new Map<string, Record<string, unknown>>();
+/** A store's own ended plan, so our key is confirmed (Claude 3's H1 on #3463: silence lapses only then). */
+const ownPlan = (handle: string) => ownPlans.set(handle, { id: `sub_${handle}0001`, object: "subscription", status: "canceled", customer: `cus_${handle}0001`, metadata: { store: handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
+/** Another scenario's accounts were silent on these same days: several silent together read as ours (H1 on #3463). */
+const alone = () => { for (const k of redis.keys()) if (k.startsWith("nl:held:silent:")) redis.run(["DEL", k]); };
 const posted: string[] = [];
 /** What the creators' connected accounts were asked, by path. */
 const asked: string[] = [];
@@ -219,15 +223,19 @@ async function main(): Promise<void> {
   platform = "html502";
   const h1 = await quietly(() => closeOne(h.email, h.ended + (C + 1) * DAY, hands));
   const h2 = await quietly(() => closeOne(h.email, h.ended + (C + SILENT + 1) * DAY, hands));
-  is("Stripe giving only 502s is silence: past the deadline the store closes without it", [h1.state, h2.state, filesOf(h)], ["held", "removed", 0]);
+  // Claude 3's H1 on #3463: our platform key giving only 502s is ours or Stripe's, never the creator's.
+  is("our key given only 502s is not the creator's silence: held past the deadline, nothing removed", [h1.state, h2.state, filesOf(h)], ["held", "held", 1]);
   platform = "up";
 
   part("R5: the lapse count is idempotent per store (count once) when the dated record's save fails once");
   const c = await closingStore("countstore");
   await told(c);
   await setStripeAccount(c.email, "acct_1SilentCount001");
+  ownPlan(c.handle);
+  alone();
   connected = "down";
-  await quietly(() => closeOne(c.email, c.ended + (C + 1) * DAY, hands));
+  // Silent on every daily run until the deadline: a streak, never one silence (H1 on #3463).
+  for (let d = C + 1; d <= C + SILENT; d += 1) await quietly(() => closeOne(c.email, c.ended + d * DAY, hands));
   breakLapsedSave = stateKey(c.email);
   const lapseDay = c.ended + (C + SILENT + 1) * DAY;
   const monthOf = new Date(lapseDay).toISOString().slice(0, 7);
@@ -249,8 +257,10 @@ async function main(): Promise<void> {
   const ms = await storeForEmail(m.email);
   if (!ms) throw new Error("no store");
   await savePaidPeriod(ms, "sub_refund0000001", { inv: "in_refund0000001", amt: 6000, cur: "usd", ps: Math.floor((m.ended - 10 * DAY) / 1000), pe: Math.floor((m.ended + 50 * DAY) / 1000), e: "refund-member@example.com" });
+  ownPlan(m.handle);
+  alone();
   connected = "down";
-  await quietly(() => closeOne(m.email, m.ended + (C + 1) * DAY, hands));
+  for (let d = C + 1; d <= C + SILENT; d += 1) await quietly(() => closeOne(m.email, m.ended + d * DAY, hands));
   delete process.env.COMPANY_POSTAL_ADDRESS;
   const m1 = await quietly(() => closeOne(m.email, m.ended + (C + SILENT + 1) * DAY, hands));
   const row = (await paidPeriods(ms)).get("sub_refund0000001");
@@ -274,14 +284,19 @@ async function main(): Promise<void> {
   const ns = await storeForEmail(n.email);
   if (!ns) throw new Error("no store");
   await savePaidPeriod(ns, "sub_mail00000001", { inv: "in_mail00000001", amt: 6000, cur: "usd", ps: Math.floor((n.ended - 10 * DAY) / 1000), pe: Math.floor((n.ended + 50 * DAY) / 1000), e: "mail-member@example.com" });
+  ownPlan(n.handle);
+  alone();
   connected = "down";
   await quietly(() => closeOne(n.email, n.ended + (C + 1) * DAY, hands));
   delete process.env.COMPANY_POSTAL_ADDRESS;
   // Rule 23 (coordinator's decision): a notice that cannot go out keeps the store; past the published time it is
-  // counted as "notice".
-  for (const d of [SILENT + 1, 60, 400]) {
+  // counted as "notice". Looked at on every daily run, as the closing job does (silence counts as a streak, H1 on
+  // #3463); the days checked are the same.
+  const checkedDays = new Set([SILENT + 1, 60, 400]);
+  for (let d = 2; d <= 400; d += 1) {
+    if (d % 2 === 0) alone();
     const r = await quietly(() => closeOne(n.email, n.ended + (C + d) * DAY, hands));
-    is(`day C+${d}: kept until the member can be told, counted past the published time`, [d, r.state, filesOf(n), Reflect.get(r, "overdue")], [d, "held", 1, d >= ERASE_WITHIN_DAYS ? "notice" : undefined]);
+    if (checkedDays.has(d)) is(`day C+${d}: kept until the member can be told, counted past the published time`, [d, r.state, filesOf(n), Reflect.get(r, "overdue")], [d, "held", 1, d >= ERASE_WITHIN_DAYS ? "notice" : undefined]);
   }
   process.env.COMPANY_POSTAL_ADDRESS = POSTAL; connected = "up";
   part("R8: the creator disconnected Marktmorgen from their Stripe account (403 account_invalid on every connected call)");
@@ -308,8 +323,10 @@ async function main(): Promise<void> {
   const ls = await storeForEmail(l.email);
   if (!ls) throw new Error("no store");
   await savePaidPeriod(ls, "sub_letter0000001", { inv: "in_letter0000001", amt: 6000, cur: "usd", ps: Math.floor((l.ended - 10 * DAY) / 1000), pe: Math.floor((l.ended + 50 * DAY) / 1000), e: "letter-member@example.com" });
+  ownPlan(l.handle);
+  alone();
   connected = "down";
-  await quietly(() => closeOne(l.email, l.ended + (C + 1) * DAY, hands));
+  for (let d = C + 1; d <= C + SILENT; d += 1) await quietly(() => closeOne(l.email, l.ended + d * DAY, hands));
   const day = (await record(l))?.day as number;
   // Out of email credit first: the member cannot be told, so nothing is deleted.
   await redis.pipeline([["SET", creditKey(l.folder), 0]]);
@@ -318,7 +335,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", creditKey(l.folder), 5]]);
   const letterBefore = sent.length;
   const lapsedLetter = await quietly(() => closeOne(l.email, l.ended + (C + SILENT + 2) * DAY, hands));
-  const letter = sent.slice(letterBefore).find((x) => x.to.includes("letter-member@example.com")) as { subject: string; text?: string } | undefined;
+  const letter = sent.slice(letterBefore).find((x) => x.to.includes("letter-member@example.com") && /may not have been made/.test(x.subject)) as { subject: string; text?: string } | undefined;
   const dayWords = new Date(day).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
   is("then it lapses, and the member is told first", [lapsedLetter.state, filesOf(l)], ["removed", 0]);
   is("the letter says the refund may not have been made, and the day the store closed, never 'today'", [/may not have been made/.test(letter?.subject ?? ""), (letter?.text ?? "").includes(dayWords), /closed today/.test(letter?.text ?? "")], [true, true, false]);

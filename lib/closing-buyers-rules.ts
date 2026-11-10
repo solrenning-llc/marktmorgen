@@ -404,6 +404,25 @@ export function refundLapsedLetter(input: { store: string; amount: string; conta
   };
 }
 
+/**
+ * Claude 3's M2 on #3463: a store closed without Stripe before its members' renewals were stopped there. The
+ * membership lives on the creator's own Stripe account, so it may keep charging; the member is told how to stop it.
+ */
+export function renewalsUnstoppedLetter(input: { store: string; contact: string; closedOn: number }): BuyerLetter {
+  return {
+    subject: `Your membership with ${input.store} may keep renewing`,
+    text: [
+      `${input.store} closed on ${dateWords(input.closedOn)}.`,
+      "We could not reach the store's Stripe account, so we could not stop your membership's renewals or check whether they were stopped. Your card may still be charged.",
+      "",
+      `To stop it, please contact ${input.store} directly: ${input.contact}`,
+      "If they do not answer, your card issuer can stop the payments.",
+      "",
+      "Marktmorgen does not hold the store's money and cannot stop or refund these payments.",
+    ].join("\n"),
+  };
+}
+
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 /**

@@ -25,7 +25,8 @@
  * keys, end call meetings and mark reviews read the disputes closed since
  * their last run, as they read refunds). A dispute still open (needs_response,
  * under_review, the warning_ stages) or won by the creator closes nothing:
- * only the final "lost" does. A partial refund keeps access, because the
+ * only a final "lost" does, or a "prevented" one whose money the bank
+ * withdrew and did not put back (lostBy). A partial refund keeps access, because the
  * creator chose to keep part of the price, and the buyer keeps what it paid
  * for. A lost dispute closes whatever its amount: Stripe says a dispute's
  * amount is "usually the amount of the charge, but it can differ (usually
@@ -129,9 +130,13 @@ const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "fai
  * Whether one dispute takes the payment back for good: "lost" does; a "prevented" one (stopped before it opened, an
  * issuer's early resolution) does only when its own money was withdrawn and not put back (disputeMoneyGone, the rule
  * main's readers use since #3321), and does not when nothing was withdrawn or all of it was reinstated; any other
- * status does not. null when a prevented dispute's money cannot be read (CX-123 rule 24): never lost, never not lost.
+ * status Stripe sends does not. null when its status is not one Stripe sends, or a prevented dispute's money cannot be
+ * read (CX-123 rule 24): never lost, never not lost.
  */
 function lostBy(dispute: Record<string, unknown>): boolean | null {
+  // A status Stripe does not send (missing, another type, not among DISPUTE_STATUSES) is unknown, as closingKnown()
+  // reads an event's (CX-123 rule 24; Claude 4 on #3569): never "not lost".
+  if (typeof dispute.status !== "string" || !DISPUTE_STATUSES.has(dispute.status)) return null;
   if (dispute.status === "lost") return true;
   if (dispute.status === "prevented") return disputeMoneyGone(dispute);
   return false;
@@ -197,8 +202,9 @@ function closingKnown(event: unknown): boolean {
  * Throws when Stripe cannot be asked, and when its answer is not this
  * charge's own list (rule 30): a reply that is not a list, a row that is not
  * a dispute object or a row naming another charge or none, whatever else
- * the list holds; and, only when no lost row of its own decides, a prevented
- * row whose money cannot be read or a list not said to be whole. Not paged,
+ * the list holds; and, only when no lost row of its own decides, a row
+ * whose status is not one Stripe sends, a prevented row whose money cannot
+ * be read or a list not said to be whole. Not paged,
  * so no request is
  * added: a charge with more disputes than one page holds reads as unknown.
  */
@@ -218,14 +224,14 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
     // Another charge's lost dispute, or one naming none, would close the doors on a buyer who paid.
     if (idOf((row as { charge?: unknown }).charge) !== id) throw new Error("Stripe listed another charge's dispute");
     const taken = lostBy(row as Record<string, unknown>);
-    // A prevented dispute whose money cannot be read is unknown; it decides only when no row of its own proves a loss
-    // (Codex V on #3569), and every row is still checked for its shape and its charge first.
+    // A row whose status, or a prevented one's money, cannot be read is unknown; it decides only when no row of its own
+    // proves a loss (Codex V and Claude 4 on #3569), and every row is still checked for its shape and its charge first.
     if (taken === null) unread = true;
     else if (taken) lost = true;
   }
   // Its own lost dispute is lost whatever else there is; "not lost" only from a list that says, exactly, there is no more.
   if (lost) return true;
-  if (unread) throw new Error("a prevented dispute's money could not be read");
+  if (unread) throw new Error("a dispute listed for this charge could not be decided");
   if ((listed as { has_more?: unknown }).has_more !== false) throw new Error("this charge's disputes were not read whole");
   return false;
 }

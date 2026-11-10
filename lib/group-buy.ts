@@ -41,7 +41,7 @@ import { consentEmailLines } from "@/lib/digital-consent-email";
 import { countOrder } from "@/lib/orders";
 import { ADMITTED_FIELD, OPEN_HOURS, admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -437,8 +437,11 @@ export async function askPlace(input: {
   if (sentCount === null) return "unavailable";
   if (sentCount > group.people * 3 + 10) return "slow";
   // The email is one of the store's access emails, taken as it is sent
-  // (lib/email.ts); when the month's are used, the person is told so here.
-  if ((await allowanceUsed(store, "transactional")) >= allowanceFor(store, "transactional")) return "resting";
+  // (lib/email.ts); when the month's are used, the person is told so here. A count that cannot be read is not room
+  // (rule 24): nothing is sent, and the person is asked to try again.
+  const accessUsed = await allowanceUsedExact(store, "transactional");
+  if (accessUsed === null) return "unavailable";
+  if (accessUsed >= allowanceFor(store, "transactional")) return "resting";
 
   if (has) {
     const link = (await input.ordersLink(email)) ?? `${base}/orders`;

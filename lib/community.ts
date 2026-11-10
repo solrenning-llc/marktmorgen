@@ -324,11 +324,25 @@ export async function readConfig(id: string): Promise<CommunityConfig | null> {
 }
 
 /**
+ * A setup that Redis did answer, as text, but that is not settings: stored
+ * damaged, so asking again gives the same answer. Still an unknown reply to
+ * anyone who catches UnknownReplyError; only a caller that knows what such a
+ * setup means for it may tell the two apart (lib/community-erasure.ts).
+ */
+export class DamagedConfigError extends UnknownReplyError {
+  constructor() {
+    super("a community setup stored damaged");
+    this.name = "DamagedConfigError";
+  }
+}
+
+/**
  * The settings, read before anything is written over them: null only when
  * the GET answered exactly nil, so there is no setup yet. A lost reply, one
  * in another shape or a value that does not parse throws, and the caller
  * writes nothing; a fresh setup over the creator's spaces and access would
- * lock every paying member out.
+ * lock every paying member out. A text value that does not parse throws
+ * DamagedConfigError.
  */
 export async function readConfigExact(id: string): Promise<CommunityConfig | null> {
   if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
@@ -336,7 +350,7 @@ export async function readConfigExact(id: string): Promise<CommunityConfig | nul
   if (!replies) throw new UnknownReplyError("a community setup");
   if (replies[0] === null) return null;
   const config = parseConfig(replies[0]);
-  if (!config) throw new UnknownReplyError("a community setup");
+  if (!config) throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
   return config;
 }
 
@@ -459,6 +473,28 @@ export async function readMembers(id: string, keys: string[]): Promise<Map<strin
   unique.forEach((key, i) => {
     const member = parseMember(list[i]);
     if (member) out.set(key, member);
+  });
+  return out;
+}
+
+/**
+ * The members of `keys`, read exactly (rules 24 and 30), for deciding who an email goes to: one left out of the map
+ * only when its row answered exactly nil, so it is gone. A reply lost, cut short or in another shape, or a row that is
+ * not that member's record, throws UnknownReplyError: a member who did not read is not one who is gone, and an email
+ * meant for them is not counted as sent (lib/community-event-mail.ts).
+ */
+export async function readMembersExact(id: string, keys: string[]): Promise<Map<string, Member>> {
+  const out = new Map<string, Member>();
+  const unique = [...new Set(keys)].filter((k) => k !== CREATOR);
+  if (!unique.length) return out;
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...unique]]), 1);
+  const rows = replies && repliesFor(replies[0], unique.length);
+  if (!rows) throw new UnknownReplyError("community members");
+  unique.forEach((key, i) => {
+    if (rows[i] === null) return;
+    const member = parseMember(rows[i]);
+    if (!member || member.k !== key) throw new UnknownReplyError("a community member record");
+    out.set(key, member);
   });
   return out;
 }

@@ -51,6 +51,10 @@ import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { releaseLock } from "@/lib/redis-lock";
+import { claimValue } from "@/lib/claim-mark";
+import { StripeListUnreadable, plainObject, ownField, readStripePage } from "@/lib/stripe-list";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -155,49 +159,78 @@ export const confirmedKey = (session: string) => `nl:call:confirmed:${session}`;
  */
 export const CONFIRMED_SECONDS = 430 * 86_400;
 
-function readEntries(flat: string[]): { field: string; entry: Entry }[] {
-  const out: { field: string; entry: Entry }[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      out.push({ field: flat[i], entry: JSON.parse(flat[i + 1]) as Entry });
-    } catch {
-      out.push({ field: flat[i], entry: { e: NaN, until: -1 } });
-    }
+/** A time as the diary's writers make it: a whole number of milliseconds since 1970, after 1970. */
+const diaryTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+/**
+ * One diary entry, read exactly (CX-123 rule 24): a JSON object whose start
+ * (`s` or, for an entry filed by its start before group calls, its field) and
+ * end `e` are diary times with the end after the start, and whose `until` is 0
+ * (a booking) or a diary time (a hold: holdAndCheckout writes Date.now() plus
+ * the hold). Anything else throws UnknownReplyError: an entry that cannot be
+ * read could be a held or booked seat, so it is never read as free, and never
+ * deleted as stale (a negative `until` once read as a hold that ran out, and
+ * the real hold was deleted and its time sold again: Codex Z on #3240).
+ */
+function entryOf(field: string, value: string): Entry & { start: number } {
+  let entry: unknown;
+  try {
+    entry = JSON.parse(value);
+  } catch {
+    throw new UnknownReplyError("a call diary entry that does not parse");
   }
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new UnknownReplyError("a call diary entry that is not an object");
+  const { s, e, until } = entry as Entry;
+  const start = s === undefined ? Number(field) : s;
+  if ((until !== 0 && !diaryTime(until)) || !diaryTime(start) || !diaryTime(e) || e <= start) {
+    throw new UnknownReplyError("a call diary entry whose times cannot be read");
+  }
+  return { ...(entry as Entry), start };
+}
+
+/** Every entry of a diary, each read exactly (entryOf): one that cannot be read throws, and nothing is read from the rest. */
+function readEntries(flat: string[]): { field: string; value: string; entry: Entry & { start: number } }[] {
+  const out: { field: string; value: string; entry: Entry & { start: number } }[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push({ field: flat[i], value: flat[i + 1], entry: entryOf(flat[i], flat[i + 1]) });
   return out;
 }
 
 export { PAST_CALL_DAYS };
 
+/**
+ * The diary's fields and values as HGETALL gives them, read in their exact
+ * shape (CX-123 rule 24): a list of strings in pairs, empty only when Redis
+ * says the diary is empty. Anything else throws UnknownReplyError, never read
+ * as "nothing held": a held or booked time would be offered and sold again.
+ */
+async function readDiary(callsId: string): Promise<string[]> {
+  const one = repliesFor(await redisPipeline([["HGETALL", busyKey(callsId)]]), 1);
+  const flat = one ? stringList(one[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a call diary's holds");
+  return flat;
+}
+
 async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { field: string })[]> {
   const callsId = store.callsId as string;
-  const [raw] = await redisPipeline([["HGETALL", busyKey(callsId)]]);
-  const flat = Array.isArray(raw) ? (raw as string[]) : [];
+  // Every entry is read before anything is decided or deleted: one that cannot be read throws (entryOf), and the
+  // whole diary is then unknown, so no time is offered or sold and nothing is let go on it.
+  const entries = readEntries(await readDiary(callsId));
   const busy: (TeamBusy & { field: string })[] = [];
   const stale: string[] = [];
   const past: string[] = [];
   let freed = 0;
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const entry = JSON.parse(flat[i + 1]) as Entry;
-      if (entry.until === 0 && Number.isFinite(entry.e) && entry.e < now - PAST_CALL_DAYS * 86_400_000) {
-        past.push(flat[i]);
-        freed += fieldReleaseBytes(flat[i], flat[i + 1]);
-      }
-    } catch {
-      // Read as stale below.
+  for (const { field, value, entry } of entries) {
+    if (entry.until === 0 && entry.e < now - PAST_CALL_DAYS * 86_400_000) {
+      past.push(field);
+      freed += fieldReleaseBytes(field, value);
+      continue;
     }
-  }
-  for (const { field, entry } of readEntries(flat)) {
-    if (past.includes(field)) continue;
-    if (entry.until === -1 || (entry.until !== 0 && entry.until < now)) {
+    if (entry.until !== 0 && entry.until < now) {
       stale.push(field);
       continue;
     }
-    const start = typeof entry.s === "number" ? entry.s : Number(field);
-    if (!Number.isFinite(start) || !Number.isFinite(entry.e)) continue;
     const team = teamOf(entry);
-    busy.push({ start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}) });
+    busy.push({ start: entry.start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}) });
   }
   // Holds that ran out are tidied as they are noticed, and calls long over let go.
   if (stale.length) await redisPipeline([["HDEL", busyKey(callsId), ...stale]]).catch(() => {});
@@ -355,9 +388,23 @@ async function withMoves(found: CallRow[]): Promise<CallRow[]> {
 }
 
 /**
+ * A completed checkout row as Stripe gives it: its metadata a plain object.
+ * A row whose metadata cannot be read could be a booking, so it is not read
+ * as "not a call".
+ */
+function sessionRowKnown(row: Record<string, unknown>): boolean {
+  return plainObject(ownField(row, "metadata"));
+}
+
+/**
  * The paid bookings Stripe lists for this store, and the sessions of those
  * refunded in full. Only completed checkouts are read, so holds that ran out
  * never use up the pages.
+ *
+ * Each page is read in its exact shape (lib/stripe-list.ts; CX-123 rule 24):
+ * a page in another shape, a row that cannot be read, or a page that says
+ * there is more without a row to read on from throws StripeListUnreadable,
+ * never read as "no booking", so a paid time is never offered again.
  */
 async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refunded: Set<string>; partial: boolean }> {
   const refunded = new Set<string>();
@@ -370,23 +417,26 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
   // Whether the last page read still said there were more: older bookings were then left out.
   let partial = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const list = (await onAccount(
-      "GET",
-      store.stripeAccountId,
-      `/checkout/sessions?limit=100&status=complete&created[gte]=${since}&expand[]=data.payment_intent.latest_charge${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
-    )) as { data?: unknown; has_more?: unknown };
-    const rows = Array.isArray(list.data) ? (list.data as SessionRow[]) : [];
+    const list = readStripePage(
+      await onAccount(
+        "GET",
+        store.stripeAccountId,
+        `/checkout/sessions?limit=100&status=complete&created[gte]=${since}&expand[]=data.payment_intent.latest_charge${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      ),
+      sessionRowKnown,
+    );
+    if (list.unreadable > 0) throw new StripeListUnreadable(`${list.unreadable} checkout row(s) could not be read`);
+    if (list.hasMore && !list.lastId) throw new StripeListUnreadable("more checkouts, with no row to read on from");
+    const rows = list.rows as SessionRow[];
     for (const row of rows) {
       const call = await callOrLost(store, row, handles, reads);
       if (call === "refunded") {
         if (typeof row.id === "string") refunded.add(row.id);
       } else if (call) found.push(call);
     }
-    if (list.has_more !== true || rows.length === 0) break;
+    if (!list.hasMore) break;
     if (page === MAX_PAGES - 1) partial = true;
-    const last = rows[rows.length - 1];
-    after = typeof last.id === "string" ? last.id : "";
-    if (!after) break;
+    after = list.lastId as string;
   }
   return { paid: await withMoves(found), refunded, partial };
 }
@@ -432,7 +482,12 @@ async function readBusy(
   sessions.catch(() => {});
   let refunded = new Set<string>();
   try {
-    ({ paid, refunded } = await readCallSessions(store));
+    let partial: boolean;
+    ({ paid, refunded, partial } = await readCallSessions(store));
+    // A reading that stopped at its last page while Stripe said there were more left older completed checkouts
+    // unread: a paid booking among them, whose diary entry is missing, would be offered and sold again. Not every
+    // paid booking is known then, so no time is offered or sold on this reading (Claude 2 on #3233).
+    if (partial) throw new StripeListUnreadable(`more completed checkouts than ${MAX_PAGES} pages; paid bookings not all read`);
   } catch (error) {
     // Without Stripe's answer a paid time could be offered twice. Refusing to
     // show any time is the safe failure; the caller treats the throw as that.
@@ -505,8 +560,8 @@ function ownerOf(store: Pick<Store, "email">): string {
 export async function releaseOwnHold(store: Store, session: string): Promise<void> {
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return;
   if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
-  const [raw] = await redisPipeline([["HGETALL", busyKey(store.callsId)]]);
-  const flat = Array.isArray(raw) ? (raw as string[]) : [];
+  // A diary that cannot be read throws: the hold is left alone, as when it is not found, and runs out by itself.
+  const flat = await readDiary(store.callsId);
   const held = readEntries(flat).filter(({ entry }) => entry.session === session && entry.until !== 0);
   const fields = held.map(({ field }) => field);
   if (!fields.length) return;
@@ -651,27 +706,120 @@ export async function checkCallChange(
 
 // ---- The lock around a check and a write ---------------------------------
 
-async function takeLock(callsId: string): Promise<boolean> {
-  const lock = lockKey(callsId);
+/** The one reply of a single command, in a reply list of exactly one; UnknownReplyError otherwise. */
+async function onlyReply(command: (string | number)[], what: string): Promise<unknown> {
+  const one = repliesFor(await redisPipeline([command]), 1);
+  if (!one) throw new UnknownReplyError(what);
+  return one[0];
+}
+
+/**
+ * A store's lock, as its holder keeps it: the key and the value only this
+ * holder wrote (claimValue, lib/claim-mark.ts: the time it was taken in
+ * milliseconds, then a random part), so it is let go, made to last again and
+ * fenced only while it is still this holder's (Claude 6, the two notes left
+ * open on #3240). The value starts with the time, so a lock left behind is
+ * still told by its age.
+ */
+type CallLock = { key: string; token: string };
+
+const LOCK_SECONDS = 15;
+/**
+ * Replaces the lock's value only while it still holds the one given, with a
+ * fresh expiry, in one step on the Redis side: a take-over of a lock left
+ * behind (the value read with GET), so two requests that read the same one
+ * cannot both take it; and a holder making its own lock last again. The first
+ * line names the script for the local stand-in (lib/redis-memory.ts).
+ */
+const LOCK_SWAP = '-- marktmorgen:call-lock-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
+/** Writes a hold into the diary only while the lock is still the writer's, in one step. */
+const HOLD_IF_LOCKED = '-- marktmorgen:call-hold-if-locked:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("HSET", KEYS[2], ARGV[2], ARGV[3]) return 1 else return 0 end';
+
+/** One of the scripts above: exactly 1 (done) or 0 (not ours); any other reply throws UnknownReplyError (rule 24). */
+async function scriptDone(command: (string | number)[], what: string): Promise<boolean> {
+  const got = await onlyReply(command, what);
+  if (got === 1) return true;
+  if (got === 0) return false;
+  throw new UnknownReplyError(what);
+}
+
+/**
+ * Takes the store's lock: the lock when it is ours, null when somebody else
+ * holds it. Each reply is read exactly (CX-123 rule 24; Claude 6, audit round
+ * 5): only "OK" to the SET NX takes the lock and nil is somebody else's; any
+ * other answer throws UnknownReplyError, and the caller refuses, opening no
+ * checkout and writing no move. A held lock is taken over only when its GET
+ * is a time in milliseconds that is 15 seconds old, and only when the swap
+ * finds that same value still there (LOCK_SWAP): a request that read the same
+ * lock left behind and took it over first keeps it. A GET in another shape,
+ * or one that says the lock is gone while SET NX still says it is held, is
+ * never read as a lock left behind.
+ */
+async function takeLock(callsId: string): Promise<CallLock | null> {
+  const key = lockKey(callsId);
+  const take = async (): Promise<CallLock | null> => {
+    const token = claimValue();
+    const got = await onlyReply(["SET", key, token, "NX", "EX", LOCK_SECONDS], "a call lock's SET NX");
+    if (got === "OK") return { key, token };
+    if (got === null) return null;
+    throw new UnknownReplyError("a call lock's SET NX");
+  };
   // Another buyer of this store may be picking a time right now. They hold
   // the lock for a second or two, so wait for it rather than turn this one
   // away over a time nobody took.
-  let got: unknown = null;
-  for (let attempt = 0; attempt < 12 && got === null; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250));
-    [got] = await redisPipeline([["SET", lock, String(Date.now()), "NX", "EX", 15]]);
+    const lock = await take();
+    if (lock) return lock;
   }
-  if (got === null) {
-    const [held] = await redisPipeline([["GET", lock]]);
-    // A lock left behind by a request that died is taken over after 15 seconds.
-    if (typeof held === "string" && Date.now() - Number(held) < 15_000) return false;
-    await redisPipeline([["SET", lock, String(Date.now()), "EX", 15]]);
-  }
+  const held = await onlyReply(["GET", key], "a call lock's GET");
+  // Gone since: tried once more, never taken over.
+  if (held === null) return take();
+  if (typeof held !== "string" || !/^\d{1,16}(\.\d{1,9})?$/.test(held)) throw new UnknownReplyError("a call lock's GET");
+  // A lock left behind by a request that died is taken over after 15 seconds.
+  if (Date.now() - Number(held) < LOCK_SECONDS * 1000) return null;
+  const token = claimValue();
+  return (await scriptDone(["EVAL", LOCK_SWAP, 1, key, held, token, LOCK_SECONDS], "a call lock's take-over")) ? { key, token } : null;
+}
+
+/**
+ * Makes the lock last another LOCK_SECONDS, only while it is still ours, with
+ * a value of the time now, so it is not read as left behind meanwhile. Called
+ * right before the steps that sell or move a time: a Stripe reading can take
+ * longer than the lock lasts, and a lock taken over since is no longer ours to
+ * act on. False when it is not ours any more; throws on a reply in another
+ * shape. Either way the caller refuses and writes nothing.
+ */
+async function keepLock(lock: CallLock): Promise<boolean> {
+  const token = claimValue();
+  if (!(await scriptDone(["EVAL", LOCK_SWAP, 1, lock.key, lock.token, token, LOCK_SECONDS], "a call lock's renewal"))) return false;
+  lock.token = token;
   return true;
 }
 
-async function dropLock(callsId: string): Promise<void> {
-  await redisPipeline([["DEL", lockKey(callsId)]]).catch(() => {});
+/**
+ * Lets go of the lock only while it still holds our value (lib/redis-lock.ts
+ * releaseLock, one script): a lock that ran out and was taken by the next
+ * request is never deleted by us. When the script cannot run, the lock runs out
+ * at its own 15 seconds. Never throws.
+ */
+async function dropLock(lock: CallLock): Promise<void> {
+  await releaseLock({ key: lock.key, token: lock.token, ttlSeconds: LOCK_SECONDS });
+}
+
+/**
+ * Closes a checkout opened under a lock that was not ours any more by the
+ * time its hold was to be written. Its address was never handed out, so
+ * nobody can have paid it; true only when Stripe says it is expired.
+ */
+async function closeUnheld(account: string, session: string): Promise<boolean> {
+  try {
+    const closed = await onAccount("POST", account, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
+    return closed.status === "expired";
+  } catch (error) {
+    console.error("closing a call checkout whose lock was lost failed", error);
+    return false;
+  }
 }
 
 /**
@@ -937,7 +1085,16 @@ export async function holdAndCheckout(input: {
   // Past the store's orders the buyer is told the call cannot be booked right now, and nothing is charged.
   if (!admitted.ok) return { ok: false, reason: "unavailable" };
 
-  if (!(await takeLock(store.callsId))) return { ok: false, reason: "taken" };
+  // A lock that cannot be read is not ours: refused, and nothing is opened. It is not let go either (it may be
+  // somebody else's); it runs out at its own 15 seconds.
+  let lock: CallLock | null;
+  try {
+    lock = await takeLock(store.callsId);
+  } catch (error) {
+    console.error("taking a call's lock failed", error);
+    return { ok: false, reason: "error" };
+  }
+  if (!lock) return { ok: false, reason: "taken" };
 
   // A team booking's claim on its hosts' time, once taken: let go again if no checkout comes of it.
   let claimed: { hosts: string[]; claim: string } | null = null;
@@ -991,6 +1148,9 @@ export async function holdAndCheckout(input: {
     // checkout keeps its own closing time, which the hold is counted from.
     let asking = !pkg && recoveryOn(store) && store.recovery.asks;
     if (asking) askForCallReminder(body);
+    // The readings above can outlast the lock: the checkout is opened only while it is still ours, made to last
+    // again for the opening and the hold. Taken over since, somebody else may have checked this time without us.
+    if (!(await keepLock(lock))) return { ok: false, reason: "error" };
     const open = () => onAccount("POST", account, "/checkout/sessions", body, pkg ? NO_COST_VERSION : undefined);
     const session = await openKeepingTheSale(body, async () => {
       try {
@@ -1011,7 +1171,21 @@ export async function holdAndCheckout(input: {
     opened = true;
     const until = Date.now() + HOLD_SECONDS * 1000;
     const entry: Entry = { s: start, e: end, until, session: session.id, p: product.id, ...(claimed ? { h: claimed.hosts, c: claimed.claim } : {}) };
-    await redisPipeline([["HSET", busyKey(store.callsId), session.id, JSON.stringify(entry)]]);
+    // The hold is written only while the lock is still ours, in one step. A checkout can take longer to open than
+    // the lock lasts, and a lock taken over meanwhile means another buyer may have checked this time without this
+    // hold: then the checkout, whose address was never handed out, is closed at Stripe and the booking refused. A
+    // reply in another shape is refused the same way (rule 24); a hold it may have written runs out by itself.
+    let held = false;
+    try {
+      held = await scriptDone(["EVAL", HOLD_IF_LOCKED, 2, lock.key, busyKey(store.callsId), lock.token, session.id, JSON.stringify(entry)], "a call hold's write");
+    } catch (error) {
+      console.error("writing a call's hold failed", error);
+    }
+    if (!held) {
+      // Closed for certain: nobody can pay it, so its hosts get the time back.
+      if (await closeUnheld(account, session.id)) opened = false;
+      return { ok: false, reason: "error" };
+    }
     // Once the checkout can no longer be open, the mail job looks at it: a
     // buyer who paid and never came back is confirmed then.
     await planCheck(store.callsId, store.handle, session.id, start, until + 60_000).catch((error) =>
@@ -1024,7 +1198,7 @@ export async function holdAndCheckout(input: {
   } finally {
     // No checkout was opened for the claim: nobody can pay for it, so its hosts get the time back.
     if (claimed && !opened) await releaseClaim(claimed.hosts, claimed.claim).catch(() => {});
-    await dropLock(store.callsId);
+    await dropLock(lock);
   }
 }
 
@@ -1195,7 +1369,15 @@ export async function moveBooking(input: {
     return { ok: false, reason: "error" };
   }
 
-  if (!(await takeLock(callsId))) return { ok: false, reason: "taken" };
+  // As in holdAndCheckout: a lock that cannot be read refuses the move, and is left to run out.
+  let lock: CallLock | null;
+  try {
+    lock = await takeLock(callsId);
+  } catch (error) {
+    console.error("taking a call's lock for a move failed", error);
+    return { ok: false, reason: "error" };
+  }
+  if (!lock) return { ok: false, reason: "taken" };
   let from: { start: number; end: number; moves: number };
   let teamOwn: { hosts: string[]; claim: string } | null = null;
   // A team booking whose call is no longer a team event: its hosts' old claim is let go after the move.
@@ -1223,6 +1405,10 @@ export async function moveBooking(input: {
     } catch {
       return { ok: false, reason: "error" };
     }
+    // As before a checkout opens: the Stripe reading can outlast the lock, so the move is written only while the lock
+    // is still ours, made to last again for the writes below (Redis only, no Stripe call). A lock taken over since
+    // refuses the move, nothing written; a reply in another shape throws and refuses it the same way.
+    if (!(await keepLock(lock))) return { ok: false, reason: "error" };
     const own = busy.find((b) => b.session === session && b.hosts && b.claim);
     if (own && own.hosts && own.claim && !team) letGo = { hosts: own.hosts, claim: own.claim };
     if (team && own && own.hosts && own.claim) {
@@ -1246,10 +1432,19 @@ export async function moveBooking(input: {
     // The seat moves in the diary too: whatever was written under this
     // checkout — a hold, a booking, one filed by its start before group calls
     // — gives way to one entry at the new time.
-    const [raw] = await redisPipeline([["HGETALL", busyKey(callsId)]]);
-    const old = readEntries(Array.isArray(raw) ? (raw as string[]) : [])
-      .filter(({ field, entry }) => entry.session === session && field !== session)
-      .map(({ field }) => field);
+    //
+    // The move is written by now, so this reading is tidying only: read exactly (readDiary, entryOf), and when the
+    // diary or an entry cannot be read, nothing is deleted and the move is still reported as done. An old entry
+    // left in place keeps its old time taken (never a time freed on an unknown reply) until it runs out or the
+    // call is long past.
+    let old: string[] = [];
+    try {
+      old = readEntries(await readDiary(callsId))
+        .filter(({ field, entry }) => entry.session === session && field !== session)
+        .map(({ field }) => field);
+    } catch (error) {
+      console.error("reading a moved booking's old entries failed; left in place", error);
+    }
     const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}) };
     // Counted in the store's room at what it really adds (lib/order-data.ts).
     await orderWrite(store, [
@@ -1263,7 +1458,7 @@ export async function moveBooking(input: {
     console.error("moving a booking failed", error);
     return { ok: false, reason: "error" };
   } finally {
-    await dropLock(callsId);
+    await dropLock(lock);
   }
 
   const moves = from.moves + 1;

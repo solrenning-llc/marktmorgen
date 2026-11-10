@@ -1,0 +1,60 @@
+{
+  "paypal-payouts-writes-exact.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    the settling's removal was the one that failed",
+      "  ok    the settling's removal failed while PayPal gave no token",
+      "The write of the '?' entry got no answer after Redis applied it, and taking it away failed",
+      "  ok    the HDEL of the '?' entry was the one that failed",
+      "  ok    the HDEL of the '?' entry was the one that failed",
+      "66 checks, all passing."
+    ]
+  },
+  "paypal-payouts.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "49 checks, all passing.",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable"
+    ]
+  },
+  "paypal-payouts-reconcile.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)",
+      "  ok    the write of its id failed, the '?' evidence is kept",
+      "43 checks, all passing."
+    ]
+  },
+  "paypal-payouts-unknown.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    the write of its id failed",
+      "  ok    the write of its id failed",
+      "45 checks, all passing."
+    ]
+  },
+  "paypal-settle-unknown.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    nothing settled on a read that failed",
+      "9 checks, all passing."
+    ]
+  },
+  "pending-payouts.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 33",
+      "ℹ fail 0"
+    ]
+  }
+}

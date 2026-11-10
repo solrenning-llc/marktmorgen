@@ -1,0 +1,10 @@
+{
+  "cx1-3335-promote-race.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  the first accepted provider batch remains unknown locally",
+      "4 checks, 1 failing."
+    ]
+  }
+}

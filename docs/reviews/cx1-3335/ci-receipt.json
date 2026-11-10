@@ -1,0 +1,74 @@
+{
+  "query": {
+    "repo": "solrenning-llc/marktmorgen",
+    "commit_sha": "85f6833757a1a1bf5a2513fc3e8daecca796eb60"
+  },
+  "fetched_at": "2026-11-10 17:30:22 UTC",
+  "run_ids": [
+    42595129067,
+    42595128972,
+    42595128980,
+    42595129045,
+    42595129001,
+    42595128967,
+    42595129003,
+    42595129074,
+    42595129002
+  ],
+  "aggregators": [
+    {
+      "run_id": 42595129067,
+      "name": "All checks (accessibility-studio-matrix)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595128972,
+      "name": "All checks (product-checks)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595128980,
+      "name": "All checks (accessibility-signup-actions)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595129045,
+      "name": "All checks (codeql)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595129001,
+      "name": "All checks (accessibility-public-matrix)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595128967,
+      "name": "All checks (accessibility-real-readers)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595129003,
+      "name": "All checks (accessibility-product-actions)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595129074,
+      "name": "All checks (dependency-security)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 42595129002,
+      "name": "All checks (accessibility-buyer-actions)",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}

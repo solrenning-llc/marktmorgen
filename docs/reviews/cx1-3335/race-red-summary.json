@@ -1,0 +1,12 @@
+{
+  "cx1-3335-promote-race.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  the first accepted provider batch remains unknown locally",
+      "  FAIL  no second money request for a known held batch",
+      "  FAIL  later cleanup settles both recipients without a second send",
+      "4 checks, 3 failing."
+    ]
+  }
+}

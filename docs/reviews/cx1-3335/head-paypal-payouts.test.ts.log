@@ -1,0 +1,108 @@
+
+Connecting the creator's own PayPal app
+  ok    not a Client ID
+  ok    PayPal refuses it
+  ok    an app without Payouts on
+  ok    an app with Payouts on
+  ok    the Secret is not stored readable
+  ok    the studio sees only a shortened Client ID
+
+One press
+  ok    another payout holding the lock: busy, never an error, and nothing asked of PayPal or Stripe
+  ok    a balance that does not cover it sends nothing
+  ok    everyone owed, in one batch
+  ok    with PayPal's idempotency key, the batch's own id
+  ok    each by email, in the store's currency, as PayPal writes amounts
+  ok    only fields PayPal's description has
+  ok    both on their way
+  ok    nobody is sent twice while on their way
+  ok    the book does not say paid yet
+
+Unavailable pending records never start a new payment
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    saved pending records were not changed
+  ok    valid pending records recover immediately
+
+What PayPal reports
+  ok    paid, and still waiting to be claimed
+  ok    the book says paid for SUCCESS only
+  ok    asked again, nothing is written twice
+  ok    still counted as paid once
+  ok    not claimed in time: back to owed
+  ok    nobody on their way any more
+  ok    and they can be paid again
+
+Payday by itself
+  ok    off until asked
+  ok    on when asked
+  ok    the email says what was sent, from where
+  ok    and when nothing could be sent, why
+
+Taken away
+  ok    nothing is sent without it
+
+49 checks, all passing.
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47314:9)
+    at readPendingPayoutBatches (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47329:17)
+    at readOpen (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47507:10)
+    at async onTheirWay (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47511:16)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47581:40
+    at async withLock (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:4458:12)
+    at async payWithPayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47578:12)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:48019:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47314:9)
+    at readPendingPayoutBatches (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47329:17)
+    at readOpen (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47507:10)
+    at async onTheirWay (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47511:16)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47581:40
+    at async withLock (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:4458:12)
+    at async payWithPayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47578:12)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:48019:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47314:9)
+    at readPendingPayoutBatches (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47322:38)
+    at readOpen (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47507:10)
+    at async onTheirWay (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47511:16)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47581:40
+    at async withLock (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:4458:12)
+    at async payWithPayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47578:12)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:48019:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47314:9)
+    at readPendingPayoutBatches (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47337:14)
+    at readOpen (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47507:10)
+    at async onTheirWay (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47511:16)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47581:40
+    at async withLock (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:4458:12)
+    at async payWithPayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47578:12)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:48019:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47314:9)
+    at readPendingPayoutBatches (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47343:155)
+    at readOpen (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47507:10)
+    at async onTheirWay (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47511:16)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47581:40
+    at async withLock (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:4458:12)
+    at async payWithPayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:47578:12)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-payouts.test.ts.cjs:48019:21)

@@ -1,0 +1,25 @@
+
+A store whose record cannot be read stays in the daily job
+  ok    nothing settled on a read that failed
+  ok    the store with its batch still open is still in the daily job
+  ok    a store that is gone (its id names no record) leaves it, as before
+
+An id key that answers another shape is not a store that is gone
+  ok    nothing settled on a reply of another shape
+  ok    the store with its batch still open is still in the daily job
+
+An owner record that comes back cut is not a store that is gone
+  ok    nothing settled on a cut record
+  ok    the store with its batch still open is still in the daily job
+
+An EXISTS that cannot be read keeps the store too
+  ok    nothing settled
+  ok    the store is still in the daily job
+
+9 checks, all passing.
+a PayPal store's record could not be read; it is tried again next run Error: Redis request timed out (test)
+    at store.pipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-settle-unknown.test.ts.cjs:48097:81)
+    at redisPipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-settle-unknown.test.ts.cjs:2238:41)
+    at storeForId (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-settle-unknown.test.ts.cjs:12311:23)
+    at settleAllPayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-settle-unknown.test.ts.cjs:48042:22)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3335\.cx1-evidence\paypal-settle-unknown.test.ts.cjs:48126:19)

@@ -1,0 +1,10 @@
+  ok    the first provider-accepted batch is known despite an unconfirmed local promotion
+  ok    the second read really met the concurrent promotion
+  FAIL  no second money request for a known held batch
+        expected [1,2]
+        got      [2,2]
+  FAIL  later cleanup settles both recipients without a second send
+        expected [1,2,0,[]]
+        got      [2,2,0,[]]
+
+4 checks, 2 failing.

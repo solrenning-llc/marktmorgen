@@ -1,0 +1,11 @@
+{
+  "cx1-3335-promote-race.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  no second money request for a known held batch",
+      "  FAIL  later cleanup settles both recipients without a second send",
+      "4 checks, 2 failing."
+    ]
+  }
+}

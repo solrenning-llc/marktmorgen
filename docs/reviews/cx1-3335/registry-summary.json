@@ -1,0 +1,18 @@
+{
+  "plan-cost-registry.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 26",
+      "ℹ fail 0"
+    ]
+  },
+  "store-data-registry.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 7",
+      "ℹ fail 0"
+    ]
+  }
+}

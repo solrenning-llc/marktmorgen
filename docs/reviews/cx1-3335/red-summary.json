@@ -1,0 +1,14 @@
+{
+  "paypal-payouts-writes-exact.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  the press says the batch may still go",
+      "  FAIL  and the payday email never says nothing left the creator's PayPal",
+      "  ok    the HDEL of the '?' entry was the one that failed",
+      "  FAIL  the press says the batch may still go",
+      "  FAIL  and the payday email never says nothing left the creator's PayPal",
+      "66 checks, 25 failing."
+    ]
+  }
+}

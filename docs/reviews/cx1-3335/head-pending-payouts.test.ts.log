@@ -1,0 +1,41 @@
+✔ confirmed empty array and map remain empty (9.8903ms)
+✔ both hash shapes preserve legacy identifiers, amount and currency (1.856ms)
+✔ empty recovery batches remain readable (0.3752ms)
+✔ missing envelope is unavailable (1.3734ms)
+✔ missing reply is unavailable (0.3746ms)
+✔ extra replies is unavailable (0.3609ms)
+✔ null hash is unavailable (0.3405ms)
+✔ string hash is unavailable (0.2483ms)
+✔ odd hash is unavailable (0.2895ms)
+✔ non-string key is unavailable (0.6434ms)
+✔ non-string value is unavailable (0.3927ms)
+✔ duplicate key is unavailable (0.3408ms)
+✔ empty key is unavailable (0.3094ms)
+✔ invalid JSON is unavailable (0.4305ms)
+✔ array record is unavailable (0.222ms)
+✔ null record is unavailable (0.4189ms)
+✔ missing timestamp never releases a partially valid hash (0.5669ms)
+✔ negative timestamp never releases a partially valid hash (0.234ms)
+✔ unsafe timestamp never releases a partially valid hash (0.2035ms)
+✔ timestamp string never releases a partially valid hash (0.2218ms)
+✔ missing currency never releases a partially valid hash (0.2054ms)
+✔ invalid currency never releases a partially valid hash (0.2198ms)
+✔ missing lines never releases a partially valid hash (0.203ms)
+✔ null line never releases a partially valid hash (0.2498ms)
+✔ missing affiliate never releases a partially valid hash (0.2164ms)
+✔ blank affiliate never releases a partially valid hash (0.1911ms)
+✔ duplicate affiliate never releases a partially valid hash (0.1753ms)
+✔ zero cents never releases a partially valid hash (0.1745ms)
+✔ negative cents never releases a partially valid hash (0.1667ms)
+✔ fractional cents never releases a partially valid hash (0.188ms)
+✔ string cents never releases a partially valid hash (0.1999ms)
+✔ unsafe cents never releases a partially valid hash (0.208ms)
+✔ input records are left intact when any entry is invalid (0.4088ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 43.249

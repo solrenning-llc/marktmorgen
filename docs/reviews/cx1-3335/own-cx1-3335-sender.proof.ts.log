@@ -1,0 +1,22 @@
+
+Known and legacy sender identities
+  ok    old record has no new required field
+  ok    a known sender survives exactly
+  ok    a known sender survives exactly
+
+Unknown senders cannot drive deduplication
+  ok    invalid sender is unavailable null
+  ok    invalid sender is unavailable ""
+  ok    invalid sender is unavailable "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ok    invalid sender is unavailable "with space"
+  ok    invalid sender is unavailable "with\nnewline"
+  ok    invalid sender is unavailable 42
+  ok    invalid sender is unavailable []
+  ok    invalid sender is unavailable {}
+
+The uncertainty notice does not tell the creator to pay again
+  ok    may still go out is stated
+  ok    do not pay another way is stated
+  ok    no claim of nothing left the account
+
+14 checks, all passing.

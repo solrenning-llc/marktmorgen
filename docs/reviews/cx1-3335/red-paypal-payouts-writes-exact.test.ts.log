@@ -1,0 +1,142 @@
+
+PayPal named the batch, and taking its "?" entry away throws: counted once, never asked of PayPal again
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    the press is paid, in the batch PayPal named
+  ok    the '?' entry is still there beside the batch's id
+  ok    both affiliates on their way
+  FAIL  nobody is shown as being checked: the batch is known
+        expected {"checking":0,"manual":0}
+        got      {"checking":2,"manual":0}
+  FAIL  the settling sends PayPal no second money request
+        expected 1
+        got      2
+  FAIL  both are paid once, from the batch's own items
+        expected [2,0,0]
+        got      [2,0,2]
+  FAIL  no unknown batch is counted settled
+        expected 0
+        got      1
+  ok    nothing stays open
+  ok    nobody is left on their way
+  ok    and nothing is left for the creator's own check
+
+PayPal named the batch, and taking its "?" entry away answers in another shape: counted once, never asked of PayPal again
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    the press is paid, in the batch PayPal named
+  ok    the '?' entry is still there beside the batch's id
+  ok    both affiliates on their way
+  FAIL  nobody is shown as being checked: the batch is known
+        expected {"checking":0,"manual":0}
+        got      {"checking":2,"manual":0}
+  FAIL  the settling sends PayPal no second money request
+        expected 1
+        got      2
+  FAIL  both are paid once, from the batch's own items
+        expected [2,0,0]
+        got      [2,0,2]
+  FAIL  no unknown batch is counted settled
+        expected 0
+        got      1
+  ok    nothing stays open
+  ok    nobody is left on their way
+  ok    and nothing is left for the creator's own check
+
+The settling's own removal of the '?' entry left beside a held batch fails too: kept on its way, never sent, dropped next run
+  ok    the settling's removal was the one that failed
+  FAIL  nothing is asked of PayPal; the batch's two people wait once
+        expected [0,2,1]
+        got      [2,2,2]
+  ok    waiting is the people really on their way
+  ok    the store stays in the daily job
+  ok    and the '?' entry stays, so nobody in it is put in another batch
+  FAIL  the next run drops it and pays the batch once, with no second money request
+        expected [2,0,1,[]]
+        got      [0,2,2,["?nl-statswex01-mwayp5e5"]]
+  FAIL  then nobody is left on their way
+        expected 0
+        got      2
+
+The settling's removal of the '?' entry is applied but its answer is lost: the batch's people wait once
+  ok    the settling's removal was the one whose answer was lost
+  FAIL  nothing paid, nothing asked of PayPal, the two people wait once
+        expected [0,2,1]
+        got      [2,2,2]
+  FAIL  the next run pays the batch once
+        expected [2,0,1,[]]
+        got      [0,0,2,[]]
+
+The '?' entry beside a held batch cannot be removed and PayPal gives no token: the batch's people wait once
+  FAIL  the settling's removal failed while PayPal gave no token
+        expected true
+        got      false
+  FAIL  nothing paid and the two people wait once
+        expected [0,2]
+        got      [0,4]
+  ok    and two people are really on their way
+  FAIL  the next run, with a token, pays the batch once
+        expected [2,0,1,[]]
+        got      [2,2,2,[]]
+
+The '?' entry cannot be confirmed written, and taking it away is confirmed: nothing was sent, and nothing will be
+  ok    the write's reply was of another shape
+  ok    the press says nothing was sent
+  ok    nobody is on their way
+  ok    and the settling sends nothing
+
+The '?' entry cannot be confirmed written, nor taken away: the press never says nothing will be sent
+  ok    taking it away was tried
+  FAIL  the press says the batch may still go
+        expected "pending"
+        got      "error"
+  ok    nothing was asked of PayPal by the press
+  ok    its people stay on their way, never put in another batch
+  ok    the studio's words never say nothing will be sent
+  FAIL  nor does the payday email
+        expected [false,true,true]
+        got      [true,false,false]
+
+The write of the '?' entry got no answer after Redis applied it, and taking it away confirmed
+  ok    nothing was asked of PayPal by the press
+  ok    the press says nothing was sent
+  FAIL  and nobody is left on their way
+        expected 0
+        got      2
+  FAIL  so the settling never sends it
+        expected 0
+        got      1
+
+The write of the '?' entry got no answer after Redis applied it, and taking it away failed
+  ok    nothing was asked of PayPal by the press
+  FAIL  the press says the batch may still go
+        expected "pending"
+        got      "error"
+  ok    its people stay on their way
+
+PayPal refuses the batch for its balance, and taking the "?" entry away throws: never "nothing was sent"
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    PayPal was asked once, and refused
+  FAIL  the press says the batch may still go
+        expected "pending"
+        got      "error"
+  FAIL  and the payday email never says nothing left the creator's PayPal
+        expected false
+        got      true
+  ok    its people stay on their way, never put in another batch
+
+PayPal refuses the batch for its balance, and taking the "?" entry away answers in another shape: never "nothing was sent"
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    PayPal was asked once, and refused
+  FAIL  the press says the batch may still go
+        expected "pending"
+        got      "funds"
+  FAIL  and the payday email never says nothing left the creator's PayPal
+        expected false
+        got      true
+  ok    its people stay on their way, never put in another batch
+
+PayPal refuses the batch, and taking the "?" entry away is confirmed: its people are owed again
+  ok    the press says why
+  ok    nothing stays open
+  ok    and the settling sends nothing more
+
+66 checks, 25 failing.

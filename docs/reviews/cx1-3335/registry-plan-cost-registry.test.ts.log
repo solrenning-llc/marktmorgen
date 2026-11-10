@@ -1,0 +1,49 @@
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (241.331ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (3093.0694ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (618.9638ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (5.4717ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.3795ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.1913ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (5.4177ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (2449.5557ms)
+✔ every store figure taken in the code is a kind a line prices (2270.6511ms)
+✔ every email sent names a meter, and each file only the meters it may use (2330.7688ms)
+✔ the units a figure is taken in cost at least what they stand for (13.2404ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.5281ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.6606ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.691ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.1637ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.1042ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.6901ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.2295ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.4141ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.148ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (9.0055ms)
+✔ Path push fits its reserved studio requests (0.2693ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.1903ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.2632ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.6053ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (152.8724ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11222.3561

@@ -1,0 +1,92 @@
+
+PayPal named the batch, and taking its "?" entry away throws: counted once, never asked of PayPal again
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    the press is paid, in the batch PayPal named
+  ok    the '?' entry is still there beside the batch's id
+  ok    both affiliates on their way
+  ok    nobody is shown as being checked: the batch is known
+  ok    the settling sends PayPal no second money request
+  ok    both are paid once, from the batch's own items
+  ok    no unknown batch is counted settled
+  ok    nothing stays open
+  ok    nobody is left on their way
+  ok    and nothing is left for the creator's own check
+
+PayPal named the batch, and taking its "?" entry away answers in another shape: counted once, never asked of PayPal again
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    the press is paid, in the batch PayPal named
+  ok    the '?' entry is still there beside the batch's id
+  ok    both affiliates on their way
+  ok    nobody is shown as being checked: the batch is known
+  ok    the settling sends PayPal no second money request
+  ok    both are paid once, from the batch's own items
+  ok    no unknown batch is counted settled
+  ok    nothing stays open
+  ok    nobody is left on their way
+  ok    and nothing is left for the creator's own check
+
+The settling's own removal of the '?' entry left beside a held batch fails too: kept on its way, never sent, dropped next run
+  ok    the settling's removal was the one that failed
+  ok    nothing is asked of PayPal; the batch's two people wait once
+  ok    waiting is the people really on their way
+  ok    the store stays in the daily job
+  ok    and the '?' entry stays, so nobody in it is put in another batch
+  ok    the next run drops it and pays the batch once, with no second money request
+  ok    then nobody is left on their way
+
+The settling's removal of the '?' entry is applied but its answer is lost: the batch's people wait once
+  ok    the settling's removal was the one whose answer was lost
+  ok    nothing paid, nothing asked of PayPal, the two people wait once
+  ok    the next run pays the batch once
+
+The '?' entry beside a held batch cannot be removed and PayPal gives no token: the batch's people wait once
+  ok    the settling's removal failed while PayPal gave no token
+  ok    nothing paid and the two people wait once
+  ok    and two people are really on their way
+  ok    the next run, with a token, pays the batch once
+
+The '?' entry cannot be confirmed written, and taking it away is confirmed: nothing was sent, and nothing will be
+  ok    the write's reply was of another shape
+  ok    the press says nothing was sent
+  ok    nobody is on their way
+  ok    and the settling sends nothing
+
+The '?' entry cannot be confirmed written, nor taken away: the press never says nothing will be sent
+  ok    taking it away was tried
+  ok    the press says the batch may still go
+  ok    nothing was asked of PayPal by the press
+  ok    its people stay on their way, never put in another batch
+  ok    the studio's words never say nothing will be sent
+  ok    nor does the payday email
+
+The write of the '?' entry got no answer after Redis applied it, and taking it away confirmed
+  ok    nothing was asked of PayPal by the press
+  ok    the press says nothing was sent
+  ok    and nobody is left on their way
+  ok    so the settling never sends it
+
+The write of the '?' entry got no answer after Redis applied it, and taking it away failed
+  ok    nothing was asked of PayPal by the press
+  ok    the press says the batch may still go
+  ok    its people stay on their way
+
+PayPal refuses the batch for its balance, and taking the "?" entry away throws: never "nothing was sent"
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    PayPal was asked once, and refused
+  ok    the press says the batch may still go
+  ok    and the payday email never says nothing left the creator's PayPal
+  ok    its people stay on their way, never put in another batch
+
+PayPal refuses the batch for its balance, and taking the "?" entry away answers in another shape: never "nothing was sent"
+  ok    the HDEL of the '?' entry was the one that failed
+  ok    PayPal was asked once, and refused
+  ok    the press says the batch may still go
+  ok    and the payday email never says nothing left the creator's PayPal
+  ok    its people stay on their way, never put in another batch
+
+PayPal refuses the batch, and taking the "?" entry away is confirmed: its people are owed again
+  ok    the press says why
+  ok    nothing stays open
+  ok    and the settling sends nothing more
+
+66 checks, all passing.

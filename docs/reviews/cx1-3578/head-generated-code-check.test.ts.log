@@ -1,0 +1,108 @@
+
+A clean calculator passes the static check, and says what it could not check
+  ok    no findings
+  ok    static pass
+  ok    what only a rendered check sees is listed
+  ok    contrast and target size are among them
+
+Nothing loaded or sent from outside the store
+  ok    a script from a URL
+  ok    a script from the same site still is not the code shown
+  ok    an SVG script from an address
+  ok    an SVG link to javascript:
+  ok    a script made in JavaScript
+  ok    import()
+  ok    a frame
+  ok    a stylesheet link
+  ok    a picture from another site
+  ok    …unless that host is allowed
+  ok    a protocol-relative picture
+  ok    a srcset entry from another site
+  ok    a CSS @import
+  ok    a CSS background from another site
+  ok    a style attribute with an outside URL
+  ok    a form that posts elsewhere
+  ok    fetch to another site
+  ok    fetch to an address built from a variable
+  ok    fetch to a template that starts with a variable
+  ok    fetch to '/' joined with '/other.site'
+  ok    fetch to an allowed host joined with more host
+  ok    fetch to an allowed host with its path
+  ok    XMLHttpRequest elsewhere
+  ok    a WebSocket
+  ok    sendBeacon
+  ok    window.open
+
+It stays in its box and away from storage
+  ok    window.top
+  ok    parent.postMessage
+  ok    opener
+  ok    a property named top is not the window
+  ok    a meta refresh
+  ok    a base element
+  ok    cookies
+  ok    localStorage
+  ok    saved passwords
+
+No code written from text, nothing hidden
+  ok    eval
+  ok    a script closed with an odd end tag is still read
+  ok    a script never closed is still read
+  ok    a style never closed is still read
+  ok    new Function
+  ok    a timer from a string
+  ok    innerHTML
+  ok    document.write
+  ok    an inline handler
+  ok    a javascript: link
+  ok    a javascript: link hidden with tabs and entities
+  ok    a frame written from text is a frame, refused
+  ok    atob
+  ok    character codes
+  ok    escaped text
+  ok    entities decode as browsers do
+  ok    outsideUrl: a relative path is the store
+  ok    outsideUrl: a backslash host is not
+  ok    outsideUrl: an unknown scheme is not
+
+Never a password, a card or an identity number (568 [GD2] (c), the same rules)
+  ok    a password field
+  ok    a password field made in JavaScript
+  ok    a card number by its label
+  ok    a security code by its placeholder
+  ok    a card field by its autocomplete
+  ok    an identity number by its name
+  ok    the reason is the forms' own, said of generated code
+  ok    a gift card question is an ordinary question
+
+No imitation of signing in, a checkout or Marktmorgen
+  ok    the Marktmorgen name
+  ok    a secure checkout
+  ok    confirm your card
+  ok    sign in to your account
+
+Accessibility faults the code alone shows (AX274, WCAG 2.2 AAA)
+  ok    a picture without alt
+  ok    a decorative picture with alt="" is fine
+  ok    a field without a name
+  ok    a field named by aria-label
+  ok    a button without words
+  ok    a button with only an icon described
+  ok    tabindex above 0
+  ok    outline hidden with no focus style
+  ok    outline hidden with a focus style
+  ok    justified text
+  ok    zoom blocked
+  ok    maximum-scale=1
+  ok    animation without reduced motion
+  ok    animation inside a reduced-motion query
+  ok    marquee
+  ok    JavaScript animation without asking
+  ok    JavaScript animation that asks
+  ok    autoplaying video
+
+Bounded
+  ok    past the size it is refused before reading
+  ok    every finding says why in words
+
+90 checks, all passing.

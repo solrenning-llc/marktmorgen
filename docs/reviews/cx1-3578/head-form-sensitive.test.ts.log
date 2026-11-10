@@ -1,0 +1,31 @@
+
+What a scam asks for is found
+  ok    refused: Your password
+  ok    refused: Choose a passcode
+  ok    refused: Card number
+  ok    refused: Credit card number
+  ok    refused: Your debit card
+  ok    refused: CVV
+  ok    refused: Security code on the back
+  ok    refused: Social Security number
+  ok    refused: SSN
+  ok    refused: Passport number
+  ok    refused: Driver's license number
+  ok    refused: National ID number
+
+Ordinary questions are not
+  ok    kept: Your name
+  ok    kept: Your gift card's name
+  ok    kept: Your tax ID for the invoice
+  ok    kept: PIN code (postal)
+  ok    kept: Which business card style do you like?
+  ok    kept: What did the chapter on passwords teach you?
+  ok    kept: Your email
+
+Where it is refused, and how it is said
+  ok    the field is named
+  ok    why, in plain words, for each kind
+  ok    the save refuses it before writing, naming the field
+  ok    the editor says it
+
+23 checks, all passing.

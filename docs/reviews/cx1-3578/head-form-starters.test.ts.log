@@ -1,0 +1,17 @@
+
+The examples
+  ok    two, each named once
+  ok    each kept whole by the server's own reader, once named and given an id
+  ok    none asks for anything sensitive or beyond a plan, so the save route takes each
+  ok    within the limits, with an email field, and fresh ids each time
+  ok    questions only: no figure, no quotation, no promise made for the creator, no one person assumed
+  ok    what a person reads after sending is left to the store's own words, in its language, as on a blank form
+
+On the empty screen
+  ok    under its own heading, which names the list
+  ok    offered with a heading, each with its words tied to its button
+  ok    and that nothing is saved or shown until the creator does it
+  ok    not once there is a form
+  ok    opened unsaved in the editor, the focus on its name, as a blank new form is
+
+11 checks, all passing.

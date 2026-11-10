@@ -1,0 +1,14 @@
+{
+  "form-sensitive-password.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  a direct password request cannot pass the generated-code check",
+      "  FAIL  the password request is identified",
+      "  FAIL  a direct password request cannot pass the generated-code check",
+      "  FAIL  the password request is identified",
+      "  FAIL  the password request is identified",
+      "52 checks, 39 failing."
+    ]
+  }
+}

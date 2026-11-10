@@ -1,0 +1,39 @@
+{
+  "form-sensitive-password.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    refused:   PLEASE ENTER YOUR PASSWORD:  ",
+      "  ok    form names the refused field:   PLEASE ENTER YOUR PASSWORD:  ",
+      "52 checks, all passing."
+    ]
+  },
+  "form-sensitive.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "23 checks, all passing."
+    ]
+  },
+  "generated-code-check.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "90 checks, all passing."
+    ]
+  },
+  "form-starters.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "11 checks, all passing."
+    ]
+  },
+  "funnel-form-sensitive.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "4 checks, all passing."
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "cx1-sensitive-password.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  generated finding Please&#32;enter your password",
+      "  FAIL  generated refused Please&#x20;provide your passphrase",
+      "  FAIL  generated finding Please&#x20;provide your passphrase",
+      "  FAIL  generated refused Re-enter your passcode",
+      "  FAIL  generated finding Re-enter your passcode",
+      "36 checks, 23 failing."
+    ]
+  }
+}

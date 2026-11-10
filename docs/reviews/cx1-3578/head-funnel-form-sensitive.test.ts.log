@@ -1,0 +1,10 @@
+
+Funnels made from a page
+  ok    each typed form question is checked before anything is made
+  ok    the picker says it
+
+Funnel files shared by another store
+  ok    a form in the file is checked as it is read
+  ok    the share panel says it
+
+4 checks, all passing.

@@ -1,6 +1,6 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
-import { forgetMetaUser, isMetaConfigured, signedUser } from "@/lib/meta-ads";
+import { MetaIncompleteForget, forgetMetaUser, isMetaConfigured, signedUser } from "@/lib/meta-ads";
 import { clientAddress, limited, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -28,10 +28,24 @@ export async function POST(request: NextRequest) {
   }
   const user = signedUser(raw);
   if (!user) return Response.json({ error: "invalid" }, { status: 400 });
-  const forgot = await forgetMetaUser(user);
+  // Nothing is confirmed to Meta unless every store was read and forgotten exactly (CX-123 rule 24): an unknown reply
+  // answers 503 with no confirmation code, the user's index kept, so Meta asks again.
+  let forgot: Awaited<ReturnType<typeof forgetMetaUser>>;
+  try {
+    forgot = await forgetMetaUser(user);
+  } catch (error) {
+    console.error("forgetting a Meta user failed", error);
+    // The stores this pass did forget are told now: the next pass reads them as gone (Claude 5 on #2869).
+    if (error instanceof MetaIncompleteForget) tell(error.forgot);
+    return Response.json({ error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+  tell(forgot);
+  const code = `meta-${Date.now().toString(36)}-${forgot.length}`;
+  return Response.json({ url: `${SITE_URL}/privacy#meta-ads`, confirmation_code: code }, { headers: { "Cache-Control": "no-store" } });
+}
+
+function tell(forgot: { owner: { email: string; handle: string } }[]): void {
   if (forgot.length) after(async () => {
     for (const store of forgot) await noticeCreator(store.owner, { kind: "metaads-disconnected", byMeta: true });
   });
-  const code = `meta-${Date.now().toString(36)}-${forgot.length}`;
-  return Response.json({ url: `${SITE_URL}/privacy#meta-ads`, confirmation_code: code }, { headers: { "Cache-Control": "no-store" } });
 }

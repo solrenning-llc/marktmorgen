@@ -178,10 +178,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   // is nothing to correct.
   if (asked !== store.handle && !reachedOn) permanentRedirect(`/@${store.handle}`);
 
-  // A store with no plan a visit can be charged to, which has had the visits
-  // such a store has this month, rests until the month turns or its plan is
-  // paid (lib/traffic.ts). Asked only of such a store, before anything else
-  // is read for it; a store that pays is never rested.
+  // A store rests until its window turns once the visits or the requests its
+  // standing covers this window are used, or when they cannot be read
+  // (lib/traffic.ts, isResting): a store with no plan at the visits such a
+  // store has, a store that pays at its plan's. Asked before anything else is
+  // read for it. Only a visit a person's browser sent is counted toward it
+  // (app/api/store/hit).
   if (await isResting(store)) return <StoreResting store={store} />;
   // Switched off after notices about its content (lib/takedown.ts).
   if (store.suspended) return <StoreResting store={store} suspended />;

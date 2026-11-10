@@ -4,6 +4,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
+import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
 import { openRequestCheckout } from "@/lib/payment-requests";
 import { ID_PATTERN } from "@/lib/payment-request-rules";
 
@@ -45,6 +46,8 @@ export async function POST(request: NextRequest) {
     console.error("opening a payment request's checkout failed", opened.error);
     // Stripe refusing on purpose is the creator's to put right, and they are told (lib/checkout-trouble.ts).
     if (opened.error) after(() => noteCheckoutTrouble(store, opened.error).then(() => undefined, () => undefined));
+    // Stripe says the account cannot take card payments: written down, and said with the page's own notice (lib/stripe-charges.ts).
+    if (await chargesOffAfterRefusal(store, opened.error)) return back("closed");
   }
   return back(opened.reason === "gone" ? "" : opened.reason);
 }

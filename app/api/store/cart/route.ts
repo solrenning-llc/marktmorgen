@@ -29,6 +29,7 @@ import { countHit } from "@/lib/visit";
 import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { productSegment } from "@/lib/product-slug";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
+import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
 import { assistReminderShown, keepAssistReminder } from "@/lib/assistant-reminder";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { cartOfferOwner } from "@/lib/cart-offers";
@@ -365,6 +366,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof CartShippingRefused) return away(`/@${store.handle}?cart=changed#cart`);
     console.error("a cart's checkout failed", error);
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
+    // Stripe says the account cannot take card payments: written down, and said on the store page (lib/stripe-charges.ts).
+    if (await chargesOffAfterRefusal(store, error)) return away(`/@${store.handle}?status=nocharges`);
     return away(`/@${store.handle}?cart=error#cart`);
   }
 }

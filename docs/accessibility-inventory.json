@@ -1338,6 +1338,7 @@
     "components/course-day-preview.tsx",
     "components/course-editor.tsx",
     "components/course-outline.tsx",
+    "components/course-shelf-studio.tsx",
     "components/course-template-picker.tsx",
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",

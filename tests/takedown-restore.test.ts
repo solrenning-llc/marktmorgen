@@ -19,7 +19,8 @@ import { GET as servePicture } from "@/app/api/image/[folder]/[file]/route";
 import { POST as act } from "@/app/api/takedown/route";
 import { addStoreLink, claimHandle, ensureStatsId, imageFolder, setLinkImage, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
-import { type Report, actOnHeld, fileReport, openReport, settleHeld, takeDown } from "@/lib/takedown";
+import { type Report, actOnHeld, fileReport, noticeSentAt, openReport, settleHeld, takeDown } from "@/lib/takedown";
+import { createHash } from "node:crypto";
 import { COUNTER_NOTICE_DAYS, RESTORE_AFTER_WEEKDAYS, RESTORE_BY_WEEKDAYS, restoreFrom } from "@/lib/takedown-hold";
 import { imageUrl } from "@/lib/product-image";
 import { MAX_STORE_LINKS, showingLinks } from "@/lib/store-link";
@@ -136,6 +137,16 @@ async function main(): Promise<void> {
   is("the creator is told it is kept until a date, and what a counter-notice does", [Boolean(told?.text.includes("We keep the link and its picture")), Boolean(told?.text.includes(new Date(until).toLocaleDateString("en-US", { dateStyle: "long", timeZone: "UTC" }))), Boolean(told?.text.includes("for good"))], [true, true, false]);
   is("the page that acts on the notice stays open until the hold and a put-back are over", (await redis.pipeline([["TTL", `nl:report:t:${(await import("node:crypto")).createHash("sha256").update(`nimbus-takedown:${token}`).digest("hex")}`]]))[0] as number >= Math.floor((until + 20 * DAY - Date.now()) / 1000), true);
 
+  part("When the creator was told is kept, read exactly (for the six months to ask us to look again, #3533)");
+  const strike = held.strikes.find((x) => x.report === report.id && x.what.startsWith("The link \"Photo set\""));
+  const toldAt = strike ? await noticeSentAt(report.id, strike) : "no strike";
+  is("the send time is kept, between the press and now", typeof toldAt === "string" && Date.parse(toldAt) >= heldAt && Date.parse(toldAt) <= Date.now(), true);
+  is("a strike whose notice never went out has none", await noticeSentAt(report.id, { at: "2026-01-01T00:00:00.000Z", what: "The link \"Never\" (https://example.com/never)" }), null);
+  const sentKeyOf = (x: { at: string; what: string }) => `nl:report:${report.id}:s:${createHash("sha256").update(`nimbus-told:${x.at.slice(0, 30)}\n${x.what.slice(0, 200)}`).digest("hex").slice(0, 24)}`;
+  const odd = { at: "2026-02-02T00:00:00.000Z", what: "The link \"Odd\" (https://example.com/odd)" };
+  await redis.pipeline([["SET", sentKeyOf(odd), "yesterday"]]);
+  is("a kept value that is not a time is unknown: it throws, never now and never not sent", await noticeSentAt(report.id, odd).then(() => "read", () => "threw"), "threw");
+
   part("Inside the window, nothing is deleted and nothing goes back");
   is("a run the day before the window ends", (await settleHeld(until - DAY)).deleted, 0);
   is("still held, its picture kept", [(await current()).heldLinks?.length, kept.has(keptAs)], [1, true]);
@@ -166,7 +177,7 @@ async function main(): Promise<void> {
   is("held, its picture kept", [Boolean(second0), kept.has(secondKept), (await fetchPicture(second.path))[0]], [true, true, 404]);
   is("a counter-notice after the window is refused", await actOnHeld(report, await current(), second.id, "counter", ORIGIN, secondUntil + 1), null);
   is("the run after the window deletes it", (await settleHeld(secondUntil + 1)).deleted, 1);
-  is("the link and its picture are gone, never back", [(await current()).heldLinks?.some((h) => h.link.id === second.id), (await current()).links.some((l) => l.id === second.id), kept.has(secondKept), kept.has(second.path)], [false, false, false, false]);
+  is("the link and its picture are gone, never back", [(await current()).heldLinks?.some((h) => h.link.id === second.id) ?? false, (await current()).links.some((l) => l.id === second.id), kept.has(secondKept), kept.has(second.path)], [false, false, false, false]);
 
   part("The sender went to court: it stays down, and is deleted when the window ends");
   const third = await pictured("Cover scan", 3);
@@ -193,9 +204,9 @@ async function main(): Promise<void> {
     if (commands.some((c) => c[0] === "ZRANGEBYSCORE")) return [{ odd: true }];
     return realPipeline(commands);
   }) as typeof redis.pipeline;
-  const odd = await settleHeld(due + 400 * DAY).catch(() => "threw" as const);
+  const oddRun = await settleHeld(due + 400 * DAY).catch(() => "threw" as const);
   redis.pipeline = realPipeline;
-  is("a list of held stores answered in another shape: nothing done", [odd === "threw" || odd.failed > 0, (await current()).heldLinks?.some((h) => h.link.id === fourth.id), kept.has(fourthHeld?.picture ?? "")], [true, true, true]);
+  is("a list of held stores answered in another shape: nothing done", [oddRun === "threw" || oddRun.failed > 0, (await current()).heldLinks?.some((h) => h.link.id === fourth.id), kept.has(fourthHeld?.picture ?? "")], [true, true, true]);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands.some((c) => c[0] === "GET")) throw new Error("the store did not answer");
     return realPipeline(commands);

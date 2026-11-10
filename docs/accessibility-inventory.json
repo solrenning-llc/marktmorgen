@@ -1684,6 +1684,7 @@
     "app/api/cron/shares/route.ts",
     "app/api/cron/stream/route.ts",
     "app/api/cron/stripe-check/route.ts",
+    "app/api/cron/takedowns/route.ts",
     "app/api/cron/usage/route.ts",
     "app/api/cron/weekly/route.ts",
     "app/api/discord/callback/route.ts",

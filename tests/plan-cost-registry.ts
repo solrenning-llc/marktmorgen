@@ -75,6 +75,8 @@ import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
 import { MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
+import { MAX_STORE_LINKS } from "@/lib/store-link";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
@@ -1406,6 +1408,20 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/cron/courses/route.ts", names: ["sweepCommunityUploads"] },
     ],
     basis: "Every picture the plan lets a community keep, each at the most one may weigh, at the dearest store a file may be in. A door takes a place before it is given; a picture deleted, or a door never used (swept a day on), gives it back.",
+  },
+  {
+    id: "takedown-held-links",
+    feature: "Links held after a copyright notice, with their pictures, until they go back or their window ends (C6-92, 10 November 2026)",
+    monthlyUsd: () => ((MAX_STORE_LINKS * MAX_IMAGE_BYTES) / GB) * STORAGE_PER_GB,
+    sources: [
+      { file: "lib/store-link.ts", names: ["MAX_STORE_LINKS"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "lib/store.ts", names: ["heldPlaces(store) >= MAX_STORE_LINKS", "holdStoreLink", "restoreHeldLink", "dropHeldLink"] },
+      { file: "lib/takedown-hold.ts", names: ["COUNTER_NOTICE_DAYS", "RESTORE_BY_WEEKDAYS", "heldDue"] },
+      { file: "lib/takedown.ts", names: ["holdLink", "settleHeld", "deleteHeld"] },
+      { file: "vercel.json", names: ["/api/cron/takedowns"] },
+    ],
+    basis: "A held link keeps its place in the store's list (addStoreLink counts it against MAX_STORE_LINKS), so a store holds at most MAX_STORE_LINKS pictures between its live and held links, each at the most a picture may weigh, all month, at the dearest store a file may be in, although a link picture is drawn at 320 px. Its record stays inside the store record's own ceiling (MAX_STORE_BYTES). The copies, deletes and the daily job's reads that hold, put back or delete a link follow a takedown the company presses on a notice: a company cost, outside this line.",
   },
 ];
 

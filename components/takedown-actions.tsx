@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { takedownAnswer } from "@/lib/takedown-response";
 
-type Action = { type: "link"; id: string } | { type: "product"; id: string } | { type: "kit" } | { type: "store"; on: boolean };
+type Action = { type: "link"; id: string } | { type: "product"; id: string } | { type: "kit" } | { type: "store"; on: boolean } | { type: "held"; id: string; op: "counter" | "court" | "restore" };
 
 /** One button that acts on a notice (app/api/takedown), and says what it did. */
 /**

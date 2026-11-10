@@ -197,6 +197,11 @@ async function main(): Promise<void> {
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
     "lib/takedown.ts del(done.removed.path)": "the own picture of the link the takedown removed, read from the record it wrote; link-image attach admits only a fresh or own name",
+    "lib/takedown.ts del(kept)": "the copy of a link's picture this press made under a fresh name, when the hold it was made for was not written (lib/takedown-hold.ts)",
+    "lib/takedown.ts del(original)": "the old file of a link's own picture, only after the record holds the link with its copy (lib/takedown-hold.ts)",
+    "lib/takedown.ts del(held.link.image.path)": "the same old file again, for a link this notice holds, read from the held record",
+    "lib/takedown.ts del(held.picture)": "the kept copy of a held link's picture, after the link went back with its picture copied back to its own address",
+    "lib/takedown.ts del(files)": "a held link's kept copy and old file, read from the held record, when its window ended without a counter-notice or after the sender went to court",
     "lib/review-photo.ts del(photo.path)": "a review's photo, read from the review record, or the one this request stored under a fresh name",
   };
   const unexplained = [...new Set(found)].filter((entry) => !Object.hasOwn(REASONS, entry));

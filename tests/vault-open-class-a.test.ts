@@ -26,8 +26,12 @@
  * (https://vercel.com/docs/vercel-blob/usage-and-pricing, read 10 November
  * 2026), priced per start as UPLOAD_OPEN_BLOB_ADVANCED_OPS.
  *
- * Synthetic Redis, synthetic R2 stand-in, a stub for the host's file
- * listing; no real request.
+ * And it reads what the store keeps on the video service (lib/stream.ts
+ * streamHeld, one Bunny Stream API read of the store's collection), priced
+ * per start as UPLOAD_OPEN_STREAM_API_READS.
+ *
+ * Synthetic Redis, synthetic R2 and video service stand-ins, a stub for the
+ * host's file listing; no real request.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -38,6 +42,7 @@ import * as costTable from "@/lib/spend-cost-table";
 import { UPLOAD_OPEN_CLASS_A_OPS, UPLOAD_OPEN_CLASS_B_OPS } from "@/lib/spend-cost-table";
 import { storageAnswers } from "./storage-provider-stub";
 import { UPLOAD_SECONDS, VAULT_LIST_PAGES } from "@/lib/vault-rules";
+import { STREAM_API_ORIGIN } from "@/lib/stream-rules";
 
 // The atomic scripts of lib/storage-reservations.ts, as tests/storage-reservations.test.ts stands them in.
 const original = store.run.bind(store);
@@ -64,6 +69,13 @@ process.env.R2_ACCOUNT_ID = ACCOUNT;
 process.env.R2_ACCESS_KEY_ID = "a-stand-in-access-key-id";
 process.env.R2_SECRET_ACCESS_KEY = "a-stand-in-secret-access-key-for-tests-only";
 process.env.R2_BUCKET = BUCKET;
+// The store keeps videos too: its collection at the video service is read at every start.
+process.env.BUNNY_STREAM_LIBRARY_ID = "123456";
+process.env.BUNNY_STREAM_API_KEY = "a-stand-in-stream-api-key";
+process.env.BUNNY_STREAM_TOKEN_KEY = "a-stand-in-stream-token-key";
+const COLLECTION = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+original(["SET", "nl:stream:col:" + FOLDER, COLLECTION]);
+let streamReads = 0;
 
 type Op = "A" | "B" | "free";
 const billed: { op: Op; what: string }[] = [];
@@ -78,6 +90,11 @@ const xml = (body: string, status = 200) => new Response(`<?xml version="1.0" en
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
+  if (url.origin === STREAM_API_ORIGIN) {
+    assert.equal(`${method} ${url.pathname}`, `GET /library/123456/collections/${COLLECTION}`, "only the store's collection is read at the video service");
+    streamReads += 1;
+    return Response.json({ guid: COLLECTION, totalSize: 0 });
+  }
   assert.equal(url.origin, ORIGIN, "only the R2 stand-in is asked");
   const key = url.pathname.slice(`/${BUCKET}/`.length);
   const range = ((init?.headers ?? {}) as Record<string, string>).range;
@@ -134,6 +151,10 @@ test("one upload start never costs more R2 operations than the cost table prices
   const pricedBlob = (costTable as Record<string, unknown>).UPLOAD_OPEN_BLOB_ADVANCED_OPS;
   assert.ok(typeof pricedBlob === "number" && blobLists <= pricedBlob,
     `Vercel Blob list calls on the path: ${blobLists}; priced as Advanced Operations per start: ${String(pricedBlob)}`);
+  const pricedStream = (costTable as Record<string, unknown>).UPLOAD_OPEN_STREAM_API_READS;
+  assert.ok(streamReads >= 1, "admission read the store's collection at the video service");
+  assert.ok(typeof pricedStream === "number" && streamReads <= pricedStream,
+    `video service reads on the path: ${streamReads}; priced per start: ${String(pricedStream)}`);
 
   measureFails = 1;
   const closed = await closeReservedVault(opened.upload.pathname, ["0".repeat(32)]);

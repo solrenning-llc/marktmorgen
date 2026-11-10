@@ -25,7 +25,7 @@ import { deleteFile } from "@/lib/file-store";
 import { PERSON_DATA } from "@/lib/person-data";
 import { FAMILIES } from "./store-data-registry";
 import { setDeletionRecordsReview } from "./backup-files-review-fixture";
-import { dropStamped } from "@/lib/pdf-stamp";
+import { copyFolder, dropStamped } from "@/lib/pdf-stamp";
 import { deletionWorld, resetDeletionWorld } from "./backup-deletions-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -177,7 +177,9 @@ async function main(): Promise<void> {
   part("the site's own clean-up says so: a stamped copy is deleted as site_cleanup");
   reset();
   const original = { pathname: blobFile(F, "book.pdf"), name: "book.pdf", contentType: "application/pdf" };
-  deletionWorld.pages = [{ blobs: [{ pathname: `stores/${F}/stamped/aaaa/one.pdf` }, { pathname: `stores/${F}/stamped/aaaa/two.pdf` }], hasMore: false }];
+  // Listed under the copies' own folder, as the file store now checks every listed name against the prefix asked.
+  const stamped = copyFolder(original);
+  deletionWorld.pages = [{ blobs: [{ pathname: `${stamped}one.pdf` }, { pathname: `${stamped}two.pdf` }], hasMore: false }];
   await dropStamped(original);
   is("both copies deleted and recorded as the site's clean-up", ((await kept()) as { key: string; reason: string }[]).map((r) => r.reason), ["site_cleanup", "site_cleanup"]);
 

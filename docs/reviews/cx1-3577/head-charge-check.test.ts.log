@@ -1,0 +1,65 @@
+
+A charge at the published price is correct
+  ok    monthly
+  ok    yearly
+  ok    a legacy price the subscription started on
+  ok    quantity written with decimals
+  ok    a 28-day February
+  ok    overpaid: Stripe credits the balance, nothing to refund
+  ok    an explained proration
+
+Nothing to decide
+  ok    an open invoice charged nothing
+  ok    a trial's zero invoice
+
+Proven wrong: refunded
+  ok    above the published price: the difference
+  ok    the difference with its share of tax added on top
+  ok    charged after the plan was meant to stop: all of it
+  ok    the same period paid twice: all of the second
+  ok    another currency than shown: all of it
+  ok    a legacy subscriber charged today's price: the difference
+  ok    the same period twice on one invoice: the extra line
+  ok    of a duplicate pair, the later one is refunded whole
+  ok    a tie refunds the higher id
+  ok    not when the earlier one was already given back
+  ok    an overpayment is never refunded again on top of Stripe's credit
+  ok    of a duplicate pair, the earlier one is kept
+  ok    a tie keeps the lower id
+  ok    over-priced with a coupon: the excess's share of what was paid
+
+Already refunded, credited or disputed: never more than is left
+  ok    a credit note after payment is subtracted
+  ok    a disputed charge is left to the dispute
+  ok    disputes not read
+  ok    partly refunded leaves the rest
+  ok    fully refunded asks for nothing
+  ok    the excess is capped at what is left
+
+A doubt is never correct: treated as wrong, refunded whole
+  ok    a price that is not published
+  ok    cannot tell whether the plan was to be charged
+  ok    a proration the switch on record does not explain
+  ok    the proration is judged with its own line and amount
+  ok    a plan line of another subscription
+  ok    a paid subscription invoice with no lines
+  ok    a plan line naming no subscription
+  ok    a plan line whose amount before discounts is not its unit
+  ok    a plan line on an invoice with no subscription
+  ok    a one-off line with no record
+  ok    a quantity of two
+  ok    a period that is neither a month nor a year
+  ok    the old shape with a top-level price is not read as correct
+  ok    a line of another currency
+  ok    a proven excess beside a doubt refunds the whole
+
+What it could not read is decided later, never correct and never refunded
+  ok    lines not read whole
+  ok    refunds not read
+  ok    no paid time
+  ok    amounts that are not whole cents
+  ok    credit notes missing
+  ok    credit notes that cannot be read
+  ok    not an invoice
+
+51 checks, all passing.

@@ -1,0 +1,16 @@
+{
+  "charge-check-read-evidence.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "23 checks, all passing."
+    ]
+  },
+  "charge-check.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "51 checks, all passing."
+    ]
+  }
+}

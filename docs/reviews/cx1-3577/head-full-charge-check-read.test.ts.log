@@ -1,0 +1,96 @@
+
+Pinned version and query
+  ok    the version is fixed
+  ok    asks paid invoices only
+  ok    from 48 hours back
+  ok    100 a page
+  ok    all three read whole
+  ok    window read to its end: no cursor
+  ok    stopped done
+
+More than 50 pages: page cap and cursor, then carried on
+  ok    stops at the page cap
+  ok    read exactly cap × 100
+  ok    cursor at the last one read
+  ok    run 2 keeps the same window
+  ok    run 3 keeps the same window
+  ok    run 4 keeps the same window
+  ok    every invoice read once across runs
+
+Time budget: no request after `until`, cursor before the unfinished one
+  ok    stopped on the budget
+  ok    cursor just before the invoice whose lines ran out of time
+  ok    that invoice is not handed on
+  ok    nor marked unread
+
+Lines over several pages are read whole
+  ok    1 + 250 lines
+  ok    handed on as complete
+
+Too many lines: set aside, the rest read
+  ok    unread with its reason
+  ok    the other two read
+
+A permanent 500 on one invoice's lines never blocks the rest
+  ok    unread, not shortened
+  ok    not handed on with only its first lines
+  ok    the others read
+  ok    done
+
+A list page not answered stops with the cursor unchanged
+  ok    stopped list_error
+  ok    cursor after the 100 read
+  ok    a resumed run that fails keeps its place and counts the failure
+  ok    after the cap of failures in a row the window is abandoned and reported
+  ok    and counts as reported, so the failing page is not reached again by every window
+  ok    and a fresh window is read instead of the failing page
+
+Shapes this file does not know are never taken
+  ok    a list without object: list
+  ok    an entry with no id stops the run
+  ok    and nothing is handed on
+  ok    has_more with no data is not looped on
+  ok    a non-paid entry is not decided
+  ok    lines url for another invoice is not followed
+  ok    no lines list: unread
+
+A daily cron resumes the same window, and new charges reach the next one
+  ok    resumed a day later, not dropped
+  ok    every invoice exactly once
+  ok    the window read to its end says up to when, with the clock margin
+  ok    the next fresh window reads the newer charge
+
+A window resumed over three runs loses nothing created meanwhile
+  ok    third run finishes the window
+  ok    those three never saw the new charge
+  ok    the next window reaches back to the first run
+  ok    and reads the new charge
+  ok    a stretch too old to reach is reported, not hidden
+  ok    no gap is claimed while a window that covers it is resumed
+  ok    a stop before the end leaves readUpTo for the caller to keep
+
+Too old a window is abandoned, said, and a fresh one read
+  ok    reported
+  ok    fresh window
+
+A cap on requests per run, whatever the clock
+  ok    stopped on the call cap
+  ok    never more than the cap
+
+An unread invoice is read again by id
+  ok    read whole by id
+  ok    its calls counted for the run's cap
+  ok    not answered: tried later, never decided
+  ok    its lines not answered: tried later
+  ok    not paid: final, reported
+  ok    not found: final
+  ok    the run's cap left holds the retry too
+  ok    a malformed id asks nothing
+
+Cursor rules
+  ok    a stale cursor starts a fresh window
+  ok    a malformed cursor is not sent to Stripe
+  ok    a good cursor carries on after its invoice
+  ok    calls counted
+
+66 checks, all passing.

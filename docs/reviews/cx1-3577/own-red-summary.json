@@ -1,0 +1,14 @@
+{
+  "cx1-3577-boundaries.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  unnamed later line: remains retryable",
+      "  FAIL  numeric later id: unknown",
+      "  FAIL  numeric later id: remains retryable",
+      "  FAIL  bad id is available for retry",
+      "  FAIL  good invoice remains available",
+      "16 checks, 10 failing."
+    ]
+  }
+}

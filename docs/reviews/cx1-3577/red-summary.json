@@ -1,0 +1,14 @@
+{
+  "charge-check-read-evidence.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  oversized embedded page remains retryable",
+      "  FAIL  oversized subsequent line page is unknown",
+      "  FAIL  unnamed final-page line is unread",
+      "  FAIL  bad invoice is set aside",
+      "  FAIL  the other invoice is still read",
+      "23 checks, 11 failing."
+    ]
+  }
+}

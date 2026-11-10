@@ -1,0 +1,6 @@
+﻿docs/codex-queue.md
+docs/reservations/codex.md
+lib/charge-check-read.ts
+tests/aliases/charge-check-read-evidence.test.ts.json
+tests/charge-check-read-evidence.test.ts
+tests/charge-check-read-platform-world.ts

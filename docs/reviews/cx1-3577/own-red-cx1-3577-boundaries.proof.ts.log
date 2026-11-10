@@ -1,0 +1,47 @@
+
+Duplicates anywhere in the pagination do not reach a decision
+  FAIL  third page repeats the first: unknown
+        expected "lines_unreadable"
+        got      "invoice"
+  FAIL  third page repeats the first: remains retryable
+        expected false
+        got      true
+  FAIL  duplicate within next page: unknown
+        expected "lines_unreadable"
+        got      "invoice"
+  FAIL  duplicate within next page: remains retryable
+        expected false
+        got      true
+  FAIL  unnamed later line: unknown
+        expected "lines_unreadable"
+        got      "invoice"
+  FAIL  unnamed later line: remains retryable
+        expected false
+        got      true
+  FAIL  numeric later id: unknown
+        expected "lines_unreadable"
+        got      "invoice"
+  FAIL  numeric later id: remains retryable
+        expected false
+        got      true
+
+Healthy terminal boundary and provider immutability
+  ok    unique next page is retained
+  ok    input first page was not mutated
+  ok    no budget means no read
+
+Per-invoice unknown stays separate from confirmed good work
+  FAIL  bad id is available for retry
+        expected [{"id":"in_cx1","reason":"lines_unreadable"}]
+        got      []
+  FAIL  good invoice remains available
+        expected ["in_good"]
+        got      ["in_cx1","in_good"]
+  ok    one list read only
+
+The existing line-page cap still precedes an extra request
+  ok    the existing cap is honored
+  ok    no request beyond the existing cap
+CX1 measured simulated get calls 18
+
+16 checks, 10 failing.

@@ -1,0 +1,13 @@
+{
+  "charge-check-read.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    a resumed run that fails keeps its place and counts the failure",
+      "  ok    after the cap of failures in a row the window is abandoned and reported",
+      "  ok    and counts as reported, so the failing page is not reached again by every window",
+      "  ok    and a fresh window is read instead of the failing page",
+      "66 checks, all passing."
+    ]
+  }
+}

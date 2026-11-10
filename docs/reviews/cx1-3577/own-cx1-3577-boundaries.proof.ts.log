@@ -1,0 +1,27 @@
+
+Duplicates anywhere in the pagination do not reach a decision
+  ok    third page repeats the first: unknown
+  ok    third page repeats the first: remains retryable
+  ok    duplicate within next page: unknown
+  ok    duplicate within next page: remains retryable
+  ok    unnamed later line: unknown
+  ok    unnamed later line: remains retryable
+  ok    numeric later id: unknown
+  ok    numeric later id: remains retryable
+
+Healthy terminal boundary and provider immutability
+  ok    unique next page is retained
+  ok    input first page was not mutated
+  ok    no budget means no read
+
+Per-invoice unknown stays separate from confirmed good work
+  ok    bad id is available for retry
+  ok    good invoice remains available
+  ok    one list read only
+
+The existing line-page cap still precedes an extra request
+  ok    the existing cap is honored
+  ok    no request beyond the existing cap
+CX1 measured simulated get calls 18
+
+16 checks, all passing.

@@ -1,0 +1,66 @@
+
+A healthy, single paid period is still correct
+  ok    one read
+  ok    the real decision accepts the known paid price
+
+A repeated line is not a second charge
+  ok    two reads, no refund or other write
+OBSERVATION duplicate-line decision {"kind":"wrong","reasons":["the same period charged twice on one invoice"],"refundCents":4000}
+  FAIL  the repeated provider row is unread, never handed to the refund decision
+        expected false
+        got      true
+
+Duplicate lines inside the first page are also unknown
+  FAIL  duplicate first-page row not handed on
+        expected false
+        got      true
+
+Requested list bounds apply to a terminal page too
+  FAIL  oversized terminal page is a list error
+        expected "list_error"
+        got      "done"
+  FAIL  no invoice from the invalid page is handed on
+        expected 0
+        got      101
+  FAIL  invalid page never advances the completion anchor
+        expected null
+        got      1789999700
+
+A unique, legitimate second period remains distinguishable
+  ok    two distinct lines are retained
+  ok    different periods are not a duplicate-charge finding
+
+The exact requested list bound remains admissible
+  ok    100 invoices are read
+  ok    the exact-bound page completes
+  ok    one list call
+
+Line pages obey the same bound
+  FAIL  oversized embedded line page is unknown
+        expected "lines_unreadable"
+        got      "invoice"
+  FAIL  oversized embedded page remains retryable
+        expected false
+        got      true
+  FAIL  oversized subsequent line page is unknown
+        expected "lines_unreadable"
+        got      "invoice"
+  ok    100 distinct lines are still complete
+
+Malformed rows do not block another invoice or invent a charge
+  FAIL  unnamed final-page line is unread
+        expected false
+        got      true
+  FAIL  bad invoice is set aside
+        expected [{"id":"in_1","reason":"lines_unreadable"}]
+        got      []
+  FAIL  the other invoice is still read
+        expected ["in_2"]
+        got      ["in_1","in_2"]
+  ok    window completes with the unread id reported
+
+Different line ids charging the same period still expose a real error
+  ok    distinct lines are not hidden
+  ok    the real duplicate-period decision remains wrong
+
+23 checks, 11 failing.

@@ -72,7 +72,7 @@ const list = (data: unknown[], url: string) => new Response(JSON.stringify({ obj
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
-  if (!url.hostname.endsWith("stripe.com")) return new Response(JSON.stringify({ error: "nothing leaves this test" }), { status: 500 });
+  if (url.hostname !== "api.stripe.com") return new Response(JSON.stringify({ error: "nothing leaves this test" }), { status: 500 });
   const path = url.pathname.replace(/^\/v1/, "");
   const q = url.searchParams;
   if (path === "/refunds") {

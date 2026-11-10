@@ -48,6 +48,8 @@
  * the route that takes the answers all read these rules.
  */
 
+import { csvCell } from "@/lib/csv";
+
 export const MAX_FORMS = 20;
 export const MAX_FIELDS = 12;
 export const MAX_OPTIONS = 8;
@@ -640,10 +642,13 @@ export function answerText(field: FormField, given: Answers[string] | undefined)
   return given;
 }
 
-/** A spreadsheet cell that cannot be read as a formula. */
+/**
+ * A spreadsheet cell that cannot be read as a formula: the platform's one cell
+ * rule (lib/csv.ts csvCell), always quoted, so a ";" in an answer stays inside
+ * its cell when a spreadsheet opens the file with ";" as the list separator.
+ */
 export function safeCell(text: string): string {
-  const cell = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+  return csvCell(text);
 }
 
 /** One kept response. */

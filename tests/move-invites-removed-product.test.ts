@@ -42,7 +42,8 @@ async function main(): Promise<void> {
   ]);
   is("three invitations are made", fields.every((f) => typeof f === "string"), true);
   const invitesKey = `nl:mv:${store.statsId}`;
-  const adaLink = (await readInvite(store.statsId!, fields[0]!))!.t;
+  // inviteMembers answers false for an address deleted from the store (main's INVITE_UNLESS_ERASED); all three are text, checked above.
+  const adaLink = (await readInvite(store.statsId!, fields[0] as string))!.t;
 
   part("The membership with invited members is removed from the studio");
   const session = await openSession(OWNER);

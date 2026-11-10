@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EmailInput } from "@/components/email-input";
 import Link from "next/link";
 import { toast } from "@/components/toast";
@@ -62,6 +62,13 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
   const [shown, setShown] = useState(initial);
   /** Whether removing it is being asked about, on the page itself (485 [IT2]: no browser dialog). */
   const [asking, setAsking] = useState(false);
+  // Where the focus goes when the question closes (2.4.3): back to Remove, or, once the address is gone, the heading.
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const keepAsking = () => {
+    setAsking(false);
+    requestAnimationFrame(() => removeButton.current?.focus());
+  };
   const [address, setAddress] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
@@ -87,7 +94,7 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
 
   return (
     <section id="account-recovery" aria-labelledby="account-recovery-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
-      <h3 id="account-recovery-title" className="flex items-center gap-2 font-semibold text-ink">
+      <h3 ref={heading} tabIndex={-1} id="account-recovery-title" className="flex items-center gap-2 font-semibold text-ink">
         <Icon name="mail" size={18} className="text-violet-deep" />
         Recovery address
       </h3>
@@ -147,7 +154,7 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
             {busy ? "Sending…" : "Send a code there"}
           </button>
           {shown && asking ? (
-            <span role="group" aria-labelledby="account-recovery-remove-ask" className="flex w-full flex-wrap items-center gap-2 text-sm" data-recovery-remove-ask="">
+            <span role="group" aria-labelledby="account-recovery-remove-ask" className="flex w-full flex-wrap items-center gap-2 text-sm" data-recovery-remove-ask="" onKeyDown={(e) => { if (e.key === "Escape") keepAsking(); }}>
               <span id="account-recovery-remove-ask" className="w-full font-semibold text-ink">
                 {REMOVE_RECOVERY_QUESTION}
               </span>
@@ -157,22 +164,27 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
                 disabled={busy}
                 aria-busy={busy}
                 onClick={() => {
-                  setAsking(false);
+                  let removed = false;
                   void run({ action: "remove" }, () => {
+                    removed = true;
                     setShown("");
                     toast("Recovery address removed.");
+                  }).then(() => {
+                    setAsking(false);
+                    requestAnimationFrame(() => (removed ? heading.current : removeButton.current)?.focus());
                   });
                 }}
               >
                 Remove recovery address
               </button>
               {/* The safe choice takes the focus, so a second Enter pressed by mistake keeps it. */}
-              <button type="button" className="btn btn-secondary btn-sm" autoFocus onClick={() => setAsking(false)}>
+              <button type="button" className="btn btn-secondary btn-sm" autoFocus onClick={keepAsking}>
                 Keep it
               </button>
             </span>
           ) : shown ? (
             <button
+              ref={removeButton}
               type="button"
               className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
               disabled={busy}

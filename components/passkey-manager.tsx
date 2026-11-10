@@ -153,6 +153,14 @@ export function PasskeyManager({
   const [back, setBack] = useState(false);
   /** The passkey whose removal is being asked about in its own row (485 [IT2]), or null. */
   const [asking, setAsking] = useState<string | null>(null);
+  // Where the focus goes when the question closes (2.4.3): back to the row's Remove, or, once the row is gone, the heading.
+  const removeButtons = useRef<Record<string, HTMLButtonElement | null>>({});
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusLater = (target: () => HTMLElement | null | undefined) => requestAnimationFrame(() => target()?.focus());
+  const keepAsking = (id: string) => {
+    setAsking(null);
+    focusLater(() => removeButtons.current[id]);
+  };
   const section = useRef<HTMLElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
 
@@ -223,15 +231,17 @@ export function PasskeyManager({
       : `Remove “${row.name}”? You will no longer be able to log in with it.`;
 
   async function remove(row: PasskeyRow) {
-    setAsking(null);
     setBusy(row.id);
     setError(null);
     const done = await call({ action: "remove", id: row.id });
     setBusy(null);
+    setAsking(null);
     if (!done.ok) {
       setError(MESSAGES[done.error ?? ""] ?? MESSAGES.server_error);
+      focusLater(() => removeButtons.current[row.id]);
       return;
     }
+    focusLater(() => heading.current);
     if (typeof done.removeOn === "number") {
       const at = done.removeOn;
       setBlocked(true);
@@ -263,7 +273,7 @@ export function PasskeyManager({
 
   return (
     <section ref={section} id="passkeys" aria-labelledby="passkeys-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
-      <h3 id="passkeys-title" className="flex items-center gap-2 font-semibold text-ink">
+      <h3 ref={heading} tabIndex={-1} id="passkeys-title" className="flex items-center gap-2 font-semibold text-ink">
         <Icon name="key" size={18} className="text-violet-deep" />
         Passkeys
       </h3>
@@ -300,18 +310,19 @@ export function PasskeyManager({
                 </button>
               ) : null}
               {asking === row.id ? (
-                <span role="group" aria-labelledby={`passkey-remove-${row.id}`} className="flex w-full flex-wrap items-center gap-2 pt-2 text-sm" data-passkey-remove-ask="">
+                <span role="group" aria-labelledby={`passkey-remove-${row.id}`} className="flex w-full flex-wrap items-center gap-2 pt-2 text-sm" data-passkey-remove-ask="" onKeyDown={(e) => { if (e.key === "Escape") keepAsking(row.id); }}>
                   <span id={`passkey-remove-${row.id}`} className="w-full font-semibold text-ink">{removalQuestion(row)}</span>
                   <button type="button" className="btn btn-danger btn-sm" disabled={busy !== null} aria-busy={busy === row.id} onClick={() => void remove(row)}>
                     Remove passkey
                   </button>
                   {/* The safe choice takes the focus, so a second Enter pressed by mistake keeps it. */}
-                  <button type="button" className="btn btn-secondary btn-sm" autoFocus onClick={() => setAsking(null)}>
+                  <button type="button" className="btn btn-secondary btn-sm" autoFocus onClick={() => keepAsking(row.id)}>
                     Keep passkey
                   </button>
                 </span>
               ) : (
                 <button
+                  ref={(el) => { removeButtons.current[row.id] = el; }}
                   type="button"
                   onClick={() => setAsking(row.id)}
                   disabled={busy !== null}

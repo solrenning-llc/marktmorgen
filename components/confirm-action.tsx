@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * A button for something that cannot be undone (568 [GD2] (h); WCAG 3.3.4 and, at AAA, 3.3.6): the first press
@@ -31,15 +31,23 @@ export function ConfirmAction({
   label?: string;
 }) {
   const [asking, setAsking] = useState(false);
+  // When the question closes (Keep it, Escape, or done), the focus goes back to the button that opened it (2.4.3),
+  // as the browser's own dialog did, never to the top of the page.
+  const trigger = useRef<HTMLButtonElement>(null);
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (wasAsking.current && !asking) trigger.current?.focus();
+    wasAsking.current = asking;
+  }, [asking]);
   if (!asking) {
     return (
-      <button type="button" className={className} disabled={disabled} aria-label={label} onClick={() => setAsking(true)}>
+      <button ref={trigger} type="button" className={className} disabled={disabled} aria-label={label} onClick={() => setAsking(true)}>
         {children}
       </button>
     );
   }
   return (
-    <span role="group" aria-label={question} className="flex flex-wrap items-center gap-2 text-sm" data-confirm-action>
+    <span role="group" aria-label={question} className="flex flex-wrap items-center gap-2 text-sm" data-confirm-action onKeyDown={(e) => { if (e.key === "Escape") setAsking(false); }}>
       <span className="font-semibold text-ink">{question}</span>
       <button
         type="button"

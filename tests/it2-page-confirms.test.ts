@@ -38,10 +38,21 @@ is("asked on the page, never the browser's dialog", [recovery.includes("window.c
 is("the same question as before: what removing it costs", REMOVE_RECOVERY_QUESTION, "Remove your recovery address? Losing the inbox you log in with would then need a passkey to get back in.");
 is(
   "the buttons say what happens; the safe one takes the focus; the question names the group",
-  [recovery.includes("Remove recovery address </button>"), recovery.includes('autoFocus onClick={() => setAsking(false)}> Keep it </button>'), recovery.includes('aria-labelledby="account-recovery-remove-ask"'), recovery.includes('<span id="account-recovery-remove-ask" className="w-full font-semibold text-ink"> {REMOVE_RECOVERY_QUESTION} </span>')],
+  [recovery.includes("Remove recovery address </button>"), recovery.includes('autoFocus onClick={keepAsking}> Keep it </button>'), recovery.includes('aria-labelledby="account-recovery-remove-ask"'), recovery.includes('<span id="account-recovery-remove-ask" className="w-full font-semibold text-ink"> {REMOVE_RECOVERY_QUESTION} </span>')],
   [true, true, true, true],
 );
-is("only the second press removes it, as the server always did", recovery.includes('setAsking(false); void run({ action: "remove" }, () => { setShown(""); toast("Recovery address removed."); });'), true);
+is("only the second press removes it, as the server always did", recovery.includes('void run({ action: "remove" }, () => { removed = true; setShown(""); toast("Recovery address removed."); })'), true);
+is(
+  "the focus is never dropped to the page (2.4.3): Keep and Escape give it back to Remove; after the request, to the heading once the address is gone, else to Remove",
+  [
+    recovery.includes("const keepAsking = () => { setAsking(false); requestAnimationFrame(() => removeButton.current?.focus()); };"),
+    recovery.includes('onKeyDown={(e) => { if (e.key === "Escape") keepAsking(); }}'),
+    recovery.includes("requestAnimationFrame(() => (removed ? heading.current : removeButton.current)?.focus());"),
+    recovery.includes('<h3 ref={heading} tabIndex={-1} id="account-recovery-title"'),
+    recovery.includes("<button ref={removeButton} type=\"button\""),
+  ],
+  [true, true, true, true, true],
+);
 const withAddress = renderToStaticMarkup(createElement(RecoveryAddressManager, { shown: "m•••@e•••.com" }));
 is("first, only its Remove, as before; the question is not shown yet", [/>\s*Remove\s*<\/button>/.test(withAddress), withAddress.includes(REMOVE_RECOVERY_QUESTION)], [true, false]);
 is("and without an address, no Remove", /Remove\s*<\/button>/.test(renderToStaticMarkup(createElement(RecoveryAddressManager, { shown: "" }))), false);
@@ -56,13 +67,36 @@ is(
 );
 is(
   "the buttons say what happens; the safe one takes the focus; the question names the group",
-  [passkeys.includes("onClick={() => void remove(row)}> Remove passkey </button>"), passkeys.includes('autoFocus onClick={() => setAsking(null)}> Keep passkey </button>'), passkeys.includes("aria-labelledby={`passkey-remove-${row.id}`}")],
+  [passkeys.includes("onClick={() => void remove(row)}> Remove passkey </button>"), passkeys.includes('autoFocus onClick={() => keepAsking(row.id)}> Keep passkey </button>'), passkeys.includes("aria-labelledby={`passkey-remove-${row.id}`}")],
   [true, true, true],
 );
-is("only the second press sends the removal, and asking ends with it", passkeys.includes("async function remove(row: PasskeyRow) { setAsking(null); setBusy(row.id);"), true);
+is("only the second press sends the removal; the question stays open, busy, until the answer", [passkeys.includes("async function remove(row: PasskeyRow) { setBusy(row.id);"), passkeys.includes('const done = await call({ action: "remove", id: row.id }); setBusy(null); setAsking(null);')], [true, true]);
+is(
+  "the focus is never dropped to the page (2.4.3): Keep and Escape give it back to the row's Remove; a refusal too; a removal to the heading",
+  [
+    passkeys.includes("const keepAsking = (id: string) => { setAsking(null); focusLater(() => removeButtons.current[id]); };"),
+    passkeys.includes('onKeyDown={(e) => { if (e.key === "Escape") keepAsking(row.id); }}'),
+    passkeys.includes("setError(MESSAGES[done.error ?? \"\"] ?? MESSAGES.server_error); focusLater(() => removeButtons.current[row.id]); return; } focusLater(() => heading.current);"),
+    passkeys.includes('<h3 ref={heading} tabIndex={-1} id="passkeys-title"'),
+    passkeys.includes("ref={(el) => { removeButtons.current[row.id] = el; }}"),
+  ],
+  [true, true, true, true, true],
+);
 const rows = [{ id: "pk1", name: "Phone", createdAt: "2026-10-12T00:00:00Z", lastUsedAt: "2026-10-30T00:00:00Z", synced: true }];
 const list = renderToStaticMarkup(createElement(PasskeyManager, { initial: rows, fresh: true }));
 is("first, only its Remove, as before; the question is not shown yet", [/>\s*Remove\s*<\/button>/.test(list), list.includes("You will no longer be able to log in with it."), list.includes("Remove passkey")], [true, false, false]);
+
+part("The shared ConfirmAction (the Path, and every other caller)");
+const confirmAction = flat("components/confirm-action.tsx");
+is(
+  "when its question closes, by Keep it, Escape or done, the focus goes back to its own button (2.4.3)",
+  [
+    confirmAction.includes("if (wasAsking.current && !asking) trigger.current?.focus();"),
+    confirmAction.includes("<button ref={trigger} type=\"button\""),
+    confirmAction.includes('onKeyDown={(e) => { if (e.key === "Escape") setAsking(false); }}'),
+  ],
+  [true, true, true],
+);
 
 part("No browser confirmation comes back elsewhere");
 // Left by unit 0 for their own units: routine ones waiting on an undo or the bin (417 [CC1]), and the

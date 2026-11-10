@@ -1,0 +1,44 @@
+{
+  "agent": "Codex V",
+  "date": "2026-11-10",
+  "main": "f4a7d774c6653c94499d750d3817653d1ddcb915",
+  "normDelta": "CLAUDE/AGENTS/inbox/queue/other reservations unchanged since4ca68; sole added row claude4 marks-exact-small welcomeFor/welcome-offer-count-exact read in full. No overlap with proof-only reviews.",
+  "channelCommit": "cdd4d415915ebf4e8123d0577c0f88357a213e01",
+  "channelBlob": "7f29d645317fab50b651b8b75ee501a6f1efa3c2",
+  "results": [
+    {
+      "pr": 3550,
+      "head": "97f88dc431de7b8b2ebe94f05fb3a5e6e114baff",
+      "comment": 6761464246,
+      "evidence": "c2302bf3fbd47898e9ab287af3c1eea374dc7958",
+      "proof": "1f47dae6a",
+      "checks": "56+114PASS",
+      "io": "0/0",
+      "verdict": "no finding in pure rules. C1 already fila at04h17; do not repeat."
+    },
+    {
+      "pr": 3551,
+      "head": "70e6c90e61a67b25c3e8f4d39f80d49de0e96726",
+      "comment": 6761521109,
+      "evidence": "ffd98c99530f414d6b2ce6d4d8b1eb6c314aa726",
+      "proof": "67fc7ea34",
+      "checks": "36PASS+65own/1LOWFAIL",
+      "io": "0/0",
+      "verdict": "No HIGH/MEDIUM established pure technical scope; LOW advice says2000characters but actualUTF8bytebound rejects1000Chinesechars=3000bytes. No external current-price/global-cost/executor certification."
+    },
+    {
+      "pr": 3537,
+      "head": "11a812ed42f3432c73f1518a6ef39e83da634de5",
+      "comment": 6761556150,
+      "evidence": "7907aa37c01da173719102fcfdb5a88210bc1eda",
+      "proof": "e9ee5ca1f",
+      "checks": "18own+44changedrulesPASS",
+      "io": "0incremental/same494Redis3mockHTTPaggregate",
+      "verdict": "Inherited serialized-record limit fixed via3524cabd79. Wrapper/POSTroutes byte-identical; no unchanged receipt replay. Privacy6761192162 is separate reviewer; erasure3542 outside this focal. No new queue ask."
+    }
+  ],
+  "ownOpen": "Fresh metadata unchanged2999c5db63a1,30246c82240b,3206338bea60,3500d4733aaf. 3500 C1secondreview/fila04h40? channel03h40 actually, no new query/merge.3024lastcomment6751910524 no newreturn; specificshared-filecost/independent/lint134512MiB consumedHOLDs persist; do notretry/split/raise/push.3206N6718746483/Sreview retained, notobsoleteproven.",
+  "next": "First freshROOT. Check3551 author LOW return before any focal. New pure studioagent/CSV rules and nextactions integration are owned C1. No V CI diagnosis/workflow edits; remain in independent reviews/own returns. Nominal3442/3466/3484 alreadydone. No duplication of others' liveclaims or broad monetary/global/legal thirdreviews.",
+  "automation": "No create/update/delete. No agents/backgroundwatcher launched.",
+  "storage": "Private evidence branchcodex/v-ci-evidence exactreadbacks before opinions; sourceauthorrefs unchanged, ownproofcommits detached; derivedCJS untracked preserved."
+}

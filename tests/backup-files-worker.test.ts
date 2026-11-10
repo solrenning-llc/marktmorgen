@@ -480,6 +480,53 @@ async function main(): Promise<void> {
   is("each source copied under its own folder", [copies(S, "blob").length, copies(S, "r2").length, report.heartbeat], [2, 3, true]);
   is("a store's file is never put in the videos' bucket", videos.under("copies/").length, 0);
 
+
+  // Claude 3's second review of #3340 (HIGH 1): a live object's copy is never deleted as a version it once was.
+  part("an etag that comes back (A, then B, then A): the live A's copy is never pruned as the old version A");
+  fresh();
+  const twenty = objects("blob", S, 20);
+  setListing("blob", S, twenty);
+  await runAt(0);
+  const genB = objects("blob", S, 1, 16, 2)[0];
+  setListing("blob", S, [genB, ...twenty.slice(1)]);
+  await runAt(1);
+  setListing("blob", S, twenty);
+  await runAt(2);
+  const nameA = await copyName("blob", S, twenty[0].key, twenty[0].etag, 16);
+  is("control: day 2, the copy of A is in the bucket", files.objects.has(nameA), true);
+  for (const day of [31, 32, 33]) await runAt(day);
+  is("day 33: the live A's copy is still in the bucket", bytesEqual(files.objects.get(nameA)?.bytes, twenty[0].bytes), true);
+
+  // Claude 3's second review of #3340 (HIGH 2): the site's clock alone never skips the holds.
+  part("records dated long before they arrive are held and counted from their arrival, never deleted the day they arrive");
+  fresh();
+  const tenOld = objects("blob", S, 10);
+  setListing("blob", S, tenOld);
+  await runAt(0);
+  world.records = tenOld.map((o) => ({ source: "blob", key: o.key, recordedAt: DAY0 - 100 * DAY, reason: "creator_deleted" as const }));
+  setListing("blob", S, []);
+  report = await runAt(1);
+  is("control: the report raises records_share", has(report, "records_share"), true);
+  is("no copy deleted on the day they arrive", [deletesIn(files).length, copies().length], [0, 10]);
+
+  // Claude 3's second review of #3340 (MEDIUM): a record received and archived is never lost with the Worker's state.
+  part("a deletion record archived on a day whose state could not be saved is still applied");
+  fresh();
+  const pairPrivacy = objects("blob", S, 2);
+  setListing("blob", S, pairPrivacy);
+  await runAt(0);
+  const privacyName = await copyName("blob", S, pairPrivacy[0].key, pairPrivacy[0].etag, 16);
+  world.records = [{ source: "blob", key: pairPrivacy[0].key, recordedAt: DAY0 + DAY, reason: "privacy_request" }];
+  world.storesStatus = 503;
+  files.putFault = (key) => (key === "state/worker.json" ? "throw" : undefined);
+  await runAt(1);
+  files.putFault = () => undefined;
+  world.storesStatus = 200;
+  is("control: the record was archived in deletions/", files.under(`deletions/${iso(DAY0 + DAY)}/`).length, 1);
+  setListing("blob", S, pairPrivacy.slice(1));
+  for (const day of [2, 31, 32, 35]) await runAt(day);
+  is("day 35: the erasure was applied, the copy is gone", files.objects.has(privacyName), false);
+
   done();
 }
 

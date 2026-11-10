@@ -225,6 +225,40 @@ async function main(): Promise<void> {
     redis.pipeline = original;
     is("a list that cannot be read is unknown, never nothing due", unknown, "unknown");
   }
+  part("A file a close keeps without a known record still reaches the sweep (review of #3568, Codex C2)");
+  {
+    await redis.pipeline([["DEL", "nl:sub:due"]]);
+    /** The next record write is answered as `answer` says: sent and never answered, or answered with nothing and not run. */
+    const onRecordWrite = (answer: "never answered" | "out of shape") => {
+      const original = redis.pipeline.bind(redis);
+      redis.pipeline = (async (list: (string | number)[][]) => {
+        if (list.some((command) => String(command[0]) === "SET" && String(command[1]).startsWith("nl:sub:rec:"))) {
+          redis.pipeline = original;
+          if (answer === "never answered") throw new Error("fetch failed");
+          return [];
+        }
+        return original(list);
+      }) as typeof redis.pipeline;
+    };
+    const close = (who: string, lessonId: string, path: string, steps: DoorSteps) =>
+      closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId, who, data: SHOP, note: "" }, path, ["e"], NOW, steps);
+    const { steps, calls } = world();
+    const who = "3".repeat(32);
+    const lost = await send(who, lesson(8), steps, true);
+    onRecordWrite("never answered");
+    is("a close whose record write was never answered is not known", await threw(() => close(who, lesson(8), lost.path, steps)), "Error: fetch failed");
+    is("its file is kept: the write may have landed", calls.filter((call) => call.startsWith("delete")), []);
+    is("and it is on the sweep's list, so it never outlives the keeping time", await due(), [lost.path]);
+    const stuck = world({ deleteVault: async () => false });
+    const absent = await send(who, lesson(9), stuck.steps, true);
+    onRecordWrite("out of shape");
+    is("a record Redis confirms was not written is unknown too", await threw(() => close(who, lesson(9), absent.path, stuck.steps)), "unknown");
+    is("its file, which the vault did not delete, is on the list as well", (await due()).sort(), [lost.path, absent.path].sort());
+    calls.length = 0;
+    is("the sweep deletes both when the keeping time ends", await sweepSubmissions(NOW + 30 * DAY, steps), { deleted: 2, retried: 0 });
+    is("those files", calls.sort(), [`delete ${lost.path}`, `delete ${absent.path}`].sort());
+    is("and the list is empty", await due(), []);
+  }
 
   done();
 }

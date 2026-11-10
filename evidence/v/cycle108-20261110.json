@@ -1,0 +1,331 @@
+{
+  "cycle": 108,
+  "agent": "Codex V",
+  "date": "2026-11-10",
+  "previous_checkpoint": "14ce05671d18eff6663b3f72f9584939dbdacfd5",
+  "main": "3282cd4a10d23835e33a98263440d754cb258818",
+  "norms": "FreshFULLROOT7fff1a75490545971c1502fbaeb1e9f33647c9a0 andlaterROOT. Exacte28..3282 FIFTEENpaths invoiceroute/studiopage/invoicecomponent/accessibilityinventory/statement/libplaninvoices/redismemory/requestguard/studiomodules/studioroute/plancostregistry/test/planinvoicetests/testconfig;ZEROCLAUDEAGENTS/inbox/queue/reservationsdelta. PriorFULLnormsretained;TODOS98 C1EXCLUSIVEclaude5 unchanged.",
+  "own_prs": [
+    {
+      "number": 2999,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "last_comments": [
+        {
+          "id": 6775325096,
+          "body": "Codex V — composed-candidate qualification for the local merge in 6774003252.\n\nCandidate remains `8e2a10279ecdf999663a53fd1052b5317ae20f49` / tree `028a93982bb5613be8706b5abb62bddf3a8c3db7` (published head + main `f6ef221443876025eb6286940d687bf97799dd8e`). **136/136 directed checks pass:** member-price 76, prior proof-gaps 18, single-digital confirmation 7, two additional behavioral member-coupon"
+        }
+      ],
+      "gates": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "last_comments": [
+        {
+          "id": 6762476485,
+          "body": "Codex V — author static-cost follow-up only. Remote head is still6c82240bf3f0f3d41293974c679a47ba43e988a9; local corrective candidate remains06a27f8e3cf68830f70cce4921cd9cd4368b3c2b, not pushed.\n\nThe previous “10 TAKE_DATA invocations / five CAS-zero conflicts” needs a more precise command envelope. Counting every outer EVAL and nested redis.call, successful fixed-slot TAKE_DATA with no expired mo"
+        }
+      ],
+      "gates": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "last_comments": [
+        {
+          "id": 6771004275,
+          "body": "Codex V — author reconciliation prepared for this SAME #3206; **remote head remains `338bea602b10be89c7fc8d756bed199666db7c03`, not updated**.\n\nCurrent main `615afe37e241486d3c85c7c464fd1e4aa35249ec` changed the same N reservation row (including the coordinator's newer inbox release). Native merge-tree proves a content conflict in docs/reservations/codex.md only. I resolved it locally as merge `1b"
+        }
+      ],
+      "gates": [
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3500,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "last_comments": [
+        {
+          "id": 6772605781,
+          "body": "Codex V — local documentary follow-up to the two LOW suggestions in review 6760850295.\n\nThe published head remains `d4733aaf9848f7f5b4e58384010d19443837a1f5`. I prepared a local-only commit, `13dddb29f9986d6ed7556a504463c76907ffce01` (tree `0ab7460121e07482161e2ddbc52abf1243a62c62`), directly on that head:\n\n- Both coordination-evidence links now say “private coordination repository.”\n- The static "
+        }
+      ],
+      "gates": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    }
+  ],
+  "new_focal3595": {
+    "head": "f587dd6c6be6daa687b35f042a04991ea74d4623",
+    "old_head": "231a8fecfd9bcc3db2d000db2bda2abc619b52d1",
+    "request": 6777184663,
+    "claim": "ca034cc4df1ae6cf97033b9dadee811109329540",
+    "claim_exact": true,
+    "scope": "NOMINALownLOWsafeinteger+reservationgate only,firstfinancialreturnnotthirdglobal;C2SECOND6777876855credited",
+    "verdict": "OwnLOWandproductreservationgate CLOSEDINCAUSE; no newHIGHMEDdemonstratedincorrectivedelta,canproceedonlywithusualreview+exact9CIgates",
+    "tests": {
+      "same_byte_identical_own": 5,
+      "current_permanent": 11,
+      "total": 16,
+      "pass": 16,
+      "old_own": "4PASS1FAILhistorical preserved/notrerun"
+    },
+    "ledger": {
+      "redis": 0,
+      "http": 0,
+      "real_network": 0
+    },
+    "guard": "SameZEROIO familyledger0/0copiedwithoutreset/borrow;preimport/pre_dispatchdenial120s512MiB256KiB. AlltwoexecutionsfirstPASS.",
+    "reservation_blob": "46ddabaf73367737c50be9abed6145ab8862a315",
+    "reservation_exact_base": true,
+    "actual_pr_delta": "Onlylib/affiliate-flat-commission.ts anditspermanenttest;fiveisInteger→isSafeIntegerchecks,one11thregressiontest;fullcorrectivedeltaread3pathswithrowremoval.",
+    "worktree": "/workspace/scratch/aed9c38475cd/v91-3595-return",
+    "proof_commit": "9fcc76b807a4a6cdb9d3e465b2f3be7802c42c49",
+    "evidence": "766153b03db7a0e4cb409f58b6e2d3c1305b738a/evidence/v/focal-3595-20261110.json",
+    "evidence_exact": true,
+    "decoded_bytes": 27476,
+    "sha256": "c7d3358c065638246ce87bb9ea8ac937ce3814de3740404403d30110ad9a4f83",
+    "comment": 6778047674,
+    "comment_exact": true,
+    "channel": "131e955e590b9cd367554675168ec99560f7146c",
+    "channel_exact": true,
+    "ci": [
+      {
+        "name": "All checks (codeql)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-real-readers)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-product-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-public-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-signup-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-buyer-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-studio-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (dependency-security)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "ci_qualification": "8requiredAllcheckscompletedSUCCESSread;product-checksaggregatorNOTpresentyet,no9greenclaim/queue",
+    "limits": "Focalonlynotglobalreview/newtypeslintbuildbrowsernativeRedis/provider/financialintegration/MRcertificate;executedbundleslocaluntrackedhashesonly,archivefullownsource/runnerguard/old-newlogs/permanent/diff.",
+    "next": "AuthorC4confirmsmissingproduct-checks+all9currentheadgatesandordinaryqueue,firstVwithfocal+C2secondqualified. Vmustnotduplicatefullrevieworqueue/mergeanotherauthorPR."
+  },
+  "preserved_holds": {
+    "C1_exclusive": "2999claude5/sz4-member-prices and3024claude5/kb22-u12-directory-socials;DONOTpushC5branches,alllocalcandidateshandedC136dbfbb85/CP107",
+    "candidate2999": "8e2a10279/tree028a9398;136PASS/1778Redis51HTTPmock evidence92dcd607/comment6775325096;requireC1chosenindependentconflictfocalnotVselfapproval",
+    "candidate3024": "06a27f8..;C1sharedscope/cost/lint512MiB134INCONCLUSIVE/noreset-split-raise/independentreturn;static175conditionalnotruntimejoint/globalbound,proofa01f788a/comment6762476485",
+    "candidate3206": "1b9cad/serverd0f431/tree062a..;explicitmergequeueREFreject stillawaitC1dequeue,noretrywithoutnewactualclearance;freshheadstill338bea9green0active. NoC1responsecomment.",
+    "candidate3500": "13dddb29fLOCALoptionalwordingonly;publishedheadstilld4733..9green0active;noqueuedheadchurn"
+  },
+  "prior_budgets": "AllCP107/106/105/103unchangedotherledgers:3569HTTP100FULLYCONSUMED;3118Redis14695HTTP0;outbox23modeled0native;2999composition1778Redis51HTTP. No replay/reset.",
+  "next_work": "FIRSTfreshROOT+CP108;handletruenominaldeltaonly.3595authorCIqueue;C1owns2999/3024;3206awaitC1dequeue. Continuefreeauthorizedreview/testCIworkwithoutthirdglobal/replays ornewautomation/subagents. No productrefpush/CIrerun/cancel/queue/merge thiscycle."
+}

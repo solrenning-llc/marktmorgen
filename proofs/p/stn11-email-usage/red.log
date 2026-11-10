@@ -1,0 +1,410 @@
+(node:13) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/tests/email-usage-summary.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ the email page reads its existing counter exactly instead of inventing zero (2.289487ms)
+✖ email usage is before the composer for every viewport (0.193103ms)
+✖ an unconfirmed counter does not enter the composer as a known month (0.846371ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 102.996545
+
+✖ failing tests:
+
+test at tests/email-usage-summary.test.ts:7:1
+✖ the email page reads its existing counter exactly instead of inventing zero (2.289487ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /usedThisMonthExact\(store\.listId,/. Input:
+  
+  'import { agreementsAllowed } from "@/lib/agreement-rules";\n' +
+    'import { requestsOpen } from "@/lib/payment-requests";\n' +
+    'import { randomBytes } from "node:crypto";\n' +
+    'import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";\n' +
+    'import { storeBase } from "@/lib/purchase-email";\n' +
+    'import { starterFlows } from "@/lib/mail-starters";\n' +
+    'import { windowId } from "@/lib/allowance-window";\n' +
+    'import { WHO, type Who } from "@/lib/contacts";\n' +
+    'import { lookColours } from "@/lib/store-look";\n' +
+    'import type { Metadata } from "next";\n' +
+    'import { aiAvailableFor, aiLeft } from "@/lib/ai";\n' +
+    'import { productLink } from "@/lib/checkout-recovery";\n' +
+    'import { idsOfKind, readTitles } from "@/lib/catalog";\n' +
+    'import { cookies } from "next/headers";\n' +
+    'import { redirect } from "next/navigation";\n' +
+    'import { PLANS_ON_SALE } from "@/lib/opening";\n' +
+    'import { studioPath, studioView } from "@/lib/studio-route";\n' +
+    'import { StudioHeader } from "@/components/studio-header";\n' +
+    'import { StudioStorePin } from "@/components/studio-store-pin";\n' +
+    'import { listCounts } from "@/lib/contacts";\n' +
+    'import { listBroadcastsStrict } from "@/lib/broadcasts";\n' +
+    'import { letterIdFor, publishedLetters } from "@/lib/letters";\n' +
+    'import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";\n' +
+    'import { sellsSomething } from "@/lib/mail-starters";\n' +
+    'import { readFlowStatsStrict } from "@/lib/flow-stats";\n' +
+    'import { readFlowListStrict } from "@/lib/flow-list";\n' +
+    'import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";\n' +
+    'import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";\n' +
+    'import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";\n' +
+    'import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";\n' +
+    'import { EmailStudio } from "@/components/email-studio";\n' +
+    'import { emailEquivalence } from "@/lib/email-equivalence";\n' +
+    'import { readForms } from "@/lib/form-store";\n' +
+    'import { readFields, readPipelines } from "@/lib/crm";\n' +
+    'import { labeledStages } from "@/lib/crm-rules";\n' +
+    'import { listDraftsStrict } from "@/lib/mail-drafts";\n' +
+    'import { can } from "@/lib/team-roles";\n' +
+    'import { isBillingConfigured, trialOffered } from "@/lib/billing";\n' +
+    'import { planDisputed } from "@/lib/plan-dispute-rules";\n' +
+    'import { listSegments } from "@/lib/segments";\n' +
+    'import { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";\n' +
+    'import { listHeld, runsToday } from "@/lib/flow-runs";\n' +
+    'import { readTeam } from "@/lib/team";\n' +
+    '\n' +
+    'type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };\n' +
+    '\n' +
+    'export const metadata: Metadata = {\n' +
+    '  title: "Email — Marktmorgen",\n' +
+    '  robots: { index: false, follow: false },\n' +
+    '};\n' +
+    '\n' +
+    '/** Writing to the people who agreed to hear from the creator. */\n' +
+    'export default async function StudioEmailPage({ searchParams }: Params) {\n' +
+    '  const query = await searchParams;\n' +
+    `  // Which store, and whether this person's role there has "draft" (lib/studio-route.ts).\n` +
+    '  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "draft");\n' +
+    '  if (!found.ok) {\n' +
+    '    if (found.reason === "signed_out") redirect("/signin");\n' +
+    '    redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");\n' +
+    '  }\n' +
+    '  const { view } = found;\n' +
+    '  const { store } = view;\n' +
+    '\n' +
+    '  const allowance = monthlyAllowance(store);\n' +
+    '  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([\n' +
+    '    listCounts(store.listId),\n' +
+    '    usedThisMonth(store.listId, windowId(store)),\n' +
+    '    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.\n' +
+    '    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),\n' +
+    '    readFlowListStrict(store.listId).catch(() => null),\n' +
+    '    // The names of the products a flow or a broadcast can be about: one\n' +
+    '    // command, where reading every card was one per product (lib/catalog.ts).\n' +
+    '    readTitles(store),\n' +
+    '    listDraftsStrict(store.listId).catch(() => null),\n' +
+    "    // Whether this store's list email is waiting out a week because too many\n" +
+    '    // of its addresses bounced or reported it (lib/mail-health.ts).\n' +
+    '    pausedFor(healthId(store)),\n' +
+    '    // The same seven days the pause reads, said before it comes (599 [KB20], lib/mail-health-levels.ts).\n' +
+    '    listHealth(healthId(store)).catch(() => null),\n' +
+    '    // Whether no pause is confirmed (null), unlike pausedFor, which says null when it could not read: the\n' +
+    '    // health section is shown only then, so a failed read never says "no pause coming" during a pause.\n' +
+    '    pauseForSending(healthId(store)).catch(() => undefined),\n' +
+    '  ]);\n' +
+    '  const levels = health ? healthLevels(health) : null;\n' +
+    '  const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;\n' +
+    '  const broadcasts = loadedBroadcasts ?? [];\n' +
+    '  const flows = loadedFlows ?? [];\n' +
+    '  const drafts = loadedDrafts ?? [];\n' +
+    '  const role = view.role;\n' +
+    '  const emailTemplate = typeof query.emailTemplate === "string" ? MAIL_TEMPLATES.find(item => item.id === query.emailTemplate) : undefined;\n' +
+    '  const visiblePaid = idsOfKind(store,"paid").filter(id => !idsOfKind(store,"hidden").includes(id));\n' +
+    '  const firstPaid = visiblePaid.find(id => listings.has(id));\n' +
+    '  const sequence = loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")\n' +
+    '    ? starterFlows({\n' +
+    '      fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",\n' +
+    '      product:firstPaid ? {title:listings.get(firstPaid)!,link:productLink(store,firstPaid)} : null,paidCount:visiblePaid.length\n' +
+    '    }, flows).find(item => item.starter === query.sequenceTemplate)\n' +
+    '    : undefined;\n' +
+    '  const initialSequence = sequence ? {name:sequence.name,trigger:sequence.trigger as "joined"|"bought",steps:sequence.steps.map(step => ({...step,id:randomBytes(8).toString("hex")}))} : undefined;\n' +
+    '\n' +
+    "  // What each email sold, from the creator's own Stripe account, cached for\n" +
+    '  // ten minutes (lib/mail-revenue.ts). Asked only when something was sent.\n' +
+    '  const [stats, revenue, visits] = await Promise.all([\n' +
+    '    readFlowStatsStrict(flows).catch(() => null),\n' +
+    '    broadcasts.length || flows.length ? readMailRevenue(store) : Promise.resolve(null),\n' +
+    '    // And how many times its links opened a page of the store, from the\n' +
+    "    // store's own count of visits by tag: nothing in the email reports back.\n" +
+    '    readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),\n' +
+    '  ]);\n' +
+    '  const trial = allowance > 0 && inTrial(store);\n' +
+    '  // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.\n' +
+    '  // A failed read is not "not published": the studio says it does not know (null).\n' +
+    '  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();\n' +
+    '  const letterPath = (id: string) => {\n' +
+    '    if (published === null) return null;\n' +
+    '    const letter = letterIdFor(store.sid, id);\n' +
+    '    return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;\n' +
+    '  };\n' +
+    '  const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;\n' +
+    '\n' +
+    '  return (\n' +
+    '    <div className="min-h-screen bg-paper text-ink">\n' +
+    '      <StudioHeader\n' +
+    '        current={store}\n' +
+    '        role={view.role}\n' +
+    '        stores={view.stores}\n' +
+    '        owned={view.owned}\n' +
+    '        action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }}\n' +
+    '      />\n' +
+    '      <StudioStorePin sid={store.sid}>\n' +
+    '\n' +
+    '      <main id="content" className="container-page pb-20 pt-10 sm:pt-14">\n' +
+    '        <p className="eyebrow">Email</p>\n' +
+    '        <h1 className="t-h2 mt-3">Write to your list</h1>\n' +
+    '        <p className="mt-3 max-w-2xl text-ink-soft">\n' +
+    '          Only the people who agreed to hear from you are written to: those who checked the box when they got\n' +
+    '          something free or bought from you, and those you import who agreed elsewhere. Every email carries a\n' +
+    '          one-click unsubscribe, and anyone who leaves is never written to again.\n' +
+    '        </p>\n' +
+    '\n' +
+    '        {allowance === 0 && store.subscriptionActive && hasPro(store.tier) ? (\n' +
+    '          // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment\n' +
+    '          // (lib/plan.ts canUse): moving "up to Pro" is not the way back (lib/checkup-rules.ts says the same).\n' +
+    '          <div role="status" className="card mt-8 p-6 sm:p-8">\n' +
+    '            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">\n' +
+    '              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n' +
+    `                ? "Email to your list is stopped: your plan's last renewal is not paid."\n` +
+    '                : "Email to your list is stopped while a payment for your plan is disputed."}\n' +
+    '            </p>\n' +
+    '            <p className="mt-2 text-ink-soft">\n' +
+    '              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n' +
+    '                ? "Nothing goes to your list, and your sequences wait, until it is paid. Sign-in links and receipts still go out."\n' +
+    '                : "Nothing goes to your list, and your sequences wait, until the dispute is closed. Sign-in links and receipts still go out."}\n' +
+    '            </p>\n' +
+    '            {isBillingConfigured() && can(role, "billing") ? (\n' +
+    '              <a href={`${studioPath(store)}#billing`} className="btn btn-secondary mt-5">See your plan</a>\n' +
+    '            ) : null}\n' +
+    '          </div>\n' +
+    '        ) : allowance === 0 ? (\n' +
+    '          <div className="card mt-8 p-6 sm:p-8">\n' +
+    '            <div className="flex flex-wrap items-center justify-between gap-2">\n' +
+    '              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>\n' +
+    '              <span className="tag tag-brand">{priceWords("pro", "month")}</span>\n' +
+    '            </div>\n' +
+    '            <ul className="mt-4 space-y-2 text-ink-soft">\n' +
+    '              <li>One-off emails to everyone on your list, or only to those who got one product.</li>\n' +
+    '     '... 10476 more characters
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/tests/email-usage-summary.test.ts:8:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'import { agreementsAllowed } from "@/lib/agreement-rules";\nimport { requestsOpen } from "@/lib/payment-requests";\nimport { randomBytes } from "node:crypto";\nimport { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";\nimport { storeBase } from "@/lib/purchase-email";\nimport { starterFlows } from "@/lib/mail-starters";\nimport { windowId } from "@/lib/allowance-window";\nimport { WHO, type Who } from "@/lib/contacts";\nimport { lookColours } from "@/lib/store-look";\nimport type { Metadata } from "next";\nimport { aiAvailableFor, aiLeft } from "@/lib/ai";\nimport { productLink } from "@/lib/checkout-recovery";\nimport { idsOfKind, readTitles } from "@/lib/catalog";\nimport { cookies } from "next/headers";\nimport { redirect } from "next/navigation";\nimport { PLANS_ON_SALE } from "@/lib/opening";\nimport { studioPath, studioView } from "@/lib/studio-route";\nimport { StudioHeader } from "@/components/studio-header";\nimport { StudioStorePin } from "@/components/studio-store-pin";\nimport { listCounts } from "@/lib/contacts";\nimport { listBroadcastsStrict } from "@/lib/broadcasts";\nimport { letterIdFor, publishedLetters } from "@/lib/letters";\nimport { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";\nimport { sellsSomething } from "@/lib/mail-starters";\nimport { readFlowStatsStrict } from "@/lib/flow-stats";\nimport { readFlowListStrict } from "@/lib/flow-list";\nimport { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";\nimport { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";\nimport { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";\nimport { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";\nimport { EmailStudio } from "@/components/email-studio";\nimport { emailEquivalence } from "@/lib/email-equivalence";\nimport { readForms } from "@/lib/form-store";\nimport { readFields, readPipelines } from "@/lib/crm";\nimport { labeledStages } from "@/lib/crm-rules";\nimport { listDraftsStrict } from "@/lib/mail-drafts";\nimport { can } from "@/lib/team-roles";\nimport { isBillingConfigured, trialOffered } from "@/lib/billing";\nimport { planDisputed } from "@/lib/plan-dispute-rules";\nimport { listSegments } from "@/lib/segments";\nimport { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";\nimport { listHeld, runsToday } from "@/lib/flow-runs";\nimport { readTeam } from "@/lib/team";\n\ntype Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };\n\nexport const metadata: Metadata = {\n  title: "Email — Marktmorgen",\n  robots: { index: false, follow: false },\n};\n\n/** Writing to the people who agreed to hear from the creator. */\nexport default async function StudioEmailPage({ searchParams }: Params) {\n  const query = await searchParams;\n  // Which store, and whether this person\'s role there has "draft" (lib/studio-route.ts).\n  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "draft");\n  if (!found.ok) {\n    if (found.reason === "signed_out") redirect("/signin");\n    redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");\n  }\n  const { view } = found;\n  const { store } = view;\n\n  const allowance = monthlyAllowance(store);\n  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([\n    listCounts(store.listId),\n    usedThisMonth(store.listId, windowId(store)),\n    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.\n    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),\n    readFlowListStrict(store.listId).catch(() => null),\n    // The names of the products a flow or a broadcast can be about: one\n    // command, where reading every card was one per product (lib/catalog.ts).\n    readTitles(store),\n    listDraftsStrict(store.listId).catch(() => null),\n    // Whether this store\'s list email is waiting out a week because too many\n    // of its addresses bounced or reported it (lib/mail-health.ts).\n    pausedFor(healthId(store)),\n    // The same seven days the pause reads, said before it comes (599 [KB20], lib/mail-health-levels.ts).\n    listHealth(healthId(store)).catch(() => null),\n    // Whether no pause is confirmed (null), unlike pausedFor, which says null when it could not read: the\n    // health section is shown only then, so a failed read never says "no pause coming" during a pause.\n    pauseForSending(healthId(store)).catch(() => undefined),\n  ]);\n  const levels = health ? healthLevels(health) : null;\n  const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;\n  const broadcasts = loadedBroadcasts ?? [];\n  const flows = loadedFlows ?? [];\n  const drafts = loadedDrafts ?? [];\n  const role = view.role;\n  const emailTemplate = typeof query.emailTemplate === "string" ? MAIL_TEMPLATES.find(item => item.id === query.emailTemplate) : undefined;\n  const visiblePaid = idsOfKind(store,"paid").filter(id => !idsOfKind(store,"hidden").includes(id));\n  const firstPaid = visiblePaid.find(id => listings.has(id));\n  const sequence = loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")\n    ? starterFlows({\n      fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",\n      product:firstPaid ? {title:listings.get(firstPaid)!,link:productLink(store,firstPaid)} : null,paidCount:visiblePaid.length\n    }, flows).find(item => item.starter === query.sequenceTemplate)\n    : undefined;\n  const initialSequence = sequence ? {name:sequence.name,trigger:sequence.trigger as "joined"|"bought",steps:sequence.steps.map(step => ({...step,id:randomBytes(8).toString("hex")}))} : undefined;\n\n  // What each email sold, from the creator\'s own Stripe account, cached for\n  // ten minutes (lib/mail-revenue.ts). Asked only when something was sent.\n  const [stats, revenue, visits] = await Promise.all([\n    readFlowStatsStrict(flows).catch(() => null),\n    broadcasts.length || flows.length ? readMailRevenue(store) : Promise.resolve(null),\n    // And how many times its links opened a page of the store, from the\n    // store\'s own count of visits by tag: nothing in the email reports back.\n    readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),\n  ]);\n  const trial = allowance > 0 && inTrial(store);\n  // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.\n  // A failed read is not "not published": the studio says it does not know (null).\n  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();\n  const letterPath = (id: string) => {\n    if (published === null) return null;\n    const letter = letterIdFor(store.sid, id);\n    return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;\n  };\n  const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;\n\n  return (\n    <div className="min-h-screen bg-paper text-ink">\n      <StudioHeader\n        current={store}\n        role={view.role}\n        stores={view.stores}\n        owned={view.owned}\n        action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }}\n      />\n      <StudioStorePin sid={store.sid}>\n\n      <main id="content" className="container-page pb-20 pt-10 sm:pt-14">\n        <p className="eyebrow">Email</p>\n        <h1 className="t-h2 mt-3">Write to your list</h1>\n        <p className="mt-3 max-w-2xl text-ink-soft">\n          Only the people who agreed to hear from you are written to: those who checked the box when they got\n          something free or bought from you, and those you import who agreed elsewhere. Every email carries a\n          one-click unsubscribe, and anyone who leaves is never written to again.\n        </p>\n\n        {allowance === 0 && store.subscriptionActive && hasPro(store.tier) ? (\n          // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment\n          // (lib/plan.ts canUse): moving "up to Pro" is not the way back (lib/checkup-rules.ts says the same).\n          <div role="status" className="card mt-8 p-6 sm:p-8">\n            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">\n              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n                ? "Email to your list is stopped: your plan\'s last renewal is not paid."\n                : "Email to your list is stopped while a payment for your plan is disputed."}\n            </p>\n            <p className="mt-2 text-ink-soft">\n              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n                ? "Nothing goes to your list, and your sequences wait, until it is paid. Sign-in links and receipts still go out."\n                : "Nothing goes to your list, and your sequences wait, until the dispute is closed. Sign-in links and receipts still go out."}\n            </p>\n            {isBillingConfigured() && can(role, "billing") ? (\n              <a href={`${studioPath(store)}#billing`} className="btn btn-secondary mt-5">See your plan</a>\n            ) : null}\n          </div>\n        ) : allowance === 0 ? (\n          <div className="card mt-8 p-6 sm:p-8">\n            <div className="flex flex-wrap items-center justify-between gap-2">\n              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>\n              <span className="tag tag-brand">{priceWords("pro", "month")}</span>\n            </div>\n            <ul className="mt-4 space-y-2 text-ink-soft">\n              <li>One-off emails to everyone on your list, or only to those who got one product.</li>\n     '... 10476 more characters,
+    expected: /usedThisMonthExact\(store\.listId,/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/email-usage-summary.test.ts:12:1
+✖ email usage is before the composer for every viewport (0.193103ms)
+  AssertionError [ERR_ASSERTION]: the email page has a visible usage summary
+      at TestContext.<anonymous> (file:///workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/tests/email-usage-summary.test.ts:14:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/email-usage-summary.test.ts:18:1
+✖ an unconfirmed counter does not enter the composer as a known month (0.846371ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /monthKnown=\{used !== null\}/. Input:
+  
+  'import { agreementsAllowed } from "@/lib/agreement-rules";\n' +
+    'import { requestsOpen } from "@/lib/payment-requests";\n' +
+    'import { randomBytes } from "node:crypto";\n' +
+    'import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";\n' +
+    'import { storeBase } from "@/lib/purchase-email";\n' +
+    'import { starterFlows } from "@/lib/mail-starters";\n' +
+    'import { windowId } from "@/lib/allowance-window";\n' +
+    'import { WHO, type Who } from "@/lib/contacts";\n' +
+    'import { lookColours } from "@/lib/store-look";\n' +
+    'import type { Metadata } from "next";\n' +
+    'import { aiAvailableFor, aiLeft } from "@/lib/ai";\n' +
+    'import { productLink } from "@/lib/checkout-recovery";\n' +
+    'import { idsOfKind, readTitles } from "@/lib/catalog";\n' +
+    'import { cookies } from "next/headers";\n' +
+    'import { redirect } from "next/navigation";\n' +
+    'import { PLANS_ON_SALE } from "@/lib/opening";\n' +
+    'import { studioPath, studioView } from "@/lib/studio-route";\n' +
+    'import { StudioHeader } from "@/components/studio-header";\n' +
+    'import { StudioStorePin } from "@/components/studio-store-pin";\n' +
+    'import { listCounts } from "@/lib/contacts";\n' +
+    'import { listBroadcastsStrict } from "@/lib/broadcasts";\n' +
+    'import { letterIdFor, publishedLetters } from "@/lib/letters";\n' +
+    'import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";\n' +
+    'import { sellsSomething } from "@/lib/mail-starters";\n' +
+    'import { readFlowStatsStrict } from "@/lib/flow-stats";\n' +
+    'import { readFlowListStrict } from "@/lib/flow-list";\n' +
+    'import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";\n' +
+    'import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";\n' +
+    'import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";\n' +
+    'import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";\n' +
+    'import { EmailStudio } from "@/components/email-studio";\n' +
+    'import { emailEquivalence } from "@/lib/email-equivalence";\n' +
+    'import { readForms } from "@/lib/form-store";\n' +
+    'import { readFields, readPipelines } from "@/lib/crm";\n' +
+    'import { labeledStages } from "@/lib/crm-rules";\n' +
+    'import { listDraftsStrict } from "@/lib/mail-drafts";\n' +
+    'import { can } from "@/lib/team-roles";\n' +
+    'import { isBillingConfigured, trialOffered } from "@/lib/billing";\n' +
+    'import { planDisputed } from "@/lib/plan-dispute-rules";\n' +
+    'import { listSegments } from "@/lib/segments";\n' +
+    'import { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";\n' +
+    'import { listHeld, runsToday } from "@/lib/flow-runs";\n' +
+    'import { readTeam } from "@/lib/team";\n' +
+    '\n' +
+    'type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };\n' +
+    '\n' +
+    'export const metadata: Metadata = {\n' +
+    '  title: "Email — Marktmorgen",\n' +
+    '  robots: { index: false, follow: false },\n' +
+    '};\n' +
+    '\n' +
+    '/** Writing to the people who agreed to hear from the creator. */\n' +
+    'export default async function StudioEmailPage({ searchParams }: Params) {\n' +
+    '  const query = await searchParams;\n' +
+    `  // Which store, and whether this person's role there has "draft" (lib/studio-route.ts).\n` +
+    '  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "draft");\n' +
+    '  if (!found.ok) {\n' +
+    '    if (found.reason === "signed_out") redirect("/signin");\n' +
+    '    redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");\n' +
+    '  }\n' +
+    '  const { view } = found;\n' +
+    '  const { store } = view;\n' +
+    '\n' +
+    '  const allowance = monthlyAllowance(store);\n' +
+    '  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([\n' +
+    '    listCounts(store.listId),\n' +
+    '    usedThisMonth(store.listId, windowId(store)),\n' +
+    '    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.\n' +
+    '    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),\n' +
+    '    readFlowListStrict(store.listId).catch(() => null),\n' +
+    '    // The names of the products a flow or a broadcast can be about: one\n' +
+    '    // command, where reading every card was one per product (lib/catalog.ts).\n' +
+    '    readTitles(store),\n' +
+    '    listDraftsStrict(store.listId).catch(() => null),\n' +
+    "    // Whether this store's list email is waiting out a week because too many\n" +
+    '    // of its addresses bounced or reported it (lib/mail-health.ts).\n' +
+    '    pausedFor(healthId(store)),\n' +
+    '    // The same seven days the pause reads, said before it comes (599 [KB20], lib/mail-health-levels.ts).\n' +
+    '    listHealth(healthId(store)).catch(() => null),\n' +
+    '    // Whether no pause is confirmed (null), unlike pausedFor, which says null when it could not read: the\n' +
+    '    // health section is shown only then, so a failed read never says "no pause coming" during a pause.\n' +
+    '    pauseForSending(healthId(store)).catch(() => undefined),\n' +
+    '  ]);\n' +
+    '  const levels = health ? healthLevels(health) : null;\n' +
+    '  const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;\n' +
+    '  const broadcasts = loadedBroadcasts ?? [];\n' +
+    '  const flows = loadedFlows ?? [];\n' +
+    '  const drafts = loadedDrafts ?? [];\n' +
+    '  const role = view.role;\n' +
+    '  const emailTemplate = typeof query.emailTemplate === "string" ? MAIL_TEMPLATES.find(item => item.id === query.emailTemplate) : undefined;\n' +
+    '  const visiblePaid = idsOfKind(store,"paid").filter(id => !idsOfKind(store,"hidden").includes(id));\n' +
+    '  const firstPaid = visiblePaid.find(id => listings.has(id));\n' +
+    '  const sequence = loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")\n' +
+    '    ? starterFlows({\n' +
+    '      fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",\n' +
+    '      product:firstPaid ? {title:listings.get(firstPaid)!,link:productLink(store,firstPaid)} : null,paidCount:visiblePaid.length\n' +
+    '    }, flows).find(item => item.starter === query.sequenceTemplate)\n' +
+    '    : undefined;\n' +
+    '  const initialSequence = sequence ? {name:sequence.name,trigger:sequence.trigger as "joined"|"bought",steps:sequence.steps.map(step => ({...step,id:randomBytes(8).toString("hex")}))} : undefined;\n' +
+    '\n' +
+    "  // What each email sold, from the creator's own Stripe account, cached for\n" +
+    '  // ten minutes (lib/mail-revenue.ts). Asked only when something was sent.\n' +
+    '  const [stats, revenue, visits] = await Promise.all([\n' +
+    '    readFlowStatsStrict(flows).catch(() => null),\n' +
+    '    broadcasts.length || flows.length ? readMailRevenue(store) : Promise.resolve(null),\n' +
+    '    // And how many times its links opened a page of the store, from the\n' +
+    "    // store's own count of visits by tag: nothing in the email reports back.\n" +
+    '    readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),\n' +
+    '  ]);\n' +
+    '  const trial = allowance > 0 && inTrial(store);\n' +
+    '  // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.\n' +
+    '  // A failed read is not "not published": the studio says it does not know (null).\n' +
+    '  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();\n' +
+    '  const letterPath = (id: string) => {\n' +
+    '    if (published === null) return null;\n' +
+    '    const letter = letterIdFor(store.sid, id);\n' +
+    '    return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;\n' +
+    '  };\n' +
+    '  const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;\n' +
+    '\n' +
+    '  return (\n' +
+    '    <div className="min-h-screen bg-paper text-ink">\n' +
+    '      <StudioHeader\n' +
+    '        current={store}\n' +
+    '        role={view.role}\n' +
+    '        stores={view.stores}\n' +
+    '        owned={view.owned}\n' +
+    '        action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }}\n' +
+    '      />\n' +
+    '      <StudioStorePin sid={store.sid}>\n' +
+    '\n' +
+    '      <main id="content" className="container-page pb-20 pt-10 sm:pt-14">\n' +
+    '        <p className="eyebrow">Email</p>\n' +
+    '        <h1 className="t-h2 mt-3">Write to your list</h1>\n' +
+    '        <p className="mt-3 max-w-2xl text-ink-soft">\n' +
+    '          Only the people who agreed to hear from you are written to: those who checked the box when they got\n' +
+    '          something free or bought from you, and those you import who agreed elsewhere. Every email carries a\n' +
+    '          one-click unsubscribe, and anyone who leaves is never written to again.\n' +
+    '        </p>\n' +
+    '\n' +
+    '        {allowance === 0 && store.subscriptionActive && hasPro(store.tier) ? (\n' +
+    '          // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment\n' +
+    '          // (lib/plan.ts canUse): moving "up to Pro" is not the way back (lib/checkup-rules.ts says the same).\n' +
+    '          <div role="status" className="card mt-8 p-6 sm:p-8">\n' +
+    '            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">\n' +
+    '              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n' +
+    `                ? "Email to your list is stopped: your plan's last renewal is not paid."\n` +
+    '                : "Email to your list is stopped while a payment for your plan is disputed."}\n' +
+    '            </p>\n' +
+    '            <p className="mt-2 text-ink-soft">\n' +
+    '              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n' +
+    '                ? "Nothing goes to your list, and your sequences wait, until it is paid. Sign-in links and receipts still go out."\n' +
+    '                : "Nothing goes to your list, and your sequences wait, until the dispute is closed. Sign-in links and receipts still go out."}\n' +
+    '            </p>\n' +
+    '            {isBillingConfigured() && can(role, "billing") ? (\n' +
+    '              <a href={`${studioPath(store)}#billing`} className="btn btn-secondary mt-5">See your plan</a>\n' +
+    '            ) : null}\n' +
+    '          </div>\n' +
+    '        ) : allowance === 0 ? (\n' +
+    '          <div className="card mt-8 p-6 sm:p-8">\n' +
+    '            <div className="flex flex-wrap items-center justify-between gap-2">\n' +
+    '              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>\n' +
+    '              <span className="tag tag-brand">{priceWords("pro", "month")}</span>\n' +
+    '            </div>\n' +
+    '            <ul className="mt-4 space-y-2 text-ink-soft">\n' +
+    '              <li>One-off emails to everyone on your list, or only to those who got one product.</li>\n' +
+    '     '... 10476 more characters
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/tests/email-usage-summary.test.ts:19:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'import { agreementsAllowed } from "@/lib/agreement-rules";\nimport { requestsOpen } from "@/lib/payment-requests";\nimport { randomBytes } from "node:crypto";\nimport { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";\nimport { storeBase } from "@/lib/purchase-email";\nimport { starterFlows } from "@/lib/mail-starters";\nimport { windowId } from "@/lib/allowance-window";\nimport { WHO, type Who } from "@/lib/contacts";\nimport { lookColours } from "@/lib/store-look";\nimport type { Metadata } from "next";\nimport { aiAvailableFor, aiLeft } from "@/lib/ai";\nimport { productLink } from "@/lib/checkout-recovery";\nimport { idsOfKind, readTitles } from "@/lib/catalog";\nimport { cookies } from "next/headers";\nimport { redirect } from "next/navigation";\nimport { PLANS_ON_SALE } from "@/lib/opening";\nimport { studioPath, studioView } from "@/lib/studio-route";\nimport { StudioHeader } from "@/components/studio-header";\nimport { StudioStorePin } from "@/components/studio-store-pin";\nimport { listCounts } from "@/lib/contacts";\nimport { listBroadcastsStrict } from "@/lib/broadcasts";\nimport { letterIdFor, publishedLetters } from "@/lib/letters";\nimport { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";\nimport { sellsSomething } from "@/lib/mail-starters";\nimport { readFlowStatsStrict } from "@/lib/flow-stats";\nimport { readFlowListStrict } from "@/lib/flow-list";\nimport { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";\nimport { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";\nimport { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";\nimport { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";\nimport { EmailStudio } from "@/components/email-studio";\nimport { emailEquivalence } from "@/lib/email-equivalence";\nimport { readForms } from "@/lib/form-store";\nimport { readFields, readPipelines } from "@/lib/crm";\nimport { labeledStages } from "@/lib/crm-rules";\nimport { listDraftsStrict } from "@/lib/mail-drafts";\nimport { can } from "@/lib/team-roles";\nimport { isBillingConfigured, trialOffered } from "@/lib/billing";\nimport { planDisputed } from "@/lib/plan-dispute-rules";\nimport { listSegments } from "@/lib/segments";\nimport { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";\nimport { listHeld, runsToday } from "@/lib/flow-runs";\nimport { readTeam } from "@/lib/team";\n\ntype Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };\n\nexport const metadata: Metadata = {\n  title: "Email — Marktmorgen",\n  robots: { index: false, follow: false },\n};\n\n/** Writing to the people who agreed to hear from the creator. */\nexport default async function StudioEmailPage({ searchParams }: Params) {\n  const query = await searchParams;\n  // Which store, and whether this person\'s role there has "draft" (lib/studio-route.ts).\n  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "draft");\n  if (!found.ok) {\n    if (found.reason === "signed_out") redirect("/signin");\n    redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");\n  }\n  const { view } = found;\n  const { store } = view;\n\n  const allowance = monthlyAllowance(store);\n  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([\n    listCounts(store.listId),\n    usedThisMonth(store.listId, windowId(store)),\n    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.\n    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),\n    readFlowListStrict(store.listId).catch(() => null),\n    // The names of the products a flow or a broadcast can be about: one\n    // command, where reading every card was one per product (lib/catalog.ts).\n    readTitles(store),\n    listDraftsStrict(store.listId).catch(() => null),\n    // Whether this store\'s list email is waiting out a week because too many\n    // of its addresses bounced or reported it (lib/mail-health.ts).\n    pausedFor(healthId(store)),\n    // The same seven days the pause reads, said before it comes (599 [KB20], lib/mail-health-levels.ts).\n    listHealth(healthId(store)).catch(() => null),\n    // Whether no pause is confirmed (null), unlike pausedFor, which says null when it could not read: the\n    // health section is shown only then, so a failed read never says "no pause coming" during a pause.\n    pauseForSending(healthId(store)).catch(() => undefined),\n  ]);\n  const levels = health ? healthLevels(health) : null;\n  const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;\n  const broadcasts = loadedBroadcasts ?? [];\n  const flows = loadedFlows ?? [];\n  const drafts = loadedDrafts ?? [];\n  const role = view.role;\n  const emailTemplate = typeof query.emailTemplate === "string" ? MAIL_TEMPLATES.find(item => item.id === query.emailTemplate) : undefined;\n  const visiblePaid = idsOfKind(store,"paid").filter(id => !idsOfKind(store,"hidden").includes(id));\n  const firstPaid = visiblePaid.find(id => listings.has(id));\n  const sequence = loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")\n    ? starterFlows({\n      fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",\n      product:firstPaid ? {title:listings.get(firstPaid)!,link:productLink(store,firstPaid)} : null,paidCount:visiblePaid.length\n    }, flows).find(item => item.starter === query.sequenceTemplate)\n    : undefined;\n  const initialSequence = sequence ? {name:sequence.name,trigger:sequence.trigger as "joined"|"bought",steps:sequence.steps.map(step => ({...step,id:randomBytes(8).toString("hex")}))} : undefined;\n\n  // What each email sold, from the creator\'s own Stripe account, cached for\n  // ten minutes (lib/mail-revenue.ts). Asked only when something was sent.\n  const [stats, revenue, visits] = await Promise.all([\n    readFlowStatsStrict(flows).catch(() => null),\n    broadcasts.length || flows.length ? readMailRevenue(store) : Promise.resolve(null),\n    // And how many times its links opened a page of the store, from the\n    // store\'s own count of visits by tag: nothing in the email reports back.\n    readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),\n  ]);\n  const trial = allowance > 0 && inTrial(store);\n  // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.\n  // A failed read is not "not published": the studio says it does not know (null).\n  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();\n  const letterPath = (id: string) => {\n    if (published === null) return null;\n    const letter = letterIdFor(store.sid, id);\n    return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;\n  };\n  const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;\n\n  return (\n    <div className="min-h-screen bg-paper text-ink">\n      <StudioHeader\n        current={store}\n        role={view.role}\n        stores={view.stores}\n        owned={view.owned}\n        action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }}\n      />\n      <StudioStorePin sid={store.sid}>\n\n      <main id="content" className="container-page pb-20 pt-10 sm:pt-14">\n        <p className="eyebrow">Email</p>\n        <h1 className="t-h2 mt-3">Write to your list</h1>\n        <p className="mt-3 max-w-2xl text-ink-soft">\n          Only the people who agreed to hear from you are written to: those who checked the box when they got\n          something free or bought from you, and those you import who agreed elsewhere. Every email carries a\n          one-click unsubscribe, and anyone who leaves is never written to again.\n        </p>\n\n        {allowance === 0 && store.subscriptionActive && hasPro(store.tier) ? (\n          // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment\n          // (lib/plan.ts canUse): moving "up to Pro" is not the way back (lib/checkup-rules.ts says the same).\n          <div role="status" className="card mt-8 p-6 sm:p-8">\n            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">\n              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n                ? "Email to your list is stopped: your plan\'s last renewal is not paid."\n                : "Email to your list is stopped while a payment for your plan is disputed."}\n            </p>\n            <p className="mt-2 text-ink-soft">\n              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)\n                ? "Nothing goes to your list, and your sequences wait, until it is paid. Sign-in links and receipts still go out."\n                : "Nothing goes to your list, and your sequences wait, until the dispute is closed. Sign-in links and receipts still go out."}\n            </p>\n            {isBillingConfigured() && can(role, "billing") ? (\n              <a href={`${studioPath(store)}#billing`} className="btn btn-secondary mt-5">See your plan</a>\n            ) : null}\n          </div>\n        ) : allowance === 0 ? (\n          <div className="card mt-8 p-6 sm:p-8">\n            <div className="flex flex-wrap items-center justify-between gap-2">\n              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>\n              <span className="tag tag-brand">{priceWords("pro", "month")}</span>\n            </div>\n            <ul className="mt-4 space-y-2 text-ink-soft">\n              <li>One-off emails to everyone on your list, or only to those who got one product.</li>\n     '... 10476 more characters,
+    expected: /monthKnown=\{used !== null\}/,
+    operator: 'match',
+    diff: 'simple'
+  }

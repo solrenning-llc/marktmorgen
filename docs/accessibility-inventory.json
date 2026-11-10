@@ -1097,6 +1097,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/invoices/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/invoices",
+      "parameters": []
+    },
+    {
       "source": "app/studio/labels/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/labels",
@@ -1504,6 +1510,7 @@
     "components/picture-viewer.tsx",
     "components/pixel-editor.tsx",
     "components/plan-dispute-notice.tsx",
+    "components/plan-invoices-list.tsx",
     "components/podcast-editor.tsx",
     "components/podcast-toggle.tsx",
     "components/post-cover.tsx",
@@ -2064,6 +2071,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 141
+    "pageTemplates": 142
   }
 }

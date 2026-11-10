@@ -55,7 +55,7 @@ export default async function StudioDevicesPage({ searchParams }: Params) {
           <div role="status" aria-live="polite">
             {result ? <p className={`notice ${result.tone} mt-6`}>{result.words}</p> : null}
             {query.status === "out-others-reauth" ? (
-              <Link href="/signin?to=login" className="btn btn-secondary mt-3 min-h-11">
+              <Link href="/signin?to=login" className="btn btn-secondary mt-3">
                 Log in again
               </Link>
             ) : null}
@@ -72,11 +72,11 @@ export default async function StudioDevicesPage({ searchParams }: Params) {
           <p className="mt-8 font-semibold text-ink">Log out of your other devices now?</p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <form action="/api/auth/signout-others" method="post">
-              <button type="submit" className="btn btn-primary min-h-11">
+              <button type="submit" className="btn btn-primary">
                 Yes, log out the other devices
               </button>
             </form>
-            <Link href={studioPath(store)} className="btn btn-secondary min-h-11">
+            <Link href={studioPath(store)} className="btn btn-secondary">
               Keep them logged in
             </Link>
           </div>

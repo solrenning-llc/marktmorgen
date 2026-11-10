@@ -583,13 +583,15 @@ export default function DevelopersPage() {
           podcast or a bundle, by its id or its exact name. They open it from your store&apos;s list of purchases with
           that address, where it shows as given by your store, not as a sale; it is not counted in your numbers, sent to
           webhooks or credited to an affiliate. Send <code className="font-mono">notify: true</code> and they get one email
-          from your store&apos;s name saying so, in your store&apos;s language, while your plan is running.
+          from your store&apos;s name saying so, in your store&apos;s language, while your plan is running. Somebody
+          deleted from your store is never given anything again or emailed.
         </Endpoint>
         <Code>{`{"email": "dana@example.com", "product": "k3j9x2p1ab", "notify": true}
 
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "given", "emailed": true}}
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "already", "emailed": false}}
-409  {"error": "cannot_give", "message": "Memberships, calls and products with several prices cannot be given this way."}`}</Code>
+409  {"error": "cannot_give", "message": "Memberships, calls and products with several prices cannot be given this way."}
+409  {"error": "deleted", "message": "This person was deleted from your store, so nothing is given to them and they are not emailed."}`}</Code>
         <Endpoint method="DELETE" path="/api/v1/access">
           Takes back a product the API gave, with the same body. Only what the API gave: a sale, an import, a gift or a
           purchase paid with PayPal is not the API&apos;s to take, and gets 404{" "}

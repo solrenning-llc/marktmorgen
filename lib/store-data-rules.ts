@@ -208,6 +208,26 @@ export function dataWords(bytes: number): string {
   return `${Math.max(b > 0 ? 1 : 0, Math.round(b / 1000)).toLocaleString("en-US")} KB`;
 }
 
+/**
+ * The share of a store's data room, in percent, that all its students'
+ * private lesson notes together may take (lib/lesson-notes.ts; decision
+ * C1-20261107-1453-TODOS-9 on Claude 2's finding on #3031). The notes are
+ * still counted in the room, so the plan's room stays the bound on what is
+ * kept; this keeps them from filling the room the creator's own work needs.
+ */
+export const STUDENT_NOTES_SHARE_PERCENT = 10;
+
+/** The most bytes all a store's students' notes together may take in its room. */
+export function studentNotesRoomFor(store: DataFields, nowSeconds = Date.now() / 1000): number {
+  return Math.floor((dataRoomFor(store, nowSeconds) * STUDENT_NOTES_SHARE_PERCENT) / 100);
+}
+
+/** The studio's line on what the students' notes take: "Student notes: 1.2 MB of 1.8 MB"; an unknown count is said so, never as 0. */
+export function studentNotesLine(used: number | null | undefined, room: number): string {
+  if (typeof used !== "number" || !Number.isSafeInteger(used) || used < 0) return "Student notes: how much room they take could not be read right now.";
+  return `Student notes: ${dataWords(used)} of ${dataWords(room)}`;
+}
+
 /** The rooms in one sentence, for the pricing page, the help center and the terms. */
 export function dataRoomListWords(names: Record<Tier, string>): string {
   return `${dataWords(DATA_ROOM_BYTES.creator)} on ${names.creator}, ${dataWords(DATA_ROOM_BYTES.pro)} on ${names.pro} and ${dataWords(DATA_ROOM_BYTES.scale)} on ${names.scale}`;

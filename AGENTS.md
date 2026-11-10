@@ -36,11 +36,37 @@ Vale para todo agente que trabalha neste repositório (Claude 1, Claude 2 e Code
 
 Autorização do dono, nas palavras dele: "se não faz a construção andar mais devagar, se melhora a qualidade, se reduz erros, autorizo". Vale para todo agente deste repositório (Claude 1 a 6, cada Codex e qualquer agente novo), em toda sessão. Motivo: em 06/11/2026 a construção travou por três causas, o main vermelho com pushes por cima, PRs abertos demais para revisar e juntar o main repetidamente só para tentar o CI de novo.
 
-(a) **Main vermelho.** Quando o CI do próprio main falha, ou uma falha no main fica comprovada, fica aberta a issue com o rótulo `main-vermelho` e o título "MAIN VERMELHO". O workflow .github/workflows/main-red-alarm.yml a abre sozinho quando um dos 9 workflows obrigatórios falha no main (push ou execução diária) e a fecha sozinho, com "MAIN VERDE", quando os 9 passam no head atual do main; uma falha comprovada de outro modo é aberta à mão com o mesmo rótulo e fechada à mão pelo PR que a conserta. Enquanto a issue estiver aberta, ninguém faz push em PR nenhum, exceto no PR que conserta o main, e ninguém incorpora outra coisa. O trabalho local (teste RED, correção, testes) e as revisões continuam. Quando ela fechar, cada agente junta o main uma única vez em cada PR seu e faz um único push por PR, com tudo o que acumulou. Antes de cada push e de cada incorporação, conferir `gh issue list --label main-vermelho --state open` (ou a lista de issues no GitHub).
+(a) **Main vermelho.** Quando o CI do próprio main falha, ou uma falha no main fica comprovada, fica aberta a issue com o rótulo `main-vermelho` e o título "MAIN VERMELHO". O workflow .github/workflows/main-red-alarm.yml a abre sozinho quando um dos 9 workflows obrigatórios falha no main (push ou execução diária) e a fecha sozinho, com "MAIN VERDE", quando os 9 passam no head atual do main; um workflow cujo run de push nesse head foi cancelado, pulado ou não existe conta o run de merge_group que passou na fila de merge sobre o mesmo commit (o main só avança para o commit da fila), uma falha de merge_group nunca abre a issue e uma falha posterior de push ou da execução diária no head continua abrindo. Pelo mesmo motivo (C1-20261108-0305-C4-28), o push no main não repete os testes já aprovados no run de merge_group verde do mesmo commit (scripts/ci_full_tree_proof.py), exceto o CodeQL, que sempre roda de verdade no main; a execução diária e a manual continuam completas. Uma falha comprovada de outro modo é aberta à mão com o mesmo rótulo e fechada à mão pelo PR que a conserta. Enquanto a issue estiver aberta, ninguém faz push em PR nenhum, exceto no PR que conserta o main, e ninguém incorpora outra coisa. O trabalho local (teste RED, correção, testes) e as revisões continuam. Quando ela fechar, cada agente junta o main uma única vez em cada PR seu e faz um único push por PR, com tudo o que acumulou. Antes de cada push e de cada incorporação, conferir `gh issue list --label main-vermelho --state open` (ou a lista de issues no GitHub).
 
 (b) **Limite de PRs abertos.** No máximo 15 PRs abertos por agente (Claude 2, 3, 4, 5, 6 e cada Codex), contados pelo prefixo do ramo do agente (por exemplo, `claude4/`). Ajuste do dono (07/11/2026, 10h23 Fortaleza: "se for o correto, sim"): contam no limite só os PRs que dependem do próprio autor, isto é, com achado (LEVE ou mais grave) ainda sem correção no head atual, em conflito com a base ou com CI vermelha por causa do próprio código; não contam os PRs que esperam revisão, retorno focal, CI, a fila de merge ou o PR de baixo de uma pilha. No limite, o agente não abre PR novo: revisa PRs dos outros agentes e corrige os achados nos próprios PRs; revisões não têm limite. Exceções: a correção do main vermelho e as correções GRAVE ou ALTO. Motivo: o gargalo é a revisão e o CI, não a escrita, e trabalho aberto além do que dá para revisar só envelhece e gera conflito.
 
 (c) **Junção do main num PR, só quando necessária:** quando houver conflito; logo antes de incorporar, se as verificações verdes forem anteriores ao main atual; e depois que o main vermelho for consertado. Nunca juntar o main repetidamente e nunca fazer push só para tentar o CI de novo; uma falha causada por algo fora do PR é avisada no canal `para-claude-1`, em vez de um novo push. Depois que a fila de incorporação (merge queue) for ligada, é ela que testa a combinação, e as junções de rotina do main acabam de vez.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
+## CV — "CI verde" só com prova (dono, 09/11/2026, por volta das 13h20 Fortaleza)
+
+Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais cuidados para que episodios assim e outros nao ocorram mais". Vale para todo agente deste repositório (Claude 1 a 6, cada Codex e qualquer agente novo), em toda sessão. Motivo: em 09/11/2026 um PR foi dado como verde sem nunca ter rodado GitHub Actions, depois de um incidente do próprio GitHub, porque o estado geral do commit aparecia como SUCCESS só com a verificação da Vercel; o PR ficou parado por quase 3 horas. Na mesma semana, um limite de tempo do CodeQL derrubou a fila por dias, relatado PR a PR, sem que ninguém o tratasse como causa comum.
+
+(a) **O que é "CI verde".** Só as 9 verificações `All checks (...)` com SUCCESS no head exato do PR. Não valem o estado geral do commit (`statusCheckRollup.state`), o `mergeStateStatus`, a bolinha verde, a verificação da Vercel nem um resultado de head anterior. Para conferir, troque N pelo número do PR:
+
+`gh pr view N -R solrenning-llc/marktmorgen --json headRefOid,statusCheckRollup --jq '{head:.headRefOid,verdes:([.statusCheckRollup[]|select((.name//"")|startswith("All checks"))|select(.conclusion=="SUCCESS")]|length)}'`
+
+(b) **Afirmação de estado.** "Verde", "na fila", "incorporado", "corrigido" e "revisado" só se escrevem com o número do PR e o head, depois de ler o estado na hora. Quem não conferiu agora escreve "não conferi agora".
+
+(c) **Pedido de fila.** Sempre no formato exato `fila #N @sha`, depois de conferir (a).
+
+(d) **Head sem nenhuma execução de Actions 30 minutos depois do envio.** Primeiro confira se há conflito: o GitHub não roda CI em PR com conflito. Sem conflito, feche e reabra o PR uma vez, o que dispara a CI sem commit novo. Não faça push para isso: a regra MV (c) continua valendo. Se continuar sem execução, avise no canal `para-claude-1`.
+
+(e) **Falha fora do PR que se repete.** Quando a mesma verificação obrigatória falhar ou for cancelada em 3 ou mais PRs sem relação entre si, avise o coordenador no canal como causa comum, com o nome da verificação e os números dos PRs, em vez de pedir para reenfileirar um a um.
+
+(f) **PR pronto não espera.** Com as revisões exigidas válidas no head exato e (a) conferido, o próprio autor pede a fila na mesma rodada. Quem revisar e aprovar escreve "pode entrar" com o número e o head. Em 09/11/2026, 177 PRs verdes estavam fora da fila, e dezenas já tinham revisão favorável sem ninguém pedir a fila.
+
+(g) **PR que saiu da fila tem dono.** O autor lê o motivo em até 1 hora de trabalho: falha de infraestrutura, `reexecutar #N @sha` ou novo `fila #N @sha`; conflito ou falha do código, correção. Nunca deixar um PR expulso sem resposta no canal.
+
+(h) **PR empilhado.** Quando a base entrar no main, o autor muda a base do PR para `main` na mesma rodada, sem push novo se não houver conflito.
+
+(i) **Próximo responsável.** Todo aviso de "aguardando" diz quem age em seguida e por quê: autor, revisor nomeado, coordenador ou dono.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

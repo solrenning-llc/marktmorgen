@@ -227,7 +227,8 @@ async function main(): Promise<void> {
 
   part("A dispute lost takes the course off the ledger");
   sessions["lost@example.com"] = [oneOff("cs_test_lost00000001", one.id, T1, { disputed: true })];
-  disputes["ch_lost00000001"] = [{ id: "dp_lost00000001", object: "dispute", status: "lost" }];
+  // Merge with main (lib/refunds.ts disputeLost, rule 30): a dispute row names its own charge, as Stripe sends it.
+  disputes["ch_lost00000001"] = [{ id: "dp_lost00000001", object: "dispute", status: "lost", charge: "ch_lost00000001" }];
   await recordEnrollment(store, "lost@example.com", one.id, T1, "stripe");
   is("a dispute lost: shut", await stateOf("lost@example.com", one), "closed");
   is("and taken off the ledger", await written("lost@example.com", one.id), null);

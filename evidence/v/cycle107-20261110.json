@@ -1,0 +1,273 @@
+{
+  "cycle": 107,
+  "date": "2026-11-10",
+  "agent": "Codex V",
+  "previous_checkpoint": "a90bbba81165d0380ef59bfc7fc5c7d2ecad33f8",
+  "main": "e28d2fecb2318c99f27bdffd9f9d0503202f89b9",
+  "norms": "FreshFULLROOTea09d5999587f3c85028d339adcee2ba1fa94b41andlaterfreshreads. Exactf6ef..e28 TENfiles(numbers-linkroute/page,numberslinks,paypalsales,theirtests,stablecoinstudy,testconfig);ZEROCLAUDE/AGENTS/inbox/queue/reservationdelta. TODOS98FULLreadTHISCYCLE: C1EXCLUSIVEclaude5branches overridesoldVauthor/integratorstatus2999and3024. PriorCP106scopeinterpretationnotpermissiontopushC5. NoC13206dequeueyet.",
+  "own_metadata_and_checks": [
+    {
+      "number": 2999,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "state": "open",
+      "merged": false,
+      "checks": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "state": "open",
+      "merged": false,
+      "checks": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "state": "open",
+      "merged": false,
+      "checks": [
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3500,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "state": "open",
+      "merged": false,
+      "checks": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    }
+  ],
+  "review3595": {
+    "head": "231a8fecfd9bcc3db2d000db2bda2abc619b52d1",
+    "base_mergebase": "f6ef221443876025eb6286940d687bf97799dd8e",
+    "claim": "1582cce848683822dfa292e69b185d36f4e16851",
+    "claim_exact": true,
+    "worktree": "/workspace/scratch/aed9c38475cd/v91-3595",
+    "proof_commit": "bb7947bb805a38674c79e8509f159818288470f3",
+    "scope": "First independentmoneyreview,purefunctionsONLY; noactualproductioncallers lib/app/components,notfutureintegration/globalfinancialapproval",
+    "verdict": "No HIGH/MEDIUMdemonstrated; functionalLOWunsafeintegers; mandatoryscopegate reservationrowmustremovedfromproductPR perowner",
+    "tests": {
+      "canonical_pass": 10,
+      "own_pass": 4,
+      "own_low_failure": 1,
+      "partner_share_pass": 26,
+      "total_pass": 40,
+      "total_fail": 1,
+      "integercap_vectors": 4800
+    },
+    "ledger": {
+      "redis": 0,
+      "http": 0,
+      "real_network": 0
+    },
+    "guard": "STRICTZEROIO rejection beforedispatch;networkdeniedbeforeimports120s512MiB256KiB;NOsemanticreruns/productpatch",
+    "low": "Number.MAX_SAFE_INTEGER+1 acceptedat51/67-69/96 ->[2500,9000,0,null] ratherthan[null,null,null,unknown];noactualcallers/realfinancialloss;Number.isSafeInteger beforeintegration",
+    "scope_gate": "docs/reservations/claude4.md:11 newWP7row belongscoordinationnotproduct; requireauthorremoveonlyownchange,preservechannelreserve. CommentupdatedsameID tostate it explicitly; notadditionalMED or newruntime.",
+    "evidence": "e5b6ffa7648921a34afbd90096d999f5d3cf582d/evidence/v/review-3595-20261110.json",
+    "decoded_bytes": 24438,
+    "sha256": "f21a49a9b5ee153d0488c8a0a86757c629a780cd4e889367647974d430d8c4e0",
+    "evidence_exact": true,
+    "comment": 6776792287,
+    "comment_exact": true,
+    "channel_result": "a709b12e1e779fee3ccae9a5d02e19298866a73a",
+    "handoff_and_scope_gate_channel": "36dbfbb85a411df9753bb12636b0586b78b62750",
+    "channel_exact": true,
+    "ci": "AtreviewonlydependencysecurityrequiredaggregatorcompleteSUCCESS;otherspending/notgreenclaim",
+    "limits": "No fulltypes/lint/build/nativeRedis/browser/financialintegration/CI9cert; packageownsource+runnerguard+logs/status andnewmodule+canonicaltests;threeexecutedbundleslocaluntrackedhashesonly. Initial2dotvsAPIcurrentbaseprintedmainonlyreversals;correct3dotnativebaseactualdelta3files,noerroneousfindingfrom2dot."
+  },
+  "handoff_C1": {
+    "order": "C1-20261110-1517-TODOS-98",
+    "exclusive_branches": "claude5/*; VmustNOTpush2999claude5/sz4-member-prices or3024claude5/kb22-u12-directory-socials",
+    "candidate2999": "8e2a10279/tree028a9398 retained;136PASSproof92dcd607 and6775325096 requireindependentconflictfocalchosenbyC1,notVselfpublish. LocalproofHEADcf4f1475c notproductcandidate;ledger1778Redis51HTTP preserved.",
+    "candidate3024": "06a27f8e3 local/reportHEAD1a9201616;MEDremoteremain;C1scope+cost+lint134disposition+independentreturn gates. Stati175conditionalnotjointlyruntimeproven/globalcap,proofa01f788a/comment6762476485; noreset/split/raise/replay.",
+    "notification": "36dbfbb85a411df9753bb12636b0586b78b62750 exact"
+  },
+  "preserved_others": "3206candidate1b9cad/serverd0f431..stillqueueblockedexplicitly;NOretrywithoutC1dequeue;3500optional13ddLOCALnotpublished;oldreviewsnotnewheadclearance. AllCP106/105/103ledgersretained:3569HTTP100exhausted,3118Redis14695HTTP0,outbox23modeled0native.",
+  "next_work": "FIRSTROOTfreshCP107; return3595LOW/scopeonlyifnewhead/request,firstreviewneedsSECONDindependent+9CI; doNOTthird/replay. C1handles2999and3024exclusive;3206awaitdequeue+freshscopefocal then9newheadCI. RemainVreviewer/testCIband;nonewautomation/subagents/refpush/CIrerun/cancel/queue/merge."
+}

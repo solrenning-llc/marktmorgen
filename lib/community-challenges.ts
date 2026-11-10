@@ -160,7 +160,10 @@ export async function readChallenge(id: string, ch: string): Promise<Challenge |
 async function stillKept(id: string, ch: string): Promise<boolean> {
   const [score] = repliesFor(await redisPipeline([["ZSCORE", indexKey(id), ch]]), 1) ?? [undefined];
   if (score === null) return false;
-  if (typeof score !== "string" && typeof score !== "number") throw new UnknownReplyError("whether a challenge is kept");
+  // ZSCORE answers a member's score as a numeric string (or null): anything that is not a finite number is unknown
+  // (Codex Z's LOW on #3452), never read as "still kept".
+  const value = typeof score === "number" ? score : typeof score === "string" && score.trim() !== "" ? Number(score) : NaN;
+  if (!Number.isFinite(value)) throw new UnknownReplyError("whether a challenge is kept");
   return true;
 }
 

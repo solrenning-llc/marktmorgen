@@ -25,6 +25,8 @@ import { forgetPublicFeeds } from "@/lib/podcast-public-show";
 import { dataKey } from "@/lib/store-data";
 import { eraseClosed, markDue } from "@/lib/closed-store-data";
 import { GET as feed } from "@/app/api/store/podcast/public/[handle]/[product]/route";
+import { POST as productRoute } from "@/app/api/store/product/route";
+import { turnOnMissing } from "@/components/podcast-public-feed";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -186,6 +188,31 @@ async function main(): Promise<void> {
   await post({ action: "episode", id: pid, episode: "ep0000000001", public: true, audio: AUDIO });
   is("only the show's category and flag, and each episode's mark and audio address", Object.keys(JSON.parse(stored() ?? "{}")).sort(), ["category", "episodes", "explicit"]);
   is("no address of anybody in it", (stored() ?? "").includes(OWNER) || /@/.test(stored() ?? ""), false);
+
+  // Review of #3544 (Claude 3, MÉDIO 1): the box is shown only while the feed is off, so it is asked for only then.
+  part("A creator who comes back with the feed on can save the category and explicit setting");
+  is("feed on, a fresh page (box not shown, so not checked), a category and a flag: nothing missing", turnOnMissing({ on: true, understood: false, category: "Education", explicit: false }), null);
+  is("control: turning it on still needs the box", turnOnMissing({ on: false, understood: false, category: "Education", explicit: false }), "understood");
+  is("a category and a flag are still asked for, on or off", [turnOnMissing({ on: true, understood: false, category: "", explicit: false }), turnOnMissing({ on: false, understood: true, category: "Arts", explicit: null })], ["category", "explicit"]);
+
+  // Review of #3544 (Claude 3, MÉDIO 2): removing the product takes its public settings and their room with it.
+  part("Removing the podcast's product deletes its public settings and gives their room back");
+  {
+    const POD2 = "d".repeat(32);
+    const KEY2 = `nl:pod:${POD2}:public`;
+    const gone = await addProduct(OWNER, "A show that goes", "", "9", null);
+    if (!gone.ok) throw new Error("no product");
+    if (!(await setProductPodcast(OWNER, gone.product.id, { id: POD2, episodes: 3 })).ok) throw new Error("no podcast");
+    await savePodcast(podcast(POD2));
+    await post({ action: "on", id: gone.product.id, category: "Education", explicit: false, understood: true });
+    is("control: on, with its record and its room", [redis.run(["EXISTS", KEY2]), Number(redis.run(["HGET", room, `pod:${POD2}:public`])) > 0], [1, true]);
+    const removed = await productRoute(
+      new NextRequest(`${ORIGIN}/api/store/product`, { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid!, cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "remove", id: gone.product.id }) }),
+    );
+    is("the product is removed", [removed.status, ((await removed.json()) as { ok?: boolean }).ok], [200, true]);
+    is("its public settings are deleted", redis.run(["EXISTS", KEY2]), 0);
+    is("and their room given back", redis.run(["HGET", room, `pod:${POD2}:public`]), null);
+  }
 
   part("The store's closing erases it, by the podcast's id; another store's stays");
   await claimHandle(OTHER, "shorecast", "Shore", "");

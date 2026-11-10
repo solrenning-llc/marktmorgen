@@ -45,6 +45,17 @@ function said(answer: Answer): string {
   return answer.message || MESSAGES[answer.error ?? ""] || MESSAGES.unavailable;
 }
 
+/**
+ * What the creator still has to give before "on" (or a save while it is on) is sent; null when nothing. The
+ * server checks the same again.
+ */
+export function turnOnMissing(state: { on: boolean; understood: boolean; category: string; explicit: boolean | null }): "understood" | "category" | "explicit" | null {
+  if (!state.understood) return "understood";
+  if (!state.category) return "category";
+  if (state.explicit === null) return "explicit";
+  return null;
+}
+
 export function PodcastPublicFeed({ productId, episodes }: { productId: string; episodes: Episode[] }) {
   const [feed, setFeed] = useState<Feed | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -95,9 +106,8 @@ export function PodcastPublicFeed({ productId, episodes }: { productId: string; 
   }
 
   async function turnOn() {
-    if (!understood) return setError(MESSAGES.understood);
-    if (!category) return setError(MESSAGES.category);
-    if (explicit === null) return setError(MESSAGES.explicit);
+    const missing = turnOnMissing({ on: feed?.on === true, understood, category, explicit });
+    if (missing) return setError(MESSAGES[missing]);
     await run({ action: "on", category, explicit, understood: true }, feed?.on ? "Saved." : "The public feed is on. No episode is in it yet.");
   }
 

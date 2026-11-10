@@ -312,14 +312,34 @@ async function bodyUpTo(response: Response, most: number): Promise<Buffer | null
   }
 }
 
-/** The files of a received message, as the sender's API takes them, and the names of the ones left out. */
-async function files(id: string, charge?: Charge): Promise<{ sent: { filename: string; content: string }[]; left: string[] }> {
+/**
+ * The list of a received message's files, read without fetching any of them;
+ * null when it could not be read. An error status, an answer with no list in
+ * it or an entry that is not an object says nothing about the files: never
+ * "no files", so the message is tried again ("retry") instead of going on with
+ * the writer's files quietly left out. Read before a store's hourly allowance
+ * is taken, so a retry does not spend it (LEVE on #2919).
+ */
+async function listFiles(id: string): Promise<FileEntry[] | null> {
+  try {
+    const listed = await read(`/emails/receiving/${id}/attachments?limit=100`);
+    const entries = (listed.data as { data?: unknown } | null)?.data;
+    if (!Array.isArray(entries) || entries.some((entry) => !entry || typeof entry !== "object")) {
+      throw new Error(`the list of files answered ${listed.status} without a list`);
+    }
+    return entries as FileEntry[];
+  } catch (error) {
+    console.error("the files of an inbound message could not be listed", error);
+    return null;
+  }
+}
+
+/** The listed files of a received message, as the sender's API takes them, and the names of the ones left out. */
+async function files(entries: FileEntry[], charge?: Charge): Promise<{ sent: { filename: string; content: string }[]; left: string[] }> {
   const sent: { filename: string; content: string }[] = [];
   const left: string[] = [];
-  const listed = await read(`/emails/receiving/${id}/attachments?limit=100`);
-  const entries = (listed.data as { data?: unknown } | null)?.data;
   let total = 0;
-  for (const entry of Array.isArray(entries) ? (entries as FileEntry[]).slice(0, 100) : []) {
+  for (const entry of entries.slice(0, 100)) {
     const name = headerText(typeof entry.filename === "string" && entry.filename ? entry.filename : "file", 150);
     const size = typeof entry.size === "number" && entry.size >= 0 ? entry.size : 0;
     const url = fileUrl(entry.download_url);
@@ -549,6 +569,7 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
   const toStore = creators ? written.find((a) => a.toLowerCase().endsWith(`@${creators}`)) : undefined;
   let creator: { name: string; email: string; address: string } | null = null;
   let store: Awaited<ReturnType<typeof storeForHandle>> = null;
+  let listed: FileEntry[] | null = null;
   if (toStore) {
     const handle = toStore.slice(0, toStore.lastIndexOf("@")).toLowerCase();
     if (!HANDLE_PATTERN.test(handle)) return "skipped";
@@ -561,6 +582,9 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
     }
     const email = found ? oneAddress(found.email) : null;
     if (!found || !email) return "skipped";
+    // Listed before the allowance is taken: a list that cannot be read now is a retry that spends nothing.
+    listed = await listFiles(id);
+    if (!listed) return "retry";
     if (!(await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600))) return "skipped";
     creator = { name: headerText(found.name, 60).replace(/["\\<>]/g, "") || handle, email, address: `${handle}@${creators}` };
     store = found;
@@ -582,11 +606,14 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
     charge = (want) => chargeSupportBytes(admitted.mark, admitted.taken, want, now);
   }
 
+  // Listed once it is admitted (support counts its read before the list), or before the store's allowance above.
+  listed ??= await listFiles(id);
+  if (!listed) return "retry";
   let attached: Awaited<ReturnType<typeof files>> = { sent: [], left: [] };
   try {
-    attached = await files(id, charge);
+    attached = await files(listed, charge);
   } catch (error) {
-    console.error("the files of an inbound message could not be listed", error);
+    console.error("the files of an inbound message could not be fetched", error);
     return "retry";
   }
 

@@ -33,6 +33,8 @@ import {
   replyNoticeMessage,
   tellBuyerOfReply,
 } from "@/lib/submission-notice";
+import * as notice from "@/lib/submission-notice";
+import * as review from "@/components/submission-review";
 import { courseSender } from "@/lib/learn";
 import { freshReplyIds, readSeenReplies, seenRepliesKey, seenRepliesValue } from "@/lib/submission-upload";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
@@ -190,9 +192,30 @@ async function main(): Promise<void> {
   part("The studio's reply tells the buyer");
   const route = readFileSync(join(process.cwd(), "app/api/store/course/submissions/route.ts"), "utf8");
   is("after the reply is kept, the buyer is told", /replySubmission\([\s\S]*tellBuyerOfReply\(/.test(route), true);
-  is("and the studio is told whether the email went", route.includes('emailed: told === "sent"'), true);
+  is("and the studio is told whether the email went", route.includes("emailed: emailedAnswer(told)"), true);
   const studio = readFileSync(join(process.cwd(), "components/submission-review.tsx"), "utf8");
-  is("the studio says so in words", studio.includes("data.emailed"), true);
+  is("the studio says so in words", studio.includes("replySavedNotice(data.emailed)"), true);
+
+  part("Whether the buyer was emailed is never guessed (review rule of #3571/#3574: unknown is never said as done)");
+  // A sender that answered false may still have sent it (lib/email.ts: an Amazon answer that did not say), and
+  // a mark already taken may stand for a send that went or did not: neither is "sent", neither is "none went".
+  const answerOf = (notice as Record<string, unknown>).emailedAnswer as ((told: string) => unknown) | undefined;
+  const answered = (told: string) => (typeof answerOf === "function" ? answerOf(told) : "missing");
+  is("sent: the buyer was emailed", answered("sent"), true);
+  is("a send the sender did not confirm: unknown, never 'no email went'", answered("unsent"), "unknown");
+  is("a mark taken before: unknown", answered("already"), "unknown");
+  is("nothing tried (skipped, nothing to tell, a check that did not read): no email went", ["stopped", "none", "unknown"].map(answered), [false, false, false]);
+  const savedOf = (review as Record<string, unknown>).replySavedNotice as ((emailed: unknown) => string) | undefined;
+  const saved = (emailed: unknown) => (typeof savedOf === "function" ? savedOf(emailed) : "missing");
+  is("emailed: said so", saved(true), "Reply saved with the file. The buyer was emailed.");
+  is("none went: said so, with where they will see it", saved(false), "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson.");
+  for (const [label, emailed] of [["unknown", "unknown"], ["missing", undefined], ["another shape", "yes"]] as const) {
+    const words = saved(emailed);
+    is(`${label}: neither 'was emailed' nor 'no email went'`, /was emailed|No email went/.test(words), false);
+    is(`${label}: says it could not be confirmed, and where they will see it`, words, "Reply saved with the file. We could not confirm whether the buyer was emailed, so they will see it when they open the lesson.");
+  }
+  is("the check before sending does not promise an email that may not go", studio.includes("and the buyer is emailed about it once."), false);
+  is("it says when none goes", studio.includes("unless your store&rsquo;s emails for this month are used up or their address cannot get email"), true);
 
   part("On the lesson page, a reply not shown yet is marked");
   const rows = [

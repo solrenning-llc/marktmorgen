@@ -166,7 +166,8 @@ async function main(): Promise<void> {
   is("it is answered", replied.body.state, "reviewed");
   is("with the words", (replied.body.reply as { text: string }).text, "Knees out a little more.");
   // 750 [CD1] unit 6: the buyer is told by email, and the studio hears whether it went (no sender here, so it did not).
-  is("the studio is told whether the buyer was emailed", replied.body.emailed, false);
+  // No sender here: lib/email.ts answers false, which may also be a send that went, so it is never said as "none went".
+  is("the studio is told the email could not be confirmed, never that none went", replied.body.emailed, "unknown");
   is("the reply is marked told, so it is never emailed twice", (await redis.pipeline([["EXISTS", `nl:sub:told:${FOLDER}:${target}`]]))[0], 1);
   is("the reply and its notice stay inside the studio requests taken (20 commands each)", replyCommands <= 20 * (1 + SUBMISSION_REPLY_UNITS), true);
   is("its studio requests were taken first", state.events.includes(`allowance:studio:${SUBMISSION_REPLY_UNITS}`), true);

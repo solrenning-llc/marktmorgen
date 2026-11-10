@@ -145,3 +145,24 @@ export const REFUND_DONE: Record<string, { tone: "success" | "warn"; title: stri
   none: { tone: "warn", title: "Nothing was refunded", body: "The reason is below." },
   owner: { tone: "warn", title: "Only the store's owner can ask for this refund", body: "Ask the owner of this store to open this page." },
 };
+
+/**
+ * When a refund's record of what was still owed was damaged and stayed unreadable for GIVE_UP_DAYS: we do not know how
+ * much went through, so the letter says only that, what happens to the plan, and who settles it (Claude 4 on #2692).
+ */
+export function planRefundUnknownLetter(o: { store: string; stopped: boolean }): { subject: string; text: string } {
+  const store = o.store || "your store";
+  return {
+    subject: `${store}: we could not confirm your refund`,
+    text: [
+      `We could not confirm how much of the refund you asked for on your Marktmorgen plan for ${store} went through.`,
+      "",
+      o.stopped
+        ? "Your plan is set to stop at the end of the period you paid for, and nothing more will be charged for it."
+        : "Your plan goes on as before. It renews as usual unless you cancel it in your studio.",
+      `Reply to this email or write to ${SUPPORT_ADDRESS}, and we will check your refund and settle anything still owed.`,
+      "",
+      "Marktmorgen",
+    ].join("\n"),
+  };
+}

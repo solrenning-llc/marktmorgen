@@ -176,7 +176,8 @@ await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_
   await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
   const callsBefore = world.calls.length;
   world.emails = [];
-
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
   await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
 
   assert.equal(await shop.note(), null, "past GIVE_UP_DAYS the unknown note is let go, never kept forever");
@@ -192,6 +193,9 @@ await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_
   world.emails = [];
   await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
   assert.equal(world.emails.length, 0, "a second run sends nothing more");
+  } finally {
+    delete process.env.RESEND_API_KEY;
+  }
 });
 }
 });

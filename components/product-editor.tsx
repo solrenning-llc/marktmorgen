@@ -2239,6 +2239,8 @@ export function ProductEditor({
                   options: product.options.length,
                   priceCents: product.priceCents,
                   interval: product.recurring?.interval ?? null,
+                  // How often it charges now (609 [WP8]), so a change to every 3 months is reviewed (Claude 4 on #3536).
+                  every: product.recurring ? parseEvery(product.recurring.interval, product.recurring.every) : 1,
                   suggestedCents: product.pwyw?.suggestedCents ?? null,
                   // "Now" is what the checkout offers, never only what is stored (lib/store-checkout.ts).
                   intro: activeIntro(product, tiers),
@@ -2286,7 +2288,7 @@ export function ProductEditor({
                 draft={draft}
                 setDraft={(next) => {
                   setDraft(next);
-                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice || next.trial !== draft.trial || next.payments !== draft.payments) setPriceReview(null);
+                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice || next.trial !== draft.trial || next.payments !== draft.payments || next.everyCount !== draft.everyCount) setPriceReview(null);
                 }}
                 busy={busy}
                 error={error}

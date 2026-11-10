@@ -26,7 +26,8 @@
  * joined at, also when the product stops being a membership, until they or
  * the creator cancel.
  */
-import { readRecurring, type Interval } from "@/lib/product-recurring";
+import { everyOf, isInterval, readRecurring, type Interval } from "@/lib/product-recurring";
+import { everyName, everyProblem } from "@/lib/recurring-every-rules";
 import { introProblem } from "@/lib/intro-price";
 import { yearlyProblem } from "@/lib/yearly-price";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
@@ -40,6 +41,8 @@ export type PricedProduct = {
   options: number;
   priceCents: number;
   interval: Interval | null;
+  /** How many intervals one charge covers (609 [WP8]): 3 with "month" is every 3 months. Absent: 1. */
+  every?: number;
   /** The pay-what-you-want box's starting price, or null when the price is set. */
   suggestedCents: number | null;
   /** A membership's introductory price as the checkout offers it now (lib/intro-price.ts, activeIntro), or null. */
@@ -71,7 +74,7 @@ export type PricedProduct = {
   planAfter: (next: { priceCents: number; interval: Interval | null }) => boolean;
 };
 
-export type PriceDraft = { title: string; summary: string; about: string; price: string; every: string; pwyw: boolean; suggested: string; introPrice: string; introCount: string; yearlyPrice: string; trial?: string; payments?: string };
+export type PriceDraft = { title: string; summary: string; about: string; price: string; every: string; pwyw: boolean; suggested: string; introPrice: string; introCount: string; yearlyPrice: string; trial?: string; payments?: string; /** How many intervals one charge covers, as the editor holds it ("1", "3"). Absent: 1. */ everyCount?: string };
 
 /** Which field a row's "Change" goes back to. */
 export type PriceField = "every" | "pwyw" | "price" | "suggested" | "intro" | "yearly" | "trial" | "payments";
@@ -85,7 +88,9 @@ const MONEY_ROWS = new Set(["price", "suggested", "intro", "yearly"]);
 
 const EVERY: Record<string, string> = { day: "Every day", week: "Every week", month: "Every month", year: "Every year" };
 
-function how(interval: string | null, chooses: boolean): string {
+function how(interval: string | null, chooses: boolean, count = 1): string {
+  // Every 3 months, said as the editor's own list says it (lib/recurring-every-rules.ts, everyName).
+  if (interval && count > 1 && isInterval(interval)) return everyName(interval, count);
   if (interval) return EVERY[interval] ?? `Every ${interval}`;
   return chooses ? "They choose what to pay" : "Once";
 }
@@ -168,21 +173,27 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
   if (every === "month" && draft.yearlyPrice.trim() && yearly === null) return null;
   // The free trial and the payments it ends after, read by the product route's own rule (lib/product-recurring.ts, readRecurring):
   // one it would refuse (out of range, not a whole number) is not reviewed, and the save says why.
-  const recurring = every ? readRecurring(every, draft.trial?.trim() ?? "", draft.payments?.trim() ?? "") : null;
+  // With how often it charges (609 [WP8]): a count the route refuses is not reviewed either.
+  const recurring = every ? readRecurring(every, draft.trial?.trim() ?? "", draft.payments?.trim() ?? "", draft.everyCount?.trim() ?? "") : null;
   if (recurring === "trial" || recurring === "payments" || recurring === "every") return null;
   const trial = recurring ? recurring.trialDays : 0;
   const payments = recurring ? recurring.payments : 0;
+  const count = recurring ? everyOf(recurring) : 1;
+  const countBefore = product.interval ? Math.max(1, product.every ?? 1) : 1;
   // An introductory or yearly price the route refuses for the product as this save leaves it (lib/intro-price.ts, lib/yearly-price.ts):
   // below the least the currency charges, not under the price, beside each other or a trial or an end, on price options or a plan members switch between.
   const after = { id: product.id, priceCents: price, recurring: every ? { interval: every as Interval, trialDays: trial, payments } : null, options: Array.from({ length: product.options }), pwyw: null, intro, yearly: yearly === null ? null : { cents: yearly } };
   if (intro && introProblem(after, intro, product.bounds.min, product.tiers)) return null;
   if (after.yearly && yearlyProblem(after, after.yearly, product.bounds.min, product.tiers)) return null;
+  // A count above 1 the route refuses beside what this save keeps (app/api/store/product/route.ts, everyProblem).
+  if (everyProblem(count, { intro, yearly: after.yearly, inTiers: product.tiers.includes(product.id), payments })) return null;
 
   const chose = product.suggestedCents !== null && !product.interval;
   const rows: PriceRow[] = [];
-  const everyChanged = every !== product.interval;
+  // A change of how often it charges is a change of how buyers pay: "Every month" to "Every 3 months" (Claude 4 on #3536).
+  const everyChanged = every !== product.interval || (Boolean(every) && count !== countBefore);
   const howChanged = everyChanged || chooses !== chose;
-  if (howChanged) rows.push({ key: "how", label: "How buyers pay", now: how(product.interval, chose), then: how(every, chooses), field: everyChanged ? "every" : "pwyw" });
+  if (howChanged) rows.push({ key: "how", label: "How buyers pay", now: how(product.interval, chose, countBefore), then: how(every, chooses, count), field: everyChanged ? "every" : "pwyw" });
   // With how they pay changed, the price is always shown, so the creator sees what buyers will pay.
   if (!optioned && (price !== product.priceCents || howChanged)) rows.push({ key: "price", label: chooses ? "Lowest price" : "Price", now: priced(product.priceCents), then: priced(price), field: "price" });
   if (chooses && suggested !== product.suggestedCents) rows.push({ key: "suggested", label: "Price their box starts at", now: chose && product.suggestedCents !== null ? money(product.suggestedCents) : "None", then: money(suggested!), field: "suggested" });

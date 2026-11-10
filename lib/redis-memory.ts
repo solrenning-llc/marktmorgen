@@ -242,6 +242,20 @@ export class MemoryRedis {
           this.run(["HDEL", imported, field]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_SETTLE: a completed payment written down, once, with every list it belongs in, in one step.
+        if (key.startsWith("-- marktmorgen:paypal-settle:v1\n") && args[0] === "6" && args.length === 14) {
+          const [, paid, handOver, watch, own, pending, sales, record, life, order, at, look, floor, salesLife] = args;
+          if (this.run(["SET", paid, record, "NX", "EX", life]) === null) return 0;
+          this.run(["ZADD", handOver, at, order]);
+          this.run(["ZADD", watch, look, order]);
+          this.run(["SADD", own, order]);
+          this.run(["EXPIRE", own, life]);
+          this.run(["ZREM", pending, order]);
+          this.run(["ZADD", sales, at, order]);
+          this.run(["ZREMRANGEBYSCORE", sales, "-inf", floor]);
+          this.run(["EXPIRE", sales, salesLife]);
+          return 1;
+        }
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;
@@ -624,6 +638,23 @@ export class MemoryRedis {
           this.run(["EXPIRE", count, keep]);
           return n;
         }
+        // lib/orders.ts COUNT_ORDER: an order's mark and its count written in one step, nothing written unless the
+        // count reads as a whole number (a hash or other type there is an error before any write, as GET's in Redis).
+        if (key.startsWith("-- marktmorgen:orders-count:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, count, rawMark, rawKeep, rawN] = args;
+          const num = (raw: string) => raw.trim() === "" || !Number.isFinite(Number(raw)) ? null : Number(raw);
+          const seconds = num(rawMark), keep = num(rawKeep), n = num(rawN);
+          if (seconds === null || seconds < 1 || keep === null || keep < 1 || (n !== 0 && n !== 1)) return -1;
+          if (n === 1) {
+            const have = this.run(["GET", count]);
+            if (have !== null && (String(have).length > 15 || (have !== "0" && !/^[1-9]\d*$/.test(String(have))))) return -1;
+          }
+          if (this.run(["SET", mark, "1", "NX", "EX", rawMark]) === null) return 0;
+          if (n === 0) return 0;
+          const made = this.run(["INCR", count]);
+          this.run(["EXPIRE", count, rawKeep]);
+          return made;
+        }
         if (key.startsWith("-- marktmorgen:order-admission-settle:v2\n") && args[0] === "2" && args.length === 6) {
           const [, openKey, heldKey, field, rawN, rawBytes] = args;
           this.live(openKey);
@@ -704,6 +735,19 @@ export class MemoryRedis {
           this.run(["HSET", people, field, next]);
           return 1;
         }
+        // lib/affiliate-codes.ts GIVE_CODE: whether the code is held, its room and the write in one step. A code held
+        // is moved and takes no room ({2, 0}); a code not held takes its room (TAKE_DATA, slot "aff:codes") and is
+        // written only when that answers {1, total}.
+        if (key.startsWith("-- marktmorgen:affiliate-code-give:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, room, codes, limit, month, bytes, promo, affiliate] = args;
+          if (this.run(["HEXISTS", codes, promo]) === 1) {
+            this.run(["HSET", codes, promo, affiliate]);
+            return [2, 0];
+          }
+          const taken = this.storeData([room, limit, "0", month, "a", "aff:codes", bytes]);
+          if (Array.isArray(taken) && taken[0] === 1) this.run(["HSET", codes, promo, affiliate]);
+          return taken;
+        }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
         if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
@@ -714,6 +758,13 @@ export class MemoryRedis {
           if (current === undefined) return 0;
           if (current !== args[3]) return [-1, new TextEncoder().encode(current).length];
           this.hash(target).set(args[2], args[4]);
+          return 1;
+        }
+        // lib/review-proof.ts REVIEW_LINK_IF_NOTED: a review link written only while its erasure note is still there.
+        if (key.startsWith("-- marktmorgen:review-link-if-noted:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, notes, link, member, value, seconds] = args;
+          if (this.run(["ZSCORE", notes, member]) === null) return 0;
+          this.run(["SET", link, value, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {

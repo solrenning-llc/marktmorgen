@@ -1,0 +1,16 @@
+{
+  "cx1-monitoring-ecp-source-gap.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "1 checks, all passing."
+    ]
+  },
+  "gd1-payment-monitoring-sources.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "20 checks, all passing."
+    ]
+  }
+}

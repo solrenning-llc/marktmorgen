@@ -1,0 +1,24 @@
+
+GD1(b): retain the source limitations before any monitoring automation
+  ok    source review preserves 10/11/2026
+  ok    source review preserves https://docs.stripe.com/disputes/monitoring-programs
+  ok    source review preserves https://support.stripe.com/questions/monitoring-program-faq
+  ok    source review preserves mês anterior
+  ok    source review preserves 30/90 dias
+  ok    source review preserves TC40
+  ok    source review preserves TC15
+  ok    source review preserves disputas ocultas
+  ok    source review preserves 1.500
+  ok    source review preserves 1,5%
+  ok    source review preserves CEMEA
+  ok    source review preserves 100–299
+  ok    source review preserves 300+
+  ok    source review preserves exceeds
+  ok    source review preserves não certifica
+  ok    source review preserves custo desconhecido
+  ok    source review preserves sem contato externo
+  ok    source review preserves fontes das próprias bandeiras
+  ok    source review preserves Nenhuma pausa ou liberação
+  ok    Mastercard source conflict stays explicit and unresolved
+
+20 checks, all passing.

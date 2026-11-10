@@ -5,8 +5,9 @@
  *
  *   - Affiliates active: those with a sale that still earns in the period. Clicks are kept only as all-time totals
  *     (recordClick, one count per affiliate), so they count toward "active" only for all time, and the page says so.
- *   - Sold through affiliates: what the buyers paid before tax, after refunds, for the sales themselves. A bonus, a
- *     second-tier share (which repeats a sale already counted) or a lead adds nothing sold.
+ *   - Sold through affiliates: what the buyers paid before tax, after refunds, for the sales themselves, each sale
+ *     once however many partners share in it. A bonus, a second-tier share (which repeats a sale already counted) or
+ *     a lead adds nothing sold.
  *   - Earned: every commission in the period after refunds, whether paid already or still owed.
  *
  * An own purchase never counts. A sale in another currency than the store's is left out and counted apart, as the
@@ -48,6 +49,16 @@ export function periodStart(period: string, now: number): number | null {
   return null;
 }
 
+/**
+ * The sale a line is part of. readBook writes a partner's standing share of a sale as one more line, ref
+ * `${sale.ref}:${partner}`, beside the affiliate's own commission and other partners' shares (lib/affiliates.ts):
+ * those are one sale, sold once (Codex U on #3510). Every other line is its own sale.
+ */
+function saleOf(line: Line): string {
+  const tail = `:${line.aff}`;
+  return line.how === "partner" && line.ref.endsWith(tail) ? line.ref.slice(0, -tail.length) : line.ref;
+}
+
 /** What a line's buyers paid before tax and kept after refunds: the base its commission is worked out from. */
 function keptBase(line: Line): number {
   if (line.total <= 0) return 0;
@@ -62,9 +73,10 @@ export function programSummary(book: Pick<Book, "rows" | "lines" | "currency" | 
   const currency = book.currency.toLowerCase();
   let soldCents = 0;
   let earnedCents = 0;
-  let sales = 0;
   let elsewhere = 0;
   const active = new Set<string>();
+  // Each sale once, however many share in it: its base, and whether any share of it still earns.
+  const sold = new Map<string, { kept: number; earns: boolean }>();
   for (const line of book.lines) {
     if (line.at < since || line.self) continue;
     if ((line.currency || "usd").toLowerCase() !== currency) {
@@ -73,12 +85,16 @@ export function programSummary(book: Pick<Book, "rows" | "lines" | "currency" | 
     }
     earnedCents += line.commission;
     if (!SALE_HOW.has(line.how)) continue;
-    const kept = keptBase(line);
-    soldCents += kept;
-    if (line.status === "earned" || line.status === "partly refunded") {
-      sales += 1;
-      active.add(line.aff);
-    }
+    const earns = line.status === "earned" || line.status === "partly refunded";
+    if (earns) active.add(line.aff);
+    const sale = saleOf(line);
+    const seen = sold.get(sale);
+    sold.set(sale, { kept: Math.max(seen?.kept ?? 0, keptBase(line)), earns: Boolean(seen?.earns) || earns });
+  }
+  let sales = 0;
+  for (const sale of sold.values()) {
+    soldCents += sale.kept;
+    if (sale.earns) sales += 1;
   }
   const allTime = period === "all";
   if (allTime) for (const row of book.rows) if (row.clicks > 0) active.add(row.affiliate.id);

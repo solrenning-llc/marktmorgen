@@ -94,6 +94,9 @@ async function main(): Promise<void> {
   const request = { prompt: "The funnel: \"Checklist funnel\"." };
   is("a bare domain with a path is dropped, the rest kept", readExplanation({ why: "Visitors cannot open the funnel while it is switched off.", todo: ["Open fix-funnel.example/login and type your password there.", "Open the funnel settings."] }, request)?.todo, ["Open the funnel settings."]);
   is("abbreviations stay", readExplanation({ why: "Switch it on, e.g. after testing each step.", todo: ["Check the price first, i.e. before sharing it."] }, request)?.todo, ["Check the price first, i.e. before sharing it."]);
+  // In capitals too (Codex V on #3508): a domain name is a domain name whatever its case.
+  for (const line of ["Open FIX-FUNNEL.EXAMPLE/LOGIN and type your password there.", "Open Fix-Funnel.Com/login and type your password there.", "Go to FIX-FUNNEL.COM to finish."]) is(`a bare domain in capitals is dropped: ${line}`, readExplanation({ why: "Visitors cannot open the funnel while it is switched off.", todo: [line, "Open the funnel settings."] }, request)?.todo, ["Open the funnel settings."]);
+  is("abbreviations in capitals stay", readExplanation({ why: "Switch it on, E.G. after testing each step.", todo: ["Check the price first, I.E. before sharing it.", "Built with Next.JS."] }, request)?.todo, ["Check the price first, I.E. before sharing it.", "Built with Next.JS."]);
 
   part("Note: the draft panel's buttons are tied to the sentence beside them");
   const panel = renderToStaticMarkup(createElement(FunnelAiDraftPanel, { type: FUNNEL_TYPES[0], picked: {}, sid: "store-1", ai: { on: true, left: null } as never, emailsPossible: false, onDraft() {} }));

@@ -51,7 +51,8 @@ import { checkChosenFile, sendSubmission } from "@/lib/submission-upload";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import { LessonSubmission } from "@/components/lesson-submission";
 import type { DataStore } from "@/lib/store-data";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
+import { mount, texts } from "./client-hooks";
 import { COURSE, FOLDER, LESSON, resetWorld, state } from "./submission-upload-world";
 import { done, is, part } from "./check";
 
@@ -381,6 +382,69 @@ async function main(): Promise<void> {
     const brazilian = ["você", "arquivo", "equipe", "Tente de novo", "tente de novo", "Tentar de novo", "Carregando", "Enviando", "Esperando", "conexão", "aceitos", "recado", "Confira", "3.000"];
     is("Portuguese is Portugal's: no Brazilian word or number format", brazilian.filter((word) => pt.includes(word)), []);
     is("and says ficheiro, as the store's other Portuguese does", pt.includes("ficheiro"), true);
+  }
+
+  // Review of #3574 (Codex U, three MÉDIOs).
+  part("Stop: nothing kept is said only when the door confirmed the upload was given up");
+  for (const [label, abortAnswer, expected] of [
+    ["control: the door gave it up", { ok: true }, "stopped"],
+    ["the door could not give it up", { ok: false, error: "files_unavailable" }, "stopped_unconfirmed"],
+    ["the door could not be reached", { ok: false, error: "server_error" }, "stopped_unconfirmed"],
+  ] as const) {
+    const posted: string[] = [];
+    const stop = new AbortController();
+    const file = Object.assign(new Blob([new Uint8Array(10)], { type: "video/mp4" }), { name: "a.mp4" });
+    const result = await sendSubmission(file, SETUP, route, "", {
+      signal: stop.signal,
+      wait: async () => undefined,
+      post: async (body) => {
+        posted.push(String(body.action));
+        if (body.action === "open") return { ok: true, upload: { pathname: "vault/p/sub_w/1-a.mp4", pieces: 1, pieceBytes: 16 * MiB, multipart: true } };
+        if (body.action === "sign") return { ok: true, pieces: [{ number: 1, url: "https://vault.example.test/p", type: null }] };
+        return abortAnswer;
+      },
+      put: async () => (stop.abort(), { status: 0, etag: null }),
+    });
+    is(`${label}: ${expected}`, [result, posted[posted.length - 1]], [{ ok: false, reason: expected }, "abort"]);
+  }
+  is("and \"nothing was kept\" is never what a stop that was not confirmed says", SUBMISSIONS_WORDS.en.stoppedUnconfirmed?.includes("Nothing was kept"), false);
+
+  part("A file past its keeping time is never said to be deleted on the clock alone");
+  {
+    const w = SUBMISSIONS_WORDS.en;
+    const past = Math.floor(Date.now() / 1000) - 86_400;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ ok: true, submissions: [{ id: "e".repeat(32), state: "submitted", file: { name: "old.mp4", bytes: 5 * MiB, type: "video/mp4" }, note: "", at: past - 30 * 86_400, keepUntil: past, reply: null }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    const box = await mount(LessonSubmission as (props: Record<string, unknown>) => unknown, { setup: SETUP, where: route, storeName: "Ana's Gym", language: "en" });
+    const said = texts(box.tree()).join(" ");
+    box.unmount();
+    is("its row is listed", said.includes("old.mp4"), true);
+    is("never \"Deleted\" from the date alone: the sweep may not have deleted it yet", said.includes("Deleted "), false);
+    is("its keeping time is said as ended", said.includes("Keeping time ended"), true);
+    is("and how long a file is kept never promises the deletion as done", /Then it is deleted\./.test(w.keptFor("S", 30)), false);
+  }
+
+  part("A withdrawal never overwrites a reply the creator confirmed meanwhile");
+  {
+    const race = await sent(ANA, "Race.", "lesson0002ab", false, NOW + 900);
+    const lesson2 = { ...at(ANA, "lesson0002ab"), data: SHOP as DataStore };
+    let replied: unknown = "not asked";
+    // While the vault deletes the file, the lock's time runs out, and the creator's reply takes it and is confirmed.
+    const slow = vault({
+      deleteVault: async () => {
+        advance(31_000);
+        replied = await replySubmission({ data: SHOP as DataStore, folder: FOLDER, courseId: COURSE, id: race.id, reply: { text: "Confirmed creator review", file: null } }, NOW + 931);
+        return true;
+      },
+    });
+    const withdrawn = await withdrawSubmission({ ...lesson2, id: race.id }, NOW + 900, slow.steps);
+    const kept = await readSubmission(FOLDER, race.id);
+    const confirmed = (replied as { ok?: boolean }).ok === true;
+    is("a reply confirmed to the creator is still there", confirmed ? kept?.state === "reviewed" && kept?.reply?.text === "Confirmed creator review" : true, true);
+    is("and never both told done: withdrawn to the buyer and answered to the creator", confirmed && withdrawn.ok, false);
   }
 
   done();

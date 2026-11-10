@@ -15,6 +15,7 @@ part("Scanner documentation does not prove coverage, capacity, a clean file, or 
 for (const [name, required] of [
   ["dated review", "Conferência: 10/11/2026"],
   ["scanner source", "https://docs.clamav.net/manual/Usage/Scanning.html"],
+  ["versioned limit evidence", "a configuração de exemplo registra a limitação técnica de 2 GB"],
   ["memory source", "https://docs.clamav.net/manual/Installing/Docker.html"],
   ["historical memory date", "20/09/2020"],
   ["not a memory ceiling", "não é teto de memória"],

@@ -6,6 +6,9 @@ import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
 import { pageCopy } from "@/lib/site-page-copy";
+import { formsNamed, importedEntry, importedPage, pageFile, readPageFile } from "@/lib/site-page-file";
+import { redisPipeline } from "@/lib/redis";
+import { exactReplies, replyCount } from "@/lib/redis-exact";
 import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
@@ -24,6 +27,8 @@ const refuse = (error: string, status = 400) => Response.json({ ok: false, error
  *
  *   { action: "add", title, slug?, starter? }   a new page, empty or from a starter's blocks
  *   { action: "copy", id }                      a copy of one, kept back, without its pictures (lib/site-page-copy.ts)
+ *   { action: "export", id }                    the page as a file, without its pictures (lib/site-page-file.ts)
+ *   { action: "import", file }                  a new page from such a file, kept back, with what is not this store's left out
  *   { action: "meta", id, title, slug, nav, target }
  *   { action: "order", ids }
  *   { action: "remove", id }                    the page, its blocks and the pictures only it showed
@@ -99,6 +104,63 @@ export async function POST(request: NextRequest) {
         }
       }
       return Response.json({ ok: true, pages: saved.store.sitePages, id: made.entry.id, pictures: made.pictures });
+    }
+
+    if (action === "export") {
+      // 582 [KB3]: the page as a file for the creator to keep, read exactly, never an empty guess.
+      if (!found || !SITE_PAGE_ID.test(found.id)) return refuse("unknown", 404);
+      let held = { ...EMPTY_PAGE, blocks: [] as PageBlock[] };
+      if (store.statsId) {
+        try {
+          held = (await readPageExact(store.statsId, siteKey(found.id))).page ?? held;
+        } catch (error) {
+          console.error("reading a store page before exporting it failed", error);
+          return refuse("page_unread", 503);
+        }
+      }
+      const { file, pictures } = pageFile(found, held);
+      return Response.json({ ok: true, file, pictures });
+    }
+
+    if (action === "import") {
+      // 582 [KB3]: a new page from a file, held to the rules a saved page is, kept back from visitors.
+      if (pages.length >= MAX_SITE_PAGES) return refuse("too_many");
+      const read = readPageFile(body.file);
+      if (!read.ok) return refuse(read.reason === "file" ? "file" : read.reason);
+      // The forms it names, read exactly: an answer nobody can read never decides that a form is not this store's.
+      const named = formsNamed(read.page);
+      let forms = new Set<string>();
+      if (named.length) {
+        if (!store.statsId) forms = new Set();
+        else {
+          try {
+            // The key of the store's forms (lib/form-store.ts, formsKey).
+            const replies = exactReplies(await redisPipeline(named.map((id) => ["HEXISTS", `nl:forms:${store.statsId}`, id])), named.length, "the store's forms");
+            forms = new Set(named.filter((id, i) => replyCount(replies[i], "the store's forms") === 1));
+          } catch (error) {
+            console.error("reading a store's forms before bringing in a page failed", error);
+            return refuse("forms_unread", 503);
+          }
+        }
+      }
+      const products = new Set(store.catalog.items.map((item) => item.id));
+      const made = importedPage(read.page, (id) => products.has(id), (id) => forms.has(id));
+      const entry = importedEntry(read.title, pages, randomBytes(5).toString("hex"));
+      if (!entry) return refuse("taken");
+      const saved = await appendSitePages(ref, [entry]);
+      if (!saved.ok) return refuse(saved.reason === "none" ? "unknown" : "copy_conflict", saved.reason === "none" ? 404 : 409);
+      if (made.page.blocks.length) {
+        const statsId = saved.store.statsId;
+        if (!statsId) return refuse("copy_blocks", 500);
+        try {
+          await writePage(statsId, siteKey(entry.id), made.page, saved.store);
+        } catch (error) {
+          if (error instanceof StoreFullError) return refuse("copy_blocks_full", 409);
+          console.error("writing a store page brought in from a file failed", error);
+          return refuse("copy_blocks", 500);
+        }
+      }
+      return Response.json({ ok: true, pages: saved.store.sitePages, id: entry.id, left: made.left });
     }
 
     if (action === "meta") {

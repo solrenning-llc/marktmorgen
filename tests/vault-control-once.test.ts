@@ -136,6 +136,15 @@ test("a confirmed cancellation, asked for again inside the priced requests, is a
   assert.equal(billed.length, asked, "no request to R2 for the repeat");
 });
 
+test("a finish refused for its piece list asks R2 nothing and does not use up a priced request", async () => {
+  const pathname = await opened();
+  assert.deepEqual(await closeReservedVault(pathname, []), { ok: false, reason: "invalid" }, "a one-piece upload needs one piece tag");
+  assert.equal(billed.length, 0, "R2 is not asked for a refused finish");
+  measureFails = 1;
+  assert.deepEqual(await closeReservedVault(pathname, ["0".repeat(32)]), { ok: false, reason: "unavailable" }, "the corrected finish joins it, and its measurement could not be read");
+  assert.equal(await abortReservedVault(pathname), true, "the cancel is still inside the priced requests, finds the file completed and measures it");
+});
+
 test("no upload takes more finish-or-cancel requests than are priced for it, and past them R2 is not asked", async () => {
   const pathname = await opened();
   measureFails = 1;

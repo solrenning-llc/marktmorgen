@@ -18,6 +18,9 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/creators/route";
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
+import { RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, RESEARCH_MAX_BYTES } from "@/lib/creator-research-room";
+import { LIMITS } from "@/lib/creator-research";
+import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { store } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -135,6 +138,16 @@ async function main() {
     is("each field at its limit, three bytes a character, is kept", await ask(largest), [201, "saved"]);
     const [row] = await rows();
     is("and stored in fewer bytes than the ceiling", Buffer.byteLength(row ?? "", "utf8") <= ANSWER_MAX_BYTES, true);
+  }
+
+  part("The ceiling in the code is the one held here, and it never stops the backup");
+  {
+    is("320 answers of 12,288 bytes", [RESEARCH_MAX_ANSWERS, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_BYTES], [MAX_ANSWERS, ANSWER_MAX_BYTES, MAX_ANSWERS * ANSWER_MAX_BYTES]);
+    is("the whole list fits in one backup part less its 1 KiB of room", RESEARCH_MAX_BYTES <= BACKUP_MAX_BYTES - 1_024, true);
+    const characters = Object.values(LIMITS).reduce((sum, limit) => sum + limit, 0);
+    is("every field at its limit at three bytes a character, with 512 bytes for the rest, is under one answer's ceiling", characters * 3 + 512 <= RESEARCH_ANSWER_MAX_BYTES, true);
+    const registry = readFileSync("tests/store-data-registry.ts", "utf8");
+    is("the store data registry states the family's bound", /"nl:creators:responses@[^\n]*RESEARCH_MAX_ANSWERS[^\n]*RESEARCH_ANSWER_MAX_BYTES/.test(registry), true);
   }
 
   part("The form says a full list and a too long answer in plain words");

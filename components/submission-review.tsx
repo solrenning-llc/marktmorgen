@@ -131,16 +131,16 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
                 Send this reply? It cannot be changed once it is sent.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className="btn btn-primary btn-sm min-h-11" disabled={busy} aria-busy={busy} onClick={send}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy} aria-busy={busy} onClick={send}>
                   {busy ? "Sending…" : "Send the reply"}
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm min-h-11" disabled={busy} onClick={() => setChecking(false)}>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setChecking(false)}>
                   Change it
                 </button>
               </div>
             </div>
           ) : (
-            <button type="submit" className="btn btn-secondary btn-sm mt-3 min-h-11">
+            <button type="submit" className="btn btn-secondary btn-sm mt-3">
               Check the reply
             </button>
           )}
@@ -194,7 +194,7 @@ export function SubmissionReview({ productId }: { productId: string }) {
       </h2>
       <p className="mt-1 text-sm text-ink-soft">Files buyers sent you for review on this course&rsquo;s lessons, newest first.</p>
       {items === null ? (
-        <button type="button" className="btn btn-secondary btn-sm mt-3 min-h-11" disabled={busy} aria-busy={busy} onClick={() => load()}>
+        <button type="button" className="btn btn-secondary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={() => load()}>
           {busy ? "Opening…" : "Show files to review"}
         </button>
       ) : items.length === 0 ? (
@@ -216,7 +216,7 @@ export function SubmissionReview({ productId }: { productId: string }) {
             )}
           </ul>
           {next !== null ? (
-            <button type="button" className="btn btn-secondary btn-sm mt-3 min-h-11" disabled={busy} aria-busy={busy} onClick={() => load(next)}>
+            <button type="button" className="btn btn-secondary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={() => load(next)}>
               {busy ? "Opening…" : "Show older files"}
             </button>
           ) : null}

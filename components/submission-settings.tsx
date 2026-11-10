@@ -139,7 +139,7 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
             Ask buyers of this course to send you a video, a photo or a PDF for this lesson, and answer each one in writing.
           </p>
         )}
-        <button type="button" className="btn btn-secondary btn-sm mt-2 min-h-11" disabled={busy} aria-busy={busy} onClick={open}>
+        <button type="button" className="btn btn-secondary btn-sm mt-2" disabled={busy} aria-busy={busy} onClick={open}>
           {busy ? "Opening…" : setup === undefined ? "Open these settings" : setup ? "Change what you ask for" : "Ask for a submission"}
         </button>
         {undo ? (
@@ -147,7 +147,7 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
             You stopped asking for files on this lesson. Files already sent are kept.
             <button
               type="button"
-              className="btn btn-ghost btn-sm min-h-11"
+              className="btn btn-ghost btn-sm"
               disabled={busy}
               onClick={async () => {
                 const done = await send(undo);
@@ -240,16 +240,16 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
       </label>
       {errorLine}
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-        <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm min-h-11">
+        <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm">
           {busy ? "Saving…" : "Save"}
         </button>
-        <button type="button" className="btn btn-ghost btn-sm min-h-11" onClick={() => { setDraft(null); setError(null); }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); setError(null); }}>
           Cancel
         </button>
         {setup ? (
           <button
             type="button"
-            className="btn btn-ghost btn-sm ml-auto min-h-11"
+            className="btn btn-ghost btn-sm ml-auto"
             disabled={busy}
             onClick={async () => {
               const done = await send(null);

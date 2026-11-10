@@ -68,7 +68,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
         Commissions waiting for a buyer check
       </h2>
       <p className="mt-2 text-sm text-ink-soft">
-        {`These sales did not give us the buyer's email, so we cannot tell whether the buyer is the affiliate who invited the seller. We keep looking for ${days} days and decide on our own if the email turns up. Until then they are not in your payment batch. If you know the buyer is somebody else, you can approve one.`}
+        {`These sales did not give us the buyer's email, so we cannot tell whether the buyer is the affiliate who invited the seller. For a sale, we keep looking for ${days} days and decide on our own if the email turns up. A membership's renewal cannot be looked up again, so it waits for you. Until then they are not in your payment batch. If you know the buyer is somebody else, you can approve one.`}
       </p>
       <p className="mt-2 text-sm text-ink-soft" role="status">
         {total > lines.length ? `Showing ${lines.length} of ${total} waiting.` : `${total} waiting.`}

@@ -73,7 +73,7 @@ async function setup() {
   offers = [];
   await claimHandle(OWNER, "mill", "Mill Notes", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestTierSelfPend", true);
+  await setStripeAccount(OWNER, "acct_1TestTierSlfPd", true);
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, percent: 30, days: 30, recurring: 12, secondTier: 10 }));
   let store = (await storeForEmail(OWNER))!;
   if (!store.sid) await ensureStoreId(storeRef(store));

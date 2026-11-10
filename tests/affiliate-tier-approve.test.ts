@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestTierApprove1", true);
+  await setStripeAccount(OWNER, "acct_1TestTierAppr1", true);
   await setSubscription(OWNER, { customerId: "cus_harbor", subscriptionId: "sub_harbor", active: true, tier: "creator", period: paidPeriod() });
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, percent: 30, secondTier: 10 }));
   const store = async () => (await storeForEmail(OWNER))!;

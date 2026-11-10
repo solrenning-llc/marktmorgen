@@ -58,7 +58,7 @@ async function setup() {
   asked = [];
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestTierUnconf1", true);
+  await setStripeAccount(OWNER, "acct_1TestTierUncf1", true);
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, percent: 30, secondTier: 10 }));
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;

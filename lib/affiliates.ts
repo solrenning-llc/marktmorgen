@@ -86,7 +86,7 @@ import { giveData, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion } from "@/lib/affiliate-promotion";
-import { onAccount } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, readStripePage } from "@/lib/stripe-list";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { DISPUTE_TAKES } from "@/lib/retained-revenue";
@@ -782,6 +782,23 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
   if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return null;
   const [raw] = await redisPipeline([["HGET", peopleKey(store.statsId), id]]);
   return parseAffiliate(raw);
+}
+
+/**
+ * One affiliate's record read exactly (rule 24; the money reviews of #3485, M2): the record, null only when Redis
+ * answers that there is none, and undefined when it is not known (no answer, a reply that is not text, text that is
+ * not a record), never taken for "no such affiliate".
+ */
+async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null | undefined> {
+  if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return undefined;
+  try {
+    const read = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
+    if (!read) return undefined;
+    if (read[0] === null) return null;
+    return typeof read[0] === "string" ? (parseAffiliate(read[0]) ?? undefined) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -4151,37 +4168,47 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
   const titles = new Map([...(named && ids.length ? await readCardsFor(store, ids).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
   const lines: Referral[] = [];
   for (const { invoice, meta } of found) {
-    const total = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (typeof invoice.id !== "string" || invoice.status !== "paid" || total <= 0) continue;
-    const paidAt = Number(invoice.status_transitions?.paid_at) || Number(invoice.created) || 0;
-    const plan = meta.kind === "plan";
-    const months = Number(meta.via_months) || 0;
-    const soldAt = Number(meta.via_at) || 0;
-    if (!plan && (months < 1 || !soldAt || !withinMonths(soldAt, paidAt, months))) continue;
-    const tax = (invoice.total_taxes ?? []).reduce((sum, t) => sum + (typeof t?.amount === "number" ? t.amount : 0), 0);
-    const pi = invoice.payments?.data?.map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string") ?? "";
-    const affiliate = byId.get(meta.via);
-    const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
-    lines.push({
-      ref: invoice.id,
-      pi,
-      aff: meta.via,
-      at: paidAt,
-      product: meta.product ?? "",
-      title: (titles.get(meta.product ?? "") ?? "").slice(0, 200),
-      base: Math.max(0, total - tax),
-      total,
-      currency: readCurrencyCode(invoice.currency),
-      rate: Number(meta.via_rate) || 0,
-      self: Boolean(affiliate && buyer) && ownAddress(affiliate!, buyer),
-      how: "recurring",
-      promotion: affiliatePromotionFrom(meta) ?? undefined,
-      // Decided with the invoice, as a sale is when written down (tierOff); with no address on an invoice paid since
-      // TIER_BUYER_FROM, it waits (buyerUnknown), as a new sale with none does.
-      ...tierOfInvoice(byId, meta.via, buyer, paidAt),
-    });
+    const line = invoiceLine(invoice, meta, byId, titles);
+    if (line) lines.push(line);
   }
   return { lines, complete };
+}
+
+/**
+ * One paid invoice of a membership or plan sold through a link, as its Referral, or null when it earns nothing (not
+ * paid, nothing paid, past the months agreed when it was sold). Shared by recurringReferrals and the creator's
+ * approval of a renewal that waits for its buyer (approveUnconfirmed), so both read it the same way.
+ */
+function invoiceLine(invoice: InvoiceLike, meta: Record<string, string>, byId: Map<string, Affiliate>, titles: Map<string, string>): Referral | null {
+  const total = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
+  if (typeof invoice.id !== "string" || invoice.status !== "paid" || total <= 0) return null;
+  const paidAt = Number(invoice.status_transitions?.paid_at) || Number(invoice.created) || 0;
+  const plan = meta.kind === "plan";
+  const months = Number(meta.via_months) || 0;
+  const soldAt = Number(meta.via_at) || 0;
+  if (!plan && (months < 1 || !soldAt || !withinMonths(soldAt, paidAt, months))) return null;
+  const tax = (invoice.total_taxes ?? []).reduce((sum, t) => sum + (typeof t?.amount === "number" ? t.amount : 0), 0);
+  const pi = invoice.payments?.data?.map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string") ?? "";
+  const affiliate = byId.get(meta.via);
+  const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
+  return {
+    ref: invoice.id,
+    pi,
+    aff: meta.via,
+    at: paidAt,
+    product: meta.product ?? "",
+    title: (titles.get(meta.product ?? "") ?? "").slice(0, 200),
+    base: Math.max(0, total - tax),
+    total,
+    currency: readCurrencyCode(invoice.currency),
+    rate: Number(meta.via_rate) || 0,
+    self: Boolean(affiliate && buyer) && ownAddress(affiliate!, buyer),
+    how: "recurring",
+    promotion: affiliatePromotionFrom(meta) ?? undefined,
+    // Decided with the invoice, as a sale is when written down (tierOff); with no address on an invoice paid since
+    // TIER_BUYER_FROM, it waits (buyerUnknown), as a new sale with none does.
+    ...tierOfInvoice(byId, meta.via, buyer, paidAt),
+  };
 }
 
 /**
@@ -4248,11 +4275,12 @@ function tierOwn(recruit: Affiliate, up: Affiliate | undefined, email: string): 
  * named no buyer, or the affiliates do not read (never denied nor paid on a guess). Two record reads at the most.
  */
 async function tierFor(store: Store, aff: string, buyer: string): Promise<{ tierOff?: 1; buyerUnknown?: 1 }> {
-  const recruit = await readAffiliate(store, aff).catch(() => undefined);
+  // Read exactly: a record that does not read is not known, never "no such affiliate" (M2 of the reviews of #3485).
+  const recruit = await readAffiliateExact(store, aff);
   if (recruit === undefined) return { buyerUnknown: 1 };
   if (!recruit?.by) return {};
   if (!buyer) return { buyerUnknown: 1 };
-  const up = await readAffiliate(store, recruit.by.id).catch(() => undefined);
+  const up = await readAffiliateExact(store, recruit.by.id);
   if (up === undefined) return { buyerUnknown: 1 };
   return tierOwn(recruit, up ?? undefined, buyer) ? { tierOff: 1 } : {};
 }
@@ -4317,7 +4345,8 @@ export async function approveUnconfirmed(store: Store, ref: string): Promise<"ap
   if (!store.statsId || !isRedisConfigured() || !/^[A-Za-z0-9_:.-]{3,250}$/.test(sale)) return "unknown";
   const read = repliesFor(await redisPipeline([["HGET", salesKey(store.statsId), sale]]), 1);
   if (!read || (read[0] !== null && typeof read[0] !== "string")) return "unknown";
-  if (read[0] === null) return "gone";
+  // A membership's renewal is never written down: it is read from its invoice (M3 of the reviews of #3485).
+  if (read[0] === null) return sale.startsWith("in_") ? approveRenewal(store, sale) : "gone";
   const kept = parseReferral(read[0]);
   if (!kept) return "unknown";
   if (!kept.buyerUnknown) return "not-waiting";
@@ -4325,6 +4354,45 @@ export async function approveUnconfirmed(store: Store, ref: string): Promise<"ap
   delete whole.buyerUnknown;
   await orderWrite(store, [["HSET", salesKey(store.statsId), sale, JSON.stringify(whole)]]);
   await redisPipeline([["ZREM", unconfirmedKey(store.statsId), sale]]).catch(() => undefined);
+  await countUnconfirmed({ approved: 1 });
+  return "approved";
+}
+
+/**
+ * The creator approves a membership's renewal whose second tier waits because its invoice named no buyer (M3 of the
+ * reviews of #3485): its invoice is read again from the creator's Stripe account, as recurringReferrals reads it, and
+ * when its line still waits it is written down as a sale with no wait (HSETNX): from then the book reads that line,
+ * never the invoice's again (readBook: one line, never two), so its tier joins the next payment batch. "gone" when
+ * the invoice is not one of the store's lines, "not-waiting" when it does not wait (or was written meanwhile),
+ * "unknown" when Stripe or a record does not answer for sure.
+ */
+async function approveRenewal(store: Store, invoiceId: string): Promise<"approved" | "not-waiting" | "gone" | "unknown"> {
+  if (!store.stripeAccountId || !/^in_[A-Za-z0-9]{3,250}$/.test(invoiceId)) return "gone";
+  let invoice: InvoiceLike;
+  try {
+    invoice = (await onAccount("GET", store.stripeAccountId, `/invoices/${invoiceId}?expand[]=payments`, undefined, AFF_SUB_STRIPE_VERSION)) as InvoiceLike;
+  } catch (error) {
+    if (error instanceof StripeError && error.status === 404) return "gone";
+    console.error("reading a renewal to approve its second tier failed", error instanceof Error ? error.message : "");
+    return "unknown";
+  }
+  if (!invoice || invoice.id !== invoiceId) return "unknown";
+  const meta = invoice.parent?.subscription_details?.metadata ?? {};
+  if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !saleHandles(store).has(meta.store ?? "")) return "gone";
+  const recruit = await readAffiliateExact(store, meta.via);
+  if (recruit === undefined) return "unknown";
+  if (recruit === null) return "gone";
+  const up = recruit.by ? await readAffiliateExact(store, recruit.by.id) : null;
+  if (up === undefined) return "unknown";
+  const byId = new Map<string, Affiliate>([[recruit.id, recruit], ...(up ? [[up.id, up] as [string, Affiliate]] : [])]);
+  const titles = new Map([...(meta.product ? await readCardsFor(store, [meta.product]).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
+  const line = invoiceLine(invoice, meta, byId, titles);
+  if (!line) return "gone";
+  if (!line.buyerUnknown) return "not-waiting";
+  const { buyerUnknown: _waits, ...decided } = line;
+  void _waits;
+  const written = await orderWrite(store, [["HSETNX", salesKey(store.statsId as string), invoiceId, JSON.stringify(decided)]]);
+  if (written[0] !== 1) return written[0] === 0 ? "not-waiting" : "unknown";
   await countUnconfirmed({ approved: 1 });
   return "approved";
 }
@@ -4478,7 +4546,9 @@ export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<strin
     const percent = Math.min(recruit.by.percent, MAX_COMMISSION - line.rate - (partners.get(line.ref) ?? 0));
     if (percent <= 0) continue;
     const settled = settleLine({ ref: `tier2:${line.ref}`, pi: line.pi, aff: up.id, at: line.at, product: line.product, title: line.title, base: line.base, total: line.total, currency: line.currency, rate: percent, self: false, how: "tier2" }, line.refunded);
-    out.push(tier === "waits" && settled.status === "earned" ? { ...settled, status: "buyer not confirmed" } : settled);
+    // Waiting whatever its refund or dispute status (M1 of the reviews of #3485): a partial refund never puts a tier
+    // whose buyer is not confirmed in what is paid automatically. Refunded in full it has nothing left to wait for.
+    out.push(tier === "waits" && settled.commission > 0 ? { ...settled, status: "buyer not confirmed" } : settled);
   }
   return out;
 }

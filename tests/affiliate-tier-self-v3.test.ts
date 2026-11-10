@@ -43,7 +43,7 @@ async function setup(extra: Record<string, unknown> = {}) {
   redis.clear();
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPrerevTier1", true);
+  await setStripeAccount(OWNER, "acct_1TestPrerevTr1", true);
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, percent: 30, secondTier: 10, ...extra }));
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;

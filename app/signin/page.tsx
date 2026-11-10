@@ -14,6 +14,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { formatMoney } from "@/lib/money";
 import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
+import { ForgetInboxDrafts } from "@/components/forget-inbox-drafts";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
 const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
@@ -292,6 +293,8 @@ export default async function SignInPage({
           ) : null}
 
           {confirmation ? <ToastOnLoad message={confirmation} param="status" /> : null}
+          {/* Every log-out lands here: the unsent inbox answers kept on this device go with the session (lib/inbox-drafts.ts). */}
+          {status.startsWith("out") ? <ForgetInboxDrafts /> : null}
           {notice ? (
             <div className={`notice ${notice.tone === "success" ? "notice-success" : "notice-warn"} mt-6`} role="status">
               <p className="font-semibold">{notice.title}</p>

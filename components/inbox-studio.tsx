@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/toast";
 import { FaqFromInbox } from "@/components/faq-from-inbox";
 import { randomLetters } from "@/lib/random-letters";
+import { browserDrafts, clearDraft, draftIds, readDraft, saveDraft } from "@/lib/inbox-drafts";
 import {
   type Conversation,
   type InboxSetting,
@@ -106,6 +107,32 @@ export function InboxStudio({
   const hydrated = useHydrated();
   const [checkFailed, setCheckFailed] = useState(false);
   const [paused, setPaused] = useState(false);
+  // Unsent answers, kept per conversation on this device only (lib/inbox-drafts.ts): which conversations have one.
+  const [drafted, setDrafted] = useState<Set<string>>(() => new Set());
+  // Read out politely when a draft is kept or comes back, never on each key (3.2.5).
+  const [draftSaid, setDraftSaid] = useState("");
+  /** The answer box changed by typing, a saved reply or a suggestion: kept as this conversation's draft. */
+  const typed = (next: string) => {
+    setText(next);
+    if (!thread) return;
+    if (saveDraft(browserDrafts(), thread.conversation.id, next)) setDrafted(draftIds(browserDrafts()));
+  };
+  // Once the page is drawn: the drafts on this device, and the open conversation's own back in its box.
+  const firstId = first?.conversation.id ?? null;
+  useEffect(() => {
+    // Right after the page is drawn, so the server's page and the browser's first one agree.
+    const timer = window.setTimeout(() => {
+      const storage = browserDrafts();
+      setDrafted(draftIds(storage));
+      if (!firstId) return;
+      const kept = readDraft(storage, firstId);
+      if (kept) {
+        setText((now) => now || kept);
+        setDraftSaid("Your unsent answer to this conversation is back in the box.");
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [firstId]);
 
   const refresh = useCallback(async (asked: boolean) => {
     const answer = await post({ action: "list" });
@@ -159,8 +186,20 @@ export function InboxStudio({
     setBusy(false);
     if (!answer.ok) return fail(answer.error);
     const next = answer.thread as Thread;
+    const leaving = thread && thread.conversation.id !== id && text.trim() ? thread.conversation : null;
     setThread(next);
-    setText("");
+    // The answer typed for the conversation left stays its draft; the one opened gets its own back, or an empty box.
+    const kept = readDraft(browserDrafts(), id);
+    const now = draftIds(browserDrafts());
+    setText(kept);
+    setDrafted(now);
+    setDraftSaid(
+      kept
+        ? "Your unsent answer to this conversation is back in the box."
+        : leaving && now.has(leaving.id)
+          ? `Your unsent answer to ${leaving.name || leaving.email} is kept as a draft on this device.`
+          : "",
+    );
     put(next.conversation);
     const url = new URL(window.location.href);
     url.searchParams.set("c", id);
@@ -178,6 +217,9 @@ export function InboxStudio({
     setThread(next);
     put(next.conversation);
     setText("");
+    clearDraft(browserDrafts(), next.conversation.id);
+    setDrafted(draftIds(browserDrafts()));
+    setDraftSaid("");
     toast(answer.emailed ? `Sent: in their chat, and emailed to ${next.conversation.email}.` : "Kept in the conversation. The email could not go just now; they see it in their chat.");
   }
 
@@ -197,7 +239,7 @@ export function InboxStudio({
     const answer = await post({ action: "suggest", id: thread.conversation.id });
     setBusy(false);
     if (!answer.ok) return fail(answer.error);
-    setText(String(answer.text ?? ""));
+    typed(String(answer.text ?? ""));
     setLeft(Number(answer.left) || 0);
     toast("A suggestion is in the box. Read it and change what you need before sending.");
   }
@@ -249,6 +291,7 @@ export function InboxStudio({
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className={`truncate ${x.unread ? "font-semibold" : ""}`}>{x.name || x.email}</span>
+                      {drafted.has(x.id) && c?.id !== x.id ? <span className="tag shrink-0" data-inbox-draft="">Draft</span> : null}
                       {x.unread ? (
                         <span className="rounded-full bg-ink px-2 text-xs text-paper" aria-label={`${x.unread} unread`}>
                           {x.unread}
@@ -328,8 +371,12 @@ export function InboxStudio({
               <form onSubmit={reply} className="mt-5 space-y-3">
                 <label className="block">
                   <span className="field-label">Your answer</span>
-                  <textarea className="field mt-1 w-full" rows={5} maxLength={MAX_MESSAGE} required value={text} onChange={(e) => setText(e.target.value)} />
+                  <textarea className="field mt-1 w-full" rows={5} maxLength={MAX_MESSAGE} required value={text} onChange={(e) => typed(e.target.value)} aria-describedby="inbox-draft-help" />
                 </label>
+                <p id="inbox-draft-help" className="text-xs text-ink-soft">
+                  What you type is kept on this device only, as a draft for this conversation, until you send it or log out. It is never sent to us.
+                </p>
+                <p className="sr-only" role="status" aria-live="polite" data-inbox-draft-said="">{draftSaid}</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="submit" className="btn btn-primary btn-sm" disabled={busy || text.trim().length < 2}>
                     Send the answer
@@ -342,7 +389,7 @@ export function InboxStudio({
                         value=""
                         onChange={(e) => {
                           const picked = setting.saved.find((s) => s.id === e.target.value);
-                          if (picked) setText((t) => (t.trim() ? `${t.trimEnd()}\n\n${picked.text}` : picked.text));
+                          if (picked) typed(text.trim() ? `${text.trimEnd()}\n\n${picked.text}` : picked.text);
                         }}
                       >
                         <option value="">Put in a saved reply…</option>

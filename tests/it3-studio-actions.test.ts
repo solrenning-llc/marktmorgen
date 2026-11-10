@@ -24,11 +24,10 @@ import {
   editDistance,
   readRecent,
   rememberAction,
-  searchActions,
   singular,
   termsOf,
-  type ActionResult,
 } from "@/lib/studio-actions";
+import { searchActions, type ActionResult } from "@/lib/studio-actions-gallery";
 import { STUDIO_MODULES, type GalleryContext } from "@/lib/studio-modules";
 import { can, type Role } from "@/lib/team-roles";
 import { done, is, part } from "./check";

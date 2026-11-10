@@ -13,7 +13,8 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
-import { STUDIO_ACTIONS, available, resultFor, searchActions } from "@/lib/studio-actions";
+import { STUDIO_ACTIONS, score, termsOf } from "@/lib/studio-actions";
+import { available, offeredFor, resultFor, searchActions } from "@/lib/studio-actions-gallery";
 import { STUDIO_MODULES, type GalleryContext } from "@/lib/studio-modules";
 import { PER_GROUP, type SearchAnswer, answerSentence } from "@/lib/studio-search-rules";
 import { studioSearch } from "@/lib/studio-search";
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
   is("the actions group's rules exist (lib/studio-search-actions.ts)", pure !== null, true);
   is("the server's list of actions exists (lib/studio-actions-offered.ts)", server !== null, true);
   if (!pure || !server) return done();
-  const { ACTIONS_TITLE, offeredFor, matchActions, withActions } = pure;
+  const { ACTIONS_TITLE, matchActions, withActions } = pure;
 
   part("What the server offers: the gallery's role and conditions, as unit 1 reads them");
   for (const role of ["owner", "admin", "editor", "support"] as Role[]) {
@@ -87,7 +88,9 @@ async function main(): Promise<void> {
   is("an id the box does not know is never shown", ids(matchActions("dicount", [{ id: "sale-everything", href: "/studio?store=s1#x", plan: null, module: null }])), []);
   is("an offered list that is not a list shows nothing", ids(matchActions("dicount", null as unknown as [])), []);
   is("the same action offered twice is shown once", ids(matchActions("dicount", [sale, sale])), ["sale"]);
-  is(`at most ${PER_GROUP} actions`, matchActions("a e i o u store your", owner).length <= PER_GROUP, true);
+  // "co" starts more than a group's worth of their words.
+  const fitting = owner.filter((entry) => score(termsOf("co"), STUDIO_ACTIONS.find((action) => action.id === entry.id)!) > 0).length;
+  is(`at most ${PER_GROUP} actions, the best of more`, [fitting > PER_GROUP, matchActions("co", owner).length], [true, PER_GROUP]);
   is("the offered order does not change the answer", ids(matchActions("refunds", [...owner].reverse())), ids(matchActions("refunds", owner)));
   is("small words alone find nothing", ids(matchActions("how do i", owner)), []);
 
@@ -117,7 +120,8 @@ async function main(): Promise<void> {
   is("with no answer from the route yet (or a refusal), the actions alone", withActions("blog", owner, null).groups.map((group) => group.id), ["actions"]);
   is("an address is never searched as an action", withActions("blog@example.com", owner, null).groups.flatMap((group) => group.results), []);
   is("too few letters is no search", withActions("b", owner, null).groups.flatMap((group) => group.results), []);
-  is("the sentence counts the actions with the rest", answerSentence(merged, "blog"), "3 results: 1 action, 1 product, 1 tool.");
+  const counted = merged.groups[0].results.length;
+  is("the sentence counts the actions with the rest", answerSentence(merged, "blog"), `${counted + 2} results: ${counted} ${counted === 1 ? "action" : "actions"}, 1 product, 1 tool.`);
   is("one action alone", answerSentence(withActions("dicount", owner, { groups: [] }), "dicount"), "1 result: 1 action.");
   is("nothing, said once", answerSentence(withActions("zzzz", owner, { groups: [] }), "zzzz"), "Nothing matches “zzzz”.");
 
@@ -166,6 +170,8 @@ async function main(): Promise<void> {
   is("the box draws without a list of actions", renderToStaticMarkup(createElement(StudioSearch, { sid: "s1", buyers: false })).includes("Search the studio"), true);
   const header = readFileSync("components/studio-header.tsx", "utf8");
   is("the top bar gives the box the role's own actions for this store", /<StudioSearch[^>]*actions=\{offeredActions\(current, role\)\}/.test(header), true);
+  const actionsSource = readFileSync("lib/studio-actions.ts", "utf8");
+  is("the list and its matching import nothing of the gallery, so the browser does not carry it", /from "@\/lib\/studio-modules"/.test(actionsSource), false);
   const rules = readFileSync("lib/studio-search-actions.ts", "utf8");
   is("the box's rules hold nothing of the server's (no Redis, no settings)", ["@/lib/redis", "@/lib/store\"", "process.env", "@/lib/discord", "@/lib/billing"].some((piece) => rules.includes(piece)), false);
   done();

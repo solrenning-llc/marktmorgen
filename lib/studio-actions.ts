@@ -9,7 +9,10 @@
  *   - the words typed, at most MAX_QUERY_CHARS, never kept anywhere;
  *   - the person's role and the store's conditions, the same GalleryContext
  *     the gallery "Add to your store" reads (lib/studio-modules.ts), so a
- *     result never opens a screen the person's role would be sent away from;
+ *     result never opens a screen the person's role would be sent away from
+ *     (available, resultFor and searchActions, in lib/studio-actions-gallery.ts,
+ *     so this list and its matching carry nothing of the gallery and run in
+ *     the browser too: 486 [IT3], unit 2);
  *   - the ids of the actions this person opened last, on their own device
  *     (rememberAction, readRecent), only to order the results.
  *
@@ -27,7 +30,6 @@
  * home names the section it scrolls to, and that section is drawn for every
  * role with the action's permission, under that permission alone.
  */
-import { STUDIO_MODULES, cardFor, shows, type GalleryContext } from "@/lib/studio-modules";
 import type { Permission } from "@/lib/team-roles";
 
 /** The most a search reads of what was typed; the rest is ignored. */
@@ -113,9 +115,6 @@ export const NOT_ACTIONS: Readonly<Record<string, string>> = {
   "closing-refunds": "The review before members get unused time back, which opens only while the store is closing.",
 };
 
-/** A result: what it does, where it goes, and the plan it needs when the store's plan does not include it. */
-export type ActionResult = { id: string; title: string; href: string; plan: string | null };
-
 /** Words that say nothing about what to do, left out of a search. */
 const SMALL_WORDS = new Set(["a", "an", "the", "to", "i", "my", "me", "want", "how", "do", "can", "of", "for", "on", "in", "and", "or", "is", "it", "your", "you", "with", "please", "where", "what"]);
 
@@ -196,29 +195,6 @@ export function score(typed: readonly string[], action: StudioAction): number {
   return total;
 }
 
-/** Whether an action is shown to this person on this store: its card's role and conditions in the gallery, or the action's permission. */
-export function available(action: StudioAction, ctx: GalleryContext): boolean {
-  const screen = action.segment ? STUDIO_MODULES.find((entry) => entry.segment === action.segment) : undefined;
-  if (screen) return shows(screen, ctx);
-  return action.permission === "member" || ctx.may(action.permission);
-}
-
-/**
- * Where an action goes: its screen, or its section of the studio home; for a
- * module the store's plan does not include, the way to the plan, as the
- * gallery says it (cardFor); null when there is no way from here.
- */
-export function resultFor(action: StudioAction, ctx: GalleryContext, href: (segment: string) => string): ActionResult | null {
-  const screen = action.segment ? STUDIO_MODULES.find((entry) => entry.segment === action.segment) : undefined;
-  if (screen) {
-    const card = cardFor(screen, ctx, href);
-    if (card.state === "plan") return card.href ? { id: action.id, title: action.title, href: card.href, plan: card.plan } : null;
-    return { id: action.id, title: action.title, href: card.href, plan: null };
-  }
-  const base = href(action.segment);
-  return { id: action.id, title: action.title, href: action.anchor ? `${base}#${action.anchor}` : base, plan: null };
-}
-
 /** The ids of recently opened actions, as a device kept them: known ids only, at most MAX_RECENT; anything else reads as none. */
 export function readRecent(raw: unknown): string[] {
   let value: unknown = raw;
@@ -243,31 +219,4 @@ export function readRecent(raw: unknown): string[] {
 export function rememberAction(recent: readonly string[], id: string): string[] {
   if (!STUDIO_ACTIONS.some((action) => action.id === id)) return readRecent(recent);
   return [id, ...readRecent(recent).filter((other) => other !== id)].slice(0, MAX_RECENT);
-}
-
-/**
- * The results of one search, best first: how well the words fit, then the
- * actions this person opened most recently, then the order above. With no
- * words to search, the recently opened actions, most recent first.
- */
-export function searchActions(query: string, ctx: GalleryContext, href: (segment: string) => string, recent: readonly string[] = []): ActionResult[] {
-  const typed = termsOf(query);
-  const order = readRecent(recent);
-  const rank = (id: string) => {
-    const at = order.indexOf(id);
-    return at === -1 ? MAX_RECENT : at;
-  };
-  const candidates = typed.length === 0
-    ? STUDIO_ACTIONS.filter((action) => order.includes(action.id)).map((action) => ({ action, fits: 0 }))
-    : STUDIO_ACTIONS.map((action) => ({ action, fits: score(typed, action) })).filter((entry) => entry.fits > 0);
-  const results: ActionResult[] = [];
-  for (const { action } of candidates
-    .map((entry, index) => ({ ...entry, index }))
-    .sort((a, b) => b.fits - a.fits || rank(a.action.id) - rank(b.action.id) || a.index - b.index)) {
-    if (!available(action, ctx)) continue;
-    const result = resultFor(action, ctx, href);
-    if (result) results.push(result);
-    if (results.length === MAX_RESULTS) break;
-  }
-  return results;
 }

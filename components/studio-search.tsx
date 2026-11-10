@@ -11,6 +11,7 @@ import {
   isAddress,
   searchScheduler,
 } from "@/lib/studio-search-rules";
+import { type OfferedAction, withActions } from "@/lib/studio-search-actions";
 
 // Before the page's script runs the box could not search, so it is not shown or reachable yet; but the server
 // still draws it, unseen and inert, so it already holds its place and nothing under it moves when it appears
@@ -18,6 +19,8 @@ import {
 const subscribe = () => () => {};
 const clientReady = () => true;
 const serverReady = () => false;
+
+const NO_ACTIONS: readonly OfferedAction[] = [];
 
 type Reply = { status: number; body: SearchAnswer & { ok?: boolean; error?: string; message?: string } };
 type Option = { key: string; group: string; title: string; detail: string; href?: string; buyer?: string };
@@ -34,7 +37,11 @@ function refusalSentence(reply: Reply): string {
  * The studio's one search box (766 [STN13], unit 1), under the top bar of
  * every studio screen: the store's products, its own pages and the studio's
  * tools, found by name; for a role that may read orders, a buyer's whole email
- * address opens that buyer's page.
+ * address opens that buyer's page. First of all, the things this person may do
+ * here (486 [IT3]): `actions` is the list the server offered for this role and
+ * store (lib/studio-actions-offered.ts), searched in the browser as the words
+ * change (lib/studio-search-actions.ts, withActions), with no request of its
+ * own, so they are there even when the route says no.
  *
  * The WAI-ARIA Authoring Practices combobox with a grouped listbox: focus
  * stays in the field, the arrows move through the results (Home and End to
@@ -50,7 +57,7 @@ function refusalSentence(reply: Reply): string {
  * answers, so typing never reads per key (lib/studio-search-rules.ts,
  * searchScheduler); each search is counted by the route before it reads.
  */
-export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) {
+export function StudioSearch({ sid, buyers, actions = NO_ACTIONS }: { sid: string; buyers: boolean; actions?: readonly OfferedAction[] }) {
   const ready = useSyncExternalStore(subscribe, clientReady, serverReady);
   const base = useId();
   const inputId = `${base}-field`;
@@ -69,6 +76,11 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
   const [active, setActive] = useState(-1);
   const [busy, setBusy] = useState(false);
   const scheduler = useRef<ReturnType<typeof searchScheduler<Reply>> | null>(null);
+  // How many things to do were found, said before the route's refusal, which does not take them away.
+  const lead = (q: string) => {
+    const local = withActions(q, actions, null);
+    return local.groups.some((group) => group.results.length > 0) ? `${answerSentence(local, q)} ` : "";
+  };
 
   const schedule = () => {
     scheduler.current ??= searchScheduler<Reply>({
@@ -86,15 +98,15 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
       answer: (q, reply) => {
         if (reply.status === 200 && reply.body.ok === true && Array.isArray(reply.body.groups)) {
           setAnswer({ groups: reply.body.groups });
-          say(answerSentence({ groups: reply.body.groups }, q));
+          say(answerSentence(withActions(q, actions, { groups: reply.body.groups }), q));
         } else {
           setAnswer(null);
-          say(refusalSentence(reply));
+          say(lead(q) + refusalSentence(reply));
         }
       },
-      failed: () => {
+      failed: (q) => {
         setAnswer(null);
-        say("We could not search just now. Check your connection and try again.");
+        say(`${lead(q)}We could not search just now. Check your connection and try again.`);
       },
     });
     return scheduler.current;
@@ -104,9 +116,9 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
   const address = buyers && query !== null && isAddress(query) ? query.trim() : "";
   const options: Option[] = address
     ? [{ key: "buyer", group: "Buyers", title: `Open the page of ${address}`, detail: "Their payments, courses and your team's notes.", buyer: address }]
-    : (answer?.groups ?? []).flatMap((group) =>
+    : (query !== null ? withActions(query, actions, answer) : answer)?.groups.flatMap((group) =>
         group.results.map((result) => ({ key: `${group.id}-${result.id}`, group: group.title, title: result.title, detail: result.detail, href: result.href })),
-      );
+      ) ?? [];
   const expanded = open && options.length > 0;
   const optionId = (index: number) => `${listId}-${index}`;
 
@@ -211,8 +223,8 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
         </label>
         <p id={hintId} className="mt-1 text-sm text-ink-soft">
           {buyers
-            ? "Find a product, one of your pages or a tool by its name. To open a buyer's page, type their whole email address."
-            : "Find a product, one of your pages or a tool by its name."}
+            ? "Type what you want to do, or find a product, one of your pages or a tool by its name. To open a buyer's page, type their whole email address."
+            : "Type what you want to do, or find a product, one of your pages or a tool by its name."}
         </p>
         <input
           id={inputId}
@@ -227,7 +239,7 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
           spellCheck={false}
           maxLength={MAX_QUERY}
           value={text}
-          placeholder="For example: planner, About, Inbox"
+          placeholder="For example: refund, planner, About"
           onChange={(event) => change(event.target.value)}
           onKeyDown={keys}
           onFocus={() => setOpen(true)}

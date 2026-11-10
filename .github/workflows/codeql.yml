@@ -23,7 +23,10 @@ concurrency:
   # the group a merge group never shares one with a pull request run or another merge group.
   # The active merge-group run is never canceled by this group; a newer delivery of the same
   # merge group may replace one still pending, and that replacement is the same check.
-  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+  # CodeQL cancels only an older run of the same pull request: a push to main, the daily run
+  # and a manual run always finish, so main gets a complete analysis; per group at most one
+  # runs and one waits, and a newer push replaces the waiting one, so runs never pile up.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   documentation-scope:
     name: Documentation scope (codeql)

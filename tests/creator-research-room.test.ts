@@ -1,0 +1,153 @@
+/**
+ * The creator research list has a ceiling, checked before an answer is kept
+ * (MR: a ceiling before every spend; unknown cost is never zero).
+ *
+ * app/api/creators/route.ts takes answers from anyone, signed in or not,
+ * five an hour per connection. Before this, nl:creators:responses only grew
+ * for 24 months (the daily job drops older answers), with no count and no
+ * byte ceiling: many connections could fill the database, and one list over
+ * the backup's part size (lib/backup-parts.ts) stops every backup run.
+ *
+ * Now an answer is at most 12,288 bytes as stored (every real answer fits:
+ * each field at its limit, three bytes a character, stays under it), and the
+ * list holds at most 320 answers, read before the write and checked again on
+ * the length the write answers, so two answers sent at once cannot both pass.
+ * A full list is said honestly (503 "full"), never as saved.
+ */
+import { readFileSync } from "node:fs";
+import { NextRequest } from "next/server";
+import { POST } from "@/app/api/creators/route";
+import { RESPONSES_KEY } from "@/lib/creator-research-store";
+import { store } from "./redis-stub";
+import { done, is, part } from "./check";
+
+const MAX_ANSWERS = 320;
+const ANSWER_MAX_BYTES = 12_288;
+
+const payload = {
+  name: "Synthetic Creator", email: "creator@example.test", platform: "Other",
+  country: "Test country", problem: "A synthetic research answer for a regression test.",
+  link: "", tools: "", cost: "", consentResearch: true,
+  consentFollowUp: false, consentUpdates: false, website: "",
+};
+
+let ip = 0;
+async function ask(body: unknown): Promise<[number, string]> {
+  ip += 1;
+  const response = await POST(
+    new NextRequest("https://marktmorgen.com/api/creators", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://marktmorgen.com", Host: "marktmorgen.com", "x-forwarded-for": `198.51.100.${ip}` },
+      body: JSON.stringify(body),
+    }),
+  );
+  const json = (await response.json()) as { error?: string; saved?: boolean };
+  return [response.status, json.error ?? (json.saved === true ? "saved" : "?")];
+}
+
+async function rows(): Promise<string[]> {
+  const [list] = await store.pipeline([["LRANGE", RESPONSES_KEY, 0, -1]]);
+  return list as string[];
+}
+
+async function fill(count: number): Promise<void> {
+  store.clear();
+  const at = new Date().toISOString();
+  const values = Array.from({ length: count }, (_, i) => JSON.stringify({ id: `old-${i}`, createdAt: at, problem: "kept" }));
+  if (values.length) await store.pipeline([["LPUSH", RESPONSES_KEY, ...values]]);
+}
+
+const pipeline = store.pipeline.bind(store);
+const quiet = (on: boolean) => {
+  console.error = on ? () => {} : original;
+};
+const original = console.error;
+
+async function main() {
+  globalThis.fetch = (async () => {
+    throw new Error("Unexpected external request");
+  }) as typeof fetch;
+
+  part("A full list keeps no more answers and says so");
+  {
+    await fill(MAX_ANSWERS);
+    is("the 321st answer is refused as full", await ask(payload), [503, "full"]);
+    is("and the list still holds 320", (await rows()).length, MAX_ANSWERS);
+    await fill(MAX_ANSWERS - 1);
+    is("the 320th answer is kept", await ask(payload), [201, "saved"]);
+    is("and the list holds 320", (await rows()).length, MAX_ANSWERS);
+  }
+
+  part("Two answers at once: the one the write finds past the ceiling takes itself back");
+  {
+    await fill(MAX_ANSWERS);
+    // Another answer was kept between this one's read and its write: the read says 319, the write finds 321.
+    store.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "LLEN" ? [MAX_ANSWERS - 1] : pipeline(commands));
+    const got = await ask({ ...payload, name: "Raced Creator" });
+    store.pipeline = pipeline;
+    is("refused as full, never said saved", got, [503, "full"]);
+    const kept = await rows();
+    is("the list holds 320, none of them the raced answer", [kept.length, kept.some((row) => row.includes("Raced Creator"))], [MAX_ANSWERS, false]);
+  }
+
+  part("An unread count or an unconfirmed take-back is never a saved answer (rule 24)");
+  {
+    await fill(3);
+    store.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "LLEN" ? ["3"] : pipeline(commands));
+    quiet(true);
+    const unread = await ask(payload);
+    quiet(false);
+    store.pipeline = pipeline;
+    is("a count not read as a number: 500, nothing kept", [unread, (await rows()).length], [[500, "server_error"], 3]);
+
+    await fill(MAX_ANSWERS);
+    store.pipeline = async (commands) => {
+      if (commands.length === 1 && commands[0][0] === "LLEN") return [MAX_ANSWERS - 1];
+      if (commands.length === 1 && commands[0][0] === "LREM") return [undefined];
+      return pipeline(commands);
+    };
+    quiet(true);
+    const lost = await ask(payload);
+    quiet(false);
+    store.pipeline = pipeline;
+    is("a take-back not answered 1: 500, not saved and not full", lost, [500, "server_error"]);
+  }
+
+  part("An answer past its byte ceiling is refused before anything is kept");
+  {
+    await fill(0);
+    // Characters JSON writes as six bytes each (\u0001): far past the ceiling, inside the form's character limits.
+    const heavy = { ...payload, problem: "\u0001".repeat(2000), tools: "\u0001".repeat(1000) };
+    is("refused as too large", await ask(heavy), [413, "too_large"]);
+    is("nothing kept", (await rows()).length, 0);
+  }
+
+  part("Every real answer fits under the byte ceiling");
+  {
+    await fill(0);
+    const wide = "語";
+    const largest = {
+      ...payload,
+      name: wide.repeat(80), email: `${wide.repeat(194)}@${wide}.${wide.repeat(3)}`, link: wide.repeat(300),
+      country: wide.repeat(60), problem: wide.repeat(2000), tools: wide.repeat(1000), cost: wide.repeat(200),
+      consentFollowUp: true, consentUpdates: true,
+    };
+    is("each field at its limit, three bytes a character, is kept", await ask(largest), [201, "saved"]);
+    const [row] = await rows();
+    is("and stored in fewer bytes than the ceiling", Buffer.byteLength(row ?? "", "utf8") <= ANSWER_MAX_BYTES, true);
+  }
+
+  part("The form says a full list and a too long answer in plain words");
+  {
+    const form = readFileSync("components/creator-research-form.tsx", "utf8");
+    is("a full list is told, with where to send the answers instead", /full:\s*`[^`]*no room[^`]*\$\{SUPPORT_EMAIL\}/.test(form), true);
+    is("a too long answer is told", /too_large:\s*"[^"]*too long/.test(form), true);
+  }
+
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

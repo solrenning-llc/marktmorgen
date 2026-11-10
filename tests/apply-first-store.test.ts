@@ -20,8 +20,8 @@ import { APPLY_TOKEN, applyTokenDigest, canPurchase, parseApplication } from "@/
 import {
   APPLY_AFTER_DAYS, APPLY_CHANGE, APPLY_DAY_SECONDS, APPLY_DECIDE_COMMANDS, APPLY_KEEP_DAYS,
   APPLY_LIST_COMMANDS, APPLY_COPY_COMMANDS, APPLY_FORGET_COMMANDS, APPLY_MAX_KEPT, APPLY_MAX_PER_PERSON, APPLY_NEW, APPLY_PER_STORE_DAY,
-  APPLY_RECORD_MAX_BYTES, APPLY_SUBMIT_COMMANDS,
-  applicationsOfPerson, decideApplication, forgetApplyFirstPerson, listApplications, submitApplication, untilOf,
+  APPLY_CONSENT_TEXT, APPLY_CONSENT_VERSION, APPLY_RECORD_MAX_BYTES, APPLY_SUBMIT_COMMANDS,
+  applicationsOfPerson, decideApplication, forgetApplyFirstPerson, isApplyFirst, listApplications, submitApplication, untilOf,
 } from "@/lib/apply-first-store";
 
 const DAY = 86_400_000;
@@ -93,7 +93,7 @@ beforeEach(() => {
 });
 
 async function submit(email = ann, where = shop, what = offer) {
-  const done = await submitApplication(where, { offer: what, email }, clock);
+  const done = await submitApplication(where, { offer: what, email, consentVersion: APPLY_CONSENT_VERSION }, clock);
   assert.equal(done.ok, true, JSON.stringify(done));
   return (done as { ok: true; application: { id: string } }).application;
 }
@@ -101,7 +101,7 @@ async function submit(email = ann, where = shop, what = offer) {
 test("an application is kept with its address, both index entries and every expiry; the list shows it", async () => {
   const one = await submit();
   assert.match(one.id, /^[0-9a-f]{32}$/);
-  assert.deepEqual(one, { id: one.id, offer, email: "ann@example.invalid", state: "submitted", at: START, decidedAt: 0, expiresAt: 0, usedAt: 0 });
+  assert.deepEqual(one, { id: one.id, offer, email: "ann@example.invalid", state: "submitted", at: START, decidedAt: 0, expiresAt: 0, usedAt: 0, consent: { text: APPLY_CONSENT_TEXT, version: APPLY_CONSENT_VERSION } });
   const record = `nl:apply:r:${shop.sid}:${one.id}`;
   const person = `nl:apply:p:${shop.sid}:${personKey(shop.sid, ann)}`;
   const day = `nl:apply:d:${shop.sid}:20261110`;
@@ -124,7 +124,7 @@ test("the store's day is counted before anything is kept, and a store past it ke
   await submit();
   const before = keys();
   sent = [];
-  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "day" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "day" });
   assert.deepEqual(sent.map((c) => c[0]), ["INCR", "EXPIRE"], "nothing but the day's count is sent");
   assert.deepEqual(keys(), before);
   // The next UTC day counts again.
@@ -135,12 +135,12 @@ test("the store's day is counted before anything is kept, and a store past it ke
 test("the store's and the address's caps are checked with the write, which keeps nothing past them", async () => {
   for (let i = 0; i < APPLY_MAX_PER_PERSON; i++) await submit();
   const before = keys().length;
-  assert.deepEqual(await submitApplication(shop, { offer, email: ann }, clock), { ok: false, reason: "person" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: ann, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "person" });
   assert.equal(keys().length, before);
   // A full store: its index holds APPLY_MAX_KEPT live entries.
   const stores = `nl:apply:s:${other.sid}`;
   for (let i = 0; i < APPLY_MAX_KEPT; i++) base(["ZADD", stores, String(START + DAY), i.toString(16).padStart(32, "0")]);
-  assert.deepEqual(await submitApplication(other, { offer, email: bob }, clock), { ok: false, reason: "full" });
+  assert.deepEqual(await submitApplication(other, { offer, email: bob, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "full" });
   assert.equal(base(["ZCARD", `nl:apply:p:${other.sid}:${personKey(other.sid, bob)}`]), 0);
   // Entries whose record is gone leave first: once they are past, the store takes one again.
   at(START + DAY);
@@ -150,10 +150,10 @@ test("the store's and the address's caps are checked with the write, which keeps
 test("a form that is not right sends nothing to the database", async () => {
   for (const [email, what] of [["not an address", offer], ["", offer], [ann, ""], [ann, "has space"], [ann, "x".repeat(65)]]) {
     sent = [];
-    assert.deepEqual(await submitApplication(shop, { offer: what, email }, clock), { ok: false, reason: "bad-input" });
+    assert.deepEqual(await submitApplication(shop, { offer: what, email, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "bad-input" });
     assert.equal(sent.length, 0);
   }
-  assert.deepEqual(await submitApplication({ sid: "" }, { offer, email: ann }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication({ sid: "" }, { offer, email: ann, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "unavailable" });
 });
 
 test("approving answers the link's token once; the record keeps only its digest and lives past the link", async () => {
@@ -233,10 +233,10 @@ test("rule 24: a reply that is not exact is never a saved application, a decisio
   // The day's count in another shape: nothing kept.
   for (const reply of ["1", null, -1, 1.5]) {
     fault = (command) => (command[0] === "INCR" ? reply : undefined);
-    assert.deepEqual(await submitApplication(shop, { offer, email: ann }, clock), { ok: false, reason: "unavailable" });
+    assert.deepEqual(await submitApplication(shop, { offer, email: ann, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "unavailable" });
   }
   fault = (command) => (command[0] === "EXPIRE" && String(command[1]).startsWith("nl:apply:d:") ? 0 : undefined);
-  assert.deepEqual(await submitApplication(shop, { offer, email: ann }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: ann, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "unavailable" });
   assert.equal(keys().some((k) => k.startsWith("nl:apply:r:")), false);
   // The script ran but its answer was lost: the record read back says it was kept.
   fault = (command) => {
@@ -244,11 +244,11 @@ test("rule 24: a reply that is not exact is never a saved application, a decisio
     runScript(command);
     return "OK";
   };
-  const landed = await submitApplication(shop, { offer, email: ann }, clock);
+  const landed = await submitApplication(shop, { offer, email: ann, consentVersion: APPLY_CONSENT_VERSION }, clock);
   assert.equal(landed.ok, true);
   // The script did not run and its answer was lost: not kept.
   fault = (command) => (String(command[1]) === APPLY_NEW ? null : undefined);
-  assert.deepEqual(await submitApplication(shop, { offer, email: bob }, clock), { ok: false, reason: "unavailable" });
+  assert.deepEqual(await submitApplication(shop, { offer, email: bob, consentVersion: APPLY_CONSENT_VERSION }, clock), { ok: false, reason: "unavailable" });
   fault = null;
   assert.equal((await listApplications(shop, clock))?.length, 1);
   const id = (landed as { ok: true; application: { id: string } }).application.id;
@@ -360,10 +360,46 @@ test("a person's deletion and copy run this file's own functions, by the store's
   assert.equal(COPY_PLAN["lib/apply-first-store.ts"]?.how, "copied");
   assert.deepEqual(await COPIERS["lib/apply-first-store.ts"](scope), [{
     offer, state: "declined", applied: new Date(START).toISOString(), decided: new Date(START + 2_000).toISOString(), linkEnds: "", linkUsed: "",
+    agreed: APPLY_CONSENT_TEXT, agreedVersion: APPLY_CONSENT_VERSION,
   }]);
   const eraser = ERASERS.find((e) => e.module === "lib/apply-first-store.ts");
   assert.ok(eraser && !eraser.only, "both doors delete them");
   assert.equal(await eraser.run(scope, [], new Set()), 1);
   assert.deepEqual(await COPIERS["lib/apply-first-store.ts"](scope), []);
   assert.deepEqual((await listApplications(shop, clock))?.map((a) => a.email), [bob]);
+});
+
+test("an application is kept only with the sentence the person agreed to, in the version they were shown", async () => {
+  for (const version of ["", "apply-first-0", "toString", "__proto__"]) {
+    sent = [];
+    assert.deepEqual(await submitApplication(shop, { offer, email: ann, consentVersion: version }, clock), { ok: false, reason: "consent" });
+    assert.equal(sent.length, 0, "nothing is sent without it");
+  }
+  const one = await submit();
+  const record = `nl:apply:r:${shop.sid}:${one.id}`;
+  const raw = String(base(["GET", record]));
+  assert.deepEqual(JSON.parse(raw).consent, { text: APPLY_CONSENT_TEXT, version: APPLY_CONSENT_VERSION });
+  // A record whose sentence is not the words of its version, or whose version is unknown, is unknown.
+  for (const bad of [
+    raw.replace(APPLY_CONSENT_TEXT, "Something else."),
+    raw.replace(`"version":"${APPLY_CONSENT_VERSION}"`, '"version":"apply-first-9"'),
+    raw.replace(`,"consent":{"text":${JSON.stringify(APPLY_CONSENT_TEXT)},"version":"${APPLY_CONSENT_VERSION}"}`, ""),
+  ]) {
+    assert.notEqual(bad, raw);
+    base(["SET", record, bad, "EX", 600]);
+    assert.equal(await listApplications(shop, clock), null);
+  }
+});
+
+test("the mode is read exactly: a product asks for an application only on Redis's 1", async () => {
+  assert.equal(await isApplyFirst(shop, offer), false);
+  base(["SADD", `nl:apply:on:${shop.sid}`, offer]);
+  assert.equal(await isApplyFirst(shop, offer), true);
+  assert.equal(await isApplyFirst(other, offer), false);
+  for (const reply of [null, "1", true, 2, [1]]) {
+    fault = (command) => (command[0] === "SISMEMBER" ? reply : undefined);
+    await assert.rejects(isApplyFirst(shop, offer), UnknownReplyError, JSON.stringify(reply));
+  }
+  fault = null;
+  assert.equal(await isApplyFirst({ sid: "" }, offer), false);
 });

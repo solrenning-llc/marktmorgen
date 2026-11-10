@@ -14,6 +14,8 @@
  *   - The confirmation says what will happen and to how many people; the undo exists where the action can be taken
  *     back, and the words say so where it cannot.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -220,6 +222,36 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = original;
   }
+
+  part("The per-sale and per-store counters are essential: an email spends money, so a counter not known never lets one go (SG2 17)");
+  const resendCounter = (commands: (string | number)[][]) => commands.some((c) => String(c[1] ?? "").startsWith("nl:rl:resend-sale:"));
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (resendCounter(commands)) throw new Error("Redis out of reach");
+    return original.call(redis, commands);
+  }) as typeof redis.pipeline;
+  try {
+    const unreachable = await post({ action: "resend", references: [ref(7), ref(8)] });
+    is(
+      "a counter out of reach: nothing sent, each 'not confirmed', never 'too often'",
+      [unreachable.status, unreachable.body.sent, unreachable.body.couldNot?.map((c) => c.why)],
+      [200, [], ["failed", "failed"]],
+    );
+  } finally {
+    redis.pipeline = original;
+  }
+  redis.pipeline = (async (commands: (string | number)[][]) => (resendCounter(commands) ? ["OK", "many"] : original.call(redis, commands))) as typeof redis.pipeline;
+  try {
+    const strange = await post({ action: "resend", references: [ref(7)] });
+    is("a counter answer in another shape: not sent, 'not confirmed'", [strange.body.sent, strange.body.couldNot?.map((c) => c.why)], [[], ["failed"]]);
+  } finally {
+    redis.pipeline = original;
+  }
+  const single = readFileSync(join(process.cwd(), "app/api/store/resend/route.ts"), "utf8");
+  is(
+    "the single resend keeps its own two numbers, the same as the bulk's (lib/resend-limits.ts)",
+    [Number(/const PER_SALE_PER_DAY = (\d+);/.exec(single)?.[1]), Number(/const PER_STORE_PER_HOUR = (\d+);/.exec(single)?.[1])],
+    [RESEND_PER_SALE_PER_DAY, RESEND_PER_STORE_PER_HOUR],
+  );
 
   part("Team roles: those who may send a purchase email again, and no one else");
   await putMember(shop, "support@example.com", "support");

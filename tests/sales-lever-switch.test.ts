@@ -169,6 +169,65 @@ test("an unconfirmed reply leaves the state unknown, and nothing more is sent un
   assert.equal(sent.length, 4);
 });
 
+test("a write applied whose reply was lost is unknown, never 'Nothing was changed', and nothing more is sent until a reload", async () => {
+  const { session, read } = await world();
+  assert.ok(await setNextOffer(OWNER, { on: true, email: true }));
+  const control = toggle(await read(), "next", true);
+  const sent: { route: string; body: unknown }[] = [];
+  const route = poster(session, sent);
+  // What the route really answers: the fenced write of the store record runs, then its acknowledgment is lost once.
+  const original = redis.pipeline;
+  let lost = 0;
+  const replies: unknown[] = [];
+  redis.pipeline = async (commands) => {
+    const result = await original.call(redis, commands);
+    if (!lost && commands.some((command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:fenced-set:v1\n"))) {
+      lost += 1;
+      throw new Error("synthetic: the reply to an applied write was lost");
+    }
+    return result;
+  };
+  let view;
+  try {
+    view = await pressLever(control, SWITCH_START, "switch", async (path, body) => {
+      const reply = await route(path, body);
+      replies.push(reply);
+      return reply;
+    });
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.equal(lost, 1);
+  assert.deepEqual(replies, [{ ok: false, error: "server_error" }]);
+  // The write did happen.
+  assert.deepEqual((await read()).nextOffer, { on: false, email: false });
+  assert.equal(view.outcome?.state, "unknown");
+  assert.doesNotMatch(view.outcome!.text, /Nothing was changed/);
+  assert.match(view.outcome!.text, /Reload/);
+  assert.equal(view.flipped, "unknown");
+  assert.equal(view.undo, false);
+  // No further press is sent from that state.
+  for (const how of ["switch", "undo"] as const) assert.deepEqual(await pressLever(control, view, how, route), view);
+  assert.equal(sent.length, 1);
+});
+
+test("only a refusal the route gives before any write says nothing was changed; a server error or an unknown code is unknown", async () => {
+  const { read } = await world();
+  const control = toggle(await read(), "next");
+  for (const error of ["server_error", "something_new", "", 42]) {
+    const view = await pressLever(control, SWITCH_START, "switch", async () => ({ ok: false, error }));
+    assert.equal(view.outcome?.state, "unknown", String(error));
+    assert.doesNotMatch(view.outcome!.text, /Nothing was changed/);
+    assert.equal(view.flipped, "unknown");
+  }
+  for (const error of ["address", "address_long", "stripe", "role", "forbidden", "signed_out", "unavailable", "studio_used", "locked", "two_step_required", "store_gone", "none", "invalid"]) {
+    const view = await pressLever(control, SWITCH_START, "switch", async () => ({ ok: false, error }));
+    assert.equal(view.outcome?.state, "refused", error);
+    assert.match(view.outcome!.text, /^Nothing was changed\./);
+    assert.equal(view.flipped, false);
+  }
+});
+
 test("addOnFact: active only inside a paid month; a snapshot that ran out is unknown, never active", () => {
   const now = 1_800_000_000;
   const plan = (over: Record<string, unknown>) => ({ subscriptionId: "sub_1", active: true, period: { start: now - 86_400, end: now + 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "", ...over });

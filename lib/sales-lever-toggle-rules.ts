@@ -26,6 +26,8 @@
  * could not be read offers no switch. A reply is "saved" only when the route
  * answered ok and echoed the state that was asked for; anything else is
  * unknown, and the creator is asked to reload rather than told it worked.
+ * "Nothing was changed" is said only for a refusal the route gives before
+ * any write; a server error may come after an applied write, so it is unknown.
  *
  * Pure and browser-safe: no server import, no request, no write.
  */
@@ -305,6 +307,14 @@ export type LeverOutcome =
   | { state: "refused"; text: string; changed?: true }
   | { state: "unknown"; text: string };
 
+/**
+ * The refusals the two routes give before they write anything (the request
+ * guard, lib/store-request.ts and studioAccess, and each route's own checks
+ * ahead of its write): only these may say "Nothing was changed". A
+ * "server_error" can follow a write that was applied and whose reply was
+ * lost, and a code not listed here is not known to come first, so both are
+ * unknown (rule 24).
+ */
 const REFUSED: Record<string, string> = {
   address: "Reminder emails must show your postal address. Add it in the reminder settings.",
   address_long: "The postal address is too long. Shorten it in the reminder settings.",
@@ -313,7 +323,6 @@ const REFUSED: Record<string, string> = {
   forbidden: "This request came from another site.",
   signed_out: "You were signed out. Sign in again.",
   unavailable: "This could not be done just now, because a service it needs is not available. Try again later.",
-  server_error: "This could not be saved just now. Try again in a moment.",
   studio_used: "Your studio has reached its limit of changes for now. Try again later.",
   locked: "The store is locked right now.",
   two_step_required: "This needs your second sign-in step first.",
@@ -330,8 +339,9 @@ export function toggleOutcome(control: LeverSwitch, reply: unknown): LeverOutcom
   if (!reply || typeof reply !== "object" || Array.isArray(reply)) return { state: "unknown", text: UNSURE };
   const value = reply as Record<string, unknown>;
   if (value.ok === false) {
-    const error = typeof value.error === "string" && Object.hasOwn(REFUSED, value.error) ? REFUSED[value.error] : "This could not be saved.";
-    return value.error === "changed" ? { state: "refused", text: `Nothing was changed. ${error}`, changed: true } : { state: "refused", text: `Nothing was changed. ${error}` };
+    if (typeof value.error !== "string" || !Object.hasOwn(REFUSED, value.error)) return { state: "unknown", text: UNSURE };
+    const text = `Nothing was changed. ${REFUSED[value.error]}`;
+    return value.error === "changed" ? { state: "refused", text, changed: true } : { state: "refused", text };
   }
   if (value.ok !== true) return { state: "unknown", text: UNSURE };
   const echoed = control.route === "/api/store/recovery" ? readRecovery(value.recovery)?.enabled : readNext(value.next)?.on;

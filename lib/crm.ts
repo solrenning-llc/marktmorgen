@@ -24,6 +24,7 @@ import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
@@ -671,8 +672,12 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     // script deletes them and answers what it deleted, so what is given back
     // is what the deletion removed. Should their tasks have changed between
     // the two (a lock that ran out), the count is dropped, to be made again.
+    // A record that cannot be read whole (keptTasks) is deleted all the same,
+    // and the count dropped, to be made again, rather than moved by a guess:
+    // "" as what was read never matches a value that is there.
     const [read] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
-    const reply = await redisPipeline([["EVAL", FORGET_PERSON_TASKS, 1, tasksKey(statsId), person, typeof read === "string" ? read : "", tasksOf(read).length, TASK_COUNT_FIELD]]);
+    const readable = keptTasks(read);
+    const reply = await redisPipeline([["EVAL", FORGET_PERSON_TASKS, 1, tasksKey(statsId), person, readable && typeof read === "string" ? read : "", readable ? readable.length : 0, TASK_COUNT_FIELD]]);
     const [taken] = reply;
     if (!Array.isArray(taken) || taken.length !== 2 || typeof taken[0] !== "string" || (taken[1] !== 0 && taken[1] !== 1)) throw new CrmValueWriteUnconfirmed();
     const freed = taskWeight(person, taken[0]) + (taken[1] === 1 ? TASK_COUNT_WEIGHT : 0);
@@ -765,16 +770,56 @@ export class TasksRecountRefused extends Error {
 /** What one person's tasks take in the store's data room, as kept. */
 const taskWeight = (person: string, value: unknown) => (typeof value === "string" && value ? dataBytes([person, value], 1) : 0);
 
-function tasksOf(raw: unknown): PersonTask[] {
-  if (typeof raw !== "string" || !raw) return [];
-  return parseTasks(json(raw));
+/**
+ * One person's tasks could not be read whole (CX-123 rule 24): the reply was
+ * missing or of another shape, or what is kept is not a list of tasks, every
+ * entry one. Nothing is said about them (never "no tasks") and nothing is
+ * written over them; the routes answer 503 with TASKS_NOT_READ or
+ * TASKS_NOT_CHANGED (lib/person-tasks.ts).
+ */
+export class TasksUnreadable extends UnknownReplyError {
+  constructor(what = "a person's tasks") {
+    super(what);
+    this.name = "TasksUnreadable";
+  }
 }
 
-/** One person's tasks, open and done, in the order they were written (639 [GL7](6)). */
+/**
+ * One person's tasks as kept, read whole, or null when they cannot be: none
+ * only for Redis's own null (no field) or the empty string; otherwise a
+ * string of a JSON list each of whose entries is a task parseTasks keeps
+ * (an entry it would drop, a repeated id or more than MAX_PERSON_TASKS make
+ * the whole record unknown, so a list written back from it never erases
+ * one). A list that is not a string, a number, an object or anything else
+ * is unknown. The write path never stores "" (WRITE_PERSON_TASKS deletes the
+ * field instead), so "" stays none only as what an empty list was.
+ */
+function keptTasks(raw: unknown): PersonTask[] | null {
+  if (raw === null || raw === "") return [];
+  if (typeof raw !== "string") return null;
+  const value = json(raw);
+  if (!Array.isArray(value)) return null;
+  const tasks = parseTasks(value);
+  return tasks.length === value.length ? tasks : null;
+}
+
+/** keptTasks, or TasksUnreadable: what every reader and change of tasks reads them through. */
+function tasksOf(raw: unknown): PersonTask[] {
+  const tasks = keptTasks(raw);
+  if (!tasks) throw new TasksUnreadable();
+  return tasks;
+}
+
+/**
+ * One person's tasks, open and done, in the order they were written (639
+ * [GL7](6)). Throws TasksUnreadable when the reply or what is kept cannot be
+ * read whole: never "no tasks" from a reply it could not read.
+ */
 export async function readPersonTasks(statsId: string | null, person: string): Promise<PersonTask[]> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
-  return tasksOf(raw);
+  const replies = repliesFor(await redisPipeline([["HGET", tasksKey(statsId), person]]), 1);
+  if (!replies) throw new TasksUnreadable("a person's tasks reply");
+  return tasksOf(replies[0]);
 }
 
 /**
@@ -788,13 +833,25 @@ export async function taskPeople(statsId: string | null): Promise<number> {
   return Math.max(0, (Number(fields) || 0) - (counted === 1 ? 1 : 0));
 }
 
-/** Everyone's tasks, by person: what the agenda groups (lib/person-tasks.ts, tasksDue). At most MAX_STORE_TASKS. */
+/**
+ * Everyone's tasks, by person: what the agenda groups (lib/person-tasks.ts,
+ * tasksDue) and what the store's count is made from. At most
+ * MAX_STORE_TASKS. Throws TasksUnreadable when the reply is missing or of
+ * another shape, or when any one person's tasks cannot be read whole: an
+ * unreadable person is never counted as no tasks, so the agenda never says
+ * nothing is due and the count is never made short of the cap.
+ */
 export async function readAllTasks(statsId: string | null): Promise<DueTask[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", tasksKey(statsId)]]);
+  const replies = repliesFor(await redisPipeline([["HGETALL", tasksKey(statsId)]]), 1);
+  if (!replies) throw new TasksUnreadable("the store's tasks reply");
+  const raw = replies[0];
   const pairs: [string, unknown][] = [];
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), raw[i + 1]]);
-  else if (raw && typeof raw === "object") pairs.push(...Object.entries(raw as Record<string, unknown>));
+  if (Array.isArray(raw)) {
+    if (raw.length % 2 !== 0) throw new TasksUnreadable("the store's tasks");
+    for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), raw[i + 1]]);
+  } else if (raw && typeof raw === "object") pairs.push(...Object.entries(raw as Record<string, unknown>));
+  else throw new TasksUnreadable("the store's tasks");
   const out: DueTask[] = [];
   for (const [person, value] of pairs) {
     if (!PERSON.test(person)) continue;
@@ -862,7 +919,11 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   // key; a store whose id is not of today's form (none is made any more)
   // relies on forgetCrm's second deletion under this lock instead.
   if (room.sid && STORE_ID_PATTERN.test(room.sid) && !(await storeIdExists(room.sid))) return { result: { ok: false, error: "unknown" } };
-  const [before, kept, fields] = await redisPipeline([["HGET", tasksKey(statsId), person], ["HGET", tasksKey(statsId), TASK_COUNT_FIELD], ["HLEN", tasksKey(statsId)]]);
+  const replies = repliesFor(await redisPipeline([["HGET", tasksKey(statsId), person], ["HGET", tasksKey(statsId), TASK_COUNT_FIELD], ["HLEN", tasksKey(statsId)]]), 3);
+  if (!replies) throw new TasksUnreadable("a person's tasks reply");
+  const [before, kept, fields] = replies;
+  // Read whole or not at all (TasksUnreadable): a list built from tasks it
+  // could not read, or from some of them, is never written over what is kept.
   const tasks = tasksOf(before);
   const result = change(tasks);
   if (!result.ok) return { result };

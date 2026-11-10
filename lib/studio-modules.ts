@@ -100,6 +100,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   copy: "Copies this store into another store of the account, an account action rather than a part of the store.",
   checkup: "A health check of payments, the domain, email and checkout, opened from the studio home.",
   totals: "Figures for the stores of the account, a report rather than a part of the store.",
+  applications: "Applications to buy (604 [WP3]): no product can ask for one yet, so the page is not offered until the product setting that does (a later unit) links to it.",
   paused: "Shown only when the studio's requests for the period are used up.",
   "closing-refunds": "The review before members get unused time back when a store closes.",
   refund: "The review before a refund of the store's own Marktmorgen plan.",

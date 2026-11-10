@@ -972,6 +972,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/applications/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/applications",
+      "parameters": []
+    },
+    {
       "source": "app/studio/blog/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/blog",
@@ -1291,6 +1297,7 @@
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
+    "components/apply-first-studio.tsx",
     "components/arrival-notice.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
@@ -1740,6 +1747,8 @@
     "app/api/store/announcement/route.ts",
     "app/api/store/answers/route.ts",
     "app/api/store/api-keys/route.ts",
+    "app/api/store/applications/route.ts",
+    "app/api/store/apply/route.ts",
     "app/api/store/ask/route.ts",
     "app/api/store/assistant-memory/route.ts",
     "app/api/store/assistant-next/route.ts",
@@ -2071,6 +2080,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

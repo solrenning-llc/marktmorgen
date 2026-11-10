@@ -87,7 +87,7 @@ Generated from the actual CI renderer for MR; amounts are registered-model calcu
 | Store monthly ($69) | $69.00 | $54.33 | $9.14 | $6.94 | $32.63 | $5.62 | 10.34% | $0.25 | positive | no |
 | Store yearly ($690) | $690.00 | $543.30 | $85.65 | $80.24 | $322.23 | $55.18 | 10.15% | $1.00 | positive | no |
 | Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $24.28 | $231.34 | $41.95 | 11.86% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $276.34 | $2,291.64 | $413.47 | 11.69% | $1.00 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $276.35 | $2,291.63 | $413.47 | 11.69% | $1.00 | positive | no |
 | Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $48.50 | $519.64 | $94.71 | 12.04% | $0.25 | positive | no |
 | Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $553.08 | $5,147.63 | $933.61 | 11.86% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |

@@ -49,7 +49,6 @@ import {
   parseStages,
 } from "@/lib/crm-rules";
 import type { ListRead } from "@/lib/contacts";
-import { UnknownReplyError } from "@/lib/redis-reply";
 
 export class CrmDealReadUnavailable extends Error {
   constructor() { super("CRM deal preflight could not be confirmed"); this.name = "CrmDealReadUnavailable"; }

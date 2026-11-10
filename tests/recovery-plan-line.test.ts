@@ -13,6 +13,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, setLanguage, setP
 import { remindAbandoned } from "@/lib/checkout-recovery";
 import { readListing } from "@/lib/catalog";
 import { activePlan } from "@/lib/product-extras";
+import { setSoon } from "@/lib/waitlist";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { speechFor } from "@/lib/buyer-words";
@@ -91,6 +92,17 @@ async function main(): Promise<void> {
   const guide = (await readListing(await load(), paused))!;
   is("the guide keeps its plan, which no longer covers the price: paused", [guide.priceCents, guide.plan !== null, activePlan(guide)], [4000, true, null]);
   is("a plan paused since: sent, with no plan line", [await remindAbandoned(await load(), left(paused, "cy@example.com")), emails.at(-1)!.text.includes("pay in parts")], ["sent", false]);
+
+  part("Only when the checkout itself would offer the plan");
+  // A pre-order's checkout takes no plan (lib/store-checkout.ts): its reminder never offers one (review of f8a3e47).
+  const preordered = left(course, "eve@example.com") as unknown as { metadata: Record<string, string> };
+  preordered.metadata.preorder = "yes";
+  is("an abandoned pre-order: sent, with no plan line", [await remindAbandoned(await load(), preordered as never), emails.at(-1)!.text.includes("pay in parts")], ["sent", false]);
+  // A product coming soon has a waitlist or a pre-order where the plan would be (lib/preorders.ts).
+  await setSoon(await load(), course, true);
+  is("a product coming soon: sent, with no plan line", [await remindAbandoned(await load(), left(course, "fay@example.com")), emails.at(-1)!.text.includes("pay in parts")], ["sent", false]);
+  await setSoon(await load(), course, false);
+  is("and on sale again: the line is back", [await remindAbandoned(await load(), left(course, "gus@example.com")), emails.at(-1)!.text.includes(GIVING_WORDS.en.recoverPlan(plan))], ["sent", true]);
 
   part("In every buyer language");
   is("each carries the plan as given", LANGUAGE_CODES.filter((code) => !GIVING_WORDS[code].recoverPlan("«plan»").includes("«plan»")), []);

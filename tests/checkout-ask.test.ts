@@ -73,7 +73,8 @@ test("it is taken off the queue before anything is sent, and never put back", ()
 test("every kind of yes goes through the one set of limits", () => {
   const src = code("lib/checkout-recovery.ts");
   // Stripe's box, the buyer's own ask, and the Store assistant's box at checkout (lib/assistant-reminder.ts, remindAssisted).
-  assert.equal((src.match(/return deliver\(store, \{ kind: "product", product \},/g) ?? []).length, 3, "Stripe's box, the buyer's own ask and the assistant's box");
+  // A checkout's own reminder carries whether it was a pre-order, so the plan line follows the checkout (630 [HN6](15)).
+  assert.equal((src.match(/return deliver\(store, \{ kind: "product", product(?:, preorder: meta\.preorder === "yes")? \},/g) ?? []).length, 3, "Stripe's box, the buyer's own ask and the assistant's box");
   assert.equal((src.match(/return deliver\(store, \{ kind: "cart", items \},/g) ?? []).length, 3, "and the same three for a whole cart");
   const deliver = src.slice(src.indexOf("async function deliver("));
   for (const guard of ["offKey(statsId, email)", "onceKey(statsId, email, onceFor)", "parseContact(contact)?.unsub", "paidSince(store, email, ids, how.since)"]) {

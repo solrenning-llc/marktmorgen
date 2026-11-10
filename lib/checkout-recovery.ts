@@ -65,6 +65,7 @@ import { cartAskIds } from "@/lib/checkout-ask-cart";
 import type { Listing } from "@/lib/store";
 import { membershipLine, planLine, speech } from "@/lib/buyer-words";
 import { activePlan } from "@/lib/product-extras";
+import { isComingSoon } from "@/lib/preorders";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { isTimeZone, readableTime, zoneName } from "@/lib/call-setup";
@@ -339,7 +340,7 @@ export async function remindAbandoned(
   if (!product || product.call || !canSellProduct(store, product)) return "skip";
   if (!(await someLeftOrUnlimited(store, product))) return "skip";
 
-  return deliver(store, { kind: "product", product }, email, {
+  return deliver(store, { kind: "product", product, preorder: meta.preorder === "yes" }, email, {
     claim: id,
     since: created,
     why: givingWords(store.language).recoverWhyCheckout(store.name),
@@ -423,7 +424,7 @@ export async function remindAssisted(
   const product = meta.product ? await readListing(store, meta.product) : null;
   if (!product || product.call || meta.kind === "call" || !canSellProduct(store, product)) return "skip";
   if (!(await someLeftOrUnlimited(store, product))) return "skip";
-  return deliver(store, { kind: "product", product }, input.email, how);
+  return deliver(store, { kind: "product", product, preorder: meta.preorder === "yes" }, input.email, how);
 }
 
 /**
@@ -434,7 +435,7 @@ export async function remindAssisted(
  */
 async function deliver(
   store: Store,
-  about: { kind: "product"; product: Listing } | { kind: "cart"; items: Listing[] } | { kind: "call"; product: Listing; start: number; tz: string; minutes?: number },
+  about: { kind: "product"; product: Listing; preorder?: boolean } | { kind: "cart"; items: Listing[] } | { kind: "call"; product: Listing; start: number; tz: string; minutes?: number },
   email: string,
   how: {
     claim: string;
@@ -594,8 +595,12 @@ async function deliver(
     : product.recurring
       ? from(membershipLine(store, product.recurring, price, activeIntro(product, store.tiers)))
       : from(price);
-  // The plan the product page offers today (lib/product-extras.ts activePlan: one-off products only, covering every price).
-  const plan = activePlan(product);
+  // The plan the product page offers today, with the checkout's own condition (lib/product-extras.ts activePlan: one-off
+  // products only, covering every price): never for a pre-order, whose checkout takes no plan (lib/store-checkout.ts),
+  // nor for a product coming soon, whose page has a waitlist or a pre-order where the plan would be (lib/preorders.ts).
+  // Coming soon is one exact read, only for a product with a plan; unknown is "coming soon": no plan line on a guess.
+  const offered = about.preorder ? null : activePlan(product);
+  const plan = offered && !(await isComingSoon(store, product.id).catch(() => true)) ? offered : null;
   subject = how.subject ?? g.recoverSubject(product.title);
   text = [
     how.lead ?? g.recoverLead(product.title, name),

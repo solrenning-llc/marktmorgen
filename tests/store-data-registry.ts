@@ -963,7 +963,7 @@ export const FAMILIES: Record<string, Family> = {
   // ---------------------------------------------------------------- lib/ t–z
   "nl:report:@lib/takedown.ts": company("A takedown report", "Reports to the company."),
   "nl:report:t:@lib/takedown.ts": company("A takedown report's token", "Reports to the company."),
-  "nl:report:@lib/takedown-appeals.ts": company("A creator's request to look again at a takedown, and its number, at most one per decision (50 per store), 400 days like the notice", "Part of the company's record of a takedown (DSA Art. 20 shape, 646 [WG6]); it costs no plan anything."),
+  "nl:report:@lib/takedown-appeals.ts": company("A creator's request to look again at a takedown, at most one per decision (50 per store), and its number, at most 3 tried per decision, each drawn from and naming that decision's record; 400 days like the notice", "Part of the company's record of a takedown (DSA Art. 20 shape, 646 [WG6]); it costs no plan anything."),
   "nl:callteam:@lib/team-booking.ts": { what: "A team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:callteam:rr:@lib/team-booking.ts": { what: "Round-robin counts of a team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:rl:team-invite:@lib/team.ts": short("Invites a day", "studio", 1, 128),

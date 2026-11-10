@@ -14,7 +14,7 @@ import { POST } from "@/app/api/store/appeal/route";
 import StudioAppealsPage from "@/app/studio/appeals/page";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setSubscription, storeForEmail } from "@/lib/store";
-import { decisionsOf, kindOfStrike, readAppeals } from "@/lib/takedown-appeals";
+import { NUMBER_TRIES, decisionsOf, fileAppeal, kindOfStrike, readAppeals } from "@/lib/takedown-appeals";
 import { APPEAL_NUMBER } from "@/lib/takedown-appeal-rules";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -165,6 +165,41 @@ async function main() {
   is("five records under the notices' family (four here, one on the other store)", keys.length, 5);
   await redis.pipeline(keys.map((k) => ["SET", k, "not json"]));
   is("the page reads nothing and offers nothing", (await page(cookie, store.sid)).includes('data-appeals="unknown"'), true);
+
+  part("A decision keeps at most its few numbers, however many presses or lost replies");
+  const numbers = () => [...redis.keys()].filter((k) => k.startsWith("nl:report:an:")).length;
+  const raceEmail = "appeal-race@example.test";
+  await creator(raceEmail, "appealshoprace");
+  await noteTakedown(raceEmail, PRODUCT);
+  const raceStore = (await storeForEmail(raceEmail))!;
+  const raceKey = decisionsOf(raceStore)[0].key;
+  const raceSent = sent.length;
+  const numbersBefore = numbers();
+  const presses = await Promise.all(Array.from({ length: 60 }, () => fileAppeal(raceStore, raceKey, { explanation: "Sixty presses at once." }, new Date(), "https://marktmorgen.com").catch(() => null)));
+  is("sixty presses at once keep one request and send one email", [presses.filter((r) => r?.ok).length, (await readAppeals(raceStore)).size, sent.length - raceSent], [1, 1, 1]);
+  is("and leave exactly one number, never one a press", numbers() - numbersBefore, 1);
+
+  const lostEmail = "appeal-lost@example.test";
+  await creator(lostEmail, "appealshoplost");
+  await noteTakedown(lostEmail, LINK);
+  const lostStore = (await storeForEmail(lostEmail))!;
+  const lostKey = decisionsOf(lostStore)[0].key;
+  const lostBefore = numbers();
+  const realPipeline = redis.pipeline.bind(redis);
+  // The number's write lands, then its reply is lost: every try throws closed, as an unknown reply must.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await realPipeline(commands);
+    if (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:report:an:")) throw new Error("reply lost");
+    return replies;
+  }) as typeof redis.pipeline;
+  let threw = 0;
+  for (let i = 0; i < 8; i++) await fileAppeal(lostStore, lostKey, { explanation: "Eight tries, every reply lost." }, new Date(), "https://marktmorgen.com").catch(() => threw++);
+  redis.pipeline = realPipeline;
+  is("eight tries whose replies are lost all fail closed, and leave one number, not eight", [threw, numbers() - lostBefore, (await readAppeals(lostStore)).size], [8, 1, 0]);
+  const recovered = await fileAppeal(lostStore, lostKey, { explanation: "Eight tries, every reply lost." }, new Date(), "https://marktmorgen.com");
+  const recoveredNumber = recovered.ok ? recovered.kept.appeal.number : "";
+  is("the next try takes that same number, so nothing is left behind", [recovered.ok, numbers() - lostBefore, redis.keys().includes(`nl:report:an:${recoveredNumber}`)], [true, 1, true]);
+  is(`never more than ${NUMBER_TRIES} numbers a decision`, NUMBER_TRIES, 3);
 
   part("The studio's notice links here for whoever may change the settings");
   const studio = readFileSync("app/studio/page.tsx", "utf8");

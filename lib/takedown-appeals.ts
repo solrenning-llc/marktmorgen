@@ -5,7 +5,10 @@
  *
  *   nl:report:<notice>:a:<sha(store, decision)> JSON  one request about one decision of that notice, with whether the
  *                                               support inbox was told; 400 days, like the notice itself
- *   nl:report:an:<number>                 string the request's key, so a number is given once; 400 days
+ *   nl:report:an:<number>                 string the request's key, so a number is given once; 400 days. A
+ *                                               decision only ever tries the same NUMBER_TRIES numbers, drawn from
+ *                                               its own record key, so retries and presses at once keep at most that
+ *                                               many, each naming that decision's record, never one more per try
  *
  * Both sit in the company's family of a notice (nl:report:): a request is part of the record of a takedown that
  * Marktmorgen keeps, not the store's content, and it costs no plan anything. At most one request per decision, and a
@@ -18,7 +21,7 @@
  *
  * Every reply is read in its exact shape (rule 24): an unknown read throws, and is never "no request".
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
@@ -30,8 +33,8 @@ import {
 } from "@/lib/takedown-appeal-rules";
 
 const KEEP_SECONDS = 400 * 86_400;
-/** Tries at a number not given yet: 40 random bits each, so a second try is already rare. */
-const NUMBER_TRIES = 3;
+/** Tries at a number not given yet: 40 bits each, so a second try is already rare. */
+export const NUMBER_TRIES = 3;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const key = (rest: string) => `nl:report:${rest}`;
@@ -39,6 +42,12 @@ const key = (rest: string) => `nl:report:${rest}`;
 const recordKey = (sid: string, decision: Decision) => key(`${noticeOf(decision.report)}:a:${sha(`${sid}
 ${decisionKey(decision)}`).slice(0, 24)}`);
 const numberKey = (number: string) => key(`an:${number}`);
+/**
+ * The number a request about this decision tries on its i-th try. It comes from the record's own key (which holds the
+ * store's permanent id), not from a fresh random draw: a retry after a lost reply, or many presses at once, try the
+ * same numbers, so a decision can never leave behind a new number on every try.
+ */
+const candidateNumber = (rk: string, i: number) => appealNumber(createHash("sha256").update(`${rk}\n${i}`).digest().subarray(0, 5));
 /** A notice's id as lib/takedown.ts makes it (16 hex); anything else is hashed, so it never shapes a key. */
 const noticeOf = (report: string) => (/^[0-9a-f]{16}$/.test(report) ? report : `x${sha(report).slice(0, 16)}`);
 
@@ -142,10 +151,12 @@ export async function fileAppeal(store: Store, decisionKeyRaw: unknown, raw: Rec
   const rk = recordKey(store.sid, target);
   let number = "";
   for (let i = 0; i < NUMBER_TRIES && !number; i++) {
-    const candidate = appealNumber(randomBytes(5));
-    const replies = repliesFor(await redisPipeline([["SET", numberKey(candidate), rk, "NX", "EX", KEEP_SECONDS]]), 1);
-    if (!replies || (replies[0] !== "OK" && replies[0] !== null)) throw new UnknownReplyError("a request number");
-    if (replies[0] === "OK") number = candidate;
+    const candidate = candidateNumber(rk, i);
+    // Taken only where free, then read back: a number that already names this decision's record is this decision's
+    // own (an earlier try whose reply was lost, or a press at the same time) and is used again, never replaced.
+    const replies = repliesFor(await redisPipeline([["SET", numberKey(candidate), rk, "NX", "EX", KEEP_SECONDS], ["GET", numberKey(candidate)]]), 2);
+    if (!replies || (replies[0] !== "OK" && replies[0] !== null) || typeof replies[1] !== "string") throw new UnknownReplyError("a request number");
+    if (replies[1] === rk) number = candidate;
   }
   if (!number) throw new Error("no request number was free");
   const kept: KeptAppeal = { appeal: openAppeal(checked.appeal, number, store.sid), told: false, tries: 0 };

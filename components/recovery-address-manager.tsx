@@ -30,6 +30,9 @@ async function call(payload: Record<string, unknown>): Promise<{ ok?: boolean; e
   }
 }
 
+/** Asked on the page before the recovery address is removed (485 [IT2]): what it costs, in its own words. */
+export const REMOVE_RECOVERY_QUESTION = "Remove your recovery address? Losing the inbox you log in with would then need a passkey to get back in.";
+
 /** Said in the recovery section when the address could not be read just now (rule 24): unknown is not none. */
 export const RECOVERY_UNREAD = "Your recovery address could not be read just now. Nothing was changed; reload the page in a moment.";
 
@@ -57,6 +60,8 @@ export function RecoveryAddressUnread() {
  */
 export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
   const [shown, setShown] = useState(initial);
+  /** Whether removing it is being asked about, on the page itself (485 [IT2]: no browser dialog). */
+  const [asking, setAsking] = useState(false);
   const [address, setAddress] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
@@ -141,18 +146,37 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
           <button type="submit" className="btn btn-secondary" disabled={busy}>
             {busy ? "Sending…" : "Send a code there"}
           </button>
-          {shown ? (
+          {shown && asking ? (
+            <span role="group" aria-labelledby="account-recovery-remove-ask" className="flex w-full flex-wrap items-center gap-2 text-sm" data-recovery-remove-ask="">
+              <span id="account-recovery-remove-ask" className="w-full font-semibold text-ink">
+                {REMOVE_RECOVERY_QUESTION}
+              </span>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                disabled={busy}
+                aria-busy={busy}
+                onClick={() => {
+                  setAsking(false);
+                  void run({ action: "remove" }, () => {
+                    setShown("");
+                    toast("Recovery address removed.");
+                  });
+                }}
+              >
+                Remove recovery address
+              </button>
+              {/* The safe choice takes the focus, so a second Enter pressed by mistake keeps it. */}
+              <button type="button" className="btn btn-secondary btn-sm" autoFocus onClick={() => setAsking(false)}>
+                Keep it
+              </button>
+            </span>
+          ) : shown ? (
             <button
               type="button"
               className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
               disabled={busy}
-              onClick={() => {
-                if (!window.confirm("Remove your recovery address? Losing the inbox you log in with would then need a passkey to get back in.")) return;
-                void run({ action: "remove" }, () => {
-                  setShown("");
-                  toast("Recovery address removed.");
-                });
-              }}
+              onClick={() => setAsking(true)}
             >
               Remove
             </button>

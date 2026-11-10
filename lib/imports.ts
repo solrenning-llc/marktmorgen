@@ -1853,11 +1853,15 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       await remindLater(sid, field, now - 3_600 * 1000);
       continue;
     }
+    // The renewal date, once read: no reminder can go after it (reminderEmail), so an answer that stays unknown is
+    // tried again only before it, never for ever (Claude 4's LEVE on #3598).
+    let renews: number | null = null;
     try {
       const store = await storeForId(sid);
       if (!store?.statsId || !isPaidUp(store) || (await pausedFor(sid))) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      renews = invite.r * 1000;
       // Never to somebody deleted from the store. Read whole (CX-123 rule 24): unknown throws, and the reminder is put
       // back in line (the catch below).
       if ((await deletedAmong(store.listId, [invite.e])).size) continue;
@@ -1906,7 +1910,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
     } catch (error) {
       console.error("sending a moved member's reminder failed", error);
-      await remindLater(sid, field, now);
+      if (renews === null || now < renews) await remindLater(sid, field, now);
     }
   }
   return counts;

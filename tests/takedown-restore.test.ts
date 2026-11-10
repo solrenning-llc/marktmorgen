@@ -17,14 +17,14 @@
 import { NextRequest } from "next/server";
 import { GET as servePicture } from "@/app/api/image/[folder]/[file]/route";
 import { POST as act } from "@/app/api/takedown/route";
-import { addStoreLink, claimHandle, ensureStatsId, imageFolder, setLinkImage, storeForEmail } from "@/lib/store";
+import { addStoreLink, claimHandle, closeStoreRecord, createStore, deleteStore, dropHeldLink, ensureStatsId, imageFolder, setLinkImage, storeForEmail, storeRef } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { type Report, actOnHeld, fileReport, noticeSentAt, openReport, settleHeld, takeDown } from "@/lib/takedown";
 import { createHash } from "node:crypto";
 import { COUNTER_NOTICE_DAYS, RESTORE_AFTER_WEEKDAYS, RESTORE_BY_WEEKDAYS, restoreFrom } from "@/lib/takedown-hold";
 import { imageUrl } from "@/lib/product-image";
 import { MAX_STORE_LINKS, showingLinks } from "@/lib/store-link";
-import { faults, kept } from "./picture-takedown-world";
+import { faults, hooks, kept } from "./picture-takedown-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -215,6 +215,58 @@ async function main(): Promise<void> {
   redis.pipeline = realPipeline;
   is("a store that cannot be read: nothing done", [unread === "threw" || unread.failed > 0, (await current()).heldLinks?.some((h) => h.link.id === fourth.id), kept.has(fourthHeld?.picture ?? "")], [true, true, true]);
   is("a later healthy run puts it back", [(await settleHeld(due + DAY)).restored, (await fetchPicture(fourth.path))[0]], [1, 200]);
+
+  part("A store that is gone leaves the daily job's index; one that cannot be read stays in it (review of #3539)");
+  const HELD = "nl:report:held";
+  const inIndex = async (ref: string) => (await redis.pipeline([["ZSCORE", HELD, ref]]))[0] !== null;
+  const spare = await createStore(OWNER, "holdingspare", "Holding spare", "");
+  if (!spare.ok) throw new Error("no spare store");
+  await redis.pipeline([["ZADD", HELD, Date.now(), storeRef(spare.store)]]);
+  is("the control: the spare store is in the index", await inIndex(storeRef(spare.store)), true);
+  is("deleting the store takes it off the index", [(await deleteStore(storeRef(spare.store))).ok, await inIndex(storeRef(spare.store))], [true, false]);
+  const closing = await createStore(OWNER, "holdingclose", "Holding close", "");
+  if (!closing.ok) throw new Error("no closing store");
+  await redis.pipeline([["ZADD", HELD, Date.now(), storeRef(closing.store)]]);
+  await closeStoreRecord(closing.store);
+  is("closing the store takes it off the index", await inIndex(storeRef(closing.store)), false);
+  const goneRef = "gone-holder@example.test";
+  await redis.pipeline([["ZADD", HELD, Date.now(), goneRef]]);
+  const goneRun = await settleHeld(Date.now() + 1);
+  is("an entry whose store is gone (no record): dropped, and the run is not a failure", [goneRun.failed, await inIndex(goneRef)], [0, false]);
+  is("a second run: still nothing failed", (await settleHeld(Date.now() + 1)).failed, 0);
+  const oddRef = "odd-holder@example.test";
+  await redis.pipeline([["ZADD", HELD, Date.now(), oddRef]]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EXISTS")) return [{ odd: true }];
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const oddGone = await settleHeld(Date.now() + 1);
+  redis.pipeline = realPipeline;
+  is("a store whose presence answers in another shape: kept in the index, counted as failed (rule 24)", [oddGone.failed > 0, await inIndex(oddRef)], [true, true]);
+  await redis.pipeline([["ZREM", HELD, oddRef]]);
+
+  part("A put-back that finds the hold gone leaves no picture behind (review of #3539)");
+  const sixth = await pictured("Zine scan", 6);
+  await takeDown(report, await current(), { type: "link", id: sixth.id }, ORIGIN, token);
+  const sixthHeld = (await current()).heldLinks?.find((h) => h.link.id === sixth.id);
+  await actOnHeld(report, await current(), sixth.id, "counter", ORIGIN, Date.now());
+  hooks.onCopy = async () => {
+    if (!sixthHeld || !(await dropHeldLink(OWNER, sixthHeld.report, sixthHeld.link.id, sixthHeld.heldAt))) throw new Error("not dropped");
+  };
+  const lost = await settleHeld(restoreFrom(Date.now()));
+  is("the hold went while the picture was copied back: nothing put back", [lost.restored, (await current()).links.some((l) => l.id === sixth.id)], [0, false]);
+  is("the copy at the old address and the kept copy are both deleted", [kept.has(sixth.path), kept.has(sixthHeld?.picture ?? ""), (await fetchPicture(sixth.path))[0]], [false, false, 404]);
+
+  part("A notice page that never expires keeps never expiring (review of #3539)");
+  const tokenKey = `nl:report:t:${createHash("sha256").update(`nimbus-takedown:${token}`).digest("hex")}`;
+  const ttlBefore = (await redis.pipeline([["TTL", tokenKey]]))[0] as number;
+  await redis.pipeline([["PERSIST", tokenKey]]);
+  const seventh = await pictured("Flyer", 7);
+  await takeDown(report, await current(), { type: "link", id: seventh.id }, ORIGIN, token);
+  is("holding a link sets no expiry on it", (await redis.pipeline([["TTL", tokenKey]]))[0], -1);
+  await redis.pipeline([["EXPIRE", tokenKey, ttlBefore]]);
+  const seventhUntil = Date.parse((await current()).heldLinks?.find((h) => h.link.id === seventh.id)?.until ?? "");
+  is("(the window ends and it is deleted, which frees its place)", (await settleHeld(seventhUntil + 1)).deleted, 1);
 
   part("A held link keeps its place in the store's list");
   const s = await current();

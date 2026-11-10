@@ -20,6 +20,12 @@
  */
 import { type StoreLink, parseStoreLinks } from "@/lib/store-link";
 
+/**
+ * The daily job's index (store ref -> when its held links next need a look, ms). The company's, in the nl:report:
+ * family; lib/store.ts drops a store's entry when the store is deleted or closed, so no address stays in it.
+ */
+export const HELD_INDEX = "nl:report:held";
+
 /** How long after a copyright takedown of a link a counter-notice is taken, the link and its picture held meanwhile. */
 export const COUNTER_NOTICE_DAYS = 30;
 /** Full weekdays after the day a counter-notice came in before the link goes back: at least 10 business days. */

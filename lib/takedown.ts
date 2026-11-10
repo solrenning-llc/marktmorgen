@@ -24,13 +24,13 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { type Store, dropHeldLink, holdStoreLink, markHeldLink, noteTakedown, removeStoreLink, restoreHeldLink, setKit, setProductHidden, storeForEmail, storeForHandle, storeRef } from "@/lib/store";
+import { type Store, dropHeldLink, holdStoreLink, markHeldLink, noteTakedown, removeStoreLink, restoreHeldLink, setKit, setProductHidden, storeForEmail, storeForHandle, storeRecordKept, storeRef } from "@/lib/store";
 import { BlobNotFoundError } from "@vercel/blob";
 import { copy, del, head } from "@/lib/blob";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { imageType } from "@/lib/product-image";
 import { SITE_URL } from "@/lib/site-url";
-import { type HeldLink, NOTICE_PAGE_AFTER_HOLD_DAYS, heldDue, holdUntil, restoreFrom } from "@/lib/takedown-hold";
+import { HELD_INDEX, type HeldLink, NOTICE_PAGE_AFTER_HOLD_DAYS, heldDue, holdUntil, restoreFrom } from "@/lib/takedown-hold";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
@@ -587,7 +587,6 @@ function heldName(path: string): string {
  *   nl:report:held:run             string one run of the daily job at a time
  * The company's, like the notices themselves (the nl:report: family).
  */
-const HELD_INDEX = reportKey("held");
 const heldLockKey = (ref: string) => `${HELD_INDEX}:${sha(`nimbus-held:${ref}`)}:lock`;
 const HELD_RUN = reportKey("held:run");
 const HELD_LOCK_SECONDS = 120;
@@ -596,6 +595,12 @@ const HELD_LOCK_WAIT_MS = 10_000;
 const HELD_PER_RUN = 100;
 /** A store that could not be read is looked at again a week later, never forgotten. */
 const UNREAD_AGAIN_MS = 7 * 86_400_000;
+
+/** Takes a store off the daily job's index; throws unless Redis confirms it. */
+async function dropFromIndex(ref: string): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["ZREM", HELD_INDEX, ref]]), 1);
+  if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("the held links' index write");
+}
 
 /** Asks the daily job to look at this store's held links at its next run; throws unless Redis confirms it. */
 async function lookAgain(ref: string, at: number): Promise<void> {
@@ -615,7 +620,8 @@ async function keepNoticePage(token: string, until: number): Promise<void> {
   const replies = repliesFor(await redisPipeline([["TTL", tokenKey(token)]]), 1);
   const ttl = replies && typeof replies[0] === "number" && Number.isSafeInteger(replies[0]) ? replies[0] : null;
   if (ttl === null) throw new UnknownReplyError("a notice page's lifetime");
-  if (ttl === -2 || (ttl >= 0 && ttl >= want)) return;
+  // -2: the page is gone already; -1: it never expires, so it already lasts long enough.
+  if (ttl === -2 || ttl === -1 || ttl >= want) return;
   const set = repliesFor(await redisPipeline([["EXPIRE", tokenKey(token), want]]), 1);
   if (!set || set[0] !== 1) throw new UnknownReplyError("a notice page's lifetime write");
 }
@@ -687,12 +693,15 @@ async function withdrawHeldOriginal(store: Store, report: string, id: string): P
  * copy deleted, and the creator told. Throws unless each step is confirmed: the link stays held for the next try.
  */
 async function putBack(ref: string, held: HeldLink, origin: string): Promise<boolean> {
+  let copiedBack = false;
   if (held.picture && held.link.image) {
     const back = await copyFile(held.picture, held.link.image.path);
     if (back === "absent") console.error("a held link's picture was not found; it goes back without it");
+    copiedBack = back === "copied";
   }
   const done = await restoreHeldLink(ref, held.report, held.link.id, held.heldAt);
   if (!done.ok) {
+    await afterNoPutBack(ref, held, copiedBack);
     if (done.reason === "none") return false;
     throw new Error("the store's list of links is full");
   }
@@ -717,6 +726,29 @@ async function putBack(ref: string, held: HeldLink, origin: string): Promise<boo
   return true;
 }
 
+/**
+ * After a put-back that did not happen, by the store as it is now (review of #3539): while the link is still held, the
+ * picture copied back to its old address is deleted again, so that address keeps answering "not found"; once the hold
+ * is gone and the link is not on the page with that picture, the copy back and the kept copy are deleted too; once
+ * the link is back with it, only the kept copy. A store that cannot be read leaves every file as it is (rule 24), and
+ * the next try settles it. A delete that fails is logged; the next run or press deletes it again.
+ */
+async function afterNoPutBack(ref: string, held: HeldLink, copiedBack: boolean): Promise<void> {
+  const oldPath = copiedBack && held.link.image ? held.link.image.path : null;
+  const store = await storeForEmail(ref);
+  let files: string[];
+  if (store) {
+    const stillHeld = (store.heldLinks ?? []).some((h) => h.report === held.report && h.link.id === held.link.id && h.heldAt === held.heldAt);
+    const live = oldPath !== null && store.links.some((l) => l.image?.path === oldPath);
+    files = stillHeld ? (oldPath ? [oldPath] : []) : [...(held.picture ? [held.picture] : []), ...(oldPath && !live ? [oldPath] : [])];
+  } else if ((await storeRecordKept(ref)) === false) {
+    files = [...(held.picture ? [held.picture] : []), ...(oldPath ? [oldPath] : [])];
+  } else {
+    return;
+  }
+  if (files.length) await del(files).catch((error: unknown) => console.error("could not delete a held link's picture after a put-back that did not happen", error));
+}
+
 /** Deletes a held link whose window ended: its kept picture first, then the record. Throws unless confirmed. */
 async function deleteHeld(ref: string, held: HeldLink): Promise<boolean> {
   const files = [...(held.picture ? [held.picture] : []), ...(held.link.image ? [held.link.image.path] : [])];
@@ -731,7 +763,12 @@ async function settleStore(ref: string, now: number, counts: HeldCounts): Promis
   await withLock(heldLockKey(ref), HELD_LOCK_SECONDS, HELD_LOCK_WAIT_MS, async () => {
     const store = await storeForEmail(ref);
     if (!store) {
-      // Gone, or not readable: never taken for "nothing held"; looked at again later.
+      // A store that is gone has nothing held left to settle: its entry leaves the index, so no address stays in it.
+      // One that could not be read is never taken for gone (rule 24): looked at again later.
+      if ((await storeRecordKept(ref)) === false) {
+        await dropFromIndex(ref);
+        return;
+      }
       counts.failed += 1;
       await lookAgain(ref, now + UNREAD_AGAIN_MS);
       return;
@@ -757,8 +794,7 @@ async function settleStore(ref: string, now: number, counts: HeldCounts): Promis
       await lookAgain(ref, next);
       return;
     }
-    const replies = repliesFor(await redisPipeline([["ZREM", HELD_INDEX, ref]]), 1);
-    if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("the held links' index write");
+    await dropFromIndex(ref);
   });
 }
 

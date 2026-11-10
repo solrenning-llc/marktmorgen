@@ -37,7 +37,7 @@ export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin,
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
 import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@/lib/shipping";
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
-import { type HeldLink, parseHeldLinks } from "@/lib/takedown-hold";
+import { HELD_INDEX, type HeldLink, parseHeldLinks } from "@/lib/takedown-hold";
 import { type Video, parseVideo } from "@/lib/sales-page";
 import { type FaqItem, parseFaq } from "@/lib/store-faq";
 import { type FaqAddRefusal, faqAddition } from "@/lib/faq-from-inbox";
@@ -1132,6 +1132,17 @@ export async function storeForEmailSeen(
   return store;
 }
 
+/**
+ * Whether a store's record is kept under this ref: false only when Redis answers that no record is there, true when
+ * one is, and null for anything else (rule 24): an unknown reply is never taken for a store that is gone.
+ */
+export async function storeRecordKept(ref: string): Promise<boolean | null> {
+  if (!ref || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["EXISTS", await ownerKey(ref)]]), 1);
+  const there = replies ? countOf(replies[0]) : null;
+  return there === 0 ? false : there === 1 ? true : null;
+}
+
 /** One bounded read for the funded restart's final source check.
  * It cannot migrate, save, infer absence from an oversized/partial answer,
  * or turn a current-source observation into permission for another POST. */
@@ -1887,6 +1898,7 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
       ["SREM", await accountKey(store.email), store.sid],
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
+      ["ZREM", HELD_INDEX, storeRef(store)],
     ]);
     return { ok: true, store };
   });
@@ -1911,6 +1923,7 @@ export async function closeStoreRecord(store: Store, extraKeys: string[] = []): 
     ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
     ["ZREM", ENDED_INDEX, storeRef(store)],
     ["SREM", SHARING_INDEX, storeRef(store)],
+    ["ZREM", HELD_INDEX, storeRef(store)],
   ]);
 }
 

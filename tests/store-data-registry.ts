@@ -652,6 +652,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lc:@lib/lesson-comments.ts": { what: "Lesson comments", room: ["lib/lesson-comments.ts"] },
   "nl:lnote:@lib/lesson-notes.ts": { what: "A student's private notes on lessons (290 [SQ1]): at most MAX_NOTES_PER_STUDENT of MAX_NOTE_CHARS each, MAX_NOTES_BYTES_PER_STUDENT a student, all students' notes in one slot (NOTES_TOTAL_FIELD) of at most studentNotesRoomFor, a tenth of the data room", room: ["lib/lesson-notes.ts"] },
   "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
+  "nl:mto:i:@lib/made-to-order.ts": room("A store's list of its orders made to order (761 [STN8]), at most MAX_KEPT_ORDERS, each counted with its record", "lib/made-to-order.ts"),
+  "nl:mto:o:@lib/made-to-order.ts": room("One order made to order, ending by itself KEEP_SECONDS after its payment, counted until that month", "lib/made-to-order.ts"),
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },

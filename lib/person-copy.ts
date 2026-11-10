@@ -66,6 +66,7 @@ import { chatMessagesOf } from "@/lib/community-chat";
 import { rsvpsOf } from "@/lib/community-events";
 import { votesOf } from "@/lib/community-polls";
 import { keysOf } from "@/lib/licence-keys";
+import { madeOrdersOf } from "@/lib/made-to-order";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
@@ -141,6 +142,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/closing-plan-guard.ts": { how: "marks", what: "Nothing about buyers: only the creator's own plan, if one was paid while the store was closing" },
   "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
   "lib/contacts.ts": { how: "copied", what: "Your place on the store's list: your address, name, labels, what you asked for or bought, and whether you agreed to hear from it" },
+  "lib/made-to-order.ts": { how: "copied", what: "Orders made to order you bought: the sale, the days promised and each stage with its time" },
 };
 
 /** True only when every module is copied or holds only marks: the condition for giving the copy to anybody. */
@@ -415,6 +417,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/made-to-order.ts": async (s) => (await madeOrdersOf(s.store, s.email)).map((r) => ({ sale: r.sale, paid: iso(r.order.paidAt), days: r.order.days, stages: r.order.steps.map((step) => ({ stage: step.stage, at: iso(step.at) })) })),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
   "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
   "lib/closing-buyers.ts": async (s) => {

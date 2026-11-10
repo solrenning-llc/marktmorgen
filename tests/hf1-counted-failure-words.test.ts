@@ -102,6 +102,20 @@ async function main(): Promise<void> {
     [/nothing was counted/i.test(outreachFailed), /counted as one of this month's writing jobs/i.test(outreachFailed)],
     [false, true],
   );
+  // The new pitch is saved after writePitch took the job, and anything thrown there is the route's server_error.
+  const outreach = readFileSync(join(process.cwd(), "lib/outreach.ts"), "utf8");
+  const route = readFileSync(join(process.cwd(), "app/api/store/outreach/route.ts"), "utf8");
+  is(
+    "the pitch is saved after the writing job was taken, and a throw there is the route's server_error",
+    [outreach.indexOf("await writePitch(") > 0 && outreach.indexOf('["HSET", key(store.statsId, "pitches"), pitch.id') > outreach.indexOf("await writePitch("), /catch \(error\) \{[\s\S]*?fail\("server_error", 500\)/.test(route)],
+    [true, true],
+  );
+  const outreachServer = said("components/outreach-studio.tsx", "server_error");
+  is(
+    "so the outreach studio's server_error words never say nothing was changed or counted, and say the try may have counted",
+    [/nothing was (changed|counted)/i.test(outreachServer), /may have counted as one of this month's writing jobs/i.test(outreachServer)],
+    [false, true],
+  );
 
   part("A question about the store's numbers");
   const beforeAsk = await jobs();

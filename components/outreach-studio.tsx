@@ -48,7 +48,7 @@ const MESSAGES: Record<string, string> = {
   day: "That is today's limit of site reads. Try again tomorrow.",
   signed_out: "Your session ended. Log in again.",
   unknown: "That pitch is no longer here. Reload the page.",
-  server_error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
+  server_error: "Something went wrong on our side. Try again in a moment. If an email was being written, this try may have counted as one of this month's writing jobs.",
 };
 
 const STATUS_WORDS: Record<PitchStatus, string> = {

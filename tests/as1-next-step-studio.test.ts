@@ -31,6 +31,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { POST as courseRoute } from "@/app/api/store/course/route";
+import { POST as noThanksRoute } from "@/app/api/store/course/no-thanks/route";
 import { CourseNextStep } from "@/components/course-next-step";
 import { CourseNextStepCard } from "@/components/course-next-step-card";
 import { NEXT_STEP_NO_SECONDS, nextStepCookie, nextStepFor } from "@/lib/course-next-step";
@@ -184,8 +185,9 @@ test("the card: the product, its price and the creator's line, a real No thanks 
   const w = coursesWords("en");
   const html = renderToStaticMarkup(
     createElement(CourseNextStepCard, {
-      cookie: nextStepCookie("a".repeat(32)),
-      seconds: NEXT_STEP_NO_SECONDS,
+      handle: "nextstep",
+      courseId: "a".repeat(32),
+      productId: "course000001",
       href: "/@nextstep/p/advanced-watercolor",
       title: "Advanced watercolor",
       price: "$49",
@@ -197,10 +199,15 @@ test("the card: the product, its price and the creator's line, a real No thanks 
   assert.match(html, /<h2 id="next-step-title"[^>]*>Advanced watercolor<\/h2>/);
   assert.ok(html.includes(">$49<") && html.includes(">Go deeper.<"));
   assert.match(html, /<a href="\/@nextstep\/p\/advanced-watercolor" class="btn st-btn">See Advanced watercolor<\/a>/);
-  assert.match(html, /<button type="button"[^>]*aria-describedby="next-step-title"[^>]*>No thanks<\/button>/);
+  assert.match(html, /<form [^>]*action="\/api\/store\/course\/no-thanks" method="post"/, "a plain form: no script needed");
+  assert.match(html, /<button type="submit"[^>]*aria-describedby="next-step-title"[^>]*>No thanks<\/button>/);
+  assert.match(html, /<div role="status" aria-live="polite"><\/div>/, "the status region is there before it says anything");
   assert.ok(!/%|\d+ (people|students|left)|only|hurry/i.test(html.replace(">$49<", "")), "nothing that presses");
   const card = readFileSync("components/course-next-step-card.tsx", "utf8");
-  assert.ok(card.includes("document.cookie = `${cookie}=1; Path=/; Max-Age=${seconds}; SameSite=Lax${secure}`"), "the cookie holds only 1");
+  assert.ok(!card.includes("document.cookie"), "never written by script: Safari keeps those 7 days, not a year");
+  assert.ok(card.includes("said.current?.focus()") && card.includes("tabIndex={-1}"), "focus moves to the sentence that says it is done");
+  const field = readFileSync("components/course-next-step.tsx", "utf8");
+  assert.ok(field.includes("aria-disabled={!dirty || busy || over || undefined}") && field.includes("if (!dirty || busy || over) return;"), "Save stays, so focus is never lost with it");
   const page = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
   assert.ok(page.includes('dismissed: jar.get(nextCookie)?.value === "1"'), "the page reads the No thanks before anything else");
   assert.ok(readFileSync("app/privacy/page.tsx", "utf8").includes("<code>nl_ns_</code>"), "the privacy policy names the cookie");
@@ -213,4 +220,25 @@ test("every store language says the card in its own words", () => {
     assert.ok(w.nextStepSee("T").includes("T") && w.nextStepLabel && w.nextStepNoThanks && w.nextStepNoThanksDone, language);
     if (language !== "en") assert.ok(w.nextStepLabel !== en.nextStepLabel && w.nextStepNoThanks !== en.nextStepNoThanks && w.nextStepNoThanksDone !== en.nextStepNoThanksDone, `${language}: not English`);
   }
+});
+
+test("No thanks is kept by the server for a year, only for that store's course pages, and a wrong answer sets nothing", async () => {
+  const post = (fields: Record<string, string>, headers: Record<string, string> = {}) =>
+    noThanksRoute(new NextRequest("https://marktmorgen.com/api/store/course/no-thanks", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", host: "marktmorgen.com", ...headers }, body: new URLSearchParams(fields).toString() }));
+  const course = "a".repeat(32);
+  const good = { handle: "nextstep", course, product: "course000001" };
+  const fetched = await post(good, { accept: "application/json" });
+  const cookie = fetched.headers.get("set-cookie") ?? "";
+  assert.equal(fetched.status, 204);
+  assert.ok(cookie.startsWith(`${nextStepCookie(course)}=1;`), cookie);
+  for (const part of [`Max-Age=${NEXT_STEP_NO_SECONDS}`, "Path=/@nextstep/course/", "SameSite=Lax", "HttpOnly", "Secure"]) assert.ok(cookie.includes(part), `${part} in ${cookie}`);
+  assert.equal(NEXT_STEP_NO_SECONDS, 365 * 86_400, "a year, as the privacy policy says");
+  const plain = await post(good);
+  assert.deepEqual([plain.status, plain.headers.get("location"), Boolean(plain.headers.get("set-cookie"))], [303, "https://marktmorgen.com/@nextstep/course/course000001", true], "without script, back to the course");
+  for (const bad of [{ ...good, course: "x" }, { ...good, handle: "Not A Handle!" }, { ...good, product: "../../x" }]) {
+    const refused = await post(bad, { accept: "application/json" });
+    assert.deepEqual([refused.status, refused.headers.get("set-cookie")], [400, null], JSON.stringify(bad));
+  }
+  const elsewhere = await post(good, { origin: "https://evil.example", accept: "application/json" });
+  assert.deepEqual([elsewhere.status, elsewhere.headers.get("set-cookie")], [403, null], "not from another site");
 });

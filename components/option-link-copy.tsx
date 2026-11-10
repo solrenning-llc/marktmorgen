@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/icons";
+import { NewTab } from "@/components/new-tab";
 import { optionLinkPath } from "@/lib/option-link-rules";
 
 /**
@@ -34,6 +35,7 @@ export function OptionLinkCopy({ path, optionId, label }: { path: string; option
     >
       <Icon name={copied ? "check" : "link"} size={15} />
       <span aria-live="polite">{copied ? "Link copied" : `Copy a link that opens ${label} chosen`}</span>
+      <NewTab />
     </a>
   );
 }

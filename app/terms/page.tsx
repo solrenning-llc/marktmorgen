@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 10, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -844,7 +844,8 @@ export default function TermsPage() {
           podcast&rsquo;s episodes, the files its students handed in and the
           pictures in its community&rsquo;s posts), and every membership and
           payment plan sold through it ends that day on the creator&rsquo;s
-          own Stripe account. Within {ERASE_WITHIN_DAYS} days, and usually the same day,
+          own Stripe account. The files its buyers sent for review go that
+          day too, with the rest of its files. Within {ERASE_WITHIN_DAYS} days, and usually the same day,
           everything else the store keeps with us is deleted: its page and
           settings, products and prices, pages, posts, courses and the
           certificates they gave, community, contacts, forms and their

@@ -65,14 +65,25 @@ export type ErasureSize = {
 };
 
 /**
+ * A person's files sent for review (750 [CD1], lib/submission-store.ts,
+ * forgetSubmissionsPerson) at MAX_SUBMISSIONS_PER_PERSON (20): their index
+ * read, each entry's door read and its record, door and place on the sweep's
+ * list deleted, each open upload given up at the vault (its record read and
+ * deleted, its storage reservation given back under its lock: at most eight
+ * commands), and their places' keys deleted. [commands, bytes], held by
+ * tests/submission-erasure.test.ts to cover what it sends.
+ */
+export const ERASE_SUBMISSIONS: readonly [number, number] = [260, 60_000];
+
+/**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,
  * and (since 18 October 2026) a person's payment requests at their cap, four commands each for twice MAX_PER_PERSON
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them.
  */
-export const ERASE_FIXED_COMMANDS = 550;
+export const ERASE_FIXED_COMMANDS = 550 + ERASE_SUBMISSIONS[0];
 /** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
-export const ERASE_FIXED_BYTES = 310_000;
+export const ERASE_FIXED_BYTES = 310_000 + ERASE_SUBMISSIONS[1];
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],

@@ -41,7 +41,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
+import { type Store, ensureListId, ensureStatsId, storeFolder, storeRef } from "@/lib/store";
 import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
@@ -70,6 +70,7 @@ import { forgetFormsPerson } from "@/lib/form-store";
 import { forgetFinishPerson } from "@/lib/course-finish";
 import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
+import { forgetSubmissionsPerson } from "@/lib/submission-store";
 import { forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
@@ -148,6 +149,8 @@ export const ERASERS: Eraser[] = [
       return records;
     },
   },
+  // Files they sent for review (750 [CD1]): open uploads given up, records deleted, files deleted with the rest below.
+  { module: "lib/submission-store.ts", run: async (s, files) => forgetSubmissionsPerson(await storeFolder(storeRef(s.store)), s.learner, files) },
   { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email, s.store) },
   {
     module: "lib/lesson-comments.ts",

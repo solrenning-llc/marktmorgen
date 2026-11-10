@@ -69,6 +69,12 @@ export const MAX_SUBMISSION_NOTE = MAX_FEEDBACK;
 
 /** Files one buyer may have waiting for review on one lesson or call, so one buyer cannot fill a creator's storage. */
 export const MAX_WAITING_PER_BUYER = 3;
+/**
+ * Files one buyer may have open, waiting or kept in one store at once, every
+ * lesson together, so deleting a person (lib/person-erasure.ts) and the copy
+ * of their data have a bounded cost (lib/erasure-rules.ts, ERASE_SUBMISSIONS).
+ */
+export const MAX_SUBMISSIONS_PER_PERSON = 20;
 
 /** What the creator turned on. */
 export type SubmissionSetup = {

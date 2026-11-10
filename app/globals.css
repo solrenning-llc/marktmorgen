@@ -5214,3 +5214,37 @@ html:has([data-product-editor]) {
   }
 }
 /* end 654 [WG14] */
+
+/* 274 [AX1] dark mode, stage 1: dormant dark tokens (lib/dark-tokens.ts). */
+/* Nothing sets data-color-scheme yet, so no page changes. tests/dark-tokens.test.ts holds every pair to AAA. */
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --paper: #10151d;
+  --sand: #161c26;
+  --sand-deep: #1e2531;
+  --line: #2a3240;
+  --line-strong: #3b4453;
+  --line-off: #7d8797;
+  --ink: #f4f2ed;
+  --ink-soft: #dad7d0;
+  --ink-mute: #c9c5bc;
+  --lilac: #1d1f3a;
+  --lilac-deep: #262a4d;
+  --action-bg: #b9b7f5;
+  --action-on: #10151d;
+  --action-border: #b9b7f5;
+  --link: #c3c1f7;
+  --focus-ring: #c3c1f7;
+  --accent-large: #9a97e0;
+  --mint-soft: #0f2a22;
+  --mint-text: #8fe8c6;
+  --mint: #4fd1a3;
+  --danger-soft: #331614;
+  --danger-text: #ffb4ab;
+  --danger: #ff7b6e;
+  --amber-soft: #2e2210;
+  --amber: #ffcf8a;
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+/* end dark tokens */

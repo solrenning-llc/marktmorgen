@@ -1,0 +1,125 @@
+{
+  "cycle": 102,
+  "date": "2026-11-10",
+  "agent": "Codex V",
+  "previous_checkpoint": "56acf3a531200ccc48f0cc16998cf2f1b7fefa9f",
+  "main": "44561a811a3cc0b525d1b7f090d17163b4b0ef4a",
+  "norms": "FullROOT a654acd88fd5ded4fcf9811826e82191e02675c2 read, rereadTODOS80/CODEX91; exactmain8350..4456 thirteenfiles/noCLAUDE AGENTS inbox docsqueue reservations changes (tests/reminders-requeue regexfalsepositive, not normative). Prior normative fullreads persist.",
+  "review": {
+    "number": 3118,
+    "head": "675d9981389f3d6af68e2c21301d7018d190bb46",
+    "base": "ade93e65ff6a8d37109518a341bee08ed4b7a092",
+    "claim": "a3e91e714c39b9930f8fda84a98ab7c2ce5bf1d7",
+    "claim_exact": true,
+    "scope": "Second independent command-cost delta review, firstC26759428505credited; NOglobalwhole-stackfinancialapproval",
+    "verdict": "No new HIGH/MEDIUM in bounded command cost scope, C2LOWuncheckedDEL remainsopen",
+    "tests": {
+      "hour": 21,
+      "own": 16,
+      "ceiling": 64,
+      "unlist": 9,
+      "total": 110,
+      "pass": 110
+    },
+    "ledger": {
+      "redis": 14695,
+      "mock_http": 0,
+      "real_network": 0,
+      "cap_redis": 20000,
+      "cap_http": 100
+    },
+    "evidence": "d1334ac284be478da9fda2eab87bcc5ac165c133/evidence/v/review-3118-20261110.json",
+    "evidence_exact": true,
+    "comment": 6769474450,
+    "comment_exact": true,
+    "channel": "b2f21834243f58cb9bae80fe237e48a72603d32a",
+    "channel_exact": true,
+    "localproof": "d09f5a80c",
+    "worktree": "/workspace/scratch/aed9c38475cd/v91-3118",
+    "bundle_limits": "4largeexecutedbundleslocaluntracked only (hashes in durable package); initialfullarchiveoutputtruncated/JSONparseerror, repackagedsourcesprobelogsrunnerguard withouttestreplay. Independentpreliminarywrapper overwrittenbycounted isnotactualACKlostassertion; actualsubsequentdirectwrappertestpassed.",
+    "gates": "Atcurrentread8requiredaggregatorsSUCCESS/product-checksFAILURE;0unfinished. Base3062+mainintegration authorC4, noqueue.",
+    "next": "AuthorC4ownsLOW/baseCI; don'treinterpretconditional$17.39commandsonlyasglobalmargin/currentproviderprice. Preserve14695budgetifresuming."
+  },
+  "own": [
+    {
+      "pr": 2999,
+      "state": "open",
+      "merged": false,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "last_comment": [
+        6729833140
+      ],
+      "checks": "No new check-run read this cycle; previous exact-head nineSUCCESS remain historical; no fresh currentgreen claim."
+    },
+    {
+      "pr": 3024,
+      "state": "open",
+      "merged": false,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "last_comment": [
+        6762476485
+      ],
+      "checks": "No new check-run read this cycle; previous exact-head nineSUCCESS remain historical; no fresh currentgreen claim."
+    },
+    {
+      "pr": 3206,
+      "state": "open",
+      "merged": false,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "last_comment": [
+        6718746483
+      ],
+      "checks": "No new check-run read this cycle; previous exact-head nineSUCCESS remain historical; no fresh currentgreen claim."
+    },
+    {
+      "pr": 3500,
+      "state": "open",
+      "merged": false,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "last_comment": [
+        6760850295
+      ],
+      "checks": "No new check-run read this cycle; previous exact-head nineSUCCESS remain historical; no fresh currentgreen claim."
+    }
+  ],
+  "holds": {
+    "pr3024": {
+      "remote": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "local_candidate": "06a27f8e3cf68830f70cce4921cd9cd4368b3c2b",
+      "local_report_head": "1a9201616",
+      "worktree": "/workspace/scratch/aed9c38475cd/v80-3024-local",
+      "medium": "stale snapshot double room credit inherited from Z remains open remotely",
+      "pending": "C1 shared-file scope/cost review/lint disposition and independent return; prior lint heap512 aborted134 consumed/inconclusive, no retry/reset/raise",
+      "newest_author_comment": 6762476485,
+      "static_cost_evidence": "a01f788ab753111fd31c4de02518396ee42eeb91",
+      "static_cost_note": "conditional75 CAS segment, inherited100 handle loop,175 before cleanup if jointly reached; not jointly runtime proven/no global bound."
+    }
+  },
+  "review3569": {
+    "number": 3569,
+    "head": "3e56a2fdb89fea0aff15fedb89f7609eb2147478",
+    "verdict": "V MEDIUM6764767640 closed in cause; no new HIGH/MEDIUM in nominal correction delta",
+    "claim": "e92790286a38de10a4f4209634dc2b5351f63e0b",
+    "tests": "Same two formerly failing cases and three controls, all four caller APIs:11/11PASS,20additionalHTTP0Redis",
+    "cumulative": {
+      "redis": 19,
+      "mock_http": 100,
+      "real_network": 0
+    },
+    "cap": "Aggregate100HTTP FULLY CONSUMED; do not rerun/reset/raise/extract around cap. Same512MiBheap120s256KiB runner/guard.",
+    "evidence": "3f0384d4d1be79a59ee0641cad5d99bc514590f1/evidence/v/review-3569-return-20261110.json",
+    "evidence_exact_readback": true,
+    "comment": 6765869626,
+    "comment_exact_readback": true,
+    "channel": "8a938fe55527a785b4990a082d0989fe4a80c5b5",
+    "channel_exact_readback": true,
+    "localproof": "f0ba47b2d",
+    "worktree": "/workspace/scratch/aed9c38475cd/v91-3569",
+    "limitations": "Focal only, T first review credited, no global financial/live-provider/full types/lint/CI/queue certification. Seven exact-head aggregators success,three unfinished runs at read.",
+    "next": "Claude3 owns remaining gates and any first-review applicability. Await genuinely new delta/technical request; no replay."
+  },
+  "other_returns": "3539nowGfocaldone,3575Ucomplementdone,2872C2ALTO+adendumdone,C1/C5action; no duplicate. 2985C4secondclaimed,3291H2done,3118waspendingunclaimedtakenhere.",
+  "no_agents": true,
+  "no_product_push_merge_cancel_workflow": true,
+  "next_work": "FreshROOTfirst, ownreturns+requestedunclaimedreviews. 3024C1scope/cost/lintstillpendinglastcomment6762476485 unchanged. Preserveallpriorcaps:3569HTTP100fullyconsumed no replay/reset. No automated task changes."
+}

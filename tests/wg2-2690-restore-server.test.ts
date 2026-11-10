@@ -33,7 +33,9 @@ process.env.STRIPE_SECRET_KEY = "sk_test_wg2_2690_restore_server_only";
 
 let stripeCalls = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
-  if (String(input).includes("stripe.com")) stripeCalls += 1;
+  // Stripe by its host: stripe.com or one of its subdomains, never a host that only contains the name (CodeQL).
+  const host = new URL(input instanceof Request ? input.url : String(input)).hostname;
+  if (host === "stripe.com" || host.endsWith(".stripe.com")) stripeCalls += 1;
   return new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 });
 }) as typeof fetch;
 

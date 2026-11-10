@@ -1,0 +1,30 @@
+{
+  "cycle": 105,
+  "agent": "Codex V",
+  "date": "2026-11-10",
+  "scope": "LOCAL ONLY merge candidate #2999; no independent monetary clearance, qualificationtests or newheadCI",
+  "claim": "a3656e7acc4e9d493e22bd50bd0fb9270544d9a5",
+  "commit": "8e2a10279ecdf999663a53fd1052b5317ae20f49",
+  "tree": "028a93982bb5613be8706b5abb62bddf3a8c3db7",
+  "parents": [
+    "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+    "f6ef221443876025eb6286940d687bf97799dd8e"
+  ],
+  "automatic_conflict_tree": "b6a1f0037063c4c2a18673109a5704b47631dc68",
+  "manual_resolution_only_path": "lib/store-checkout.ts",
+  "resolved_block": "    // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.\n    !body.has(\"discounts[0][promotion_code]\") && !(body.has(\"discounts[0][coupon]\") && !body.has(\"metadata[member]\")));\n  if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== \"never_activated\") {\n    throw new Error(\"The payment page could not be opened\");\n  }",
+  "published_parent_block": "    // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.\n    !body.has(\"discounts[0][promotion_code]\") && !(body.has(\"discounts[0][coupon]\") && !body.has(\"metadata[member]\")));\n",
+  "main_parent_block": "  if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== \"never_activated\") {\n    throw new Error(\"The payment page could not be opened\");\n  }",
+  "parent_block_concatenation_exact": true,
+  "source_blob": "997f2e411c57e3b1cedb42e38b244297c30047c5",
+  "resolution_diff": "diff --git a/lib/store-checkout.ts b/lib/store-checkout.ts\nindex 0272452b6..997f2e411 100644\n--- a/lib/store-checkout.ts\n+++ b/lib/store-checkout.ts\n@@ -731,16 +731,11 @@ export async function createCheckout(\n     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&\n     !extras.buyerKey && !extras.upsellKey && !extras.held && !recovering && !named &&\n     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&\n-<<<<<<< c5db63a1fffc5c79a5866831d54ddff01b3825fa\n     // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.\n     !body.has(\"discounts[0][promotion_code]\") && !(body.has(\"discounts[0][coupon]\") && !body.has(\"metadata[member]\")));\n-  if (singleDigital) throw new Error(\"The payment page could not be opened\");\n-=======\n-    !body.has(\"discounts[0][promotion_code]\") && !body.has(\"discounts[0][coupon]\"));\n   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== \"never_activated\") {\n     throw new Error(\"The payment page could not be opened\");\n   }\n->>>>>>> f6ef221443876025eb6286940d687bf97799dd8e\n \n   // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):\n   // admitted here, before Stripe's page opens, so nobody is stopped while paying.\n",
+  "own_delta_stat": " app/api/store/checkout/route.ts             |  24 ++\n docs/reviews/v-2999-integration.md          |  45 +++\n lib/data-families.ts                        |   3 +-\n lib/discount-impact.ts                      |   6 +-\n lib/fair-coupon.ts                          |  28 +-\n lib/member-price-rules.ts                   | 110 +++++++\n lib/member-price.ts                         | 245 +++++++++++++++\n lib/store-checkout.ts                       |  29 +-\n lib/store.ts                                |  15 +\n proofs/v/2999/blob-identities.json          |  74 +++++\n proofs/v/2999/ci-log-reference.json         |  15 +\n proofs/v/2999/dependency-versions.json      |  27 ++\n proofs/v/2999/logs-manifest.json            | 138 +++++++++\n proofs/v/2999/logs.json.gz.b64              |   1 +\n proofs/v/2999/member-family.proof.ts        |  31 ++\n proofs/v/2999/preload.mjs                   |  13 +\n proofs/v/2999/publication-checks.json       |  16 +\n proofs/v/2999/registry-without-candidate.ts | 461 ++++++++++++++++++++++++++++\n proofs/v/2999/run.mjs                       |   7 +\n proofs/v/2999/types.mjs                     |  10 +\n proofs/v/2999/validate.mjs                  |   7 +\n proofs/v/2999/worker.mjs                    |  18 ++\n tests/member-price-proof-gaps.test.ts       | 123 ++++++++\n tests/member-price.test.ts                  | 386 +++++++++++++++++++++++\n tests/plan-cost-registry.ts                 |   4 +\n tests/store-data-registry.ts                |   1 +\n 26 files changed, 1825 insertions(+), 12 deletions(-)\n",
+  "diff_check": "PASS",
+  "status": "",
+  "incremental_semantic_execution": "ZERO; no test/Redis/HTTP/provider/lifecycle execution",
+  "preparation_errors": [
+    "First marker lookup assumed SHA labels but actual merge used HEAD. Python failed; shell continued and made local-only bad merge c63bc893a57965412ad887a366b7655e96274acd. Corrected immediately with set-e and actuallabels; amended unpublished candidate. No badref/push/testpassclaim.",
+    "Initialcachedcheck also found inherited blankline tests/store-consent-language.test.ts:153; notedited; own delta vs main clean.",
+    "First archive extraction included entire source+oldproofdiff and exceeded tooloutputcap; JSON parse failed; repackaged small resolution-only evidence without runtime replay."
+  ]
+}

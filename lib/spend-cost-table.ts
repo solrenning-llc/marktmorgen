@@ -17,7 +17,12 @@
  *   https://platform.claude.com/docs/en/build-with-claude/pdf-support
  *   https://developers.cloudflare.com/r2/pricing/
  *   https://upstash.com/pricing/redis (the Upstash transfer and storage rates)
+ *
+ * Read 2026-11-10 (the Vercel Blob operation rate):
+ *   https://vercel.com/docs/vercel-blob/usage-and-pricing (page dated 2026-09-23)
+ *   https://vercel.com/docs/pricing/regional-pricing (page dated 2026-09-14)
  */
+import { BLOB_LIST_PAGES } from '@/lib/storage-rules';
 import { VAULT_CONTROL_CALLS_PER_UPLOAD, VAULT_LIST_PAGES, VAULT_MEASURE_REQUESTS } from '@/lib/vault-rules';
 export const COST_TABLE_VERSION = 'cost-table-2026-10-17';
 
@@ -91,6 +96,13 @@ export const R2_STORAGE_MICRO_USD_PER_GB_MONTH = 15_000;
 export const R2_CLASS_A_MICRO_USD_PER_MILLION = 4_500_000;
 export const R2_CLASS_B_MICRO_USD_PER_MILLION = 360_000;
 
+/** Vercel Blob Advanced Operations (an upload, a copy, a list, a store
+ * created), no included amount counted: the top of the regional range,
+ * "Blob Advanced Operations | 1,000,000 for $4.50 - $7.00" (Regional
+ * Pricing, read 2026-11-10), so no region is assumed. The Blob pricing page
+ * (read 2026-11-10) counts every list as one. */
+export const BLOB_ADVANCED_MICRO_USD_PER_MILLION = 7_000_000;
+
 /** Upload doors (lib/upload-budget.ts): each request is a function call held
  * at 2 GB for up to 10 seconds with one CPU-second and twenty database
  * commands. An upload start is priced at the R2 operations its own path makes
@@ -101,7 +113,9 @@ export const R2_CLASS_B_MICRO_USD_PER_MILLION = 360_000;
  * Class B: three file measurements (VAULT_MEASURE_REQUESTS each, a HEAD and a
  * ranged GET): the expired session admission retires, the completion, and a
  * cancellation after a completion whose measurement could not be read. Each
- * signed piece is one Class A part upload. */
+ * signed piece is one Class A part upload. Vercel Blob: every page of the
+ * host file store's listing that admission reads (BLOB_LIST_PAGES, Vercel
+ * Blob list, an Advanced Operation). */
 export const UPLOAD_REQUEST_WAIT_SECONDS = 10;
 export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   ceilDiv(BigInt(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR * VERCEL_FUNCTION_GB * UPLOAD_REQUEST_WAIT_SECONDS), BigInt(3600))
@@ -110,6 +124,7 @@ export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   + ceilDiv(BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS * 20), BigInt(1_000_000)));
 export const UPLOAD_OPEN_CLASS_A_OPS = VAULT_LIST_PAGES + 2;
 export const UPLOAD_OPEN_CLASS_B_OPS = 3 * VAULT_MEASURE_REQUESTS;
+export const UPLOAD_OPEN_BLOB_ADVANCED_OPS = BLOB_LIST_PAGES;
 /** Requests one upload start is priced for: the start, and the finish and
  * cancel requests lib/vault.ts lets one upload make in all
  * (VAULT_CONTROL_CALLS_PER_UPLOAD: a repeat past them is refused before any
@@ -124,7 +139,9 @@ export function uploadOperationsMicroUsd(opens: number, controlRequests: number,
   const classA = BigInt(opens) * BigInt(UPLOAD_OPEN_CLASS_A_OPS) + BigInt(controlRequests) * BigInt(piecesPerControl);
   const classB = BigInt(opens) * BigInt(UPLOAD_OPEN_CLASS_B_OPS);
   const requests = BigInt(opens) * BigInt(UPLOAD_REQUESTS_PER_OPEN) + BigInt(controlRequests);
+  const blobAdvanced = BigInt(opens) * BigInt(UPLOAD_OPEN_BLOB_ADVANCED_OPS);
   const total = ceilDiv(classA * BigInt(R2_CLASS_A_MICRO_USD_PER_MILLION), million) + ceilDiv(classB * BigInt(R2_CLASS_B_MICRO_USD_PER_MILLION), million)
+    + ceilDiv(blobAdvanced * BigInt(BLOB_ADVANCED_MICRO_USD_PER_MILLION), million)
     + requests * BigInt(UPLOAD_REQUEST_INFRA_MICRO_USD);
   return total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
 }

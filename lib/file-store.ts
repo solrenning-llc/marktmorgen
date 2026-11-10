@@ -13,6 +13,7 @@
  */
 import * as blob from "@/lib/blob";
 import { deleteVault, headVault, listVault, readVault, vaultHeld, vaultUrl, writeVault } from "@/lib/vault";
+import { BLOB_LIST_PAGES } from "@/lib/storage-rules";
 import { VAULT_PREFIX, isVaultPath } from "@/lib/vault-rules";
 
 export type Measured = { pathname: string; size: number; contentType: string };
@@ -134,7 +135,7 @@ export async function filesHeld(folder: string): Promise<number> {
   const seen = new Set<string>();
   const paths = new Set<string>();
   let complete = false;
-  for (let page = 0; page < 20; page += 1) {
+  for (let page = 0; page < BLOB_LIST_PAGES; page += 1) {
     const answer = await blob.list({ prefix: `stores/${folder}/`, limit: 1000, cursor });
     if (!answer || !Array.isArray(answer.blobs) || answer.blobs.length > 1000 || typeof answer.hasMore !== "boolean") throw new Error("invalid storage listing");
     for (const entry of answer.blobs) {

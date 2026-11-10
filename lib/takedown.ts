@@ -596,10 +596,14 @@ const HELD_PER_RUN = 100;
 /** A store that could not be read is looked at again a week later, never forgotten. */
 const UNREAD_AGAIN_MS = 7 * 86_400_000;
 
-/** Takes a store off the daily job's index; throws unless Redis confirms it. */
+/**
+ * Takes a store off the daily job's index; throws unless Redis confirms it. One member is named, so only 0 or 1 is a
+ * receipt: any other count is unknown (review of #3539), never a removal.
+ */
 async function dropFromIndex(ref: string): Promise<void> {
   const replies = repliesFor(await redisPipeline([["ZREM", HELD_INDEX, ref]]), 1);
-  if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("the held links' index write");
+  const removed = replies ? countOf(replies[0]) : null;
+  if (removed !== 0 && removed !== 1) throw new UnknownReplyError("the held links' index write");
 }
 
 /** Asks the daily job to look at this store's held links at its next run; throws unless Redis confirms it. */

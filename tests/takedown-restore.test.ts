@@ -244,6 +244,16 @@ async function main(): Promise<void> {
   redis.pipeline = realPipeline;
   is("a store whose presence answers in another shape: kept in the index, counted as failed (rule 24)", [oddGone.failed > 0, await inIndex(oddRef)], [true, true]);
   await redis.pipeline([["ZREM", HELD, oddRef]]);
+  const twoRef = "two-holder@example.test";
+  await redis.pipeline([["ZADD", HELD, Date.now(), twoRef]]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.length === 1 && commands[0][0] === "ZREM" && commands[0][2] === twoRef) return [2];
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const twoRun = await settleHeld(Date.now() + 1);
+  redis.pipeline = realPipeline;
+  is("a removal of one member answered with 2 (not applied): not taken for a removal, counted as failed, still indexed", [twoRun.failed > 0, await inIndex(twoRef)], [true, true]);
+  is("a later healthy run drops it", [(await settleHeld(Date.now() + 1)).failed, await inIndex(twoRef)], [0, false]);
 
   part("A put-back that finds the hold gone leaves no picture behind (review of #3539)");
   const sixth = await pictured("Zine scan", 6);

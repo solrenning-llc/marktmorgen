@@ -17,7 +17,8 @@ import { SITE_URL } from "@/lib/site-url";
  *
  *   { action: "read", id }                                    what it is now
  *   { action: "on", id, category, explicit, understood }     turns the feed on (or changes its category and flag)
- *   { action: "off", id }                                     turns it off: the record is deleted
+ *   { action: "off", id }                                     turns it off: the record is deleted (never from a
+ *                                                             session let in without its second step)
  *   { action: "episode", id, episode, public, audio }         puts one episode in the feed, or takes it out
  *
  * Nothing is public by itself. Turning the feed on needs `understood` exactly true (the studio shows that the feed is
@@ -49,7 +50,9 @@ function refused(write: { reason: "full" | "too_big"; message?: string }): Respo
 }
 
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "products", 4_000);
+  // Turning the feed off deletes its record, with every episode's typed address: a session let in without its second
+  // step may not (lib/two-step.ts, LOCKED_ACTIONS products "remove", as removing an episode); the rest stays open.
+  const guarded = await guardStoreWrite(request, "products", 4_000, (sent) => (sent.action === "off" ? "remove" : ""));
   if (!guarded.ok) return guarded.response;
   const { ref, body } = guarded;
   const action = text(body.action, 10);

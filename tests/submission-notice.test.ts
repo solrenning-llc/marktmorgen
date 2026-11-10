@@ -164,11 +164,44 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline;
   is("still three emails", sent.length, 3);
 
+  part("An address deleted while the mark is taken is never written to (Codex CX1, MÉDIO 2 on #3583)");
+  {
+    const late = kept();
+    // The buyer's deletion lands while the once-only mark is being set, before its answer comes back.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:sub:told:"))) {
+        await pipeline([suppressCommand("list0001", late.buyer, NOW)]);
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    const before = sent.length;
+    is("the deletion is seen at the last check: stopped", await tellBuyerOfReply({ store: STORE, ...where, submission: late }, send), "stopped");
+    redis.pipeline = pipeline;
+    is("and no email was sent to it", sent.length, before);
+
+    // The last check does not read: nothing is sent, and the mark is given back so a later reply can tell the buyer.
+    const unread = kept();
+    let failOnce = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (failOnce && commands.some((c) => c[0] === "HEXISTS") && (await pipeline([["EXISTS", `nl:sub:told:${FOLDER}:${unread.id}`]]))[0] === 1) {
+        failOnce = false;
+        throw new Error("the check could not be read");
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    is("a last check that did not read is unknown: nothing sent", await tellBuyerOfReply({ store: STORE, ...where, submission: unread }, send), "unknown");
+    redis.pipeline = pipeline;
+    is("still nothing sent", sent.length, before);
+    is("the mark was given back", (await pipeline([["EXISTS", `nl:sub:told:${FOLDER}:${unread.id}`]]))[0], 0);
+    is("so the next try tells the buyer (control)", await tellBuyerOfReply({ store: STORE, ...where, submission: unread }, send), "sent");
+    is("one email", sent.length, before + 1);
+  }
+
   part("Nothing for a file that was not answered");
   is("waiting", await tellBuyerOfReply({ store: STORE, ...where, submission: kept({ state: "submitted", reply: null, closedAt: 0 }) }, send), "none");
   is("withdrawn", await tellBuyerOfReply({ store: STORE, ...where, submission: kept({ state: "withdrawn", reply: null }) }, send), "none");
   is("no address", await tellBuyerOfReply({ store: STORE, ...where, submission: kept({ buyer: "not an address" }) }, send), "none");
-  is("still three", sent.length, 3);
+  is("still four", sent.length, 4);
 
   part("Its Redis commands, at most");
   let commands = 0;

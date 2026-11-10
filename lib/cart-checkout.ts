@@ -132,6 +132,13 @@ export async function createCartCheckout(
   const country = extras.country ?? "";
   const body = new URLSearchParams({
     mode: "payment",
+    // Stripe's paying label on its submit button ("Buy"), so the button that
+    // places the order says it obliges payment (Directive 2011/83/EU art. 8(2);
+    // EU consumer audit 2026-11-06, row 11). Read 6 November 2026 at
+    // https://docs.stripe.com/api/checkout/sessions/create (API 2026-10-28):
+    // `pay` "Submit button includes a 'Buy' label"; allowed only in payment or
+    // subscription mode and not with ui_mode elements (this session is hosted).
+    submit_type: "pay",
     locale: LANGUAGES[store.language].stripe,
     "metadata[store]": store.handle,
     "metadata[product]": products[0].id,

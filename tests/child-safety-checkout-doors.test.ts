@@ -22,9 +22,10 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductLink, setStripeAccount, setSubscription, setWelcomeOffer, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription, setWelcomeOffer, storeForEmail } from "@/lib/store";
 import * as safety from "@/lib/child-safety";
-import { readListing } from "@/lib/catalog";
+import { readListing, readProduct } from "@/lib/catalog";
+import { HeldInSaleError, createCheckoutUnlessHeld } from "@/lib/held-checkout";
 import { readClaimFull, requestCopy } from "@/lib/free";
 import { openWelcome, welcomeFor } from "@/lib/welcome-offer-send";
 import { store as redis } from "./redis-stub";
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, HANDLE, "Hold Doors", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestHoldDoors01", true);
+  await setStripeAccount(OWNER, "acct_1TestHoldDrs01", true);
   await setSubscription(OWNER, { customerId: "cus_holddoors", subscriptionId: "sub_holddoors", active: true, period: paidPeriod() });
   const current = async () => (await storeForEmail(OWNER))!;
   const make = async (title: string, price: string, link = true) => {
@@ -137,6 +138,25 @@ async function main(): Promise<void> {
   const clean = await openWelcome(await current(), token, ORIGIN, asked + 240, TEST_CONSENT);
   is("its button opens a checkout naming both", [clean.ok, names(opened.at(-1)!, partC), names(opened.at(-1)!, partD)], [true, true, true]);
   is("no checkout since the report names the held product", opened.slice(openedAt).some((body) => names(body, reported)), false);
+
+  part("The door itself, as any caller reaches it");
+  const front = await make("item-front", "19");
+  const box = await setProductExtras(OWNER, front, { slot: 0, bump: { productId: reported, priceCents: 900, pitch: "" } });
+  if (!box.ok) throw new Error(`box not set: ${box.reason}`);
+  const door = async (id: string, bumps: string[]) => {
+    const store = await current();
+    return createCheckoutUnlessHeld(store, (await readProduct(store, id))!, ORIGIN, undefined, { bumps, digitalConsent: TEST_CONSENT }).then(
+      () => "opened",
+      (error) => (error instanceof HeldInSaleError ? error.why : "other"),
+    );
+  };
+  is("a bundle holding the held product: refused", await door(heldBundle, []), "bundle");
+  is("a checked box of the held product: refused", await door(front, [reported]), "box");
+  is("the first box checked the old way: refused", await door(front, ["yes"]), "box");
+  is("nothing reached Stripe", opened.length - openedAt - 1, 0);
+  is("no box checked: opens", await door(front, []), "opened");
+  is("the clean bundle: opens", await door(cleanBundle, []), "opened");
+  is("still no checkout since the report names the held product", opened.slice(openedAt).some((body) => names(body, reported)), false);
 
   part("One door to a single product's checkout");
   const root = process.cwd();

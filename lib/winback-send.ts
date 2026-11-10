@@ -28,7 +28,8 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { canSellProduct } from "@/lib/store-checkout";
+import { HeldInSaleError, createCheckoutUnlessHeld } from "@/lib/held-checkout";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { fromLine, render } from "@/lib/mail";
@@ -348,7 +349,7 @@ export async function openWinBack(
   try {
     // A limited product holds a unit while the checkout is open, as any other checkout does.
     const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: holding, digitalConsent: consent }),
+      createCheckoutUnlessHeld(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: holding, digitalConsent: consent }),
     );
     if (!held.ok) return { ok: false, reason: "unavailable" };
     return { ok: true, url: held.value.url };
@@ -358,6 +359,8 @@ export async function openWinBack(
     // the email did not promise.
     // The store's orders for the month are reached (lib/order-admission.ts): not open right now, nothing charged.
     if (error instanceof OrdersPausedError) return { ok: false, reason: "unavailable" };
+    // It would hand over a product kept for a child-safety report, or a hold could not be read (lib/held-checkout.ts): nothing opened.
+    if (error instanceof HeldInSaleError) return { ok: false, reason: "unavailable" };
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a come-back checkout failed", store.handle, error);

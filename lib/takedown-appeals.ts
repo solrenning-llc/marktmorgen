@@ -5,6 +5,8 @@
  *
  *   nl:report:<notice>:a:<sha(store, decision)> JSON  one request about one decision of that notice, with whether the
  *                                               support inbox was told; 400 days, like the notice itself
+ *   nl:report:<notice>:al:<sha>  "1"     held for 30 seconds while one request is written, so a creator's send and a
+ *                                               decision at the same moment never write over each other
  *   nl:report:an:<number>                 string the request's key, so a number is given once; 400 days. A
  *                                               decision only ever tries the same NUMBER_TRIES numbers, drawn from
  *                                               its own record key, so retries and presses at once keep at most that
@@ -27,9 +29,11 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import type { Store } from "@/lib/store";
+import { studioPath } from "@/lib/studio-route";
 import {
-  type Appeal, type AppealProblem, type Decision, type DecisionKind, APPEAL_NUMBER, APPEAL_PROBLEMS, MAX_APPEAL_TEXT, appealNumber,
-  appealVisibleTo, decisionKey, openAppeal, readAppeal,
+  type Appeal, type AppealProblem, type AppealState, type Decision, type DecisionKind, type MoveProblem, APPEAL_NUMBER, APPEAL_PROBLEMS,
+  APPEAL_STATES, APPEAL_STATE_WORDS, MAX_APPEAL_TEXT, appealNumber, appealStateWords, appealVisibleTo, decisionKey, moveAppeal, openAppeal,
+  readAppeal,
 } from "@/lib/takedown-appeal-rules";
 
 const KEEP_SECONDS = 400 * 86_400;
@@ -42,6 +46,8 @@ const key = (rest: string) => `nl:report:${rest}`;
 const recordKey = (sid: string, decision: Decision) => key(`${noticeOf(decision.report)}:a:${sha(`${sid}
 ${decisionKey(decision)}`).slice(0, 24)}`);
 const numberKey = (number: string) => key(`an:${number}`);
+const lockKey = (sid: string, decision: Decision) => key(`${noticeOf(decision.report)}:al:${sha(`${sid}\n${decisionKey(decision)}`).slice(0, 24)}`);
+const LOCK_SECONDS = 30;
 /**
  * The number a request about this decision tries on its i-th try. It comes from the record's own key (which holds the
  * store's permanent id), not from a fresh random draw: a retry after a lost reply, or many presses at once, try the
@@ -83,8 +89,14 @@ export function decisionsOf(store: Pick<Store, "strikes">): StoreDecision[] {
   return out;
 }
 
-/** `tries`: inbox emails tried for this request, at most MAX_TELL_TRIES; each try has its own idempotency key. */
-export type KeptAppeal = { appeal: Appeal; told: boolean; tries: number };
+/** Whether the creator was emailed the request's current state: one email a state, at most MAX_TELL_TRIES tries. */
+export type CreatorTold = { state: AppealState; tries: number; told: boolean };
+
+/**
+ * `tries`: inbox emails tried for this request, at most MAX_TELL_TRIES; each try has its own idempotency key.
+ * `creator`: set once a person at Marktmorgen moved the request (unit 3), for the email the creator is owed.
+ */
+export type KeptAppeal = { appeal: Appeal; told: boolean; tries: number; creator?: CreatorTold };
 
 /**
  * The most inbox emails one request may try. A try whose outcome the email service could not confirm is never sent
@@ -102,7 +114,41 @@ function readKept(raw: string): KeptAppeal {
       !["received", "under_review", "upheld", "reversed"].includes(String(a.state))) {
     throw new UnknownReplyError("a request to look again");
   }
-  return { appeal: a as unknown as Appeal, told: r.told, tries: r.tries };
+  const c = r.creator;
+  if (c === undefined) return { appeal: a as unknown as Appeal, told: r.told, tries: r.tries };
+  const co = c && typeof c === "object" && !Array.isArray(c) ? (c as Record<string, unknown>) : null;
+  if (!co || !(APPEAL_STATES as readonly unknown[]).includes(co.state) || typeof co.told !== "boolean" || typeof co.tries !== "number" ||
+      !Number.isSafeInteger(co.tries) || co.tries < 0) {
+    throw new UnknownReplyError("a request to look again");
+  }
+  return { appeal: a as unknown as Appeal, told: r.told, tries: r.tries, creator: { state: co.state as AppealState, tries: co.tries, told: co.told } };
+}
+
+/**
+ * Runs `work` while this request is held, so two writers of one request (the creator sending it, a person deciding it)
+ * never write over each other: each reads the request again inside. "busy" when someone else holds it; an unknown
+ * reply throws. The hold ends with the work, or by itself after LOCK_SECONDS.
+ */
+async function held<T>(sid: string, decision: Decision, work: () => Promise<T>): Promise<T | "busy"> {
+  const lk = lockKey(sid, decision);
+  const got = repliesFor(await redisPipeline([["SET", lk, "1", "NX", "EX", LOCK_SECONDS]]), 1);
+  if (!got || (got[0] !== "OK" && got[0] !== null)) throw new UnknownReplyError("a request's hold");
+  if (got[0] === null) return "busy";
+  try {
+    return await work();
+  } finally {
+    await redisPipeline([["DEL", lk]]).catch(() => null);
+  }
+}
+
+/** One request read again, exactly, or null when there is none. */
+async function readOne(sid: string, decision: StoreDecision): Promise<KeptAppeal | null> {
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(sid, decision)]]), 1);
+  if (!replies) throw new UnknownReplyError("a request to look again");
+  if (replies[0] === null) return null;
+  if (typeof replies[0] !== "string") throw new UnknownReplyError("a request to look again");
+  const kept = readKept(replies[0]);
+  return appealVisibleTo(kept.appeal, sid) && kept.appeal.decision === decision.key ? kept : null;
 }
 
 /**
@@ -163,7 +209,7 @@ export async function fileAppeal(store: Store, decisionKeyRaw: unknown, raw: Rec
   const written = repliesFor(await redisPipeline([["SET", rk, JSON.stringify(kept), "NX", "EX", KEEP_SECONDS]]), 1);
   if (!written || (written[0] !== "OK" && written[0] !== null)) throw new UnknownReplyError("a request to look again's write");
   if (written[0] === null) return { ok: false, problem: "already", words: APPEAL_PROBLEMS.already };
-  return tell(store, target, kept, origin);
+  return tellInbox(store, target, origin);
 }
 
 /** Tells the inbox again about a kept request it was never told of. Nothing else changes. */
@@ -174,7 +220,18 @@ export async function sendAgain(store: Store, decisionKeyRaw: unknown, origin: s
   const kept = (await readAppeals(store, decisions)).get(decision.key);
   if (!kept) return null;
   if (kept.told) return { ok: true, kept };
-  return tell(store, decision, kept, origin);
+  return tellInbox(store, decision, origin);
+}
+
+/** Tells the inbox, holding the request and reading it again first; held by someone else, it is left to Send it again. */
+async function tellInbox(store: Store, decision: StoreDecision, origin: string): Promise<FileResult> {
+  const result = await held(store.sid, decision, async () => {
+    const kept = await readOne(store.sid, decision);
+    if (!kept) throw new UnknownReplyError("a request to look again");
+    if (kept.told) return { ok: true as const, kept };
+    return tell(store, decision, kept, origin);
+  });
+  return result === "busy" ? { ok: false, problem: "unsent", words: UNSENT_WORDS } : result;
 }
 
 async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string): Promise<FileResult> {
@@ -211,4 +268,101 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
   // key, so the inbox may get this request once more: never more than MAX_TELL_TRIES in all, and never a buyer.
   if (!replies || replies[0] !== "OK") return { ok: true, kept: counted };
   return { ok: true, kept: told };
+}
+
+/** A request about one decision of this notice, for the page a person at Marktmorgen opens from the notice's email. */
+export type NoticeAppeal = { decision: StoreDecision; kept: KeptAppeal };
+
+/** The requests this store sent about this notice's decisions, newest decision first. Throws on any unknown reply. */
+export async function appealsOfNotice(report: { id: string }, store: Pick<Store, "strikes" | "sid">): Promise<NoticeAppeal[]> {
+  if (!store.sid) return [];
+  const decisions = decisionsOf(store).filter((d) => d.report === report.id);
+  const kept = await readAppeals(store, decisions);
+  return decisions.flatMap((decision) => {
+    const k = kept.get(decision.key);
+    return k ? [{ decision, kept: k }] : [];
+  });
+}
+
+export type DecideProblem = MoveProblem | "none" | "busy";
+export type DecideResult = { ok: true; kept: KeptAppeal; emailed: boolean } | { ok: false; problem: DecideProblem; words: string };
+
+/** What the person deciding reads when a move is refused. */
+export const DECIDE_PROBLEMS: Record<DecideProblem, string> = {
+  who: "Only a person at Marktmorgen can answer a request.",
+  final: "This request already has its final answer, and a final answer does not change.",
+  order: "A request goes from Received to Under review, and then to Upheld or Reversed. It never goes back.",
+  reason: "Write the reason for the answer. The creator reads it, word for word.",
+  none: "There is no request about this decision.",
+  busy: "This request is being written right now. Wait a moment, then try again.",
+};
+
+/**
+ * A person at Marktmorgen moves a request (lib/takedown-appeal-rules.ts moveAppeal: only forward, a final answer only
+ * with its reason) and the creator is emailed its new state. Only a decision of this notice and of this store can be
+ * moved. The request is held while it is read and written, so a creator's send at the same moment never undoes it. A
+ * state whose email could not go is kept and marked so, and the page offers to send it again (`tellCreatorAgain`).
+ */
+export async function decideAppeal(report: { id: string }, store: Store, decisionKeyRaw: unknown, toRaw: unknown, reason: unknown, now: Date, origin: string): Promise<DecideResult | null> {
+  const decision = decisionsOf(store).find((d) => d.key === decisionKeyRaw && d.report === report.id);
+  if (!decision || !store.sid) return null;
+  if (typeof toRaw !== "string" || !(APPEAL_STATES as readonly string[]).includes(toRaw)) return { ok: false, problem: "order", words: DECIDE_PROBLEMS.order };
+  const to = toRaw as AppealState;
+  const result = await held(store.sid, decision, async (): Promise<DecideResult> => {
+    const kept = await readOne(store.sid, decision);
+    if (!kept) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
+    const moved = moveAppeal(kept.appeal, to, { role: "operator" }, now, typeof reason === "string" ? reason : undefined);
+    if (!moved.ok) return { ok: false, problem: moved.problem, words: DECIDE_PROBLEMS[moved.problem] };
+    const next: KeptAppeal = { ...kept, appeal: moved.appeal, creator: { state: moved.appeal.state, tries: 0, told: false } };
+    const written = repliesFor(await redisPipeline([["SET", recordKey(store.sid, decision), JSON.stringify(next), "XX", "EX", KEEP_SECONDS]]), 1);
+    if (!written || written[0] !== "OK") throw new UnknownReplyError("a request's new state");
+    return tellCreator(store, decision, next, origin);
+  });
+  return result === "busy" ? { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy } : result;
+}
+
+/** Emails the creator again the state they were not told of. Nothing else changes. */
+export async function tellCreatorAgain(report: { id: string }, store: Store, decisionKeyRaw: unknown, origin: string): Promise<DecideResult | null> {
+  const decision = decisionsOf(store).find((d) => d.key === decisionKeyRaw && d.report === report.id);
+  if (!decision || !store.sid) return null;
+  const result = await held(store.sid, decision, async (): Promise<DecideResult> => {
+    const kept = await readOne(store.sid, decision);
+    if (!kept) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
+    if (!kept.creator || kept.creator.told) return { ok: true, kept, emailed: Boolean(kept.creator?.told) };
+    return tellCreator(store, decision, kept, origin);
+  });
+  return result === "busy" ? { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy } : result;
+}
+
+async function tellCreator(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string): Promise<DecideResult> {
+  const told = kept.creator as CreatorTold;
+  if (told.tries >= MAX_TELL_TRIES) return { ok: true, kept, emailed: false };
+  // The try is counted before the email, so a lost count never lets one more go.
+  const counted: KeptAppeal = { ...kept, creator: { ...told, tries: told.tries + 1 } };
+  const rk = recordKey(store.sid, decision);
+  const mark = repliesFor(await redisPipeline([["SET", rk, JSON.stringify(counted), "XX", "EX", KEEP_SECONDS]]), 1);
+  if (!mark || mark[0] !== "OK") throw new UnknownReplyError("a request's email try");
+  const { appeal } = counted;
+  const sent = await sendEmail({ meter: { by: "company" },
+    from: NIMBUS_FROM,
+    to: store.email,
+    replyTo: SUPPORT_EMAIL,
+    subject: `Your request ${appeal.number}: ${APPEAL_STATE_WORDS[appeal.state]}`,
+    text: [
+      `About: ${decision.what}`,
+      "",
+      ...appealStateWords(appeal),
+      "",
+      `See it in your studio: ${origin}${studioPath(store, "", "appeals")}`,
+      "Reply to this email if you have a question. A person reads it.",
+    ].join("\n"),
+    // One key a state and a try: a retry of one try never sends twice; at most MAX_TELL_TRIES a state.
+    idempotencyKey: `appeal-${appeal.number}-${appeal.state}-${told.tries + 1}`,
+  }).catch(() => false);
+  if (!sent) return { ok: true, kept: counted, emailed: false };
+  const done: KeptAppeal = { ...counted, creator: { ...(counted.creator as CreatorTold), told: true } };
+  const replies = repliesFor(await redisPipeline([["SET", rk, JSON.stringify(done), "XX", "EX", KEEP_SECONDS]]), 1);
+  // The creator has it. A mark that did not land leaves "Email the creator again" offered: at most MAX_TELL_TRIES.
+  if (!replies || replies[0] !== "OK") return { ok: true, kept: counted, emailed: true };
+  return { ok: true, kept: done, emailed: true };
 }

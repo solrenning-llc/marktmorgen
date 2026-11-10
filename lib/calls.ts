@@ -281,6 +281,8 @@ export async function paidCalls(store: Store): Promise<
     /** The affiliate a lead is credited to once the call has taken place (lib/affiliate-leads.ts), and the payment; empty otherwise. */
     lead: string;
     pi: string;
+    /** The package the session came from (metadata[package], packageOf; lib/call-packages.ts); empty otherwise. */
+    pkg: string;
     /** What is left to pay in person, and a code taken off the whole price, as the sale keeps them (lib/call-deposit.ts). */
     due: DueInPerson | null;
     /** The cancellation deadline the buyer was promised when paying (lib/call-setup.ts, readCancelPromise). */
@@ -365,10 +367,29 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
+    // The package a session came from (lib/call-packages.ts), whose confirmation writes it down there.
+    pkg: packageOf(meta),
     pi: paymentOf(row.payment_intent),
     due: readDue(meta),
     cancel: readCancelPromise(meta),
   };
+}
+
+/** The package a booking's checkout came from (metadata[package], callCheckoutBody), or "" when none. */
+export function packageOf(meta: unknown): string {
+  const pkg = meta && typeof meta === "object" ? (meta as { package?: unknown }).package : undefined;
+  return typeof pkg === "string" ? pkg : "";
+}
+
+/**
+ * Writes a session from a package down with its package before its mark
+ * (lib/call-packages.ts, packageSessionUsed): imported when needed, since that
+ * file reads this one's confirmation mark.
+ */
+async function packageSessionUsed(pkg: string, session: string): Promise<void> {
+  if (!pkg) return;
+  const packages = await import("@/lib/call-packages");
+  await packages.packageSessionUsed(pkg, session);
 }
 
 /** A checkout's payment's id, whether Stripe gave the id or the payment itself. */
@@ -621,6 +642,7 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
       currency: call.currency,
       lead: call.lead,
       pi: call.pi,
+      fromPackage: call.pkg,
       due: call.due,
       cancel: call.cancel,
       origin,
@@ -1264,6 +1286,8 @@ export async function moveBooking(input: {
   booked: { start: number; end: number; email: string | null; buyerTz: string };
   start: number;
   origin: string;
+  /** The package the session came from (metadata[package], packageOf): a move can write its mark first. */
+  fromPackage?: string;
 }): Promise<MoveResult> {
   const { store, product, session, start, origin } = input;
   const setup = product.call;
@@ -1355,6 +1379,9 @@ export async function moveBooking(input: {
       console.error("reading a moved booking's old entries failed; left in place", error);
     }
     const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}) };
+    // The mark below may be the session's first: one from a package is written down with it before (confirmBooking);
+    // a throw refuses the move.
+    await packageSessionUsed(input.fromPackage ?? "", session);
     // Counted in the store's room at what it really adds (lib/order-data.ts).
     await orderWrite(store, [
       ...(old.length ? [["HDEL", busyKey(callsId), ...old]] : []),
@@ -1623,6 +1650,8 @@ export async function confirmBooking(input: {
   /** The affiliate a lead is credited to (metadata lead_via), and the booking's payment, which a refund is made against. */
   lead?: string;
   pi?: string;
+  /** The package the session came from (metadata[package], packageOf), written down there before the mark. */
+  fromPackage?: string;
   /**
    * What is left to pay in person and the code taken off the whole price
    * (lib/call-deposit.ts, readDue): null when nothing is; left out when not
@@ -1666,6 +1695,13 @@ export async function confirmBooking(input: {
     team = await bookingTeam(store, product, session);
   } catch (error) {
     throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
+  }
+  // A session from a package is written down with it before its mark, which expires long before a package with no
+  // last day; a throw leaves the confirmation for later, never a mark without it (Claude 4 and Claude 6 on #3487).
+  try {
+    await packageSessionUsed(input.fromPackage ?? "", session);
+  } catch (error) {
+    throw new Error("writing a session down with its package failed; confirmed later", { cause: error });
   }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;

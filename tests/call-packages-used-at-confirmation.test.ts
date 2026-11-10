@@ -17,7 +17,8 @@
 import { addProduct, claimHandle, ensureStatsId, setCallPackage, setProductCall, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { holdSession, packageState, readBought, recordPackage } from "@/lib/call-packages";
-import { CONFIRMED_SECONDS, confirmBooking, type CallListing } from "@/lib/calls";
+import { CONFIRMED_SECONDS, confirmBooking, moveBooking, type CallListing } from "@/lib/calls";
+import { zonedToUtc } from "@/lib/call-setup";
 import type { CallSetup } from "@/lib/call-setup";
 import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
@@ -29,6 +30,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "e" }));
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
+  // The store's completed checkouts, read by a move (readBusy): none on Stripe in this test.
+  if (method === "GET" && path === "/checkout/sessions") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   if (path.startsWith("/checkout/sessions/")) {
     const id = decodeURIComponent(path.slice("/checkout/sessions/".length));
     return new Response(JSON.stringify({ id, status: "complete", payment_status: "paid", payment_intent: { latest_charge: { refunded: false, amount: 50000, amount_refunded: 0 } } }));
@@ -37,7 +40,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 const weekly = {
-  kind: "weekly", minutes: 60, tz: "America/New_York", weekly: [[], [[540, 1020]], [], [], [], [], []],
+  kind: "weekly", minutes: 60, tz: "America/New_York", weekly: [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []],
   noticeHours: 12, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [],
 } as unknown as CallSetup;
 const DAY = 86_400;
@@ -93,6 +96,18 @@ function moveBothClocks(seconds: number): void {
   const at = Date.now() + seconds * 1000;
   Date.now = () => at;
   redis.now = () => Date.now();
+}
+
+/** A weekday at `minute` past midnight in New York, at least `days` from now. */
+function weekdayAt(days: number, minute: number): number {
+  for (let d = days; d < days + 8; d += 1) {
+    const day = new Date(Date.now() + d * DAY * 1000);
+    const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
+    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
+    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, "America/New_York") as number;
+  }
+  throw new Error("no weekday");
 }
 
 const left = async (checkout: string) => (await packageState((await readBought(checkout))!)).left;
@@ -187,6 +202,25 @@ async function main(): Promise<void> {
     is("tried again, it confirms", await confirmFromPackage(store, product, PAID, sessionId("e", 0)), "confirmed");
     moveBothClocks(434 * DAY);
     is("and the session stays used after its mark expires", await left(PAID), 2);
+  }
+
+  part("A move made before the confirmation writes the session's mark: it writes the session down with its package first");
+  {
+    const { store, product } = await setUp();
+    const PAID = checkoutId("m");
+    await buy(store, product, PAID);
+    const session = sessionId("m", 0);
+    await holdSession(store, PAID, session, nowSeconds() - 3_600);
+    const start = weekdayAt(5, 600);
+    const moved = await moveBooking({
+      store, product: product as CallListing, session, booked: { start, end: start + 3_600_000, email: "dana@example.com", buyerTz: "America/New_York" },
+      start: start + 3 * 3_600_000, origin: "https://marktmorgen.com", fromPackage: PAID,
+    } as Parameters<typeof moveBooking>[0]);
+    is("the move is made", moved.ok, true);
+    is("and wrote the session's mark", redis.run(["EXISTS", markOf(session)]), 1);
+    moveBothClocks(434 * DAY);
+    is("the mark is gone", redis.run(["EXISTS", markOf(session)]), 0);
+    is("the moved session stays used", await left(PAID), 2);
   }
 
   Date.now = realNow;

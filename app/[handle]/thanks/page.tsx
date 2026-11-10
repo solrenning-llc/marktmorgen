@@ -25,7 +25,7 @@ import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-chec
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { canMove, confirmBooking, moveLink, packageOf, paidCall } from "@/lib/calls";
 import { type DueInPerson, dueLines } from "@/lib/call-deposit";
 import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
@@ -446,6 +446,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       currency: order.currency,
       lead: order.call.lead,
       pi: order.call.pi,
+      // A session from a package is written down with it (lib/call-packages.ts).
+      fromPackage: packageOf(order.record.metadata),
       due,
       cancel,
       origin: SITE_URL,

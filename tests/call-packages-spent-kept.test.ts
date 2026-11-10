@@ -6,15 +6,15 @@
  *
  *   - a confirmed session stays spent when its call's mark is gone, on Redis's clock alone and on both clocks
  *     with nothing read in between;
- *   - a session whose time ran out unpaid still comes back, while its mark could still be there, and for good once
- *     a reading has been sure it was never confirmed (Claude 6 on #3487);
+ *   - a session whose time ran out unpaid still comes back, while its mark could still be there, and for good after,
+ *     since a confirmation writes its session down with the package before its mark (Claude 4 and Claude 6 on #3487);
  *   - an answer that is neither 1 nor 0 about a mark is not known, so the session stays spent (rule 24);
  *   - the record of spent sessions never expires before its package, and is among the package's keys a closing
  *     store deletes.
  */
 import { addProduct, claimHandle, ensureStatsId, setCallPackage, setProductCall, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { holdSession, packageKeys, packageState, prepareSession, readBought, recordPackage } from "@/lib/call-packages";
+import { holdSession, packageKeys, packageSessionUsed, packageState, prepareSession, readBought, recordPackage } from "@/lib/call-packages";
 import { CONFIRMED_SECONDS } from "@/lib/calls";
 import type { CallSetup } from "@/lib/call-setup";
 import { store as redis } from "./redis-stub";
@@ -42,8 +42,14 @@ const DAY = 86_400;
 const realNow = Date.now;
 const checkoutId = (tag: string) => `cs_test_${tag}${"q".repeat(24 - tag.length)}`;
 const sessionId = (tag: string, i: number) => `cs_test_${tag}${i}${"x".repeat(20)}`;
-/** confirmBooking's own write: SET confirmedKey NX EX CONFIRMED_SECONDS (lib/calls.ts). */
-const confirm = (session: string) => redis.run(["SET", `nl:call:confirmed:${session}`, "1", "NX", "EX", CONFIRMED_SECONDS]);
+/**
+ * confirmBooking's own writes (lib/calls.ts): the session written down with its package (packageSessionUsed), then
+ * SET confirmedKey NX EX CONFIRMED_SECONDS. tests/call-packages-used-at-confirmation.test.ts calls confirmBooking itself.
+ */
+async function confirm(pkg: string, session: string): Promise<void> {
+  await packageSessionUsed(pkg, session);
+  redis.run(["SET", `nl:call:confirmed:${session}`, "1", "NX", "EX", CONFIRMED_SECONDS]);
+}
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 async function setUp(): Promise<{ store: Store; product: Listing }> {
@@ -87,7 +93,7 @@ async function main(): Promise<void> {
     const past = nowSeconds() - 3_600;
     for (let i = 0; i < 3; i += 1) {
       await holdSession(store, PAID, sessionId("a", i), past);
-      confirm(sessionId("a", i));
+      await confirm(PAID, sessionId("a", i));
     }
     is("nothing left today", (await packageState((await readBought(PAID))!)).left, 0);
     is("the package record has no expiry (days 0)", redis.run(["TTL", `nl:pkg:${PAID}`]), -1);
@@ -106,7 +112,7 @@ async function main(): Promise<void> {
     const past = nowSeconds() - 3_600;
     for (let i = 0; i < 3; i += 1) await holdSession(store, PAID, sessionId("b", i), past);
     // Confirmed only after the last hold was taken, and never read again.
-    for (let i = 0; i < 3; i += 1) confirm(sessionId("b", i));
+    for (let i = 0; i < 3; i += 1) await confirm(PAID, sessionId("b", i));
     moveBothClocks(431 * DAY);
     is("the confirmation marks are gone", redis.run(["EXISTS", `nl:call:confirmed:${sessionId("b", 0)}`]), 0);
     is("sessions used stay used, on both clocks", (await packageState((await readBought(PAID))!)).left, 0);
@@ -120,7 +126,7 @@ async function main(): Promise<void> {
     const PAID = checkoutId("c");
     await buy(store, product, PAID, 0);
     await holdSession(store, PAID, sessionId("c", 0), nowSeconds() - 3_600);
-    confirm(sessionId("c", 0));
+    await confirm(PAID, sessionId("c", 0));
     await holdSession(store, PAID, sessionId("c", 1), nowSeconds() - 3_600);
     is("one used, one left unpaid: two left", (await packageState((await readBought(PAID))!)).left, 2);
     moveBothClocks(200 * DAY);
@@ -137,7 +143,7 @@ async function main(): Promise<void> {
     await holdSession(store, PAID, sessionId("f", 0), nowSeconds() - 3_600);
     moveBothClocks(10 * DAY);
     is("ten days on, never confirmed: three left", (await packageState((await readBought(PAID))!)).left, 3);
-    confirm(sessionId("f", 0));
+    await confirm(PAID, sessionId("f", 0));
     is("confirmed after all: two left", (await packageState((await readBought(PAID))!)).left, 2);
     moveBothClocks(431 * DAY);
     is("and still two left once its mark is gone", (await packageState((await readBought(PAID))!)).left, 2);
@@ -149,7 +155,7 @@ async function main(): Promise<void> {
     const PAID = checkoutId("g");
     const bought = await buy(store, product, PAID, 0);
     await holdSession(store, PAID, sessionId("g", 0), nowSeconds() - 3_600);
-    confirm(sessionId("g", 0));
+    await confirm(PAID, sessionId("g", 0));
     const record = (await readBought(PAID))!;
     // The closing store deletes the package's keys between the reading and what it writes down.
     for (const key of packageKeys(PAID, bought.token)) redis.run(["DEL", key]);
@@ -164,7 +170,7 @@ async function main(): Promise<void> {
     const bought = await buy(store, product, PAID, 0);
     for (let i = 0; i < 3; i += 1) {
       await holdSession(store, PAID, sessionId("d", i), nowSeconds() - 3_600);
-      confirm(sessionId("d", i));
+      await confirm(PAID, sessionId("d", i));
     }
     const pipeline = redis.pipeline.bind(redis);
     redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -187,7 +193,7 @@ async function main(): Promise<void> {
     const bought = await buy(store, product, PAID, 30);
     for (let i = 0; i < 3; i += 1) {
       await holdSession(store, PAID, sessionId("e", i), nowSeconds() - 3_600);
-      confirm(sessionId("e", i));
+      await confirm(PAID, sessionId("e", i));
     }
     is("nothing left", (await packageState((await readBought(PAID))!)).left, 0);
     const record = Number(redis.run(["TTL", `nl:pkg:${PAID}`]));

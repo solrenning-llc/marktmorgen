@@ -368,8 +368,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
   "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token, and the sessions it spent for good", parts: [
     item(KEY, "One per package, kept with it.", "call"),
-    // C6 R40 and Claude 6 on #3487 (9 November 2026): <token key>:used, a set of how past holds ended, at most the package's total (MAX_PACKAGE_SESSIONS, 20) spent and FREED_MAX (20) left unpaid, ids of 16 characters, never more (spent in lib/call-packages.ts), kept exactly as long as the package.
-    item(768, "How its holds ended: at most 20 spent and 20 left unpaid, ids of 16 characters, kept as long as the package.", "call"),
+    // C6 R40, Claude 4 and Claude 6 on #3487 (9-10 November 2026): <token key>:used, the package's paid sessions, one id of 16 characters per
+    // confirmed hold (packageSessionUsed and spent in lib/call-packages.ts): its total (MAX_PACKAGE_SESSIONS, 20), with room kept for as many
+    // again (a late confirmation of a hold that had already let its slot go), kept exactly as long as the package.
+    item(768, "Its paid sessions: one id of 16 characters each, at most 20 with as many again in room, kept as long as the package.", "call"),
   ] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept 200 days by the booking", "call", 200, KB),

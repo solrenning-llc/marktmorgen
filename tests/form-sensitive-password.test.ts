@@ -38,6 +38,18 @@ for (const label of [
   "What is my account passphrase?",
   "Please enter the Instagram password",
   "Please share your bank account passcode",
+  // Claude 3 focal 6778196468: service names and combined credentials.
+  "Instagram password",
+  "Gmail password",
+  "Email & password",
+  "Login (email and password)",
+  "Gmail password (required)",
+  "User name / password",
+  "Could you share your Gmail password?",
+  "Which is your password?",
+  "Do you reuse your passwords? Enter your password",
+  "How often do you change your password? Enter your Gmail password",
+  "Your feedback on my password course: enter your password",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -61,6 +73,12 @@ for (const label of [
   "Your preferred password manager",
   "What is a password?",
   "How do you choose a passphrase?",
+  // Complete habit questions do not ask the respondent to reveal a secret.
+  "Do you reuse your passwords?",
+  "How often do you change your password?",
+  "What makes your password strong?",
+  "Did you forget your password last month?",
+  "Your feedback on my password course",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");
@@ -68,6 +86,10 @@ for (const html of [
   '<label>Please enter your password<input type="text"></label>',
   '<input type="text" aria-label="Please provide your password">',
   '<input type="text" placeholder="Type your passphrase">',
+  '<label>Instagram password<input type="text"></label>',
+  '<input type="text" aria-label="Gmail password">',
+  '<input type="text" placeholder="Email &amp; password">',
+  '<label>Login (email and password)<input type="text"></label>',
 ]) {
   const result = checkGeneratedCode({ html, css: "", js: "" });
   is("a direct password request cannot pass the generated-code check", result.staticPass, false);

@@ -1,0 +1,1 @@
+6/6 dated rows byte-identical to the generated margin document. Historical-model alignment only; no owner profit calculation.

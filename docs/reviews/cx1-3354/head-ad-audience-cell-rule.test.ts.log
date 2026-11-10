@@ -1,0 +1,16 @@
+
+Every address follows the one cell rule
+  ok    the header is still the bare word the platforms read
+  ok    each address line is that address as one quoted cell
+  ok    read with ",", no address cell runs as a formula
+  ok    read with ",", one cell a line
+  ok    read with ";", no address cell runs as a formula
+  ok    read with ";", one cell a line
+  ok    an address holding a separator stays in its one cell
+
+A real address reads back as itself
+  ok    lowercased, trimmed, without repeats or lines with no @, sorted
+  ok    the bytes
+  ok    an empty file still has its header
+
+10 checks, all passing.

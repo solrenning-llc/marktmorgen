@@ -1,0 +1,6 @@
+TypeError: row.tags is not iterable
+    at decideContact (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:50402:56)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:50463:21
+    at Array.map (<anonymous>)
+    at importContactRows (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:50461:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:52579:3)

@@ -1,0 +1,1 @@
+7/7 docs checkout equals Git blob after CRLF-only conversion; canonical blobs staged in own worktree for four literal document comparisons. No expectations changed.

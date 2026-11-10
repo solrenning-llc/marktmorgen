@@ -1,0 +1,44 @@
+
+Fields, read safely
+  ok    each named once, a choice with two options, known kinds only
+
+A value, kept as the field keeps it
+  ok    text, trimmed to one line
+  ok    a number, or nothing
+  ok    a real date, or nothing
+  ok    one of the choices, or nothing
+  ok    empty clears
+
+Stages
+  ok    the default ones are valid
+  ok    without a lost stage, refused
+
+A deal, and the board
+  ok    read safely
+  ok    no stage the store has, no deal
+  ok    a negative value is none
+  ok    each stage added up
+  ok    ids of the right length
+
+Through the route
+  ok    signed out, refused
+  ok    a deal made, with an id of its own
+  ok    moved on
+  ok    no title, refused
+  ok    an id that is not one of theirs, refused
+  ok    stages without a won one, refused
+  ok    stages saved
+  ok    a deal in a stage that is gone moves to the first open one
+  ok    fields saved
+  ok    a field sent twice by name, refused
+  ok    an answer kept
+  ok    an answer the field does not keep, refused
+  ok    an unknown field, refused
+  ok    read back for the person
+  ok    the list's file has a column per field
+  ok    and the person's answer in it
+  ok    a field taken away takes its answers
+  ok    removed
+  ok    removed twice, unknown
+
+32 checks, all passing.

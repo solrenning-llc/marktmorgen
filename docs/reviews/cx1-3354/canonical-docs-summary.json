@@ -1,0 +1,32 @@
+{
+  "cx1-margin-alignment-canonical.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 1",
+      "ℹ fail 0"
+    ]
+  },
+  "cx1-pricing-optimization-canonical.proof.ts": {
+    "status": null,
+    "signal": "SIGTERM",
+    "error": "spawnSync C:\\Program Files\\nodejs\\node.exe ETIMEDOUT",
+    "summary": []
+  },
+  "cx1-pricing-usage-proposal-canonical.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 1",
+      "ℹ fail 0"
+    ]
+  },
+  "cx1-limits-proposal-canonical.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 1",
+      "ℹ fail 0"
+    ]
+  }
+}

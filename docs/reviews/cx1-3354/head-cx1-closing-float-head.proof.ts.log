@@ -1,0 +1,7 @@
+
+Those downloads are priced with the store's closing, as its whole exports are (tests/plan-cost-registry.ts, closure)
+  ok    creator: the closing carries ENDED_LIST_DOWNLOADS list downloads, each at the largest list its room can hold
+  ok    pro: the closing carries ENDED_LIST_DOWNLOADS list downloads, each at the largest list its room can hold
+  ok    scale: the closing carries ENDED_LIST_DOWNLOADS list downloads, each at the largest list its room can hold
+
+3 checks, all passing.

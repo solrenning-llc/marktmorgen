@@ -1,0 +1,19 @@
+
+CX1 merge: partial export and funded reads coexist
+  ok    partial file still delivered
+  ok    partial name identifies unread contact
+  ok    readable contact retained
+  ok    malformed row not fabricated
+  ok    failed held read returns retryable failure
+  ok    failure reached the real list read
+  ok    spent studio figure refuses download
+  ok    no HSCAN beyond the figure
+
+8 checks, all passing.
+exporting a list failed Error: synthetic HSCAN unavailable
+    at store.pipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:52595:13)
+    at redisPipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:9668:41)
+    at read (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:52450:25)
+    at async listAsCsv (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:51612:28)
+    at async GET (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:52490:19)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-focal-3354\.cx1-evidence\cx1-list-merge.proof.ts.cjs:52600:56)

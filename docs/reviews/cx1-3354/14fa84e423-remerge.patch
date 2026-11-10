@@ -1,0 +1,8 @@
+commit 14fa84e423f19c28c8dd0416caff5ffef281120a
+Merge: 46c5bdfbe 171004d86
+Author:     Claude <noreply@anthropic.com>
+AuthorDate: Tue Nov 10 05:01:36 2026 +0000
+Commit:     Claude <noreply@anthropic.com>
+CommitDate: Tue Nov 10 05:01:36 2026 +0000
+
+    Merge remote-tracking branch 'origin/main' into claude6/fix-3354

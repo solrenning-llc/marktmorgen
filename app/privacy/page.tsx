@@ -1985,7 +1985,11 @@ export default function PrivacyPage() {
           creator&apos;s store may set these, each for that store alone: a pass
           that lets a
           browser into a course or a community, named <code>nl_learn_</code>{" "}
-          followed by a code for the store, for 90 days; the code and time of
+          followed by a code for the store, for 90 days; a student&apos;s
+          &quot;No thanks&quot; to the next step a course&apos;s creator suggests,
+          named <code>nl_ns_</code> followed by a code for the course, holding
+          only that answer, for a year, so it is not suggested again in that
+          browser; the code and time of
           an affiliate link a visitor followed, named <code>nl_via_</code>{" "}
           followed by the store&apos;s address, for up to {MAX_COOKIE_DAYS} days,
           subject to the browser&apos;s own limits; it may expire sooner. The store also keeps an

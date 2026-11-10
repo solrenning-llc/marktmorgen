@@ -27,7 +27,9 @@ import {
   StudentAccess,
   WithdrawCertificate,
 } from "@/components/course-editor";
-import { readListing } from "@/lib/catalog";
+import { readListing, readTitles } from "@/lib/catalog";
+import { CourseNextStep } from "@/components/course-next-step";
+import { MAX_NEXT_STEP_LINE } from "@/lib/course-next-step-rules";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
@@ -101,6 +103,13 @@ export default async function StudioCoursePage({
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
+  // The store's other products by title, to pick the course's "Next step" from (560 [AS1]): one command, as the other
+  // studio pickers read them (lib/catalog.ts readTitles). Null when they could not be read: the form says so, never
+  // offering an empty list as if the store sold nothing else.
+  const nextChoices = await readTitles(store).then(
+    (named) => [...named].filter(([pid]) => pid !== product.id).map(([pid, title]) => ({ id: pid, title })).sort((a, b) => a.title.localeCompare(b.title, "en")),
+    () => null,
+  );
   const aiState = aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
   // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything.
   const hasTasks = lessonsInOrder(course).some(({ lesson }) => lesson.task);
@@ -309,6 +318,23 @@ export default async function StudioCoursePage({
                 </tbody>
               </table>
             </div>
+          )}
+        </section>
+
+        <section className="card mt-8 p-6 sm:p-8" aria-labelledby="next-step-title" data-next-step="">
+          <h2 id="next-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Next step</h2>
+          <p className="mt-2 max-w-2xl text-ink-soft">
+            Suggest one of your products for students who are ready for more. They see it on the course&apos;s page and right after
+            they finish the last lesson, with its price and your line, and can say &quot;No thanks&quot;.
+          </p>
+          {nextChoices === null ? (
+            <p className="notice notice-error mt-4" role="status">
+              Your products could not be read just now, so the next step cannot be changed. Reload this page in a moment.
+            </p>
+          ) : nextChoices.length === 0 && !course.nextStep ? (
+            <p className="mt-4 text-sm text-ink-soft">Add another product to your store to suggest it here.</p>
+          ) : (
+            <CourseNextStep productId={product.id} current={course.nextStep ?? null} choices={nextChoices} maxLine={MAX_NEXT_STEP_LINE} />
           )}
         </section>
 

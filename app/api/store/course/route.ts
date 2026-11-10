@@ -37,13 +37,14 @@ import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
-import { readListing } from "@/lib/catalog";
+import { productIds, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { noteIfFinished } from "@/lib/course-finish";
 import { applyTemplate, templateById } from "@/lib/course-templates";
+import { NEXT_STEP_PROBLEMS, readNextStep } from "@/lib/course-next-step-rules";
 
 const OPS = new Set([
   "outline",
@@ -100,6 +101,10 @@ export async function GET(request: NextRequest) {
  * lessonId, task }` saves a lesson's assignment and `task: null` takes it off,
  * with the work handed in for it; `{ action: "review", id, lessonId, who,
  * verdict, feedback }` approves a student's work or asks for another try;
+ * `{ action: "next-step", id, productId, line }` sets the course's "Next
+ * step" (560 [AS1]), one product of this store with the creator's line, and
+ * an empty productId takes it away; a line the rules refuse is answered with
+ * the reason and its sentence, never cut;
  * `{ action: "template", id, template }` gives a new course one of the ready
  * structures (lib/course-templates.ts) by its id, applied here to the course
  * as it is kept, in one write.
@@ -321,6 +326,20 @@ export async function POST(request: NextRequest) {
         different moment in Auckland and in Los Angeles and the one who
         decides which is the creator running the course.
       */
+      // The course's "Next step" (560 [AS1]): one product of this very store, never the course itself, and the creator's
+      // line, refused with its reason when it presses, deals, counts, quotes, links or shouts (lib/course-next-step-rules.ts).
+      if (action === "next-step") {
+        const read = readNextStep(
+          { productId: text(body.productId, 40), line: typeof body.line === "string" ? body.line.slice(0, 2_000) : "" },
+          { courseProductId: id, products: new Set(productIds(store)) },
+        );
+        if (!read.ok) return Response.json({ ok: false, error: "next_step", reason: read.why, message: NEXT_STEP_PROBLEMS[read.why] }, { status: 400 });
+        const result = editCourse(course, { op: "next-step", step: read.step });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
       if (action === "start") {
         const at = body.at === null ? null : Number(body.at);
         const result = editCourse(course, { op: "start", at });

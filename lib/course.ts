@@ -15,6 +15,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
+import type { NextStep } from "@/lib/course-next-step-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
@@ -105,6 +106,13 @@ export type Course = {
    * order. Absent is none.
    */
   shelf?: string[];
+  /**
+   * The course's "Next step" (560 [AS1]): one product of the store the
+   * creator picked, with their line, shown to students on the course's home
+   * and after its last lesson (lib/course-next-step-rules.ts decides when).
+   * Checked by readNextStep when the studio saves it; absent is none.
+   */
+  nextStep?: NextStep;
   /**
    * How long a certificate issued from now on stays valid, in months
    * (639 [GL7](32)), for a training that has to be renewed; absent is for
@@ -201,6 +209,18 @@ export function readCertificateMonths(raw: unknown): number | null {
   return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= MAX_CERTIFICATE_MONTHS ? n : null;
 }
 
+/**
+ * A kept "Next step" read back in its shape only: a product id and a line of at most a few hundred characters. What
+ * the line may say was checked when it was saved (lib/course-next-step-rules.ts, readNextStep); that module is not
+ * imported here, so the pages that load this file in the browser carry none of the words it checks.
+ */
+function keptNextStep(raw: unknown): NextStep | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { productId, line } = raw as Record<string, unknown>;
+  if (typeof productId !== "string" || !/^[a-z0-9]{6,40}$/.test(productId)) return null;
+  return { productId, line: typeof line === "string" ? line.slice(0, 800) : "" };
+}
+
 export function parseCourse(raw: unknown): Course | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -213,7 +233,8 @@ export function parseCourse(raw: unknown): Course | null {
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
     const shelf = readShelf(value.shelf);
     const months = readCertificateMonths(value.certificateMonths);
-    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}) };
+    const nextStep = keptNextStep(value.nextStep);
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}), ...(nextStep ? { nextStep } : {}) };
   } catch {
     return null;
   }
@@ -308,6 +329,8 @@ export type CourseEdit =
   | { op: "certificate"; on: boolean }
   /** The "More from" shelf (628 [HN4](b)): product ids, the course's own product left out. */
   | { op: "shelf"; products: unknown; courseProductId: string }
+  /** The "Next step" (560 [AS1]), already read by readNextStep; null takes it away. */
+  | { op: "next-step"; step: NextStep | null }
   /** How long certificates issued from now on stay valid: 1 to 120 months, or null for good. */
   | { op: "certificate-months"; months: unknown }
   | { op: "start"; at: unknown }
@@ -511,6 +534,11 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
       const { shelf: _was, ...rest } = course;
       void _was;
       return { ok: true, course: shelf.length ? { ...rest, shelf } : rest, removed: [] };
+    }
+    case "next-step": {
+      const rest = { ...course };
+      delete rest.nextStep;
+      return { ok: true, course: edit.step ? { ...rest, nextStep: edit.step } : rest, removed: [] };
     }
     case "certificate-months": {
       if (edit.months === null || edit.months === 0 || edit.months === "") {

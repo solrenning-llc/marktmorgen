@@ -39,6 +39,9 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
+import { NEXT_STEP_NO_SECONDS, nextStepCookie, nextStepFor } from "@/lib/course-next-step";
+import { CourseNextStepCard } from "@/components/course-next-step-card";
+import { pricePill, productPath } from "@/components/store-product";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -134,6 +137,14 @@ export default async function CoursePage({ params, searchParams }: Params) {
     ? all.find((entry) => !known.has(entry.lesson.id) && reachable(entry)) ?? all.find(reachable)
     : null;
   const preview = all.find(({ lesson }) => lesson.preview);
+  // The course's "Next step" (560 [AS1]) for a student: only what its creator picked, never something they have or
+  // turned down in this browser; every read it needs is paid for before it is made, and unknown shows nothing
+  // (lib/course-next-step.ts).
+  const nextCookie = nextStepCookie(course.id);
+  const nextProduct =
+    open && !access.learner.owner && course.nextStep
+      ? await nextStepFor({ store, course, courseProductId: product.id, email: access.learner.email, dismissed: jar.get(nextCookie)?.value === "1" }).catch(() => null)
+      : null;
   const base = `/@${store.handle}/course/${product.id}`;
   const selling = canSellProduct(store, product);
   // Said with every term the checkout will apply: a trial, a set number of
@@ -341,6 +352,18 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </div>
           )}
         </div>
+
+        {nextProduct && course.nextStep ? (
+          <CourseNextStepCard
+            cookie={nextCookie}
+            seconds={NEXT_STEP_NO_SECONDS}
+            href={productPath(store, nextProduct)}
+            title={nextProduct.title}
+            price={pricePill(store, nextProduct)}
+            line={course.nextStep.line}
+            words={{ label: w.nextStepLabel, see: w.nextStepSee(nextProduct.title), noThanks: w.nextStepNoThanks, done: w.nextStepNoThanksDone }}
+          />
+        ) : null}
 
         <div className="st-card mt-6 p-6 sm:p-8">
           <h2 className="font-display text-xl font-semibold">{w.inside}</h2>

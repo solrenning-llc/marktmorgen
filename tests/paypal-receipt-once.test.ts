@@ -673,7 +673,9 @@ async function main(): Promise<void> {
   // The store's list written once, before the hand-over reads the person's deletion mark (nothing in between for a
   // store with a list: the paid record's last write, then that read): the commands that try adds, at most.
   const markRead = sentK4.findIndex((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"));
-  const paidWrite = sentK4.findLastIndex((c, i) => i < markRead && String(c[1]).startsWith("nl:ppsell:sales:"));
+  // The paid record's last write names the sales list among its keys: a ZADD, or (since #3385) the one EVAL that
+  // settles the sale, whose keys follow the script and its key count.
+  const paidWrite = sentK4.findLastIndex((c, i) => i < markRead && c.slice(1).some((arg) => String(arg).startsWith("nl:ppsell:sales:")));
   const listWrite = markRead > paidWrite && paidWrite >= 0 ? markRead - paidWrite - 1 : -1;
   console.log(`        the list's write added ${listWrite} commands to that try`);
   is("the list's write, once in a store's life, adds at most the 7 commands the registry adds for it (commandsPerReceiptTry)", listWrite > 0 && listWrite <= 7, true);

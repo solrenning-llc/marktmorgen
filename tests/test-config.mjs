@@ -52,6 +52,7 @@ function centralAliases(file,root,here){
   aliases['next/navigation']=join(here,'blog-read-page-world.tsx');
  }
  if(file==='studio-today-trips.test.ts'||file==='studio-today-removal-order.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/navigation']=join(here,'studio-today-navigation.ts');aliases['next/server']=join(here,'studio-today-next-server.ts');}
+ if(file==='studio-passkeys-unread.test.ts'||file==='studio-lock-unread.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/navigation']=join(here,'studio-today-navigation.ts');aliases['next/server']=join(here,'studio-today-next-server.ts');}
  if(file==='service-counter-admission.test.ts')for(const name of ['redis','store-allowance','traffic'])aliases['@/lib/'+name]=join(here,'service-counter-admission-world.ts');
  if(file==='stream-hook-counter-admission.test.ts')for(const name of ['redis','stream','auto-captions'])aliases['@/lib/'+name]=join(here,'stream-hook-counter-admission-world.ts');
  if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');
@@ -85,6 +86,7 @@ function centralAliases(file,root,here){
   for(const name of ['meet-test','account-notice'])aliases['@/lib/'+name]=join(here,'meeting-disabled-world.ts');
  }
  if(file==='host-calendar-removal.test.ts')aliases['@/lib/host-calendar']=join(here,'host-calendar-removal-world.ts');
+ if(file==='calendar-add-limit.test.ts')aliases['@/lib/calendar-sync']=join(here,'calendar-add-limit-world.ts');
  if(file==='outreach-counter-admission.test.ts')for(const name of ['redis','store-request','outreach','metered-limits'])aliases['@/lib/'+name]=join(here,'outreach-counter-admission-world.ts');
  if(file==='ai-report-counter-admission.test.ts')for(const name of ['redis','store-request','review-ai-summary','stats-report','numbers-ask','person-agenda-read','ai'])aliases['@/lib/'+name]=join(here,'ai-report-counter-admission-world.ts');
  if(file==='cron-checks-exact.test.ts')for(const name of ['email','verify-mail','verify-stripe'])aliases['@/lib/'+name]=join(here,'cron-checks-exact-world.ts');
@@ -110,6 +112,7 @@ function centralAliases(file,root,here){
  if(file==='path-wording-route.test.ts'){
   for(const name of ['studio-route','path-board-rules','path-reminder','store-request','store','path-rules','path','path-wording','path-wording-source','request-guard','ai-rules'])aliases['@/lib/'+name]=join(here,'path-wording-route-world.ts');
  }
+ if(file==='stripe-charges-off.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='path-wording-provider.test.ts'){
   aliases['@/lib/redis']=join(here,'path-wording-provider-world.ts');
   aliases['@/lib/ai-spend']=join(root,'lib/ai-spend.ts');
@@ -124,6 +127,7 @@ function centralAliases(file,root,here){
  if(file==='orders-page-bounds.test.ts'){aliases['next/server']=join(here,'next-server-after-world.ts');aliases['next/link']=join(here,'next-link-world.tsx');}
  if(file==='deals-board-pipelines-render.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='unnamed-buyer-notes.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
+ if(file==='wg15-tax-link.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='agent-proposals-names.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='mail-reservation.test.ts'){aliases['@/lib/email']=join(here,'mail-reservation-email.ts');aliases['@/lib/ses']=join(here,'mail-reservation-ses.ts');}
  if(file==='traffic-admission.test.ts')for(const name of ['redis','store','delivery','secret-box'])aliases['@/lib/'+name]=join(here,'traffic-admission-world.ts');

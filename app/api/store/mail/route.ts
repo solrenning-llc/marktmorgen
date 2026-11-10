@@ -15,7 +15,7 @@ import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey,
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
-import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
+import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, BroadcastsUnreadable, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
 import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
@@ -389,6 +389,8 @@ export async function POST(request: NextRequest) {
     console.error("an email action failed", error);
     if (error instanceof BroadcastCancellationUnconfirmed) return fail("broadcast_cancel_unconfirmed", 502);
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);
+    // An email's record that could not be read (rule 24): nothing was changed, never "not there".
+    if (error instanceof BroadcastsUnreadable) return fail("broadcast_read_unavailable", 503);
     if (error instanceof FlowWriteUnconfirmed) return fail("flow_write_unconfirmed", 502);
     if (error instanceof FlowRunUnavailable) return fail("flow_runs_unavailable", 503);
     // A sequence's stages and fields are checked against the store's own; unknown ones save nothing (lib/crm.ts).

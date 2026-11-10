@@ -268,6 +268,7 @@ async function paidAtStripe(store: Store, email: string, reading: Reading): Prom
       }
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
       query.append("expand[]", "data.subscription");
+      query.append("expand[]", "data.subscription.latest_invoice");
       query.append("expand[]", "data.payment_intent.latest_charge");
       if (after) query.set("starting_after", after);
       const read = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), sessionLegible);

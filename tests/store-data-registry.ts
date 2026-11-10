@@ -653,6 +653,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:leave:@lib/leave-flow.ts": short("Leavers counted a month", "day", 62, 128),
   "nl:lc:@lib/lesson-comment-notify.ts": short("A student told of an answer, once in a while", "buyer", 1),
   "nl:lc:@lib/lesson-comments.ts": { what: "Lesson comments", room: ["lib/lesson-comments.ts"] },
+  "nl:lnote:@lib/lesson-notes.ts": { what: "A student's private notes on lessons (290 [SQ1]): at most MAX_NOTES_PER_STUDENT of MAX_NOTE_CHARS each, MAX_NOTES_BYTES_PER_STUDENT a student, all students' notes in one slot (NOTES_TOTAL_FIELD) of at most studentNotesRoomFor, a tenth of the data room", room: ["lib/lesson-notes.ts"] },
   "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
@@ -926,6 +927,8 @@ export const FAMILIES: Record<string, Family> = {
   },
   "nl:stock:@lib/stock.ts": { what: "Stock left, by product, and a sale's hold: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:stock:lock:@lib/stock.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
+  // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
+  "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
@@ -943,6 +946,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:join:t:@lib/store-join.ts": short("A link to join the list, sent by email", "access", 7, LINK_BYTES, MAIL("join")),
   "nl:store:photo:@lib/store-photo.ts": { what: "The store's photo", parts: [capped(2 * (MAX_PHOTO_BYTES * 4) / 3 + KB, "One photo, and the one it replaces while it is written.", src("lib/photo-limits.ts", "MAX_PHOTO_BYTES"))] },
   "nl:account:stores:@lib/store.ts": company("An account's other stores", "An account's."),
+  "nl:account:stores:@lib/account-exists.ts": { what: "An account's other stores, read exactly to tell an existing account when an invitation is taken", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:catalog:move:cursor@lib/store.ts": company("Where the catalog move stopped", "One key, the company's job."),
   "nl:store:before-catalog:@lib/store.ts": { what: "A store record kept aside while it moved, thirty days", parts: [capped(MAX_STORE_BYTES + KB, "Once, at most the record.", src("lib/store.ts", "MAX_STORE_BYTES"))] },
   "nl:store:handle:@lib/store.ts": { what: "The store's addresses", parts: [capped(21 * KEY, "Its address and up to twenty before it.")] },
@@ -952,6 +956,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:store:lock:@lib/store.ts": short("The store's lock while one change is written", "studio", 1, 128),
   "nl:store:owner:*@lib/store.ts": company("The pattern the daily job reads every store by", "Not a key: a pattern."),
   "nl:store:owner:@lib/store.ts": { what: "The store record", parts: [capped(MAX_STORE_BYTES + KB, "At most MAX_STORE_BYTES, refused past it.", src("lib/store.ts", "MAX_STORE_BYTES"))] },
+  "nl:store:owner:@lib/account-exists.ts": { what: "The store record, read exactly to tell an existing account when an invitation is taken", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:stream:cap:@lib/stream.ts": { what: "A video's caption languages", room: ["app/api/store/stream/route.ts"] },
   "nl:stream:col:@lib/stream.ts": { what: "The store's collection at the video service", parts: [capped(KEY, "One a store.")] },
   "nl:stream:due@lib/stream.ts": company("Videos to ask about", "One sorted set for every store, each a video counted in its store's room."),

@@ -211,7 +211,9 @@ export default function DevelopersPage() {
         <Endpoint path="/api/v1/leads">
           Your list: everybody who asked for something free, bought, or came in with an import — the same rows as the
           CSV export in your studio. Add <code className="font-mono">?agreed=true</code> for only those who agreed to hear
-          from you and have not unsubscribed: the ones it is fair to email.
+          from you and have not unsubscribed: the ones it is fair to email. If a page holds a contact that could not be
+          read, it leaves that contact out and says how many in <code className="font-mono">unreadable</code>; a page
+          without that field left nobody out.
         </Endpoint>
         <p>{`A page counts as at least ${n(LIST_PAGE_LEAST)} of your API requests (one while your store has no list yet), and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. A page needs ${n(LIST_PAGE_HELD)} requests free before it is read, what a full page of the longest rows could take; what it did not use is given back at once. With fewer free, the page is refused and nothing is read. Members count the same way: a page of members needs ${n(MEMBERS_PAGE_HELD)} free before it is read.`}</p>
         <Code>{`{
@@ -586,13 +588,15 @@ export default function DevelopersPage() {
           podcast or a bundle, by its id or its exact name. They open it from your store&apos;s list of purchases with
           that address, where it shows as given by your store, not as a sale; it is not counted in your numbers, sent to
           webhooks or credited to an affiliate. Send <code className="font-mono">notify: true</code> and they get one email
-          from your store&apos;s name saying so, in your store&apos;s language, while your plan is running.
+          from your store&apos;s name saying so, in your store&apos;s language, while your plan is running. Somebody
+          deleted from your store is never given anything again or emailed.
         </Endpoint>
         <Code>{`{"email": "dana@example.com", "product": "k3j9x2p1ab", "notify": true}
 
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "given", "emailed": true}}
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "already", "emailed": false}}
-409  {"error": "cannot_give", "message": "Memberships, calls and products with several prices cannot be given this way."}`}</Code>
+409  {"error": "cannot_give", "message": "Memberships, calls and products with several prices cannot be given this way."}
+409  {"error": "deleted", "message": "This person was deleted from your store, so nothing is given to them and they are not emailed."}`}</Code>
         <Endpoint method="DELETE" path="/api/v1/access">
           Takes back a product the API gave, with the same body. Only what the API gave: a sale, an import, a gift or a
           purchase paid with PayPal is not the API&apos;s to take, and gets 404{" "}

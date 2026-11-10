@@ -39,6 +39,15 @@ export async function GET(request: NextRequest) {
   try {
     // The file names no product (batchFile), so nothing is read for the names.
     const book = await readBook(store, undefined, { titles: false });
+    // The file is paid from as it is: while refunds or chargebacks could not
+    // be read from Stripe in full, what is owed is not known, so no file is
+    // handed out, as "Mark as paid" below and payWithPayPal refuse too.
+    if (!book.refundsChecked) {
+      return new Response(
+        "We could not check every refund and chargeback on your Stripe account just now, so what each affiliate is owed is not settled yet. Reload the affiliates page in a minute and download the file again.",
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     // Never a file its confirmation (POST below) would refuse, on the same test, before any line is written: paid in
     // the creator's own PayPal and then not recorded, the same lines would come back in the next file and be paid
     // twice (review of #3378 by Claude 2, HIGH).

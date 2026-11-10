@@ -42,6 +42,7 @@ import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/pr
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
+import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -172,7 +173,7 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 export async function stampedCopy(
   file: ProductFile,
   sale: { reference: string; email: string; paidAt: number },
-  store: DataStore,
+  store: DataStore & { language?: LanguageCode },
 ): Promise<ProductFile | null> {
   if (!isStampable(file) || !sale.reference || !sale.email) return null;
   if (file.bytes > MAX_STAMP_BYTES) {
@@ -201,7 +202,8 @@ export async function stampedCopy(
       await noteProblem(file.pathname, "too_big");
       return null;
     }
-    const line = stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000));
+    // In the store's language, with the date its way (lib/buyer-words/stamp.ts).
+    const line = stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000), store.language);
     let stamped: Uint8Array;
     if (epub) {
       const result = stampEpub(original, line);

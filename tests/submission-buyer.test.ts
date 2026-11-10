@@ -452,6 +452,63 @@ async function main(): Promise<void> {
     is("and never both told done: withdrawn to the buyer and answered to the creator", confirmed && withdrawn.ok, false);
   }
 
+  part("A write held up past its lock never lands over the next holder's confirmed change (Codex U, focal on #3574)");
+  {
+    // The record's write is paused just before it is sent; meanwhile the lock runs out and the other side takes it.
+    const writes = (list: (string | number)[][], id: string) =>
+      list.some((cmd) => (cmd[0] === "SET" || cmd[0] === "EVAL") && cmd.some((arg) => typeof arg === "string" && arg.startsWith("nl:sub:rec:") && arg.endsWith(id)));
+    const pausing = (id: string, meanwhile: () => Promise<unknown>) => {
+      const original = redis.pipeline.bind(redis);
+      let once = true;
+      redis.pipeline = (async (list: (string | number)[][]) => {
+        if (once && writes(list, id)) {
+          once = false;
+          redis.pipeline = original;
+          advance(31_000);
+          await meanwhile();
+        }
+        return original(list);
+      }) as typeof redis.pipeline;
+      return () => (redis.pipeline = original);
+    };
+    const lesson2 = { ...at(ANA, "lesson0002ab"), data: SHOP as DataStore };
+
+    // 1. The withdrawal's write is late: the creator's reply takes the lock and is confirmed first.
+    const late = await sent(ANA, "Late withdrawal.", "lesson0002ab", false, NOW + 1_000);
+    let replied: unknown = "not asked";
+    let vaultAsked = 0;
+    const counting = vault({ deleteVault: async () => ((vaultAsked += 1), true) });
+    const restore1 = pausing(late.id, async () => {
+      replied = await replySubmission({ data: SHOP as DataStore, folder: FOLDER, courseId: COURSE, id: late.id, reply: { text: "Confirmed interleaved review", file: null } }, NOW + 1_031);
+    });
+    const withdrawn = await withdrawSubmission({ ...lesson2, id: late.id }, NOW + 1_000, counting.steps).catch((error: unknown) => ({ thrown: String(error) }));
+    restore1();
+    const afterWithdraw = await readSubmission(FOLDER, late.id);
+    is("the creator's reply was confirmed (control)", (replied as { ok?: boolean }).ok, true);
+    is("the late withdrawal is not said done", (withdrawn as { ok?: boolean }).ok === true, false);
+    is("the confirmed reply is still the record", [afterWithdraw?.state, afterWithdraw?.reply?.text], ["reviewed", "Confirmed interleaved review"]);
+    is("and the file under review was never deleted", vaultAsked, 0);
+
+    // 2. The reply's write is late: the buyer's withdrawal takes the lock, is kept and its file deleted first.
+    const other = await sent(ANA, "Late reply.", "lesson0002ab", false, NOW + 2_000);
+    let gone: unknown = "not asked";
+    const restore2 = pausing(other.id, async () => {
+      gone = await withdrawSubmission({ ...lesson2, id: other.id }, NOW + 2_031, vault({}).steps);
+    });
+    const answered = await replySubmission({ data: SHOP as DataStore, folder: FOLDER, courseId: COURSE, id: other.id, reply: { text: "Late creator review", file: null } }, NOW + 2_000).catch((error: unknown) => ({ thrown: String(error) }));
+    restore2();
+    const afterReply = await readSubmission(FOLDER, other.id);
+    is("the withdrawal was kept (control)", (gone as { ok?: boolean }).ok, true);
+    is("the late reply is not said sent", (answered as { ok?: boolean }).ok === true, false);
+    is("the withdrawal is still the record", [afterReply?.state, afterReply?.reply ?? null], ["withdrawn", null]);
+
+    // 3. Control: with no delay, a withdrawal still lands and deletes its file.
+    const plain = await sent(ANA, "Plain.", "lesson0002ab", false, NOW + 3_000);
+    let plainAsked = 0;
+    const plainDone = await withdrawSubmission({ ...lesson2, id: plain.id }, NOW + 3_000, vault({ deleteVault: async () => ((plainAsked += 1), true) }).steps);
+    is("an ordinary withdrawal is kept and its file deleted", [plainDone.ok, (plainDone as { deleted?: boolean }).deleted, plainAsked], [true, true, 1]);
+  }
+
   done();
 }
 

@@ -291,6 +291,37 @@ async function main(): Promise<void> {
     is("that file", calls.filter((call) => call.startsWith("delete")), [`delete ${both.path}`]);
   }
 
+  part("An erasure that runs while a close is at the vault is never undone by that close (Claude 1 on #3570)");
+  {
+    const who = "7".repeat(32);
+    let erased: number | string = "not run";
+    const erasedFiles: string[] = [];
+    const racing = world({
+      closeReservedVault: async (pathname) => {
+        // The buyer's erasure runs while the vault completes the file, and says done.
+        erased = await forgetSubmissionsPerson(FOLDER, who, erasedFiles, world().steps);
+        return { ok: true, file: { pathname, bytes: 5 * MiB, contentType: "video/mp4" } };
+      },
+    });
+    const opened = await openSubmissionDoor(ask(who, lesson(30)), racing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const path = opened.upload.pathname;
+    const id = path.split("/")[2].slice(4);
+    const closed = await closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(30), who, data: SHOP, note: "Private note." }, path, ["e"], NOW, racing.steps).catch((error: unknown) => ({ thrown: String(error) }));
+    is("control: the erasure ran and said done, naming the file", [erased, erasedFiles.includes(path)], [0, true]);
+    is("the close is not said kept", (closed as { ok?: boolean }).ok === true, false);
+    is("after an erasure said done, no record of the erased buyer remains", await readSubmission(FOLDER, id), null);
+    // An empty index counts as none (Redis drops a sorted set with no member; the stand-in may keep the key).
+    const left = await redis.pipeline([["ZCARD", `nl:sub:who:${FOLDER}:${who}`], ["ZSCORE", "nl:sub:due", `${FOLDER}|${path}`]]);
+    is("nor their index, nor a sweep entry written again by the close", [left[0], left[1]], [0, null]);
+    is("and the completed file is deleted", racing.calls.includes(`delete ${path}`), true);
+
+    // Control: with no erasure, a close still keeps its record.
+    const plain = world();
+    const sent = await send("9".repeat(32), lesson(31), plain.steps);
+    is("an ordinary close keeps its record", (await readSubmission(FOLDER, sent.id))?.state, "submitted");
+  }
+
   done();
 }
 

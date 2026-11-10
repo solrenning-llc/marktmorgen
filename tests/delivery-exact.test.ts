@@ -4,11 +4,17 @@
  * storeKeysOf and ownersOf read the folder's owner key with GET. Nil is a
  * folder nobody uploaded to through the studio (null, as before), and a
  * string is what was kept. Any other answer (a missing or extra reply, a
- * number, an empty string, a database that does not answer) is unknown and
- * throws: it is never "no store" or "no address on file". The daily usage
- * watch then writes to nobody about the delivery allowance, tells support no
- * false "we have no address", leaves its told list as it was and says the
- * part is unknown (503, unread ["delivery"]).
+ * number, an empty string, a database that does not answer) is unknown: it
+ * is never "no store" or "no address on file". storeKeysOf throws on it. So
+ * does ownersOf when the read as a whole is unknown (no reply, a reply short or
+ * extra, a database that does not answer): the daily usage watch then writes
+ * to nobody about the delivery allowance, tells support no false "we have no
+ * address", leaves its told list as it was and says the part is unknown (503,
+ * unread ["delivery"]). One folder's answer of another shape (undefined, a
+ * number, an empty string) is that folder's owner unknown, undefined, and the
+ * watch postpones that store only (Claude 1's decision on #3072, 1975a5cd):
+ * nobody is written to about it, support is told nothing and it is not
+ * recorded as told, while the other stores in the run go on as usual.
  *
  * Synthetic data only; the healthy and confirmed-absence answers work as before.
  */
@@ -36,6 +42,9 @@ const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => inject?.(commands) ?? pipeline(commands)) as typeof redis.pipeline;
 const onOwner = (commands: Command[]) => commands.length > 0 && commands.every((c) => c[0] === "GET" && String(c[1]).startsWith("nl:store:folder-owner:"));
 
+/** Answers of one folder's own shape, not of the read as a whole: that folder's owner unknown, the store postponed. */
+const PER_FOLDER = new Set(["undefined", "a number", "an empty string"]);
+
 const MALFORMED: [string, (n: number) => Promise<unknown[]>][] = [
   ["no reply at all", async () => []],
   ["a reply short", async (n) => Array(n - 1).fill("owner@example.com")],
@@ -58,7 +67,8 @@ async function readers(): Promise<void> {
   for (const [label, reply] of MALFORMED) {
     inject = (commands) => (onOwner(commands) ? reply(commands.length) : null);
     is(`storeKeysOf, answered ${label}: unknown`, await storeKeysOf([a, b]).then(() => "answered", () => "unknown"), "unknown");
-    is(`ownersOf, answered ${label}: unknown`, await ownersOf([a, b]).then(() => "answered", () => "unknown"), "unknown");
+    is(`ownersOf, answered ${label}: unknown`, await ownersOf([a, b]).then((owners) => owners, () => "unknown"),
+      PER_FOLDER.has(label) ? [undefined, undefined] : "unknown");
     inject = null;
   }
 }
@@ -81,7 +91,8 @@ async function watch(): Promise<void> {
   part("Usage watch: an owner that cannot be read is never \"no address on file\"");
   for (const [label, reply] of MALFORMED) {
     inject = (commands) => (onOwner(commands) ? reply(commands.length) : null);
-    is(`owner answered ${label}: nobody written to, support told nothing, the told list left, the part unknown`, await run(), { status: 503, unread: ["delivery"], emails: [], told: null });
+    is(`owner answered ${label}: nobody written to, support told nothing, ${PER_FOLDER.has(label) ? "the store not recorded, postponed" : "the told list left, the part unknown"}`, await run(),
+      PER_FOLDER.has(label) ? { status: 200, unread: [], emails: [], told: "[]" } : { status: 503, unread: ["delivery"], emails: [], told: null });
     inject = null;
   }
   is("owner read: the owner is told, once", await run(), { status: 200, unread: [], emails: ["heavy@example.com"], told: JSON.stringify([folder]) });

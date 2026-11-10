@@ -34,6 +34,7 @@ import { AFFILIATE_ENTRY_BYTES, BOOK_KEPT_REFUND_BYTES } from "@/lib/api-read-ru
 import { PAYPAL_REFUNDS_READ, type Paid, readPayPalRefundsWithCoverage, watchPayPal } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -216,8 +217,10 @@ async function main(): Promise<void> {
   part("Unknown: the set's listing not exact is a reading that covered nothing, never \"no refunds\" (rule 24)");
   await setup();
   await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), ORDER]]);
-  const listing = await answering("ZRANGEBYSCORE", `nl:ppsell:refunded:${SID}`, "garbled", () => readPayPalRefundsWithCoverage(SID, 0));
-  is("the numbers' reading is partial", listing.partial, true);
+  // Since main's exact reading (tests/paypal-refunds-score-exact.test.ts), a listing not exact throws instead of answering
+  // partial; its callers (lib/stats.ts, lib/segments.ts) take the throw as an unread reading, so it is never "no refunds".
+  const listing = await answering("ZRANGEBYSCORE", `nl:ppsell:refunded:${SID}`, "garbled", () => readPayPalRefundsWithCoverage(SID, 0)).catch((error: unknown) => error);
+  is("the numbers' reading is refused as unknown, never read as complete", listing instanceof UnknownReplyError, true);
 
   part("Unknown: the book's question to the set about its own orders not exact leaves it unchecked");
   await setup();

@@ -292,6 +292,92 @@ test("rule 24: a reply that is not exact is never a saved application, a decisio
   assert.equal(await listApplications(shop, clock), null, "an MGET of another length");
 });
 
+test("an approval applied whose reply was lost (a throw after the script ran) is read back and answers its token", async () => {
+  const one = await submit();
+  const record = `nl:apply:r:${shop.sid}:${one.id}`;
+  // Codex U's probe on #3564: APPLY_CHANGE runs, then the acknowledgment is lost as a thrown transport error.
+  fault = (command) => {
+    if (String(command[1]) !== APPLY_CHANGE) return undefined;
+    fault = null;
+    runScript(command);
+    throw new Error("synthetic: the reply to an applied approval was lost");
+  };
+  const done = await decideApplication(shop, one.id, { kind: "approve", days: 7 }, clock + 1);
+  assert.equal(done.ok, true, JSON.stringify(done));
+  const { token, application } = done as { ok: true; token: string; application: { state: string } };
+  assert.equal(application.state, "approved");
+  assert.match(token, APPLY_TOKEN);
+  const app = parseApplication(JSON.parse(String(base(["GET", record]))).app);
+  assert.ok(app);
+  assert.equal(app.tokenDigest, applyTokenDigest(token));
+  assert.deepEqual(canPurchase(app, { token, email: ann, offer, now: clock + DAY }), { ok: true });
+  // The script did not run and the call threw: nothing is said to be saved.
+  const two = await submit(bob);
+  const before = base(["GET", `nl:apply:r:${shop.sid}:${two.id}`]);
+  fault = (command) => {
+    if (String(command[1]) !== APPLY_CHANGE) return undefined;
+    fault = null;
+    throw new Error("synthetic: the request never reached the database");
+  };
+  assert.deepEqual(await decideApplication(shop, two.id, { kind: "approve", days: 7 }, clock + 1), { ok: false, reason: "unavailable" });
+  assert.equal(base(["GET", `nl:apply:r:${shop.sid}:${two.id}`]), before);
+});
+
+test("an approval applied whose reply and read back were both lost is unknown, and its retry with the same key answers a fresh link", async () => {
+  const one = await submit();
+  const record = `nl:apply:r:${shop.sid}:${one.id}`;
+  const key = "a".repeat(32);
+  // The script runs and its reply is lost; the read back is lost too: unknown, never "approved" without a link.
+  let lost = false;
+  fault = (command) => {
+    if (String(command[1]) === APPLY_CHANGE) {
+      runScript(command);
+      lost = true;
+      throw new Error("synthetic: reply lost");
+    }
+    if (lost && command[0] === "GET") {
+      fault = null;
+      throw new Error("synthetic: read back lost");
+    }
+    return undefined;
+  };
+  assert.deepEqual(await decideApplication(shop, one.id, { kind: "approve", days: 7, key }, clock + 1), { ok: false, reason: "unavailable" });
+  fault = null;
+  const applied = parseApplication(JSON.parse(String(base(["GET", record]))).app);
+  assert.equal(applied?.state, "approved", "the approval did land");
+  const lostDigest = applied!.tokenDigest;
+  // Another press, another key (another tab): the open link is not touched.
+  assert.deepEqual(await decideApplication(shop, one.id, { kind: "approve", days: 7, key: "b".repeat(32) }, clock + 2), { ok: false, reason: "still-open" });
+  assert.deepEqual(await decideApplication(shop, one.id, { kind: "approve", days: 7 }, clock + 2), { ok: false, reason: "still-open" });
+  assert.equal(parseApplication(JSON.parse(String(base(["GET", record]))).app)?.tokenDigest, lostDigest);
+  // The same press again, with its key: a fresh token replaces the kept digest, so the link nobody holds stops working.
+  const life = ttl(record);
+  const again = await decideApplication(shop, one.id, { kind: "approve", days: 7, key }, clock + 3);
+  assert.equal(again.ok, true, JSON.stringify(again));
+  const { token } = again as { ok: true; token: string };
+  assert.match(token, APPLY_TOKEN);
+  const now = parseApplication(JSON.parse(String(base(["GET", record]))).app);
+  assert.ok(now);
+  assert.equal(now.state, "approved");
+  assert.equal(now.tokenDigest, applyTokenDigest(token));
+  assert.notEqual(now.tokenDigest, lostDigest);
+  assert.equal(now.expiresAt, clock + 3 + 7 * DAY);
+  assert.deepEqual(canPurchase(now, { token, email: ann, offer, now: clock + DAY }), { ok: true });
+  assert.ok(ttl(record) >= life - 1, "a retry never shortens the record's life");
+  assert.equal(Number(base(["ZSCORE", `nl:apply:s:${shop.sid}`, one.id])), untilOf(now));
+  assert.equal(String(base(["GET", record])).includes(token), false, "the plain token is never kept");
+  assert.equal(String(base(["GET", record])).includes(key), false, "the press's key is never kept, only its digest");
+  // A key in another shape is refused, and nothing is written.
+  const kept = base(["GET", record]);
+  for (const bad of ["A".repeat(32), "a".repeat(31), "../x", 7]) {
+    assert.deepEqual(await decideApplication(shop, one.id, { kind: "approve", days: 7, key: bad as string }, clock + 4), { ok: false, reason: "bad-input" }, String(bad));
+  }
+  assert.equal(base(["GET", record]), kept);
+  // Declined is final, whatever the key.
+  assert.equal((await decideApplication(shop, one.id, { kind: "decline" }, clock + 5)).ok, true);
+  assert.deepEqual(await decideApplication(shop, one.id, { kind: "approve", days: 7, key }, clock + 6), { ok: false, reason: "final" });
+});
+
 test("a record goes by itself: waiting KEEP days, or AFTER days past its decision", async () => {
   const one = await submit();
   const two = await submit(bob);

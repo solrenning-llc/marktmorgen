@@ -38,9 +38,13 @@
  * The record keeps the address the person applied with, because the creator
  * must see who applied and the approved person must be sent their link. The
  * link's token is never kept: an approval answers it once, to the caller that
- * sends it (a later unit), and the record keeps only its digest.
+ * sends it (a later unit), and the record keeps only its digest. So that an
+ * approval which landed while its answer was lost never leaves a link nobody
+ * holds, the press may carry a key (APPROVAL_KEY): the record keeps that key's
+ * digest, and the same press sent again finds its own approval and answers a
+ * fresh token in place of the kept one, so the lost one stops working.
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -49,9 +53,12 @@ import type { Store } from "@/lib/store";
 import {
   APPLICATION_ID,
   APPLY_LINK_DAYS_DEFAULT,
+  APPLY_LINK_DAYS_MAX,
+  APPLY_LINK_DAYS_MIN,
   type Application,
   type ApplicationState,
   applicantDigest,
+  applyTokenDigest,
   newApplication,
   newApplyToken,
   nextApplication,
@@ -173,7 +180,20 @@ export type ApplicationView = {
   consent: { text: string; version: string };
 };
 
-type Kept = { email: string; app: Application; consent: { text: string; version: string } };
+/** One press of "approve" (16 random bytes, hex), chosen by the caller and sent again with the same press. */
+export const APPROVAL_KEY = /^[0-9a-f]{32}$/;
+const DIGEST = /^[0-9a-f]{64}$/;
+
+/**
+ * op: the digest of the key of the press that approved it (approvalDigest),
+ * kept only while approved or used, never the key itself.
+ */
+type Kept = { email: string; app: Application; consent: { text: string; version: string }; op?: string };
+
+/** What the record keeps of a press's key: bound to the store and the application, under this file's own label. */
+function approvalDigest(sid: string, id: string, key: string): string {
+  return createHash("sha256").update(`nimbus-apply-first-approval:${sid}:${id}:${key}`).digest("hex");
+}
 
 /** When an application's record is no longer needed: it waits KEEP days, and a decision or a link adds AFTER days. */
 export function untilOf(app: Application): number {
@@ -188,7 +208,10 @@ const seconds = (until: number, now: number) => Math.max(60, Math.ceil((until - 
 
 /** The stored text: the address and the rules' record, in one fixed shape. */
 function storedText(kept: Kept): string {
-  return JSON.stringify({ v: 1, email: kept.email, app: JSON.stringify(kept.app), consent: { text: kept.consent.text, version: kept.consent.version } });
+  return JSON.stringify({
+    v: 1, email: kept.email, app: JSON.stringify(kept.app), consent: { text: kept.consent.text, version: kept.consent.version },
+    ...(kept.op ? { op: kept.op } : {}),
+  });
 }
 
 /**
@@ -206,15 +229,17 @@ function readKept(raw: unknown, id: string): Kept | null {
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { v, email, app, consent } = value as Record<string, unknown>;
+  const { v, email, app, consent, op } = value as Record<string, unknown>;
   if (v !== 1 || typeof email !== "string" || typeof app !== "string" || !consent || typeof consent !== "object") return null;
   const { text, version } = consent as Record<string, unknown>;
   if (typeof text !== "string" || typeof version !== "string" || !Object.hasOwn(CONSENT_WORDS, version) || CONSENT_WORDS[version] !== text) return null;
+  if (op !== undefined && (typeof op !== "string" || !DIGEST.test(op))) return null;
   // Written exactly as storedText writes it, or it was not written here.
-  if (JSON.stringify({ v: 1, email, app, consent: { text, version } }) !== raw) return null;
+  if (JSON.stringify({ v: 1, email, app, consent: { text, version }, ...(op ? { op } : {}) }) !== raw) return null;
   const parsed = parseApplication(app);
   if (!parsed || parsed.id !== id || normaliseEmail(email) !== email || applicantDigest(email) !== parsed.applicant) return null;
-  return { email, app: parsed, consent: { text, version } };
+  if (op && parsed.state !== "approved" && parsed.state !== "used") return null;
+  return op ? { email, app: parsed, consent: { text, version }, op } : { email, app: parsed, consent: { text, version } };
 }
 
 function viewOf(kept: Kept): ApplicationView {
@@ -289,17 +314,28 @@ export type Decided =
  * the new link's token, once: it is not kept, so whoever sends the link must
  * take it from here. "changed": the application changed or was deleted while
  * this was decided, and nothing was written.
+ *
+ * An approval whose answer was lost is read back: kept exactly as proposed, it
+ * answers the token still in hand; otherwise "unavailable", never approved
+ * without a link. An approval sent with `key` keeps that key's digest; the
+ * same press sent again with the same key, while its link is open and unused,
+ * is that approval: a fresh token replaces the kept digest (the token nobody
+ * holds stops working) and is answered. Any other press on an open link is
+ * "still-open", as before.
  */
 export async function decideApplication(
   store: Pick<Store, "sid">,
   id: string,
-  step: { kind: "approve"; days?: number } | { kind: "decline" },
+  step: { kind: "approve"; days?: number; key?: string } | { kind: "decline" },
   now = Date.now(),
 ): Promise<Decided> {
   if (!store.sid || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
   if (typeof id !== "string" || !APPLICATION_ID.test(id)) return { ok: false, reason: "gone" };
   const sid = store.sid;
   const key = recordKey(sid, id);
+  const press = step.kind === "approve" ? step.key : undefined;
+  if (press !== undefined && (typeof press !== "string" || !APPROVAL_KEY.test(press))) return { ok: false, reason: "bad-input" };
+  const op = press === undefined ? "" : approvalDigest(sid, id, press);
   try {
     const read = repliesFor(await redisPipeline([["GET", key]]), 1);
     if (!read) return { ok: false, reason: "unavailable" };
@@ -307,24 +343,39 @@ export async function decideApplication(
     const kept = readKept(read[0], id);
     if (!kept) return { ok: false, reason: "unavailable" };
     const token = step.kind === "approve" ? newApplyToken() : "";
-    const answer = step.kind === "approve"
-      ? nextApplication(kept.app, { kind: "approve", now, days: step.days ?? APPLY_LINK_DAYS_DEFAULT, token })
-      : step.kind === "decline" ? nextApplication(kept.app, { kind: "decline", now }) : null;
+    const days = step.kind === "approve" ? step.days ?? APPLY_LINK_DAYS_DEFAULT : 0;
+    const retry = step.kind === "approve" && op !== "" && kept.op === op && kept.app.state === "approved" &&
+      kept.app.usedAt === 0 && now < kept.app.expiresAt;
+    const answer = retry
+      ? reissued(kept.app, now, days, token)
+      : step.kind === "approve"
+        ? nextApplication(kept.app, { kind: "approve", now, days, token })
+        : step.kind === "decline" ? nextApplication(kept.app, { kind: "decline", now }) : null;
     if (!answer) return { ok: false, reason: "bad-input" };
     if (!answer.ok) {
       if (answer.why === "final" || answer.why === "still-open" || answer.why === "bad-input") return { ok: false, reason: answer.why };
       return { ok: false, reason: "unavailable" };
     }
-    const next: Kept = { email: kept.email, app: answer.next, consent: kept.consent };
+    // A decline drops the press's digest with the link; an approval keeps its own press's, or none.
+    const next: Kept = answer.next.state === "approved" && op
+      ? { email: kept.email, app: answer.next, consent: kept.consent, op }
+      : { email: kept.email, app: answer.next, consent: kept.consent };
     const text = storedText(next);
     if (Buffer.byteLength(text, "utf8") > APPLY_RECORD_MAX_BYTES) return { ok: false, reason: "unavailable" };
     // A record's life only grows: a decline after an approval keeps the longer one, so its index entries, and the
     // indexes themselves, never outlive or undercount it.
     const until = Math.max(untilOf(kept.app), untilOf(next.app));
-    const reply = repliesFor(await redisPipeline([[
-      "EVAL", APPLY_CHANGE, 3, key, storeIndex(sid), personIndex(sid, kept.email),
-      read[0] as string, text, seconds(until, now), until, id,
-    ]]), 1);
+    let reply: unknown[] | null;
+    try {
+      reply = repliesFor(await redisPipeline([[
+        "EVAL", APPLY_CHANGE, 3, key, storeIndex(sid), personIndex(sid, kept.email),
+        read[0] as string, text, seconds(until, now), until, id,
+      ]]), 1);
+    } catch (error) {
+      // The script may have run and only its answer been lost: the record read back below decides.
+      console.error("deciding an application: the write's answer was lost", error);
+      reply = null;
+    }
     const done = { ok: true as const, application: viewOf(next), ...(token ? { token } : {}) };
     if (reply?.[0] === 1) return done;
     if (reply?.[0] === 0) return { ok: false, reason: "changed" };
@@ -333,6 +384,17 @@ export async function decideApplication(
     console.error("deciding an application failed", error);
     return { ok: false, reason: "unavailable" };
   }
+}
+
+/**
+ * The same approval's link given again: a fresh token over the open link the
+ * same press wrote, for the days it asks for, from now. The rules read the
+ * result exactly (parseApplication); anything they refuse is unknown.
+ */
+function reissued(app: Application, now: number, days: number, token: string): ReturnType<typeof nextApplication> {
+  if (!Number.isSafeInteger(days) || days < APPLY_LINK_DAYS_MIN || days > APPLY_LINK_DAYS_MAX || now < app.decidedAt) return { ok: false, why: "bad-input" };
+  const next = parseApplication(JSON.stringify({ ...app, decidedAt: now, expiresAt: now + days * DAY, tokenDigest: applyTokenDigest(token) }));
+  return next && next.tokenDigest !== app.tokenDigest ? { ok: true, next } : { ok: false, why: "unknown" };
 }
 
 /**

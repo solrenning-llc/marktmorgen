@@ -242,6 +242,20 @@ export class MemoryRedis {
           this.run(["HDEL", imported, field]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_SETTLE: a completed payment written down, once, with every list it belongs in, in one step.
+        if (key.startsWith("-- marktmorgen:paypal-settle:v1\n") && args[0] === "6" && args.length === 14) {
+          const [, paid, handOver, watch, own, pending, sales, record, life, order, at, look, floor, salesLife] = args;
+          if (this.run(["SET", paid, record, "NX", "EX", life]) === null) return 0;
+          this.run(["ZADD", handOver, at, order]);
+          this.run(["ZADD", watch, look, order]);
+          this.run(["SADD", own, order]);
+          this.run(["EXPIRE", own, life]);
+          this.run(["ZREM", pending, order]);
+          this.run(["ZADD", sales, at, order]);
+          this.run(["ZREMRANGEBYSCORE", sales, "-inf", floor]);
+          this.run(["EXPIRE", sales, salesLife]);
+          return 1;
+        }
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;
@@ -623,6 +637,23 @@ export class MemoryRedis {
           this.run(["INCRBY", count, n]);
           this.run(["EXPIRE", count, keep]);
           return n;
+        }
+        // lib/orders.ts COUNT_ORDER: an order's mark and its count written in one step, nothing written unless the
+        // count reads as a whole number (a hash or other type there is an error before any write, as GET's in Redis).
+        if (key.startsWith("-- marktmorgen:orders-count:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, count, rawMark, rawKeep, rawN] = args;
+          const num = (raw: string) => raw.trim() === "" || !Number.isFinite(Number(raw)) ? null : Number(raw);
+          const seconds = num(rawMark), keep = num(rawKeep), n = num(rawN);
+          if (seconds === null || seconds < 1 || keep === null || keep < 1 || (n !== 0 && n !== 1)) return -1;
+          if (n === 1) {
+            const have = this.run(["GET", count]);
+            if (have !== null && (String(have).length > 15 || (have !== "0" && !/^[1-9]\d*$/.test(String(have))))) return -1;
+          }
+          if (this.run(["SET", mark, "1", "NX", "EX", rawMark]) === null) return 0;
+          if (n === 0) return 0;
+          const made = this.run(["INCR", count]);
+          this.run(["EXPIRE", count, rawKeep]);
+          return made;
         }
         if (key.startsWith("-- marktmorgen:order-admission-settle:v2\n") && args[0] === "2" && args.length === 6) {
           const [, openKey, heldKey, field, rawN, rawBytes] = args;

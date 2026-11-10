@@ -34,7 +34,7 @@ const call = async (handler: (r: Request) => Promise<Response>, key: string, bod
   const response = await handler(new Request("https://marktmorgen.com/api/v1/x", { method: "POST", headers, body: raw ?? JSON.stringify(body) }));
   return { status: response.status, replayed: response.headers.get("Idempotent-Replayed"), json: await response.json() };
 };
-const records = () => [...redis.keys()].filter((k) => k.startsWith("nl:api:idem:"));
+const records = () => [...redis.keys()].filter((k) => k.startsWith("nl:api:idem:") && !k.startsWith("nl:api:idem:p:"));
 
 async function shop(owner: string, handle: string) {
   await claimHandle(owner, handle, "Synthetic Kitchen", "");

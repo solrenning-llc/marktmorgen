@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       console.error("api: giving a product failed", error);
       return { response: apiError(502, "unavailable", "The product could not be given just now. Try again in a moment."), effect: "maybe" };
     }
-  });
+  }, typeof body.email === "string" ? body.email : undefined);
 }
 
 export async function DELETE(request: Request) {

@@ -9,7 +9,8 @@
  * write is one of the plan's API requests, already counted and refused at the plan's figure before it gets here
  * (lib/api-guard.ts), so a store keeps at most its month's API figure of them, and fewer in any 24 hours.
  *
- * Wired, for now, only on POST /api/v1/access and POST /api/v1/leads. Without the header nothing changes.
+ * Wired, for now, only on POST /api/v1/access and POST /api/v1/leads. Without the header nothing changes. Since unit 3 an
+ * answer about an address is listed under that address, and deleting the person deletes it at once.
  */
 import { createHash } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
@@ -20,6 +21,15 @@ import {
 } from "@/lib/api-idempotency-rules";
 
 const recordKey = (sid: string, key: string) => `nl:api:idem:${createHash("sha256").update(`${sid}\n${key}`).digest("hex")}`;
+/**
+ *   nl:api:idem:p:<sha(store id, address)>  set  the records whose answer is about that address, 24 hours
+ *
+ * (unit 3) so deleting a person from the store deletes those answers at once (forgetIdempotentPerson), instead of
+ * leaving them until they expire. The name says neither the store nor the address.
+ */
+const personKey = (sid: string, email: string) => `nl:api:idem:p:${createHash("sha256").update(`${sid}\n${email.trim().toLowerCase()}`).digest("hex")}`;
+/** The most records one person's index lists: every keyed write about them in 24 hours is one API request, and a month's figure is at most 10,000. */
+const MAX_PERSON_RECORDS = 10_000;
 const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Type": "application/json" };
 const answer = (status: number, error: string, message: string) => Response.json({ error, message }, { status, headers });
 
@@ -31,7 +41,7 @@ export type KeyedWrite = { response: Response; effect: Effect };
  * Without the header, `run` runs as it always has. A repeat of a finished write gets its answer back, marked
  * `Idempotent-Replayed: true`, and runs nothing; anything unknown runs nothing.
  */
-export async function onceForKey(request: Request, sid: string, path: string, body: unknown, largest: number, run: () => Promise<KeyedWrite>, now = Date.now()): Promise<Response> {
+export async function onceForKey(request: Request, sid: string, path: string, body: unknown, largest: number, run: () => Promise<KeyedWrite>, person?: string, now = Date.now()): Promise<Response> {
   const read = readIdempotencyKey(request.headers.get(IDEMPOTENCY_HEADER));
   if (read.kind === "none") return (await run()).response;
   if (read.kind === "invalid") return answer(400, "idempotency_key", read.message);
@@ -67,9 +77,32 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
   if (after.action === "keep") {
     // Kept until 24 hours after the write began, never longer.
     const left = Math.max(1, Math.ceil((now + IDEMPOTENCY_SECONDS * 1_000 - Date.now()) / 1_000));
-    await redisPipeline([["SET", rk, after.record, "XX", "EX", left]]).catch(() => {});
+    // The person's index first: an answer about an address is never kept where an erasure could not find it.
+    const pk = typeof person === "string" && person.trim() ? personKey(sid, person) : null;
+    const indexed = pk
+      ? repliesFor(await redisPipeline([["SADD", pk, rk], ["EXPIRE", pk, IDEMPOTENCY_SECONDS]]).catch(() => null), 2)
+      : [0, 1];
+    // When the index could not be written, the answer is not kept and the claim is held, so a repeat is told 409.
+    if (indexed && typeof indexed[0] === "number" && indexed[1] === 1) await redisPipeline([["SET", rk, after.record, "XX", "EX", left]]).catch(() => {});
   }
   return done.response;
+}
+
+/**
+ * Deletes every kept answer about this address in this store (unit 3): the person's erasure (lib/person-erasure.ts)
+ * calls it. Returns how many records went. Every reply is read exactly; an unknown one throws, so the erasure is
+ * pressed again rather than said done.
+ */
+export async function forgetIdempotentPerson(sid: string, email: string): Promise<number> {
+  if (!sid || !email) return 0;
+  const pk = personKey(sid, email);
+  const read = repliesFor(await redisPipeline([["SMEMBERS", pk]]), 1);
+  const members = read && Array.isArray(read[0]) && read[0].every((m) => typeof m === "string") ? (read[0] as string[]) : null;
+  if (!members) throw new Error("the kept API answers of a person could not be read");
+  const ours = members.filter((m) => /^nl:api:idem:[0-9a-f]{64}$/.test(m)).slice(0, MAX_PERSON_RECORDS);
+  const replies = repliesFor(await redisPipeline([...ours.map((m) => ["DEL", m]), ["DEL", pk]]), ours.length + 1);
+  if (!replies || replies.some((r) => typeof r !== "number")) throw new Error("the kept API answers of a person could not be deleted");
+  return (replies.slice(0, ours.length) as number[]).reduce((sum, n) => sum + n, 0);
 }
 
 /** The record's exact reply: null when Redis says there is none, the string otherwise; any other shape is passed on as unknown. */

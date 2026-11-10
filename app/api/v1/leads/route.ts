@@ -47,5 +47,5 @@ export async function POST(request: Request) {
       console.error("api: adding a lead failed", error);
       return { response: apiError(502, "unavailable", "The list could not be changed just now. Nothing was changed; try again in a moment."), effect: "maybe" };
     }
-  });
+  }, typeof body.email === "string" ? body.email : undefined);
 }

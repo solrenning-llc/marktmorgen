@@ -99,6 +99,7 @@ import { forgetRequestsPerson } from "@/lib/payment-request-store";
 import { forgetAgreementsPerson } from "@/lib/agreement-store";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
 import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
+import { forgetIdempotentPerson } from "@/lib/api-idempotency";
 
 
 /**
@@ -127,6 +128,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
+  { module: "lib/api-idempotency.ts", run: (s) => forgetIdempotentPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
   { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {

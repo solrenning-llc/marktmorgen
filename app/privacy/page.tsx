@@ -668,16 +668,24 @@ export default function PrivacyPage() {
           continue from there: in its storage, under <code>mm:lp:</code>{" "}
           followed by the course, the lesson and a code made on our server
           that cannot be worked out from their email address. It holds the
-          second they reached and when, and nothing else, and is never sent to
-          us. The speed they chose is kept the same way, under{" "}
+          second they reached and when, and is never sent to us. The speed
+          they chose is kept the same way, under{" "}
           <code>mm:lp-speed</code>. A place is removed when the video is
           watched to its end and when they press Start over. One older than
           90 days is never used, and is removed the next time that lesson is
           opened in that browser. Whenever the course page opens in that
           browser without confirming their access (because it ended, or
           because it could not be checked at that moment), all their places in
-          that course are removed. Clearing the browser&apos;s site data
-          removes them at any time.
+          that course are removed. The same browser also keeps
+          the last lesson they opened, so their library on this site can offer &quot;Continue
+          where you left off&quot;: under <code>mm:ll:</code> followed by
+          another code made on our server from their email address alone, it
+          holds that lesson&apos;s address, its name, the course&apos;s and the
+          store&apos;s names and when, and is never sent to us. It is never
+          used after 90 days, and it is also removed with their places when
+          the course page opens without confirming their access to that
+          course. Clearing the browser&apos;s site data removes all of it at
+          any time.
         </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
@@ -689,6 +697,27 @@ export default function PrivacyPage() {
           wrote it, at most once an hour for each lesson. A creator who asked
           for it gets a notification on their phone with the lesson and the
           start of the comment, without the name.
+        </p>
+        <p id="lesson-notes">
+          <strong className="text-black">Private notes on lessons.</strong>{" "}
+          A student can write notes on each lesson of a course they are taking.
+          We keep what they wrote and when, for that student alone: the
+          creator, the creator&apos;s team and the other students never see
+          them. A note holds at most 4,000 characters, and a student keeps at
+          most 300 notes in one store, together at most 256 KB. All the
+          students&apos; notes in one store together take at most a tenth of
+          the store&apos;s data room, so at least nine tenths of it always stay
+          the creator&apos;s: past that, a new or longer note is refused and
+          the notes already saved stay. The creator can neither see nor delete
+          them. While signed in with the address they took the course with,
+          the student can download its notes as a text file: from each lesson
+          while the course is open to them, and from the course&apos;s own page
+          also after the course is no longer open to them (after a refund, for
+          example, or when a membership ends). The notes stay kept until the
+          student empties them on the lesson or,
+          after their access to the course ends, deletes them on the
+          course&apos;s page, asks to be deleted from the store, or the store
+          is closed.
         </p>
         <p>
           <strong className="text-black">A one-click offer after paying.</strong>{" "}
@@ -2167,7 +2196,7 @@ export default function PrivacyPage() {
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;
             your progress, quiz results, handed-in work and its files, lesson
-            comments and certificates in its courses, and your private podcast
+            comments, private lesson notes and certificates in its courses, and your private podcast
             feeds; your community profile, points, notifications, private
             conversations and what you said in its room; your Discord
             account&apos;s link to the store, whose roles are taken back; the

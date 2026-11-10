@@ -36,6 +36,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
 import { HDEL_IF_EQUAL } from "@/lib/redis-reply";
@@ -104,13 +105,16 @@ export async function rememberBuyer(store: Store, email: string, affiliateId: st
   }
   // On last click a known buyer moves to the affiliate who brought them back;
   // an unknown one is only added while there is room under the cap.
-  const [known] = await redisPipeline([["HEXISTS", key, field]]);
-  if (Number(known) === 1) {
+  // Each count read exactly (CX-123 rule 24). Whether the buyer is known, unknown: on last click the HSET is right
+  // either way (it moves a known buyer, adds a new one), so it goes ahead only under a cap read exactly, as for a new
+  // buyer (Claude 5 on #2958). An unknown cap writes nothing, so it is never passed on a count that could not be read.
+  const known = countOf(repliesFor(await redisPipeline([["HEXISTS", key, field]]), 1)?.[0]);
+  if (known === 1) {
     await orderWrite(store, [["HSET", key, field, affiliateId]]);
     return;
   }
-  const [count] = await redisPipeline([["HLEN", key]]);
-  if (Number(count) >= MAX_BONDS) return;
+  const count = countOf(repliesFor(await redisPipeline([["HLEN", key]]), 1)?.[0]);
+  if (count === null || count >= MAX_BONDS) return;
   // Counted in the store's room as what the order that made it really adds (lib/order-data.ts).
   await orderWrite(store, [["HSET", key, field, affiliateId]]);
 }

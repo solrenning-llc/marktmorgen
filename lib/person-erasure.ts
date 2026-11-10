@@ -73,6 +73,7 @@ import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
@@ -156,6 +157,7 @@ export const ERASERS: Eraser[] = [
       return records;
     },
   },
+  { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
   { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds) : Promise.resolve(0)) },
   { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
@@ -292,7 +294,7 @@ export async function erasePerson(
     if (!more.ok) return { ok: false, reason: more.reason === "used" ? "limit" : "unavailable", message: more.message };
   }
 
-  // First, and on its own: whatever happens next, they are never written to again.
+  // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).
   await redisPipeline([suppressCommand(scope.listId as string, email)]);
   // A person's own deletion is noted as theirs too, before anything is deleted (lib/suppression.ts ownErasureCommand):
   // it takes their purchases and a team's does not, so a PayPal order still owed to them is then not handed over

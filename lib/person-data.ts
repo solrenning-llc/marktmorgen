@@ -41,6 +41,7 @@ type ErasureBy = "team" | "person";
 
 export const PERSON_DATA: PersonData[] = [
   { file: "lib/checkout-sweep.ts", how: "none", what: "Checkout observations are inactive: there is no production persistence policy. Synthetic integration tests may keep a hashed checkout reference, provider creation time, country/state, currency and gross amount under an absolute expiry of at most one day. No name, email or street address is kept; fiscal coverage remains incomplete. Enabling real records needs a separate scope, retention, erasure and cost review." },
+  { file: "lib/discount-schedule.ts", how: "none", what: "A discount code's start and end (511 [CK3]): the code's word, its times and its tries, by the store; nothing about any buyer, so deleting a person changes nothing here" },
   { file: "lib/redis-memory.ts", how: "none", what: "In-memory database adapter: follows callers' keys and deletions and keeps no separate per-person index" },
   // ---------------------------------------------------------------- the list and email
   { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },
@@ -104,13 +105,14 @@ export const PERSON_DATA: PersonData[] = [
 
   // ---------------------------------------------------------------- courses
   { file: "lib/learn.ts", how: "erased", what: "Their progress in your courses: when they began and came back, the lessons they marked done, the drip emails sent them, and every browser let in with their address" },
-  { file: "lib/lesson-position.ts", how: "none", what: "Where they stopped in a lesson video is kept only in their own browser, under a code made on our server, and never sent to us (Privacy #lesson-places)" },
+  { file: "lib/lesson-position.ts", how: "none", what: "Where they stopped in a lesson video, and the last lesson they opened (its address and names, for their library), are kept only in their own browser, under codes made on our server, and never sent to us (Privacy #lesson-places)" },
   { file: "lib/learn.ts", how: "expires", days: 1, what: "A sign-in link to a course already emailed works for an hour" },
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },
+  { file: "lib/lesson-notes.ts", how: "erased", what: "Their private notes on lessons, which only they could see" },
   { file: "lib/podcast-access.ts", how: "erased", what: "Their private podcast feeds" },
   { file: "lib/letter-access.ts", how: "expires", days: 1, what: "A link to read an email kept for members works for an hour; whether their address may read it is kept for minutes, and how often a link was asked for, by a one-way hash of their address and connection, for an hour" },
   { file: "lib/discord-store.ts", how: "erased", via: "lib/discord-access.ts", what: "Their Discord account, and the roles they were given are taken back in your server" },

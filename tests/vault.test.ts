@@ -23,6 +23,7 @@ import {
   listVault,
   openVaultUpload,
   readVault,
+  retireVaultSession,
   signPieces,
   vaultHeld,
   vaultOrigin,
@@ -224,11 +225,14 @@ async function main() {
   const etags: string[] = [];
   for (const [i, address] of (addresses ?? []).entries()) etags.push((await send(address.url, big.slice(i * PIECE_BYTES, (i + 1) * PIECE_BYTES))) ?? "");
   is("closing it with a piece missing from the list is refused", await closeVaultUpload(pathname, etags.slice(0, 2)), { ok: false, reason: "invalid" });
-  is("and with something that is not what the store answered", await closeVaultUpload(pathname, ["one", "two", "three"]), { ok: false, reason: "invalid" });
+  // On the second upload of the same file: one upload makes one finish and one cancel in all (lib/vault.ts).
+  is("and with something that is not what the store answered", again.ok && await closeVaultUpload(again.upload.pathname, ["one", "two", "three"]), { ok: false, reason: "invalid" });
   const closed = await closeVaultUpload(pathname, etags);
   is("with every piece, it is joined and measured by the store itself", closed, { ok: true, file: { pathname, bytes: big.byteLength, contentType: "application/zip" } });
   is("the store holds the file exactly", md5(objects.get(pathname)?.bytes ?? new Uint8Array()), md5(big));
-  is("and the upload cannot be closed, or added to, a second time", [await closeVaultUpload(pathname, etags), await signPieces(pathname, [1])], [{ ok: false, reason: "unknown" }, null]);
+  const askedClosed = asked.length;
+  is("and the upload cannot be closed, or added to, a second time", [await closeVaultUpload(pathname, etags), await signPieces(pathname, [1])], [{ ok: false, reason: "tries" }, null]);
+  is("and the store is not asked for that", asked.length, askedClosed);
 
   part("A small file goes up whole");
   const small = bytesOf(5000, 11);
@@ -260,7 +264,9 @@ async function main() {
   is("an unreachable provider does not falsely confirm cancellation", await abortVaultUpload(cancelled.upload.pathname), false);
   service = "up";
   is("a failed cancellation keeps the session available to retry", (await signPieces(cancelled.upload.pathname, [1]))?.length, 1);
-  is("a retry confirms cancellation at the provider", await abortVaultUpload(cancelled.upload.pathname), true);
+  const askedCancel = asked.length;
+  is("a repeat is given the first cancellation's answer, the store not asked again", [await abortVaultUpload(cancelled.upload.pathname), asked.length], [false, askedCancel]);
+  is("the session is cancelled at the provider once it is retired", await retireVaultSession(cancelled.upload.pathname, cancelled.sessionId), true);
   is("a part URL from an aborted session cannot create a file", (await fetch(cancelPart.url, { method: "PUT", body: sessionBytes as BodyInit })).status, 404);
   is("the canceled file does not exist", objects.has(cancelled.upload.pathname), false);
 

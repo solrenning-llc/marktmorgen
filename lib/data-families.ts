@@ -111,7 +111,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:x:", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
-  "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
+  "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:ctl:", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
@@ -420,7 +420,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:upload-budget:v2:{": C, "nl:upload-budget:v2:{YYYY-MM}": C,
   "nl:upsell-slots:": X(8), "nl:upsell:": X(8), "nl:upsell:pending": I,
   "nl:usage-watch:told": C,
-  "nl:vault:up:": X(1),
+  // An upload's finish and cancel count and first answers (lib/vault.ts): a day after their last write.
+  "nl:vault:ctl:": X(1), "nl:vault:up:": X(1),
   "nl:verified:": E, "nl:verified:cursor": C,
   "nl:voice:": E, "nl:voice:lock:": E,
   // A product's AI summary of its reviews (lib/review-ai-summary.ts): kept eight days, and goes with the store.

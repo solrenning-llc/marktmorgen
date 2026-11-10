@@ -18,7 +18,7 @@
  *   https://developers.cloudflare.com/r2/pricing/
  *   https://upstash.com/pricing/redis (the Upstash transfer and storage rates)
  */
-import { VAULT_LIST_PAGES, VAULT_MEASURE_REQUESTS } from '@/lib/vault-rules';
+import { VAULT_CONTROL_CALLS_PER_UPLOAD, VAULT_LIST_PAGES, VAULT_MEASURE_REQUESTS } from '@/lib/vault-rules';
 export const COST_TABLE_VERSION = 'cost-table-2026-10-17';
 
 type RateTier = { readonly upToInputTokens: number; readonly inputMicroUsdPerMTok: number; readonly outputMicroUsdPerMTok: number };
@@ -110,8 +110,12 @@ export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   + ceilDiv(BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS * 20), BigInt(1_000_000)));
 export const UPLOAD_OPEN_CLASS_A_OPS = VAULT_LIST_PAGES + 2;
 export const UPLOAD_OPEN_CLASS_B_OPS = 3 * VAULT_MEASURE_REQUESTS;
-/** Requests an upload start brings besides itself: completing and canceling it. */
-export const UPLOAD_REQUESTS_PER_OPEN = 3;
+/** Requests one upload start is priced for: the start, and the finish and
+ * cancel requests lib/vault.ts lets one upload make in all
+ * (VAULT_CONTROL_CALLS_PER_UPLOAD: a repeat past them is refused before any
+ * other work, and a repeat inside them is answered from the first one's
+ * record, with no request to R2; tests/vault-control-once.test.ts). */
+export const UPLOAD_REQUESTS_PER_OPEN = 1 + VAULT_CONTROL_CALLS_PER_UPLOAD;
 
 /** The most a month of upload starts and signed pieces can cost, in whole micro-USD. */
 export function uploadOperationsMicroUsd(opens: number, controlRequests: number, piecesPerControl: number): number | null {

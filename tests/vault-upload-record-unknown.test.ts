@@ -245,8 +245,9 @@ test("confirmed absence and healthy records are read as before", async () => {
   // The record is gone after the join: a confirmed absence.
   assert.equal(await vaultReservationId(pathname), undefined);
   assert.equal(await signPieces(pathname, [1]), null);
-  assert.deepEqual(await closeVaultUpload(pathname, ["a".repeat(32)]), { ok: false, reason: "unknown" });
+  // A repeat of the finish is given the first one's answer (lib/vault.ts), the provider not asked.
   asked.length = 0;
+  assert.deepEqual(await closeVaultUpload(pathname, ["a".repeat(32)]), { ok: true, file: { pathname, bytes: 10, contentType: "application/pdf" } });
   assert.equal(await abortVaultUpload(pathname), true);
   assert.deepEqual(asked, []);
   // A healthy cancellation asks the provider and gives the bytes back.

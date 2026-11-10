@@ -121,6 +121,16 @@ export const VAULT_LIST_PAGES = 20;
  * Both are Class B operations on R2.
  */
 export const VAULT_MEASURE_REQUESTS = 2;
+/**
+ * Finish ("done") and cancel ("abort") requests one upload may make in all
+ * (lib/vault.ts, closeVaultUpload and abortVaultUpload): one of each, which
+ * is what one upload start is priced for (lib/spend-cost-table.ts,
+ * UPLOAD_REQUESTS_PER_OPEN). Each is counted before anything else is done
+ * for it; past this many, the request is refused and R2 is not asked. The
+ * first finish and the first cancel are written down with their answer, so
+ * a repeat inside the count is answered from that record, never from R2.
+ */
+export const VAULT_CONTROL_CALLS_PER_UPLOAD = 2;
 
 /** How many pieces a file of this size goes up in. A file of one piece or less goes up whole. */
 export function pieceCount(bytes: number): number {

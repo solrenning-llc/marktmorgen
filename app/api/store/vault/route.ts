@@ -29,6 +29,10 @@ const ASKS_PER_HOUR = 6_000;
  *       the file as the store itself measured it
  *   { action: "abort", pathname }                    gives the upload up
  *
+ * One finish and one cancel per upload, which is what one start is priced
+ * for: a repeat gets the first one's answer, and past them the request is
+ * refused (`upload_tries`) with nothing asked of the file store.
+ *
  * Asked for only what a signed-in creator may do, exactly as the door into
  * the host's own store is (app/api/store/file): the product, option or
  * lesson has to be one of this store's own, the file of a kind that may be
@@ -101,8 +105,12 @@ export async function POST(request: NextRequest) {
       const etags = Array.isArray(body.etags) ? body.etags.filter((e): e is string => typeof e === "string") : [];
       // Completion was authorized with the original upload. Do not strand it
       // because the current admission budget is paused or the month changed.
+      // One finish and one cancel per upload (lib/vault.ts): a repeat is
+      // answered as the first was, and past them nothing is asked of R2.
       const closed = await closeReservedVault(pathname, etags);
       if (!closed.ok) {
+        if (closed.reason === "tries") return fail("upload_tries", 409);
+        if (closed.reason === "busy") return fail("upload_busy", 409);
         const status = closed.reason === "unknown" ? 404 : closed.reason === "unavailable" ? 503 : closed.reason === "off" ? 404 : 400;
         return fail(closed.reason === "unavailable" ? "files_unavailable" : closed.reason, status);
       }
@@ -110,7 +118,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "abort") {
-      if (!(await abortReservedVault(pathname))) return fail("files_unavailable", 503);
+      const aborted = await abortReservedVault(pathname);
+      if (aborted === "tries") return fail("upload_tries", 409);
+      if (aborted === "busy") return fail("upload_busy", 409);
+      if (aborted !== true) return fail("files_unavailable", 503);
       return Response.json({ ok: true });
     }
 

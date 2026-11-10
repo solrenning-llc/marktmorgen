@@ -5,20 +5,25 @@
  *
  * Read and written exactly (CX-123 rule 24): a reply in any other shape, or a value that is not a snapshot, is
  * unknown (null), never zero; a snapshot that is not one, or a window other than 30 or 40 days, is never written.
- * One GET to read and one SET to write; no page reads it yet (751 [CD2] unit 3).
+ * One GET to read and one SET to write; no page reads it yet (751 [CD2] unit 3). The kept value is at most
+ * PROOF_SNAPSHOT_MAX_BYTES: a larger snapshot is refused before the database, and a larger kept value is not read
+ * as one (Codex U on #3509).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { PROOF_VALID_DAYS, type PlatformProofSnapshot, parseProofSnapshot } from "@/lib/platform-proof";
 
 export const PROOF_KEY = "nl:platform:proof";
+/** The most the kept snapshot may take, in UTF-8 bytes of its JSON: an internal ceiling, not a customer limit. */
+export const PROOF_SNAPSHOT_MAX_BYTES = 1_024;
+const withinCeiling = (json: string) => Buffer.byteLength(json, "utf8") <= PROOF_SNAPSHOT_MAX_BYTES;
 
 /** The kept snapshot, or null when there is none or it cannot be read exactly. */
 export async function readPlatformProof(): Promise<PlatformProofSnapshot | null> {
   if (!isRedisConfigured()) return null;
   const replies = repliesFor(await redisPipeline([["GET", PROOF_KEY]]).catch(() => null), 1);
   const raw = replies?.[0];
-  if (typeof raw !== "string" || !raw) return null;
+  if (typeof raw !== "string" || !raw || !withinCeiling(raw)) return null;
   try {
     return parseProofSnapshot(JSON.parse(raw));
   } catch {
@@ -30,7 +35,9 @@ export async function readPlatformProof(): Promise<PlatformProofSnapshot | null>
 export async function writePlatformProof(snapshot: PlatformProofSnapshot, validDays: number): Promise<void> {
   const kept = parseProofSnapshot(snapshot);
   if (!kept || !(PROOF_VALID_DAYS as readonly number[]).includes(validDays)) throw new Error("not a platform proof snapshot");
+  const json = JSON.stringify(kept);
+  if (!withinCeiling(json)) throw new Error(`a platform proof snapshot over ${PROOF_SNAPSHOT_MAX_BYTES} bytes is never kept`);
   if (!isRedisConfigured()) throw new Error("the platform proof cannot be kept (no database)");
-  const replies = repliesFor(await redisPipeline([["SET", PROOF_KEY, JSON.stringify(kept), "EX", validDays * 86_400]]), 1);
+  const replies = repliesFor(await redisPipeline([["SET", PROOF_KEY, json, "EX", validDays * 86_400]]), 1);
   if (replies?.[0] !== "OK") throw new Error("keeping the platform proof could not be confirmed");
 }

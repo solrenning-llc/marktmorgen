@@ -92,6 +92,7 @@ import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
@@ -194,8 +195,15 @@ export const ERASERS: Eraser[] = [
     module: "lib/reviews.ts",
     only: "person",
     run: async (s, files) => {
-      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it.
-      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files);
+      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it. Their
+      // name and words leave the store page's quotes before the reviews go (lib/store-quotes.ts); when that fails, this
+      // part fails and the reviews are kept for the retry.
+      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files, (reviews) => dropReviewQuotes(s.store, reviews));
+      // Then the quotes are kept again from the reviews as they now stand, under the store's lock, even when this run
+      // found none: a review an earlier run deleted is not found again, a refresh that read one before its delete has
+      // written by now, and other buyers' quotes taken off above come back. When they cannot be kept, they are all
+      // taken off; this part fails only when that is not confirmed either.
+      await keepStoreQuotes(s.store);
       return done.records;
     },
   },

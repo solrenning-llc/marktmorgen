@@ -257,9 +257,10 @@ export async function requestCopy(input: {
       g.freeSentBy(name),
     ].join("\n"),
   });
-  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts.
-  if (sent) await countOrder(store, `free:${token}`, 0);
-  await settleAdmitted(store, admitted.hour);
+  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts. A count not confirmed keeps
+  // the room it was admitted with until its hours end, never given back as if counted.
+  const tally = sent ? await countOrder(store, `free:${token}`, 0) : false;
+  if (tally !== "unknown") await settleAdmitted(store, admitted.hour);
   return sent ? "sent" : "error";
 }
 

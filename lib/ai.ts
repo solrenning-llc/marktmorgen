@@ -4,7 +4,7 @@ import { allowanceWindow, windowId } from "@/lib/allowance-window";
 import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
-import { consumeAiCallBudget, hasAiCallBudget, withAiCallBudget } from '@/lib/ai-call-budget';
+import { consumeAiCallBudget, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
 import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
 /**
  * The writing help in the studio (lib/ai-rules.ts), on the server: asking the
@@ -239,6 +239,8 @@ export async function askModel(
   if (!window) return null;
   if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return null;
   if (!(await reserveAiSpend(store.statsId, scope, named, undefined, hold, window))) return null;
+  // From here the provider may bill: the writing job that asked keeps its count (counted).
+  if (!noteAiDispatch(store.statsId)) return null;
   const response = await timed(timeoutMs, (signal) =>
     fetch(API, {
       method: "POST",
@@ -404,14 +406,24 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
     return { ok: false, reason: "used" };
   }
   let value: T | null = null;
+  const calls: AiCallReport = { owned: false, dispatched: 0 };
   try {
-    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run);
+    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run, calls);
   } catch (error) {
     console.error("a writing job failed", error);
   }
-  // Provider work may cost money even when the response is unusable.
-  // Only a refused reservation is returned; a started attempt stays counted.
-  if (value === null) return { ok: false, reason: "failed" };
+  // Provider work may cost money even when the response is unusable: a
+  // started attempt stays counted. A job whose own budget saw no call reach
+  // the provider (its dollar reservation refused, or it stopped before one)
+  // is given back, once: its reply is read in its exact shape, and one that
+  // cannot be confirmed is logged, never retried (R32 finding 1).
+  if (value === null) {
+    if (calls.owned && calls.dispatched === 0) {
+      const back = repliesFor(await redisPipeline([["DECRBY", key, jobs]]).catch(() => null), 1);
+      if (!back || countOf(back[0]) === null) console.error("a writing job with no provider call could not be confirmed given back");
+    }
+    return { ok: false, reason: "failed" };
+  }
   return { ok: true, value, left: Math.max(0, allowance - count) };
 }
 
@@ -668,6 +680,8 @@ export async function writeStoreSetup(store: Store, input: { about: string; sell
   if (!about && !link) return { ok: false, reason: "notes" };
   return counted(store, now, async () => {
     // The page is read inside this job, so each read is one of the month's writing jobs, counted first.
+    // The read is work of its own: noted like a provider call, so the job keeps its count without one.
+    if (link && !noteAiDispatch(store.statsId ?? "")) return null;
     const source = link ? await readSourcePage(link, sourceHooks) : null;
     const page = source?.ok ? source : null;
     if (!about && !page) return null;

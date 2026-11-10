@@ -209,12 +209,16 @@ export function assistantFacts(store: Store, products: Listing[], pages: Map<str
   return text;
 }
 
-/** The facts for a store, read as its public pages show them: its first products and the pages of the first few. */
+/**
+ * The facts for a store, read as its public pages show them: its first products and the pages of the first few. A page
+ * whose read is not known refuses the whole read (it throws): answered without it, the assistant could say the store
+ * does not say what its page does (C4-20261106-2610-C6-153, unit B).
+ */
 export async function readAssistantFacts(store: Store): Promise<string> {
   const products = (await readListings(store, visibleIds(store).slice(0, ASSISTANT_PRODUCTS))).filter((p) => !p.hidden);
   const pages = new Map<string, SalesPage>();
   const withPage = products.filter((p) => p.page).slice(0, ASSISTANT_PAGES);
-  const read = await Promise.all(withPage.map((p) => readPage(store.statsId, p.id).catch(() => null)));
+  const read = await Promise.all(withPage.map((p) => readPage(store.statsId, p.id)));
   withPage.forEach((p, i) => {
     const page = read[i];
     if (page && pageShown(page)) pages.set(p.id, page);
@@ -364,12 +368,15 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   const readOnly = () =>
     input.facts === undefined ? pool("settle", statsId, window.id, hold, assistantMessageExtraMicroUsd()) : pool("release", statsId, window.id, hold);
 
+  // Facts that could not be read whole are no facts to answer from: the question can still be left for the creator
+  // (unit B). What the read took of the store is paid from the pool, as any other stop before the model.
   let facts: string;
   try {
     facts = input.facts ?? (await readAssistantFacts(store));
   } catch (error) {
+    console.error("reading the store assistant's facts failed", error);
     await readOnly();
-    throw error;
+    return { ok: false, reason: "failed" };
   }
   const request = assistantRequest(store, facts, before, text);
   const modelHold = request && aiRequestHoldMicroUsd(ASSISTANT_MODEL, { inputBytes: request.inputBytes, blocks: 1, media: null, maxTokens: ASSISTANT_OUTPUT_TOKENS });

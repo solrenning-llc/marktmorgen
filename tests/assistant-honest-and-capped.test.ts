@@ -231,6 +231,25 @@ async function main(): Promise<void> {
   const catalogReads = keys.filter((k) => !k.startsWith("EVAL") && !k.includes("nl:assist:c:"));
   is("nothing of the catalog or its pages is read before the refusal", catalogReads, []);
 
+  part("C. Facts that cannot be read whole: failed, not thrown, and the reads are paid (with main's unit B)");
+  await redis.pipeline([["DEL", poolKey]]);
+  (redis as unknown as { pipeline: typeof original }).pipeline = async (cmds: (string | number)[][]) => {
+    if (cmds.some((c) => c[0] !== "EVAL" && !String(c[1]).startsWith("nl:assist:"))) throw new Error("synthetic read failure");
+    return original(cmds);
+  };
+  const beforeUnread = calls;
+  let unread: Awaited<ReturnType<typeof askAssistant>> | Error;
+  try {
+    unread = await askAssistant({ store: large, text: "Is it a PDF?", now });
+  } catch (error) {
+    unread = error as Error;
+  }
+  (redis as unknown as { pipeline: typeof original }).pipeline = original;
+  is("refused as failed, so the question can still be left; no model call", [unread instanceof Error ? "thrown" : unread.ok ? "answered" : unread.reason, calls - beforeUnread], ["failed", 0]);
+  const [unreadSpent] = await redis.pipeline([["HGET", poolKey, "spent"]]);
+  const [unreadHeld] = await redis.pipeline([["HGET", poolKey, "held"]]);
+  is("what the read took is spent from the pool, and nothing stays held", [Number(unreadSpent ?? 0), Number(unreadHeld ?? 0)], [assistantMessageExtraMicroUsd(), 0]);
+
   part("D. Light: what goes to the model, an error body, the cart's reminder box");
   is("a bare domain typed by the buyer does not reach the model", forAi("See mysite.com/deal for it").includes("mysite.com"), false);
   is("nor an address written with a full-width at sign", forAi("I am jane\uFF20example.com").includes("example.com"), false);

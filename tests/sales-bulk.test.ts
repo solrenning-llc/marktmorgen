@@ -254,6 +254,41 @@ async function main(): Promise<void> {
     redis.pipeline = original;
   }
 
+  part("Many at once cost what one at a time costs: one studio request for each order asked (review of #3543, Claude 3)");
+  {
+    const studioTaken: number[] = [];
+    let counters = 0;
+    const counting = (failExtra: boolean) =>
+      (async (commands: (string | number)[][]) => {
+        for (const c of commands) {
+          if (c[0] === "INCRBY" && String(c[1]).startsWith("nl:allow:studio:")) studioTaken.push(Number(c[2]));
+          if (/^nl:rl:resend-(sale|store):/.test(String(c[1] ?? ""))) counters += 1;
+        }
+        // The studio's count for the extra orders answers in a shape that is not a count: not known, so refused.
+        if (failExtra && commands.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:allow:studio:") && Number(c[2]) > 1)) return ["not a count"];
+        return original.call(redis, commands);
+      }) as typeof redis.pipeline;
+    redis.pipeline = counting(false);
+    try {
+      const three = await post({ action: "resend", references: [ref(21), ref(22), ref(23)] });
+      is("three orders asked: three studio requests taken, as three single resends would", [three.status, studioTaken.reduce((a, b) => a + b, 0)], [200, 3]);
+      studioTaken.length = 0;
+      const one = await post({ action: "resend", references: [ref(24)] });
+      is("control: one order, one studio request", [one.status, studioTaken.reduce((a, b) => a + b, 0)], [200, 1]);
+    } finally {
+      redis.pipeline = original;
+    }
+    studioTaken.length = 0;
+    counters = 0;
+    redis.pipeline = counting(true);
+    try {
+      const refused = await post({ action: "resend", references: [ref(25), ref(26), ref(27)] });
+      is("the extra studio requests not taken: refused whole, before any counter or send", [refused.status, refused.body.sent, counters], [503, undefined, 0]);
+    } finally {
+      redis.pipeline = original;
+    }
+  }
+
   part("The per-sale and per-store counters are essential: an email spends money, so a counter not known never lets one go (SG2 17)");
   const resendCounter = (commands: (string | number)[][]) => commands.some((c) => String(c[1] ?? "").startsWith("nl:rl:resend-sale:"));
   redis.pipeline = (async (commands: (string | number)[][]) => {

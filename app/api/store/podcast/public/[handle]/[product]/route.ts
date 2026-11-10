@@ -5,6 +5,7 @@ import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
 import { readPodcast } from "@/lib/podcast";
 import { type PublicCategory, PublicFeedError, publicFeedXml } from "@/lib/podcast-public-feed";
 import {
+  PUBLIC_FEED_BUILD_UNITS,
   PUBLIC_FEED_HOLD_UNITS,
   buildUnits,
   cachedFeed,
@@ -56,20 +57,19 @@ const unavailable = () => plain(503, "This feed cannot be read just now. Try aga
 
 /** The feed, or why there is none, built from the records once the build's units are held. */
 async function build(store: Store, segment: string, now: number): Promise<KeptFeed | "none" | "unavailable" | "resting"> {
-  const id = productIdFromAddress(store, segment) ?? segment;
-  let product: Awaited<ReturnType<typeof readListingExactly>>;
-  try {
-    product = await readListingExactly(store, id);
-  } catch (error) {
-    console.error("a public podcast feed's product could not be read", error);
-    return "unavailable";
-  }
-  if (product === "unknown") return "unavailable";
-  if (!product || product.hidden || !product.podcast) return "none";
-  // Held at its worst before the podcast and its settings are read; what it did not read is given back after.
+  // Held at its worst before anything past the store is read, the listing included (a GET when the product is off the
+  // catalog's head); what it did not read is given back after. A listing that is missing keeps the base (the store and
+  // the listing read); one that cannot be read keeps the whole hold, its cost unknown, never zero.
   if (!(await holdPublicRequests(store, PUBLIC_FEED_HOLD_UNITS, now))) return "resting";
   let used = PUBLIC_FEED_HOLD_UNITS;
   try {
+    const id = productIdFromAddress(store, segment) ?? segment;
+    const product = await readListingExactly(store, id);
+    if (product === "unknown") return "unavailable";
+    if (!product || product.hidden || !product.podcast) {
+      used = PUBLIC_FEED_BUILD_UNITS;
+      return "none";
+    }
     const [podcast, show] = await Promise.all([readPodcast(product.podcast.id), readPublicShow(product.podcast.id)]);
     // What was read: the podcast as savePodcast writes it, and the settings as they came.
     const read = (podcast ? Buffer.byteLength(JSON.stringify(podcast), "utf8") : 0) + (show ? show.bytes : 0);

@@ -5,9 +5,12 @@
  *
  * Nothing is shown that does not work (VR). A request is worth asking, and
  * its two emails worth sending, only if both confirmations then move the
- * purchases: the library, the orders, the imported purchases and the email
- * of the creator's Stripe customer, a later unit. Until the unit that builds
- * that move sets PURCHASE_MOVE_DELIVERED, with its tests, the pages are not
+ * purchases. Since unit 4a they are written into the index of moved
+ * addresses (lib/purchase-move-index.ts), but no reader of a buyer's
+ * purchases follows it yet: the orders, courses, community, membership,
+ * downloads, podcast, newsletter, imported purchases and library, unit 4b
+ * onward. Until the last of them sets PURCHASE_MOVE_DELIVERED, with its
+ * tests, the pages are not
  * found and the routes answer 404 before reading anything, whatever the
  * store. After that, only where the store's purchases can be listed at all
  * (lib/buyer-orders.ts canRecover).

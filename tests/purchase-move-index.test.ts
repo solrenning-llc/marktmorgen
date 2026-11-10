@@ -18,8 +18,9 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccou
 import { allowanceUsed } from "@/lib/store-allowance";
 import { suppressCommand } from "@/lib/suppression";
 import { askPurchaseMove, confirmPurchaseMove, readPurchaseMove } from "@/lib/purchase-moves";
-import { applyPurchaseMove, forgetMovedPerson, readMovedIndex } from "@/lib/purchase-move-index";
-import { confirmMoveLink } from "@/lib/purchase-move-flow";
+import { applyPurchaseMove, copyMovedPerson, forgetMovedPerson, readMovedIndex } from "@/lib/purchase-move-index";
+import { COPY_PLAN } from "@/lib/person-copy";
+import { MOVE_APPLY_COMMANDS, confirmMoveLink } from "@/lib/purchase-move-flow";
 import { PURCHASE_MOVE_DELIVERED } from "@/lib/purchase-move-open";
 import { ERASERS } from "@/lib/person-erasure";
 import { CLOSING, COUNTED_FAMILIES } from "@/lib/data-families";
@@ -47,8 +48,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 /** Answers `reply` to `command` on keys starting with `prefix`, the next `times` times. */
 let odd: { command: string; prefix: string; reply: unknown; times: number } | null = null;
+/** Commands run while recording, besides the store's email figure and the sender's own. */
+let seen: string[] | null = null;
 const run = redis.run.bind(redis);
 redis.run = (c: (string | number)[]) => {
+  seen?.push(String(c[1] ?? ""));
   if (odd && odd.times > 0 && String(c[0]).toUpperCase() === odd.command && String(c[1]).startsWith(odd.prefix)) {
     odd.times -= 1;
     return odd.reply;
@@ -72,6 +76,11 @@ async function main(): Promise<void> {
   const told = () => mails.filter((m) => m.to === OWNER);
   const used = () => allowanceUsed(moss, "email");
   const roomField = (id: string) => redis.keys().some((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, `pm:${id}`]) === 1);
+  /** The store's data room in use, as its own record says. */
+  const roomTotal = () => {
+    const key = redis.keys().find((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, "#"]) === 1 && String(redis.run(["HKEYS", k])).includes("pm:"));
+    return key ? Number(redis.run(["HGET", key, "#"])) : null;
+  };
 
   /** A request at this store, with the given sides confirmed through its own links. */
   const asked = async (from: string, to: string, sides: ("from" | "to")[] = ["from", "to"]) => {
@@ -114,17 +123,17 @@ async function main(): Promise<void> {
     is("one notice to the creator, from the store's emails", [notice.length, (await used()) - q0], [1, 1]);
     is("it names both addresses", [notice[0]?.text.includes("ana.old@example.com"), notice[0]?.text.includes("ana.new@example.com")], [true, true]);
     is("it says refunds stay with the order", /refund/i.test(notice[0]?.text ?? ""), true);
-    const before = indexState();
-    is("again: nothing written twice, nobody told twice", [await applyPurchaseMove(moss, both.id), indexState(), told().length - t0], [{ state: "moved", told: "already" }, before, 1]);
+    const [before, room] = [indexState(), roomTotal()];
+    is("again: nothing written twice, nobody told twice, no room taken twice", [await applyPurchaseMove(moss, both.id), indexState(), told().length - t0, roomTotal()], [{ state: "moved", told: "already" }, before, 1, room]);
+    is("the room is in use", typeof room === "number" && room > 0, true);
   }
 
   part("A crash at any write resumes, never twice, and never leaves the purchases with nobody");
-  for (const [what, command, prefix, reply] of [
+  for (const [n, [what, command, prefix, reply]] of [
     ["the room", "EVAL", "-- marktmorgen:store-data:v1", "not a receipt"],
     ["the old address's mark", "SET", "nl:pm:moved:", "QUEUED"],
     ["the new address's line", "HSET", "nl:pm:into:", "QUEUED"],
-  ] as const) {
-    const n = what.length;
+  ].entries()) {
     const old = `crash${n}.old@example.com`;
     const fresh = `crash${n}.new@example.com`;
     const request = await asked(old, fresh);
@@ -194,6 +203,16 @@ async function main(): Promise<void> {
     is("pressing again resumes and says it is done", await confirmMoveLink({ store: moss, token: made.toToken }), "done");
   }
 
+  part("What writing a move costs");
+  {
+    const request = await asked("cost.old@example.com", "cost.new@example.com");
+    seen = [];
+    await applyPurchaseMove(moss, request.id);
+    const commands = seen.filter((k) => k.startsWith("nl:pm:") || k.startsWith("nl:erased:") || k.startsWith("-- marktmorgen:")).length;
+    seen = null;
+    is(`at most MOVE_APPLY_COMMANDS (${MOVE_APPLY_COMMANDS}), the data room's script billed as four`, commands + 3 <= MOVE_APPLY_COMMANDS, true);
+  }
+
   part("Read exactly");
   {
     odd = { command: "GET", prefix: "nl:pm:moved:", reply: 7, times: 1 };
@@ -216,6 +235,11 @@ async function main(): Promise<void> {
     is("a list that cannot be read throws, never \"none\"", threw, true);
   }
 
+  part("The person's own copy of their data says it");
+  is("the old address: where it moved", (await copyMovedPerson(moss, "ana.old@example.com")).map((e) => (e as { movedTo?: string }).movedTo), ["ana.new@example.com"]);
+  is("the new address: from where", await copyMovedPerson(moss, "ana.new@example.com"), [{ movedFrom: "ana.old@example.com" }]);
+  is("the copy's plan names it", COPY_PLAN["lib/purchase-move-index.ts"]?.how, "copied");
+
   part("The store deleting either address takes the index's lines with it");
   {
     const removed = await forgetMovedPerson(moss, "Ana.New@example.com");
@@ -228,6 +252,7 @@ async function main(): Promise<void> {
     const removedOld = await forgetMovedPerson(moss, "flow.old@example.com");
     is("the old address: its mark and its line", removedOld, 2);
     is("nothing left of that move", (await readMovedIndex(moss.sid, "flow.new@example.com")).movedFrom, []);
+    is("neither deleted address is written anywhere in the index now", ["ana.new@example.com", "flow.old@example.com"].map((a) => indexState().join("\n").includes(a)), [false, false]);
     is("an address never moved: nothing", await forgetMovedPerson(moss, "nobody@example.com"), 0);
   }
 

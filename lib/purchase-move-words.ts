@@ -58,6 +58,11 @@ export const moveWords = {
     both: { title: "Both addresses are confirmed", body: "Your purchases from this store move to the new address." },
     expired: { title: "This link has expired", body: "The 24 hours are over and nothing moved. You can ask again from your purchases page." },
     done: { title: "Already moved", body: "These purchases were already moved. Nothing else changes." },
+    unfinished: {
+      title: "Both addresses are confirmed, but the move isn't finished",
+      body: "We could not finish moving your purchases just now. Open this link again in a few minutes to finish it. Nothing is lost.",
+    },
+    elsewhere: { title: "These purchases already moved", body: "They were moved to another address before. Nothing else changes." },
     link: { title: "This link does not work", body: "It may be mistyped or too old. You can ask again from your purchases page." },
     deleted: { title: "This move can't be made", body: "This store can't move purchases to or from one of these addresses. Nothing moved." },
     busy: { title: "The store is busy right now", body: "Nothing was changed. Open the link again in a few minutes." },

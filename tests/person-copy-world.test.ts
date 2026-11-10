@@ -58,7 +58,8 @@ async function main(): Promise<void> {
 }
 
 /** Modules seedPerson writes nothing to for a person (see the log line above). */
-const EXPECTED_EMPTY: string[] = ["lib/shipment-mail-outbox.ts", "lib/order-confirmation-outbox.ts", "lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/gifts.ts", "lib/group-buy.ts", "lib/preorders.ts", "lib/call-packages.ts", "lib/meet-records.ts", "lib/shipments.ts", "lib/closing-buyers.ts", "lib/closing-holds.ts"];
+// lib/purchase-move-index.ts (611 [WP10] unit 4a): the world moves no purchases; its copy is held in tests/purchase-move-index.test.ts.
+const EXPECTED_EMPTY: string[] = ["lib/shipment-mail-outbox.ts", "lib/order-confirmation-outbox.ts", "lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/purchase-move-index.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/gifts.ts", "lib/group-buy.ts", "lib/preorders.ts", "lib/call-packages.ts", "lib/meet-records.ts", "lib/shipments.ts", "lib/closing-buyers.ts", "lib/closing-holds.ts"];
 
 main().catch((error) => {
   console.error(error);

@@ -79,6 +79,7 @@ import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
+import { copyMovedPerson } from "@/lib/purchase-move-index";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
@@ -108,6 +109,8 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
   "lib/imported-purchases.ts": { how: "copied", what: "What an import from another platform, a gift or a PayPal order gave you" },
+  // 611 [WP10] unit 4a.
+  "lib/purchase-move-index.ts": { how: "copied", what: "If you moved your purchases at this store to another email address: where they moved, when, and from which addresses" },
   "lib/podcast-access.ts": { how: "copied", what: "Which products' private podcast feeds you have (the feed's secret address is in the email that sent it)" },
   "lib/welcome-offer-send.ts": { how: "marks", what: "When your welcome offer began, and that its reminder was set" },
   "lib/winback-send.ts": { how: "marks", what: "Marks that you heard a come-back offer about a product" },
@@ -333,6 +336,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
+  "lib/purchase-move-index.ts": (s) => copyMovedPerson(s.store, s.email),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     for (const productId of s.productIds) {

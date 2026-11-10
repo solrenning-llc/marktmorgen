@@ -164,6 +164,7 @@ test("every route a buyer acts through takes from the store's month before it wr
     ["app/api/store/course/task/upload/route.ts", /takeBuyerAction\(on\.store\)/],
     ["app/api/store/course/progress/route.ts", /takeBuyerAction\(store, access\.learner\.owner \? "owner" : "buyer"\)/],
     ["app/api/store/course/certificate/route.ts", /takeBuyerAction\(store\)/],
+    ["app/api/store/course/note/route.ts", /takeBuyerAction\(store\)/],
     ["app/api/store/course/file/route.ts", /takePublicRequest\(store, found\.lesson\.preview \? "public" : "buyer"\)/],
     ["app/api/store/course/open/route.ts", /takeBuyerRead\(store\)/],
     ["app/api/store/course/link/route.ts", /takeBuyerRead\(store\)/],

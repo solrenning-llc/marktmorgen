@@ -958,7 +958,8 @@ local ok,r=pcall(cjson.decode,raw)
 if #raw>131072 or not ok or type(r)~='table' or r.kind~='confirmation' or r.statsId~=store or redis.call('GET',KEYS[2])~=r.sourceValue then return {'unknown'} end
 if r.person==person then return {'matched'} end
 -- A resolved different buyer needs no retained hash for this request.
-if r.phase~='course_reserved' and r.phase~='digital_option_reserved' and r.phase~='awaiting_creation' and r.phase~='creating' and r.phase~='creation_unknown' and r.phase~='awaiting_payment' then return {'other'} end
+-- Digital-option custody has no buyer binding step, so retains no unrelated hash.
+if r.phase~='course_reserved' and r.phase~='awaiting_creation' and r.phase~='creating' and r.phase~='creation_unknown' and r.phase~='awaiting_payment' then return {'other'} end
 if type(r.erasedPeople)~='string' or #r.erasedPeople>4096 or #r.erasedPeople%64~=0 or string.find(r.erasedPeople,'[^a-f0-9]') or type(r.erasureSaturated)~='boolean' then return {'unknown'} end
 for i=1,#r.erasedPeople,64 do if string.sub(r.erasedPeople,i,i+63)==person then return {'marked'} end end
 if #r.erasedPeople==4096 then r.erasureSaturated=true else r.erasedPeople=r.erasedPeople..person end

@@ -38,7 +38,7 @@ import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
 import { deleteVault, signPieces, type OpenedUpload } from "@/lib/vault";
-import { withLock } from "@/lib/redis-lock";
+import { LockBusyError, withLock, type Held } from "@/lib/redis-lock";
 import { STUDIO_UNIT_SENT_BYTES } from "@/lib/sent-bytes";
 import {
   MAX_SUBMISSION_KEEP_DAYS,
@@ -621,6 +621,11 @@ export async function abortSubmissionDoor(where: DoorWhere, pathname: string, st
 
 /** A kept record, read exactly; null only when Redis confirms there is none. */
 export async function readSubmission(folder: string, id: string): Promise<KeptSubmission | null> {
+  return (await readSubmissionText(folder, id))?.kept ?? null;
+}
+
+/** A kept record and the exact text it was read from, so a write can land only over that same text (moveSubmission). */
+async function readSubmissionText(folder: string, id: string): Promise<{ kept: KeptSubmission; text: string } | null> {
   if (!ID.test(id)) return null;
   const replies = repliesFor(await redisPipeline([["GET", recordKey(folder, id)]]), 1);
   if (!replies) throw new UnknownReplyError("a submission record");
@@ -629,10 +634,49 @@ export async function readSubmission(folder: string, id: string): Promise<KeptSu
     if (typeof replies[0] !== "string") throw new Error();
     const value = JSON.parse(replies[0]) as KeptSubmission;
     if (value?.id !== id || value.folder !== folder || typeof value.path !== "string") throw new Error();
-    return value;
+    return { kept: value, text: replies[0] };
   } catch {
     throw new UnknownReplyError("a submission record");
   }
+}
+
+/**
+ * A reply or a withdrawal lands in one step on the Redis side (Codex U, focal on #3574): only while the record is
+ * still the exact text read under the lock, and only while that lock is still ours. A request held up past its lock
+ * (a slow network, a paused function) can then never land over what the next holder wrote and confirmed. 1: written;
+ * 0: the record is gone (erased, or its time); -2: it changed since it was read; -1: the lock is no longer ours and
+ * nothing changed. The first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+const SUBMISSION_MOVE = [
+  "-- marktmorgen:submission-move:v1",
+  'local now = redis.call("GET", KEYS[2])',
+  "if not now then return 0 end",
+  "if now ~= ARGV[2] then return -2 end",
+  'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return -1 end',
+  'redis.call("SET", KEYS[2], ARGV[3], "XX", "EX", ARGV[4])',
+  'redis.call("ZREM", KEYS[3], ARGV[5])',
+  'if #KEYS == 4 then redis.call("ZADD", KEYS[4], ARGV[6], ARGV[7]) end',
+  "return 1",
+].join("\n");
+
+/**
+ * Writes `json` over the record read as `text`, fenced by `held` (SUBMISSION_MOVE), takes it off the live list and,
+ * for a withdrawal, puts its file on the sweep's list. "written", "gone" or "changed" are known; a lock lost with
+ * the record unchanged throws LockBusyError (nothing written, try again); any other reply throws, never said done.
+ */
+async function moveSubmission(
+  held: Held,
+  move: { key: string; text: string; json: string; seconds: number; live: string; liveMember: string; due?: { score: number; member: string } },
+): Promise<"written" | "gone" | "changed"> {
+  const keys = [held.key, move.key, move.live, ...(move.due ? [DUE_KEY] : [])];
+  const args = [held.token, move.text, move.json, move.seconds, move.liveMember, ...(move.due ? [move.due.score, move.due.member] : [])];
+  const replies = repliesFor(await redisPipeline([["EVAL", SUBMISSION_MOVE, keys.length, ...keys, ...args]]), 1);
+  const answer = replies?.[0];
+  if (answer === 1) return "written";
+  if (answer === 0) return "gone";
+  if (answer === -2) return "changed";
+  if (answer === -1) throw new LockBusyError("a submission's lock ran out before its write");
+  throw new UnknownReplyError("a submission's write");
 }
 
 // ------------------------------------------------------- the person's data
@@ -864,9 +908,10 @@ export async function replySubmission(
   nowSeconds: number,
 ): Promise<Replied> {
   if (!ID.test(input.id)) return { ok: false, reason: "gone" };
-  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async () => {
-    const kept = await readSubmission(input.folder, input.id);
-    if (!kept || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId) return { ok: false as const, reason: "gone" as const };
+  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async (held) => {
+    const read = await readSubmissionText(input.folder, input.id);
+    const kept = read?.kept;
+    if (!read || !kept || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId) return { ok: false as const, reason: "gone" as const };
     const moved = applySubmissionEvent(kept, { event: "review", actor: "creator", reply: input.reply }, nowSeconds);
     if (!moved.ok) return { ok: false as const, reason: moved.reason === "reply" ? ("state" as const) : moved.reason };
     const next: KeptSubmission = { ...kept, ...moved.submission };
@@ -882,17 +927,20 @@ export async function replySubmission(
         throw new UnknownReplyError("the store's data room");
       }
     }
-    const replies = repliesFor(
-      await redisPipeline([
-        ["SET", key, json, "XX", "EX", Math.max(1, until - nowSeconds)],
-        ["ZREM", liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who), kept.id],
-      ]),
-      2,
-    );
-    if (!replies) throw new UnknownReplyError("a submission's reply");
+    // Fenced by the lock and the text read (moveSubmission): a reply held up past its lock never lands over a
+    // withdrawal the buyer was told is kept.
+    const landed = await moveSubmission(held, {
+      key,
+      text: read.text,
+      json,
+      seconds: Math.max(1, until - nowSeconds),
+      live: liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who),
+      liveMember: kept.id,
+    });
     // Deleted since it was read (its buyer, or its time): nothing was written.
-    if (replies[0] === null) return { ok: false as const, reason: "gone" as const };
-    if (replies[0] !== "OK" || countOf(replies[1]) === null) throw new UnknownReplyError("a submission's reply");
+    if (landed === "gone") return { ok: false as const, reason: "gone" as const };
+    // Changed by the next holder (a withdrawal): nothing was written.
+    if (landed === "changed") return { ok: false as const, reason: "state" as const };
     return { ok: true as const, submission: next };
   });
 }
@@ -1009,9 +1057,10 @@ export async function withdrawSubmission(
   steps: Pick<DoorSteps, "deleteVault"> = VAULT_STEPS,
 ): Promise<Withdrawn> {
   if (!ID.test(input.id)) return { ok: false, reason: "gone" };
-  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async (): Promise<Withdrawn> => {
-    const kept = await readSubmission(input.folder, input.id);
-    if (!kept || kept.who !== input.who || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId || kept.target.lessonId !== input.lessonId) {
+  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async (held): Promise<Withdrawn> => {
+    const read = await readSubmissionText(input.folder, input.id);
+    const kept = read?.kept;
+    if (!read || !kept || kept.who !== input.who || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId || kept.target.lessonId !== input.lessonId) {
       return { ok: false, reason: "gone" };
     }
     const moved = applySubmissionEvent(kept, { event: "withdraw", actor: "buyer" }, nowSeconds);
@@ -1033,19 +1082,22 @@ export async function withdrawSubmission(
     // reply that takes the lock after this reads "withdrawn" and is refused, so a reply the creator was told is kept
     // is never overwritten, and its file never deleted from under it. The file is due on the sweep's list from now,
     // so it goes even when the delete below does not.
+    // The write is fenced by the lock and the text read (moveSubmission, Codex U's focal): a withdrawal held up past its
+    // lock never lands over a reply the next holder confirmed, and its file is then never deleted from under it.
     const member = dueMember(input.folder, kept.path);
-    const replies = repliesFor(
-      await redisPipeline([
-        ["SET", key, json, "XX", "EX", Math.max(1, until - nowSeconds)],
-        ["ZADD", DUE_KEY, nowSeconds, member],
-        ["ZREM", liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who), kept.id],
-      ]),
-      3,
-    );
-    if (!replies) throw new UnknownReplyError("a submission withdrawn");
+    const landed = await moveSubmission(held, {
+      key,
+      text: read.text,
+      json,
+      seconds: Math.max(1, until - nowSeconds),
+      live: liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who),
+      liveMember: kept.id,
+      due: { score: nowSeconds, member },
+    });
     // Deleted since it was read (the buyer's erasure, or its time): nothing was written.
-    if (replies[0] === null) return { ok: false, reason: "gone" };
-    if (replies[0] !== "OK" || countOf(replies[1]) === null || countOf(replies[2]) === null) throw new UnknownReplyError("a submission withdrawn");
+    if (landed === "gone") return { ok: false, reason: "gone" };
+    // Changed by the next holder (a reply): nothing was written, and the file is not touched.
+    if (landed === "changed") return { ok: false, reason: "state" };
     // Then the file: said deleted only when the vault confirmed it, and off the sweep's list only then.
     const deleted = await steps.deleteVault([kept.path]).catch(() => false);
     if (deleted) {

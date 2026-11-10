@@ -12,6 +12,12 @@ import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 
 const en = {
   withdrawLink: "Withdraw from contract here",
+  /**
+   * Said at checkout, beside the box or where there is none, outside the sentence the buyer checks: that the function
+   * exists and where it is (Directive 2011/83/EU art. 6(1)(h), Annex I as amended by Directive (EU) 2023/2673).
+   * Conditional, so it never promises the right to a buyer who has none; it names withdrawLink exactly.
+   */
+  checkoutWhere: "You can withdraw online with ‘Withdraw from contract here’ on your purchases page, while you have that right.",
   backToList: "Back to your purchases",
   chooseLead: "Choose the order you are withdrawing from.",
   noneOpen: "None of your purchases can be withdrawn from online now.",
@@ -56,6 +62,7 @@ export type WithdrawalWords = typeof en;
 
 const es: WithdrawalWords = {
   withdrawLink: "Desistir del contrato aquí",
+  checkoutWhere: "Puedes desistir en línea con “Desistir del contrato aquí” en tus compras, mientras tengas ese derecho.",
   backToList: "Volver a tus compras",
   chooseLead: "Elige el pedido del que desistes.",
   noneOpen: "Ahora no puedes desistir en línea de ninguna de tus compras.",
@@ -97,6 +104,7 @@ const es: WithdrawalWords = {
 
 const fr: WithdrawalWords = {
   withdrawLink: "Se rétracter du contrat ici",
+  checkoutWhere: "Vous pouvez vous rétracter en ligne avec « Se rétracter du contrat ici » dans vos achats, tant que vous disposez de ce droit.",
   backToList: "Retour à vos achats",
   chooseLead: "Choisissez la commande dont vous vous rétractez.",
   noneOpen: "Aucun de vos achats ne peut faire l'objet d'une rétractation en ligne pour l'instant.",
@@ -138,6 +146,7 @@ const fr: WithdrawalWords = {
 
 const de: WithdrawalWords = {
   withdrawLink: "Vertrag hier widerrufen",
+  checkoutWhere: "Sie können online mit ‚Vertrag hier widerrufen‘ unter Ihren Käufen widerrufen, solange Ihnen dieses Recht zusteht.",
   backToList: "Zurück zu Ihren Käufen",
   chooseLead: "Wählen Sie die Bestellung, die Sie widerrufen.",
   noneOpen: "Keiner Ihrer Käufe kann jetzt online widerrufen werden.",
@@ -179,6 +188,7 @@ const de: WithdrawalWords = {
 
 const it: WithdrawalWords = {
   withdrawLink: "Recedi dal contratto qui",
+  checkoutWhere: "Puoi recedere online con “Recedi dal contratto qui” nei tuoi acquisti, finché hai questo diritto.",
   backToList: "Torna ai tuoi acquisti",
   chooseLead: "Scegli l'ordine da cui recedi.",
   noneOpen: "Al momento non puoi recedere online da nessuno dei tuoi acquisti.",
@@ -220,6 +230,7 @@ const it: WithdrawalWords = {
 
 const nl: WithdrawalWords = {
   withdrawLink: "Overeenkomst hier herroepen",
+  checkoutWhere: "Je kunt online herroepen met ‘Overeenkomst hier herroepen’ bij je aankopen, zolang je dat recht hebt.",
   backToList: "Terug naar je aankopen",
   chooseLead: "Kies de bestelling die je herroept.",
   noneOpen: "Geen van je aankopen kan nu online worden herroepen.",
@@ -261,6 +272,7 @@ const nl: WithdrawalWords = {
 
 const pt: WithdrawalWords = {
   withdrawLink: "Desistir do contrato aqui",
+  checkoutWhere: "Pode desistir do contrato online com “Desistir do contrato aqui” nas suas compras, enquanto tiver esse direito.",
   backToList: "Voltar às suas compras",
   chooseLead: "Escolha a encomenda de que desiste.",
   noneOpen: "Neste momento não pode desistir online de nenhuma das suas compras.",

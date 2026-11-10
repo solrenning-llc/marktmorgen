@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { originFrom } from "@/lib/request-origin";
+import { linkOrigin } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { handleIn, readReport } from "@/lib/takedown-rules";
 import { fileReport } from "@/lib/takedown";
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
   const read = readReport(body);
   if (!read.ok) return Response.json({ ok: false, error: "problem", problem: read.problem }, { status: 400 });
   try {
-    const result = await fileReport(read.report, clientAddress(request), originFrom(request));
+    const result = await fileReport(read.report, clientAddress(request), linkOrigin(request));
     if (result !== "limited" && (read.report.kind === "child_safety" || read.report.kind === "intimate_image")) {
       const handle = handleIn(read.report.url);
       // A store that cannot be read is said as such, never as an address that names nothing.

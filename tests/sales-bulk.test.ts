@@ -117,6 +117,25 @@ async function main(): Promise<void> {
   ] as const) {
     is(`never a result: ${what}`, readLabelOutcome(bad, "remove"), null);
   }
+  // Codex H2, LOW on #3543: an undo is built from what each contact lost, so a removal answer that does not say it
+  // for every address it changed offers no undo; a replacement for an address not changed is not in its shape either.
+  const two = { ok: true, changed: ["a@example.com", "b@example.com"], already: 0, full: 0, notOnList: 0 };
+  const lost = [{ email: "a@example.com", label: "VIP", at: 0 }, { email: "b@example.com", label: "Other", at: 1 }];
+  is("a removal that says what each changed contact lost", readLabelOutcome({ ...two, removed: lost }, "remove")?.taken, lost);
+  is("an add that replaced nothing", readLabelOutcome({ ...two, replaced: [] }, "add")?.taken, []);
+  is("an add that replaced one of the changed", readLabelOutcome({ ...two, replaced: [lost[1]] }, "add")?.taken, [lost[1]]);
+  is("nothing changed, nothing lost", readLabelOutcome({ ...two, changed: [], removed: [] }, "remove")?.changed, []);
+  for (const [what, bad, change] of [
+    ["a removal that leaves out what was lost", { ...two }, "remove"],
+    ["a removal that says it for only one of two", { ...two, removed: [lost[0]] }, "remove"],
+    ["a removal that names an address it did not change", { ...two, removed: [...lost, { email: "c@example.com", label: "VIP", at: 0 }] }, "remove"],
+    ["a removal that names one address twice", { ...two, removed: [lost[0], lost[0]] }, "remove"],
+    ["an add that leaves out what it replaced", { ...two }, "add"],
+    ["an add that replaced on an address it did not change", { ...two, replaced: [{ email: "c@example.com", label: "vip", at: 0 }] }, "add"],
+    ["an add that names one address twice", { ...two, replaced: [lost[0], lost[0]] }, "add"],
+  ] as const) {
+    is(`never an undo built on a guess: ${what}`, readLabelOutcome(bad, change), null);
+  }
   is("a review read exactly", readLabelReview(review), review);
   is("a review with a count as text is unknown", readLabelReview({ ...review, changes: "2" }), null);
 
@@ -128,7 +147,11 @@ async function main(): Promise<void> {
   is("a formula kept as text, an unknown amount left blank", lines[2], `"2026-11-02T15:00:00.000Z","${ref(2)}","'=SUM(1)","trial","","USD",""`);
 
   part("The screen: a table to choose in, a live count, only the actions the role allows, none that moves money");
-  const screen = (canLabel: boolean, canExport: boolean) => renderToStaticMarkup(createElement(SalesBulkActions, { sales: [row(), row({ reference: ref(2), email: null })], canLabel, canExport }));
+  const screen = (canLabel: boolean, canExport: boolean) => renderToStaticMarkup(createElement(SalesBulkActions, { sales: [row(), row({ reference: ref(2), email: null })], canLabel, canExport, defaultOpen: true }));
+  const closed = renderToStaticMarkup(createElement(SalesBulkActions, { sales: [row(), row({ reference: ref(2), email: null })], canLabel: true, canExport: true }));
+  // The list above already shows each order once; the table is a second copy, drawn only once it is opened, so the
+  // sales list holds each order's row once (tests/e2e/shipment-acknowledgment.mjs) and the page carries no hidden copy.
+  is("closed: only its summary, no second copy of the orders", [closed.includes("Act on several orders at once"), closed.includes("<table"), closed.includes("Choose Course,")], [true, false, false]);
   const full = screen(true, true);
   is("a table with a caption, column and row headers, a box per order with its own name", [full.includes("<caption"), full.includes('scope="col"'), full.includes('scope="row"'), full.includes("Choose Course, jane@example.com,"), full.includes("Choose Course, no email address,")], [true, true, true, true, true]);
   is("the count of chosen orders, live", full.includes('role="status" class="mt-2 text-sm font-semibold text-ink">0 of 2 orders chosen'), true);

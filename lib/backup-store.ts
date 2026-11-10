@@ -12,10 +12,22 @@
  *
  * Every write is create-only: PutObject with If-None-Match: *, which R2
  * evaluates atomically, so of two writes under one name at most one succeeds
- * and the other is answered 412 (https://developers.cloudflare.com/r2/api/s3/api/,
- * read 31 October 2026; a 412 is billed as a Class A operation,
- * https://developers.cloudflare.com/r2/pricing/). A read is held to its byte
- * cap as it streams.
+ * and the other is refused (https://developers.cloudflare.com/r2/api/s3/api/,
+ * read 31 October 2026): 412 PreconditionFailed when the name is not under the
+ * bucket lock, and 409 ObjectLockedByBucketPolicy when it is, because R2 checks
+ * the lock before the write's conditions ("a write that fails both checks
+ * returns ObjectLockedByBucketPolicy, not PreconditionFailed (412)",
+ * https://developers.cloudflare.com/r2/buckets/bucket-locks/, read 8 November
+ * 2026). Either is a refusal, never a write; a 412 is billed as a Class A
+ * operation (https://developers.cloudflare.com/r2/pricing/), and a 409 is taken
+ * as one too. A read is held to its byte cap as it streams.
+ *
+ * Names (inbox C1-20261108-2021-C4-37 item 4): a daily copy's objects are
+ * backups/<uuid>.mmbk; a month's copy (lib/backup-run.ts) is written under
+ * backups/monthly/<YYYY-MM>/<run uuid>/<uuid>.mmbk and marked, once verified,
+ * by an empty backups/monthly/<YYYY-MM>/<run uuid>/verified.mmbk. An object's
+ * id is its name between backups/ and .mmbk, so one listing, one bucket lock
+ * and one lifecycle rule on backups/ cover both.
  *
  * Retention (inbox C4-49): the daily run lists its own objects under backups/
  * (ListObjectsV2, a Class A operation each page, with each object's time and
@@ -24,12 +36,12 @@
  * 4 November 2026 by Claude 1, inbox C4-38), the oldest when a set would not
  * fit under the review's ceiling and, after a write, those older than the
  * review's retention (lib/backup-run.ts). The listing offers only names this store
- * writes (backups/<uuid>.mmbk), so nothing else in the bucket is ever deleted;
+ * writes (above), so nothing else in the bucket is ever deleted;
  * a listing it cannot read whole throws, never reads as an empty bucket. The
  * bucket's lifecycle rule stays as a safety net. A delete answered 409, which
  * R2 gives an object under the bucket lock (inbox C4-36 item 5, as reported to
- * Claude 1; not re-read on Cloudflare's pages in this unit), throws
- * BackupObjectLockedError, never a done delete.
+ * Claude 1; confirmed on https://developers.cloudflare.com/r2/buckets/bucket-locks/,
+ * read 8 November 2026), throws BackupObjectLockedError, never a done delete.
  */
 import { EMPTY_HASH, hashOf, signV4, type AwsKey } from "@/lib/aws-sign";
 import { timed } from "@/lib/fetch-timeout";
@@ -39,12 +51,21 @@ export type BackupStoreConfig = { endpoint: string; bucket: string; key: AwsKey 
 
 const REGION = "auto";
 const SERVICE = "s3";
-const TIMEOUT_MS = 20_000;
-/** The names verifyBackupRoundtrip gives: a random UUID. */
-const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Each bucket request is given up after this (lib/fetch-timeout.ts, timed); the run's deadline keeps room for it (lib/backup-run.ts). */
+export const BACKUP_STORE_TIMEOUT_MS = 20_000;
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const MONTH = "\\d{4}-(?:0[1-9]|1[0-2])";
+const ID_BODY = `${UUID}|monthly/${MONTH}/${UUID}/(?:${UUID}|verified)`;
+/**
+ * An object's id: a daily object (the random UUID verifyBackupRoundtrip and lib/backup-parts.ts give), or one of a
+ * month's copy, monthly/<YYYY-MM>/<run uuid>/<uuid>, or that copy's mark, monthly/<YYYY-MM>/<run uuid>/verified.
+ */
+export const BACKUP_OBJECT_ID = new RegExp(`^(?:${ID_BODY})$`);
+/** A month's mark, with its month and run. */
+export const BACKUP_MONTH_MARK = new RegExp(`^monthly/(${MONTH})/(${UUID})/verified$`);
 /** Where the backup's objects live in its bucket, and the name of one of them. */
 const PREFIX = "backups/";
-const OBJECT_NAME = /^backups\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.mmbk$/;
+const OBJECT_NAME = new RegExp(`^backups/(${ID_BODY})\\.mmbk$`);
 /** Names one listing page holds at the most (S3's own limit), and the most its answer may weigh. */
 export const BACKUP_LIST_PAGE_KEYS = 1_000;
 const LIST_MAX_BYTES = 1_048_576;
@@ -67,7 +88,7 @@ export function backupStoreConfig(): BackupStoreConfig | null {
 }
 
 const objectUrl = (config: BackupStoreConfig, id: string) => {
-  if (!ID.test(id)) throw new Error("Invalid backup id");
+  if (typeof id !== "string" || !BACKUP_OBJECT_ID.test(id)) throw new Error("Invalid backup id");
   return `${config.endpoint}/${config.bucket}/backups/${id}.mmbk`;
 };
 
@@ -152,20 +173,23 @@ export function r2BackupStore(config: BackupStoreConfig): BackupBucket {
         service: SERVICE,
         key: config.key,
       });
-      const status = await timed(TIMEOUT_MS, async (signal) => {
+      const status = await timed(BACKUP_STORE_TIMEOUT_MS, async (signal) => {
         // A redirect is refused, never followed: a PUT turned into a GET elsewhere could answer 200.
         const response = await fetch(url, { method: "PUT", headers, body: bytes as BodyInit, signal, cache: "no-store", redirect: "error" });
         await response.body?.cancel().catch(() => {});
         return response.status;
       });
       if (status === 412) throw new Error("A backup with this id already exists");
+      // The name exists and is under the bucket lock: R2 answers the lock (409 ObjectLockedByBucketPolicy) before the
+      // If-None-Match condition (bucket-locks page, read 8 November 2026). Refused, never taken as written.
+      if (status === 409) throw new Error("A backup with this id already exists under the bucket lock (409), not written");
       if (status !== 200) throw new Error(`Backup write failed with status ${status}`);
     },
     read: async (id, maxBytes) => {
       if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error("Invalid backup read bound");
       const url = objectUrl(config, id);
       const headers = signV4({ method: "GET", url, headers: { "x-amz-content-sha256": EMPTY_HASH }, payloadHash: EMPTY_HASH, region: REGION, service: SERVICE, key: config.key });
-      return timed(TIMEOUT_MS, async (signal) => {
+      return timed(BACKUP_STORE_TIMEOUT_MS, async (signal) => {
         const response = await fetch(url, { headers: { ...headers, "accept-encoding": "identity" }, signal, cache: "no-store", redirect: "error" });
         if (response.status !== 200 || !response.body) {
           await response.body?.cancel().catch(() => {});
@@ -185,7 +209,7 @@ export function r2BackupStore(config: BackupStoreConfig): BackupBucket {
       }
       const address = url.toString();
       const headers = signV4({ method: "GET", url: address, headers: { "x-amz-content-sha256": EMPTY_HASH }, payloadHash: EMPTY_HASH, region: REGION, service: SERVICE, key: config.key });
-      const xml = await timed(TIMEOUT_MS, async (signal) => {
+      const xml = await timed(BACKUP_STORE_TIMEOUT_MS, async (signal) => {
         const response = await fetch(address, { headers: { ...headers, "accept-encoding": "identity" }, signal, cache: "no-store", redirect: "error" });
         if (response.status !== 200) {
           await response.body?.cancel().catch(() => {});
@@ -198,7 +222,7 @@ export function r2BackupStore(config: BackupStoreConfig): BackupBucket {
     delete: async (id) => {
       const url = objectUrl(config, id);
       const headers = signV4({ method: "DELETE", url, headers: { "x-amz-content-sha256": EMPTY_HASH }, payloadHash: EMPTY_HASH, region: REGION, service: SERVICE, key: config.key });
-      const status = await timed(TIMEOUT_MS, async (signal) => {
+      const status = await timed(BACKUP_STORE_TIMEOUT_MS, async (signal) => {
         const response = await fetch(url, { method: "DELETE", headers, signal, cache: "no-store", redirect: "error" });
         await response.body?.cancel().catch(() => {});
         return response.status;

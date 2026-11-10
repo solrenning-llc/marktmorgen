@@ -24,6 +24,7 @@ import {
   BACKUP_BUCKET_LOCK_DAYS,
   BACKUP_MIN_RETENTION_DAYS,
   BACKUP_SHRINK_LIMIT_PERCENT,
+  backupKeptObjects,
   backupLastFailure,
   runBackup,
   validReview,
@@ -39,7 +40,8 @@ const T0 = Date.parse("2026-11-02T03:00:00Z");
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const SET_BOUND = 1_131_232;
-const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 36_199_424, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
+// The review's ceiling: retention + 2 + the 3 months' copies (inbox C1-20261108-2021-C4-37) = 35 sets of SET_BOUND.
+const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 39_593_120, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
 // The shortest retention admitted: the lock's 7 days and two (review of 9 November 2026).
 const short: BackupCostReview = { ...review, retentionDays: 9 };
 const key = Buffer.alloc(32, 7);
@@ -104,8 +106,8 @@ async function main(): Promise<void> {
     seed(5);
     at(T0);
     const good = await runBackup({ now: clock, review, store, key });
-    // Thirty-one full sets, all written in the last two days: the ceiling is reached and every candidate is locked.
-    for (let i = 0; i < 31; i += 1) filler(i, clock + DAY + i);
+    // Thirty-four full sets, all written in the last two days: the ceiling is reached and every candidate is locked.
+    for (let i = 0; i < 34; i += 1) filler(i, clock + DAY + i);
     at(T0 + 3 * DAY);
     lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
     asked.length = 0;
@@ -122,9 +124,9 @@ async function main(): Promise<void> {
     seed(5);
     at(T0 + 40 * DAY);
     await runBackup({ now: clock, review, store, key });
-    // Ten old sets (outside the lock) and twenty-one young ones (inside it): room is made from the old ones only.
+    // Ten old sets (outside the lock) and twenty-four young ones (inside it): room is made from the old ones only.
     const old = Array.from({ length: 10 }, (_, i) => filler(i, clock - 20 * DAY + i));
-    const young = Array.from({ length: 21 }, (_, i) => filler(100 + i, clock + HOUR + i));
+    const young = Array.from({ length: 24 }, (_, i) => filler(100 + i, clock + HOUR + i));
     at(T0 + 41 * DAY);
     lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
     asked.length = 0;
@@ -142,7 +144,7 @@ async function main(): Promise<void> {
     const run = T0 + 61 * DAY;
     // Seven days and a half hour old at the run: past the lock by the run's clock, inside it if the bucket's runs late.
     const edge = filler(1, run - BACKUP_BUCKET_LOCK_DAYS * DAY - 30 * 60_000);
-    for (let i = 0; i < 30; i += 1) filler(10 + i, clock + HOUR + i);
+    for (let i = 0; i < 33; i += 1) filler(10 + i, clock + HOUR + i);
     at(run);
     asked.length = 0;
     const result = await runBackup({ now: clock, review, store, key });
@@ -192,7 +194,7 @@ async function main(): Promise<void> {
     seed(5);
     at(T0 + 200 * DAY);
     await runBackup({ now: clock, review, store, key });
-    for (let i = 0; i < 31; i += 1) filler(i, clock - 10 * DAY + i);
+    for (let i = 0; i < 34; i += 1) filler(i, clock - 10 * DAY + i);
     at(T0 + 201 * DAY);
     lockMs = 30 * DAY;
     const full = await runBackup({ now: clock, review, store, key });
@@ -542,7 +544,8 @@ async function main(): Promise<void> {
     at(start);
     await runBackup({ now: clock, review, store, key });
     const old = [filler(1, clock - 20 * DAY, 2_000), filler(2, clock - 19 * DAY, 2_000)];
-    for (let i = 0; i < 62; i += 1) filler(100 + i, clock + HOUR + i, 2_000);
+    // As many young objects as the bucket may hold (the 3 months' copies and their marks count here): two gone, no room.
+    for (let i = 0; i < backupKeptObjects(review); i += 1) filler(100 + i, clock + HOUR + i, 2_000);
     at(start + DAY);
     lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
     asked.length = 0;

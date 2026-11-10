@@ -28,39 +28,62 @@
  * a failure; a call past them is refused at six commands (the lock, the
  * count, and the lock let go: the script and the two commands it runs).
  *
+ * One retention (inbox C1-20261108-2021-C4-37 item 4, which replaced C4-36's
+ * weekly copies): daily copies are kept retentionDays (30 in the design); the
+ * first verified copy of each UTC month is also that month's copy, and the
+ * BACKUP_MONTHLY_COPIES (3) newest months' copies are kept past the retention;
+ * no copy lives past BACKUP_MAX_COPY_DAYS (120): the bucket's lifecycle rule on
+ * backups/ is that cap (backupLifecycleDays). Which copy is the month's is
+ * read from the bucket alone, never from the database: a run whose listing
+ * shows no mark for its month (UTC, from the moment it starts) writes its set
+ * under backups/monthly/<YYYY-MM>/<run uuid>/ (lib/backup-store.ts) instead of
+ * backups/; once that set is verified and passed the shrink check below, the
+ * run writes the folder's mark (an empty "verified" object), and only then is
+ * it the month's copy. A copy that failed, shrank or could not be checked is
+ * never marked: its folder is a daily copy like any other, and the month's next
+ * run tries again. Of a month with two marks (only after a failure), the first
+ * written is the month's copy.
+ *
  * Retention by the run itself (inbox C4-49, C4-53): write first, delete after.
  *   1. Before it writes, the run lists every object of its own (complete, or
  *      it writes nothing: "room_pages"). If they and one more set at its bound
  *      would pass the review's maxStoredBytes, or backupKeptObjects objects, it
  *      deletes the oldest first, never the last verified copy (the manifest
- *      kept with the last good copy's time, and the parts it names), until
- *      the set fits; if that deletion fails, it writes nothing ("room_error",
- *      "room_cutoff"; the day's new try may try again). It deletes only when it
- *      knows the last verified copy for sure (lastVerified): otherwise nothing
- *      is deleted and nothing written ("room_unverified").
+ *      kept with the last good copy's time, and the parts it names) nor the
+ *      3 newest months' copies, until the set fits; if that deletion fails, it
+ *      writes nothing ("room_error", "room_cutoff"; the day's new try may try
+ *      again). It deletes only when it knows the last verified copy for sure
+ *      (lastVerified): otherwise nothing is deleted and nothing written
+ *      ("room_unverified").
  *   2. Then it writes the set and, only when the set was verified, deletes
  *      every copy of its own the bucket says was written more than
- *      retentionDays days before the run started, as best it can: a failure
- *      ("prune_error", "prune_pages", "prune_cutoff") is in the owner's report
- *      and never costs the day's copy; the next run's step 1 holds the ceiling
- *      meanwhile. A failed day deletes nothing after it, so the last good copy
- *      stays, past the retention if need be, until a new one is verified.
+ *      retentionDays days before the run started, except the 3 newest months'
+ *      copies, as best it can: a failure ("prune_error", "prune_pages",
+ *      "prune_cutoff", and "prune_monthly" when the month's mark could not be
+ *      written, which deletes nothing) is in the owner's report and never costs
+ *      the day's copy; the next run's step 1 holds the ceiling meanwhile. A
+ *      failed day deletes nothing after it, so the last good copy stays, past
+ *      the retention if need be, until a new one is verified.
  * The ceiling is a proof: no other run writes while one holds the lock (its
  * writes end by its cutoff, before the lock expires, and R2 lists what was
  * written), and a run writes only after its own complete listing showed room
  * for its whole set, so the bucket never holds more than maxStoredBytes nor
  * more than backupKeptObjects objects. validReview asks maxStoredBytes for
- * retention + 2 sets (backupPeakSets): with one good run a day, the copies of
- * the last retentionDays days and the one that is about to age out are there
- * before the day's write, so step 1 deletes nothing inside the retention; it
- * acts only after failed runs or failed deletions. The last good copy kept
- * past the retention stays inside the ceiling: it is one set, and step 1 can
- * always make room for one more beside it by deleting the others (2 sets <=
- * retention + 2, the retention being at least 3), so keeping it never stops
- * a write while the deletions work. Names under backups/ this
- * code does not write are never listed as its own nor deleted; the bucket's
+ * retention + 2 + 3 sets (backupPeakSets): with one good run a day, the copies
+ * of the last retentionDays days and the one that is about to age out are
+ * there before the day's write, and besides them at most the 3 newest months'
+ * copies (on a month's first day, before its copy is marked, the 3 earlier
+ * months' copies are all still kept), so step 1 deletes nothing inside the
+ * retention; it acts only after failed runs or failed deletions. Every set is
+ * counted at its parts, its manifest and a month's mark (an empty object), the
+ * mark adding no bytes. The last good copy kept past the retention stays
+ * inside the ceiling: with the 3 months' copies it is at most 4 sets, and step
+ * 1 can always make room for one more beside them by deleting the others
+ * (5 sets <= retention + 5, the retention being at least 3), so keeping them
+ * never stops a write while the deletions work. Names under backups/ this code
+ * does not write are never listed as its own nor deleted; the bucket's
  * lifecycle rule, kept as a safety net, removes them and anything left while
- * no run happens.
+ * no run happens, at the 120-day cap.
  *
  * The bucket lock (inbox C4-35): neither step ever asks the bucket to delete an
  * object younger than BACKUP_BUCKET_LOCK_DAYS and an hour (the owner's lock on
@@ -72,7 +95,8 @@
  * copy just verified is compared with the last good set's keys and bytes (the
  * base kept with the last good copy's mark). When either fell more than
  * BACKUP_SHRINK_LIMIT_PERCENT, nothing is deleted ("prune_shrunk") and the base
- * stays the earlier, larger set, so the next days hold the prune too. With no
+ * stays the earlier, larger set, so the next days hold the prune too, and the
+ * shrunk copy is never marked as its month's copy. With no
  * mark at all, the copy is compared the same way with the largest verified
  * set the bucket holds (its manifest's rows and sizes; Claude 6's N1): fallen
  * further (the marks went with a wiped database), nothing is deleted
@@ -94,15 +118,33 @@
  * as a verified one (a failed try's leftover is no copy) or none is more than
  * the limit larger.
  *
+ * One key a request, a deadline, and a copy resumed (C1-20261109-1525-C4-68 items 2 and 3): the copy reads one key
+ * a request (BACKUP_DUMP_BATCH), so at most one key is read past the byte cap. No key is begun past
+ * BACKUP_COPY_DEADLINE_MS from the run's start, the 700 s cutoff less the room for the request in flight and the
+ * parts and manifest still to close (BACKUP_COPY_STOP_ROOM_MS). A run that reaches it stops cleanly: the open part
+ * is closed and read back, and the progress (the last key name handled, the parts so far, their counts, the copy's
+ * start and its folder) is kept in nl:backup:progress; the run is "copy_incomplete": no manifest, never the last good
+ * copy, never verified, never a month's copy, nothing pruned, no sign of life, and the day's count is not raised past
+ * its limit, so the day's next run goes on. The set window is the UTC day of the copy's first run: a run of that day
+ * resumes it (a new walk, only the names after the cursor copied, into parts sealed with the copy's start) and closes
+ * it with the manifest; the first run of a later day leaves it (its parts are then a failed try's leftovers) and
+ * starts a new copy. A progress whose parts the listing no longer shows is left the same way. Keys that change between
+ * the runs: a key copied before the pause stays as it was copied (changed or deleted after); a key made after the
+ * pause under a name before the cursor is not in this set (it is in the next); after the cursor, every key is copied
+ * as it is when its turn comes. A copy is never a point in time, and a resumed one spans up to its day. A progress
+ * that cannot be read is never taken as none: the run is "resume_unreadable", writes nothing and lets the progress go,
+ * so the next run starts afresh; a database answer of the wrong shape is "mark_error".
+ *
  * Called by app/api/cron/backup/route.ts, scheduled in vercel.json twice a
  * day (the day's run and its new try); off while BACKUP_COST_REVIEW is null,
  * before any command is sent.
  */
+import { randomUUID } from "node:crypto";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { BackupObjectLockedError, type BackupBucket, type BackupListedObject, type BackupObjectStore } from "@/lib/backup-roundtrip";
-import { MAX_PARTS, copyInParts, isManifestEnvelope, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
-import { BACKUP_LIST_PAGE_KEYS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
-import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
+import { MAX_PARTS, copyInParts, isManifestEnvelope, manifestBound, openManifest, runStoredBound, validProgress, type CopyProgress } from "@/lib/backup-parts";
+import { BACKUP_LIST_PAGE_KEYS, BACKUP_MONTH_MARK, BACKUP_OBJECT_ID, BACKUP_STORE_TIMEOUT_MS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
+import { REDIS_TIMEOUT_MS, timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock, type Held } from "@/lib/redis-lock";
 
@@ -135,11 +177,12 @@ export const BACKUP_COST_REVIEW: BackupCostReview | null = null;
 export const BACKUP_RUNS_PER_DAY = 2;
 /**
  * Commands a run sends besides the walk and the copy: the lock (SET NX EX), the day's count (SET NX with its expiry,
- * INCRBY), the last good copy read when room must be made (GET), one outcome (the last good copy, the count raised
- * past the day's limit, a failed deletion's note; or the failure), and the lock let go only if it is its own (EVAL,
- * and the GET and DEL inside it, which Upstash bills one by one; where scripts do not run, the same GET and DEL).
+ * INCRBY), the paused copy's progress read (GET), the last good copy read when room must be made (GET), one outcome
+ * (the last good copy, the count raised past the day's limit, a failed deletion's note; or the failure; and the
+ * progress kept or let go), and the lock let go only if it is its own (EVAL, and the GET and DEL inside it, which
+ * Upstash bills one by one; where scripts do not run, the same GET and DEL).
  */
-export const BACKUP_RUN_COMMANDS = 10;
+export const BACKUP_RUN_COMMANDS = 12;
 /**
  * The most a run's listing, deletions and copy may last, in ms (independent review of #2175): every request inside is
  * given up by then and none is sent after it (lib/fetch-timeout.ts, withCutoff), and the walk, each part and the
@@ -164,13 +207,34 @@ export const BACKUP_LOCK_MS = 900_000;
  * (backupStale) before the last one ages out of the retention.
  */
 export const BACKUP_MIN_RETENTION_DAYS = BACKUP_BUCKET_LOCK_DAYS + 2;
-/** Keys copied per request. */
-const BATCH = 100;
+/**
+ * Keys copied per request: one (C1-20261109-1525-C4-68 item 2; 100 until 9 November 2026). The batch is read before
+ * the byte cap can refuse it, so lib/backup-cost.ts prices this many keys at Upstash's record cap in every run (line
+ * "upstash-overshoot"). One key a request is one round trip a key, so a database at the caps may take more than one
+ * run: the copy stops at BACKUP_COPY_DEADLINE_MS and the next run of the day goes on (tests/bk1-resume.test.ts
+ * measures it).
+ */
+export const BACKUP_DUMP_BATCH = 1;
+/** One part closed: written and read back, each at the bucket's request timeout (lib/backup-store.ts). */
+export const BACKUP_PART_CLOSE_MS = 2 * BACKUP_STORE_TIMEOUT_MS;
+/** Room for sealing (gzip and AES of up to 4 MiB) and for the clocks, besides the requests below. */
+export const BACKUP_STOP_MARGIN_MS = 15_000;
+/**
+ * What must still fit between the copy's deadline and the run's cutoff: the key request in flight when it passes (one
+ * database request at its timeout), a part a row overflows into, and the open part closed at the pause or the
+ * manifest when the copy ends, each written and read back at the bucket's timeout, and the margin: 140 s.
+ */
+export const BACKUP_COPY_STOP_ROOM_MS = REDIS_TIMEOUT_MS + 3 * BACKUP_PART_CLOSE_MS + BACKUP_STOP_MARGIN_MS;
+/** No key is begun past this, from the run's start: 560 s, below the 700 s cutoff (C1-20261109-1525-C4-68 item 3). */
+export const BACKUP_COPY_DEADLINE_MS = BACKUP_RUN_CUTOFF_MS - BACKUP_COPY_STOP_ROOM_MS;
 const DAY_MS = 86_400_000;
 const STALE_MS = 48 * 3_600_000;
 const LAST_OK = "nl:backup:last-ok";
 const LAST_FAIL = "nl:backup:last-fail";
 const LOCK = "nl:backup:lock";
+/** A paused copy's progress (C1-20261109-1525-C4-68 item 3), kept two days at the most: its window is one UTC day. */
+const PROGRESS = "nl:backup:progress";
+const PROGRESS_SECONDS = 2 * 86_400;
 /** The owner's report when the last good copy was found gone from the bucket. */
 const LOST_NOTE = "last good copy lost";
 /**
@@ -179,10 +243,26 @@ const LOST_NOTE = "last good copy lost";
  * rule is the owner's, on the bucket; the stored ceiling is the code's, so a longer rule costs nothing more.
  */
 export const BACKUP_LIFECYCLE_EXTRA_DAYS = 30;
-/** The bucket's lifecycle rule to set: the retention and BACKUP_LIFECYCLE_EXTRA_DAYS. */
-export const backupLifecycleDays = (review: Pick<BackupCostReview, "retentionDays">) => review.retentionDays + BACKUP_LIFECYCLE_EXTRA_DAYS;
-/** A copy's id, as the store names it: a random UUID. */
-const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The months whose copy is kept past the retention: the 3 newest (inbox C4-37 item 4, about 90 days). */
+export const BACKUP_MONTHLY_COPIES = 3;
+/**
+ * No copy is kept longer than this, in days (inbox C4-37 item 4): the 3 months' copies (90 days) and the lifecycle's
+ * 30 days more. A month's copy is at most 92 days old when the next month's is marked; the rule takes it at 120 if
+ * every run fails meanwhile.
+ */
+export const BACKUP_MAX_COPY_DAYS = 120;
+/**
+ * The bucket's lifecycle rule to set on backups/: the 120-day cap, the one rule for daily copies and months' copies
+ * alike (they share the prefix, so a shorter rule would take the months' copies). It is longer than every admitted
+ * retention and its BACKUP_LIFECYCLE_EXTRA_DAYS (admitReview).
+ */
+export const backupLifecycleDays = (review: Pick<BackupCostReview, "retentionDays">) => Math.max(BACKUP_MAX_COPY_DAYS, review.retentionDays + BACKUP_LIFECYCLE_EXTRA_DAYS);
+/** A set's manifest, as the mark of the last good copy names it: a daily object, or one in a month's folder. */
+const isSetId = (id: unknown): id is string => typeof id === "string" && BACKUP_OBJECT_ID.test(id) && !BACKUP_MONTH_MARK.test(id);
+/** The folder an object's id is in ("" for a daily one): a manifest's parts are in its folder. */
+const folderOf = (id: string) => id.slice(0, id.lastIndexOf("/") + 1);
+/** The UTC month of a moment, YYYY-MM. */
+const monthOf = (ms: number) => new Date(ms).toISOString().slice(0, 7);
 /** The last failure's life: 8 days, or the retention and two days when longer. The last good copy's mark has no end. */
 const outcomeSeconds = (review: BackupCostReview) => Math.max(8, review.retentionDays + 2) * 86_400;
 
@@ -197,10 +277,15 @@ const runLimits = (review: BackupCostReview) => ({
 /** What one run's stored objects weigh at the most: every part sealed, and its manifest. */
 const objectBound = (review: BackupCostReview) => runStoredBound(runLimits(review));
 
-/** Sets of a run's stored bound the review's ceiling must hold (inbox C4-53): the retention and two more. */
-export const backupPeakSets = (retentionDays: number) => retentionDays + 2;
-/** The most objects the bucket holds: retention + 2 sets of a run's objects (its parts and its manifest). */
-export const backupKeptObjects = (review: BackupCostReview) => backupPeakSets(review.retentionDays) * (runLimits(review).maxParts + 1);
+/**
+ * Sets of a run's stored bound the review's ceiling must hold (inbox C4-53, C4-37 item 4): the retention, two more,
+ * and the 3 months' copies.
+ */
+export const backupPeakSets = (retentionDays: number) => retentionDays + 2 + BACKUP_MONTHLY_COPIES;
+/** Objects one set counts at the most: its parts, its manifest and its month's mark (an empty object). */
+const setObjects = (review: BackupCostReview) => runLimits(review).maxParts + 2;
+/** The most objects the bucket holds: backupPeakSets sets of setObjects. */
+export const backupKeptObjects = (review: BackupCostReview) => backupPeakSets(review.retentionDays) * setObjects(review);
 /** Listing pages one listing may read: every object the bucket can hold, 1,000 a page (S3's limit). */
 export const backupListPages = (review: BackupCostReview) => Math.max(1, Math.ceil(backupKeptObjects(review) / BACKUP_LIST_PAGE_KEYS));
 
@@ -237,22 +322,22 @@ function snapshotReview(raw: unknown): BackupCostReview | null {
 
 /**
  * The review the run and its cost model use: a copy of its data (snapshotReview), returned only when it has every
- * cap a count, a real date, a source, a retention of at least BACKUP_MIN_RETENTION_DAYS, and a storage ceiling above
- * every copy that can be kept at once.
+ * cap a count, a real date, a source, a retention of at least BACKUP_MIN_RETENTION_DAYS whose lifecycle room
+ * stays inside BACKUP_MAX_COPY_DAYS, and a storage ceiling above every copy that can be kept at once.
  */
 export function admitReview(raw: unknown): BackupCostReview | null {
   const review = snapshotReview(raw);
   if (!review) return null;
   const { maxRows, maxCommands, maxBytes, retentionDays, maxStoredBytes, reviewedAt, source } = review;
   if (![maxRows, maxCommands, maxBytes, retentionDays, maxStoredBytes].every(whole)) return null;
-  if (retentionDays < BACKUP_MIN_RETENTION_DAYS) return null;
+  if (retentionDays < BACKUP_MIN_RETENTION_DAYS || retentionDays + BACKUP_LIFECYCLE_EXTRA_DAYS > BACKUP_MAX_COPY_DAYS) return null;
   const { maxParts, maxRunBytes } = runLimits(review);
   if (!whole(maxParts) || maxParts > MAX_PARTS || !whole(maxRunBytes)) return null;
   if (maxCommands <= BACKUP_RUN_COMMANDS + 1) return null;
   const day = typeof reviewedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(reviewedAt) ? Date.parse(`${reviewedAt}T00:00:00Z`) : NaN;
   if (!Number.isFinite(day) || dayOf(day) !== reviewedAt) return null;
   if (typeof source !== "string" || source.trim().length < 10) return null;
-  // Room for retention + 2 sets at their stored bound (backupPeakSets): the run writes only below the ceiling.
+  // Room for retention + 2 + 3 sets at their stored bound (backupPeakSets): the run writes only below the ceiling.
   const kept = backupPeakSets(retentionDays) * objectBound(review);
   return Number.isSafeInteger(kept) && kept <= maxStoredBytes ? review : null;
 }
@@ -263,7 +348,7 @@ export function validReview(review: unknown): review is BackupCostReview {
 }
 
 /** How the prune after a verified copy ended. */
-export type BackupPruneState = "done" | "prune_error" | "prune_pages" | "prune_cutoff" | "prune_locked" | "prune_shrunk" | "prune_unverified";
+export type BackupPruneState = "done" | "prune_error" | "prune_pages" | "prune_cutoff" | "prune_locked" | "prune_shrunk" | "prune_unverified" | "prune_monthly";
 
 export type BackupRunResult =
   | { ok: true; id: string; keys: number; bytes: number; parts: number; pruned: number; prune: BackupPruneState; note?: "last_good_copy_lost" }
@@ -273,8 +358,13 @@ export type BackupRunResult =
         | "off_review" | "off_store" | "off_key" | "busy" | "already_ran" | "mark_error"
         | "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"
         | "export_limits" | "export_budget" | "export_cutoff" | "export_scan_pages" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
-        | "verify";
+        | "verify" | "resume_unreadable";
     }
+  /**
+   * Stopped at its deadline (BACKUP_COPY_DEADLINE_MS): `keys` copied so far in `parts` verified parts, never a set,
+   * never the last good copy; the day's next run goes on from its progress.
+   */
+  | { ok: false; reason: "copy_incomplete"; keys: number; bytes: number; parts: number }
   /**
    * A key over the backup's ceiling (BACKUP_KEY_MAX_BYTES, lib/backup-parts.ts): every other key copied as a verified
    * set (`id`), but `missing` keys left out, so it is never the last good copy: the mark stays on the previous one,
@@ -294,8 +384,13 @@ export function backupKey(): Uint8Array | null {
   return keyFrom(process.env.BACKUP_ENCRYPTION_KEY);
 }
 
-/** Days after a rotation that the previous key still opens copies (inbox C4-36 item 3): the retention's 30, twice. */
-export const BACKUP_KEY_PREVIOUS_DAYS = 60;
+/**
+ * Days after a rotation that the previous key still opens copies: the 120-day cap, BACKUP_MAX_COPY_DAYS
+ * (C1-20261109-0025-C4-47 item 1; 60 before, inbox C4-36 item 3). The bucket's rule keeps any object up to that cap,
+ * and the lost path must open every manifest it may still list, or it stops at room_unverified. A key rotated because
+ * it leaked is removed from the deployment at once instead (docs/backup.md), whatever this says.
+ */
+export const BACKUP_KEY_PREVIOUS_DAYS = BACKUP_MAX_COPY_DAYS;
 
 /**
  * The keys a run uses (inbox C4-36 item 3): the current key (BACKUP_ENCRYPTION_KEY) writes and reads; after a
@@ -407,7 +502,10 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
     return { ok: false, reason: "mark_error" };
   }
 
-  const cutoff = Date.now() + Math.min(options.cutoffMs ?? BACKUP_RUN_CUTOFF_MS, BACKUP_RUN_CUTOFF_MS);
+  const started = Date.now();
+  const cutoff = started + Math.min(options.cutoffMs ?? BACKUP_RUN_CUTOFF_MS, BACKUP_RUN_CUTOFF_MS);
+  // No key begun past it (C1-20261109-1525-C4-68 item 3): the copy pauses and the day's next run goes on.
+  const stopAt = started + BACKUP_COPY_DEADLINE_MS;
   // Set when the last good copy was found lost while making room: the owner's report says so.
   let lost = false;
   // The base and hold the outcome keeps with the new copy's mark, or the mark left as it is: until the prune's check
@@ -415,17 +513,49 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   let mark = "keep" as MarkPlan;
   let markReply: Promise<unknown> | null = null;
   const readMark: MarkReader = () => (markReply ??= redisPipeline([["GET", LAST_OK]]));
+  // What the outcome does with the progress: keep it as it is, keep a new one, or let it go.
+  let progress: { set: string } | "keep" | "drop" = "keep";
   const result: BackupRunResult = await withCutoff(cutoff, async () => {
-    const room = await makeRoom(review, store, readers, now, readMark);
+    // A paused copy of the same UTC day, read exactly (rule 24): one reply, text or nothing.
+    let resume: StoredProgress | null;
+    let had: boolean;
+    try {
+      const reply: unknown = await redisPipeline([["GET", PROGRESS]]);
+      if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) return { ok: false, reason: "mark_error" };
+      had = reply[0] !== null;
+      resume = reply[0] === null ? null : readProgress(reply[0]);
+    } catch (error) {
+      if (!(error instanceof UnreadableProgress)) return { ok: false, reason: "mark_error" };
+      progress = "drop";
+      return { ok: false, reason: "resume_unreadable" };
+    }
+    // Its window is the UTC day of its first run: a later day starts a new copy.
+    if (resume && (resume.at > now || dayOf(resume.at) !== dayOf(now))) resume = null;
+    const resumeIds = resume ? resume.progress.parts.map((part) => (resume!.folder ?? "") + part.id) : [];
+    const room = await makeRoom(review, store, readers, now, readMark, resumeIds);
     lost = room.lost;
     if (!room.ok) return { ok: false, reason: room.reason };
-    const copied = await copy(review, store, key, now);
+    // Its parts must all still be there, or it is never resumed: the run copies afresh.
+    if (resume && !resumeIds.every((id) => room.listed.some((o) => o.id === id))) resume = null;
+    // The month's copy (inbox C4-37 item 4): written in a folder of its own while the bucket shows no mark for the month;
+    // a resumed copy stays in the folder its first run chose.
+    const month = monthOf(now);
+    const folder = resume ? resume.folder : room.listed.some((o) => BACKUP_MONTH_MARK.exec(o.id)?.[1] === month) ? null : `monthly/${month}/${randomUUID()}/`;
+    const copied = await copy(review, store, key, now, folder, resume, stopAt);
+    if (!copied.ok && copied.reason === "copy_incomplete") {
+      // Kept for the day's next run, with the copy's start and folder; never a set, never pruned after.
+      const value = JSON.stringify({ v: 1, at: resume?.at ?? now, folder, progress: copied.progress });
+      progress = Buffer.byteLength(value, "utf8") <= progressBound(review) ? { set: value } : "drop";
+      return { ok: false, reason: "copy_incomplete", keys: copied.keys, bytes: copied.bytes, parts: copied.parts };
+    }
+    // Closed (a set, whole or with keys left out): its progress is done with.
+    if (copied.ok || copied.reason === "export_key_over_ceiling") progress = had ? "drop" : "keep";
     // A failed day deletes nothing after it (Codex G on e95705e66): the last good copy stays, past the retention if
     // need be, until a new one is verified.
     if (!copied.ok) return copied;
     // After a verified write, as best it can: a failure is reported and never costs the copy just made. The copy just
     // made is the last verified one now, and it is younger than the retention.
-    const pruned = await prune(review, store, readers, now, copied, readMark);
+    const pruned = await prune(review, store, readers, now, copied, readMark, folder);
     mark = pruned.mark;
     return { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state, ...(lost ? { note: "last_good_copy_lost" as const } : {}) };
   });
@@ -448,8 +578,12 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
               : lost
                 ? [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: "last_good_copy_lost", note: LOST_NOTE }), "EX", keep]]
                 : []),
+            ...progressCommands(progress),
           ]
-        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...("missing" in result ? { missing: result.missing, set: result.id } : {}), ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]],
+        : [
+            ["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...("missing" in result ? { missing: result.missing, set: result.id } : {}), ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep],
+            ...progressCommands(progress),
+          ],
     );
   } catch {
     // The copy stands as it is; a lost note only makes the report look older.
@@ -457,6 +591,32 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   await letGo();
   return result;
 }
+
+/** The progress as kept: the copy's start (its window's moment), its folder, and where it stopped. */
+type StoredProgress = { at: number; folder: string | null; progress: CopyProgress };
+/** A kept progress that cannot be read: never taken as none (rule 24). */
+class UnreadableProgress extends Error {}
+const FOLDER = /^monthly\/\d{4}-(?:0[1-9]|1[0-2])\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/$/;
+
+/** The kept progress read exactly: its version, a moment, a folder of a month's copy or none, and a valid progress. */
+function readProgress(raw: string): StoredProgress {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    const { v, at, folder, progress, ...rest } = parsed as Record<string, unknown>;
+    if (v !== 1 || Object.keys(rest).length > 0 || !isCount(at) || (folder !== null && (typeof folder !== "string" || !FOLDER.test(folder)))) throw new Error("not a progress");
+    return { at, folder, progress: validProgress(progress) };
+  } catch {
+    throw new UnreadableProgress();
+  }
+}
+
+/** The most a kept progress weighs, in bytes: a manifest's bound for the review's parts (priced in lib/backup-cost.ts). */
+export const progressBound = (review: BackupCostReview) => manifestBound(runLimits(review).maxParts);
+
+/** The outcome's command for the progress: none, a new one kept two days, or the old one let go. */
+const progressCommands = (plan: { set: string } | "keep" | "drop"): (string | number)[][] =>
+  plan === "keep" ? [] : plan === "drop" ? [["DEL", PROGRESS]] : [["SET", PROGRESS, plan.set, "EX", PROGRESS_SECONDS]];
 
 /** Every object of the backup's own, read whole within backupListPages pages; null when the listing is longer. */
 async function listAll(review: BackupCostReview, store: BackupBucket): Promise<BackupListedObject[] | null> {
@@ -499,7 +659,7 @@ async function lastVerified(store: BackupBucket, key: Uint8Array[], listed: Back
   if (!Array.isArray(replies) || replies.length !== 1 || typeof replies[0] !== "string") throw new Unverified();
   const mark = readLastOk(replies[0]);
   const set = mark?.set;
-  if (!mark || !set || !ID.test(set)) throw new Unverified();
+  if (!mark || !isSetId(set)) throw new Unverified();
   // Held (a shrunk or blind database): makeRoom keeps every object written before the hold, whatever the mark names.
   if (mark.heldSince !== null) return { keep: new Set(), heldSince: mark.heldSince };
   // Gone from the bucket (Reviewer 1 on e81007570): said as such; makeRoom then keeps every verified set still there.
@@ -510,7 +670,25 @@ async function lastVerified(store: BackupBucket, key: Uint8Array[], listed: Back
   } catch {
     throw new Unverified();
   }
-  return { keep: new Set([set, ...manifest.parts.map((part) => part.id)]), heldSince: mark.heldSince };
+  return { keep: new Set([set, ...manifest.parts.map((part) => folderOf(set) + part.id)]), heldSince: mark.heldSince };
+}
+
+/**
+ * The 3 newest months' copies (inbox C4-37 item 4), from the listing alone: each month's first mark (the earliest
+ * written; ties by run), the 3 newest months, and every listed object in those marks' folders, the marks included.
+ */
+function monthlyKept(listed: BackupListedObject[]): Set<string> {
+  const first = new Map<string, { run: string; at: number }>();
+  for (const object of listed) {
+    const mark = BACKUP_MONTH_MARK.exec(object.id);
+    if (!mark) continue;
+    const [, month, run] = mark;
+    const was = first.get(month);
+    if (!was || object.writtenAt < was.at || (object.writtenAt === was.at && run < was.run)) first.set(month, { run, at: object.writtenAt });
+  }
+  const months = [...first.keys()].sort().reverse().slice(0, BACKUP_MONTHLY_COPIES);
+  const folders = new Set(months.map((month) => `monthly/${month}/${first.get(month)!.run}/`));
+  return new Set(listed.filter((o) => folders.has(folderOf(o.id))).map((o) => o.id));
 }
 
 /**
@@ -521,19 +699,21 @@ async function lastVerified(store: BackupBucket, key: Uint8Array[], listed: Back
  * be known; one that does not begin as a manifest is not one. Reads at most backupKeptObjects objects (Class B, priced
  * in lib/backup-cost.ts).
  */
-async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<Set<string>> {
-  return (await setsInBucket(store, key, listed)).keep;
+async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[], months: Set<string>): Promise<Set<string>> {
+  return (await setsInBucket(store, key, listed, months)).keep;
 }
 
 /**
  * verifiedInBucket's reads, with each verified set's keys and bytes as its run counted them (the manifest's rows; its
  * parts' sizes and the manifest's own), so a copy with no mark can be compared with them (Claude 6's N1).
  */
-async function setsInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<{ keep: Set<string>; sets: BackupBase[] }> {
+async function setsInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[], months: Set<string>): Promise<{ keep: Set<string>; sets: BackupBase[] }> {
   const keep = new Set<string>();
   const sets: BackupBase[] = [];
   for (const object of listed) {
-    if (object.bytes > manifestBound(MAX_PARTS)) continue;
+    // A month's mark is empty and never a manifest, and the 3 months' copies are kept by name (monthlyKept), so
+    // neither is read: a month's copy older than the previous key's days does not stop the run.
+    if (object.bytes > manifestBound(MAX_PARTS) || BACKUP_MONTH_MARK.test(object.id) || months.has(object.id)) continue;
     if (timeLeft() <= 0) throw new RangeError("cutoff");
     let bytes: Uint8Array;
     try {
@@ -544,7 +724,7 @@ async function setsInBucket(store: BackupBucket, key: Uint8Array[], listed: Back
     try {
       const manifest = openManifest(bytes, key);
       keep.add(object.id);
-      for (const part of manifest.parts) keep.add(part.id);
+      for (const part of manifest.parts) keep.add(folderOf(object.id) + part.id);
       sets.push({ keys: manifest.rows, bytes: manifest.parts.reduce((n, part) => n + part.bytes, 0) + bytes.byteLength });
     } catch {
       if (isManifestEnvelope(bytes)) throw new Unverified();
@@ -556,7 +736,8 @@ async function setsInBucket(store: BackupBucket, key: Uint8Array[], listed: Back
 
 /**
  * Before the write (step 1): room for one more set at its bound under the review's ceiling, in bytes and in objects,
- * made by deleting the oldest copies first and never the last verified one; or a reason, and nothing written. When
+ * made by deleting the oldest copies first and never the last verified one nor the 3 newest months' copies; or a
+ * reason, and nothing written. With room, the listing it read, for the month's copy (runBackup). When
  * the last good copy is lost (the bucket's rule took it), room is made from objects of no verified set only, every
  * verified set still there is kept, and `lost` says so for the owner's report. While the prune is held (the mark's
  * heldSince: a shrunk or blind database, review of 9 November 2026), room is made only from the copies written since
@@ -570,9 +751,10 @@ async function makeRoom(
   key: Uint8Array[],
   now: number,
   readMark: MarkReader,
-): Promise<{ ok: true; deleted: number; lost: boolean } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"; lost: boolean }> {
+  resumeIds: readonly string[] = [],
+): Promise<{ ok: true; deleted: number; lost: boolean; listed: BackupListedObject[] } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"; lost: boolean }> {
   const need = objectBound(review);
-  const objects = runLimits(review).maxParts + 1;
+  const objects = setObjects(review);
   const most = backupKeptObjects(review);
   let lost = false;
   try {
@@ -581,7 +763,8 @@ async function makeRoom(
     let bytes = listed.reduce((n, o) => n + o.bytes, 0);
     let count = listed.length;
     const fits = () => bytes + need <= review.maxStoredBytes && count + objects <= most;
-    if (fits()) return { ok: true, deleted: 0, lost };
+    if (fits()) return { ok: true, deleted: 0, lost, listed };
+    const months = monthlyKept(listed);
     let keep: Set<string>;
     let heldSince: number | null;
     try {
@@ -590,8 +773,11 @@ async function makeRoom(
       if (!(error instanceof LostLastGood)) throw error;
       lost = true;
       heldSince = error.heldSince;
-      keep = await verifiedInBucket(store, key, listed);
+      keep = await verifiedInBucket(store, key, listed, months);
     }
+    for (const id of months) keep.add(id);
+    // The paused copy this run goes on with: its parts are this run's set, never room.
+    for (const id of resumeIds) keep.add(id);
     // While the prune is held, every object written before the hold began is kept (a good, pre-shrink set), and room
     // is made only from the held copies, oldest first, the newest one too: each is a copy of the shrunk or blind
     // database, and every set from before is kept whole.
@@ -625,7 +811,7 @@ async function makeRoom(
       count -= 1;
       deleted += 1;
     }
-    if (fits()) return { ok: true, deleted, lost };
+    if (fits()) return { ok: true, deleted, lost, listed };
     return { ok: false, reason, lost };
   } catch (error) {
     if (error instanceof Unverified) return { ok: false, reason: "room_unverified", lost };
@@ -670,10 +856,12 @@ async function shrinkCheck(
 
 /**
  * After the write (step 2), as best it can: deletes every object of the backup's own written more than retentionDays
- * days before `now`, never one inside the bucket lock, and nothing when the new copy shrank or the last good set
- * cannot be known (shrinkCheck). Deletes are one by one (DeleteObject, free on R2). Also gives the mark the outcome
- * writes: the base and hold, or "keep" when the mark could not be read (or, with no mark, the listing or a read of the
- * bucket failed), so the next run decides again with nothing lost.
+ * days before `now`, never one inside the bucket lock nor of the 3 newest months' copies, and nothing when the new copy
+ * shrank or the last good set cannot be known (shrinkCheck). A copy written as its month's (`folder`) is marked first,
+ * only past that check; a mark that cannot be written deletes nothing ("prune_monthly"). Deletes are one by one
+ * (DeleteObject, free on R2). Also gives the mark the outcome writes: the base and hold, or "keep" when the mark could
+ * not be read (or, with no mark, the listing or a read of the bucket failed), so the next run decides again with
+ * nothing lost.
  */
 async function prune(
   review: BackupCostReview,
@@ -682,6 +870,7 @@ async function prune(
   now: number,
   copied: { id: string; keys: number; bytes: number; parts: number },
   readMark: MarkReader,
+  folder: string | null,
 ): Promise<{ deleted: number; state: BackupPruneState; mark: MarkPlan }> {
   const line = now - review.retentionDays * DAY_MS;
   const locked = lockLine(now);
@@ -702,9 +891,16 @@ async function prune(
       // ends once the database is back to its size and never stays for good. Not fallen (a first day's failed try,
       // a prune or an outcome write that failed once): this copy is the base. A failed try's leftover (no set opens)
       // is no copy. A bucket read that fails throws Unverified: nothing deleted and the mark left unwritten, so the
-      // next run decides again. These reads replace step 1's: with no mark it read none (lastVerified).
+      // next run decides again. These reads replace step 1's: with no mark it read none (lastVerified). The months'
+      // copies are kept by name and not read (a month's copy older than the previous key's days must not stop the
+      // run); with no other set to compare with, they are read for the comparison, and a month's mark (written only
+      // past a verified set) with no set that opens is unknown: nothing deleted, no mark written.
       if (listed.length > copied.parts + 1) {
-        const { sets } = await setsInBucket(store, key, listed.filter((o) => o.id !== copied.id));
+        const others = listed.filter((o) => o.id !== copied.id);
+        const months = monthlyKept(others);
+        let { sets } = await setsInBucket(store, key, others, months);
+        if (sets.length === 0 && months.size > 0) ({ sets } = await setsInBucket(store, key, others.filter((o) => months.has(o.id)), new Set()));
+        if (sets.length === 0 && others.some((o) => BACKUP_MONTH_MARK.test(o.id))) throw new Unverified();
         if (sets.length > 0) {
           const largest = { keys: Math.max(...sets.map((set) => set.keys)), bytes: Math.max(...sets.map((set) => set.bytes)) };
           if (shrank(copied.keys, largest.keys) || shrank(copied.bytes, largest.bytes)) return { deleted, state: "prune_shrunk", mark: { base: largest, heldSince: now } };
@@ -712,8 +908,19 @@ async function prune(
       }
       mark = { base: check.base, heldSince: null };
     }
+    if (folder !== null) {
+      // The month's copy, verified and not shrunk: marked, and only then kept as one of the months' copies.
+      const monthMark = `${folder}verified`;
+      try {
+        await store.putNew(monthMark, new Uint8Array(0));
+      } catch {
+        return { deleted, state: "prune_monthly", mark };
+      }
+      listed.push({ id: monthMark, writtenAt: now, bytes: 0 });
+    }
+    const months = monthlyKept(listed);
     for (const object of listed) {
-      if (object.writtenAt >= line || object.writtenAt > locked) continue;
+      if (months.has(object.id) || object.writtenAt >= line || object.writtenAt > locked) continue;
       if (timeLeft() <= 0) return { deleted, state: "prune_cutoff", mark };
       try {
         await store.delete(object.id);
@@ -730,18 +937,48 @@ async function prune(
   }
 }
 
-async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number): Promise<Exclude<BackupRunResult, { ok: true }> | { ok: true; id: string; keys: number; bytes: number; parts: number }> {
-  // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last.
+async function copy(
+  review: BackupCostReview,
+  store: BackupObjectStore,
+  key: Uint8Array,
+  now: number,
+  folder: string | null,
+  resume: StoredProgress | null,
+  stopAt: number,
+): Promise<
+  | Exclude<BackupRunResult, { ok: true } | { reason: "copy_incomplete" }>
+  | { ok: false; reason: "copy_incomplete"; keys: number; bytes: number; parts: number; progress: CopyProgress }
+  | { ok: true; id: string; keys: number; bytes: number; parts: number }
+> {
+  // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last; a
+  // month's copy with every object in its folder, its id the manifest's there.
+  const into: BackupObjectStore = folder === null ? store : { putNew: (id, bytes) => store.putNew(folder + id, bytes), read: (id, most) => store.read(folder + id, most) };
   let done: Awaited<ReturnType<typeof copyInParts>>;
   try {
-    done = await copyInParts({ maxRows: review.maxRows, maxCommands: review.maxCommands - BACKUP_RUN_COMMANDS, ...runLimits(review), batch: BATCH, now }, key, store);
+    // A resumed copy keeps its start as the moment its parts are sealed with, and reads the keys' ends against now.
+    done = await copyInParts(
+      {
+        maxRows: review.maxRows,
+        maxCommands: review.maxCommands - BACKUP_RUN_COMMANDS,
+        ...runLimits(review),
+        batch: BACKUP_DUMP_BATCH,
+        now: resume?.at ?? now,
+        readAt: now,
+        stopAt,
+        partMs: BACKUP_PART_CLOSE_MS,
+        ...(resume ? { resume: resume.progress } : {}),
+      },
+      key,
+      into,
+    );
   } catch {
     return { ok: false, reason: "export_error" };
   }
-  if (done.ok) return { ok: true, id: done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  if (done.ok) return { ok: true, id: (folder ?? "") + done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  if (done.reason === "paused") return { ok: false, reason: "copy_incomplete", keys: done.progress.keys, bytes: done.progress.bytes, parts: done.parts, progress: done.progress };
   // Sealing, a write or a read-back failed: every earlier set is left as it was.
   if (done.reason === "verify") return { ok: false, reason: "verify" };
-  if (done.reason === "key_over_ceiling") return { ok: false, reason: "export_key_over_ceiling", id: done.id, missing: done.missing, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  if (done.reason === "key_over_ceiling") return { ok: false, reason: "export_key_over_ceiling", id: (folder ?? "") + done.id, missing: done.missing, keys: done.keys, bytes: done.bytes, parts: done.parts };
   return { ok: false, reason: `export_${done.reason}` };
 }
 

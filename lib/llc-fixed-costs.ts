@@ -25,10 +25,18 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
  deploymentArtifacts: { currency: "USD", perGbMonthMinorEach: 10, products: ["Deployment Storage", "Functions Storage"], checked: "2026-10-30", published: "2026-10-09", source: "https://vercel.com/changelog/deployment-storage-pricing-expands-to-existing-teams", approvedCeiling: false },
  /** 273 [BK1]: the daily backup of the whole database (a company cost), its worst month from a review's caps by
   * lib/backup-cost.ts (backupWorstMonth): 64 runs (a run and a new try on 32 UTC days), R2 at the review's ceiling
-  * (retention + 2 sets; one run at a time writes only below it) with a GB-month and a million of each class of rounding,
-  * a Class A for each object's deletion and two listings a run, Upstash at every command and byte the caps allow (200
-  * SCAN pages a run at the most), no free quota. Not a reviewed ceiling: BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
- backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", approvedCeiling: false },
+  * (retention + 2 + 3 sets, backupPeakSets in lib/backup-run.ts: 35 for a 30-day retention, the 3 newest months' copies
+  * included; one run at a time writes only below it) with a GB-month and a million of each class of rounding,
+  * a Class A for each object's deletion (a month's mark included) and two listings a run, Upstash at every command and
+  * byte the caps allow (200 SCAN pages a run at the most), Vercel at its dearest region (gru1), one more billing block
+  * of each Upstash and Vercel unit, the batch of DUMPs read past the byte cap at Upstash's record cap, and every byte
+  * the function moves at Vercel's dearest transfer rate (the four lines of docs/backup-costs-2026-11-08.md, section 3,
+  * in the code since 9 November 2026), no free quota. No copy is kept past 120 days
+  * (BACKUP_MAX_COPY_DAYS, the bucket's lifecycle rule: backupLifecycleDays). It prices the database copy only: the files
+  * and videos copy's Cloudflare Worker (the Workers Paid $5 monthly minimum an account and its CPU,
+  * docs/backup-costs-2026-11-08.md on #3271) is not in it yet and must be before any review. Not a reviewed ceiling:
+  * BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
+ backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", covers: "the database copy only; the files and videos Worker is not priced yet", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

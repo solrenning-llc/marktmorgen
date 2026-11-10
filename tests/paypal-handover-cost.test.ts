@@ -159,7 +159,12 @@ async function main(): Promise<void> {
 
   part("Each PayPal sale: the list's ZADD when settled and its ZREM once handed over");
   const healthy = await buy("healthy@example.com");
-  const saleList = healthy.sent.filter((c) => c[1] === handOverKey(statsId)).map((c) => String(c[0]));
+  // Since 9 November 2026 the list's ZADD is written inside settle's one step (lib/paypal-sales.ts PAYPAL_SETTLE, an
+  // EVAL naming the list among its KEYS and doing exactly one ZADD on it): counted as that ZADD. Rule 23: only this
+  // filter changed; the expected commands and the registry's listCommandsPerSale (2) are the same (Claude 5).
+  const settleZadd = (c: Commands[number]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:paypal-settle:v1\n")
+    && c.slice(3, 3 + Number(c[2])).includes(handOverKey(statsId));
+  const saleList = healthy.sent.filter((c) => c[1] === handOverKey(statsId) || settleZadd(c)).map((c) => (settleZadd(c) ? "ZADD" : String(c[0])));
   is("a healthy return sends two commands to the list", saleList, ["ZADD", "ZREM"]);
   is("as the registry states", saleList.length, declared?.listCommandsPerSale);
 

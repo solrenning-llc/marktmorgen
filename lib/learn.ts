@@ -238,6 +238,7 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
     const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];

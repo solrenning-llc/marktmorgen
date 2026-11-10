@@ -969,7 +969,7 @@ export async function readOrder(
     session = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription&expand[]=payment_intent.latest_charge&expand[]=payment_intent.payment_method`,
+      `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription&expand[]=subscription.latest_invoice&expand[]=payment_intent.latest_charge&expand[]=payment_intent.payment_method`,
     );
   } catch (error) {
     if (error instanceof StripeError && error.status === 404) {

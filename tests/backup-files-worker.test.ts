@@ -492,6 +492,41 @@ async function main(): Promise<void> {
   is("each source copied under its own folder", [copies(S, "blob").length, copies(S, "r2").length, report.heartbeat], [2, 3, true]);
   is("a store's file is never put in the videos' bucket", videos.under("copies/").length, 0);
 
+  part("the records written into the backup bucket go after their 92 days (Claude 2, MEDIUM 3 on #3349)");
+  fresh();
+  const keep10 = objects("blob", S, 10);
+  setListing("blob", S, keep10);
+  await runAt(0);
+  world.records = [{ source: "blob", key: keep10[0].key, recordedAt: DAY0 + DAY + 60_000, reason: "privacy_request" }];
+  setListing("blob", S, keep10.slice(1));
+  await runAt(1);
+  const recordFiles = () => files.under(`deletions/${iso(DAY0 + DAY)}/`);
+  is("the day's records are written as received", recordFiles().length, 1);
+  report = await runAt(1 + 91);
+  is("91 days after: the record applied, its file still kept", [recordFiles().length, has(report, "delete_failed")], [1, false]);
+  files.deleteFault = (key) => key.startsWith("deletions/");
+  report = await runAt(1 + 92);
+  is("92 days after, a delete that fails: alarmed, the file kept for the next day, no heartbeat", [recordFiles().length, has(report, "delete_failed"), report.heartbeat], [1, true, false]);
+  files.deleteFault = () => false;
+  report = await runAt(1 + 93);
+  is("the next day it goes, and nothing else of that day is left under deletions/", [recordFiles().length, files.under("deletions/").length, has(report, "delete_failed")], [0, 0, false]);
+  const asked = files.log.length;
+  report = await runAt(1 + 94);
+  is("and that day is not asked again", [files.log.slice(asked).some((l) => l.startsWith(`delete deletions/${iso(DAY0 + DAY)}/`)), has(report, "delete_failed")], [false, false]);
+
+  part("a day of mass deletions is read in linear time (Claude 2, MEDIUM 4 on #3349)");
+  fresh();
+  setListing("blob", S, objects("blob", S, 2));
+  await runAt(0);
+  const massive = objects("blob", S, 60_000, 1, 1, 10).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "store_closed" as const }));
+  world.records = [...massive, ...massive.slice(0, 1000)];
+  const startedAt = performance.now();
+  report = await runAt(1);
+  const tookMs = performance.now() - startedAt;
+  const inbox = (files.json(`state/stores/${S}.json`) as { sources?: { blob?: { pending?: unknown[] } } } | null)?.sources?.blob?.pending?.length;
+  is("61 pages of 1,000 records, 1,000 named twice: 60,000 pending, each once", inbox, 60_000);
+  is(`in well under the Worker's CPU limit (took ${Math.round(tookMs)} ms; a scan of the inbox for each record takes many seconds)`, tookMs < 6_000, true);
+
   done();
 }
 

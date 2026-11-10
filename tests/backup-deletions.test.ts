@@ -19,7 +19,12 @@
  *   - a record past the store's month ceiling; a list or count kept without
  *     its expiry.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { deleteFile } from "@/lib/file-store";
+import { PERSON_DATA } from "@/lib/person-data";
+import { FAMILIES } from "./store-data-registry";
+import { setDeletionRecordsReview } from "./backup-files-review-fixture";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { deletionWorld, resetDeletionWorld } from "./backup-deletions-world";
 import { store as redis } from "./redis-stub";
@@ -70,6 +75,7 @@ function reset(on = true): void {
   vaultDeletes = [];
   vaultStatus = 204;
   logged = [];
+  setDeletionRecordsReview(true);
   if (on) process.env.BACKUP_FILES_ROUTE_SECRET = SECRET;
   else delete process.env.BACKUP_FILES_ROUTE_SECRET;
   process.env.CRON_SECRET = "cron-secret-synthetic-0123456789abcdef";
@@ -174,6 +180,42 @@ async function main(): Promise<void> {
   deletionWorld.pages = [{ blobs: [{ pathname: `stores/${F}/stamped/aaaa/one.pdf` }, { pathname: `stores/${F}/stamped/aaaa/two.pdf` }], hasMore: false }];
   await dropStamped(original);
   is("both copies deleted and recorded as the site's clean-up", ((await kept()) as { key: string; reason: string }[]).map((r) => r.reason), ["site_cleanup", "site_cleanup"]);
+
+
+  part("the route on is not the records on: they have a review of their own (Claude 2, MEDIUM 2 on #3349)");
+  reset();
+  setDeletionRecordsReview(false);
+  await deleteFile([blobFile(F, "a.pdf"), vaultFile(F, "b.pdf")]);
+  is("no record review: both files deleted, no record and no database command", [deletionWorld.deleted.flat(), vaultDeletes, commands.length], [[blobFile(F, "a.pdf")], [vaultFile(F, "b.pdf")], 0]);
+
+  part("a record never weighs more than RECORD_BYTES_MOST (Claude 2, MEDIUM 2 on #3349)");
+  reset();
+  const wide = `stores/${F}/prod1/${"é".repeat(500)}.pdf`;
+  await deleteFile(wide);
+  is("a key of 525 characters but more than 1,024 bytes: deleted, no record, logged as missed", [deletionWorld.deleted.flat(), (await kept()).length, logged.some((l) => l.includes("deletion record"))], [[wide], 0, true]);
+  reset();
+  const quoted = `stores/${F}/prod1/${'"'.repeat(300)}${"a".repeat(650)}.pdf`;
+  await deleteFile(quoted);
+  is("a key within 1,024 bytes whose record escapes past 1,200: deleted, no record", [deletionWorld.deleted.flat().length, (await kept()).length], [1, 0]);
+  reset();
+  const fits = `stores/${F}/prod1/${"a".repeat(974)}.pdf`;
+  await deleteFile(fits);
+  const one = (await realPipeline([["LRANGE", dayList(), 0, -1]])) as [string[]];
+  is("a key of exactly 1,024 bytes is kept, its record within the bound", [one[0].length, Buffer.byteLength(one[0][0] ?? "", "utf8") <= 1_200], [1, true]);
+
+  part("what the records hold about people is said, with its purpose and how long (Claude 2, MEDIUM 3 on #3349)");
+  const line = PERSON_DATA.find((d) => d.file === "lib/backup-deletions.ts");
+  is("lib/person-data.ts has a kept line for the records, with why", [line?.how, line && "why" in line && line.why.length > 20], ["kept", true]);
+  is("it says what they carry and how long", !!line && /fingerprint/i.test(line.what) && /file name/i.test(line.what) && /14 days/.test(line.what) && /92 days/.test(line.what), true);
+  const family = FAMILIES["nl:backup:del:@lib/backup-deletions.ts"];
+  const familyText = JSON.stringify(family ?? null);
+  is("the data registry no longer says a record holds no person", [familyText.includes("never a person"), /fingerprint/i.test(familyText)], [false, true]);
+
+  part("each deletion is recorded with its own reason (Claude 2, LOW 1 on #3349)");
+  const source = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
+  is("a person's erasure: privacy_request", /deleteFile\(unique, "privacy_request"\)/.test(source("lib/person-erasure.ts")), true);
+  is("the never-attached uploads' sweep: site_cleanup", /sweepTaskUploads\(\(paths\) => deleteFile\(paths, "site_cleanup"\)\)/.test(source("app/api/cron/courses/route.ts")), true);
+  is("the task route's own refusals: site_cleanup, every one", [...source("app/api/store/course/task/route.ts").matchAll(/deleteFile\(path(?:, "(site_cleanup)")?\)/g)].map((m) => m[1] ?? "none"), ["site_cleanup", "site_cleanup", "site_cleanup", "site_cleanup"]);
 
   console.error = realError;
   done();

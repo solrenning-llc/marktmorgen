@@ -21,11 +21,16 @@
  */
 import * as route from "@/app/api/backup/files/route";
 import { parseDeletionPage, parseStoresPage } from "@/lib/backup-files-contract";
+import * as stores from "@/lib/backup-stores";
+import { admitFilesReview } from "@/lib/backup-files-source";
+import { MAX_STORE_BYTES } from "@/lib/store";
+import { UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS } from "@/lib/spend-cost-table";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { storeFolder } from "@/lib/store";
 import { blobWorld, resetBlobWorld } from "./backup-files-world";
+import { setDeletionRecordsReview } from "./backup-files-review-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -54,6 +59,7 @@ function reset(): void {
   redis.clear();
   commands = [];
   inject = null;
+  setDeletionRecordsReview(true);
   process.env.BACKUP_FILES_ROUTE_SECRET = SECRET;
   process.env.CRON_SECRET = "cron-secret-synthetic-0123456789abcdef";
 }
@@ -233,6 +239,71 @@ async function main(): Promise<void> {
   for (const query of ["?page=stores&source=blob", "?page=deletions&store=0123456789abcdef0123456789abcdef", "?page=other", "?page=stores&page=stores"]) {
     is(`${query}: 400`, (await call(query)).status, 400);
   }
+
+  part("each page kind has its own reviewed figure (Claude 2, MEDIUM 1 on #3349)");
+  reset();
+  const dayKey = (kind: string) => `nl:backup:files:day:${new Date().toISOString().slice(0, 10)}:${kind}`;
+  await realPipeline([["SET", dayKey("stores"), "30", "EX", 86_400]]);
+  answer = await call("?page=stores");
+  is("past the review's 30 stores pages (its listing figure is 40): 429, no SCAN", [answer.status, errorOf(answer), scans()], [429, "day_ceiling", 0]);
+  const base = { maxPagesPerDay: 40, maxStoresPagesPerDay: 30, maxDeletionsPagesPerDay: 40, reviewedAt: "2026-11-08", source: "synthetic" };
+  is("a review admitted with its three figures", admitFilesReview(base) !== null, true);
+  for (const missing of ["maxStoresPagesPerDay", "maxDeletionsPagesPerDay"]) {
+    const { [missing]: _gone, ...rest } = base as Record<string, unknown>;
+    is(`a review without ${missing} is no review: the route stays off`, admitFilesReview(rest), null);
+    is(`a review with ${missing} at 0 is no review`, admitFilesReview({ ...base, [missing]: 0 }), null);
+  }
+
+  part("the stores page is priced, and reads at most its priced records (Claude 2, MEDIUM 1 on #3349)");
+  const priced = stores as unknown as Record<string, unknown>;
+  const reads = priced.BACKUP_STORES_READS_PER_PAGE;
+  is("at most the 50 found plus one SCAN step's 200 records a page", reads, stores.BACKUP_STORES_FOUND_PER_PAGE + stores.BACKUP_STORES_SCAN_COUNT);
+  is("its worst page: every SCAN and every GET, each record at MAX_STORE_BYTES", [priced.BACKUP_STORES_PAGE_COMMANDS, priced.BACKUP_STORES_PAGE_BYTES], [stores.BACKUP_STORES_SCANS_PER_PAGE + 250, 250 * MAX_STORE_BYTES]);
+  const price = typeof priced.backupStoresPageWorstMicroUsd === "function" ? (priced.backupStoresPageWorstMicroUsd as () => number)() : null;
+  is(
+    "and its price at Upstash's paid commands and transfer, never zero",
+    price,
+    Math.ceil(((stores.BACKUP_STORES_SCANS_PER_PAGE + 250) * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1e6 + (250 * MAX_STORE_BYTES * UPSTASH_MICRO_USD_PER_GB_TRANSFER) / 1e9),
+  );
+  reset();
+  for (let n = 1; n <= 260; n++) await seedStore(n, storeValue(`m${n}@x.test`, { tier: "pro" }));
+  inject = pagedScan(260);
+  answer = await call("?page=stores");
+  is("one SCAN step that names 260 stores: 503, not one record read past the bound", [answer.status, errorOf(answer), commands.filter((c) => c[0] === "GET").length], [503, "stores_unavailable", 0]);
+
+  part("each round of records is read as it arrives (Claude 2, MEDIUM 1 on #3349)");
+  reset();
+  await seedStore(1, storeValue("bad@x.test", { tier: "gold" }));
+  for (let n = 2; n <= 30; n++) await seedStore(n, storeValue(`r${n}@x.test`, { tier: "pro" }));
+  inject = pagedScan(30);
+  answer = await call("?page=stores");
+  is("a record that does not read in the first round: 503, and no other round is asked", [answer.status, commands.filter((c) => c[0] === "GET").length], [503, 10]);
+
+  part("the stores page past its cutoff between rounds: the stores read so far, resumed at the SCAN step, none lost");
+  reset();
+  for (let n = 1; n <= 30; n++) await seedStore(n, storeValue(`c${n}@x.test`, { tier: "pro" }));
+  inject = pagedScan(30);
+  let late = false;
+  const realInject = inject;
+  inject = (list) => {
+    const answerOf = realInject(list);
+    if (list[0][0] === "GET") late = true;
+    return answerOf;
+  };
+  const cut = await stores.backupStoresPage(null, { now: () => (late ? 10_000 : 0), stopAt: 5_000 });
+  is("cut after its first round: 10 stores, not complete, by the cutoff", [cut.stores.length, cut.complete, cut.reason], [10, false, "cutoff"]);
+  is("its cursor goes back to the SCAN step whose records were not all read", cut.cursor === null ? null : stores.decodeStoresCursor(cut.cursor), "0");
+  inject = realInject;
+  const rest2 = await stores.backupStoresPage(cut.cursor === null ? null : stores.decodeStoresCursor(cut.cursor), { stopAt: Date.now() + 60_000 });
+  is("the next call reads every store of that step, complete", [new Set([...cut.stores, ...rest2.stores].map((s) => s.store)).size, rest2.complete], [30, true]);
+
+  part("the deletions page while the deletion records have no review of their own (Claude 2, MEDIUM 2 on #3349)");
+  reset();
+  setDeletionRecordsReview(false);
+  answer = await call("?page=deletions");
+  is("503 deletions_unavailable, never an empty page; nothing read or counted", [answer.status, errorOf(answer), lranges(), commands.length], [503, "deletions_unavailable", 0, 0]);
+  is("the stores page still answers", (await call("?page=stores")).status, 200);
+  setDeletionRecordsReview(true);
   done();
 }
 

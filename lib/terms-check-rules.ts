@@ -78,6 +78,8 @@ export type TermsCheckInput = {
    * plain facts, not urgency.
    */
   asAd?: boolean;
+  /** Additional refusals this caller needs to retain within the warning cap. */
+  keep?: ReadonlySet<TermsWarningKind>;
   /** Whether the creator has said they hold a license to sell this content (the Terms' resale rule). */
   resaleLicense: boolean;
 };
@@ -246,13 +248,14 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
   const text = typeof input.text === "string" ? input.text.slice(0, MAX_TEXT) : "";
   const out: TermsWarning[] = [];
   const seen = new Set<string>();
+  const mustKeep = (kind: TermsWarningKind) => BLOCKING_KINDS.has(kind) || input.keep?.has(kind) === true;
   const add = (kind: TermsWarningKind, index: number, length: number, why: string, fix: string, replacement?: string) => {
     const key = `${kind}:${text.slice(index, index + length).toLowerCase()}`;
     if (seen.has(key)) return;
     if (out.length >= MAX_WARNINGS) {
       // Advisory warnings must never hide a reason to refuse publication.
-      if (!BLOCKING_KINDS.has(kind)) return;
-      const advisory = out.findIndex((warning) => !BLOCKING_KINDS.has(warning.kind));
+      if (!mustKeep(kind)) return;
+      const advisory = out.findIndex((warning) => !mustKeep(warning.kind));
       if (advisory === -1) return;
       out.splice(advisory, 1);
     }

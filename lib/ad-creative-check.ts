@@ -166,6 +166,7 @@ export function checkAdText(ad: AdText, context: AdContext): AdCheck {
       resaleLicense: true,
       // The wider urgency phrases and "from $X" as a price; positions are in the read line, not the raw one.
       asAd: true,
+      keep: REFUSED,
     });
     for (const w of found) {
       const finding = { field, rule: w.kind, excerpt: w.excerpt, why: w.why, fix: w.fix };

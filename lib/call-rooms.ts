@@ -40,6 +40,7 @@
  */
 import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
 import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -68,6 +69,22 @@ export function isVideoRoom(url: string | null | undefined): boolean {
 
 const bookingKey = (callsId: string, session: string) => `nl:call:room:${callsId}:b:${session}`;
 const timeKey = (callsId: string, product: string, start: number) => `nl:call:room:${callsId}:t:${product}:${start}`;
+
+/**
+ * Room keys read at one MGET at the most: a booking's four (its own room, its
+ * time's, and its meeting record under both names), so ROOM_KEYS_PER_MGET / 4
+ * bookings a command, every MGET of a reading in one trip (calendar-feed room,
+ * 10 November 2026). Upstash bills an MGET as one command whatever its keys;
+ * the bytes it moves are priced where the reading is (lib/read-ceilings.ts).
+ */
+export const ROOM_KEYS_PER_MGET = 100;
+/** Keys roomsFor reads for each booking asked about. */
+export const ROOM_KEYS_PER_BOOKING = 4;
+/** The MGETs roomsFor's reads take for this many bookings; a count that is not a number is never priced low. */
+export function roomReads(bookings: number): number {
+  if (Number.isNaN(bookings) || bookings === Number.POSITIVE_INFINITY) return Number.POSITIVE_INFINITY;
+  return bookings > 0 ? Math.ceil((bookings * ROOM_KEYS_PER_BOOKING) / ROOM_KEYS_PER_MGET) : 0;
+}
 
 /** One booked seat, as much of it as picks its room. */
 export type RoomAsk = {
@@ -107,24 +124,35 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
     return out;
   }
   if (!callsId || !isRedisConfigured() || asks.length === 0) return asks.map((a) => roomFor(a.setup, a.start));
-  const read = await redisPipeline(
-    asks.flatMap((a) => [
-      ["GET", bookingKey(callsId, a.session)],
-      ["GET", timeKey(callsId, a.product, a.start)],
-      // Asked for every booking, not only those of a product set to make
-      // meetings now, and under both of its possible names, since a call can
-      // go from one seat to several: a booking keeps the link it was given.
-      ["GET", recordKey(callScope(callsId, { group: false, session: a.session, product: a.product, start: a.start }))],
-      ["GET", recordKey(callScope(callsId, { group: true, session: a.session, product: a.product, start: a.start }))],
-    ]),
-  );
+  const keys = asks.flatMap((a) => [
+    bookingKey(callsId, a.session),
+    timeKey(callsId, a.product, a.start),
+    // Asked for every booking, not only those of a product set to make
+    // meetings now, and under both of its possible names, since a call can
+    // go from one seat to several: a booking keeps the link it was given.
+    recordKey(callScope(callsId, { group: false, session: a.session, product: a.product, start: a.start })),
+    recordKey(callScope(callsId, { group: true, session: a.session, product: a.product, start: a.start })),
+  ]);
+  // ROOM_KEYS_PER_MGET keys at one MGET, every MGET in one trip: a command for each twenty-five bookings, not four a
+  // booking. Read only whole (rule 24): one reply per MGET, one value per key, each text or nothing; anything else is
+  // unknown and throws, never a booking taken to have no room (and one made in its place).
+  const lots: string[][] = [];
+  for (let i = 0; i < keys.length; i += ROOM_KEYS_PER_MGET) lots.push(keys.slice(i, i + ROOM_KEYS_PER_MGET));
+  const replies = repliesFor(await redisPipeline(lots.map((lot) => ["MGET", ...lot])), lots.length);
+  if (!replies) throw new UnknownReplyError("the bookings' rooms");
+  const read: (string | null)[] = [];
+  lots.forEach((lot, l) => {
+    const values = listSlots(replies[l]);
+    if (!values || values.length !== lot.length || !values.every((v) => v === null || typeof v === "string")) throw new UnknownReplyError("the bookings' rooms");
+    read.push(...(values as (string | null)[]));
+  });
   const found: (string | null)[] = asks.map((_, i) => {
-    const own = read[i * 4];
-    const shared = read[i * 4 + 1];
-    const meeting = givenLink(parseRecord(read[i * 4 + 2])) ?? givenLink(parseRecord(read[i * 4 + 3]));
+    const own = read[i * ROOM_KEYS_PER_BOOKING];
+    const shared = read[i * ROOM_KEYS_PER_BOOKING + 1];
+    const meeting = givenLink(parseRecord(read[i * ROOM_KEYS_PER_BOOKING + 2])) ?? givenLink(parseRecord(read[i * ROOM_KEYS_PER_BOOKING + 3]));
     if (meeting) return meeting;
-    if (isVideoRoom(own as string)) return own as string;
-    if (isVideoRoom(shared as string)) return shared as string;
+    if (isVideoRoom(own)) return own;
+    if (isVideoRoom(shared)) return shared;
     return null;
   });
   // A call made on Google Meet or Zoom that has no record yet is shown what it falls back to.

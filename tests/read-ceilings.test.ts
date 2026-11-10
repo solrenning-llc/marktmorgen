@@ -29,7 +29,7 @@ import {
   FeedGone, bookedCalendar, bookedCalendarFeed, calendarView, ensureFeedToken, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
-import { isVideoRoom, roomsFor } from "@/lib/call-rooms";
+import { ROOM_KEYS_PER_MGET as ROOM_KEYS_READ, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
@@ -322,6 +322,7 @@ async function main(): Promise<void> {
     const wrongType = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
     redis.pipeline = real;
     is("an MGET answered short, or with a value that is neither text nor nothing, is unknown and throws", [off, wrongType], ["unknown", "unknown"]);
+    is("the lot measured here is roomsFor's own", ROOM_KEYS_READ, ROOM_KEYS_PER_MGET);
   }
 
   part("A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)");

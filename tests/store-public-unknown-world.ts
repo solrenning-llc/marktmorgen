@@ -20,7 +20,6 @@ export default function sharp(bytes: Uint8Array) {
 }
 
 export class ImageResponse {
-  constructor(_element: unknown, _options: { width: number; height: number }) {}
   async arrayBuffer(): Promise<ArrayBuffer> {
     const bytes = new TextEncoder().encode("LETTER:");
     return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;

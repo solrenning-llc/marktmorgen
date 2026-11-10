@@ -7,7 +7,7 @@
  * before.
  */
 import { readFileSync } from "node:fs";
-import { DRAFTS_KEY, DRAFT_DAYS, MAX_DRAFTS, type DraftStorage, clearDraft, draftIds, forgetDrafts, readDraft, saveDraft } from "@/lib/inbox-drafts";
+import { DRAFTS_KEY, DRAFT_DAYS, MAX_DRAFTS, type DraftStorage, type ListedStorage, clearDraft, draftIds, draftScope, forgetDrafts, forgetEveryonesDrafts, personDrafts, readDraft, saveDraft } from "@/lib/inbox-drafts";
 import { MAX_MESSAGE } from "@/lib/inbox-rules";
 import { done, is, part } from "./check";
 
@@ -66,6 +66,23 @@ is("an unreadable entry reads as none, and the next draft replaces it", [readDra
 broken.map.set(DRAFTS_KEY, JSON.stringify({ [a]: { text: 5, at: t0 }, "../evil": { text: "x", at: t0 }, [b]: { text: "Ok", at: t0 + 30 * DAY } }));
 is("entries of the wrong shape, an id that is not a conversation's and a time in the future are ignored", [draftIds(broken, t0).size, saveDraft(broken, "../evil", "x", t0)], [0, false]);
 
+part("One person's drafts are theirs alone (review of #3521)");
+/** A browser's storage, in memory, with its keys listed. */
+function listed(): ListedStorage & { map: Map<string, string> } {
+  const map = new Map<string, string>();
+  return { map, getItem: (k) => map.get(k) ?? null, setItem: (k, v) => void map.set(k, String(v)), removeItem: (k) => void map.delete(k), get length() { return map.size; }, key: (i) => [...map.keys()][i] ?? null };
+}
+const shared = listed();
+const pia = personDrafts(shared, "pia@example.com"), ned = personDrafts(shared, "ned@example.com");
+saveDraft(pia, a, "Pia's answer, unsent", t0);
+is("a teammate on the same computer sees no draft of another, and gets none in the box", [draftIds(ned, t0).size, readDraft(ned, a, t0), readDraft(pia, a, t0)], [0, "", "Pia's answer, unsent"]);
+is("each person's entry is scoped, never named by the address", [[...shared.map.keys()].some((k) => k.includes("pia") || k.includes("@")), [...shared.map.keys()][0] === `${DRAFTS_KEY}:${draftScope("pia@example.com")}`, draftScope(" PIA@example.com") === draftScope("pia@example.com")], [false, true, true]);
+is("no person, no drafts", personDrafts(shared, " "), null);
+saveDraft(ned, b, "Ned's answer", t0);
+shared.setItem("other-app-key", "kept");
+is("the sign-in page forgets every person's drafts, and nothing else", [forgetEveryonesDrafts(shared), [...shared.map.keys()]], [true, ["other-app-key"]]);
+is("and a storage that refuses is said so, nothing thrown", forgetEveryonesDrafts({ ...blocked, length: 1, key: () => DRAFTS_KEY }), false);
+
 part("Never sent anywhere");
 const rules = readFileSync("lib/inbox-drafts.ts", "utf8");
 const studio = readFileSync("components/inbox-studio.tsx", "utf8").replace(/\s+/g, " ");
@@ -74,18 +91,19 @@ is("the inbox posts what it always posted: a draft is never part of a request", 
 
 part("In the inbox");
 is("typing, a saved reply and a suggestion all keep the draft", [studio.includes("onChange={(e) => typed(e.target.value)}"), studio.includes("if (picked) typed("), studio.includes('typed(String(answer.text ?? ""));')], [true, true, true]);
-is("opening a conversation brings its own draft back, never another's", [studio.includes("const kept = readDraft(browserDrafts(), id); const now = draftIds(browserDrafts()); setText(kept);"), studio.includes('setText(""); put(next.conversation); const url')], [true, false]);
-is("sending removes it", studio.includes('setText(""); clearDraft(browserDrafts(), next.conversation.id);'), true);
+is("opening a conversation brings its own draft back, never another's", [studio.includes("const kept = readDraft(browserDrafts(me), id); const now = draftIds(browserDrafts(me)); setText(kept);"), studio.includes('setText(""); put(next.conversation); const url')], [true, false]);
+is("sending removes it", studio.includes('setText(""); clearDraft(browserDrafts(me), next.conversation.id);'), true);
 is("the list says Draft beside a conversation that has one, not beside the one open", studio.includes('{drafted.has(x.id) && c?.id !== x.id ? <span className="tag shrink-0" data-inbox-draft="">Draft</span> : null}'), true);
 is(
   "the box says where its words are kept, and a kept or returned draft is read out politely",
-  [studio.includes('aria-describedby="inbox-draft-help"'), studio.includes("What you type is kept on this device only, as a draft for this conversation, until you send it or log out. It is never sent to us."), studio.includes('<p className="sr-only" role="status" aria-live="polite" data-inbox-draft-said="">{draftSaid}</p>'), studio.includes("is kept as a draft on this device.")],
+  [studio.includes('aria-describedby="inbox-draft-help"'), studio.includes("What you type is kept on this device only, for you, as a draft for this conversation, until you send it, you log out or your session ends, or for 7 days. It is never sent to us."), studio.includes('<p className="sr-only" role="status" aria-live="polite" data-inbox-draft-said="">{draftSaid}</p>'), studio.includes("is kept as a draft on this device.")],
   [true, true, true, true],
 );
 
 part("Logging out");
 const signin = readFileSync("app/signin/page.tsx", "utf8");
-is("the page every log-out lands on forgets the drafts", signin.includes('{status.startsWith("out") ? <ForgetInboxDrafts /> : null}'), true);
+is("the sign-in page forgets the drafts whatever brought the person there (a log-out, an expired or refused session, log in again)", [signin.includes("<ForgetInboxDrafts />"), signin.includes('status.startsWith("out") ? <ForgetInboxDrafts />')], [true, false]);
+is("and forgets every person's, not only one", readFileSync("components/forget-inbox-drafts.tsx", "utf8").includes("forgetEveryonesDrafts(browserStorage());"), true);
 const landings = ["app/api/auth/signout/route.ts", "app/api/auth/signout-all/route.ts"].flatMap((f) => [...readFileSync(f, "utf8").matchAll(/\/signin\?status=\$\{([^}]*)\}/g)].map((m) => m[1]));
 is("and both log-outs land on it with a status that starts with out", [landings.length, landings.every((expr) => [...expr.matchAll(/"([^"]+)"/g)].every((m) => m[1].startsWith("out")))], [2, true]);
 

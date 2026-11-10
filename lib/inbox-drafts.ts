@@ -12,11 +12,18 @@
  *
  *   - Send a draft anywhere. It is never written to the server: nothing new
  *     is stored, read or paid for by Marktmorgen.
- *   - Keep a draft for long. Each one goes when its answer is sent, when the
- *     creator logs out on this device (components/forget-inbox-drafts.tsx, on
- *     the page every log-out lands on) and DRAFT_DAYS after it was last
- *     typed, whichever comes first; and no more than MAX_DRAFTS are kept, the
- *     oldest going first.
+ *   - Show one person's draft to another. Each person signed in on this
+ *     device has their own entry, under a scope made from their account
+ *     (draftScope, never the address itself), and the inbox reads only the
+ *     signed-in person's: a teammate who logs in on the same computer never
+ *     sees, or sends, someone else's unsent words (review of #3521).
+ *   - Keep a draft for long. Each one goes when its answer is sent; every
+ *     person's go whenever the sign-in page is shown on this device, which is
+ *     where every log-out and every ended session lands (an expired or
+ *     refused session, "log in again", a log-out everywhere seen here;
+ *     components/forget-inbox-drafts.tsx); and DRAFT_DAYS after it was last
+ *     typed, whichever comes first. No more than MAX_DRAFTS are kept for a
+ *     person, the oldest going first.
  *   - Break the inbox when storage is blocked or full (a private window, a
  *     setting): every read and write is tried and, when it fails, the inbox
  *     works exactly as before, without drafts.
@@ -125,11 +132,64 @@ export function forgetDrafts(storage: DraftStorage | null): boolean {
   }
 }
 
-/** The browser's own storage, or null when there is none or it may not be touched. */
-export function browserDrafts(): DraftStorage | null {
+/** A whole storage, with its keys listed: what forgetting every person's drafts needs. */
+export type ListedStorage = DraftStorage & Pick<Storage, "length" | "key">;
+
+/** Removes every person's drafts from this device, as the sign-in page does; false when the storage refused. */
+export function forgetEveryonesDrafts(storage: ListedStorage | null): boolean {
+  if (!storage) return false;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key === DRAFTS_KEY || key?.startsWith(`${DRAFTS_KEY}:`)) keys.push(key);
+    }
+    for (const key of keys) storage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The scope of one person's drafts: a short hash of their account (FNV-1a,
+ * twice), so the address itself is never written in the browser's storage.
+ * Not a secret: it only keeps one person's drafts apart from another's.
+ */
+export function draftScope(who: string): string {
+  const text = who.trim().toLowerCase();
+  const hash = (seed: number) => {
+    let h = seed >>> 0;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  };
+  return `${hash(2166136261)}${hash(3735928559)}`;
+}
+
+/** One person's drafts in a storage: the same rules, under that person's own entry only. Null without a person. */
+export function personDrafts(storage: DraftStorage | null, who: string): DraftStorage | null {
+  if (!storage || !who.trim()) return null;
+  const key = (k: string) => (k === DRAFTS_KEY ? `${DRAFTS_KEY}:${draftScope(who)}` : k);
+  return {
+    getItem: (k) => storage.getItem(key(k)),
+    setItem: (k, v) => storage.setItem(key(k), v),
+    removeItem: (k) => storage.removeItem(key(k)),
+  };
+}
+
+/** The browser's own storage, whole, or null when there is none or it may not be touched. */
+export function browserStorage(): ListedStorage | null {
   try {
     return typeof window === "undefined" ? null : window.localStorage;
   } catch {
     return null;
   }
+}
+
+/** The signed-in person's drafts in this browser, or null. */
+export function browserDrafts(who: string): DraftStorage | null {
+  return personDrafts(browserStorage(), who);
 }

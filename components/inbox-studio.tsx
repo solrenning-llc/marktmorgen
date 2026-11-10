@@ -115,14 +115,14 @@ export function InboxStudio({
   const typed = (next: string) => {
     setText(next);
     if (!thread) return;
-    if (saveDraft(browserDrafts(), thread.conversation.id, next)) setDrafted(draftIds(browserDrafts()));
+    if (saveDraft(browserDrafts(me), thread.conversation.id, next)) setDrafted(draftIds(browserDrafts(me)));
   };
   // Once the page is drawn: the drafts on this device, and the open conversation's own back in its box.
   const firstId = first?.conversation.id ?? null;
   useEffect(() => {
     // Right after the page is drawn, so the server's page and the browser's first one agree.
     const timer = window.setTimeout(() => {
-      const storage = browserDrafts();
+      const storage = browserDrafts(me);
       setDrafted(draftIds(storage));
       if (!firstId) return;
       const kept = readDraft(storage, firstId);
@@ -132,7 +132,7 @@ export function InboxStudio({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [firstId]);
+  }, [firstId, me]);
 
   const refresh = useCallback(async (asked: boolean) => {
     const answer = await post({ action: "list" });
@@ -189,8 +189,8 @@ export function InboxStudio({
     const leaving = thread && thread.conversation.id !== id && text.trim() ? thread.conversation : null;
     setThread(next);
     // The answer typed for the conversation left stays its draft; the one opened gets its own back, or an empty box.
-    const kept = readDraft(browserDrafts(), id);
-    const now = draftIds(browserDrafts());
+    const kept = readDraft(browserDrafts(me), id);
+    const now = draftIds(browserDrafts(me));
     setText(kept);
     setDrafted(now);
     setDraftSaid(
@@ -217,8 +217,8 @@ export function InboxStudio({
     setThread(next);
     put(next.conversation);
     setText("");
-    clearDraft(browserDrafts(), next.conversation.id);
-    setDrafted(draftIds(browserDrafts()));
+    clearDraft(browserDrafts(me), next.conversation.id);
+    setDrafted(draftIds(browserDrafts(me)));
     setDraftSaid("");
     toast(answer.emailed ? `Sent: in their chat, and emailed to ${next.conversation.email}.` : "Kept in the conversation. The email could not go just now; they see it in their chat.");
   }
@@ -374,7 +374,7 @@ export function InboxStudio({
                   <textarea className="field mt-1 w-full" rows={5} maxLength={MAX_MESSAGE} required value={text} onChange={(e) => typed(e.target.value)} aria-describedby="inbox-draft-help" />
                 </label>
                 <p id="inbox-draft-help" className="text-xs text-ink-soft">
-                  What you type is kept on this device only, as a draft for this conversation, until you send it or log out. It is never sent to us.
+                  What you type is kept on this device only, for you, as a draft for this conversation, until you send it, you log out or your session ends, or for 7 days. It is never sent to us.
                 </p>
                 <p className="sr-only" role="status" aria-live="polite" data-inbox-draft-said="">{draftSaid}</p>
                 <div className="flex flex-wrap items-center gap-2">

@@ -293,8 +293,8 @@ export default async function SignInPage({
           ) : null}
 
           {confirmation ? <ToastOnLoad message={confirmation} param="status" /> : null}
-          {/* Every log-out lands here: the unsent inbox answers kept on this device go with the session (lib/inbox-drafts.ts). */}
-          {status.startsWith("out") ? <ForgetInboxDrafts /> : null}
+          {/* Every log-out and every ended session lands here: the unsent inbox answers kept on this device go (lib/inbox-drafts.ts). */}
+          <ForgetInboxDrafts />
           {notice ? (
             <div className={`notice ${notice.tone === "success" ? "notice-success" : "notice-warn"} mt-6`} role="status">
               <p className="font-semibold">{notice.title}</p>

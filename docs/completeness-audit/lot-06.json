@@ -1,0 +1,650 @@
+{
+ "lote": 6,
+ "main": "d7bbf9d35",
+ "pedido": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "itens": [
+  {
+   "n": 442,
+   "etiqueta": "SV2",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:12263 \"442. [SV2] Troca somente com decisão do dono.\" (sem linha Estado própria; o registro SV de 25/10 diz \"Itens441–442 continuam na fila, pesquisa/construção/migração não executadas\", items/442.md:119). queue.md:1761 (decisão SV do dono, 27/10/2026 13h19): \"317[EU1],441[SV1],442[SV2],SV3,SV4eSV5 passam TODOS para DEPOIS DA ABERTURA DAS VENDAS ... Não abrir novos PRs de implementação desses itens até a abertura\"; queue.md:884 \"| 442 [SV2] | sem mudança | FIM1: cauda vigente\". O próprio pedido só começa quando 441 [SV1] estiver pronto e testado, o que não ocorreu.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 459,
+   "etiqueta": "EL3",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:12702 ainda diz \"Estado: em andamento pela Claude 2 (1/11/2026 ...) ... Unidade 2, página de preços: testada num PR empilhado sobre o #1526 e o #1549\". queue.md:325 registra \"#1549 (459 [EL3] 1, frase dos e-mails no estúdio)\" como incluído no main e \"#1569 (459 [EL3] 2, cartões de preço)\" ainda como aberto. gh api: #1549 merged_at 2026-11-01T05:14:15Z, merge 09dcb353488955c72d6bb85a0887f9a6bff0c259, base main; #1569 merged_at 2026-11-01T07:18:57Z, merge 937ccba7f4a46fb0da23e40ee87b28f92de11b97, base main e ancestral do main atual (git merge-base --is-ancestor). As duas unidades descritas pelo item estão no main.",
+   "linha_estado": "Estado: em andamento pela Claude 2 (1/11/2026, ramo claude2/el3-email-equivalence; arquivos reservados: lib/email-equivalence.ts, components/email-studio.tsx, app/studio/email/page.tsx, tests/email-equivalence.test.ts). Unidade 1, estúdio: a frase é calculada por lib/email-equivalence.ts (o limite do mês dividido por 5, o máximo de vezes que um dia da semana cabe num mês, arredondado para baixo: \"That is one email a week to as many as 1,400 people, in any month.\" para 7.000; escondida no teste grátis, que não é um mês e usa um fundo compartilhado; corrigida também a frase \"The count starts again on the first of the month\", falsa para loja pagante, cuja janela é o mês do plano), mostrada sob \"This month\", na oferta do Scale e no cartão do plano com e-mail; teste falha se a frase divergir do limite ou for digitada à mão. Unidade 2, página de preços: testada num PR empilhado sobre o #1526 e o #1549 (ramo claude2/el3-pricing-sentence; arquivo reservado: a linha dos e-mails em planFigures de components/home-parts.tsx): cada cartão diz \"7,000 list emails a month: one a week to as many as 1,400 people\", pela mesma função.",
+   "correcao_estado": "PR #1549, commit 09dcb353488955c72d6bb85a0887f9a6bff0c259, 01/11/2026 02h14 Fortaleza (unidade 1, estúdio); PR #1569, commit 937ccba7f4a46fb0da23e40ee87b28f92de11b97, 01/11/2026 04h18 Fortaleza (unidade 2, cartões da página de preços). Fica \"feito\" (incorporado por inteiro; publicação no domínio e uso de ponta a ponta não verificados por esta auditoria).",
+   "pedidos": [
+    {
+     "o_que": "Frase de equivalência calculada pelo código a partir do limite mensal de e-mails, nunca digitada à mão",
+     "situacao": "presente",
+     "prova": "lib/email-equivalence.ts:26-48 (WEEKLY_SENDS_IN_LONGEST_MONTH, weeklyReach, weeklyReachShort, emailEquivalence)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Frase no estúdio junto do número mensal (sob \"This month\"), escondida no teste grátis",
+     "situacao": "presente",
+     "prova": "components/email-studio.tsx:492-494",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Frase na oferta de subir para o Scale no estúdio",
+     "situacao": "presente",
+     "prova": "components/email-studio.tsx:501",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Frase no cartão do plano com e-mail na página do estúdio de e-mail",
+     "situacao": "presente",
+     "prova": "app/studio/email/page.tsx:169",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Correção da frase falsa \"The count starts again on the first of the month\" para loja pagante",
+     "situacao": "presente",
+     "prova": "components/email-studio.tsx:490 (\"starts again on the day your plan's month renews\"); tests/email-equivalence.test.ts:55 (assert.doesNotMatch)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Frase na página de preços, junto do número mensal de e-mails de cada plano",
+     "situacao": "presente",
+     "prova": "components/home-parts.tsx:189 (planFigures, weeklyReachShort), :316 (PlanCard), :398-406; app/pricing/page.tsx:5,52 (Pricing)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Teste que falha se a frase divergir do limite ou for digitada à mão",
+     "situacao": "presente",
+     "prova": "tests/email-equivalence.test.ts:8-62 (limite dividido por 5 em todos os planos, frase por plano, uso no estúdio e na página de preços, varredura de app/components/lib contra frase digitada); executado por tests/run.mjs (package.json:10)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 465,
+   "etiqueta": "MR2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:13682 \"465[MR2]em andamento: lib/company-margin-report.ts ...\"; queue.md:13736-13738 \"Incorporação465[MR2] parcial ... PR1094 incorporado em15ceac33... Não funciona ainda: relatório automático real completo com ingestão/agendamento/apresentação ao dono ... MR2 não está concluído\"; queue.md:13688 e seguintes (recortes de 04/11/2026, #2233, #2226, #2218: \"o trabalho geral permanece em andamento\"); queue.md:14728 (AV1, item 10): \"O critério de 465 [MR2] necessário à revisão comercial e 466 [MR3]; o relatório mensal de 465 [MR2] vem logo depois da abertura\".",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Trocar o piso por unidade de 60% por lucro líquido maior que zero no pior caso em lib/commercial-margin.ts (com a folga do spend floor)",
+     "situacao": "presente",
+     "prova": "lib/net-margin-rules.ts:6-7 (MINIMUM_NET_MARGIN_BPS=0, MINIMUM_NET_PROFIT_CENTS=1); lib/commercial-margin.ts:78 (marginPolicy unit 'strictly-positive-net-cents', spendFloorRoom, companyTargetBps 6000 como meta, não trava); PR #1094 merge 15ceac3351087bbd9a0937193e4202ad7e7df5a4",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "assistantMeetsFloor em lib/store-assistant-rules.ts pelo critério novo",
+     "situacao": "presente",
+     "prova": "lib/store-assistant-rules.ts:760-766 (roomCents >= ADD_ON_ROOM_CENTS e assessCustomerWorstCase aprovado); :74 (comentário MR27Oct)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "tests/margin-alignment.test.ts e tests/margin-alignment-table.ts pelo critério novo",
+     "situacao": "presente",
+     "prova": "tests/margin-alignment.test.ts:50 (\"every full-use unit keeps its existing cost room\"); tests/margin-alignment-table.ts:131-144",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "tests/spend-floor.test.ts pelo critério novo",
+     "situacao": "presente",
+     "prova": "tests/spend-floor.test.ts:52-58 (netCents > 0 em uso total)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "tests/tax-gate.test.ts pelo critério novo",
+     "situacao": "presente",
+     "prova": "tests/tax-gate.test.ts:18, :128 (\"a nonpositive registered net fails\")",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "tests/store-assistant.test.ts pelo critério novo",
+     "situacao": "presente",
+     "prova": "tests/store-assistant.test.ts:19, :141-144",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "scripts/margin-alignment.mjs gerando o documento pelo critério novo",
+     "situacao": "presente",
+     "prova": "scripts/margin-alignment.mjs:1-8 (gera a partir de tests/margin-alignment-table.ts); docs/margin-alignment-2026-10-18.md:3-7",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Demais lugares que usavam o piso de 60%: análises antigas isoladas como histórico, sem uso em produção",
+     "situacao": "presente",
+     "prova": "tests/historical-margin-isolation.test.ts:8,18 (alvo arquivado não importável pela produção); PR #1530 (merge cd045a388344670ebaba160abb2fdabe5ce106b4, 04/11/2026) resolveu tests/limits-proposal.test.ts; busca em lib/ por piso 60% só achou meta COMPANY_NET_MARGIN_TARGET_BPS e companyTargetBps",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes que falham se qualquer plano, intervalo ou complemento der prejuízo no pior caso",
+     "situacao": "presente",
+     "prova": "tests/tax-gate.test.ts:128; tests/spend-floor.test.ts:57; tests/store-assistant.test.ts:141-144; tests/customer-base.test.ts:15,17,24,29 (lucro zero nunca reparado; seis casos preço-ciclo obrigatórios)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes que falham se a base mínima da empresa não for calculada",
+     "situacao": "presente",
+     "prova": "tests/customer-base.test.ts:11-23 (assessMinimumCustomerBase; \"commercial gate includes the minimum base\"); lib/customer-base-rules.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Regerar docs/margin-alignment-2026-10-18.md",
+     "situacao": "presente",
+     "prova": "docs/margin-alignment-2026-10-18.md:3-7 (gerado, MR27 October2026); tests/margin-alignment.test.ts:19 (igualdade com o gerador); PR #1094",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Relatório mensal da margem real da empresa, sem dados pessoais: cálculo",
+     "situacao": "presente",
+     "prova": "lib/company-margin-report.ts:5,57,78,134,194; tests/company-margin-report.test.ts (9 testes); docs/company-margin-report.md; PR #1093 merge 1432ac2ba6833d83a9df9614072ac8e47d536a3b",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Relatório mensal automático real: ingestão dos dados contábeis reais, agendamento e apresentação ao dono",
+     "situacao": "fora do escopo",
+     "prova": "queue.md:14728 e :1046 (AV1/MQ1: o relatório mensal de 465 [MR2] vem logo depois da abertura); lib/commercial-margin.ts:410 (CURRENT_COMMERCIAL_PROFIT_MIX_INPUT null, sem dados reais); PRs abertos #2605 e #2646 avançam partes do relatório",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 469,
+   "etiqueta": "SR3",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:13731-13733 \"Evidência469[SR3] — pesquisa oficial27/10/2026, sem conclusão de custos ... Em andamento\"; queue.md:13805 \"469[SR3] — aguardando o dono quanto à evidência externa de aceite e teto integral\"; queue.md:16905/16928 (LQ1 cancelava as partes de ITIN e representante residente) foi desfeito por LQ17 (queue.md:17349-17351, \"Restaurar as duas categorias ITIN/agente de aceitação e representante residenteUS em lib/llc-fixed-costs.ts\"); queue.md:15119 e o roteiro 470 remetem a quantificação restante da rota LLC ao 275 [FX1]. Nenhuma linha registra o 469 como concluído.",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1096, commit fe942061655b28f3215b531fc65d97b8c7a45705, 27/10/2026 11h33 Fortaleza (registro documental da pesquisa oficial SR3); as categorias de custo em lib/llc-fixed-costs.ts vieram no PR #1110, commit c17a767e5acdf662932afe0800b677bf473317e9, 27/10/2026 15h15 Fortaleza. O item fica \"em andamento\" (aguardando o dono quanto a aceite e tetos reais; quantificação restante da rota LLC no 275 [FX1]), não concluído.",
+   "pedidos": [
+    {
+     "o_que": "Pesquisar em fonte oficial datada o custo do ITIN (W-7 do IRS e serviços de agente de aceitação CAA/AA)",
+     "situacao": "presente",
+     "prova": "docs/stripe-us-requirements-cost-evidence.md:10-16 (instruções W-7 rev. 12/2024, prazos IRS, listas oficiais de agentes; honorários sem teto, custo desconhecido)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Pesquisar o custo do representante legal residente nos EUA aceito pelo Stripe",
+     "situacao": "presente",
+     "prova": "docs/stripe-us-requirements-cost-evidence.md:18-24 e :34 (nenhum fornecedor aceito comprovado; custo desconhecido)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Pesquisar o custo do endereço comercial real nos EUA sem caixa postal",
+     "situacao": "presente",
+     "prova": "docs/stripe-us-requirements-cost-evidence.md:18-24 e :35; docs/us-llc-owner-roadmap-2026-10-28.md:26-33 e :58 (endereço real desconhecido, reprova)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Qualquer outro custo criado por essas exigências (documentação, autenticação, envio, câmbio, impostos, reservas; formação da LLC)",
+     "situacao": "presente",
+     "prova": "docs/stripe-us-requirements-cost-evidence.md:33 e :36; lib/llc-fixed-costs.ts:19 (categoria llc-formation); docs/llc-fixed-costs-2026-10-22.md:120-126 (Atlas US$500, agente US$100/ano). Banco e telefone da rota LLC ficam com o 275 [FX1] (queue.md:1593, docs/us-llc-owner-roadmap-2026-10-28.md:58)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Somar tudo aos custos fixos da LLC, 100% do Marktmorgen (FX275), mensal e anual",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:11 (marktmorgenBps 10000), :15-19 (categorias itin-and-acceptance-agent, us-resident-representative, us-business-address), :21 (fullMonthlyUsdCents/fullAnnualUsdCents), :44 (tetos null), :84-104 (relatório gerado com coluna mensal e anual); tests/llc-fixed-costs.test.ts:25 exige as categorias",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Recalcular a base mínima de clientes",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:98 (\"Minimum paying customer base: not established\" enquanto houver custo desconhecido); docs/stripe-us-requirements-cost-evidence.md:38-40 (seis contratos, base não calculável, método); docs/mr3-current-price-result-2026-10-27.md:95",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Custo sem fonte oficial conta como desconhecido e reprova, nunca zero",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:44-79 (allocateEntireLlcFixedCosts devolve null com teto ausente, sem evidência ou sem reserva revista)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Considerar a resposta do Stripe registrada em 494 [SR5] na pesquisa SR3, sem impor ITIN ou representante residente como necessidade confirmada (CLAUDE.md/AGENTS.md, seção SR5)",
+     "situacao": "falta",
+     "prova": "docs/stripe-us-requirements-cost-evidence.md:20 ainda diz \"Continuam exigidos, por SR: representante residente nos EUA e endereço comercial real\"; grep por SR5/SD1 no arquivo não encontra nenhuma remissão; o roteiro equivalente do 470 recebeu essa remissão (docs/stripe-us-owner-roadmap.md:4-6), o registro do 469 não",
+     "onde_deveria_estar": "docs/stripe-us-requirements-cost-evidence.md (aviso no topo: SR5/SD1 vigentes, ITIN e representante residente não são exigências confirmadas; texto antigo preservado como histórico)"
+    },
+    {
+     "o_que": "Tetos e aceites reais dos serviços (cotações, contratos, prova de aceite pelo Stripe)",
+     "situacao": "fora do escopo",
+     "prova": "queue.md:13805 (aguardando o dono; sem conta, contrato, cotação ou contato autorizados)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta aplicar ao registro da pesquisa SR3, docs/stripe-us-requirements-cost-evidence.md, a resposta do Stripe gravada em 494 [SR5] e a decisão SD1: a linha 20 ainda afirma \"Continuam exigidos, por SR: representante residente nos EUA e endereço comercial real\", contra a regra SR5 de AGENTS.md e CLAUDE.md (\"As pesquisas/roteiros SR3/SR4 devem considerar esta resposta nova sem apagar seu histórico; não impor ITIN ou representante residente como necessidade confirmada\"). Acrescentar no topo desse documento um aviso datado SR5/SD1, como o já feito em docs/stripe-us-owner-roadmap.md:4-6, dizendo que ITIN e representante residente não são exigências confirmadas e que endereço comercial real nos EUA, banco no nome exato da LLC e os demais custos continuam (quantificação no 275 [FX1]), preservando o texto antigo como histórico; sem mudar lib/llc-fixed-costs.ts, cujas categorias foram restauradas por LQ17."
+  },
+  {
+   "n": 470,
+   "etiqueta": "SR4",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:13792-13796 (\"470[SR4] — roteiro somente do dono ... Depende do dono; nenhuma etapa executada\"); queue.md:15118-15123 (\"470 ainda parcial pelos rótulos privados/orçamento/prova física\"; \"470 permanece parcial\"); queue.md:17251-17253 (\"Somente essa prova privada fica aguardando o dono ... nem afirmar 470 integralmente concluído\"); docs/us-llc-owner-roadmap-2026-10-28.md:67-68 (\"470 não está integralmente concluído\"). O registro AV3 de queue.md:14757 diz que o passo 1 da AV1 (470) foi concluído em 28/10, mas as linhas próprias do item o mantêm parcial.",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1180, commit 9011b3b69af1cf17132240c44a5ec304af129921, 28/10/2026 19h37 Fortaleza (roteiro pós-SD1; o primeiro roteiro veio no PR #1098, commit 84e5815510db1007bcb76a3b690335562ca54732, 27/10/2026 12h34 Fortaleza). O item fica \"em andamento\", aguardando o dono só nos rótulos das telas privadas de ativação do Stripe e nas provas reais de endereço/banco.",
+   "pedidos": [
+    {
+     "o_que": "Roteiro em \"Depende do dono\", em português do Brasil e em ordem",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:1-17 (tabela de 7 passos do dono, marcada Depende do dono); queue.md:13792-13796 e 17251-17253",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo: abrir a LLC (Delaware)",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:9-11 e :19-24; docs/stripe-us-owner-roadmap.md:21-29",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo: obter o EIN (sem SSN, após SD1)",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:12 e :35-38 (SS-4 rev. 12/2025, linhas 1, 4-9, 7b); docs/stripe-us-owner-roadmap.md:31-35",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo: obter o ITIN (dispensado como exigência por SR5/SD1; preservado como histórico)",
+     "situacao": "presente",
+     "prova": "docs/stripe-us-owner-roadmap.md:4-6 (sem etapa obrigatória de ITIN) e :37-41 (histórico W-7)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo: representante legal e endereço comercial real nos EUA",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:10 e :26-33 (endereço físico real, sem caixa postal; representante sem residência obrigatória por SR5); docs/stripe-us-owner-roadmap.md:43-47",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo: abrir a conta Stripe da plataforma (e banco no nome exato da LLC, acrescentado por SD1)",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:13-14, :26-33 (banco) e :40-47 (conta Stripe)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Tempo estimado de cada passo segundo fontes oficiais",
+     "situacao": "presente",
+     "prova": "docs/stripe-us-owner-roadmap.md:25 (Delaware sem prazo fixo), :33 (EIN fax ~4 dias úteis, correio ~4 semanas), :41 (ITIN 7 a 11 semanas), :55 (verificação/endereço/aceite sem prazo comprovado); docs/us-llc-owner-roadmap-2026-10-28.md:24 (EIN sem SSN 10-35 dias úteis)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Custo de SR3 em cada passo",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:49-65 (Atlas US$500, agente US$100/ano, Delaware US$400/ano, EIN taxa zero, desconhecidos que reprovam); docs/stripe-us-owner-roadmap.md:47 remete à pesquisa SR3",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documentos necessários",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:7-15 (coluna de evidência), :33 (prova bancária), :35-38 (SS-4), :44-45 (campos da prova exigida)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Nomes dos campos e botões públicos (SD1) e prova exigida por stripePlatformEligibilityReady",
+     "situacao": "presente",
+     "prova": "docs/us-llc-owner-roadmap-2026-10-28.md:20 (rótulos públicos do Atlas), :36 (linhas do SS-4), :44-45 (campos do esquema de lib/stripe-platform-eligibility.ts)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Nomes exatos dos botões das telas privadas de ativação do Stripe e provas reais de endereço/banco",
+     "situacao": "fora do escopo",
+     "prova": "queue.md:17251-17253 e docs/us-llc-owner-roadmap-2026-10-28.md:42 e :67 (exigem conta aberta, login privado ou atos que o pedido proíbe; aguardando o dono)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 472,
+   "etiqueta": "TX2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:1741-1745 (\"Incorporação parcial TX2 ... PR1106 ... Leitura numérica most-correct NÃO implementada por este passo; TX2 global incompleto\"); queue.md:1730-1731 (decisões do dono sobre IRPF e IOF, \"o TX2 pode seguir neste ponto\"); queue.md:21534-21767 (unidades do PR #1490); queue.md:21805 (\"A união do main 776a6b98 incorporou o TX2, que retirou SIZING_READING e unitUnder do caminho atual\"). Nenhuma linha registra o 472 como concluído, e a parte dos impostos estaduais (ponto 9) não foi construída (docs/tx2-most-correct-model-2026-10-31.md:27).",
+   "linha_estado": "Estado inicial: na fila, dentro do Bloco de abertura, antes de 466 [MR3].",
+   "correcao_estado": "PR #1490, commit 776a6b98d65a07561d64ddac50e43d7fe808ee14, 01/11/2026 09h06 Fortaleza (leitura most-correct no avaliador, piso de 27,5% retirado; antes, PR #1106, commit bacdb636095c7090a212903958568bf2cae1efa6, 27/10/2026 14h38 Fortaleza, retirou do gate as consultas e a hospedagem na UE). O item fica \"em andamento\": falta a ligação automática dos impostos estaduais americanos pelos limites do ponto 9.",
+   "pedidos": [
+    {
+     "o_que": "Criar em lib/receiving-costs.ts a leitura \"most-correct\" com IRPF 15% (anual, em 31/12)",
+     "situacao": "presente",
+     "prova": "lib/receiving-costs.ts:42-51 (MOST_CORRECT_READING, profitTaxBps 1500) e :117 (IRPF sobre o lucro anual)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "IOF de 0,38% (pela decisão do dono de 31/10/2026, sobre cada entrada de câmbio, não sobre o faturamento)",
+     "situacao": "presente",
+     "prova": "lib/receiving-costs.ts:50 (incomingExchangeIofBps 38) e :82-127 (mostCorrectTaxesOf, IOF por operação de entrada); tests/receiving-most-correct.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "0% de imposto sobre a receita",
+     "situacao": "presente",
+     "prova": "lib/receiving-costs.ts:48 (revenueTaxBps 0)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Imposto do comprador somado por fora a até 27%, onde devido",
+     "situacao": "presente",
+     "prova": "lib/receiving-costs.ts:45-46 (salesTaxInsideBps 0, salesTaxOnTopBps 2700)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Impostos estaduais americanos (renda/franquia) ligados automaticamente pelos limites de \"doing business\" do ponto 9, com soma das vendas por estado",
+     "situacao": "falta",
+     "prova": "busca por 23101, doing business, franchise e state income em lib/ e tests/: só tests/tx4-california-evidence.test.ts:19-20 (prova documental, sem automação); lib/tax-threshold.ts:11-22 cobre só Canadá e Noruega; lib/customer-tax-review.ts:24 só exige um componente usStates revisto à mão; docs/tx2-most-correct-model-2026-10-31.md:27 diz \"No new state-tax threshold automation ... is supplied\". O 473 [TX3] trata de impostos sobre consumo (pontos 10-17), não do ponto 9; nenhum outro item o carrega",
+     "onde_deveria_estar": "lib/tax-threshold.ts (regras datadas de doing business por estado, inclusive os testes alternativos do FTB, conferidos na matriz TX1, ponto 9), alimentadas pela contagem por estado de lib/tax-sales-counter.ts e ligadas ao componente usStates de lib/customer-tax-review.ts, com teste em tests/"
+    },
+    {
+     "o_que": "Usar a leitura como leitura do gate (lib/tax-gate.ts)",
+     "situacao": "presente",
+     "prova": "lib/tax-gate.ts:13 (GATE_READING_ID most-correct) e :18 (gateReading devolve MOST_CORRECT_READING); tests/tax-gate.test.ts:75",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Usar a leitura no dimensionamento",
+     "situacao": "presente",
+     "prova": "lib/reviewed-receiving.ts:13 (reviewedUnitUnder); tests/margin-alignment.test.ts:37-53; busca por SIZING_READING/MOST_TAX_READING/2750 em lib/ e app/ não encontra uso operacional (só tests/historical-receiving-model.ts)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Não depender de EU_HOSTING_CONFIRMED nem de consulta",
+     "situacao": "presente",
+     "prova": "lib/tax-gate.ts:14-17 (argumento de hospedagem ignorado) e :64-66 (taxGateValid não lê consultas); docs/tax-gate-tx-dependency-transition.md",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Retirar do gate qualquer dependência de CONSULTATION_ANSWERS",
+     "situacao": "presente",
+     "prova": "lib/tax-gate.ts:64-66; tests/tax-gate.test.ts:86, :112, :183 (lista vazia e gate válido sem ela)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Atualizar os testes que exigem a leitura antiga, sem afrouxar outras travas",
+     "situacao": "presente",
+     "prova": "tests/historical-receiving-model.ts:25 e :61 (leituras antigas isoladas como histórico); tests/tax-gate.test.ts:75-77; tests/receiving-most-correct.test.ts:104-105 (metadado sozinho não aprova unidade)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documento do TX2 coerente com o código incorporado",
+     "situacao": "falta",
+     "prova": "docs/tx2-most-correct-model-2026-10-31.md:23-25 ainda diz \"The binding gate remains MOST_TAX_READING ... the 27.5% stress/sizing floor remains. The new scenario is excluded from READINGS\", mas lib/tax-gate.ts:13 usa most-correct e lib/receiving-costs.ts:129 tem READINGS = [MOST_CORRECT_READING]",
+     "onde_deveria_estar": "docs/tx2-most-correct-model-2026-10-31.md (aviso datado do PR #1490 marcando a seção \"Binding controls preserved\" como histórico)"
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta a parte do 472 [TX2] que liga automaticamente os impostos estaduais americanos pelos limites do ponto 9 (imposto estadual sobre a renda ou franquia, com as vendas somadas por estado e a cobrança ligada antes de cada limite de \"doing business\"). Hoje lib/tax-threshold.ts só tem as regras de Canadá e Noruega, lib/customer-tax-review.ts:24 só aceita um componente usStates revisto à mão, e docs/tx2-most-correct-model-2026-10-31.md:27 registra que essa automação não foi feita; o 473 [TX3] trata só de impostos sobre consumo. Construir as regras datadas por estado (com os testes alternativos do FTB que a matriz TX1 registra no ponto 9, não só vendas) em lib/tax-threshold.ts, alimentadas pela contagem por estado de lib/tax-sales-counter.ts e ligadas ao componente usStates, com teste em tests/, desconhecido reprovando. Falta também, menor, atualizar docs/tx2-most-correct-model-2026-10-31.md, cujas linhas 23-25 ainda dizem que o gate é MOST_TAX_READING, que o piso de 27,5% continua e que most-correct está fora de READINGS, o que o PR #1490 mudou."
+  },
+  {
+   "n": 474,
+   "etiqueta": "TX4",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:1852 \"Recorte de evidência federal incorporado — Codex D, 04/11/2026: PR #2299 ... O 474 [TX4] continua em andamento, com os demais custos e providências pendentes\"; queue.md:1679-1687 (PR1110/PR1113 incorporados em 27/10: catálogo das 8 categorias de conformidade; \"CatálogoTX4 não comprova custos/reservas reais e não concluiTX4global\"). GitHub: incorporados também #2324 (CBE, 05/11 03h02 Fortaleza), #2339 (IRPF), #2347 (Delaware), #2361 (OSS não União), #2372 (VAT britânico), #2585 (Alemanha) e outros países; abertos #2425, #2445, #2594, #2596, #2633, #2647, #2660, #2661, #2666, reservados em docs/reservations/codex.md:41-91.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Em 275 [FX1], retirar o INSS enquanto o dono não receber pró-labore",
+     "situacao": "incerto",
+     "prova": "lib/llc-fixed-costs.ts:19 mantém \"owner-inss\" entre os custos fixos obrigatórios e :37 a observação de R$ 1.695,11/mês; :101 e docs/llc-fixed-costs-2026-10-22.md:9,85 dizem que o INSS fica desconhecido até os fatos de remuneração e a leitura aplicável; queue.md:16768 \"pesquisa jurídica de INSS e fatos de remuneração continua\" e queue.md:245 \"os fatos privados ausentes de275FX1/474TX4 continuam aguardando o dono\". Não foi retirado, mas a fila registra a escolha deliberada de esperar o fato do dono (política TX, ponto 5: enquadramento real pendente); não está claro se isso é falta ou espera legítima",
+     "onde_deveria_estar": "lib/llc-fixed-costs.ts (LLC_FIXED_COST_IDS / renderLlcFixedCostStatus) e docs/llc-fixed-costs-2026-10-22.md"
+    },
+    {
+     "o_que": "Incluir o custo de cumprir o Form 5472 e o Form 1120 pro forma, com fonte oficial datada",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:15-17 (us-form-5472, us-pro-forma-1120); docs/llc-fixed-costs-2026-10-22.md:42-62 (IRS, lidos em 04/11/2026); tests/tx4-us-filing-evidence.test.ts; PR #2299 merge ba65e0409271f518be190eabce9793d7cd5e1e87",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Incluir o custo da declaração da LLC no IRPF, com fonte oficial datada",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:16 (br-irpf); docs/tx4-irpf-evidence.md:1-17 (IN RFB 2.312/2026, Perguntas e Respostas IRPF 2026, Lei 14.754/2023, lidos em 05/11/2026); tests/tx4-irpf-evidence.test.ts; PR #2339 merge 8b62fc2cc52fcf8115da9359f49792914b165048",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Incluir o custo da CBE quando aplicável, com fonte oficial datada",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:16 (br-cbe); docs/llc-fixed-costs-2026-10-22.md:11-40 (Resolução BCB 279/2022, Manual do Declarante 2026, lidos em 04/11/2026); tests/tx4-cbe-evidence.test.ts; PR #2324",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Incluir a taxa anual de Delaware, com fonte oficial datada",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:19,32 (delaware, USD 400/ano); docs/llc-fixed-costs-2026-10-22.md:81; docs/tx4-delaware-evidence.md:7-17 (Delaware Code §18-1107, 85 Del. Laws c. 273, lidos em 05/11/2026); tests/tx4-delaware-evidence.test.ts; PR #2347",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Incluir registros e declarações de impostos sobre consumo (OSS e equivalentes) já pesquisados, com fontes oficiais datadas",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:16 (vat-oss-and-local-compliance); docs/tx4-oss-evidence.md:11-16; docs/tx4-uk-vat-evidence.md; docs/tx4-germany-vat-evidence.md; docs/tx4-france-vat-evidence.md; docs/tx4-norway-voec-evidence.md; docs/tx4-australia-gst-evidence.md; docs/tx4-new-zealand-gst-evidence.md; docs/tx4-singapore-gst-evidence.md; docs/tx4-japan-consumption-tax-evidence.md; docs/tx4-taiwan-vat-evidence.md, cada um com teste em tests/tx4-*-evidence.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Demais equivalentes de consumo ainda em pesquisa (Canadá, Suíça, Irlanda, África do Sul, Chile, Coreia, Itália, Espanha, Portugal)",
+     "situacao": "prevista",
+     "prova": "PRs abertos #2425, #2445, #2594, #2596, #2633, #2647, #2660, #2661, #2666; reservas em docs/reservations/codex.md:41,42,47,48,77,86,91",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Desconhecido reprova: custos sem teto revisado ficam desconhecidos e bloqueiam a base mínima",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:44 (CURRENT_LLC_FIXED_COST_CEILINGS todos null), :48-86 (allocateEntireLlcFixedCosts recusa ausente/herdado/getter), :87-103 (relatório diz unknown, rejected, never zero); tests/llc-fixed-costs.test.ts:25",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 493,
+   "etiqueta": "DE2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:14189 'Em andamento pelo Claude ... Atualização 31/10/2026 14h55 Fortaleza: unidade 1 incorporada, PR #1458, merge 466abfce... Atualização 31/10/2026 17h50 Fortaleza: unidade 2 incorporada, PR #1469, merge dee87a3c... Próxima: unidade 3 no ramo claude/de2-page-warnings (construtor de páginas)'; queue.md:327 '493 [DE2] unidade 3 no ramo claude/de2-page-warnings (avisos no construtor de páginas)'. gh api: #1458 merged 2026-10-31T17:45:47Z (466abfce5ef30d3e9889c6e881ea15969445d347), #1469 merged 2026-10-31T20:44:21Z (dee87a3cb12104934e8fb37a57712a1ce3b9c694). O ramo claude/de2-page-warnings não existe (404) e nenhum PR da unidade 3 foi achado.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Regra fixa, sem IA, que confere o texto que o criador escreveu ou colou (termos, política de reembolso, descrição) e devolve avisos, sem alterar nada sozinha",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:1-37 (cabeçalho), lib/terms-check-rules.ts:214 (checkCreatorTerms), lib/terms-check-rules.ts:59-76 (TermsCheckInput.text = termos, reembolso e descrição); tests/terms-check-rules.test.ts (150 linhas)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso: nome de outra empresa ou de outro site que não seja do criador",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:237 e :246 (other_company), com ownHosts e TOOL_HOSTS em :62-63 e :80-85",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso: preço, prazo ou condição que contradiga o que a página e o checkout mostram",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:259 (price_mismatch); components/product-editor.tsx:526 (priceCents do checkout)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso: 'no refunds' para comprador da UE/Reino Unido sem o consentimento de entrega imediata do 91",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:270 (no_refunds), lib/terms-check-rules.ts:67-68 (immediateAccessConsent); components/product-editor.tsx:530 (deliversDigitally)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso: promessa de ganho, renda ou resultado garantido",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:279 e :298 (earnings_claim); bloqueio da promessa de dinheiro fácil em :291 (fast_money, de 567 [GD1] (d))",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso: urgência, escassez ou contagem regressiva sem prazo ou estoque real",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:306 e :314 (false_urgency); components/product-editor.tsx:532-533 (realDeadline false, realStockLimit pelo estoque)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso: direito de revenda sem a licença exigida nos Termos",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:323 (resale_rights); components/product-editor.tsx:534 (resaleLicense: false, então sempre avisa)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Para cada aviso: trecho, motivo em linguagem simples e correção sugerida",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:57 (TermsWarning com excerpt, why, fix) e :218-222; components/terms-check-panel.tsx:6-15 (títulos simples)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Avisos mostrados no estúdio antes de publicar o produto e quando o texto muda",
+     "situacao": "presente",
+     "prova": "components/product-editor.tsx:91 e :519-537 (TermsCheckPanel sob a descrição, recalculado a cada mudança do rascunho); components/terms-check-panel.tsx:30-40",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Correção aplicada somente com a aprovação do criador (um clique por correção, com desfazer)",
+     "situacao": "presente",
+     "prova": "components/terms-check-panel.tsx:99 e :103 (botões de correção), :67-70 ('Undo the last change'), :19-25 (fixFromClick); lib/terms-check-rules.ts:368 e :380; tests/terms-check-panel.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Sem modelo de IA no que regras fixas resolvem",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:8 ('Pure and fixed: no model, no request'); components/terms-check-panel.tsx:30-35 ('no request, no model, no cost')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Nunca dizer que a loja está 'legalmente conforme'",
+     "situacao": "presente",
+     "prova": "busca por 'legally'/'compliant' em lib/terms-check-rules.ts e components/terms-check-panel.tsx: nenhuma ocorrência; lib/terms-check-rules.ts:10 ('it does not decide that a text is unlawful')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Acessibilidade do painel (região de status, foco, inventário)",
+     "situacao": "presente",
+     "prova": "components/terms-check-panel.tsx:66 (role=status, aria-live); docs/accessibility-inventory.json:1548",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 3: os mesmos avisos no construtor de páginas (ramo claude/de2-page-warnings)",
+     "situacao": "prevista",
+     "prova": "queue.md:14189 'Próxima: unidade 3 no ramo claude/de2-page-warnings (construtor de páginas)' e queue.md:327; components/page-editor.tsx:3 e app/api/store/page/route.ts:1 usam só fastMoneyMessage/fastMoneyOnPage (bloqueio de 567 [GD1] (d)), não o painel de avisos; ramo inexistente, sem PR",
+     "onde_deveria_estar": "components/page-editor.tsx"
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 494,
+   "etiqueta": "SR5",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:14480-14482 'Estado operacional atualizado —494[SR5] incorporado ... incorporado peloPR1140, head87b29e29..., merge829e686ae14d43f856967c17b565b999707d4224 em28/10/2026 02h01m46s Fortaleza'; gh api: #1140 merged 2026-10-28T05:01:47Z, merge_commit_sha 829e686ae14d43f856967c17b565b999707d4224. Decisão posterior em queue.md:1604 '494 [SR5]: pendência sobre quem paga Stripe Tax ENCERRADA por esta resposta' (registro SD1, já em docs/stripe-platform-eligibility.md:202).",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1140, commit 829e686ae14d43f856967c17b565b999707d4224, 28/10/2026 02h01 Fortaleza (feito; a fila já registra a incorporação em queue.md:14480-14482, mas a linha do item continua 'na fila')",
+   "pedidos": [
+    {
+     "o_que": "Guardar a resposta do Stripe e a proveniência (Claude, Gmail do dono, e-mail de 27/10/2026 16h47) em docs/stripe-platform-eligibility.md",
+     "situacao": "presente",
+     "prova": "docs/stripe-platform-eligibility.md:39-41 (seção SR5 com a proveniência conferida pelo Claude) e :72-80 (texto do pedido)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Atualizar a tabela SR em AGENTS.md: ponto 1 sim; ponto 2 ITIN não obrigatório; ponto 3 representante pode ser o dono no Brasil; ponto 4 endereço comercial real nos EUA, nunca caixa postal, com registered agent, escritório virtual e conta bancária",
+     "situacao": "presente",
+     "prova": "AGENTS.md:326 (seção SR5), :335 (ITIN não obrigatório), :336 (representante), :337 (endereço, registered agent, escritório virtual, banco no nome da LLC)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "A mesma tabela em CLAUDE.md",
+     "situacao": "presente",
+     "prova": "CLAUDE.md:6 (seção SR5), :15, :16, :17",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Preservar as respostas antigas como histórico",
+     "situacao": "presente",
+     "prova": "AGENTS.md:351-353 ('Histórico SR1–SR4 abaixo'); docs/stripe-platform-eligibility.md:135 ('Histórico integral anterior')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Registrar a pergunta do Stripe Tax como pendente",
+     "situacao": "presente",
+     "prova": "AGENTS.md:339, CLAUDE.md:19, docs/stripe-platform-eligibility.md:52; a pendência foi depois encerrada pela resposta de 28/10/2026 13h55 (SD1), registrada em docs/stripe-platform-eligibility.md:196-202",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Registrar que nada disso é aprovação de conta",
+     "situacao": "presente",
+     "prova": "AGENTS.md:341, CLAUDE.md:21, docs/stripe-platform-eligibility.md:54",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Não alterar PLANS_ON_SALE, stripePlatformEligibilityReady nem nenhuma trava; 468 [SR2] continua até o SR6",
+     "situacao": "presente",
+     "prova": "lib/opening.ts:30-33 (PLANS_ON_SALE ainda exige stripePlatformEligibilityReady()); AGENTS.md:343; PR #1140 alterou só AGENTS.md, CLAUDE.md e docs/stripe-platform-eligibility.md (queue.md:14482)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 508,
+   "etiqueta": "SG4",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:14622 'Estado: parte 1 em andamento pela Claude 2 (1/11/2026, ramo claude2/sg4-codeql-dependabot ...). Partes 2 (security.txt, com 247 [SP4]) e 3 (reaproveitar o plano de 568 [GD2] (k)) na fila'; queue.md:323/325 listam #1551, #1554 e #1556 como PRs do SG4; queue.md:20862 (568 [GD2] (k) junto da parte 3). gh api: #1551 merged 2026-11-01T05:40:19Z (b8051926dd843dfd77f9af08633dff0576f0c375), #1554 merged 2026-11-01T05:45:10Z (418680a748b3d605a2d8f3d7b27bc6a3e3185930), #1556 merged 2026-11-01T06:00:12Z (a8785eef339604358e563c3a7d152954b07da0ad).",
+   "linha_estado": "Estado: parte 1 em andamento pela Claude 2 (1/11/2026, ramo claude2/sg4-codeql-dependabot; arquivos reservados: .github/workflows/codeql.yml, .github/dependabot.yml, scripts/ci_full_tree_proof.py, scripts/test_ci_documentation_scope.py). CodeQL (JavaScript/TypeScript e Actions, consultas security-extended) em todo PR, no main e uma vez por dia, no mesmo formato dos outros fluxos (escopo de documentação, \"All checks (codeql)\"), com a ação fixada na v4.38.3 de 08/10/2026; Dependabot só para atualizações de segurança (open-pull-requests-limit 0 desliga as de versão), nada incorporado sozinho. Depende do dono, sem trabalho do agente: ligar \"Dependabot security updates\" nas configurações do repositório (o agente não altera configurações de conta); se a configuração padrão (default setup) do CodeQL estiver ligada, o envio do fluxo avançado é recusado pelo GitHub, e o agente não consegue ler essa configuração (403). Partes 2 (security.txt, com 247 [SP4]) e 3 (reaproveitar o plano de 568 [GD2] (k)) na fila. Estado inicial: na fila.",
+   "correcao_estado": "Parte 1: PR #1551, commit b8051926dd843dfd77f9af08633dff0576f0c375, 01/11/2026 02h40 Fortaleza; parte 2: PR #1554, commit 418680a748b3d605a2d8f3d7b27bc6a3e3185930, 01/11/2026 02h45 Fortaleza; parte 3: PR #1556, commit a8785eef339604358e563c3a7d152954b07da0ad, 01/11/2026 03h00 Fortaleza (feito; fica com o dono só ligar 'Dependabot security updates' nas configurações do repositório)",
+   "pedidos": [
+    {
+     "o_que": "Parte 1: análise CodeQL nos workflows, em todo PR e uma vez por dia",
+     "situacao": "presente",
+     "prova": ".github/workflows/codeql.yml:8-13 (schedule cron '37 5 * * *', pull_request, push), :60 (javascript-typescript e actions), :65-72 (codeql-action v4.38.3, security-extended), :77 ('All checks (codeql)'); scripts/ci_full_tree_proof.py:26",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte 1: .github/dependabot.yml para atualizações de segurança, sem incorporar nada sozinho",
+     "situacao": "presente",
+     "prova": ".github/dependabot.yml:1-20 (npm e github-actions, open-pull-requests-limit 0, 'Nothing is merged by itself')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte 1: ligar 'Dependabot security updates' nas configurações do repositório",
+     "situacao": "fora do escopo",
+     "prova": "queue.md:14622 (depende do dono; o item proíbe ao agente alterar configurações de conta); .github/dependabot.yml:7-8",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte 2: /.well-known/security.txt (RFC 9116) com o endereço de suporte público, data de validade e link para a página de segurança do 247 [SP4]",
+     "situacao": "presente",
+     "prova": "public/.well-known/security.txt:4 (Contact mailto:support@marktmorgen.com), :5 (Expires 2027-10-31), :8 (Policy https://marktmorgen.com/platform/security); tests/security-txt.test.ts:7-17; coordenação com SP4 em tests/security-page.test.ts:135 e lib/feature-pages.ts:2646",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte 3: docs/incident-response.md em linguagem simples com o que as proteções automáticas já fazem",
+     "situacao": "presente",
+     "prova": "docs/incident-response.md:7 ('1. O que as proteções já fazem sozinhas') e :28 (lacunas reais)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte 3: passo a passo para trocar uma chave vazada",
+     "situacao": "presente",
+     "prova": "docs/incident-response.md:43 ('3. Passo a passo: uma chave vazou')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte 3: passo a passo para pausar envios de e-mail, sem depender de painel",
+     "situacao": "presente",
+     "prova": "docs/incident-response.md:71-75 (pausa automática, MARKETING_DAILY_CAP=1, retirada das credenciais)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte 3: passo a passo para avisar os criadores",
+     "situacao": "presente",
+     "prova": "docs/incident-response.md:77-80 ('5. Passo a passo: avisar os criadores'), com modelos de aviso",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documento sem nota de 'pendente' para partes já entregues",
+     "situacao": "falta",
+     "prova": "docs/incident-response.md:25 diz '508 [SG4] parte 2 (PR #1554, ainda não incorporado)' e docs/incident-response.md:26 diz '508 [SG4] parte 1 (PR #1551, ainda não incorporado)', mas os dois foram incorporados em 01/11/2026 (gh api); nenhum PR aberto achado que altere o arquivo (#2545 e #2689 conferidos)",
+     "onde_deveria_estar": "docs/incident-response.md:25-26"
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar a tabela de docs/incident-response.md, linhas 25 e 26, que ainda dizem 'PR #1554, ainda não incorporado' (security.txt, parte 2) e 'PR #1551, ainda não incorporado' (CodeQL e Dependabot, parte 1); os dois foram incorporados em 01/11/2026 (#1551, commit b8051926dd843dfd77f9af08633dff0576f0c375, 02h40 Fortaleza; #1554, commit 418680a748b3d605a2d8f3d7b27bc6a3e3185930, 02h45 Fortaleza), e a linha deve dizer que estão no main, sem mudar o resto do documento."
+  }
+ ]
+}

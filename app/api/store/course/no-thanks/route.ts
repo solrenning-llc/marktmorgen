@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { originFrom } from "@/lib/request-origin";
+import { isPlatformHost, originFrom, requestHost } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 import { normaliseHandle } from "@/lib/store";
@@ -12,15 +12,19 @@ const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 /**
  * A student's "No thanks" to a course's "Next step" (560 [AS1]): kept in their
  * browser by a cookie this answer sets, `nl_ns_<course>` holding only "1", for
- * NEXT_STEP_NO_SECONDS (a year), HttpOnly, and sent only to the store's course
- * pages (Path=/@<handle>/course/). Set by the server, not by script, so a
+ * NEXT_STEP_NO_SECONDS (a year), HttpOnly, Path=/ with the course in its name.
+ * Path=/ because a course is reached two ways: /@<handle>/course/... here and
+ * /course/... on the store's own domain (proxy.ts), and a cookie limited to
+ * one path would never come back on the other (second review of #3530,
+ * MEDIUM). Set by the server, not by script, so a
  * browser that caps cookies written by script (Safari keeps those 7 days) keeps
  * it the year the privacy policy says (review of #3530, MEDIUM).
  *
  * Nothing is read or written on our side: the handle and the course are only
  * checked for their shape, so the answer costs one call and no database
  * command, and a wrong one sets nothing a page reads. A plain form, no script
- * needed: without one the answer goes back to the course's page.
+ * needed: without one the answer goes back to the course's page, at the
+ * address the browser is on (its own domain's /course/..., or ours).
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
@@ -37,8 +41,10 @@ export async function POST(request: NextRequest) {
   }
   if (!HANDLE_PATTERN.test(handle) || !COURSE_ID_PATTERN.test(course) || !PRODUCT_ID.test(product)) return new Response("Bad request", { status: 400 });
   const secure = originFrom(request).startsWith("https:") ? "; Secure" : "";
-  const cookie = `${nextStepCookie(course)}=1; Path=/@${handle}/course/; Max-Age=${NEXT_STEP_NO_SECONDS}; SameSite=Lax; HttpOnly${secure}`;
+  const cookie = `${nextStepCookie(course)}=1; Path=/; Max-Age=${NEXT_STEP_NO_SECONDS}; SameSite=Lax; HttpOnly${secure}`;
+  // Back to the course where the browser is: our address names the store, the store's own domain does not (proxy.ts).
+  const back = isPlatformHost(requestHost(request)) ? `/@${handle}/course/${product}` : `/course/${product}`;
   const wantsJson = (request.headers.get("accept") ?? "").includes("application/json");
   if (wantsJson) return new Response(null, { status: 204, headers: { "Set-Cookie": cookie, "Cache-Control": "no-store" } });
-  return new Response(null, { status: 303, headers: { "Set-Cookie": cookie, Location: `${originFrom(request)}/@${handle}/course/${product}`, "Cache-Control": "no-store" } });
+  return new Response(null, { status: 303, headers: { "Set-Cookie": cookie, Location: `${originFrom(request)}${back}`, "Cache-Control": "no-store" } });
 }

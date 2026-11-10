@@ -584,6 +584,8 @@ async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Pr
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    // Whether a past-due membership is still being retried is on its latest invoice (lib/membership-access.ts).
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     meter?.alive();
     const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
@@ -1483,6 +1485,7 @@ async function readOne(store: Store, path: string, meter: OrdersMeter): Promise<
 async function sessionOf(store: Store, email: string, id: string, meter: OrdersMeter): Promise<Row | null> {
   const query = new URLSearchParams();
   query.append("expand[]", "subscription");
+  query.append("expand[]", "subscription.latest_invoice");
   query.append("expand[]", "payment_intent.latest_charge");
   const session = await readOne(store, `/checkout/sessions/${encodeURIComponent(id)}?${query}`, meter);
   if (!session || session.status !== "complete") return null;

@@ -12,6 +12,7 @@ import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
+import { readCountry } from "@/lib/fair-price";
 
 /**
  * Starts a purchase paid with PayPal, into the creator's own PayPal account
@@ -74,7 +75,10 @@ export async function POST(request: NextRequest) {
     // (lib/paypal-sales.ts cleanMeta keeps twenty), so none of them is ever left out.
     ...pendingChannel(credit),
   };
-  const opened = await openOrder(store, product, linkOrigin(request, store), { meta, via: via && via.rate > 0 ? { aff: via.aff, rate: via.rate } : null, digitalConsent });
+  // Where the buyer's connection is, for the fair price the page showed them: from the edge, as the Stripe
+  // checkout reads it (app/api/store/checkout/route.ts), never from the form.
+  const visitor = { ...store, visitorCountry: readCountry(request.headers.get("x-vercel-ip-country")) };
+  const opened = await openOrder(visitor, product, linkOrigin(request, store), { meta, via: via && via.rate > 0 ? { aff: via.aff, rate: via.rate } : null, digitalConsent });
   if (!opened.ok && opened.reason === "consent") return away(`/@${store.handle}/p/${product.id}?consent=needed#buy`);
   if (!opened.ok) return away(opened.reason === "paused" ? `/@${store.handle}?status=paused` : `/@${store.handle}/p/${product.id}?paypal=error`);
   after(() => countHit(request, store, { kind: "checkout", id: product.id }));

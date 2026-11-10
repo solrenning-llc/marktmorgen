@@ -1,6 +1,6 @@
 /**
  * The assistant inside the studio, the agent that does the work and waits for
- * the creator's yes (631 [AA1], unit 7, with 27 [E10]; owner, 2 November
+ * the creator's yes (631 [AA1] (studio assistant), with 27 [E10]; owner, 2 November
  * 2026, 02h15 Fortaleza, and 10 November 2026: "all of Whop's AI, and
  * better"). Unit 1: the rules of one turn, pure and browser-safe. No route,
  * no screen and no model call yet: the next unit runs a turn by these rules.

@@ -1,5 +1,5 @@
 /**
- * The rules of one turn of the assistant inside the studio (631 [AA1], unit 7,
+ * The rules of one turn of the assistant inside the studio (631 [AA1] (studio assistant),
  * unit 1; lib/studio-agent-rules.ts). Pure; the real MCP tool list
  * (lib/mcp-catalog.ts), the real role table (lib/team-roles.ts) and the real
  * price table (lib/spend-cost-table.ts). Checked:

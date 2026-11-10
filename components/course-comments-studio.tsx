@@ -55,13 +55,17 @@ export function CourseCommentsStudio({
   storeName,
   initialOn,
   initial,
+  unread = false,
   lessonHref,
   now,
 }: {
   productId: string;
   storeName: string;
-  initialOn: boolean;
+  /** Null when whether comments are on could not be read (rule 24). */
+  initialOn: boolean | null;
   initial: StudioComment[];
+  /** The comments could not be read: the list says so, never "No comments yet" (rule 24). */
+  unread?: boolean;
   /** Where a lesson opens for the creator: its address without the lesson id. */
   lessonHref: string | null;
   /** Seconds, from the server, for "5 min ago". */
@@ -88,7 +92,7 @@ export function CourseCommentsStudio({
     <section id="comments" className="card mt-8 p-6 sm:p-8" aria-labelledby="comments-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="comments-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Comments under lessons</h2>
-        <span className={`tag ${on ? "tag-live" : ""}`}>{on ? "On" : "Off"}</span>
+        <span className={`tag ${on ? "tag-live" : ""}`}>{on === null ? "Not read" : on ? "On" : "Off"}</span>
       </div>
       <p className="mt-2 max-w-2xl text-ink-soft">
         Students ask questions and share what they made under each lesson, under a name they choose; their email address
@@ -98,7 +102,7 @@ export function CourseCommentsStudio({
         <input
           type="checkbox"
           className="h-5 w-5"
-          checked={on}
+          checked={on === true}
           disabled={busy !== null}
           onChange={async (e) => {
             const next = e.target.checked;
@@ -107,13 +111,21 @@ export function CourseCommentsStudio({
         />
         Students can comment under lessons
       </label>
-      {!on ? (
+      {on === null ? (
+        <p className="mt-1 text-sm text-ink-soft">
+          Whether students can comment could not be read just now. Reload the page in a moment, or choose it here.
+        </p>
+      ) : !on ? (
         <p className="mt-1 text-sm text-ink-soft">Off: every comment is hidden from students and nothing is deleted. Switch it on and they come back.</p>
       ) : null}
 
       {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
 
-      {comments.length === 0 ? (
+      {unread ? (
+        <p className="notice notice-error mt-6" role="status">
+          The comments could not be loaded just now, so none are marked as read. Reload the page in a moment.
+        </p>
+      ) : comments.length === 0 ? (
         <StudioEmptyState title="No comments yet" body="The newest ones will show here, with a way to answer each." className="mt-6" />
       ) : (
         <ol className="mt-6 space-y-4">

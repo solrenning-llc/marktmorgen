@@ -223,21 +223,34 @@ function deletionComment(raw: unknown, expectedId: string): LessonComment | null
   }
 }
 
+/**
+ * Whether students can comment: on while the creator's mark is confirmed
+ * absent, off while it is there. Any other reply is unknown and throws, so
+ * comments the creator switched off are never taken again (rule 24).
+ */
 export async function commentsOn(courseId: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const [off] = await redisPipeline([["GET", offKey(courseId)]]);
-  return off === null || off === undefined;
+  const off = oneReply(await redisPipeline([["GET", offKey(courseId)]]));
+  if (off === null) return true;
+  if (off === "1") return false;
+  throw unreadableComments();
 }
 
 export async function setCommentsOn(courseId: string, on: boolean): Promise<void> {
   await redisPipeline([on ? ["DEL", offKey(courseId)] : ["SET", offKey(courseId), "1"]]);
 }
 
-/** The name a student shows, or "" if they have not chosen one yet. */
+/**
+ * The name a student shows, or "" when it is confirmed they have not chosen
+ * one yet. Any other reply is unknown and throws: it never asks for the name
+ * again nor charges it a second time (rule 24).
+ */
 export async function commenterName(courseId: string, key: string): Promise<string> {
   if (!isRedisConfigured()) return "";
-  const [raw] = await redisPipeline([["HGET", namesKey(courseId), key]]);
-  return typeof raw === "string" ? raw : "";
+  const raw = oneReply(await redisPipeline([["HGET", namesKey(courseId), key]]));
+  if (raw === null) return "";
+  if (typeof raw !== "string") throw unreadableComments();
+  return raw;
 }
 
 /** Every comment kept under one lesson, newest first. */
@@ -301,10 +314,13 @@ export async function addComment(input: {
 
   let name = "";
   if (input.by !== CREATOR_AUTHOR) {
+    // The name is chosen once: one already kept stays, and is never charged
+    // again; one that cannot be read refuses the comment (rule 24).
     const given = cleanLine(input.name, MAX_COMMENTER_NAME);
-    name = given || (await commenterName(input.courseId, input.by));
+    const kept = await commenterName(input.courseId, input.by);
+    name = kept || given;
     if (!name) return { ok: false, reason: "name" };
-    if (given) {
+    if (!kept) {
       await needData(input.room, [{ slot: COMMENTS_SLOT(input.courseId), bytes: dataBytes([input.by, given], 1) }]);
       await redisPipeline([["HSET", namesKey(input.courseId), input.by, given]]);
     }
@@ -487,29 +503,70 @@ export async function deleteComment(courseId: string, id: string, room: DataStor
   return count;
 }
 
-/** The course's newest comments, for the studio, and how many came since it last looked. */
-export async function recentComments(courseId: string, limit = 50): Promise<{ comments: LessonComment[]; fresh: number; seen: number }> {
-  if (!isRedisConfigured()) return { comments: [], fresh: 0, seen: 0 };
-  const [ids, seenRaw] = await redisPipeline([
-    ["ZREVRANGE", allKey(courseId), 0, limit - 1],
-    ["GET", seenKey(courseId)],
-  ]);
-  const seen = Number(seenRaw) || 0;
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
-  const [fresh, rows] = await redisPipeline([
-    ["ZCOUNT", allKey(courseId), `(${seen}`, "+inf"],
-    ...(list.length ? [["HMGET", commentsKey(courseId), ...list]] : []),
-  ]);
-  return { comments: commentsFrom(rows), fresh: Number(fresh) || 0, seen };
+const STUDIO_READ = "the studio's lesson comments";
+
+/** When the studio last showed the comments: 0 when confirmed never, the time markSeen wrote, or UnknownReply. */
+function seenOf(raw: unknown): number {
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^\d{1,15}$/.test(raw)) throw new UnknownReply(STUDIO_READ);
+  return Number(raw);
 }
 
-/** How many comments came on each course since the studio last showed them. */
+/**
+ * The course's newest comments, for the studio, and how many came since it
+ * last looked. Every reply is read exactly: a list, a time, a count or a
+ * comment of another shape throws UnknownReply, never "no comments" or 0 new
+ * (rule 24). A comment deleted between the two reads is left out.
+ */
+export async function recentComments(courseId: string, limit = 50): Promise<{ comments: LessonComment[]; fresh: number; seen: number }> {
+  if (!isRedisConfigured()) return { comments: [], fresh: 0, seen: 0 };
+  const [ids, seenRaw] = exactReplies(
+    await redisPipeline([
+      ["ZREVRANGE", allKey(courseId), 0, limit - 1],
+      ["GET", seenKey(courseId)],
+    ]),
+    2,
+    STUDIO_READ,
+  );
+  const list = plainList(ids);
+  if (!list || list.length > limit || new Set(list).size !== list.length) throw new UnknownReply(STUDIO_READ);
+  if (list.some((id) => typeof id !== "string" || !COMMENT_ID_PATTERN.test(id))) throw new UnknownReply(STUDIO_READ);
+  const seen = seenOf(seenRaw);
+  const commands = [
+    ["ZCOUNT", allKey(courseId), `(${seen}`, "+inf"],
+    ...(list.length ? [["HMGET", commentsKey(courseId), ...(list as string[])]] : []),
+  ];
+  const [freshRaw, rowsRaw] = exactReplies(await redisPipeline(commands), commands.length, STUDIO_READ);
+  const fresh = replyCount(freshRaw, STUDIO_READ);
+  const comments: LessonComment[] = [];
+  if (list.length) {
+    const rows = plainList(rowsRaw);
+    if (!rows || rows.length !== list.length) throw new UnknownReply(STUDIO_READ);
+    rows.forEach((raw, i) => {
+      if (raw === null) return;
+      const comment = parseComment(raw);
+      if (!comment || comment.id !== list[i]) throw new UnknownReply(STUDIO_READ);
+      comments.push(comment);
+    });
+  }
+  return { comments, fresh, seen };
+}
+
+/**
+ * How many comments came on each course since the studio last showed them,
+ * read exactly: a time or a count of another shape throws UnknownReply,
+ * never 0 new (rule 24).
+ */
 export async function freshCounts(courseIds: string[]): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   if (!isRedisConfigured() || !courseIds.length) return counts;
-  const seen = await redisPipeline(courseIds.map((id) => ["GET", seenKey(id)]));
-  const fresh = await redisPipeline(courseIds.map((id, i) => ["ZCOUNT", allKey(id), `(${Number(seen[i]) || 0}`, "+inf"]));
-  courseIds.forEach((id, i) => counts.set(id, Number(fresh[i]) || 0));
+  const seen = exactReplies(await redisPipeline(courseIds.map((id) => ["GET", seenKey(id)])), courseIds.length, STUDIO_READ).map(seenOf);
+  const fresh = exactReplies(
+    await redisPipeline(courseIds.map((id, i) => ["ZCOUNT", allKey(id), `(${seen[i]}`, "+inf"])),
+    courseIds.length,
+    STUDIO_READ,
+  );
+  courseIds.forEach((id, i) => counts.set(id, replyCount(fresh[i], STUDIO_READ)));
   return counts;
 }
 

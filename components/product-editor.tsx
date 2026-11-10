@@ -1830,7 +1830,7 @@ export function ProductEditor({
   /** Whether the writing help is on for this person, and what is left of the month (lib/ai.ts). */
   ai?: { on: boolean; left: number };
   /** Per course product, the comments under its lessons since its studio page was last opened. */
-  newComments?: Record<string, number>;
+  newComments?: Record<string, number | null>;
   /** Per product with a waitlist, where it stands (lib/waitlist.ts). */
   waitlists?: Record<string, WaitlistView>;
   /** Each product's pre-orders, when it takes or took any (lib/preorders.ts). */
@@ -2494,7 +2494,7 @@ export function ProductEditor({
                 {product.call?.kind === "weekly" ? (
                   <PackageEditor productId={product.id} singleCents={product.priceCents} currency={currency} initial={product.callPackage ?? null} />
                 ) : null}
-                {product.call || product.bundle || product.podcast || product.shipping ? null : <CourseToggle product={product} newComments={newComments[product.id] ?? 0} />}
+                {product.call || product.bundle || product.podcast || product.shipping ? null : <CourseToggle product={product} newComments={Object.hasOwn(newComments, product.id) ? newComments[product.id] : 0} />}
                 {product.call || product.bundle || product.course || product.shipping ? null : <PodcastToggle product={product} />}
                 {product.priceCents > 0 && !product.hidden ? (
                   <WaitlistPanel

@@ -742,12 +742,15 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
-/** Comments under each course's lessons since the creator last opened that course's studio page. */
-async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number>> {
+/**
+ * Comments under each course's lessons since the creator last opened that course's studio page; null for every
+ * course when they could not be counted (rule 24), so the list says so instead of showing none.
+ */
+async function newCommentsFor(products: { id: string; course?: { id: string } | null }[]): Promise<Record<string, number | null>> {
   const courses = products.filter((p) => p.course).map((p) => [p.id, p.course!.id] as const);
   if (!courses.length) return {};
-  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => new Map<string, number>());
-  return Object.fromEntries(courses.map(([product, c]) => [product, counts.get(c) ?? 0]));
+  const counts = await freshCounts(courses.map(([, c]) => c)).catch(() => null);
+  return Object.fromEntries(courses.map(([product, c]) => [product, counts ? (counts.get(c) ?? null) : null]));
 }
 
 /** The products a store-wide sale can cover (lib/store-sale.ts), by title, for the sale's picker. */

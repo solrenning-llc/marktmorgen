@@ -29,7 +29,11 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 /** What was focused, in order, named by the element: its type and its own words (or its label). */
 let focused: string[] = [];
 const nameOf = (node: Node) => `${String(node.type)}:${String(node.props?.["aria-label"] ?? texts(node.props?.children).join("").trim())}`;
-const attach = (node: Node) => ({ focus: () => focused.push(nameOf(node)) });
+/** The tree on screen now, so a stand-in names its element as it reads when focused (its words can change). */
+let onScreen: () => unknown = () => null;
+const attach = (node: Node) => ({
+  focus: () => focused.push(nameOf(find(onScreen(), (n) => n.props?.ref === node.props?.ref)[0] ?? node)),
+});
 const lastFocus = () => focused[focused.length - 1] ?? "body";
 
 const button = (tree: unknown, label: string) => find(tree, (n) => n.type === "button" && texts(n.props?.children).join("").includes(label))[0] as Node | undefined;
@@ -40,7 +44,7 @@ const type = (tree: unknown, value: string) =>
 const stays = (node: Node | undefined) => [node?.props?.disabled ?? false, node?.props?.["aria-disabled"]];
 
 // A frame comes after React has put the new elements in place (and set their refs), as in a browser: about 16 ms later.
-globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => setTimeout(() => callback(0), 16)) as typeof requestAnimationFrame;
+globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => Number(setTimeout(() => callback(0), 16))) as unknown as typeof requestAnimationFrame;
 
 const item = {
   id: "f".repeat(32),
@@ -59,6 +63,7 @@ async function review(): Promise<void> {
   let answer: () => Promise<Response> = async () => json({ ok: false, error: "gone" }, 404);
   globalThis.fetch = (async () => answer()) as typeof fetch;
   const entry = await mount(ReviewEntry as (props: { productId: string; item: typeof item }) => unknown, { productId: "prod1", item }, { attach });
+  onScreen = entry.tree;
   const check = async () => {
     type(entry.tree(), "Keep your knees out.");
     await entry.settle();
@@ -103,6 +108,7 @@ async function settings(): Promise<void> {
   let answers: Response[] = [];
   globalThis.fetch = (async () => answers.shift() ?? json({ ok: false, error: "unavailable" }, 503)) as typeof fetch;
   const panel = await mount(SubmissionSettings as (props: { productId: string; lessonId: string }) => unknown, { productId: "prod1", lessonId: "lesson0001ab" }, { attach });
+  onScreen = panel.tree;
 
   part("Settings: focus follows what stays");
   focused = [];

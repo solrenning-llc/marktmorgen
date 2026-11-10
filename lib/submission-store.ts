@@ -774,13 +774,28 @@ export type ReviewRow = { lessonId: string; id: string; submission: KeptSubmissi
  * its buyer deleted) is taken off the list. `before` is the last page's
  * cursor. Answers the rows and the cursor of the next page, or null.
  */
-export async function reviewList(folder: string, courseId: string, nowSeconds: number, before?: number): Promise<{ rows: ReviewRow[]; next: number | null }> {
+/**
+ * Where the next page of the "To review" list starts: the last score shown, and how many members at that score
+ * were shown already. Files closed in the same second share their score, so a score alone would skip the rest of
+ * them (review of #3571, Claude 3); written "score:skip" in the page's address.
+ */
+export type ReviewCursor = { before: number; skip: number };
+export const reviewCursorText = (cursor: ReviewCursor) => `${cursor.before}:${cursor.skip}`;
+/** A cursor as the page's address carries it; null when it does not read as one. */
+export function readReviewCursor(text: string | null): ReviewCursor | null {
+  const match = /^(\d{1,15}):(\d{1,9})$/.exec(text ?? "");
+  if (!match) return null;
+  const cursor = { before: Number(match[1]), skip: Number(match[2]) };
+  return Number.isSafeInteger(cursor.before) && Number.isSafeInteger(cursor.skip) ? cursor : null;
+}
+
+export async function reviewList(folder: string, courseId: string, nowSeconds: number, cursor?: ReviewCursor): Promise<{ rows: ReviewRow[]; next: ReviewCursor | null }> {
   const key = listKey(folder, courseId);
-  const top = before !== undefined && Number.isSafeInteger(before) ? `(${before}` : "+inf";
+  const top = cursor ? `${cursor.before}` : "+inf";
   const replies = repliesFor(
     await redisPipeline([
       ["ZREMRANGEBYSCORE", key, "-inf", nowSeconds],
-      ["ZREVRANGEBYSCORE", key, top, `(${nowSeconds}`, "WITHSCORES", "LIMIT", 0, SUBMISSION_LIST_PAGE + 1],
+      ["ZREVRANGEBYSCORE", key, top, `(${nowSeconds}`, "WITHSCORES", "LIMIT", cursor?.skip ?? 0, SUBMISSION_LIST_PAGE + 1],
     ]),
     2,
   );
@@ -812,7 +827,13 @@ export async function reviewList(folder: string, courseId: string, nowSeconds: n
     else rows.push({ lessonId, id, submission });
   }
   if (gone.length) await redisPipeline([["ZREM", key, ...gone]]).catch(() => undefined);
-  return { rows, next: page.length > SUBMISSION_LIST_PAGE ? shown[shown.length - 1].score : null };
+  if (page.length <= SUBMISSION_LIST_PAGE) return { rows, next: null };
+  // The next page starts at the last score shown, past every member at that score already shown on this page and
+  // the ones before it, less those just taken off the list (a removal that failed shows one row twice, never none).
+  const last = shown[shown.length - 1].score;
+  const tied = shown.filter((row) => row.score === last && !gone.includes(row.member)).length;
+  const skip = (cursor && cursor.before === last ? cursor.skip : 0) + tied;
+  return { rows, next: { before: last, skip } };
 }
 
 export type Replied =

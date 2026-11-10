@@ -6,7 +6,7 @@ import { findLesson, readCourse } from "@/lib/course";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
 import { readSubmissionReply, readSubmissionSetup } from "@/lib/submission-rules";
-import { SUBMISSION_LIST_UNITS, SUBMISSION_REPLY_UNITS, readSetupFor, replySubmission, reviewList, saveSetupFor } from "@/lib/submission-store";
+import { SUBMISSION_LIST_UNITS, SUBMISSION_REPLY_UNITS, readReviewCursor, readSetupFor, replySubmission, reviewCursorText, reviewList, saveSetupFor } from "@/lib/submission-store";
 import { DataRoomError } from "@/lib/store-data";
 import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 
@@ -34,7 +34,7 @@ async function takeMore(store: Store, units: number): Promise<Response | null> {
  * The studio's side of buyers' files for review (750 [CD1] unit 4).
  *
  *   GET ?id=<product>&lessonId=<lesson>   what the lesson asks for, or null
- *   GET ?id=<product>&list=1[&before=n]   one page of the course's kept files, newest first
+ *   GET ?id=<product>&list=1[&before=score:skip]   one page of the course's kept files, newest first
  *
  * Only for a role that may change products, on the store the studio page was
  * drawn for (jsonAccess, which takes one studio request before anything is
@@ -53,11 +53,11 @@ export async function GET(request: NextRequest) {
     if (params.get("list") === "1") {
       const refused = await takeMore(access.store, SUBMISSION_LIST_UNITS);
       if (refused) return refused;
-      const before = Number(params.get("before"));
-      const page = await reviewList(await storeFolder(storeRef(access.store)), found.courseId, Math.floor(Date.now() / 1000), params.has("before") && Number.isSafeInteger(before) ? before : undefined);
+      const cursor = params.has("before") ? readReviewCursor(params.get("before")) : null;
+      const page = await reviewList(await storeFolder(storeRef(access.store)), found.courseId, Math.floor(Date.now() / 1000), cursor ?? undefined);
       return json({
         ok: true,
-        next: page.next,
+        next: page.next ? reviewCursorText(page.next) : null,
         rows: page.rows.map((row) => {
           const lesson = findLesson(found.course, row.lessonId);
           const title = lesson?.lesson.title ?? "A lesson removed since";

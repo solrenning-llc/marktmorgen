@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 630,
+  "sha256": "3c2e7b8da50703508b75488fad6c893cfac8cb2ecd37d60b96efd7d0d2dc7f7a",
+  "content": "✔ unknown usage has a status message without a false zero or progress value (6.130026ms)\n✔ acknowledged zero remains a real zero with an accessible zero progress value (1.153421ms)\n✔ invalid counters are unavailable, never rendered as valid balances (1.055757ms)\n✔ invalid thresholds do not invent a zero allowance (1.121614ms)\n✔ recorded overuse remains visible while progress stays within accessible bounds (0.50467ms)\n✔ a verified zero threshold is exhausted rather than dividing by zero (0.537338ms)\nℹ tests 6\nℹ suites 0\nℹ pass 6\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 16.597921\n"
+}

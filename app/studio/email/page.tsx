@@ -24,7 +24,10 @@ import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/li
 import { sellsSomething } from "@/lib/mail-starters";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { readFlowListStrict } from "@/lib/flow-list";
-import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
+import { inTrial, monthlyAllowance, usedThisMonthExact } from "@/lib/mail";
+import { isRedisConfigured } from "@/lib/redis";
+import { confirmedEmailUsage } from "@/lib/email-usage-summary";
+import { EmailUsageSummary } from "@/components/email-usage-summary";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
 import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
@@ -62,9 +65,14 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
+  const monthWindow = windowId(store);
   const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
-    usedThisMonth(store.listId, windowId(store)),
+    // Reuse the same one-counter read. An absent window/configuration is
+    // not evidence of zero, and an unread counter must not stop draft work.
+    store.listId && monthWindow && isRedisConfigured()
+      ? usedThisMonthExact(store.listId, monthWindow).then(confirmedEmailUsage).catch(() => null)
+      : Promise.resolve(null),
     // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.
     listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),
     readFlowListStrict(store.listId).catch(() => null),
@@ -137,6 +145,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           something free or bought from you, and those you import who agreed elsewhere. Every email carries a
           one-click unsubscribe, and anyone who leaves is never written to again.
         </p>
+
+        <EmailUsageSummary used={used} allowance={allowance} />
 
         {allowance === 0 && store.subscriptionActive && hasPro(store.tier) ? (
           // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment
@@ -246,7 +256,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             counts={counts}
             used={used}
             allowance={allowance}
-            monthKnown={windowId(store) !== null}
+            monthKnown={used !== null}
             trial={trial}
             // The way up for a list that has outgrown Pro, offered beside the
             // month's count to whoever may change the plan (lib/plan.ts).

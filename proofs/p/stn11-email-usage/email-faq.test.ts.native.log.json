@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 970,
+  "sha256": "29e67fdb0560e2bee7f21ed79f7b23743cef16fd1d5b4da07e82e5294b9d7c6a",
+  "content": "P_STN_METRICS {\"fetch\":0,\"run\":0,\"pipeline\":0,\"network\":0,\"sourceBytes\":1059440,\"capped\":false}\nnode:fs:797\n  return binding.read(fd, buffer, offset, length, position);\n                 ^\n\nError: EISDIR: illegal operation on a directory, read\n    at Object.readSync (node:fs:797:18)\n    at tryReadSync (node:fs:426:20)\n    at Object.readFileSync (node:fs:529:19)\n    at getSourceSync (node:internal/modules/esm/load:41:17)\n    at defaultLoadSync (node:internal/modules/esm/load:156:34)\n    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:806:12)\n    at nextStep (node:internal/modules/customization_hooks:189:26)\n    at load (file:///workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/proofs/p/stn11-email-usage/native-linked.mjs:31:34)\n    at nextStep (node:internal/modules/customization_hooks:189:26)\n    at loadWithHooks (node:internal/modules/customization_hooks:374:18) {\n  errno: -21,\n  code: 'EISDIR',\n  syscall: 'read'\n}\n\nNode.js v24.22.1\n"
+}

@@ -1368,6 +1368,7 @@
     "components/email-studio.tsx",
     "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",
+    "components/email-usage-summary.tsx",
     "components/embed-messenger.tsx",
     "components/empty-state.tsx",
     "components/exit-offer-editor.tsx",

@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 748,
+  "sha256": "b4f9b344e62b6f7048261ecb017f49add810cf538b8d20bb72484ea5bab6a554",
+  "content": "\nInside the month\n  ok    several times\n  ok    exactly once\n  ok    one person, one email left\n\nPast what is left\n  ok    more people than emails left\n  ok    none left\n  ok    used past the month reads as none left, never as a negative\n  ok    one left\n\nNothing to say\n  ok    nobody to send to\n  ok    numbers that are not counts\n\nIn the composer\n  ok    it takes the month from the same two numbers as the This month card, and none when the plan's month cannot be told\n  ok    shown only with a real recipient count, for an email that goes now\n  ok    in a polite live region that is always on the page, so a new count is read out\n  ok    bold when it is past what is left\n  ok    it asks for nothing and sends nothing\n\n14 checks, all passing.\n"
+}

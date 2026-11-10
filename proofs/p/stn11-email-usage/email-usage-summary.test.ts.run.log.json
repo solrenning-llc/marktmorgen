@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 785,
+  "sha256": "47d065f8fcdc416dcea028ba3260d3a46e9a1912c465e750a9c7fec3a1d47f92",
+  "content": "✔ the email page reads its existing counter exactly instead of inventing zero (0.871828ms)\n✔ email usage is before the composer for every viewport (0.150991ms)\n✔ an unconfirmed counter does not enter the composer as a known month (0.171832ms)\n✔ the visible text preserves the supplied monthly count and limit (18.360806ms)\n✔ unknown or invalid use never becomes zero, free capacity or a progress value (1.860878ms)\n✔ unknown limits are not presented as a verified monthly capacity (1.1394ms)\n✔ the summary has no opening pixel, network operation or automatic refresh (0.557377ms)\n✔ only confirmed whole counts reach the page and the composer (0.213583ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 29.004188\n"
+}

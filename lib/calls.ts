@@ -1388,6 +1388,18 @@ export async function moveBooking(input: {
     from = recorded
       ? { start: recorded.s, end: recorded.e, moves: recorded.n }
       : { start: input.booked.start, end: input.booked.end, moves: 0 };
+    if (recorded && recorded.s === start && recorded.n >= 1) {
+      // The same move asked again. A move refused after its key was kept (writeMove's reply and read-back both unknown,
+      // or the diary write below failed) leaves the diary at the time before it: that move is finished now, from the
+      // diary's time and counted once, through every step below, instead of answering "same" for good. Read exactly
+      // (readDiary, entryOf): an unknown diary throws and refuses. Only a diary holding this booking at another time
+      // and nowhere at the new one is half-written; anything else is the same move, done.
+      const mine = readEntries(await readDiary(callsId)).filter(({ entry }) => entry.session === session);
+      const before = mine.find(({ entry }) => entry.start !== start);
+      if (before && !mine.some(({ entry }) => entry.start === start)) {
+        from = { start: before.entry.start, end: before.entry.e, moves: recorded.n - 1 };
+      }
+    }
     if (from.moves >= MAX_MOVES) return { ok: false, reason: "limit" };
     // Weekly hours move at the length paid for, whatever the setup says now (lib/call-lengths.ts, ownLength).
     const kept = ownLength(setup, from.end - from.start);

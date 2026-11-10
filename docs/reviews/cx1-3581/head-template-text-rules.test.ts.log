@@ -1,0 +1,30 @@
+  ok    the campaign still holds the part this test uses
+
+A product's page, while the product is on the store
+  ok    a part ⟦like this⟧ is refused, with the block and the part
+  ok    a campaign's part in the second version is refused too
+  ok    the creator's own brackets are words, and save
+  ok    a draft's page keeps its parts to write
+
+A store's own page, while it is shown or scheduled
+  ok    a campaign's part in [brackets] is refused, with the block and the part
+  ok    nor scheduled to show by itself
+  ok    a part ⟦like this⟧ still is, now saying where
+  ok    kept hidden, it saves
+  ok    once written in the creator's own words, it can be shown
+
+The rule, alone
+  ok    every campaign part is read, each once, none a link's words
+  ok    a link's words in brackets are not a part
+  ok    the first part met wins, marked or bracketed
+  ok    a part in the search line is found and said there
+  ok    a part in the headline being tested is found
+  ok    a long part is shortened when said back
+  ok    the creator's own brackets stay words
+  ok    the message says the block, the part and the two ways on
+
+The page editor
+  ok    it says where the part is and opens that block
+  ok    it never carries the campaigns
+
+20 checks, all passing.

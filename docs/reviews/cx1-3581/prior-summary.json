@@ -1,0 +1,21 @@
+{
+  "cx1-template-multiline.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "5 checks, all passing."
+    ]
+  },
+  "template-text-rules.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  a part ⟦like this⟧ is refused, with the block and the part",
+      "  FAIL  a campaign's part in the second version is refused too",
+      "  FAIL  a campaign's part in [brackets] is refused, with the block and the part",
+      "  FAIL  nor scheduled to show by itself",
+      "  FAIL  a part ⟦like this⟧ still is, now saying where",
+      "20 checks, 5 failing."
+    ]
+  }
+}

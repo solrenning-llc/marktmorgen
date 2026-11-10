@@ -1,0 +1,29 @@
+{
+  "fast-money-page.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    publishing a draft reads its page and checks it",
+      "7 checks, all passing."
+    ]
+  },
+  "booking-block-save.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "3 checks, all passing."
+    ]
+  },
+  "page-routes-unknown.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "reading a page to copy failed UnknownReplyError: Redis answered a kept page in an unknown shape",
+      "reading a page before bringing back a version failed UnknownReplyError: Redis answered a kept page in an unknown shape",
+      "reading a store page before saving it failed UnknownReplyError: Redis answered a kept page in an unknown shape",
+      "reading a page for a saved section failed UnknownReplyError: Redis answered a kept page in an unknown shape",
+      "reading a page for a saved section failed UnknownReplyError: Redis answered a kept page in an unknown shape",
+      "reading a page for a saved section failed UnknownReplyError: Redis answered a kept page in an unknown shape"
+    ]
+  }
+}

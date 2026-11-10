@@ -1,0 +1,9 @@
+  ok    setup creates page
+
+CX1: multiline marked instructions cannot be published
+  ok    visible multiline placeholder refused "⟦Write the first line\nand the second line⟧"
+  ok    visible multiline placeholder refused "⟦Write the first line\r\nand the second line⟧"
+  ok    single-line marker remains refused
+  ok    hidden unfinished text is retained
+
+5 checks, all passing.

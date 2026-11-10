@@ -1,0 +1,234 @@
+
+Redis's answer to the page read: no reply
+  ok    a product's page saved with its picture taken off: refused, 503 page_unread
+  ok    a product's page saved with its picture taken off: the page read was the one changed
+  ok    a product's page saved with its picture taken off: pages unchanged
+  ok    a product's page saved with its picture taken off: owners unchanged
+  ok    a product's page saved with its picture taken off: versions unchanged
+  ok    a product's page saved with its picture taken off: section unchanged
+  ok    a product's page saved with its picture taken off: applied unchanged
+  ok    a product's page saved with its picture taken off: flag unchanged
+  ok    a product's page copied to start another: refused, 503 page_unread
+  ok    a product's page copied to start another: the page read was the one changed
+  ok    a product's page copied to start another: pages unchanged
+  ok    a product's page copied to start another: owners unchanged
+  ok    a product's page copied to start another: versions unchanged
+  ok    a product's page copied to start another: section unchanged
+  ok    a product's page copied to start another: applied unchanged
+  ok    a product's page copied to start another: flag unchanged
+  ok    an earlier version of a product's page brought back: refused, 503 page_unread
+  ok    an earlier version of a product's page brought back: the page read was the one changed
+  ok    an earlier version of a product's page brought back: pages unchanged
+  ok    an earlier version of a product's page brought back: owners unchanged
+  ok    an earlier version of a product's page brought back: versions unchanged
+  ok    an earlier version of a product's page brought back: section unchanged
+  ok    an earlier version of a product's page brought back: applied unchanged
+  ok    an earlier version of a product's page brought back: flag unchanged
+  ok    a store page saved with its picture taken off: refused, 503 page_unread
+  ok    a store page saved with its picture taken off: the page read was the one changed
+  ok    a store page saved with its picture taken off: pages unchanged
+  ok    a store page saved with its picture taken off: owners unchanged
+  ok    a store page saved with its picture taken off: versions unchanged
+  ok    a store page saved with its picture taken off: section unchanged
+  ok    a store page saved with its picture taken off: applied unchanged
+  ok    a store page saved with its picture taken off: flag unchanged
+  ok    the pages that use a saved section listed: refused, 503 page_unread
+  ok    the pages that use a saved section listed: the page read was the one changed
+  ok    the pages that use a saved section listed: pages unchanged
+  ok    the pages that use a saved section listed: owners unchanged
+  ok    the pages that use a saved section listed: versions unchanged
+  ok    the pages that use a saved section listed: section unchanged
+  ok    the pages that use a saved section listed: applied unchanged
+  ok    the pages that use a saved section listed: flag unchanged
+  ok    a saved section updated: refused, 503 page_unread
+  ok    a saved section updated: the page read was the one changed
+  ok    a saved section updated: pages unchanged
+  ok    a saved section updated: owners unchanged
+  ok    a saved section updated: versions unchanged
+  ok    a saved section updated: section unchanged
+  ok    a saved section updated: applied unchanged
+  ok    a saved section updated: flag unchanged
+  ok    a saved section put on its pages: refused, 503 page_unread_counted
+  ok    a saved section put on its pages: the page read was the one changed
+  ok    a saved section put on its pages: pages unchanged
+  ok    a saved section put on its pages: owners unchanged
+  ok    a saved section put on its pages: versions unchanged
+  ok    a saved section put on its pages: section unchanged
+  ok    a saved section put on its pages: flag unchanged
+  ok    a saved section put on its pages: the month's count went up by exactly the one try
+
+Redis's answer to the page read: not a page
+  ok    a product's page saved with its picture taken off: refused, 503 page_unread
+  ok    a product's page saved with its picture taken off: the page read was the one changed
+  ok    a product's page saved with its picture taken off: pages unchanged
+  ok    a product's page saved with its picture taken off: owners unchanged
+  ok    a product's page saved with its picture taken off: versions unchanged
+  ok    a product's page saved with its picture taken off: section unchanged
+  ok    a product's page saved with its picture taken off: applied unchanged
+  ok    a product's page saved with its picture taken off: flag unchanged
+  ok    a product's page copied to start another: refused, 503 page_unread
+  ok    a product's page copied to start another: the page read was the one changed
+  ok    a product's page copied to start another: pages unchanged
+  ok    a product's page copied to start another: owners unchanged
+  ok    a product's page copied to start another: versions unchanged
+  ok    a product's page copied to start another: section unchanged
+  ok    a product's page copied to start another: applied unchanged
+  ok    a product's page copied to start another: flag unchanged
+  ok    an earlier version of a product's page brought back: refused, 503 page_unread
+  ok    an earlier version of a product's page brought back: the page read was the one changed
+  ok    an earlier version of a product's page brought back: pages unchanged
+  ok    an earlier version of a product's page brought back: owners unchanged
+  ok    an earlier version of a product's page brought back: versions unchanged
+  ok    an earlier version of a product's page brought back: section unchanged
+  ok    an earlier version of a product's page brought back: applied unchanged
+  ok    an earlier version of a product's page brought back: flag unchanged
+  ok    a store page saved with its picture taken off: refused, 503 page_unread
+  ok    a store page saved with its picture taken off: the page read was the one changed
+  ok    a store page saved with its picture taken off: pages unchanged
+  ok    a store page saved with its picture taken off: owners unchanged
+  ok    a store page saved with its picture taken off: versions unchanged
+  ok    a store page saved with its picture taken off: section unchanged
+  ok    a store page saved with its picture taken off: applied unchanged
+  ok    a store page saved with its picture taken off: flag unchanged
+  ok    the pages that use a saved section listed: refused, 503 page_unread
+  ok    the pages that use a saved section listed: the page read was the one changed
+  ok    the pages that use a saved section listed: pages unchanged
+  ok    the pages that use a saved section listed: owners unchanged
+  ok    the pages that use a saved section listed: versions unchanged
+  ok    the pages that use a saved section listed: section unchanged
+  ok    the pages that use a saved section listed: applied unchanged
+  ok    the pages that use a saved section listed: flag unchanged
+  ok    a saved section updated: refused, 503 page_unread
+  ok    a saved section updated: the page read was the one changed
+  ok    a saved section updated: pages unchanged
+  ok    a saved section updated: owners unchanged
+  ok    a saved section updated: versions unchanged
+  ok    a saved section updated: section unchanged
+  ok    a saved section updated: applied unchanged
+  ok    a saved section updated: flag unchanged
+  ok    a saved section put on its pages: refused, 503 page_unread_counted
+  ok    a saved section put on its pages: the page read was the one changed
+  ok    a saved section put on its pages: pages unchanged
+  ok    a saved section put on its pages: owners unchanged
+  ok    a saved section put on its pages: versions unchanged
+  ok    a saved section put on its pages: section unchanged
+  ok    a saved section put on its pages: flag unchanged
+  ok    a saved section put on its pages: the month's count went up by exactly the one try
+
+What the studio says
+  ok    page_unread has its own words, saying nothing was changed
+  ok    page_unread_counted says no page changed and the try still counts
+
+Healthy reads still work the same
+  ok    the copy
+  ok    the earlier version
+  ok    the section's pages
+  ok    the product's page saved as it is
+  ok    the section put on its pages
+
+An apply past the month's figure reads no page
+  ok    refused for the month's figure
+  ok    with no page read
+
+121 checks, all passing.
+reading a product page before saving it failed UnknownReplyError: Redis answered a page read in an unknown shape
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83035:23)
+    at async POST (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85036:18)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page to copy failed UnknownReplyError: Redis answered a page read in an unknown shape
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83035:23)
+    at async GET (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85082:30)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page before bringing back a version failed UnknownReplyError: Redis answered a page read in an unknown shape
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83035:23)
+    at async GET2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85126:17)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a store page before saving it failed UnknownReplyError: Redis answered a page read in an unknown shape
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83035:23)
+    at async POST2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85228:16)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page for a saved section failed UnknownReplyError: Redis answered a page read in an unknown shape
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83035:23)
+    at async heldPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85272:12)
+    at async usesOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85295:18)
+    at async GET3 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85317:46)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page for a saved section failed UnknownReplyError: Redis answered a page read in an unknown shape
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83035:23)
+    at async heldPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85272:12)
+    at async usesOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85295:18)
+    at async POST3 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85344:31)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page for a saved section failed UnknownReplyError: Redis answered a page read in an unknown shape
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83035:23)
+    at async heldPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85272:12)
+    at async POST3 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85372:18)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a product page before saving it failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83044:11)
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83036:10)
+    at async POST (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85036:18)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page to copy failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83044:11)
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83036:10)
+    at async GET (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85082:30)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page before bringing back a version failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83044:11)
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83036:10)
+    at async GET2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85126:17)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a store page before saving it failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83044:11)
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83036:10)
+    at async POST2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85228:16)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page for a saved section failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83044:11)
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83036:10)
+    at async heldPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85272:12)
+    at async usesOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85295:18)
+    at async GET3 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85317:46)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page for a saved section failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83044:11)
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83036:10)
+    at async heldPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85272:12)
+    at async usesOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85295:18)
+    at async POST3 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85344:31)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)
+reading a page for a saved section failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83044:11)
+    at readPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:83036:10)
+    at async heldPage (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85272:12)
+    at async POST3 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85372:18)
+    at async C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:75
+    at async unknown2 (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85511:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3581\.cx1-evidence\page-routes-unknown.test.ts.cjs:85529:35)

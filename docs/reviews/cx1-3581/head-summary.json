@@ -1,0 +1,18 @@
+{
+  "cx1-template-multiline.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  visible multiline placeholder refused \"⟦Write the first line\\nand the second line⟧\"",
+      "  FAIL  visible multiline placeholder refused \"⟦Write the first line\\r\\nand the second line⟧\"",
+      "5 checks, 2 failing."
+    ]
+  },
+  "template-text-rules.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "20 checks, all passing."
+    ]
+  }
+}

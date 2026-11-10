@@ -1,0 +1,7 @@
+
+The page route and the booking block
+  ok    a page with a booking block is refused
+  ok    in the second version too
+  ok    the same page without it is saved
+
+3 checks, all passing.

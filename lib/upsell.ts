@@ -187,7 +187,9 @@ export type TakeResult =
   | { kind: "checking" }
   | { kind: "unavailable" }
   /** A yes without the box to start access at once checked on this offer's own button (lib/digital-consent.ts): nothing written, nothing charged. */
-  | { kind: "consent" };
+  | { kind: "consent" }
+  /** The step no longer has the terms the page showed (offerRef): nothing written, nothing charged; the page shows it as it stands now. */
+  | { kind: "changed" };
 
 type SessionView = {
   status?: unknown;
@@ -239,6 +241,29 @@ export function offerOpen(createdSeconds: number, secret: string | undefined, ke
  */
 const sellableTargets = (store: Store, listings: Listing[]) => listings.filter((p) => canSellProduct(store, p));
 
+/**
+ * How the thanks page's form names the offer it drew: the step's id, a dot, and a fingerprint of every term drawn
+ * with it — the product, its title and price on its own, the offer's price and the store's currency, the creator's
+ * words, the picture and which box to start access at once is asked. The answer counts only while the step still
+ * has those exact terms (takeUpsell), so an edit made while the buyer reads the page is never charged or answered
+ * on their click. Compared, never charged: the charge is the server's own current price.
+ */
+export function offerRef(store: Pick<Store, "currency">, step: FunnelStep, target: Listing): string {
+  const terms = JSON.stringify([
+    step.id,
+    target.id,
+    target.title,
+    target.priceCents,
+    step.priceCents,
+    store.currency,
+    step.headline,
+    step.text,
+    step.imageFrom,
+    deliversDigitally(target) ? consentKind(target) : "",
+  ]);
+  return `${step.id}.${createHash("sha256").update(`marktmorgen-offer-terms:v1:${terms}`).digest("hex").slice(0, 32)}`;
+}
+
 const toAnswers = (records: Map<string, UpsellRecord>) =>
   new Map<string, StepAnswer>([...records].map(([slot, record]) => [slot, record.state]));
 
@@ -255,7 +280,7 @@ export async function takeUpsell(input: {
   session: string;
   secret: string | undefined;
   origin: string;
-  /** The offer the page showed; the answer only counts for that one. */
+  /** The offer the page showed, as its form names it (offerRef); the answer only counts for that one, on those terms. */
   step: string;
   answer: "yes" | "no";
   /**
@@ -302,14 +327,18 @@ export async function takeUpsell(input: {
   // not even at a lower price on a "no thanks" path (lib/cart-offers.ts).
   if (cart) for (const record of records.values()) if (record.state === "declined" || record.state === "failed") owned.add(record.product);
   const position = funnelPosition(funnel, offered, toAnswers(records), owned);
-  if (position.kind !== "offer" || position.step.id !== input.step) {
-    const asked = funnel.steps.find((s) => s.id === input.step);
+  const askedId = input.step.split(".")[0];
+  if (position.kind !== "offer" || position.step.id !== askedId) {
+    const asked = funnel.steps.find((s) => s.id === askedId);
     const record = asked ? records.get(stepSlot(funnel, asked)) : undefined;
     if (record?.state === "failed") return { kind: "failed" };
     if (record?.state === "declined") return { kind: "declined" };
     return record ? { kind: "done" } : { kind: "unavailable" };
   }
   const { step, target } = position;
+  // Answered only on the terms the page drew: a step edited since, or a form that does not name them, is shown
+  // again as it stands now, with nothing written and nothing charged.
+  if (input.step !== offerRef(store, step, target)) return { kind: "changed" };
   const slot = stepSlot(funnel, step);
   // A bundle offered: what it holds now is what this buyer gets, kept with
   // the answer and on the charge.
@@ -675,6 +704,8 @@ export type FunnelView = {
   offer: {
     step: FunnelStep;
     target: Listing;
+    /** What the form posts as the step: its id and the terms drawn (offerRef). */
+    ref: string;
     image: ProductImage | null;
     /** Reached by saying no to an earlier offer. */
     afterNo: boolean;
@@ -761,6 +792,7 @@ export async function funnelView(input: {
     offer: {
       step,
       target,
+      ref: offerRef(store, step, target),
       image: pictured?.image ?? null,
       afterNo,
     },

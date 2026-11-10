@@ -198,4 +198,43 @@ await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_
   }
 });
 }
+
+for (const plan of ["the creator's own stop", "kept by the creator", "unreadable", "gone at Stripe"] as const) {
+await t.test(`the give-up letter says what Stripe shows of the plan, not the note's flag: ${plan} (Claude 4's LOW on #3585)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY, stopSet: plan === "the creator's own stop" });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number; s: string };
+  note.p = [null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  const row = world.subs.get(note.s)!;
+  if (plan === "kept by the creator") row.cancel_at_period_end = false;
+  if (plan === "unreadable") row.status = 42;
+  if (plan === "gone at Stripe") world.subs.delete(note.s);
+  const callsBefore = world.calls.length;
+  world.emails = [];
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+  } finally {
+    delete process.env.RESEND_API_KEY;
+  }
+  assert.equal(await shop.note(), null);
+  assert.equal(world.calls.slice(callsBefore).filter((call) => !call.startsWith("GET ")).filter((call) => call.includes("/subscriptions/") || call.startsWith("POST /refunds")).length, 0, "the letter only reads the plan; nothing is changed or refunded");
+  assert.equal(world.emails.length, 1);
+  const text = world.emails[0].text;
+  const said = {
+    stops: text.includes("set to stop at the end of the period you paid for"),
+    renews: text.includes("renews as usual"),
+    ended: text.includes("Your plan has ended"),
+    check: text.includes("check your plan in your studio"),
+  };
+  const expected = plan === "the creator's own stop" ? "stops" : plan === "kept by the creator" ? "renews" : plan === "gone at Stripe" ? "ended" : "check";
+  assert.deepEqual(Object.entries(said).filter(([, on]) => on).map(([k]) => k), [expected], `the letter says only "${expected}" (note m was ${note.m})`);
+});
+}
 });

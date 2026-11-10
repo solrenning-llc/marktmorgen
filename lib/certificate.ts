@@ -277,14 +277,24 @@ export async function issueCertificate(input: {
   return { ok: true, certificate, fresh: true };
 }
 
-/** Every certificate issued for a course, newest first, withdrawn ones included. */
-export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number }> {
+/**
+ * Every certificate issued for a course, newest first, withdrawn ones
+ * included; null when Redis answered in a shape that cannot be read (rule 24),
+ * so the studio never says "No certificates yet" while some were issued. Only
+ * Redis's own empty set is none; a certificate that is gone (nil) or whose
+ * record is itself malformed is skipped, as before, so one broken record
+ * never hides the rest.
+ */
+export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number } | null> {
   if (!isRedisConfigured()) return { list: [], total: 0 };
-  const [raw] = await redisPipeline([["SMEMBERS", allKey(courseId)]]);
-  const ids = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  const valid = ids.filter((id) => CERT_ID_PATTERN.test(id));
+  const read = plainList(await redisPipeline([["SMEMBERS", allKey(courseId)]]));
+  if (!read || read.length !== 1) return null;
+  const members = plainList(read[0]);
+  if (!members || members.some((id) => typeof id !== "string")) return null;
+  const valid = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id));
   if (valid.length === 0) return { list: [], total: 0 };
-  const rows = await redisPipeline(valid.map((id) => ["GET", certKey(id)]));
+  const rows = plainList(await redisPipeline(valid.map((id) => ["GET", certKey(id)])));
+  if (!rows || rows.length !== valid.length || rows.some((row) => row !== null && typeof row !== "string")) return null;
   const list = rows
     .map(parseCertificate)
     .filter((c): c is Certificate => c !== null && c.courseId === courseId)
@@ -406,15 +416,41 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
   const out: CertificateCopy[] = [];
+  const what = "a person's certificate copy";
+  const idsOf = (raw: unknown): string[] => {
+    const list = plainList(raw);
+    if (!list || !list.every((id) => typeof id === "string" && CERT_ID_PATTERN.test(id))) throw new UnknownReply(what);
+    return list as string[];
+  };
+  const countOf = (raw: unknown): number => {
+    const count = replyCount(raw, what);
+    if (!Number.isSafeInteger(count)) throw new UnknownReply(what);
+    return count;
+  };
   for (const courseId of courseIds) {
-    const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
-    const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
-    const ids = new Set<string>([...(Array.isArray(mine) ? mine.map(String) : []), ...(typeof current === "string" ? [current] : [])].filter((id) => CERT_ID_PATTERN.test(id)));
-    const candidates = [...new Set([...ids, ...(Array.isArray(all) ? all.map(String) : []).filter((id) => CERT_ID_PATTERN.test(id))])];
+    const [mine, current, size] = exactReplies(
+      await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]),
+      3,
+      what,
+    );
+    if (current !== null && (typeof current !== "string" || !CERT_ID_PATTERN.test(current))) throw new UnknownReply(what);
+    const count = countOf(size);
+    const [all] = count > 0 && count <= LEGACY_SCAN
+      ? exactReplies(await redisPipeline([["SMEMBERS", allKey(courseId)]]), 1, what)
+      : [[]];
+    const ids = new Set<string>([
+      ...idsOf(mine),
+      ...(typeof current === "string" ? [current] : []),
+    ]);
+    const candidates = [...new Set([...ids, ...idsOf(all)])];
     for (let i = 0; i < candidates.length; i += 500) {
       const chunk = candidates.slice(i, i + 500);
-      const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
-      (Array.isArray(rows) ? rows : []).forEach((raw, k) => {
+      const [rows] = exactReplies(await redisPipeline([["MGET", ...chunk.map(certKey)]]), 1, what);
+      const values = plainList(rows);
+      if (!values || values.length !== chunk.length || !values.every((raw) => raw === null || typeof raw === "string")) {
+        throw new UnknownReply(what);
+      }
+      values.forEach((raw, k) => {
         const record = certificateRecord(raw);
         if (record && (ids.has(chunk[k]) || (typeof record.email === "string" && record.email.trim().toLowerCase() === address))) out.push(copyCertificate(record));
       });
@@ -426,6 +462,11 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
 /** How many certificates each course keeps: what deleting a person may read (lib/person-erasure.ts). */
 export async function certificateCount(courseIds: string[]): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
-  const counts = await redisPipeline(courseIds.map((c) => ["SCARD", allKey(c)]));
-  return counts.reduce<number>((sum, n) => sum + Math.min(Number(n) || 0, LEGACY_SCAN), 0);
+  const what = "the certificates counted for a person's erasure";
+  const counts = exactReplies(await redisPipeline(courseIds.map((c) => ["SCARD", allKey(c)])), courseIds.length, what);
+  return counts.reduce<number>((sum, raw) => {
+    const count = replyCount(raw, what);
+    if (!Number.isSafeInteger(count)) throw new UnknownReply(what);
+    return sum + Math.min(count, LEGACY_SCAN);
+  }, 0);
 }

@@ -18,25 +18,34 @@ async function request(kind:Kind){
  state.commands.length=0;return req;
 }
 const invoke=(kind:Kind,req:NextRequest)=>finishConnect(req,kind==='zoom'?'zoom':'google');
+// C5 6701844921: a refused return must not guess Google store/host intent.
+async function assertCounterRefusal(response:Response,kind:Kind,limited:boolean){
+ if(kind==='zoom'){
+  assert.equal(response.status,303);const target=new URL(response.headers.get('Location')!);
+  assert.equal(target.pathname,'/studio/meetings');assert.equal(target.searchParams.get('meet'),limited?'limited':'error');assert.equal(target.searchParams.get('p'),'zoom');assert.equal(await response.text(),'');
+ }else{
+  assert.equal(response.status,limited?429:503);assert.equal(response.headers.get('Location'),null);
+  assert.match(response.headers.get('Content-Type')??'',/^text\/html/);assert.equal(response.headers.get('Cache-Control'),'no-store');assert.equal(response.headers.get('Referrer-Policy'),'no-referrer');
+  const body=await response.text();assert.ok(Buffer.byteLength(body,'utf8')<=2048,'fixed response-byte envelope');assert.match(body,/<html lang="en"/);assert.match(body,/<h1[^>]*>Google Calendar connection not completed/);
+  assert.match(body,/href="\/studio\/meetings"[^>]*>Back to Video calls/);assert.match(body,/href="\/studio\/calendar"[^>]*>Back to Your calendar/);
+  assert.match(body,limited?/too many attempts/:/could not complete/);assert.doesNotMatch(body,/for=host|synthetic-code|synthetic-session/);
+ }
+}
+
 for(const kind of kinds){
  for(const mode of ['false-set','null-count','text-count','timeout'])test(kind+' unknown '+mode+' stops before provider helper',async()=>{
   reset();const req=await request(kind);state.counter=mode;const response=await invoke(kind,req);
   assert.equal(state.commands.slice(0,2).length,2);assert.equal(state.commands[0][0],'SET');assert.equal(state.commands[1][0],'INCR');
   assert.equal(state.commands[0][3],'EX');assert.equal(state.commands[0][4],600);
   assert.equal(state.providerCalls,0,'unknown company counter must not authorize downstream provider work');
-  assert.equal(response.status,303);
-  const target=new URL(response.headers.get('Location')!);
-  assert.equal(target.pathname,'/studio/calendar');
-  assert.equal(target.searchParams.get('cal'),'error');
-  assert.equal(target.searchParams.get('p'),kind==='zoom'?'zoom':'google');
-  assert.equal(await response.text(),'');
+  await assertCounterRefusal(response,kind,false);
   assert.equal(state.commands.length,2);
   assert.equal(state.accessCalls,0);assert.equal(state.fundingCalls,0);
  });
  for(const mode of ['empty','partial','exceeded'])test(kind+' counter control '+mode,async()=>{
   reset();const req=await request(kind);state.counter=mode;const response=await invoke(kind,req);
   assert.equal(state.providerCalls,0);assert.equal(state.commands.length,2);
-  const target=new URL(response.headers.get('Location')!);assert.equal(response.status,303);assert.equal(target.pathname,'/studio/calendar');assert.equal(target.searchParams.get('cal'),mode==='exceeded'?'limited':'error');
+  await assertCounterRefusal(response,kind,mode==='exceeded');
  });
  for(const gate of ['configuration','session','state','access','pause','funding'])test(kind+' independent gate '+gate,async()=>{
   reset();const req=await request(kind);state.counter='normal';
@@ -62,12 +71,10 @@ test('callback notices exist on the actual meetings page',()=>{const page=readFi
 // Claude 4's #2819 review: a host may be an editor/support member without settings access.
 for (const mode of ['exceeded', 'null-count']) test('a refused host callback has a readable member notice: '+mode, async()=>{
  reset();const req=await request('host');state.counter=mode;
- const target=new URL((await invoke('host',req)).headers.get('Location')!);
- const part=target.pathname.split('/').at(-1)!;
- const page=readFileSync(join(process.cwd(),'app/studio',part,'page.tsx'),'utf8');
+ await assertCounterRefusal(await invoke('host',req),'host',mode==='exceeded');
+ const page=readFileSync(join(process.cwd(),'app/studio/calendar/page.tsx'),'utf8');
  for(const role of ['editor','support'] as const)assert.equal(can(role,'settings'),false);
  assert.ok(page.includes('studioView(jar, typeof query.store === "string" ? query.store : undefined, "member")'),'the destination must admit any host-eligible member');
- assert.equal(target.searchParams.get('cal'),mode==='exceeded'?'limited':'error');
  assert.equal(state.providerCalls,0);assert.equal(state.accessCalls,0);assert.equal(state.fundingCalls,0);
  assert.equal(state.commands.length,2,'no consent read or extra paid work on a refusal');
 });

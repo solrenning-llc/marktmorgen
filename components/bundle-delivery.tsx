@@ -67,6 +67,7 @@ export function BundleDelivery({
   storeName,
   heading = "What is inside",
   showHeading = true,
+  titleAs: Title = "p",
   words: given,
 }: {
   lines: BundleLine[];
@@ -76,6 +77,11 @@ export function BundleDelivery({
   heading?: string;
   /** False when the heading is already drawn above, as on the list of purchases (components/orders-bundle.tsx): it stays the list's name. */
   showHeading?: boolean;
+  /**
+   * Each product's title as a heading at the level under the one the bundle sits in (WCAG 2.4.10): h2 on the
+   * bundle's own page under its h1, h4 in a purchase's panel under the bundle's h3; a paragraph where not given.
+   */
+  titleAs?: "p" | "h2" | "h4";
   /** Said in the store's language; English when not given. */
   words?: BundleWords;
 }) {
@@ -97,7 +103,7 @@ export function BundleDelivery({
                 : null;
           return (
             <li key={product.id} className="rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
-              <p className="font-semibold">{product.title}</p>
+              <Title className="font-semibold">{product.title}</Title>
               {line.course ? (
                 "href" in line.course ? (
                   <a href={line.course.href} className="btn st-btn mt-3">

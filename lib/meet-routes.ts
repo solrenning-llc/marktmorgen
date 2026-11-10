@@ -4,9 +4,10 @@
  * both providers, written once. The rules they follow are in
  * lib/meet-connect.ts; the addresses are fixed in lib/meet-providers.ts.
  *
- * Both answer by sending the person somewhere — the provider's consent page,
- * or back to the studio's Video calls page with a word saying how it went —
- * and neither answers at all (404) while the deployment has not switched the
+ * Both normally send the person to the provider or back to the studio.
+ * A refused Google return has not read whether this is a store connection
+ * or a host's calendar, so its notice offers both contexts without guessing.
+ * Neither answers at all (404) while the deployment has not switched the
  * provider on.
  */
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
@@ -30,8 +31,36 @@ import { PERMISSION_WORDS } from "@/lib/team-roles";
 const STARTS_PER_TEN_MINUTES = 10;
 /** Returns from a consent page one address may make in ten minutes. */
 const RETURNS_PER_TEN_MINUTES = 30;
+/** Fixed response envelope; no callback parameter can enlarge the notice. */
+const RETURN_NOTICE_MAX_BYTES = 2_048;
 
 const notFound = () => new Response("Not found.", { status: 404, headers: { "Cache-Control": "no-store" } });
+
+/** No session or consent read: Google store/host intent is still unknown here. */
+function refusedReturn(origin: string, provider: MeetProvider, admission: "unknown" | "exceeded"): Response {
+  const limited = admission === "exceeded";
+  // Only Google has a host flow. Zoom's retry belongs to the store's calls.
+  if (provider === "zoom") return away(origin, `/studio/meetings?meet=${limited ? "limited" : "error"}&p=zoom`);
+  const message = limited
+    ? "There have been too many attempts. Wait a few minutes before starting again."
+    : "We could not complete this connection just now. Start it again in a moment.";
+  // Fixed text and links only: never reflect the callback's code, state or cookies.
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow"><title>Google Calendar connection not completed — Marktmorgen</title>
+<style>body{margin:0;padding:2rem 1rem;color:#111;background:#fff;font:1rem/1.6 system-ui,sans-serif}main{max-width:42rem;margin:0 auto}h1{font-size:1.75rem;line-height:1.3}a{display:inline-flex;align-items:center;min-height:44px;margin:.5rem 1rem .5rem 0;color:#111;text-decoration:underline;text-underline-offset:.2em}a:focus-visible{outline:3px solid #111;outline-offset:4px}</style></head>
+<body><main><h1>Google Calendar connection not completed</h1><p role="alert">${message}</p><p>Your connection was not changed by this return.</p><p>For a store connection, return to Video calls. For your own busy times, return to Your calendar.</p><nav aria-label="Return to your connection"><a href="/studio/meetings">Back to Video calls</a><a href="/studio/calendar">Back to Your calendar</a></nav></main></body></html>`;
+  const compact = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Google Calendar connection not completed</title></head><body><main><h1>Google Calendar connection not completed</h1><p role="alert">${message}</p><a href="/studio/meetings">Back to Video calls</a><br><a href="/studio/calendar">Back to Your calendar</a></main></body></html>`;
+  return new Response(Buffer.byteLength(html, "utf8") <= RETURN_NOTICE_MAX_BYTES ? html : compact, {
+    status: limited ? 429 : 503,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    },
+  });
+}
 
 /**
  * Starts connecting: the owner or an Admin of the store the studio page was
@@ -144,8 +173,7 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
   if (!isConfigured(provider)) return notFound();
   const origin = originFrom(request);
   const admission = await essentialLimitState("meet-return", clientAddress(request), RETURNS_PER_TEN_MINUTES, 600);
-  if (admission === "unknown") return away(origin, `/studio/calendar?cal=error&p=${provider}`);
-  if (admission === "exceeded") return away(origin, `/studio/calendar?cal=limited&p=${provider}`);
+  if (admission === "unknown" || admission === "exceeded") return refusedReturn(origin, provider, admission);
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   const email = await emailForSession(cookie);
   if (!email) return away(origin, "/signin?status=expired");

@@ -1,0 +1,17 @@
+import {createRequire} from 'node:module';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {join,resolve} from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {testAliases} from '../../tests/test-config.mjs';
+const root=process.cwd(),donor='/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules';
+const require=createRequire(import.meta.url),{build}=require(join(donor,'esbuild'));
+const requested=JSON.parse(readFileSync('package.json')).dependencies.next,installed=JSON.parse(readFileSync(join(donor,'next/package.json'))).version;
+if(requested!==installed)throw Error('Exact Next mismatch before graph');
+const [file,label,capText]=process.argv.slice(2),cap=Number(capText??100);if(!Number.isSafeInteger(cap)||cap<1||cap>20000)throw Error('Invalid cap');
+const out=resolve('proofs/z-meet-callback-local',label);mkdirSync(out,{recursive:true});
+const result=await build({entryPoints:[resolve(file)],bundle:true,platform:'node',format:'cjs',outfile:join(out,'bundle.cjs'),metafile:true,nodePaths:[donor],alias:testAliases('meet-return-counter-admission.test.ts',root,join(root,'tests')),plugins:[{name:'pre-dispatch-cap',setup(b){b.onLoad({filter:/meet-return-counter-world\.ts$/},args=>{let s=readFileSync(args.path,'utf8');const needle=' state.commands.push(...commands);';if(s.split(needle).length!==2)throw Error('Fixture instrumentation mismatch');return{contents:s.replace(needle,' for(const c of commands)(globalThis as any).__zCounterAdmission();'+needle),loader:'ts'};});}}],logLevel:'silent'});
+writeFileSync(join(out,'inputs.json'),JSON.stringify(result.metafile,null,2));
+const ownPreload=join(out,'counter-preload.cjs');writeFileSync(ownPreload,`let n=0;global.__zCounterAdmission=()=>{if(n>=${cap}){process.stderr.write('COUNTER_CAP\\n');process.exit(86);}n++;};process.on('exit',()=>process.stderr.write('COUNTER_ADMISSIONS '+n+'\\n'));`);
+const env={PATH:process.env.PATH,NODE_PATH:donor,NODE_ENV:'test',NIMBUS_DATA_KEY:'synthetic-callback-key',UPSTASH_REDIS_REST_URL:'https://redis.invalid',UPSTASH_REDIS_REST_TOKEN:'synthetic'};
+const run=spawnSync(process.execPath,['--max-old-space-size=512','--require',resolve('proofs/z-meet-callback-local/preload.cjs'),'--require',ownPreload,join(out,'bundle.cjs')],{cwd:root,env,timeout:120000,maxBuffer:131072,encoding:'utf8'});
+writeFileSync(join(out,'stdout.log'),run.stdout??'');writeFileSync(join(out,'stderr.log'),run.stderr??'');writeFileSync(join(out,'result.json'),JSON.stringify({status:run.status,signal:run.signal,error:run.error?.message,next:{requested,installed},counterCap:cap}));console.log(JSON.stringify({label,status:run.status,signal:run.signal,stdout:run.stdout?.slice(-600),stderr:run.stderr?.slice(-350)}));process.exitCode=run.status??2;

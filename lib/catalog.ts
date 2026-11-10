@@ -53,7 +53,6 @@ import { type Intro, parseIntro } from "@/lib/intro-price";
 import { type Yearly, parseYearly } from "@/lib/yearly-price";
 import { type CallSetup, parseSetup } from "@/lib/call-setup";
 import { COURSE_ID_PATTERN } from "@/lib/course";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Bump, type Plan, bumpTargets, canBeBumped, isOneOff, parseBump, parseBumps, parsePlan, parseStock } from "@/lib/product-extras";
 import { type Funnel, funnelFromUpsell, parseFunnel } from "@/lib/funnel";
 import { type PayWhatYouWant, parsePwyw } from "@/lib/pay-what-you-want";

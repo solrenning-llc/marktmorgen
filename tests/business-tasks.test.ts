@@ -20,7 +20,8 @@ import { CLOSING, COUNTED_FAMILIES, ELSEWHERE_FAMILIES } from "@/lib/data-famili
 import { type DataStore, dataKey, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { ROOM } from "./data-room";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
+import { LockBusyError } from "@/lib/redis-lock";
 import { done, is, part } from "./check";
 
 const NOW = Date.UTC(2026, 10, 10, 12, 0, 0) / 1000;
@@ -105,13 +106,14 @@ async function main(): Promise<void> {
     redis.pipeline = real as typeof redis.pipeline;
   }
 
-  part("A write whose answer is not OK is unconfirmed");
-  {
-    const lost = shop("s5");
+  part("A write whose answer is not exact is unconfirmed, never \"nothing changed\"");
+  const fenced = (commands: (string | number)[][]) => commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:fenced-set:v1") && String(commands[0][4]).startsWith("nl:biztasks:");
+  for (const [what, answer] of [["a reply that is not 1 or 0", async () => [null]], ["a request that failed after it was sent", async () => { throw new Error("lost reply"); }]] as const) {
+    const lost = shop(`s5-${what.length}`);
     await changeBusinessTasks(lost, (tasks) => addBusinessTask(tasks, { title: "Short", due: "" }, ids[0], NOW));
     const before = await slotOf(lost);
     const real = redis.pipeline.bind(redis);
-    redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:biztasks:") ? [null] : real(commands))) as typeof redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => (fenced(commands) ? answer() : real(commands))) as typeof redis.pipeline;
     thrown = null;
     try {
       await changeBusinessTasks(lost, (tasks) => addBusinessTask(tasks, { title: "A much longer task than the first one", due: "" }, ids[1], NOW));
@@ -119,8 +121,40 @@ async function main(): Promise<void> {
       thrown = error;
     }
     redis.pipeline = real as typeof redis.pipeline;
-    is("said as unconfirmed", thrown instanceof BusinessTasksWriteUnconfirmed, true);
-    is("the room kept at the larger list's, never given back on a guess", (await slotOf(lost)) > before, true);
+    is(`${what}: said as unconfirmed`, thrown instanceof BusinessTasksWriteUnconfirmed, true);
+    is(`${what}: its growth stays counted, never given back on a guess`, (await slotOf(lost)) > before, true);
+  }
+  const routeText = readFileSync("app/api/store/business-tasks/route.ts", "utf8");
+  is("the route never says nothing changed for an unconfirmed write", /BusinessTasksWriteUnconfirmed\) return Response\.json\(\{ ok: false, error: "unconfirmed", message: UNCONFIRMED \}/.test(routeText) && !/UNCONFIRMED = "[^"]*nothing/i.test(routeText), true);
+
+  part("A writer whose lock ran out writes nothing over the next one (Codex G and Codex U on #3562)");
+  {
+    const raced = { ...ROOM, sid: "raced-store", statsId: "s6" };
+    const real = redis.pipeline.bind(redis);
+    let late = true;
+    let successor: Awaited<ReturnType<typeof changeBusinessTasks>> | null = null;
+    // A pauses right before its fenced write; its lock runs out; B takes the lock and saves; then A's write is sent.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (late && fenced(commands) && String(commands[0][4]) === "nl:biztasks:s6") {
+        late = false;
+        advance(11_000);
+        redis.pipeline = real as typeof redis.pipeline;
+        successor = await changeBusinessTasks(raced, (tasks) => addBusinessTask(tasks, { title: "Successor task", due: "" }, ids[1], NOW));
+        redis.pipeline = (async (c: (string | number)[][]) => real(c)) as typeof redis.pipeline;
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    thrown = null;
+    try {
+      await changeBusinessTasks(raced, (tasks) => addBusinessTask(tasks, { title: "S".repeat(140), due: "" }, ids[0], NOW));
+    } catch (error) {
+      thrown = error;
+    }
+    redis.pipeline = real as typeof redis.pipeline;
+    is("the successor saved", successor !== null && (successor as { ok: boolean }).ok, true);
+    is("the late writer is answered busy, never done", thrown instanceof LockBusyError, true);
+    is("the successor's task is still there, alone", (await readBusinessTasks("s6")).map((t) => t.title), ["Successor task"]);
+    is("and the room counts exactly what is kept", await slotOf(raced), dataBytes(["nl:biztasks:s6", String(await kept("s6"))], 1));
   }
 
   part("It goes with the store");

@@ -135,6 +135,34 @@ export async function deleteIfHeldOnly(held: Held, keys: string[]): Promise<bool
   return strictScript(FENCED_DEL_ONLY, [held.key, ...keys], [held.token]);
 }
 
+/**
+ * What a fenced write did, said exactly: "written" (the lock was ours and it is done), "lost" (the lock was not
+ * ours: nothing was written), or "unknown" (no exact answer, or the request failed: it may have been written). For a
+ * caller that must never say "nothing changed" about a write that may have landed (lib/business-tasks.ts).
+ */
+export type FencedOutcome = "written" | "lost" | "unknown";
+
+async function exactScript(source: string, keys: string[], args: string[]): Promise<FencedOutcome> {
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]), 1);
+  } catch {
+    return "unknown";
+  }
+  const reply = replies?.[0];
+  return reply === 1 ? "written" : reply === 0 ? "lost" : "unknown";
+}
+
+/** Sets `key` only while the lock is still ours, in one script, with what happened said exactly (FencedOutcome). */
+export function setIfHeldExact(held: Held, key: string, value: string): Promise<FencedOutcome> {
+  return exactScript(FENCED_SET_ONLY, [held.key, key], [held.token, value]);
+}
+
+/** Deletes `keys` only while the lock is still ours, in one script, with what happened said exactly (FencedOutcome). */
+export function deleteIfHeldExact(held: Held, keys: string[]): Promise<FencedOutcome> {
+  return exactScript(FENCED_DEL_ONLY, [held.key, ...keys], [held.token]);
+}
+
 /** Runs `work` with the lock at `key` held, and lets go of it after, whatever happens, unless `keepHeld` says to keep it for that result. */
 export async function withLock<T>(
   key: string,

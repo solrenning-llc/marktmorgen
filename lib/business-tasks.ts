@@ -4,10 +4,16 @@
  *   nl:biztasks:<statsId>      the store's tasks, one JSON list, at most MAX_BUSINESS_TASKS
  *   nl:biztasklock:<statsId>   one change of the list at a time, BUSINESS_TASKS_LOCK_SECONDS at the most
  *
- * Counted in the store's data room (slot BUSINESS_TASKS_SLOT) before it is written: the room is taken at the larger
- * of what the list weighed and what it will weigh, so a write whose answer is not known never leaves more kept than
- * counted, and comes down to the new weight only once Redis said exactly "OK". A full room is said, and nothing is
- * written. An empty list is deleted, and its room given back.
+ * Counted in the store's data room (slot BUSINESS_TASKS_SLOT) by what each change adds or takes away, never by
+ * setting the slot, so two writers can never overwrite each other's count (Codex G and Codex U on #3562): a list
+ * that grows takes its growth before it is written; one that shrinks gives back the difference only once the write
+ * is known done. A full room is said, and nothing is written. An empty list is deleted, and its weight given back.
+ *
+ * The write itself is fenced: it lands only while the store's lock is still this change's, in one script
+ * (lib/redis-lock.ts, setIfHeldExact and deleteIfHeldExact). A lock lost meanwhile writes nothing: the growth taken is
+ * given back and the change is answered as busy. A write whose answer is not exact (a lost reply, an error) may
+ * have landed: it is BusinessTasksWriteUnconfirmed, the growth stays counted (never less kept than counted), and
+ * nobody is told nothing changed.
  *
  * Read whole or not at all (CX-123 rule 24): a reply missing or of another shape, or a list that is not one in its
  * shape (parseBusinessTasks), throws BusinessTasksUnreadable, never "no tasks", and a change on it writes nothing.
@@ -15,7 +21,7 @@
  * closing (lib/data-families.ts, CLOSING "nl:biztasks:") and written into its data copy (lib/store-export.ts).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { holdLock, withLock } from "@/lib/redis-lock";
+import { LockBusyError, deleteIfHeldExact, setIfHeldExact, withLock } from "@/lib/redis-lock";
 import { repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
@@ -89,23 +95,30 @@ export async function changeBusinessTasks(store: DataStore & { statsId?: string 
     if (!result.ok) return result;
     const key = tasksKey(statsId);
     if (!result.tasks.length) {
-      if (!(await holdLock(held))) throw new BusinessTasksWriteUnconfirmed();
-      const gone = repliesFor(await redisPipeline([["DEL", key]]), 1)?.[0];
-      if (gone !== 0 && gone !== 1) throw new BusinessTasksWriteUnconfirmed();
-      await giveData(store, [{ slot: BUSINESS_TASKS_SLOT, bytes: 0, set: true }]);
+      const gone = await deleteIfHeldExact(held, [key]);
+      if (gone === "lost") throw new LockBusyError("the store's tasks lock was lost before the list was deleted");
+      if (gone === "unknown") throw new BusinessTasksWriteUnconfirmed();
+      if (kept.bytes > 0) await giveData(store, [{ slot: BUSINESS_TASKS_SLOT, bytes: kept.bytes }]);
       return result;
     }
     const raw = JSON.stringify(result.tasks);
-    const after = dataBytes([key, raw], 1);
-    const taken = await takeData(store, [{ slot: BUSINESS_TASKS_SLOT, bytes: Math.max(after, kept.bytes), set: true }]);
-    if (!taken.ok) {
-      if (taken.reason === "full") return { ok: false, error: "store_full", message: taken.message };
-      throw new BusinessTasksUnreadable("the store's data room could not be counted");
+    const grows = dataBytes([key, raw], 1) - kept.bytes;
+    if (grows > 0) {
+      const taken = await takeData(store, [{ slot: BUSINESS_TASKS_SLOT, bytes: grows }]);
+      if (!taken.ok) {
+        if (taken.reason === "full") return { ok: false, error: "store_full", message: taken.message };
+        throw new BusinessTasksUnreadable("the store's data room could not be counted");
+      }
     }
-    if (!(await holdLock(held))) throw new BusinessTasksWriteUnconfirmed();
-    const written = repliesFor(await redisPipeline([["SET", key, raw]]), 1)?.[0];
-    if (written !== "OK") throw new BusinessTasksWriteUnconfirmed();
-    if (after < kept.bytes) await giveData(store, [{ slot: BUSINESS_TASKS_SLOT, bytes: after, set: true }]);
+    const written = await setIfHeldExact(held, key, raw);
+    if (written === "lost") {
+      // Nothing was written: the growth taken for it goes back, and the change is answered as busy.
+      if (grows > 0) await giveData(store, [{ slot: BUSINESS_TASKS_SLOT, bytes: grows }]);
+      throw new LockBusyError("the store's tasks lock was lost before the list was written");
+    }
+    // It may have landed: the growth stays counted, and nobody is told nothing changed.
+    if (written === "unknown") throw new BusinessTasksWriteUnconfirmed();
+    if (grows < 0) await giveData(store, [{ slot: BUSINESS_TASKS_SLOT, bytes: -grows }]);
     return result;
   });
 }

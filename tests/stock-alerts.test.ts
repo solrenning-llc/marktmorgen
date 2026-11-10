@@ -24,6 +24,7 @@ import { ERASERS } from "@/lib/person-erasure";
 import { COPY_PLAN } from "@/lib/person-copy";
 import { PERSON_DATA } from "@/lib/person-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { dataUsed } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -91,12 +92,16 @@ async function main(): Promise<void> {
   is("still one address, still confirmed", [redis.run(["HLEN", listKey]), await confirmedForRestock(store, pid)], [1, ["dana@example.com"]]);
 
   part("Leaving");
+  const roomBefore = (await dataUsed(store))?.used ?? Number.NaN;
   const lee = await ask("lee@example.com");
+  const roomTaken = (await dataUsed(store))?.used ?? Number.NaN;
+  is("a new place takes room in the store's data room before it is written", roomTaken > roomBefore, true);
   if (!lee.ok) throw new Error("not asked");
   await confirmStockAlert(lee.confirm, store);
   is("both confirmed", (await confirmedForRestock(store, pid)).sort(), ["dana@example.com", "lee@example.com"]);
   is("the confirm link cannot take anyone off", await leaveStockAlert(lee.confirm, store), false);
   is("the leave link does", await leaveStockAlert(lee.leave, store), true);
+  is("and its place's room comes back (its spent confirm link's ends with its month)", ((await dataUsed(store))?.used ?? Number.NaN) < roomTaken, true);
   is("off the list, and the link is spent", [await confirmedForRestock(store, pid), await leaveStockAlert(lee.leave, store)], [["dana@example.com"], false]);
 
   part("After the restock email, the addresses it went to are deleted with their links");

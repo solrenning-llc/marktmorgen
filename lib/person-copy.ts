@@ -54,6 +54,7 @@ import { personOf, readRun } from "@/lib/flow-runs";
 import { storeKey } from "@/lib/learn";
 import { clicksOf } from "@/lib/mail-clicks";
 import { waitlistPlacesOf } from "@/lib/waitlist";
+import { stockAlertsOf } from "@/lib/stock-alerts";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { syncJobsOf } from "@/lib/email-sync";
@@ -105,6 +106,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
+  "lib/stock-alerts.ts": { how: "copied", what: "Your places on the store's back-in-stock lists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
   "lib/imported-purchases.ts": { how: "copied", what: "What an import from another platform, a gift or a PayPal order gave you" },
@@ -374,6 +376,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/stock-alerts.ts": async (s) => (await stockAlertsOf(s.statsId, s.productIds, s.email)).map((a) => ({ product: a.product, asked: iso(a.asked), confirmed: iso(a.confirmed) })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),

@@ -38,6 +38,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
 
@@ -59,14 +60,19 @@ async function sha256Hex(value: string): Promise<string> {
 const linkKey = async (token: string) => `nl:yearly:link:${(await sha256Hex(`nimbus-yearly:${token}`)).slice(0, 40)}`;
 const priceKey = (account: string, product: Listing, cents: number, currency: string) => `nl:yearly:price:${account}:${product.id}:${cents}:${currency}`;
 
-/** A link to one membership's switch, for the email that offers it. Opens nothing else. */
+/**
+ * A link to one membership's switch, for the email that offers it. Opens nothing else. Handed out only when Redis
+ * answered its SET "OK": any other reply is unknown (CX-123 rule 24) and throws, so no email carries a link that may
+ * not open (lib/yearly-ask.ts then lets the membership's "sent" mark go).
+ */
 export async function mintYearlyLink(store: Store, customer: string, subscription: string): Promise<string> {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  await redisPipeline([["SET", await linkKey(token), JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]);
+  const [kept] = repliesFor(await redisPipeline([["SET", await linkKey(token), JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]), 1) ?? [];
+  if (kept !== "OK") throw new UnknownReplyError("the emailed link to a move to yearly");
   return token;
 }
 

@@ -55,16 +55,17 @@ export function CustomRange({ today, currency }: { today: string; currency: stri
   const [to, setTo] = useState(today);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ range: Omit<RangeData, "products"> & { products: Products }; marks: AutoMark[]; fullDetails: boolean; receivedAt: string } | null>(null);
+  const [result, setResult] = useState<{ range: Omit<RangeData, "products"> & { products: Products }; marks: AutoMark[] | null; titlesUnavailable: boolean; fullDetails: boolean; receivedAt: string } | null>(null);
 
   async function show(fullDetails = false, period?: CustomDatePeriod, keepDraftDates = false) {
     setBusy(true);
     setError(null);
     try {
       const response = await fetch(`/api/store/stats/range?${new URLSearchParams({ from: period?.from ?? (fullDetails && result ? result.range.from : from), to: period?.to ?? (fullDetails && result ? result.range.to : to), ...(fullDetails ? { details: "all" } : {}) })}`, { cache: "no-store" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; range?: RangeData & { products: Products }; marks?: AutoMark[] };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; range?: RangeData & { products: Products }; marks?: AutoMark[] | null; titlesUnavailable?: boolean };
       if (data.ok && data.range) {
-        setResult({ range: data.range, marks: data.marks ?? [], fullDetails, receivedAt: new Date().toISOString() });
+        // Marks that were not read are unknown (null), never an empty list (VR2 audit, rule 24).
+        setResult({ range: data.range, marks: Array.isArray(data.marks) ? data.marks : null, titlesUnavailable: data.titlesUnavailable === true, fullDetails, receivedAt: new Date().toISOString() });
         if (period && !keepDraftDates) { setFrom(data.range.from); setTo(data.range.to); }
       }
       else setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
@@ -114,7 +115,7 @@ export function CustomRange({ today, currency }: { today: string; currency: stri
           {error}
         </p>
       ) : null}
-      {r ? <CustomRangeResults range={r} marks={result.marks} currency={currency} onShowAll={() => { void show(true); }} onRefresh={() => { void show(result.fullDetails, {from:r.from,to:r.to}, true); }} busy={busy} onNavigate={direction=>{const period=direction===-1?previousPeriod:nextPeriod;if(period)void show(false,period);}} canPrevious={previousPeriod!==null} canNext={nextPeriod!==null} /> : null}
+      {r ? <CustomRangeResults range={r} marks={result.marks} titlesUnavailable={result.titlesUnavailable} currency={currency} onShowAll={() => { void show(true); }} onRefresh={() => { void show(result.fullDetails, {from:r.from,to:r.to}, true); }} busy={busy} onNavigate={direction=>{const period=direction===-1?previousPeriod:nextPeriod;if(period)void show(false,period);}} canPrevious={previousPeriod!==null} canNext={nextPeriod!==null} /> : null}
     </div>
   );
 }
@@ -131,7 +132,7 @@ export function CustomRangePresets({today,busy=false,onSelect}:{today:string;bus
 }
 
 /** The confirmed results of the requested dates, with paid coverage checked separately. */
-export function CustomRangeResults({ range, marks, currency, onShowAll, onRefresh, busy = false, onNavigate, canPrevious = false, canNext = false }: { range: Omit<RangeData, "products"> & { products: Products }; marks: AutoMark[]; currency: string; onShowAll?: () => void; onRefresh?: () => void; busy?: boolean; onNavigate?: (direction:-1|1)=>void; canPrevious?:boolean; canNext?:boolean }) {
+export function CustomRangeResults({ range, marks, titlesUnavailable = false, currency, onShowAll, onRefresh, busy = false, onNavigate, canPrevious = false, canNext = false }: { range: Omit<RangeData, "products"> & { products: Products }; marks: AutoMark[] | null; titlesUnavailable?: boolean; currency: string; onShowAll?: () => void; onRefresh?: () => void; busy?: boolean; onNavigate?: (direction:-1|1)=>void; canPrevious?:boolean; canNext?:boolean }) {
   const money = (cents: number) => formatMoney(cents, currency);
   const r = range;
   const [query, setQuery] = useState("");
@@ -192,7 +193,8 @@ export function CustomRangeResults({ range, marks, currency, onShowAll, onRefres
       {r.sales === "error" ? <p className="mt-2 text-sm text-ink-soft">Stripe did not answer, so sales are not shown. Try again in a moment.</p> : null}
       {r.partial ? <p className="mt-2 text-sm text-ink-soft">The purchase reading is incomplete. Sales and revenue are unavailable; traffic and checkouts remain visible.</p> : null}
       <CustomRangeChart range={r} currency={currency} metric={chartMetric} onMetricChange={setChartMetric} grouping={chartGrouping} onGroupingChange={setChartGrouping} cumulative={chartCumulative} onCumulativeChange={setChartCumulative} />
-      {marks.length ? (
+      {marks === null ? <p className="mt-3 text-sm text-ink-soft" role="status">Marks for these days could not be loaded. Try again in a moment.</p> : null}
+      {marks?.length ? (
         <ul className="mt-3 space-y-1 text-sm" aria-label="Marked on these days">
           {marks.map((m, i) => (
             <li key={`${m.day}-${i}`} className="flex gap-2">
@@ -202,6 +204,7 @@ export function CustomRangeResults({ range, marks, currency, onShowAll, onRefres
           ))}
         </ul>
       ) : null}
+      {titlesUnavailable && r.products.length ? <p className="mt-3 text-sm text-ink-soft" role="status">Some product names could not be loaded. Those products show “Title could not be loaded”. Try again in a moment.</p> : null}
       {r.channels.length || r.products.length ? <div className="mt-4">
         <label className="field-label" htmlFor="range-search">Search channels or products</label>
         <input id="range-search" type="search" className="field mt-1" value={query} maxLength={100} onChange={event=>setQuery(event.target.value)} placeholder="Channel, product name or product ID" />

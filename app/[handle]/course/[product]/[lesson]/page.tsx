@@ -12,8 +12,8 @@ import { lookStyle } from "@/lib/store-look";
 import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
-import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor, studentQuiz } from "@/lib/quiz";
+import { courseAccess, doneLessonsOrUnknown, emailKey, lessonVideo } from "@/lib/learn";
+import { type Attempt, attemptOf, heldBack, passedForGate, readQuizFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -31,9 +31,14 @@ import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { LessonPlayer } from "@/components/lesson-player";
-import { devicePlaceKey } from "@/lib/lesson-position";
+import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { RememberLastLesson } from "@/components/remember-last-lesson";
+import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
+import { LessonNotes } from "@/components/lesson-notes";
+import { readNote } from "@/lib/lesson-notes";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -110,9 +115,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Once the whole month's visits are used, a lesson rests too (lib/traffic-rules.ts).
   if (student && (await isResting(store, undefined, "buyer"))) redirect(`/@${store.handle}/resting`);
   if (student) await countDay(store);
+  // Null: the lessons done could not be read just now; said so, and no done/not-done toggle on a guess (rule 24).
   const [done, passed] = student
-    ? await Promise.all([doneLessons(course.id, student.email), passedQuizzes(course.id, who)])
-    : [new Set<string>(), new Set<string>()];
+    ? await Promise.all([doneLessonsOrUnknown(course.id, student.email), passedForGate(course.id, who)])
+    : [new Set<string>() as Set<string> | null, new Set<string>()];
   // A quiz that has to be passed holds the lessons after it shut, for a student.
   const held = student ? heldBack(course, passed) : new Map<string, string>();
   const blocker = held.get(lesson.id);
@@ -144,6 +150,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
       ])
     : [false, [], ""];
   const threads = reader && talking ? threadsFor(comments, reader).slice(0, SHOWN_THREADS) : [];
+  // The student's own private note (290 [SQ1]): read only for them, never for the creator or a visitor, and never on
+  // a lesson held behind a quiz or work to hand in, whose saves the route refuses (Claude 2's review of #3031, L5).
+  const note = student && open && !blocker ? await readNote(store.statsId ?? "", who, course.id, lesson.id) : null;
   const mustPass = Boolean(student && quiz && lesson.quiz?.required && !passed.has(lesson.id));
   // Work to hand in, still holding the lessons after it shut.
   const mustHandIn = Boolean(student && task && lesson.task?.gate && !passed.has(lesson.id));
@@ -159,10 +168,14 @@ export default async function LessonPage({ params, searchParams }: Params) {
     entry.lesson.preview || (start !== null && isOpen(course, entry.unit, start) && !held.has(entry.lesson.id));
   const previous = order.slice(0, at).reverse().find(reachable) ?? null;
   const next = order.slice(at + 1).find(reachable) ?? null;
-  const isDone = done.has(lesson.id);
+  const isDone = done?.has(lesson.id) ?? false;
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // This lesson kept on the student's device as the last one they opened, offered back in their library (650 [WG10],
+  // unit 2, components/library-continue.tsx), under a key made from their address alone; never for the creator or a visitor.
+  const lastPerson = student ? deviceLastKey(student.email) : null;
+  const lastPath = lessonPath(store.handle, product.id, lesson.id);
   // Plain text only: a function cannot cross to the client player (Claude 5 on #2728).
   const resumeWords = resumeWordsOf(w);
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
@@ -174,6 +187,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
+        {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
         <p className="text-sm">
           <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
           <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>
@@ -326,7 +340,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
             ) : null}
 
             {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task ? (
-              <p className="st-muted mt-6">{w.emptyLesson}</p>
+              <EmptyState title={said.w.nothingYet} body={w.emptyLesson} className="mt-6" />
             ) : null}
 
             {quiz ? (
@@ -356,9 +370,19 @@ export default async function LessonPage({ params, searchParams }: Params) {
               />
             ) : null}
 
+            {note ? (
+              <LessonNotes
+                initial={note.state === "kept" ? { state: "kept", text: note.text } : note}
+                where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
+                language={store.language}
+              />
+            ) : null}
+
             <div className="mt-8 flex flex-wrap items-center gap-3 border-t pt-6" style={{ borderColor: "var(--st-line)" }}>
               {student && open && mustPass ? (
                 <p className="st-muted text-sm font-semibold">{w.passAbove}</p>
+              ) : student && open && done === null ? (
+                <p className="st-note text-sm" role="status">{w.progressUnknown}</p>
               ) : student && open && lesson.task ? (
                 // Done by handing the work in, or by its approval, never by a button.
                 isDone ? <span className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>{w.doneMark}</span> : null
@@ -382,7 +406,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                   )}
                 </form>
               ) : null}
-              {next && (isDone || !student || !open || lesson.task) ? (
+              {next && (isDone || done === null || !student || !open || lesson.task) ? (
                 <Link href={`${base}/${next.lesson.id}`} className="btn st-btn">{w.nextLesson}</Link>
               ) : null}
               {previous ? (
@@ -394,7 +418,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
           <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2">
             <p className="st-label">{w.inThisCourse}</p>
             <div className="mt-3">
-              <CourseOutline course={course} base={base} start={start} done={done} current={lesson.id} held={held} language={store.language} />
+              <CourseOutline course={course} base={base} start={start} done={done ?? new Set<string>()} current={lesson.id} held={held} language={store.language} />
             </div>
             {!open ? (
               <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>

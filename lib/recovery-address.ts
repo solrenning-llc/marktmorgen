@@ -48,15 +48,19 @@ const linkKey = (token: string) => `nl:auth:rec:link:${sha(`nimbus-rec-link:${to
 const untilKey = (email: string) => `nl:auth:rec:until:${sha(`nimbus-rec-until:${normaliseEmail(email)}`).slice(0, 40)}`;
 
 /**
- * The account's recovery address, or "" only when Redis confirms there is none. Any other answer throws (rule 24):
- * read as none, a removal or a replacement would not tell the old address, and a move would drop it.
+ * The account's recovery address, or "" for none: only when Redis says there is none (GET null). A reply in any
+ * other shape, or a value this code never wrote, is unknown and throws UnknownReplyError (CX-123 rule 24; VR2
+ * audit): it is never read as "this account has no recovery address", which the studio, the two-step status and the
+ * rescue from the code page would say, and a move would act on.
  */
 export async function recoveryAddress(email: string): Promise<string> {
   if (!isRedisConfigured()) return "";
-  const reply = repliesFor(await redisPipeline([["GET", addressKey(email)]]), 1);
-  if (reply && reply[0] === null) return "";
-  if (!reply || typeof reply[0] !== "string" || !EMAIL_PATTERN.test(reply[0])) throw new UnknownReplyError("a recovery address");
-  return reply[0];
+  const replies = repliesFor(await redisPipeline([["GET", addressKey(email)]]), 1);
+  if (!replies) throw new UnknownReplyError("a recovery address");
+  const [raw] = replies;
+  if (raw === null) return "";
+  if (typeof raw !== "string" || !EMAIL_PATTERN.test(raw)) throw new UnknownReplyError("a recovery address");
+  return raw;
 }
 
 /** A SET answered exactly "OK"; any other answer is not known to have been kept (rule 24). */

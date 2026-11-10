@@ -459,6 +459,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/withdraw/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/withdraw",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/p/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/p/[product]",
@@ -1408,11 +1419,14 @@
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
+    "components/lesson-notes-kept.tsx",
+    "components/lesson-notes.tsx",
     "components/lesson-player.tsx",
     "components/lesson-quiz.tsx",
     "components/lesson-task.tsx",
     "components/lesson-text.tsx",
     "components/letter-publish-control.tsx",
+    "components/library-continue.tsx",
     "components/licence-key-box.tsx",
     "components/licence-key-editor.tsx",
     "components/link-editor.tsx",
@@ -1461,6 +1475,7 @@
     "components/path-certificates.tsx",
     "components/path-checkout-notice.tsx",
     "components/path-growth-missions.tsx",
+    "components/path-milestone.tsx",
     "components/path-missions.tsx",
     "components/path-onboarding.tsx",
     "components/path-reminder-button.tsx",
@@ -1471,6 +1486,7 @@
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",
+    "components/payment-received.tsx",
     "components/payment-requests-studio.tsx",
     "components/payments-panel.tsx",
     "components/paypal-payouts.tsx",
@@ -1508,6 +1524,7 @@
     "components/recovery-address-manager.tsx",
     "components/recovery-editor.tsx",
     "components/refund-activity.tsx",
+    "components/remember-last-lesson.tsx",
     "components/rename-form.tsx",
     "components/renewal-unpaid-notice.tsx",
     "components/report-download.tsx",
@@ -1584,6 +1601,7 @@
     "components/takedown-actions.tsx",
     "components/task-editor.tsx",
     "components/tasks-agenda.tsx",
+    "components/tax-collected.tsx",
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
@@ -1618,6 +1636,7 @@
     "components/welcome-offer-editor.tsx",
     "components/who-answers.tsx",
     "components/winback-editor.tsx",
+    "components/withdrawal-where.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],
@@ -1646,6 +1665,7 @@
     "app/api/billing/refund/route.ts",
     "app/api/billing/return/route.ts",
     "app/api/billing/switch/route.ts",
+    "app/api/billing/withdraw/route.ts",
     "app/api/creators/route.ts",
     "app/api/cron/affiliates/route.ts",
     "app/api/cron/closed-data/route.ts",
@@ -1758,6 +1778,7 @@
     "app/api/store/course/comment/route.ts",
     "app/api/store/course/file/route.ts",
     "app/api/store/course/link/route.ts",
+    "app/api/store/course/note/route.ts",
     "app/api/store/course/open/route.ts",
     "app/api/store/course/progress/route.ts",
     "app/api/store/course/quiz/route.ts",
@@ -1932,6 +1953,7 @@
     "app/api/store/welcome-offer/route.ts",
     "app/api/store/welcome/open/route.ts",
     "app/api/store/why-not-ask/route.ts",
+    "app/api/store/withdraw/route.ts",
     "app/api/store/yearly-ask/route.ts",
     "app/api/stream/hook/route.ts",
     "app/api/stripe/check/route.ts",
@@ -2041,6 +2063,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 140
+    "pageTemplates": 141
   }
 }

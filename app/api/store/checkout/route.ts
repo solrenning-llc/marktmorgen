@@ -160,7 +160,8 @@ export async function POST(request: NextRequest) {
   // (lib/waitlist.ts) — unless it takes pre-orders and that is what was
   // pressed (lib/preorders.ts). A pre-order is sold before there is anything
   // to hand over: it is handed over the day the product comes out.
-  const coming = await soonOne(store, product.id).catch(() => ({ soon: false, day: null }));
+  const coming = await soonOne(store, product.id).catch(() => null);
+  if (!coming) return away(`/@${store.handle}?status=error`);
   const preorder = coming.soon && wantsPreorder && preorderDay(store, product, coming.soon, coming.day) !== null;
   if (coming.soon && !preorder) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   // Refused here rather than at Stripe, so a buyer never reaches a card form
@@ -249,6 +250,9 @@ export async function POST(request: NextRequest) {
     let abTest = "";
     let ab: string | undefined;
     if (product.page && bucket !== null && !gift && !group) {
+      // A page whose read is not known never blocks the sale, and no version is claimed for it: the buyer goes on to
+      // Stripe with no metadata[ab], and the test counts nothing (C4-20261106-2610-C6-153, unit B;
+      // tests/checkout-ab-page-unknown.test.ts).
       const page = await readPage(store.statsId, product.id).catch(() => null);
       const test = page ? runningTest(page) : null;
       if (page && test && pageShown(page)) {

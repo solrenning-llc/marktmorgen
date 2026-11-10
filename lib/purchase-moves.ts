@@ -150,7 +150,24 @@ export async function readPurchaseMove(id: string): Promise<MoveRequest | null> 
   return request;
 }
 
-export type MoveConfirm = { ok: true; id: string; side: MoveSide; state: MoveState } | { ok: false; reason: "link" | "expired" | "done" | "unknown" };
+/**
+ * What a link is for, without confirming anything: its request and which
+ * address it went to, for the page that asks the person to press Confirm
+ * (611 [WP10], unit 3). Null when the link is unknown or its request is
+ * gone; throws UnknownReplyError when any part cannot be read.
+ */
+export async function readMoveLink(token: string): Promise<{ id: string; side: MoveSide; request: MoveRequest } | null> {
+  if (!MOVE_TOKEN.test(token) || !isRedisConfigured()) return null;
+  const held = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
+  if (!held) throw new UnknownReplyError("a purchase move link");
+  if (held[0] === null) return null;
+  const grant = parseGrant(held[0]);
+  if (!grant) throw new UnknownReplyError("a purchase move link");
+  const request = await readPurchaseMove(grant.id);
+  return request ? { id: grant.id, side: grant.side, request } : null;
+}
+
+export type MoveConfirm ={ ok: true; id: string; side: MoveSide; state: MoveState } | { ok: false; reason: "link" | "expired" | "done" | "unknown" };
 
 /** One address's link pressed: that address has confirmed. Pressing again changes nothing. */
 export async function confirmPurchaseMove(token: string, now = Date.now()): Promise<MoveConfirm> {

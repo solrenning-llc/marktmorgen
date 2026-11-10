@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     is("each carries its own link", [Boolean(fromLink), Boolean(toLink), fromLink !== toLink], [true, true, true]);
     is("each names the other address", [sent[0]?.text.includes("ana.new@example.com"), sent[1]?.text.includes("ana.buyer@example.com")], [true, true]);
     is("the subjects say what to do", [sent[0]?.subject, sent[1]?.subject], ["Confirm moving your purchases from Moss Notes", "Confirm this address for your purchases from Moss Notes"]);
-    is(`what the ask reads and writes is at most MOVE_ASK_COMMANDS (${MOVE_ASK_COMMANDS})`, commands <= MOVE_ASK_COMMANDS, true);
+    is(`what the ask reads and writes is MOVE_ASK_COMMANDS (${MOVE_ASK_COMMANDS})`, commands, MOVE_ASK_COMMANDS);
   }
 
   part("Opening a link confirms nothing; Confirm records that address once");
@@ -307,7 +307,7 @@ async function main(): Promise<void> {
     await confirmMoveLink({ store: moss, token: link });
     const confirmed = reads(seen);
     seen = null;
-    is(`a link's page reads at most MOVE_LINK_COMMANDS (${MOVE_LINK_COMMANDS})`, viewed <= MOVE_LINK_COMMANDS, true);
+    is(`a link's page reads MOVE_LINK_COMMANDS (${MOVE_LINK_COMMANDS})`, viewed, MOVE_LINK_COMMANDS);
     is(`a confirmation at most MOVE_CONFIRM_COMMANDS (${MOVE_CONFIRM_COMMANDS})`, confirmed <= MOVE_CONFIRM_COMMANDS, true);
   }
 

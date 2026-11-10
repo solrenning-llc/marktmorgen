@@ -49,6 +49,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeRef } from "@/lib/store";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { MAX_VAULT_PATH_BYTES } from "@/lib/vault-rules";
 import { holdFiles } from "@/lib/held-files";
 import { productFilePaths } from "@/lib/held-product-files";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
@@ -63,8 +64,40 @@ const COUNT_SECONDS = 2 * 86_400;
 /** How long a reported product is kept from removal, editing and publishing: a year from the report and a margin. */
 export const KEEP_SECONDS = 400 * 86_400;
 
-/** How many paths the held list keeps: every file stays marked, the list is for finding them again. */
-export const HELD_LIST_PATHS = 400;
+/**
+ * How many paths the held list keeps: every file stays marked whatever the list
+ * holds (lib/held-files.ts); the list is for finding them again, and `more`
+ * says how many it left out. 400 until Claude 6's focal review of #3480
+ * (6758141878): 400 longest vault paths wrote 88,106 bytes, priced at 48,000.
+ */
+export const HELD_LIST_PATHS = 200;
+/** The list's frame, `{"paths":[],"more":N}`, with room for any count. */
+const HELD_LIST_FRAME_BYTES = 40;
+/**
+ * The most a held list ever weighs, in bytes: HELD_LIST_PATHS of the longest
+ * vault paths the path rules allow (lib/vault-rules.ts), each quoted with a
+ * comma, and the frame. heldListOf never writes more, whatever the paths, so
+ * the price in tests/store-data-registry.ts cannot drift from the code.
+ */
+export const HELD_LIST_BYTES = HELD_LIST_PATHS * (MAX_VAULT_PATH_BYTES + 3) + HELD_LIST_FRAME_BYTES;
+
+/**
+ * The held list as it is written: the paths in order while they fit in
+ * HELD_LIST_PATHS and HELD_LIST_BYTES (a path longer than any vault path, say
+ * a picture's, is passed over rather than written), and how many were left out.
+ */
+export function heldListOf(paths: string[]): string {
+  const kept: string[] = [];
+  let bytes = HELD_LIST_FRAME_BYTES;
+  for (const path of paths) {
+    if (kept.length >= HELD_LIST_PATHS) break;
+    const cost = Buffer.byteLength(JSON.stringify(path), "utf8") + 1;
+    if (bytes + cost > HELD_LIST_BYTES) continue;
+    kept.push(path);
+    bytes += cost;
+  }
+  return JSON.stringify({ paths: kept, more: paths.length - kept.length });
+}
 const listKey = (store: Pick<Store, "statsId" | "handle">, productId: string) => `nl:csa:files:${storeTag(store)}:${productId}`;
 
 /**
@@ -73,7 +106,7 @@ const listKey = (store: Pick<Store, "statsId" | "handle">, productId: string) =>
  * read by the owner only, from the store's data in the hosting console, never served by the site.
  */
 async function listHeldFiles(store: Pick<Store, "statsId" | "handle">, productId: string, paths: string[]): Promise<boolean> {
-  const list = JSON.stringify({ paths: paths.slice(0, HELD_LIST_PATHS), more: Math.max(0, paths.length - HELD_LIST_PATHS) });
+  const list = heldListOf(paths);
   const replies = repliesFor(await redisPipeline([["SET", listKey(store, productId), list, "EX", KEEP_SECONDS]]), 1);
   return replies?.[0] === "OK";
 }

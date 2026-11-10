@@ -34,6 +34,12 @@ is("the same nine files as the MAIN VERMELHO alarm", REQUIRED_FILES.map((w) => [
 is("the CodeQL timeout is read from the analyze job of codeql.yml", codeqlTimeout(read(".github/workflows/codeql.yml")),
   Number(/\n {2}analyze:\n(?: {4}.*\n)*? {4}timeout-minutes: (\d+)\n/.exec(read(".github/workflows/codeql.yml"))?.[1]));
 is("a codeql.yml without an analyze timeout throws", (() => { try { codeqlTimeout("jobs:\n  analyze:\n    runs-on: x\n"); return "no"; } catch { return "threw"; } })(), "threw");
+// CodeQL js/redos on #3426: the reader never backtracks on many blank lines (it reads line by line).
+const blankRun = `jobs:\n  analyze:\n${"    \n".repeat(22)}x`;
+const started = Date.now();
+is("many blank lines inside the job: refused at once, never a long backtrack", [(() => { try { codeqlTimeout(blankRun); return "no"; } catch { return "threw"; } })(), Date.now() - started < 200], ["threw", true]);
+is("nested and blank lines before the timeout are passed over", codeqlTimeout("jobs:\n  analyze:\n    steps:\n      - run: a\n\n        with: b\n    timeout-minutes: 45\n"), 45);
+is("a timeout of the next job is never taken for analyze's", (() => { try { codeqlTimeout("jobs:\n  analyze:\n    runs-on: x\n  other:\n    timeout-minutes: 9\n"); return "no"; } catch { return "threw"; } })(), "threw");
 
 part("heads with no Actions run (M1: only a state known to have no conflict is told to close and reopen)");
 const pr = (number: number, over: Record<string, unknown> = {}) => ({ number, headSha: SHA(number), mergeableState: "clean", since: ago(45), runs: 0, ...over });

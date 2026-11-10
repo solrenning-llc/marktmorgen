@@ -55,12 +55,21 @@ async function main(): Promise<void> {
   const marked = { id: "text0002", kind: "text", heading: "About me", body: "I teach bread. ⟦Add one sentence about who you are⟧" };
   const bracketed = { id: "text0003", kind: "text", heading: "Size and materials", body: STARTER_PART };
   const own = { id: "text0004", kind: "text", heading: "Notes", body: "Sizes run small [see the chart] and ship in 2 days [US only]." };
+  /** A part ⟦like this⟧ written over two lines, with either line ending (Codex CX1, #3581). */
+  const twoLines = [
+    ["LF", { ...marked, body: "⟦Write the first line\nand the second line⟧" }],
+    ["CRLF", { ...marked, body: "⟦Write the first line\r\nand the second line⟧" }],
+  ] as const;
 
   part("A product's page, while the product is on the store");
   const refused = await post(savePage, "page", { id: shown.product.id, page: { blocks: [why, marked] } });
   is("a part ⟦like this⟧ is refused, with the block and the part", [refused.status, refused.data.error, refused.data.block, refused.data.kind, refused.data.part], [400, "placeholder", "text0002", "text", "⟦Add one sentence about who you are⟧"]);
   const second = await post(savePage, "page", { id: shown.product.id, page: { blocks: [why], variant: { id: "", blocks: [{ ...why, heading: "Why not" }, bracketed] } } });
   is("a campaign's part in the second version is refused too", [second.status, second.data.error, second.data.block, second.data.part], [400, "placeholder", "text0003", STARTER_PART]);
+  for (const [ending, block] of twoLines) {
+    const over = await post(savePage, "page", { id: shown.product.id, page: { blocks: [why, block] } });
+    is(`a part ⟦like this⟧ over two lines (${ending}) is refused, with the block`, [over.status, over.data.error, over.data.block], [400, "placeholder", "text0002"]);
+  }
   const ownWords = await post(savePage, "page", { id: shown.product.id, page: { blocks: [why, own] } });
   is("the creator's own brackets are words, and save", [ownWords.status, ownWords.data.ok], [200, true]);
   const kept = await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, marked, bracketed] } });
@@ -75,6 +84,12 @@ async function main(): Promise<void> {
   is("nor scheduled to show by itself", [later.status, later.data.error], [400, "placeholder"]);
   const markedOut = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [marked], hidden: false } });
   is("a part ⟦like this⟧ still is, now saying where", [markedOut.data.error, markedOut.data.block], ["placeholder", "text0002"]);
+  for (const [ending, block] of twoLines) {
+    const over = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [why, block], hidden: false } });
+    is(`a part ⟦like this⟧ over two lines (${ending}) is refused on a shown page, with the block`, [over.status, over.data.error, over.data.block], [400, "placeholder", "text0002"]);
+    const kept = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [why, block], hidden: true } });
+    is(`kept hidden, a part over two lines (${ending}) saves`, kept.data.ok, true);
+  }
   const hidden = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [why, bracketed, marked], hidden: true } });
   is("kept hidden, it saves", hidden.data.ok, true);
   const written = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [why, own], hidden: false } });
@@ -84,6 +99,7 @@ async function main(): Promise<void> {
   is("every campaign part is read, each once, none a link's words", [STARTER_PROMPTS.length > 50, new Set(STARTER_PROMPTS).size === STARTER_PROMPTS.length, STARTER_PROMPTS.includes(STARTER_PART), STARTER_PROMPTS.every((p) => /^\[[^\]\n]{2,}\]$/.test(p))], [true, true, true, true]);
   is("a link's words in brackets are not a part", bracketPartsIn(["Read [the guide](https://example.com/guide) first."]), []);
   is("the first part met wins, marked or bracketed", [partIn("Hi ⟦name⟧ and [Your product]", ["[Your product]"]), partIn("[Your product] then ⟦name⟧", ["[Your product]"]), partIn("Plain words.", ["[Your product]"])], ["⟦name⟧", "[Your product]", null]);
+  is("a part ⟦like this⟧ over two lines is one part, with either line ending", [partIn("Hi ⟦first\nsecond⟧ there", []), partIn("Hi ⟦first\r\nsecond⟧ there", [])], ["⟦first\nsecond⟧", "⟦first\r\nsecond⟧"]);
   is("a part in the search line is found and said there", templateLeft({ blocks: [why], seoTitle: "Bread", seoDescription: "⟦Say who it is for⟧" }), { field: "search", block: null, kind: null, part: "⟦Say who it is for⟧" });
   is("a part in the headline being tested is found", templateLeft({ blocks: [why], test: { id: "t1", headline: "[Your product]", sub: "" } as never })?.field, "test");
   is("a long part is shortened when said back", (templateTextIn({ blocks: [{ ...why, body: `⟦${"x".repeat(400)}⟧` } as never] }, [])?.part ?? "").length, MAX_PART_SHOWN);

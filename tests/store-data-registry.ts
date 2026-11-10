@@ -63,6 +63,7 @@ import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
+import { MAX_SCHEDULED_CODES } from "@/lib/discount-schedule-rules";
 import { MAX_NOTES, MAX_NOTE_LENGTH as MAX_STATS_NOTE } from "@/lib/stats-notes";
 import { MAX_CRM_FIELDS, MAX_FIELD_OPTIONS, MAX_STAGES } from "@/lib/crm-rules";
 import { MAX_FORMS, MAX_FIELDS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
@@ -327,6 +328,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:billing:sync:cursor@lib/billing-sync.ts": company("Where the billing sync stopped", "One key, the company's job."),
   "nl:plan-refund:@lib/plan-refund-flow.ts": company("One store's plan refund lock while its refund is made and its plan ended (305 [SY1])", "One short key a store, the company's money job: a random token, expiring by itself FLOW_LOCK_SECONDS (505) after it was taken, released at once when done (lib/plan-refund-flow.ts)."),
   "nl:plan-refund:ending@lib/plan-refund-flow.ts": company("Plan refunds not finished yet (305 [SY1])", "One hash, one small field a store with a refund in progress (a subscription id, two times, a flag and up to MAX_PARTS (6) charge ids with their amounts; no person's data), removed when the plan is ended or the refund is found not made, by the request itself or the daily job within GIVE_UP_DAYS (7) (lib/plan-refund-flow.ts)."),
+  "nl:plan-withdraw:@lib/plan-withdrawal.ts": company("A creator's withdrawal from their own plan (EU art. 11a, 588 [KB9] unit 3)", "One small hash a store's plan subscription, the company's proof of the withdrawal as trader: the first statement's time, the receipts tried (at most PLAN_WITHDRAW_ACK_SENDS, 3), a sent flag, a refund flag and, when support is owed a note, its short reason (the flow's own words), the notes tried (at most PLAN_WITHDRAW_SUPPORT_TRIES, 3) and a told flag; no name or email. Written with HSETNX and EXPIRE, gone by itself PLAN_WITHDRAW_KEEP_DAYS (400) after (lib/plan-withdrawal.ts)."),
   "nl:plan-refund:@lib/plan-refund-write.ts": company("A store's plan refund lock while one is made (305 [SY1])", "One short key a store, the company's money job: a random token, expiring by itself LOCK_SECONDS (345) after it was taken, released at once when the refund is done (lib/plan-refund-write.ts)."),
   "nl:plan-disputes:seen@lib/plan-disputes.ts": company("What each dispute on our own Stripe account turned out to be (232 [CA1] unit 5)", "One hash, the company's job: dispute ids with 'final', 'unmatched:<seconds>' or 'open:<store id>', never an address; 400 days from the last write; a deleted store's id reads as unmatched."),
   "nl:mail:bc:@lib/broadcasts.ts": { what: "Broadcasts and who each goes to", room: ["lib/broadcasts.ts"], parts: [per("studio", 1, KEY, "A broadcast's lock while it sends, minutes.")] },
@@ -647,6 +649,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:leave:@lib/leave-flow.ts": short("Leavers counted a month", "day", 62, 128),
   "nl:lc:@lib/lesson-comment-notify.ts": short("A student told of an answer, once in a while", "buyer", 1),
   "nl:lc:@lib/lesson-comments.ts": { what: "Lesson comments", room: ["lib/lesson-comments.ts"] },
+  "nl:lnote:@lib/lesson-notes.ts": { what: "A student's private notes on lessons (290 [SQ1]): at most MAX_NOTES_PER_STUDENT of MAX_NOTE_CHARS each, MAX_NOTES_BYTES_PER_STUDENT a student, all students' notes in one slot (NOTES_TOTAL_FIELD) of at most studentNotesRoomFor, a tenth of the data room", room: ["lib/lesson-notes.ts"] },
   "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
@@ -699,6 +702,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:nlink:opens:@lib/numbers-links.ts": short("A link's opens, by the day", "request", 2, 128, REQ("numbers link")),
   "nl:orders:n:@lib/order-admission.ts": { what: "Orders counted in the window", parts: [capped(14 * KEY, "One count a window, 400 days.")] },
   "nl:orders:open:@lib/order-admission.ts": { what: "Checkouts held, and the bytes they hold, by the hour", parts: [capped(2 * (26 * 64 + KEY), "Two hashes of the last 25 hours.")] },
+  "nl:orders:pending:@lib/order-admission.ts": { what: "Orders paid while a paying store's billing window was unknown, until it is known", parts: [capped(KEY, "One count a store, emptied by the next admission or order once the window is known.")] },
   "nl:orders:folders:@lib/orders.ts": company("The stores with orders, a month", "One set a month for every store."),
   "nl:orders:n:@lib/orders.ts": { what: "Orders counted in the window", parts: [capped(0, "Counted with lib/order-admission.ts.")] },
   // Only the LIVE legacy countOrder('1') is priced by this 45-day part.
@@ -714,6 +718,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:outreach:@lib/outreach.ts": { what: "Pitches, the domains that asked to stop, who writes, the day's count: each pitch at its largest (PITCH_BYTES) while it is kept, and its stop link for good (OUTREACH_TRACE_BYTES)", room: ["lib/outreach.ts"], parts: [capped(4 * KB, "Who writes, and the day's count.")] },
   "nl:outreach:stop:all@lib/outreach.ts": company("Domains that asked that nobody here write to them", "One set for every store."),
   "nl:outreach:stoplink:@lib/outreach.ts": room("A pitch's stop link, kept for good: counted in the room when the pitch is written (OUTREACH_TRACE_BYTES)", "lib/outreach.ts"),
+  // A discount code with a start and an end set ahead (511 [CK3], lib/discount-schedule.ts): one small field a code, gone once it is switched on.
+  "nl:dsched:@lib/discount-schedule.ts": { what: "A store's discount codes waiting for their start", parts: [capped(KEY + MAX_SCHEDULED_CODES * (ENTRY_BYTES + 160), "MAX_SCHEDULED_CODES fields: a promotion code id and its code, start, end, tries and failed mark.", src("lib/discount-schedule-rules.ts", "MAX_SCHEDULED_CODES"))] },
+  "nl:dsched:due@lib/discount-schedule.ts": company("Discount codes due to be switched on", "One sorted set for every store, at most MAX_SCHEDULED_CODES members a store (lib/discount-schedule-rules.ts), each taken out once its code is switched on, canceled, failed, or its store gone."),
+  "nl:dsched:lock:@lib/discount-schedule.ts": { what: "One change to a store's scheduled codes at a time", parts: [capped(KEY, "One key a store, held a minute at most.", src("lib/discount-schedule.ts", "LOCK_SECONDS"))] },
   "nl:depth:@lib/page-depth.ts": { what: "How far a page is read: at most DEPTH_FIELDS_MAX fields a product, counted with the product (DEPTH_RECORD_BYTES)", room: ["lib/store.ts"] },
   "nl:pfunnel:done:@lib/page-funnel-store.ts": room("Who signed up or paid at a step: counted with its funnel", "lib/page-funnel-store.ts"),
   "nl:pfunnel:seen:@lib/page-funnel-store.ts": room("Who opened a step: counted with its funnel", "lib/page-funnel-store.ts"),
@@ -732,6 +740,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:agree:p:@lib/agreement-store.ts": room("One person's agreements in a store (at most MAX_PER_PERSON): an entry each, counted with its record", "lib/agreement-store.ts"),
   "nl:agree:lock:@lib/agreement-store.ts": short("An agreement being signed or given a new version, ten seconds", "request", 1, MARK, REQ("agreement-sign")),
   "nl:letters:i:@lib/letters.ts": room("An email published on the store: its subject and words as sent, counted with its entry before it is written, until it goes by itself (letterRoomBytes)", "lib/letters.ts"),
+  "nl:withdraw:@lib/withdrawal.ts": room("A buyer's withdrawal from an order (EU art. 11a): the order's reference and the time, written once with SET NX after its bytes are counted, gone by itself after WITHDRAWAL_KEEP_DAYS", "lib/withdrawal.ts"),
   "nl:letters:link:@lib/letter-access.ts": short("An emailed link to read an email kept for members, and its opens, an hour", "access", 1, LINK_BYTES, MAIL("letter link")),
   "nl:letters:ok:@lib/letter-access.ts": short("Whether a reader holds one of a published email's products, answered for minutes", "request", 1, KEY, REQ("page")),
   "nl:letters:rl:addr:@lib/letter-access.ts": short("Links to read an email asked per address, an hour", "request", 1, KEY, REQ("letter link")),
@@ -763,9 +772,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
+  "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },
+  "nl:stamp:drop@lib/pdf-stamp.ts": company("Folders of stamped copies to delete again", "One set, members gone when done."),
   "nl:phone:cfg:@lib/phone-alerts.ts": { what: "Phones that hear of sales", parts: [capped(MAX_DEVICES * 6 * 2 * KB, "MAX_STORE_DEVICES devices.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },
   "nl:phone:seen:@lib/phone-alerts.ts": { what: "An event already sent to phones", parts: [per("order", 40, MARK, "A sale."), per("buyer", 40, MARK, "A buyer's action.")] },
   "nl:phone:st:@lib/phone-alerts.ts": { what: "How the last send went, a device", parts: [capped(MAX_DEVICES * 6 * KB, "One a device.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },
@@ -912,6 +923,8 @@ export const FAMILIES: Record<string, Family> = {
   },
   "nl:stock:@lib/stock.ts": { what: "Stock left, by product, and a sale's hold: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:stock:lock:@lib/stock.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
+  // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
+  "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
@@ -929,13 +942,17 @@ export const FAMILIES: Record<string, Family> = {
   "nl:join:t:@lib/store-join.ts": short("A link to join the list, sent by email", "access", 7, LINK_BYTES, MAIL("join")),
   "nl:store:photo:@lib/store-photo.ts": { what: "The store's photo", parts: [capped(2 * (MAX_PHOTO_BYTES * 4) / 3 + KB, "One photo, and the one it replaces while it is written.", src("lib/photo-limits.ts", "MAX_PHOTO_BYTES"))] },
   "nl:account:stores:@lib/store.ts": company("An account's other stores", "An account's."),
+  "nl:account:stores:@lib/account-exists.ts": { what: "An account's other stores, read exactly to tell an existing account when an invitation is taken", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:catalog:move:cursor@lib/store.ts": company("Where the catalog move stopped", "One key, the company's job."),
   "nl:store:before-catalog:@lib/store.ts": { what: "A store record kept aside while it moved, thirty days", parts: [capped(MAX_STORE_BYTES + KB, "Once, at most the record.", src("lib/store.ts", "MAX_STORE_BYTES"))] },
   "nl:store:handle:@lib/store.ts": { what: "The store's addresses", parts: [capped(21 * KEY, "Its address and up to twenty before it.")] },
+  "nl:store:id:@lib/discount-schedule.ts": { what: "Where the store is kept, read exactly so a scheduled code is dropped only for a store confirmed gone", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:store:id:@lib/store.ts": { what: "Where the store is kept", parts: [capped(KEY, "One a store.")] },
+  "nl:store:id:@lib/store-exact.ts": { what: "Where the store is kept, read exactly to tell a store that is gone from one that did not answer", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:store:lock:@lib/store.ts": short("The store's lock while one change is written", "studio", 1, 128),
   "nl:store:owner:*@lib/store.ts": company("The pattern the daily job reads every store by", "Not a key: a pattern."),
   "nl:store:owner:@lib/store.ts": { what: "The store record", parts: [capped(MAX_STORE_BYTES + KB, "At most MAX_STORE_BYTES, refused past it.", src("lib/store.ts", "MAX_STORE_BYTES"))] },
+  "nl:store:owner:@lib/account-exists.ts": { what: "The store record, read exactly to tell an existing account when an invitation is taken", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:stream:cap:@lib/stream.ts": { what: "A video's caption languages", room: ["app/api/store/stream/route.ts"] },
   "nl:stream:col:@lib/stream.ts": { what: "The store's collection at the video service", parts: [capped(KEY, "One a store.")] },
   "nl:stream:due@lib/stream.ts": company("Videos to ask about", "One sorted set for every store, each a video counted in its store's room."),
@@ -1020,7 +1037,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),
   "nl:hooks:wait:@lib/webhooks.ts": { what: "The Stripe event the store's reading waits on, and for how many runs", parts: [capped(KEY, "One a store, for thirty days at most."), capped(2 * 2 * KEY, "The day's count of messages not kept, one a reason (too large, the month used), gone at the end of the next UTC day.", src("lib/webhooks.ts", "SKIPPED_LINES_PER_DAY")), capped(2 * (MAX_ENDPOINTS * (288 / 3) * 128 + MAX_ENDPOINTS * 64 + 64), "The day's passed-over events said to each endpoint (a sorted set an endpoint, at most MAX_ENDPOINTS endpoints a store a day in a set of their own, and the day's count that numbers them, all gone at the end of the next UTC day: two days at most). Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS"))] },
   "nl:rl:hooks:test:@lib/webhooks.ts": short("Tests counted", "studio", 1, 128),
-  "nl:wo:due@lib/welcome-offer-send.ts": company("Welcome offers due", "One sorted set for every store, each a sign-up's."),
+  "nl:wo:due@lib/welcome-offer-send.ts": company("Welcome offers due", "One sorted set for every store, each member a sign-up's reminder holding the person's address, gone when sent or dropped, or when that person is erased (forgetWelcomePerson, lib/person-erasure.ts)."),
   "nl:wo:n:@lib/welcome-offer-send.ts": short("Welcome offers counted", "day", 62, 128),
   "nl:wo:r:@lib/welcome-offer-send.ts": short("A welcome offer's reminder set, once per free copy", "order", 430, MARK),
   "nl:wo:start:@lib/welcome-offer-send.ts": short("A welcome offer started: once per free copy, 400 days after it ends", "order", 430, MARK),
@@ -1037,6 +1054,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:tier:@lib/yearly-switch.ts": short("A membership's lock while it goes yearly", "request", 1, 128, REQ("tier switch")),
   "nl:yearly:link:@lib/yearly-switch.ts": short("A link to go yearly", "own", 30, LINK_BYTES, MAIL("yearly")),
   "nl:tier:@lib/yearly-fallback.ts": short("A membership's lock while a failed yearly renewal moves to monthly", "request", 1, 128, REQ("tier switch")),
+  "nl:tier:@lib/membership-pause.ts": short("A membership's lock while a member pauses it or resumes it early", "request", 1, 128, REQ("tier switch")),
+  "nl:tier:resume:@lib/membership-pause.ts": short("Which try one early resume of one pause is on, and the idempotency key a press of it sent with when it was first sent, until the pause has ended", "request", 128, KEY, REQ("tier switch")),
   "nl:yearly:fallback:try:@lib/yearly-fallback.ts": short("How many times one failed yearly renewal was tried on the monthly price", "request", 2, KEY, REQ("tier switch")),
   "nl:yearly:fallback:void@lib/yearly-fallback.ts": company("Yearly renewals left open after a move to monthly, for the daily job to void", "One set for the company: one entry per failed yearly renewal moved to monthly (account, invoice, invoice), taken out by the daily job (630 [HN6](14) unit 2c)."),
   "nl:yearly:fallback:check@lib/yearly-fallback.ts": company("Moves to monthly whose answer was unknown, for the daily job to check", "One set for the company: one entry per failed yearly renewal whose move came back unknown, taken out by the daily job (630 [HN6](14) unit 2c)."),

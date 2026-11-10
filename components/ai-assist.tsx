@@ -1,16 +1,24 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useId, useState } from "react";
 import { readAiAnswer } from "@/lib/ai-response";
 import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 
 /**
  * Whether the writing help (lib/ai.ts) is there for this person on this page,
- * and how many jobs are left this month. Off outside a provider, so a page
- * that never says it is on never shows a button that cannot work.
+ * and how many jobs are left this month. `known: false` when the allowance could
+ * not be read (aiLeft threw): said in words and never shown as 0 (read it with
+ * `allowanceOf`). Off outside a provider, so a page that never says it is on
+ * never shows a button that cannot work.
  */
-export const AiOn = createContext<{ on: boolean; left: number }>({ on: false, left: 0 });
+export const AiOn = createContext<{ on: boolean; left: number; known?: false }>({ on: false, left: 0 });
+
+/** The month's allowance from AiOn: a count, or null when it could not be read. */
+export const allowanceOf = (ai: { left: number; known?: false }): number | null => (ai.known === false ? null : ai.left);
+
+/** What every AI box says when the month's allowance could not be read (rule 24, VR item 2): never "0 left". */
+export const AI_ALLOWANCE_UNKNOWN = "We could not check your AI allowance just now. Reload the page in a minute to try again.";
 
 const REFUSED_BEFORE_START = new Set(["long", "invalid", "unknown"]);
 
@@ -67,12 +75,16 @@ export function AiAssist<T>({
   validateResult?: (value: unknown) => value is T;
 }) {
   const { on, left: startLeft } = useContext(AiOn);
+  // Unknown from the start when the page could not read it (known: false); nothing is started on a guess.
+  const startKnown = allowanceOf(useContext(AiOn)) !== null;
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filled, setFilled] = useState(false);
   const [left, setLeft] = useState(startLeft);
-  const [allowanceKnown, setAllowanceKnown] = useState(true);
+  const [allowanceKnown, setAllowanceKnown] = useState(startKnown);
+  const [readOnce, setReadOnce] = useState(startKnown);
+  const allowanceId = useId();
   if (!on) return null;
 
   async function run() {
@@ -96,6 +108,7 @@ export function AiAssist<T>({
       if (data.ok) {
         setLeft(data.left);
         setAllowanceKnown(true);
+        setReadOnce(true);
         if (validateResult && !validateResult(data.value)) { setError(MESSAGES.unconfirmed); return; }
         onResult(data.value as T);
         setFilled(true);
@@ -135,10 +148,10 @@ export function AiAssist<T>({
           />
         </label>
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void run()} disabled={busy || !allowanceKnown || left <= 0} aria-busy={busy}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void run()} disabled={busy || !allowanceKnown || left <= 0} aria-busy={busy} aria-describedby={allowanceId}>
             {busy ? "Writing…" : "Write a draft"}
           </button>
-          <span className="text-xs text-ink-soft">{allowanceKnown ? `${left} left this month. Started attempts count, even if they fail.` : "Reload to check your writing allowance before trying again."}</span>
+          <span id={allowanceId} className="text-xs text-ink-soft">{allowanceKnown ? `${left} left this month. Started attempts count, even if they fail.` : readOnce ? "Reload to check your writing allowance before trying again." : AI_ALLOWANCE_UNKNOWN}</span>
         </div>
         {error ? (
           <p className="notice notice-error text-sm" role="alert">

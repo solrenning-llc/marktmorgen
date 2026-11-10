@@ -197,6 +197,7 @@ export const pt: BuyerWords = {
     busy: { title: "Outra pessoa está a comprá-lo neste momento", body: "Nada foi cobrado. Carregue novamente em comprar daqui a pouco." },
     slow: { title: "Demasiadas tentativas em poucos minutos", body: "Nada foi cobrado. Aguarde alguns minutos e carregue novamente em comprar." },
     error: { title: "Não foi possível abrir a página de pagamento", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
+    nocharges: { title: "Esta loja não pode receber pagamentos com cartão neste momento", body: "Nada foi cobrado. Voltar a tentar não resulta enquanto a loja não resolver a situação." },
     paused: { title: "Esta loja não está a aceitar novas encomendas neste momento", body: "Nada foi cobrado. As novas encomendas reabrem no início do próximo mês, ou antes." },
     "paypal-declined": {
       title: "O PayPal não aceitou o pagamento",
@@ -306,6 +307,8 @@ export const pt: BuyerWords = {
   askTermsCut: () => "Não tenho aqui as condições completas. Pergunte ao criador antes de comprar.",
 
   noLongerOnSale: "Este produto já não está à venda.",
+  cardUnread: "Não foi possível carregar este produto agora. Tente novamente daqui a pouco.",
+  cardBuyUnread: "Não é possível comprar agora. Tente novamente daqui a pouco.",
   seeStore: (store) => `Ver ${store}`,
   cardTestMode: "Modo de teste: nenhum cartão real é cobrado.",
   cardCheckout: "Pagamento seguro pela Stripe, num novo separador.",

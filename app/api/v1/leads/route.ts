@@ -2,6 +2,7 @@ import { apiAdder, apiError, apiOk, apiStore, holdMoreApi } from "@/lib/api-guar
 import { apiOkFields, badFields } from "@/lib/api-fields";
 import { LEAD_FIELDS, chargedLeads } from "@/lib/api-read";
 import { WRITE_ERRORS, addLead, roomFor } from "@/lib/api-write";
+import { KEYED_WRITE_LARGEST, onceForKey } from "@/lib/api-idempotency";
 
 /**
  * GET /api/v1/leads?cursor=&agreed=true — the creator's list: the same rows as
@@ -36,12 +37,15 @@ export async function POST(request: Request) {
   const writer = await apiAdder(request);
   if (writer instanceof Response) return writer;
   const body = writer.body;
-  try {
-    const done = await roomFor(() => addLead(writer.store, body));
-    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, done.message ?? WRITE_ERRORS[done.error][1]);
-    return apiOk({ data: done.value });
-  } catch (error) {
-    console.error("api: adding a lead failed", error);
-    return apiError(502, "unavailable", "The list could not be changed just now. Nothing was changed; try again in a moment.");
-  }
+  // An Idempotency-Key makes a repeat give back the first answer instead of adding the person again (lib/api-idempotency.ts).
+  return onceForKey(request, writer.store.sid, "/api/v1/leads", body, KEYED_WRITE_LARGEST, async () => {
+    try {
+      const done = await roomFor(() => addLead(writer.store, body));
+      if (!done.ok) return { response: apiError(WRITE_ERRORS[done.error][0], done.error, done.message ?? WRITE_ERRORS[done.error][1]), effect: "none" };
+      return { response: apiOk({ data: done.value }), effect: "done" };
+    } catch (error) {
+      console.error("api: adding a lead failed", error);
+      return { response: apiError(502, "unavailable", "The list could not be changed just now. Nothing was changed; try again in a moment."), effect: "maybe" };
+    }
+  });
 }

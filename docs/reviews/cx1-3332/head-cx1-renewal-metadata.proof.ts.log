@@ -1,0 +1,30 @@
+
+CX1: missing owner metadata is unknown, never proven foreign
+  FAIL  unknown metadata {} keeps the pass open
+        expected false
+        got      true
+  ok    unknown metadata {} never cancels an unowned row
+  FAIL  unknown metadata {"store":null} keeps the pass open
+        expected false
+        got      true
+  ok    unknown metadata {"store":null} never cancels an unowned row
+  FAIL  unknown metadata {"store":7} keeps the pass open
+        expected false
+        got      true
+  ok    unknown metadata {"store":7} never cancels an unowned row
+  FAIL  unknown metadata {"store":""} keeps the pass open
+        expected false
+        got      true
+  ok    unknown metadata {"store":""} never cancels an unowned row
+
+CX1: valid own/foreign/ended controls
+  ok    own live member canceled and complete
+  ok    proven foreign row never canceled
+  ok    own ended member requires no DELETE
+
+11 checks, 4 failing.
+plan-closing: Stripe's search gave a subscription of another store; left alone
+plan-closing: Stripe's search gave a subscription of another store; left alone
+plan-closing: Stripe's search gave a subscription of another store; left alone
+plan-closing: Stripe's search gave a subscription of another store; left alone
+plan-closing: Stripe's search gave a subscription of another store; left alone

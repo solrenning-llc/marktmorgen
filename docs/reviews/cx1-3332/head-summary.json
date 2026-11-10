@@ -1,0 +1,20 @@
+{
+  "cx1-renewal-metadata.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  unknown metadata {} keeps the pass open",
+      "  FAIL  unknown metadata {\"store\":null} keeps the pass open",
+      "  FAIL  unknown metadata {\"store\":7} keeps the pass open",
+      "  FAIL  unknown metadata {\"store\":\"\"} keeps the pass open",
+      "11 checks, 4 failing."
+    ]
+  },
+  "cx1-renewals-author-prefix.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "14 checks, all passing."
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+
+A search read to its end, every row readable: done, every running member stopped
+  ok    done, and only the running one is ended
+
+A search reply that is not a list is never 'nothing to stop'
+  ok    a search answered with no data: the pass is not done
+  ok    a search answered with data as an object: the pass is not done
+  ok    a search answered with an empty object: the pass is not done
+  ok    a search answered with null: the pass is not done
+  ok    a search answered with a list in place of the page: the pass is not done
+
+A search page that does not say exactly whether more follow is never the last one
+  ok    a page with no has_more: the pass is not done
+  ok    a page with has_more as a string: the pass is not done
+  ok    a page with has_more true and no next_page: the pass is not done, and its member is still stopped
+
+A row that cannot be read is never skipped as nothing to stop
+  ok    a row that is null: the pass is not done, and the readable member is still stopped
+  ok    a row that is a string: the pass is not done, and the readable member is still stopped
+  ok    a row that is with no id: the pass is not done, and the readable member is still stopped
+  ok    a row that is with no status: the pass is not done, and the readable member is still stopped
+
+A row the search gave for another handle is never ended
+  ok    only this store's member is ended; the pass is done
+
+14 checks, all passing.
+plan-closing: Stripe's search said more subscriptions follow but not where; asked again
+plan-closing: Stripe's search gave 1 subscription(s) that could not be read; asked again
+plan-closing: Stripe's search gave 1 subscription(s) that could not be read; asked again
+plan-closing: Stripe's search gave 1 subscription(s) that could not be read; asked again
+plan-closing: Stripe's search gave 1 subscription(s) that could not be read; asked again
+plan-closing: Stripe's search gave a subscription of another store; left alone

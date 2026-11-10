@@ -1,0 +1,35 @@
+
+CX1: missing owner metadata is unknown, never proven foreign
+  FAIL  unknown metadata {} keeps the pass open
+        expected false
+        got      true
+  FAIL  unknown metadata {} never cancels an unowned row
+        expected 0
+        got      1
+  FAIL  unknown metadata {"store":null} keeps the pass open
+        expected false
+        got      true
+  FAIL  unknown metadata {"store":null} never cancels an unowned row
+        expected 0
+        got      1
+  FAIL  unknown metadata {"store":7} keeps the pass open
+        expected false
+        got      true
+  FAIL  unknown metadata {"store":7} never cancels an unowned row
+        expected 0
+        got      1
+  FAIL  unknown metadata {"store":""} keeps the pass open
+        expected false
+        got      true
+  FAIL  unknown metadata {"store":""} never cancels an unowned row
+        expected 0
+        got      1
+
+CX1: valid own/foreign/ended controls
+  ok    own live member canceled and complete
+  FAIL  proven foreign row never canceled
+        expected {"done":true,"deletes":0}
+        got      {"done":true,"deletes":1}
+  ok    own ended member requires no DELETE
+
+11 checks, 9 failing.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Source } from "@/lib/csv-map-ai-rules";
 
 /** A field of the import, as the import screen lists it. */
@@ -26,6 +26,13 @@ export const SUGGEST_MESSAGES: Readonly<Record<string, string>> = {
  * a cell. Each suggestion waits for the creator: "Use this column" sets that
  * one field (onUse), "Not this one" drops it; nothing changes otherwise, and
  * a field the creator has set meanwhile is never suggested over.
+ *
+ * Each button's accessible name is its visible text (WCAG 2.5.3); what it
+ * acts on is its description, the suggestion's own line (aria-describedby).
+ * After a choice the focus goes to the next suggestion's "Use this column",
+ * or to the summary when none is left, never to the page (2.4.3). While the
+ * request runs, the button stays focusable and says so (aria-disabled), and
+ * a second press does nothing.
  */
 export function ImportColumnSuggest({
   kind,
@@ -43,11 +50,15 @@ export function ImportColumnSuggest({
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const useButtons = useRef<Record<string, HTMLButtonElement | null>>({});
+  const summary = useRef<HTMLParagraphElement | null>(null);
   const open = fields.filter((f) => (mapping[f.key] ?? -1) < 0);
   // A suggestion is shown only while its field is still open: the creator's own choice always wins.
   const shown = suggestions.filter((s) => (mapping[s.field] ?? -1) < 0 && s.column >= 0 && s.column < header.length);
+  const lineId = (field: string) => `suggest-${kind}-${field}`;
 
   async function ask() {
+    if (busy) return;
     setBusy(true);
     setNote("");
     setSuggestions([]);
@@ -77,6 +88,10 @@ export function ImportColumnSuggest({
 
   function settle(field: string, use: boolean) {
     const s = suggestions.find((x) => x.field === field);
+    const at = shown.findIndex((x) => x.field === field);
+    const rest = shown.filter((x) => x.field !== field);
+    // The next suggestion in the list, else the one before it; with none left, the summary.
+    const next = rest[Math.min(Math.max(at, 0), rest.length - 1)]?.field ?? null;
     setSuggestions((all) => all.filter((x) => x.field !== field));
     const label = fields.find((f) => f.key === field)?.label ?? field;
     if (use && s) {
@@ -85,6 +100,7 @@ export function ImportColumnSuggest({
     } else {
       setNote(`${label} is still yours to choose.`);
     }
+    requestAnimationFrame(() => (next ? useButtons.current[next] : summary.current)?.focus());
   }
 
   if (open.length === 0 && shown.length === 0 && !note) return null;
@@ -98,11 +114,11 @@ export function ImportColumnSuggest({
         &ldquo;Use this column&rdquo; for each one.
       </p>
       {open.length > 0 ? (
-        <button type="button" onClick={ask} disabled={busy} aria-busy={busy} className="btn btn-ghost btn-sm mt-3">
+        <button type="button" onClick={ask} aria-disabled={busy} aria-busy={busy} className="btn btn-ghost btn-sm mt-3">
           {busy ? "Asking for suggestions…" : "Suggest the open columns with AI"}
         </button>
       ) : null}
-      <p role="status" className="mt-3 text-sm text-ink">
+      <p ref={summary} tabIndex={-1} role="status" className="mt-3 text-sm text-ink">
         {note}
       </p>
       {shown.length > 0 ? (
@@ -112,14 +128,22 @@ export function ImportColumnSuggest({
             const name = header[s.column] || `Column ${s.column + 1}`;
             return (
               <li key={s.field} className="rounded-xl p-3 ring-1 ring-line">
-                <p className="text-sm text-ink">
+                <p id={lineId(s.field)} className="text-sm text-ink">
                   <strong>{label}</strong>: the column &ldquo;{name}&rdquo; <span className="text-ink-soft">(suggested by AI, not checked yet)</span>
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => settle(s.field, true)} className="btn btn-primary btn-sm" aria-label={`Use the column "${name}" for ${label}`}>
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      useButtons.current[s.field] = el;
+                    }}
+                    onClick={() => settle(s.field, true)}
+                    className="btn btn-primary btn-sm"
+                    aria-describedby={lineId(s.field)}
+                  >
                     Use this column
                   </button>
-                  <button type="button" onClick={() => settle(s.field, false)} className="btn btn-ghost btn-sm" aria-label={`Do not use the column "${name}" for ${label}`}>
+                  <button type="button" onClick={() => settle(s.field, false)} className="btn btn-ghost btn-sm" aria-describedby={lineId(s.field)}>
                     Not this one
                   </button>
                 </div>

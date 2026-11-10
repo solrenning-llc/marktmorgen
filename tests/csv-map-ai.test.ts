@@ -108,7 +108,21 @@ async function main(): Promise<void> {
   is("it says only names are sent, and that nothing changes until each is chosen", [ui.includes("Only the column names are sent, never what is in the rows."), ui.includes("Nothing changes until you choose")], [true, true]);
   is("it sends names and the guess, nothing else", ui.includes("body: JSON.stringify({ kind, header, guess })"), true);
   is("a status region tells what happened; every suggestion says it is from AI", [ui.includes('role="status"'), ui.includes("suggested by AI, not checked yet")], [true, true]);
-  is("buttons are buttons, with names that say what they do", [ui.includes('type="button" onClick={ask}'), ui.includes("aria-label={`Use the column")], [true, true]);
+  is(
+    "each button's name is its visible text (2.5.3), what it acts on its description; no label hides the words",
+    [/aria-label=/.test(ui), (ui.match(/aria-describedby=\{lineId\(s\.field\)\}/g) ?? []).length, ui.includes("<p id={lineId(s.field)}"), ui.includes(">\n                    Use this column\n"), ui.includes(">\n                    Not this one\n")],
+    [false, 2, true, true, true],
+  );
+  is(
+    "after a choice the focus goes to the next suggestion's button, or to the summary, never to the page (2.4.3)",
+    [ui.includes("const next = rest[Math.min(Math.max(at, 0), rest.length - 1)]?.field ?? null;"), ui.includes("requestAnimationFrame(() => (next ? useButtons.current[next] : summary.current)?.focus());"), ui.includes('<p ref={summary} tabIndex={-1} role="status"')],
+    [true, true, true],
+  );
+  is(
+    "while asking, the button stays focusable and says so (aria-disabled), and a second press does nothing",
+    [ui.includes('type="button" onClick={ask} aria-disabled={busy} aria-busy={busy}'), /[^-]disabled={busy}/.test(ui), ui.includes("async function ask() {\n    if (busy) return;")],
+    [true, false, true],
+  );
 }
 
 main().then(done);

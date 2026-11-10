@@ -20,6 +20,7 @@ for (const [label, required] of [
   ["transition exceptions", "312.11(d)(1), (d)(4) e (g)"],
   ["guidance is qualified", "orientação da equipe, não vinculante"],
   ["recent statement is qualified", "não é dispensa geral"],
+  ["no false neutral age gate", "não é mecanismo neutro de triagem etária"],
   ["no self-attestation certification", "caixa de confirmação não é consentimento parental verificável"],
   ["no implemented checkbox", "Nenhuma caixa de idade foi implementada"],
   ["no new child information", "Nenhuma data de nascimento, documento, biometria ou dado de criança foi coletado"],

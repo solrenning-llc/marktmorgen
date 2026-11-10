@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 // Relative import deliberately exercises the real REST client, not the Redis stand-in.
 import { redisPipeline, redisPipelineBase64 } from "../lib/redis";
+import { UnknownReplyError } from "../lib/redis-reply";
 
 const fetchBefore = globalThis.fetch;
 const envBefore = { url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN };
@@ -41,7 +42,9 @@ for (const [name, pipeline] of [["plain", redisPipeline], ["base64", redisPipeli
     ["non-array body", {}],
   ] as const) test(`${name}: ${label} cannot become an acknowledged batch`, async () => {
     answer(body);
-    await assert.rejects(pipeline([["INCR", "fixture:first"], ["INCR", "fixture:second"]]));
+    // An answer out of shape is unknown (UnknownReplyError), so a route that tells it apart says "unavailable" (503),
+    // never a server error (Claude 5 on #2509, LOW 2).
+    await assert.rejects(pipeline([["INCR", "fixture:first"], ["INCR", "fixture:second"]]), UnknownReplyError);
     assert.equal(calls.length, 1, "an uncertain write is never replayed");
   });
 
@@ -58,7 +61,7 @@ for (const [name, pipeline] of [["plain", redisPipeline], ["base64", redisPipeli
 
   test(`${name}: a real Redis error rejects the complete batch`, async () => {
     answer([{ result: "OK" }, { error: "WRONGTYPE fixture" }]);
-    await assert.rejects(pipeline([["SET", "fixture:a", "v"], ["HGET", "fixture:a", "f"]]), /Redis error/);
+    await assert.rejects(pipeline([["SET", "fixture:a", "v"], ["HGET", "fixture:a", "f"]]), (error: unknown) => error instanceof Error && /Redis error/.test(error.message) && !(error instanceof UnknownReplyError));
     assert.equal(calls.length, 1);
   });
 

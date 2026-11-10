@@ -163,7 +163,10 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!stores.length) return unread ? "error" : "sent";
   if (!charged) return "error";
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
+  // The grant is the link: only a SET answered exactly "OK" is one (CX-123 rule 24). Any other reply sends nothing and
+  // takes no store email, so nobody is emailed a link that does not open; the route answers "error".
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a library link's grant");
   const link = `${input.origin}/library?token=${token}`;
   // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
   const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },

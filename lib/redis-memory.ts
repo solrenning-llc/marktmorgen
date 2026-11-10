@@ -733,6 +733,45 @@ export class MemoryRedis {
           const kept = this.run(["GET", receipt]);
           return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
         }
+        // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
+        // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
+        if (key.startsWith("-- marktmorgen:grant-unless-erased:v1\n") && Number(args[0]) >= 3 && args.length === 1 + Number(args[0]) + 1 + 4 * (Number(args[0]) - 2)) {
+          const n = Number(args[0]) - 2;
+          const [erased, who] = [args[1], args[2]];
+          const keys = args.slice(3, 3 + n);
+          const brought = args[3 + n];
+          const rest = args.slice(4 + n);
+          // As Redis: the script stops at its HMGET, nothing written, when the prints are not a hash.
+          if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...keys.map((_, i) => rest[4 * i])]) as unknown[];
+          const noted = new Set<string>();
+          return keys.map((target, i) => {
+            if (found[i] !== null) return -1;
+            const address = rest[4 * i + 1];
+            if (brought !== "" && !noted.has(address)) {
+              this.scriptCalls += 1;
+              this.run(["HSETNX", who, address, brought]);
+              noted.add(address);
+            }
+            this.scriptCalls += 1;
+            return this.run(["HSETNX", target, rest[4 * i + 2], rest[4 * i + 3]]);
+          });
+        }
+        // lib/move-members.ts INVITE_UNLESS_ERASED: each invitation HSETNX only when its print is not among the store's
+        // deleted people (-1, nothing written).
+        if (key.startsWith("-- marktmorgen:invite-unless-erased:v1\n") && args[0] === "2" && args.length >= 6 && (args.length - 3) % 3 === 0) {
+          const [, erased, invites, ...rest] = args;
+          const n = rest.length / 3;
+          if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => rest[3 * i])]) as unknown[];
+          return Array.from({ length: n }, (_, i) => {
+            if (found[i] !== null) return -1;
+            this.scriptCalls += 1;
+            return this.run(["HSETNX", invites, rest[3 * i + 1], rest[3 * i + 2]]);
+          });
+        }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
           this.live(target);
@@ -757,6 +796,19 @@ export class MemoryRedis {
           this.run(["HSET", people, field, next]);
           return 1;
         }
+        // lib/affiliate-codes.ts GIVE_CODE: whether the code is held, its room and the write in one step. A code held
+        // is moved and takes no room ({2, 0}); a code not held takes its room (TAKE_DATA, slot "aff:codes") and is
+        // written only when that answers {1, total}.
+        if (key.startsWith("-- marktmorgen:affiliate-code-give:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, room, codes, limit, month, bytes, promo, affiliate] = args;
+          if (this.run(["HEXISTS", codes, promo]) === 1) {
+            this.run(["HSET", codes, promo, affiliate]);
+            return [2, 0];
+          }
+          const taken = this.storeData([room, limit, "0", month, "a", "aff:codes", bytes]);
+          if (Array.isArray(taken) && taken[0] === 1) this.run(["HSET", codes, promo, affiliate]);
+          return taken;
+        }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
         if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
@@ -767,6 +819,13 @@ export class MemoryRedis {
           if (current === undefined) return 0;
           if (current !== args[3]) return [-1, new TextEncoder().encode(current).length];
           this.hash(target).set(args[2], args[4]);
+          return 1;
+        }
+        // lib/review-proof.ts REVIEW_LINK_IF_NOTED: a review link written only while its erasure note is still there.
+        if (key.startsWith("-- marktmorgen:review-link-if-noted:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, notes, link, member, value, seconds] = args;
+          if (this.run(["ZSCORE", notes, member]) === null) return 0;
+          this.run(["SET", link, value, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
@@ -883,6 +942,28 @@ export class MemoryRedis {
             changed.push(field);
           }
           return changed;
+        }
+        // lib/mail.ts GIVE_BACK_FLOOR: a count given back by at most itself, never below zero; one that is not a whole number is an error, nothing changed.
+        if (key.startsWith("-- marktmorgen:give-back-floor:v1\n") && args[0] === "1" && args.length === 3) {
+          const held = this.run(["GET", args[1]]);
+          if (held === null) return 0;
+          if (typeof held !== "string" || !/^-?\d+$/.test(held)) throw new Error("ERR give-back-floor: not a count");
+          const back = Math.min(Number(args[2]), Number(held));
+          if (back <= 0) return 0;
+          this.run(["DECRBY", args[1], back]);
+          return back;
+        }
+        // lib/imports.ts JOB_WRITE_IF: an import written only over the text it was read as, with an upload's batch when it carries one.
+        if (key.startsWith("-- marktmorgen:import-job-write-if:v1\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+          const two = args[0] === "2";
+          const [expected, text, seconds, batch, rowSeconds] = args.slice(two ? 3 : 2);
+          if (this.run(["GET", args[1]]) !== expected) return 0;
+          this.run(["SET", args[1], text, "EX", seconds]);
+          if (two) {
+            this.run(["RPUSH", args[2], batch]);
+            this.run(["EXPIRE", args[2], rowSeconds]);
+          }
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);

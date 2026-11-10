@@ -802,6 +802,13 @@ export function nextLook(paidAt: number, now: number): number | null {
 }
 
 /**
+ * The orders one sweep of a store reads from each of its two lists (pending payments, orders due a refund look): one
+ * ZRANGEBYSCORE of each list a run, never more orders than this (NOT_A_COST.PAYPAL_WATCH_BATCH and PAYPAL_WATCH_RANGES
+ * in tests/plan-cost-registry.ts, held by tests/paypal-watch-cost.test.ts). The rest wait for the next run.
+ */
+export const PAYPAL_WATCH_BATCH = 25;
+
+/**
  * What the sweep asks of PayPal for one store, a few orders at a time:
  *
  *   - a payment PayPal held as pending and has since completed is written
@@ -825,7 +832,7 @@ export async function watchPayPal(
   const statsId = store.statsId;
   const now = Math.floor(Date.now() / 1000);
 
-  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", "25"]]);
+  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", String(PAYPAL_WATCH_BATCH)]]);
   for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
     if (Date.now() >= deadline) return result;
     const opened = await readOpened(order);
@@ -865,7 +872,7 @@ export async function watchPayPal(
   }
 
   const dropStart = on.dropStart;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", watchKey(statsId), "0", String(now), "LIMIT", "0", "25"]]);
+  const [due] = await redisPipeline([["ZRANGEBYSCORE", watchKey(statsId), "0", String(now), "LIMIT", "0", String(PAYPAL_WATCH_BATCH)]]);
   let revoked = 0;
   for (const order of Array.isArray(due) ? (due as string[]) : []) {
     if (Date.now() >= deadline) break;

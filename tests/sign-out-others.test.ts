@@ -239,4 +239,7 @@ test("the page promises no more than the code does (Claude 3 on #3459, rule 27)"
   assert.match(page, /Every other device that was logged in is now logged out\./);
   // API keys are not sessions: a script holding one keeps working until the key is revoked.
   assert.match(page, /API keys are not affected/);
+  // A passkey or Google login also gets back in, with no email (Claude 2 on #3459, VR item 2).
+  assert.doesNotMatch(page, /needs a new login link sent to your email/);
+  assert.match(page, /someone needs to log in to your account again\./);
 });

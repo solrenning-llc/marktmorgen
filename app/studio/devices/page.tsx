@@ -64,7 +64,7 @@ export default async function StudioDevicesPage({ searchParams }: Params) {
             This logs you out on every other computer, phone or browser where you are logged in with this email address. You stay logged in here.
           </p>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            Use it if you left your account open on a device that is not yours, or one that was lost. To get back in there, someone needs a new login link sent to your email.
+            Use it if you left your account open on a device that is not yours, or one that was lost. To get back in there, someone needs to log in to your account again.
           </p>
           <p className="mt-3 max-w-2xl text-ink-soft">
             API keys are not affected. If a script or app on that device holds one of your store&apos;s API keys, it keeps working until you revoke the key in the API section of your studio.

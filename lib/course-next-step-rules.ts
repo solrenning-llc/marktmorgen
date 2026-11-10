@@ -40,13 +40,14 @@ export const MAX_NEXT_STEP_LINE = 160;
 /** What the creator picked for one course: a product of the store, and their line (which may be empty). */
 export type NextStep = { productId: string; line: string };
 
-export type NextStepProblem = "product" | "self" | "long" | "link" | "deal" | "pressure" | "number" | "quote" | "exclaim";
+export type NextStepProblem = "product" | "self" | "long" | "hidden" | "link" | "deal" | "pressure" | "number" | "quote" | "exclaim";
 
 /** What the studio says for each problem, in plain words. */
 export const NEXT_STEP_PROBLEMS: Record<NextStepProblem, string> = {
   product: "Pick a product from your store.",
   self: "Pick another product. A course cannot be its own next step.",
   long: `Keep the line to ${MAX_NEXT_STEP_LINE} characters or fewer.`,
+  hidden: "Leave out hidden characters, such as zero-width spaces or marks that change the direction of the text. Type the line again in plain words.",
   link: "Leave out links and addresses. The button already opens the product's page.",
   deal: "Leave out discounts, codes and deals. The card shows the price your store shows.",
   pressure: "Leave out words that rush the student, like \"now\", \"today\", \"last\" or \"limited\".",
@@ -81,15 +82,41 @@ export function readNextStep(
   return why ? { ok: false, why } : { ok: true, step: { productId, line } };
 }
 
+/**
+ * Characters that draw nothing and only hide what a line says from the checks below, or change how it reads on the
+ * screen: the soft hyphen, zero-width spaces, the word joiner and its kin, the byte-order mark, and the bidirectional
+ * embeddings, overrides and isolates (U+202A to U+202E, U+2066 to U+2069). Refused, never removed: the words are the
+ * creator's (review of #3523, MEDIUM). The joiners that build an emoji or spell a word (U+200C, U+200D) and the plain
+ * direction marks (U+200E, U+200F, U+061C) are kept, as lib/preheader.ts keeps them, and are taken out for the checks.
+ */
+const HIDDEN = /[­᠎​⁠-⁤﻿‪-‮⁦-⁩]/u;
+
+/**
+ * The line as the checks read it, twice: with compatibility forms folded (fullwidth letters, ligatures) and the joiners
+ * and direction marks a word may carry taken out, so "n‍ow" and "ｎｏｗ" read as "now"; and the same with the
+ * accents taken off too, so "Última" reads as "Ultima" where a word list's \b does not see an accented first letter.
+ * Only for the checks: what is kept and shown is the line as typed.
+ */
+function forChecks(line: string): [string, string] {
+  const folded = line.normalize("NFKC").replace(/[‌‍‎‏؜]/gu, "");
+  return [folded, folded.normalize("NFD").replace(/\p{M}/gu, "")];
+}
+
 /** What is wrong with the creator's line, or null when it may be shown. Counted as a reader counts: one emoji is one. */
 export function lineProblem(line: string): NextStepProblem | null {
+  // Bounded before it is counted: no line of the most characters, each a long emoji, is longer than this.
+  if (line.length > MAX_NEXT_STEP_LINE * 16) return "long";
   if ([...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(line)].length > MAX_NEXT_STEP_LINE) return "long";
-  if (/https?:|www\.|@|\b[a-z0-9-]+\.(com|net|org|io|co|app|shop|store|link|me)\b/i.test(line)) return "link";
-  if (DEAL_WORDS.test(line)) return "deal";
-  if (PRESSURE.test(line)) return "pressure";
-  if (/\p{N}/u.test(line)) return "number";
-  if (/["“”«»„‟]/.test(line)) return "quote";
-  if (/[!¡]/.test(line)) return "exclaim";
+  if (HIDDEN.test(line)) return "hidden";
+  const read = forChecks(line);
+  const any = (pattern: RegExp) => read.some((text) => pattern.test(text));
+  // Any web address: a scheme, "www.", an email address, or a name, a dot and an ending of letters ("site.de").
+  if (any(/https?:|www\.|@|[\p{L}\p{N}-]+\.\p{L}{2,24}(?![\p{L}\p{N}])/iu)) return "link";
+  if (any(DEAL_WORDS)) return "deal";
+  if (any(PRESSURE)) return "pressure";
+  if (any(/\p{N}/u)) return "number";
+  if (any(/["“”«»„‟]/)) return "quote";
+  if (any(/[!¡]/)) return "exclaim";
   return null;
 }
 

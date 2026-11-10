@@ -47,6 +47,23 @@ test("the line is refused, never cut or rewritten, when it presses, promises a d
     assert.equal(lineProblem(line), why, line);
     assert.ok(NEXT_STEP_PROBLEMS[why].length > 0 && !/[!]/.test(NEXT_STEP_PROBLEMS[why]), "each refusal says why, calmly");
   }
+  // Characters that draw nothing never carry a word past the checks (review of #3523, MEDIUM): refused when they hide,
+  // read through when they only join.
+  for (const hidden of ["​", "⁠", "­", "‮", "‪", "⁦", "⁩"]) {
+    assert.equal(lineProblem(`Join n${hidden}ow`), "hidden", `U+${hidden.codePointAt(0)!.toString(16)} is refused`);
+    assert.deepEqual(readNextStep({ productId: NEXT, line: `A calm line${hidden}` }, context), { ok: false, why: "hidden" });
+  }
+  assert.equal(lineProblem("Join n‍ow"), "pressure", "a joiner inside a word does not hide it");
+  assert.equal(lineProblem("Join n‌ow"), "pressure");
+  assert.equal(lineProblem("Join ｎｏｗ"), "pressure", "fullwidth letters are read as letters");
+  assert.equal(lineProblem("Get a dis‍count"), "deal");
+  assert.equal(lineProblem("Última clase del curso"), "pressure", "an accented first letter is still a word");
+  assert.equal(lineProblem("la última vez"), "pressure");
+  for (const address of ["Visit janesmith.dev", "See coach.academy/join", "On site.de", "At café.example"]) assert.equal(lineProblem(address), "link", address);
+  assert.equal(lineProblem("Go deeper, e.g. with the advanced module, when you are ready."), null, "an abbreviation is not an address");
+  assert.equal(lineProblem("ادامه بده‌با دوره‏"), null, "a Persian joiner and a direction mark are kept");
+  assert.equal(lineProblem("x".repeat(MAX_NEXT_STEP_LINE * 16 + 1)), "long", "bounded before it is counted");
+  assert.ok(NEXT_STEP_PROBLEMS.hidden.length > 0);
   // Counted as a reader counts: an emoji made of several code points is one character.
   assert.equal(lineProblem("\u{1F469}‍\u{1F3EB}".repeat(MAX_NEXT_STEP_LINE)), null);
   assert.equal(lineProblem("Go deeper with the advanced course, at your own pace."), null);

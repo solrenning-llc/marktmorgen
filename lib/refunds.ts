@@ -186,7 +186,8 @@ function closingKnown(event: unknown): boolean {
 
 /**
  * Whether the bank took this payment back from the creator for good: a
- * dispute on its charge that Stripe has closed as lost, whatever its amount
+ * dispute on its charge that Stripe has closed as lost, or as prevented with
+ * its own money withdrawn and not put back (lostBy), whatever its amount
  * (the owner's rule of 4 November 2026; the header says why). Takes what
  * refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
  * no longer sends the dispute with it, and nothing can expand it, so only
@@ -195,8 +196,10 @@ function closingKnown(event: unknown): boolean {
  * A charge not expanded, or not marked, counts as not lost, as with refunds.
  * Throws when Stripe cannot be asked, and when its answer is not this
  * charge's own list (rule 30): a reply that is not a list, a row that is not
- * a dispute object, a row naming another charge or none, and a list not said
- * to be whole without a lost row of its own. Not paged, so no request is
+ * a dispute object or a row naming another charge or none, whatever else
+ * the list holds; and, only when no lost row of its own decides, a prevented
+ * row whose money cannot be read or a list not said to be whole. Not paged,
+ * so no request is
  * added: a charge with more disputes than one page holds reads as unknown.
  */
 export async function disputeLost(account: string, payment: unknown): Promise<boolean> {
@@ -209,16 +212,20 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
   // Rule 30: only this charge's own rows, in a list, decide; anything else throws, as Stripe not answering does.
   if (listed === null || typeof listed !== "object" || !Array.isArray((listed as { data?: unknown }).data)) throw new Error("this charge's disputes could not be read");
   let lost = false;
+  let unread = false;
   for (const row of (listed as { data: unknown[] }).data) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("a dispute listed for this charge could not be read");
     // Another charge's lost dispute, or one naming none, would close the doors on a buyer who paid.
     if (idOf((row as { charge?: unknown }).charge) !== id) throw new Error("Stripe listed another charge's dispute");
     const taken = lostBy(row as Record<string, unknown>);
-    if (taken === null) throw new Error("a prevented dispute's money could not be read");
-    if (taken) lost = true;
+    // A prevented dispute whose money cannot be read is unknown; it decides only when no row of its own proves a loss
+    // (Codex V on #3569), and every row is still checked for its shape and its charge first.
+    if (taken === null) unread = true;
+    else if (taken) lost = true;
   }
   // Its own lost dispute is lost whatever else there is; "not lost" only from a list that says, exactly, there is no more.
   if (lost) return true;
+  if (unread) throw new Error("a prevented dispute's money could not be read");
   if ((listed as { has_more?: unknown }).has_more !== false) throw new Error("this charge's disputes were not read whole");
   return false;
 }

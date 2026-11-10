@@ -1,0 +1,11 @@
+
+People can reach safety guidance from the actual help page
+  FAIL  help offers one direct link to safety guidance
+        expected 1
+        got      0
+  FAIL  its name identifies the destination without surrounding text
+        expected true
+        got      false
+  ok    the destination is a real public page
+
+3 checks, 2 failing.

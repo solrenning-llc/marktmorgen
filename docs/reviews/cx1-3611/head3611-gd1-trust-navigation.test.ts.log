@@ -1,0 +1,7 @@
+
+People can reach safety guidance from the actual help page
+  ok    help offers one direct link to safety guidance
+  ok    its name identifies the destination without surrounding text
+  ok    the destination is a real public page
+
+3 checks, all passing.

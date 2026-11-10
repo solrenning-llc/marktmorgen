@@ -1,0 +1,43 @@
+
+A public safety guide points to working help without promising unfinished protections
+  FAIL  the guide is a public page
+        expected true
+        got      false
+  FAIL  it has a clear page title
+        expected true
+        got      false
+  FAIL  it does not present guidance as new contract terms
+        expected true
+        got      false
+  FAIL  the guide links to /report
+        expected true
+        got      false
+  ok    the /report destination exists
+  FAIL  the guide links to /copyright
+        expected true
+        got      false
+  ok    the /copyright destination exists
+  FAIL  the guide links to /terms
+        expected true
+        got      false
+  ok    the /terms destination exists
+  FAIL  the guide links to /help/buyers
+        expected true
+        got      false
+  ok    the /help/buyers destination exists
+  FAIL  a report link says what it does
+        expected true
+        got      false
+  FAIL  publication checks are scoped to their implemented fields
+        expected true
+        got      false
+  FAIL  the guide states detection limits
+        expected true
+        got      false
+  FAIL  review ownership stays with the buyer
+        expected true
+        got      false
+  ok    safety guidance does not promise unfinished automatic protections
+  ok    the new guide does not add a provider call
+
+17 checks, 11 failing.

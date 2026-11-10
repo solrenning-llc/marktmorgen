@@ -1,0 +1,16 @@
+
+Actual public components rendered with real network denied
+  ok    guide: one main
+  ok    guide: one H1
+  ok    guide: shared main focus target survives JSX runtime
+  ok    help: one main
+  ok    help: one H1
+  ok    help: shared main focus target survives JSX runtime
+  ok    guidance does not display a false effective date
+  ok    guide has named link /report
+  ok    guide has named link /copyright
+  ok    guide has named link /terms
+  ok    guide has named link /help/buyers
+  ok    help has exactly one named direct safety link
+
+12 checks, all passing.

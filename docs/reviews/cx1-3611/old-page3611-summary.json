@@ -1,0 +1,14 @@
+{
+  "cx1-author-red-trust-page.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  the guide links to /help/buyers",
+      "  FAIL  a report link says what it does",
+      "  FAIL  publication checks are scoped to their implemented fields",
+      "  FAIL  the guide states detection limits",
+      "  FAIL  review ownership stays with the buyer",
+      "17 checks, 11 failing."
+    ]
+  }
+}

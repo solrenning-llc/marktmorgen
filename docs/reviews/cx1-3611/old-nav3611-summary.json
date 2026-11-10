@@ -1,0 +1,11 @@
+{
+  "gd1-trust-navigation.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  help offers one direct link to safety guidance",
+      "  FAIL  its name identifies the destination without surrounding text",
+      "3 checks, 2 failing."
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+
+A public safety guide points to working help without promising unfinished protections
+  ok    the guide is a public page
+  ok    it has a clear page title
+  ok    it does not present guidance as new contract terms
+  ok    the guide links to /report
+  ok    the /report destination exists
+  ok    the guide links to /copyright
+  ok    the /copyright destination exists
+  ok    the guide links to /terms
+  ok    the /terms destination exists
+  ok    the guide links to /help/buyers
+  ok    the /help/buyers destination exists
+  ok    a report link says what it does
+  ok    publication checks are scoped to their implemented fields
+  ok    the guide states detection limits
+  ok    review ownership stays with the buyer
+  ok    safety guidance does not promise unfinished automatic protections
+  ok    the new guide does not add a provider call
+
+The actual page returns the guide and its help links
+  ok    the rendered layout has the guide title
+  ok    the rendered layout has no contract effective date
+  ok    metadata identifies this guide
+  ok    the actual page includes /report
+  ok    the actual page includes /copyright
+  ok    the actual page includes /terms
+  ok    the actual page includes /help/buyers
+
+24 checks, all passing.

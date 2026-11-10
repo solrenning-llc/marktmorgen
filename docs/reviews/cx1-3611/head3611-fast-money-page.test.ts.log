@@ -1,0 +1,13 @@
+
+Every word a reader reads on the page is checked
+  ok    a promise in a block is found, as on the sales page
+  ok    plain page words pass
+  ok    the search description is among the words read
+  ok    the editor names the sales page
+
+Both routes and the page editor
+  ok    a published product's page is refused before it is written
+  ok    publishing a draft reads its page and checks it
+  ok    the page editor says it in the same words
+
+7 checks, all passing.

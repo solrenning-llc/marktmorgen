@@ -1,0 +1,11 @@
+{
+  "new_route": {
+    "source": "app/help/trust-and-safety/page.tsx",
+    "status": "AAA review not completed",
+    "routeTemplate": "/help/trust-and-safety",
+    "parameters": []
+  },
+  "all_other_json_values_identical": true,
+  "page_count_before": 142,
+  "page_count_after": 143
+}

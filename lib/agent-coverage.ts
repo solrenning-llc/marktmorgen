@@ -173,6 +173,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/import": row("settings", read),
   "POST store/import": row("settings", execute, "An import writes a great deal at once and says who may be emailed."),
   "POST store/import/funnel": row("pages", draft),
+  "POST store/import-columns": row("settings", never("It suggests columns for a file the creator's own browser just read, to be confirmed one by one on the import screen; an agent reading a file has its own model and needs no second one.")),
   "POST store/inbox": row("buyers", execute, "An answer in the inbox reaches the buyer."),
   "POST store/intro": row("pages", draft),
   "GET store/keys": row("products", never(SECRET), "License keys are what buyers paid for: secrets."),

@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   const run = () => syncMeetings(async (handle) => (handle === "loomhouse" ? callStore : null), Date.now() + 10_000, "https://marktmorgen.com");
   const gone = async (pi: string) => (await readRecord(scopeOf(pi)))?.gone === true;
   const call = async (pi: string) => {
-    sessionsByPayment[pi] = [{ id: `cs_test_${pi.slice(3)}`, metadata: { kind: "call", store: "loomhouse", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
+    sessionsByPayment[pi] = [{ id: `cs_test_${pi.slice(3)}`, payment_intent: pi, metadata: { kind: "call", store: "loomhouse", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
     await writeRecord(meeting(pi));
   };
 

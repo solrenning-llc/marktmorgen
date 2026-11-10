@@ -226,7 +226,7 @@ async function main(): Promise<void> {
   const callStore: Store = { ...store, callsId };
   const callStart = Date.now() + 86_400_000;
   await redis.pipeline([["ZADD", MEET_STORES, callStart, `${callsId}|kilnworks`]]);
-  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
+  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, payment_intent: pi, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
   // Each booking's meeting, as confirmBooking leaves it before the provider made it: ending it needs no provider call.
   const scopeOf = (pi: string) => callScope(callsId, { group: false, session: `cs_test_${pi.slice(3)}`, product: guide.product.id, start: callStart });
   const meeting = (pi: string): MeetRecord => ({

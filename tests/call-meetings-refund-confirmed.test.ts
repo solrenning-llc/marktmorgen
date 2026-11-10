@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     guests: [], added: [], todo: "", tries: 0, next: 0, error: "", updates: 0, gone: false, host: "", calendar: "",
   });
   const booked = async (pi: string) => {
-    sessionsByPayment[pi] = [{ id: `cs_test_${pi.slice(3)}`, metadata: { kind: "call", store: "loomhouse", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
+    sessionsByPayment[pi] = [{ id: `cs_test_${pi.slice(3)}`, payment_intent: pi, metadata: { kind: "call", store: "loomhouse", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
     await writeRecord(meeting(pi));
   };
   const gone = async (pi: string) => (await readRecord(scopeOf(pi)))?.gone === true;

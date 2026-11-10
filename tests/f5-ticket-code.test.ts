@@ -20,6 +20,7 @@ import {
   newTicketId,
   readTicketCode,
 } from "@/lib/ticket-code";
+import { deriveKey } from "@/lib/secret-box";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -101,6 +102,45 @@ async function main(): Promise<void> {
     is("not made", made(), "refused:no_key");
     is("not read, never taken as good", readTicketCode(code, NOW), { ok: false, reason: "no_key" });
     is("check-in refuses", await checkIn(code, { event: EVENT, now: NOW }), { ok: false, reason: "no_key" });
+    restore("NIMBUS_DATA_KEY", before.d);
+    restore("STRIPE_SECRET_KEY", before.s);
+  }
+
+  part("A routine key change never turns a sold ticket into a forged one (Claude 3, MEDIUM 1 on #3457)");
+  {
+    // A code can be good for 400 days. Codes are made only under NIMBUS_DATA_KEY, a secret with no
+    // other job: under the Stripe key alone none is made or read, so neither setting NIMBUS_DATA_KEY
+    // for the first time nor rotating the Stripe key can ever make a printed ticket read as forged.
+    const before = { d: process.env.NIMBUS_DATA_KEY, s: process.env.STRIPE_SECRET_KEY };
+    const DATA = "tests-only-ticket-data-key-of-enough-length-01";
+    const STRIPE_A = "sk_test_tickets_only_a_0000000000000000";
+    const STRIPE_B = "sk_test_tickets_only_b_0000000000000000";
+    const end = EXP.toString(36);
+    const underRoot = () => {
+      const key = deriveKey("event-ticket/v1");
+      return key ? `t1.${EVENT}.${TICKET}.${end}.${createHmac("sha256", key).update(`t1|${EVENT}|${TICKET}|${EXP}`).digest("hex").slice(0, 40)}` : "";
+    };
+
+    process.env.NIMBUS_DATA_KEY = DATA;
+    process.env.STRIPE_SECRET_KEY = STRIPE_A;
+    const sold = made();
+    is("control: a code is made under NIMBUS_DATA_KEY", TICKET_CODE.test(sold), true);
+    process.env.STRIPE_SECRET_KEY = STRIPE_B;
+    is("the Stripe key rotated: the sold code still reads", readTicketCode(sold, NOW), { ok: true, event: EVENT, ticket: TICKET, expiresAt: EXP });
+    delete process.env.STRIPE_SECRET_KEY;
+    is("no Stripe key at all: the sold code still reads", readTicketCode(sold, NOW).ok, true);
+
+    delete process.env.NIMBUS_DATA_KEY;
+    process.env.STRIPE_SECRET_KEY = STRIPE_A;
+    is("only the Stripe key: no code is made", made(), "refused:no_key");
+    const stripeSigned = underRoot();
+    is("only the Stripe key: a code signed under it is not read as good", readTicketCode(stripeSigned, NOW), { ok: false, reason: "no_key" });
+    is("only the Stripe key: check-in refuses it", await checkIn(stripeSigned, { event: EVENT, now: NOW }), { ok: false, reason: "no_key" });
+    process.env.STRIPE_SECRET_KEY = STRIPE_B;
+    is("the Stripe key rotated with no NIMBUS_DATA_KEY: still no code is made", made(), "refused:no_key");
+    process.env.NIMBUS_DATA_KEY = DATA;
+    is("NIMBUS_DATA_KEY set afterwards: the code sold under it reads", readTicketCode(sold, NOW).ok, true);
+
     restore("NIMBUS_DATA_KEY", before.d);
     restore("STRIPE_SECRET_KEY", before.s);
   }

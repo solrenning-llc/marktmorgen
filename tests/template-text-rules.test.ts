@@ -13,7 +13,10 @@
  * refusal that does not say where; a hidden page or a draft's page refused;
  * the creator's own brackets refused.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
+import { MAX_PART_SHOWN, bracketPartsIn, partIn, templateLeftMessage, templateTextIn } from "@/lib/template-text-rules";
+import { STARTER_PROMPTS, templateLeft } from "@/lib/template-text";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId } from "@/lib/store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
@@ -76,6 +79,27 @@ async function main(): Promise<void> {
   is("kept hidden, it saves", hidden.data.ok, true);
   const written = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [why, own], hidden: false } });
   is("once written in the creator's own words, it can be shown", written.data.ok, true);
+
+  part("The rule, alone");
+  is("every campaign part is read, each once, none a link's words", [STARTER_PROMPTS.length > 50, new Set(STARTER_PROMPTS).size === STARTER_PROMPTS.length, STARTER_PROMPTS.includes(STARTER_PART), STARTER_PROMPTS.every((p) => /^\[[^\]\n]{2,}\]$/.test(p))], [true, true, true, true]);
+  is("a link's words in brackets are not a part", bracketPartsIn(["Read [the guide](https://example.com/guide) first."]), []);
+  is("the first part met wins, marked or bracketed", [partIn("Hi ⟦name⟧ and [Your product]", ["[Your product]"]), partIn("[Your product] then ⟦name⟧", ["[Your product]"]), partIn("Plain words.", ["[Your product]"])], ["⟦name⟧", "[Your product]", null]);
+  is("a part in the search line is found and said there", templateLeft({ blocks: [why], seoTitle: "Bread", seoDescription: "⟦Say who it is for⟧" }), { field: "search", block: null, kind: null, part: "⟦Say who it is for⟧" });
+  is("a part in the headline being tested is found", templateLeft({ blocks: [why], test: { id: "t1", headline: "[Your product]", sub: "" } as never })?.field, "test");
+  is("a long part is shortened when said back", (templateTextIn({ blocks: [{ ...why, body: `⟦${"x".repeat(400)}⟧` } as never] }, [])?.part ?? "").length, MAX_PART_SHOWN);
+  is("the creator's own brackets stay words", templateLeft({ blocks: [own as never] }), null);
+  is("the message says the block, the part and the two ways on", [
+    templateLeftMessage({ field: "block", part: "[Your product]" }, "Text", "site"),
+    templateLeftMessage({ field: "search", part: "⟦Say who⟧" }, null, "product"),
+  ], [
+    "In the Text block, “[Your product]” is a part for you to write. Replace it with your own words, including the brackets, or keep the page hidden. Nothing was saved.",
+    "In the search title or line, “⟦Say who⟧” is a part for you to write. Replace it with your own words, including the brackets, or take the product off your store first. Nothing was saved.",
+  ]);
+
+  part("The page editor");
+  const editor = readFileSync("components/page-editor.tsx", "utf8");
+  is("it says where the part is and opens that block", /data\.error === "placeholder"[\s\S]{0,900}templateLeftMessage\([\s\S]{0,200}if \(block\) show\(block\.id\)/.test(editor), true);
+  is("it never carries the campaigns", /from "@\/lib\/(template-text|funnel-starters)"/.test(editor), false);
   done();
 }
 

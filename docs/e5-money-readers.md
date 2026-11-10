@@ -122,6 +122,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `app/[handle]/affiliates/page.tsx` | SETTING | 249–250, 510–512: the creator's lead and bonus terms | no |
 | `lib/course-confirmation-origin.ts` | SETTING | 114–127: an unadmitted course candidate freezes the store currency with its original price and consent text | yes: this is an immutable original-setting snapshot, not proof of payment or an active charge; paid observation must separately match it |
 | `app/[handle]/p/[product]/page.tsx` | SETTING | 188–200: structured data priceCurrency and prices | no (unit 3: what the page says) |
+| `app/[handle]/preview/[code]/page.tsx` | SETTING | 94: the draft's price on the private preview link, in the store's currency ("Free" at 0); no checkout, nothing charged | no (unit 3: what the page says, as the product page) |
 | `app/api/store/agreements/route.ts` | SETTING | 40/62: agreement line amounts typed | partly: each version keeps its currency |
 | `app/api/store/ai/route.ts` | SETTING | 99/213/261/306: product prices as facts for AI writing | no |
 | `app/api/store/call-package/route.ts` | SETTING | 26–27: the package price field | no |

@@ -66,8 +66,8 @@ export function newPhotoId(): string {
 
 /**
  * Keeps a photo under an id (a fresh one unless given) and returns the id.
- * Written only on Redis's exact "OK" (rule 24): any other answer throws, and
- * the photo is not taken as written.
+ * Written only on Redis's exact "OK" (CX-123 rule 24): any other answer throws,
+ * so the page is never pointed at a photo that may not be there.
  */
 export async function writePhoto(bytes: Uint8Array, type: PhotoType, id = newPhotoId()): Promise<string> {
   const replies = repliesFor(await redisPipeline([
@@ -93,9 +93,10 @@ export async function readPhoto(
 
 /**
  * Deletes photos nothing points at any more. Done only on each DEL's exact
- * count, 0 (already gone) or 1 (rule 24): any other answer, or a failure,
- * throws, and whoever keeps their names keeps them until a later try is
- * confirmed (lib/store.ts, photoLeft).
+ * count, 0 (already gone) or 1 (CX-123 rule 24): any other answer, or a
+ * failure, throws, and whoever keeps their names keeps them until a later try
+ * is confirmed (lib/store.ts, photoLeft). /api/photo/<id> reads only the
+ * photo's own record, so a photo whose delete is not confirmed is not "removed".
  */
 export async function deletePhotos(ids: (string | null)[]): Promise<void> {
   const ours = [...new Set(ids.filter((id): id is string => typeof id === "string" && PHOTO_ID_PATTERN.test(id)))];

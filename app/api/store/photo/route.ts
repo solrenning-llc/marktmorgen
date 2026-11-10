@@ -18,6 +18,13 @@ import { lockedFor } from "@/lib/two-step";
  * step that failed is never kept where nothing finds it: the record names it
  * until its deletion is confirmed (Store.photoLeft in lib/store.ts), the next
  * upload deletes it, and the closing walk erases it with the store.
+ *
+ * A photo is said as gone only on a confirmed delete (CX-123 rule 24). A photo
+ * taken off is deleted first and the store stops pointing at it after, so a
+ * delete Redis does not confirm is answered as an error, the studio still
+ * shows the photo, and the next try deletes it. When the old photo of a
+ * replace is not confirmed deleted, the new one is on the page but the answer
+ * is an error too; the old one stays named until a later try deletes it.
  */
 export async function POST(request: NextRequest) {
   // Base64 is a third bigger than the bytes it carries, plus the JSON around it.
@@ -29,11 +36,16 @@ export async function POST(request: NextRequest) {
 
   try {
     if (guarded.body.remove === true) {
-      const result = await setPhotoId(guarded.ref, null);
+      const shown = guarded.store.photoId;
+      await deletePhoto(shown);
+      // Its deletion is confirmed, so it is not named as left.
+      const result = await setPhotoId(guarded.ref, null, Date.now(), shown);
       if (!result.ok) {
         return Response.json({ ok: false, error: result.reason }, { status: 400 });
       }
-      await settleAfter(guarded.ref);
+      // One put on the page since this request was read, and any left by an earlier
+      // failed step, is deleted too; not said as removed until that is confirmed.
+      if (result.store.photoLeft?.length) await settlePhotos(guarded.ref);
       return Response.json({ ok: true, photoId: null });
     }
 
@@ -74,19 +86,11 @@ export async function POST(request: NextRequest) {
       await deletePhoto(id).catch((drop) => console.error("deleting a store photo with no store failed", drop));
       return Response.json({ ok: false, error: result.reason }, { status: 400 });
     }
-    await settleAfter(guarded.ref);
+    // The old photo is said as replaced only once its deletion is confirmed; until then it stays named.
+    if (result.store.photoLeft?.length) await settlePhotos(guarded.ref);
     return Response.json({ ok: true, photoId: id });
   } catch (error) {
     console.error("saving the store photo failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
-}
-
-/**
- * Deletes the photo the store just stopped showing. The page is already right,
- * so a deletion that is not confirmed is only logged: the record still names
- * the photo, and the next upload or the closing walk deletes it.
- */
-async function settleAfter(ref: string): Promise<void> {
-  await settlePhotos(ref).catch((error) => console.error("deleting a replaced store photo failed; it stays named", error));
 }

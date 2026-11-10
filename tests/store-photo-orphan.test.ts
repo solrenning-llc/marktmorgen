@@ -112,8 +112,10 @@ async function main(): Promise<void> {
     }
     return null;
   };
-  is("the new photo is on, and the creator is told so", await upload(), [200, ""]);
+  // Not said as done while the old photo's deletion is unconfirmed (CX-123 rule 24), yet never left unnamed.
+  is("the creator is told the replace is not done", await upload(), [500, "server_error"]);
   const fourth = await shown();
+  is("the new photo is on the page", fourth !== third && fourth !== null, true);
   is("the old photo is still named in the store record, never left unnamed", await unnamed(), []);
   is("both are kept for now", photoKeys().length, 2);
   is("the next upload deletes it", await upload(), [200, ""]);
@@ -128,10 +130,16 @@ async function main(): Promise<void> {
     }
     return null;
   };
-  is("the photo is taken off the page", await send({ remove: true }), [200, ""]);
-  is("the store shows none", await shown(), null);
+  const onPage = await shown();
+  // Deleted before the page stops showing it, so an unconfirmed deletion is answered as an error (CX-123 rule 24).
+  is("the creator is told it was not taken off", await send({ remove: true }), [500, "server_error"]);
+  is("the store still shows it, so the studio still offers to take it off", await shown(), onPage);
   is("the photo kept is named in the store record", await unnamed(), []);
-  is("a photo put on later deletes it", await upload(), [200, ""]);
+  is("the next try takes it off", await send({ remove: true }), [200, ""]);
+  is("the store shows none", await shown(), null);
+  is("and no photo is kept", photoKeys(), []);
+  is("nor named as left", (await storeForEmail(OWNER))?.photoLeft ?? [], []);
+  is("a photo put on later is on", await upload(), [200, ""]);
   is("only the photo shown is kept", photoKeys(), [`${PHOTO}${await shown()}`]);
 
   part("Rule 24: a write or a deletion answered in an unknown shape is not done");
@@ -142,7 +150,7 @@ async function main(): Promise<void> {
   shift += 16 * 60_000;
   const before = await shown();
   fault = (commands) => (touches(commands, "DEL", PHOTO) ? "odd" : null);
-  is("a deletion answered in an unknown shape keeps the name", await upload(), [200, ""]);
+  is("a deletion answered in an unknown shape is not said as done", await upload(), [500, "server_error"]);
   fault = null;
   is("nothing is kept unnamed", await unnamed(), []);
   // The DEL ran and its answer was lost: the record keeps naming the photo until a deletion is confirmed.

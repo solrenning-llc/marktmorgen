@@ -76,3 +76,29 @@ operation. The existing export still bears its own accounted cost and ceiling.
 CI and engineering costs are company costs, not assumed to be zero. No price,
 limit, commission, payment behavior, policy, retention rule or flag changes.
 State: tested locally; review, CI and incorporation remain pending.
+
+## C4 review: export-scope wording
+
+Review comment #6759243698 identified that the added invitation repeated
+"your store's main data" without repeating its exclusions. The existing
+`security-page.test.ts` exposed this at the exact reviewed head
+`97c8b12dab4118639e596ade5a12aabebe25c6c9`: 41 checks, three failures.
+The independent local reproduction is preserved before correction at
+`solrenning-llc/repo-id-transfer-test@017c41e86aba1799bac7acd9bf7bed915fe7a4df`,
+`evidence/cxu/stn10-m1-red-20261110.json` (raw log SHA-256
+`a8bc7fcbd58b2ab19f0a5d5587ba0002920cd2e280253f9473968b2a078d0527`).
+
+The invitation now asks the creator to review what is included and excluded,
+then links to the existing explanation. It makes no additional export-scope
+promise. The original card's full contents and exclusions, visibility rules,
+fragment target and cancellation form remain unchanged. No test assertion or
+expected count was relaxed.
+
+After correction, all 41 security-page checks and all eight STN10 cases pass;
+the three bounded runs together use Redis 0 and HTTP 0. GREEN security log
+SHA-256: `4754e015a25cc4a6c16a1506f5ab2a7f6f1cd1653f6f1aba86da07599d0bc4ce`;
+STN10 control log: `cd92247d523695bc18fb5abe4553f6c3e616ceef7eb9b47110bab884f116a715`.
+ESLint still reports zero errors and the two pre-existing warnings above.
+The public-data scanner reports 4,834 tracked files and zero corrections;
+diff-whitespace checks pass. These checks cover the wording correction;
+the remaining delivery and browser-testing gaps above still apply.

@@ -3163,9 +3163,9 @@ export default async function StudioPage({
                       </p>
                       {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
                         <p className="mt-3 text-sm text-ink-soft">
-                          You can keep a copy of your store&rsquo;s main data before you leave.{" "}
+                          Before you leave, review what is included in the data file and what is not.{" "}
                           <a href="#store-data-export" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-2">
-                            Review and download your store&rsquo;s main data
+                            See what the data file holds, and download it
                           </a>
                         </p>
                       ) : null}

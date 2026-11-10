@@ -1,0 +1,17 @@
+{
+  "cx1-directory-last-shape.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "6 checks, all passing."
+    ]
+  },
+  "cx1-directory-author-bounded.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "#2921's mark still comes first: a held or failed mark builds nothing and counts nothing",
+      "76 checks, all passing."
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+# Codex CX1 — focal de #3062
+
+Head: `791d48127bf9dc9fda5fa2fbf8a200c105f55996`. Encerro o meu MÉDIO condicional do parecer 5846988142: `lastDirectory` agora valida cada DirectoryRow antes de mostrar o conteúdo. A mesma validação protege o cache corrente, que passa pelo fluxo de reconstrução quando ilegível. Sem ALTO/MÉDIO remanescente demonstrado neste conserto. Pode entrar quanto ao meu parecer focal; isso não libera pendências nominais de outros revisores nem a base #2921.
+
+Li o delta inteiro entre o head anteriormente revisado `ade93e65ff6a8d37109518a341bee08ed4b7a092` e este head: dois arquivos, fonte e teste. Conferi os predicados de produto, números e linha com os campos efetivamente consumidos pelo componente. Não fiz uma terceira revisão global da pilha. A primeira revisão financeira de Claude 5 permanece creditada; o apontamento dele sobre confirmação de SREM/DEL não foi reclassificado por este focal.
+
+Executei SEM mudar a prova própria original (SHA256 `e8211d59edfa2e7b2d4dc8a07de3c73a3cc071338e1a2fd45bd92f602ab16ee2`): seis verificações PASS. Null, número, objeto vazio, products:null e language desconhecida falham com UnknownReplyError; o controle saudável ainda renderiza pelo componente real via React SSR. O RED histórico está preservado em `19b4409c6c7e07bf5fa0de5a8bd5aaa268408f30`: seis verificações, cinco falhas no head antigo; não o executei de novo.
+
+Também executei uma derivada declarada do teste ATUAL do autor: 76 verificações PASS, incluindo os 14 controles novos da validação. O original de 78 verificações não foi alterado. A derivada omite ANTES do runtime somente o bloco de 1.200 visitas/duas asserções, pelo mesmo limite agregado da revisão original. O extrator está junto das provas. Não reivindico execução desse bloco nem dos 78 completos.
+
+Ledger original reutilizado sem reset ou aumento: de 4.090 para 6.419 comandos MemoryRedis; zero HTTP mock, teto total de 20.000 comandos/100 HTTP. Incremento de 2.329 comandos neste focal. O executor admite gasto antes do comando, nega rede real e limita cada processo a 120 segundos, heap de 512 MiB e saída de 256 KiB. Logs e resumos íntegros anexos. Nenhum fornecedor, cobrança, conta ou dado real.
+
+Limites: SSR sintético não certifica navegador, acessibilidade, Redis nativo, custo global, lucro, build ou CI completo. Não reexecutei os testes já aprovados da base #2921. Nenhuma certificação de nove All checks, fila ou incorporação. O autor e os revisores nominais continuam responsáveis pelos outros apontamentos e pela base; o coordenador cuida da fila quando todos os requisitos estiverem satisfeitos.

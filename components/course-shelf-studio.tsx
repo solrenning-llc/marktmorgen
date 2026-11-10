@@ -81,13 +81,13 @@ export function CourseShelfStudio({ productId, saved, options }: { productId: st
                 {at + 1}. {p.title}
               </span>
               <span className="flex flex-wrap gap-2">
-                <button type="button" className="btn btn-secondary btn-sm min-h-11" disabled={at === 0 || busy} onClick={() => move(at, -1)} aria-label={`Move ${p.title} up`}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={at === 0 || busy} onClick={() => move(at, -1)} aria-label={`Move ${p.title} up`}>
                   Up
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm min-h-11" disabled={at === chosen.length - 1 || busy} onClick={() => move(at, 1)} aria-label={`Move ${p.title} down`}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={at === chosen.length - 1 || busy} onClick={() => move(at, 1)} aria-label={`Move ${p.title} down`}>
                   Down
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm min-h-11" disabled={busy} onClick={() => remove(at)} aria-label={`Take ${p.title} off the shelf`}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => remove(at)} aria-label={`Take ${p.title} off the shelf`}>
                   Remove
                 </button>
               </span>
@@ -111,7 +111,7 @@ export function CourseShelfStudio({ productId, saved, options }: { productId: st
               ))}
             </select>
           </label>
-          <button type="button" className="btn btn-secondary btn-sm min-h-11" onClick={add} disabled={!adding || full || busy}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={add} disabled={!adding || full || busy}>
             Add
           </button>
         </div>
@@ -122,12 +122,12 @@ export function CourseShelfStudio({ productId, saved, options }: { productId: st
 
       {dirty ? (
         <div className="mt-4 flex flex-wrap gap-3">
-          <button type="button" className="btn btn-primary btn-sm min-h-11" onClick={save} disabled={busy} aria-busy={busy}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={busy} aria-busy={busy}>
             Save shelf
           </button>
           <button
             type="button"
-            className="btn btn-secondary btn-sm min-h-11"
+            className="btn btn-secondary btn-sm"
             disabled={busy}
             onClick={() => {
               setChosen(saved);

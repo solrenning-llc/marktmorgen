@@ -57,6 +57,7 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  handOverRefusal,
   handsOver,
   optionDelivers,
 } from "@/lib/product-option";
@@ -135,7 +136,6 @@ const MESSAGES: Record<string, string> = {
   title: "Give it a name before saving.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
-  nothing_to_hand_over: "This has nothing to hand over yet. Add what buyers get (a file or link, its lessons, episodes or products), give each price option one, or sell a call at one price, then publish it.",
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
   payments: `Type ${MIN_MEMBER_PAYMENTS} to ${MAX_MEMBER_PAYMENTS} payments, or leave it empty for a membership that runs until it is canceled.`,
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",
@@ -291,6 +291,8 @@ async function send(
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
     }
+    // Named, so the sentence in the list-level alert says which product (754 [STN1]; Claude 6 on #3432, LOW 2).
+    if (data.error === "nothing_to_hand_over" || data.error === "last_delivery") return wrong(handOverRefusal(data.error, typeof (data as { product?: unknown }).product === "string" ? (data as { product: string }).product : null));
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
@@ -1920,8 +1922,9 @@ export function ProductEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; error?: string; product?: unknown };
       if (data.ok) return null;
+      if (data.error === "last_delivery") return handOverRefusal(data.error, typeof data.product === "string" ? data.product : null);
       return MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
     } catch {
       return MESSAGES.server_error;

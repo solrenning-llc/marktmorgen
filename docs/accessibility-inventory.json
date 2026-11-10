@@ -1833,6 +1833,7 @@
     "app/api/store/heard-ask/route.ts",
     "app/api/store/heard/route.ts",
     "app/api/store/help/route.ts",
+    "app/api/store/help/support/route.ts",
     "app/api/store/hit/route.ts",
     "app/api/store/host-calendar/route.ts",
     "app/api/store/ics/route.ts",

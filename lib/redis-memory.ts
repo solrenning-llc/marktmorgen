@@ -381,6 +381,21 @@ export class MemoryRedis {
           this.run(["SET", target, value]);
           return 1;
         }
+        // A submission's reply or withdrawal (lib/submission-store.ts, SUBMISSION_MOVE): written only over the exact text
+        // read, and only while its lock is the writer's; off the live list, and for a withdrawal onto the sweep's list.
+        if (key.startsWith("-- marktmorgen:submission-move:v1\n") && ((args[0] === "3" && args.length === 9) || (args[0] === "4" && args.length === 12))) {
+          const count = Number(args[0]);
+          const [lock, record, live, due] = args.slice(1, count + 1);
+          const [token, expected, json, seconds, liveMember, dueScore, dueMember] = args.slice(count + 1);
+          const now = this.run(["GET", record]);
+          if (now === null) return 0;
+          if (now !== expected) return -2;
+          if (this.run(["GET", lock]) !== token) return -1;
+          this.run(["SET", record, json, "XX", "EX", seconds]);
+          this.run(["ZREM", live, liveMember]);
+          if (count === 4) this.run(["ZADD", due, dueScore, dueMember]);
+          return 1;
+        }
         // An agreement's record, written with its expiry only while the agreement's lock is the writer's (lib/agreement-store.ts, AGREEMENT_SAVE).
         if (key.startsWith("-- marktmorgen:agreement-save:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lock, target, token, value, seconds] = args;

@@ -90,8 +90,8 @@ const OVERTURNS = /\b(?:no (?:problem|issue|action)|nothing to (?:fix|do|change)
 
 /** A web address or an email address: the facts never hold one, so a line that carries one is never shown (Claude 6 on #3454). */
 const LINK = /(?:https?:\/\/|www\.)\S|[\w.+-]+@[\w-]+(?:\.[\w-]+)+/i;
-/** A web address written without http or www ("fix-funnel.example/login"), lower case as addresses are typed; ".js" is a library's name. */
-const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}\b(?:\/\S*)?/;
+/** A web address written without http or www ("fix-funnel.example/login"), in any case (Codex V on #3508); ".js" is a library's name. */
+const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}\b(?:\/\S*)?/i;
 
 /** The model's answer, kept only where the rules allow: plain lines, no link or address, no invented number, never overturning the check. */
 export function readExplanation(json: Record<string, unknown> | null, request: { prompt: string }): FunnelExplanation | null {

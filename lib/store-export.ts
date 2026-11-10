@@ -3,7 +3,7 @@
  * 18 October 2026), offered in the studio and in every notice before a
  * store closes (lib/plan-closing.ts): its products and their prices, pages,
  * long descriptions and notes after paying; its blog posts; its courses with
- * every lesson's text; its forms with their answers; its contacts; and a
+ * every lesson's text; its forms with their answers; its contacts; its own task list; and a
  * summary of its orders, read from its own Stripe account and its PayPal
  * records. Files, videos and community posts are not in it: files and videos
  * are downloaded from the studio one by one, and a community's posts are its
@@ -33,6 +33,8 @@ import { type Store } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 import { readThanksNotes } from "@/lib/thanks-note-store";
+import { readBusinessTasks } from "@/lib/business-tasks";
+import { businessTaskCopy } from "@/lib/business-tasks-rules";
 
 /**
  * What an export reads: every byte the store's data room counts at the
@@ -150,6 +152,9 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
       const { csv, partial } = await salesCsv(store, 0);
       return `,"ordersCsv":${JSON.stringify(csv)}${partial ? `,"ordersNote":"More orders than one file reads: the rest are on your own Stripe account."` : ""}`;
     },
+    // The store's own task list (IA2, lib/business-tasks.ts): one read, its words as the creator wrote them. A list that
+    // cannot be read whole throws, and is said as a part not read (unreadPart), never as no tasks.
+    async () => `,"tasks":${JSON.stringify(businessTaskCopy(await readBusinessTasks(statsId)))}`,
     async () => `,"notIncluded":"Nothing else is in this file. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio. Download files and videos from their own pages in your studio."}\n`,
   ];
   // A store whose plan runs downloads again from its studio's figure, so "download again" is true for it. A store

@@ -506,6 +506,9 @@ export const FAMILIES: Record<string, Family> = {
     parts: [capped(TASK_COUNT_WEIGHT, "The count's field noted once past a full room, when a paid recount saves it.", src("lib/crm.ts", "TASK_COUNT_WEIGHT", "noteData(room, [{ slot: TASKS_SLOT, bytes: TASK_COUNT_WEIGHT }])"))],
   },
   "nl:crm:tasks:@lib/person-agenda-read.ts": { what: "Tasks about a person, only counted here (one HLEN, tasksKept) before the agenda reads them; kept and counted by lib/crm.ts", room: ["lib/crm.ts"] },
+  // IA2 unit 2 (10 November 2026): the store's own task list, one record taken in the room before it is written.
+  "nl:biztasks:@lib/business-tasks.ts": room("The store's own task list, at what it weighs, at most MAX_BUSINESS_TASKS tasks", "lib/business-tasks.ts"),
+  "nl:biztasklock:@lib/business-tasks.ts": short("One change of the store's task list at a time, ten seconds at the most", "studio", 1, 128),
   "nl:crm:tasklock:@lib/crm.ts": short("One change of a store's tasks at a time, ten seconds at the most", "studio", 1, 128),
   "nl:crm:taskrecount:@lib/crm.ts": short("One paid recount of a store's tasks at a time, thirty seconds at the most", "studio", 1, 128),
   "nl:crm:fields:@lib/crm.ts": { what: "The store's own fields", parts: [capped(MAX_CRM_FIELDS * (MAX_FIELD_OPTIONS + 2) * 160, "MAX_CRM_FIELDS fields and their choices.", src("lib/crm-rules.ts", "MAX_CRM_FIELDS", "MAX_FIELD_OPTIONS"))] },

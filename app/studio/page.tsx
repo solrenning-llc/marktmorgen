@@ -146,6 +146,7 @@ import { PaymentsPanel } from "@/components/payments-panel";
 import { chargeableCurrencies, readWaysToPay } from "@/lib/payment-methods";
 import { formatMoney } from "@/lib/money";
 import { TodayPanel } from "@/components/today-panel";
+import { BusinessTasks } from "@/components/business-tasks";
 import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
@@ -1442,6 +1443,8 @@ export default async function StudioPage({
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
+            {/* The store's own task list (IA2): read by the block itself once the page is open, nothing read here. */}
+            {may("settings") ? <BusinessTasks /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.left} /> : null}

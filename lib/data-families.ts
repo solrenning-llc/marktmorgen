@@ -14,7 +14,7 @@
 /** Families counted in a store's data room. */
 export const COUNTED_FAMILIES: readonly string[] = [
   "nl:ab:", "nl:adsrv:ctx:", "nl:adsrv:sent:", "nl:aff:", "nl:agent:book:",
-  "nl:agree:p:", "nl:agree:r:", "nl:agree:s:", "nl:agree:v:", "nl:amem:", "nl:blog:body:", "nl:blog:meta:", "nl:blog:pub:",
+  "nl:agree:p:", "nl:agree:r:", "nl:agree:s:", "nl:agree:v:", "nl:amem:", "nl:biztasks:", "nl:blog:body:", "nl:blog:meta:", "nl:blog:pub:",
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
   "nl:dc:mem:", "nl:dc:prod:", "nl:depth:", "nl:erased:", "nl:esync:tags:", "nl:form:r:", "nl:imp:buy:",
@@ -45,7 +45,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
-  "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
+  "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:sync:after", "nl:biztasklock:", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
@@ -213,6 +213,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
   "nl:billing:sync:after": C, "nl:billing:sync:cursor": C,
+  // The store's own task list (lib/business-tasks.ts, IA2), and the lock one change of it holds for seconds.
+  "nl:biztasks:": E, "nl:biztasklock:": X(1),
   "nl:blog:body:": E, "nl:blog:meta:": E, "nl:blog:pub:": E,
   "nl:busy:": Cr(1),
   // ---------------------------------------------------------------- c

@@ -12,9 +12,13 @@ import assert from "node:assert/strict";
 import { store as memory } from "./redis-stub";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { personKey } from "@/lib/person-key";
+import { ERASERS } from "@/lib/person-erasure";
+import { COPIERS, COPY_PLAN } from "@/lib/person-copy";
+import { PERSON_DATA } from "@/lib/person-data";
+import type { ErasureScope } from "@/lib/erasure-rules";
 import { APPLY_TOKEN, applyTokenDigest, canPurchase, parseApplication } from "@/lib/apply-first-rules";
 import {
-  APPLY_AFTER_DAYS, APPLY_CHANGE, APPLY_DAY_SECONDS, APPLY_DECIDE_COMMANDS, APPLY_INDEX_SECONDS, APPLY_KEEP_DAYS,
+  APPLY_AFTER_DAYS, APPLY_CHANGE, APPLY_DAY_SECONDS, APPLY_DECIDE_COMMANDS, APPLY_KEEP_DAYS,
   APPLY_LIST_COMMANDS, APPLY_COPY_COMMANDS, APPLY_FORGET_COMMANDS, APPLY_MAX_KEPT, APPLY_MAX_PER_PERSON, APPLY_NEW, APPLY_PER_STORE_DAY,
   APPLY_RECORD_MAX_BYTES, APPLY_SUBMIT_COMMANDS,
   applicationsOfPerson, decideApplication, forgetApplyFirstPerson, listApplications, submitApplication, untilOf,
@@ -40,7 +44,7 @@ const inner = (command: Cmd) => base(command);
 function runScript(command: Cmd): unknown {
   const [, script, , ...rest] = command.map(String);
   if (script === APPLY_NEW) {
-    const [record, stores, person, id, text, ttl, until, now, most, mostPerson, indexTtl] = rest;
+    const [record, stores, person, id, text, ttl, until, now, most, mostPerson] = rest;
     if (inner(["EXISTS", record]) !== 0) return 3;
     inner(["ZREMRANGEBYSCORE", stores, "-inf", now]);
     inner(["ZREMRANGEBYSCORE", person, "-inf", now]);
@@ -49,18 +53,16 @@ function runScript(command: Cmd): unknown {
     inner(["SET", record, text, "EX", ttl]);
     inner(["ZADD", stores, until, id]);
     inner(["ZADD", person, until, id]);
-    inner(["EXPIRE", stores, indexTtl]);
-    inner(["EXPIRE", person, indexTtl]);
+    for (const index of [stores, person]) if (Number(inner(["TTL", index])) < Number(ttl)) inner(["EXPIRE", index, ttl]);
     return 1;
   }
   if (script === APPLY_CHANGE) {
-    const [record, stores, person, old, text, ttl, until, id, indexTtl] = rest;
+    const [record, stores, person, old, text, ttl, until, id] = rest;
     if (inner(["GET", record]) !== old) return 0;
     inner(["SET", record, text, "EX", ttl]);
     inner(["ZADD", stores, until, id]);
     inner(["ZADD", person, until, id]);
-    inner(["EXPIRE", stores, indexTtl]);
-    inner(["EXPIRE", person, indexTtl]);
+    for (const index of [stores, person]) if (Number(inner(["TTL", index])) < Number(ttl)) inner(["EXPIRE", index, ttl]);
     return 1;
   }
   throw new Error("a script this test does not know");
@@ -74,7 +76,9 @@ memory.run = (command: Cmd) => {
   return String(command[0]).toUpperCase() === "EVAL" ? runScript(command) : base(command);
 };
 const scriptSteps = (script: string) => script.split("redis.call(").length - 1;
-const keys = () => memory.keys().filter((key) => key.startsWith("nl:apply:") && base(["EXISTS", key]) === 1);
+// Redis keeps no empty sorted set; the stand-in leaves one where a read touched a key that was gone, so it is not counted.
+const index = (key: string) => /^nl:apply:[sp]:/.test(key);
+const keys = () => memory.keys().filter((key) => key.startsWith("nl:apply:") && base(["EXISTS", key]) === 1 && (!index(key) || Number(base(["ZCARD", key])) > 0));
 const ttl = (key: string) => Number(base(["TTL", key]));
 const at = (ms: number) => {
   clock = ms;
@@ -105,7 +109,8 @@ test("an application is kept with its address, both index entries and every expi
   for (const key of keys()) assert.ok(ttl(key) > 0, `${key} has an expiry`);
   assert.equal(ttl(record), APPLY_KEEP_DAYS * 86_400);
   assert.equal(ttl(day), APPLY_DAY_SECONDS);
-  assert.equal(ttl(person), APPLY_INDEX_SECONDS);
+  assert.equal(ttl(person), APPLY_KEEP_DAYS * 86_400, "an index goes with the last record it names");
+  assert.equal(ttl(`nl:apply:s:${shop.sid}`), APPLY_KEEP_DAYS * 86_400);
   assert.ok(Buffer.byteLength(String(base(["GET", record]))) <= APPLY_RECORD_MAX_BYTES);
   at(START + 1_000);
   const two = await submit(bob);
@@ -136,7 +141,7 @@ test("the store's and the address's caps are checked with the write, which keeps
   const stores = `nl:apply:s:${other.sid}`;
   for (let i = 0; i < APPLY_MAX_KEPT; i++) base(["ZADD", stores, String(START + DAY), i.toString(16).padStart(32, "0")]);
   assert.deepEqual(await submitApplication(other, { offer, email: bob }, clock), { ok: false, reason: "full" });
-  assert.equal(base(["EXISTS", `nl:apply:p:${other.sid}:${personKey(other.sid, bob)}`]), 0);
+  assert.equal(base(["ZCARD", `nl:apply:p:${other.sid}:${personKey(other.sid, bob)}`]), 0);
   // Entries whose record is gone leave first: once they are past, the store takes one again.
   at(START + DAY);
   await submit(bob, other);
@@ -154,12 +159,12 @@ test("a form that is not right sends nothing to the database", async () => {
 test("approving answers the link's token once; the record keeps only its digest and lives past the link", async () => {
   const one = await submit();
   at(START + 1_000);
-  const done = await decideApplication(shop, one.id, { kind: "approve", days: 7 }, clock);
+  const done = await decideApplication(shop, one.id, { kind: "approve", days: 30 }, clock);
   assert.equal(done.ok, true);
   const { application, token } = done as { ok: true; application: { state: string; expiresAt: number }; token: string };
   assert.match(token, APPLY_TOKEN);
   assert.equal(application.state, "approved");
-  assert.equal(application.expiresAt, clock + 7 * DAY);
+  assert.equal(application.expiresAt, clock + 30 * DAY);
   const record = `nl:apply:r:${shop.sid}:${one.id}`;
   const raw = String(base(["GET", record]));
   assert.equal(raw.includes(token), false, "the plain token is never kept");
@@ -169,14 +174,18 @@ test("approving answers the link's token once; the record keeps only its digest 
   // The rules open the link for that address and that offer only.
   assert.deepEqual(canPurchase(app, { token, email: ann, offer, now: clock + DAY }), { ok: true });
   assert.deepEqual(canPurchase(app, { token, email: bob, offer, now: clock + DAY }), { ok: false, why: "wrong-email" });
-  // The record and its index entries live until the link's end and the days after it.
-  assert.equal(untilOf(app), app.expiresAt + APPLY_AFTER_DAYS * DAY);
+  // The record and its index entries live until the later of its wait and the days after the link's end.
+  assert.equal(untilOf(app), Math.max(app.at + APPLY_KEEP_DAYS * DAY, app.expiresAt + APPLY_AFTER_DAYS * DAY));
+  assert.equal(untilOf({ ...app, expiresAt: app.at + 40 * DAY }), app.at + (40 + APPLY_AFTER_DAYS) * DAY);
   assert.equal(ttl(record), Math.ceil((untilOf(app) - clock) / 1000));
   assert.equal(Number(base(["ZSCORE", `nl:apply:s:${shop.sid}`, one.id])), untilOf(app));
   // An open link is not renewed; a declined application is final.
   assert.deepEqual(await decideApplication(shop, one.id, { kind: "approve" }, clock + 1), { ok: false, reason: "still-open" });
+  const life = ttl(record);
   const declined = await decideApplication(shop, one.id, { kind: "decline" }, clock + 2);
   assert.equal(declined.ok && declined.application.state, "declined");
+  assert.ok(ttl(record) >= life - 1, "a decline never shortens the record's life");
+  assert.equal(Number(base(["ZSCORE", `nl:apply:s:${shop.sid}`, one.id])), untilOf(app));
   assert.equal("token" in declined, false);
   assert.deepEqual(await decideApplication(shop, one.id, { kind: "approve" }, clock + 3), { ok: false, reason: "final" });
   // Out-of-range days are refused, and nothing is written.
@@ -274,7 +283,7 @@ test("rule 24: a reply that is not exact is never a saved application, a decisio
   base(["SET", record, raw, "EX", 600]);
   // An index in another shape is unknown, never empty.
   for (const reply of [null, "x", [7], ["not-an-id"], [later.id, later.id]]) {
-    fault = (command) => (command[0] === "ZRANGEBYSCORE" || command[0] === "ZRANGE" ? reply : undefined);
+    fault = (command) => (command[0] === "ZRANGEBYSCORE" ? reply : undefined);
     assert.equal(await listApplications(shop, clock), null, JSON.stringify(reply));
     await assert.rejects(forgetApplyFirstPerson(shop.sid, bob), UnknownReplyError);
     await assert.rejects(applicationsOfPerson(shop.sid, bob), UnknownReplyError);
@@ -286,7 +295,8 @@ test("rule 24: a reply that is not exact is never a saved application, a decisio
 test("a record goes by itself: waiting KEEP days, or AFTER days past its decision", async () => {
   const one = await submit();
   const two = await submit(bob);
-  await decideApplication(shop, two.id, { kind: "decline" }, START + 50 * DAY);
+  at(START + 50 * DAY);
+  await decideApplication(shop, two.id, { kind: "decline" }, clock);
   at(START + APPLY_KEEP_DAYS * DAY);
   assert.deepEqual((await listApplications(shop, clock))?.map((a) => a.id), [two.id]);
   assert.equal(base(["EXISTS", `nl:apply:r:${shop.sid}:${one.id}`]), 0);
@@ -322,8 +332,8 @@ test("deleting a person takes every application of theirs in that store, and onl
 });
 
 test("each call stays within its stated command ceiling, scripts' own commands counted", async () => {
-  assert.equal(scriptSteps(APPLY_NEW), 10);
-  assert.equal(scriptSteps(APPLY_CHANGE), 6);
+  assert.equal(scriptSteps(APPLY_NEW), 12);
+  assert.equal(scriptSteps(APPLY_CHANGE), 8);
   const counted = () => sent.reduce((n, c) => n + 1 + (String(c[1]) === APPLY_NEW ? scriptSteps(APPLY_NEW) : String(c[1]) === APPLY_CHANGE ? scriptSteps(APPLY_CHANGE) : 0), 0);
   sent = [];
   const one = await submit();
@@ -337,4 +347,23 @@ test("each call stays within its stated command ceiling, scripts' own commands c
   sent = [];
   await applicationsOfPerson(shop.sid, ann);
   assert.ok(counted() <= APPLY_COPY_COMMANDS);
+});
+
+test("a person's deletion and copy run this file's own functions, by the store's sid (lib/person-erasure.ts, lib/person-copy.ts)", async () => {
+  const one = await submit();
+  await submit(bob);
+  at(START + 2_000);
+  await decideApplication(shop, one.id, { kind: "decline" }, clock);
+  // Only what these two read is set; the rest of a scope is never reached by them.
+  const scope = { sid: shop.sid, statsId: "x".repeat(24), email: "ann@example.invalid" } as unknown as ErasureScope;
+  assert.deepEqual(PERSON_DATA.filter((d) => d.file === "lib/apply-first-store.ts").map((d) => d.how), ["erased"]);
+  assert.equal(COPY_PLAN["lib/apply-first-store.ts"]?.how, "copied");
+  assert.deepEqual(await COPIERS["lib/apply-first-store.ts"](scope), [{
+    offer, state: "declined", applied: new Date(START).toISOString(), decided: new Date(START + 2_000).toISOString(), linkEnds: "", linkUsed: "",
+  }]);
+  const eraser = ERASERS.find((e) => e.module === "lib/apply-first-store.ts");
+  assert.ok(eraser && !eraser.only, "both doors delete them");
+  assert.equal(await eraser.run(scope, [], new Set()), 1);
+  assert.deepEqual(await COPIERS["lib/apply-first-store.ts"](scope), []);
+  assert.deepEqual((await listApplications(shop, clock))?.map((a) => a.email), [bob]);
 });

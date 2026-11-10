@@ -89,6 +89,7 @@ import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS 
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
+import { APPLY_DAY_SECONDS, APPLY_MAX_KEPT, APPLY_MAX_PER_PERSON, APPLY_RECORD_MAX_BYTES } from "@/lib/apply-first-store";
 
 const KB = 1_024;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
@@ -754,6 +755,12 @@ export const FAMILIES: Record<string, Family> = {
   "nl:payreq:stores@lib/payment-request-store.ts": company("The stores with open payment requests", "One member a store, read once a run by the five-minute job and let go when it has none open: the job's own index, like its cursor."),
   "nl:payreq:lock:@lib/payment-request-store.ts": short("A payment request's checkout being opened, a minute", "request", 1, MARK, REQ("pay-request")),
   "nl:payreq:w:@lib/payment-request-store.ts": short("A payment request's record being changed, ten seconds at the most", "request", 1, MARK, REQ("pay-request")),
+  // 604 [WP3] "Apply first": every key expires with the record it names (lib/apply-first-store.ts). A live index
+  // entry is a live record; an address's index holds at least one live record, so there are at most APPLY_MAX_KEPT.
+  "nl:apply:r:@lib/apply-first-store.ts": { what: "An application to buy an offer that asks for one first: the address and its record", parts: [capped(APPLY_MAX_KEPT * (APPLY_RECORD_MAX_BYTES + KEY), "APPLY_MAX_KEPT records a store, each at most APPLY_RECORD_MAX_BYTES, checked in the same script that writes one.", src("lib/apply-first-store.ts", "APPLY_MAX_KEPT", "APPLY_RECORD_MAX_BYTES"))] },
+  "nl:apply:s:@lib/apply-first-store.ts": { what: "The store's applications, for the creator's list", parts: [capped(KEY + APPLY_MAX_KEPT * ENTRY_BYTES, "One index a store, APPLY_MAX_KEPT entries at most.", src("lib/apply-first-store.ts", "APPLY_MAX_KEPT"))] },
+  "nl:apply:p:@lib/apply-first-store.ts": { what: "One address's applications in a store, by a one-way key, for its cap, its deletion and its copy", parts: [capped(APPLY_MAX_KEPT * (KEY + APPLY_MAX_PER_PERSON * ENTRY_BYTES), "At most APPLY_MAX_KEPT addresses with a live record, APPLY_MAX_PER_PERSON entries each.", src("lib/apply-first-store.ts", "APPLY_MAX_KEPT", "APPLY_MAX_PER_PERSON"))] },
+  "nl:apply:d:@lib/apply-first-store.ts": short("How many applications a store took in a UTC day, kept two days", "day", APPLY_DAY_SECONDS / 86_400, MARK),
   "nl:pay:currencies:@lib/payment-methods.ts": { what: "The currencies a Stripe account takes, cached", parts: [capped(KB, "One a store.")] },
   "nl:taxreg:@lib/tax-registrations.ts": { what: "The tax registrations active on a Stripe account, cached half a day", parts: [capped(32 * KB, "One a store, at most TAX_REGISTRATIONS_MAX_BYTES, checked before it is written.")] },
   "nl:dun:report:@lib/payment-recovery-report.ts": { what: "Failed renewals, cached", parts: [capped(256 * KB, "One cached view.")] },

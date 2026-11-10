@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_MoveInvitesGone1", true);
+  await setStripeAccount(OWNER, "acct_1TestMove0001", true);
   await setSubscription(OWNER, { customerId: "cus_MoveInvitesGone", subscriptionId: "sub_MoveInvitesGone", active: true, tier: "creator", period: paidPeriod() });
   const club = await addProduct(OWNER, "Inner Circle", "", "29", { interval: "month", trialDays: 0, payments: 0 });
   const other = await addProduct(OWNER, "Outer Circle", "", "19", { interval: "month", trialDays: 0, payments: 0 });

@@ -36,7 +36,7 @@ async function setUp(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_PodRemovedLegacy1", true);
+  await setStripeAccount(OWNER, "acct_1TestPodLeg0001", true);
   await setSubscription(OWNER, { customerId: "cus_PodRemovedLegacy", subscriptionId: "sub_PodRemovedLegacy", active: true, tier: "creator", period: paidPeriod() });
 }
 

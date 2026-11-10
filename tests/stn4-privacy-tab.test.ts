@@ -65,8 +65,22 @@ const render = (role: Role, standing: Standing, extra: boolean, email = "maria@e
 
 const hrefs = (html: string) => [...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, "&"));
 const forms = (html: string) => [...html.matchAll(/<form [^>]*>/g)].map((m) => m[0]);
+/**
+ * The text a piece of server-rendered markup shows: every character outside a tag, read in one pass. It reads the
+ * markup (as a browser's text content would), it does not clean it, so nothing it returns is ever put back into a page.
+ */
+const textOf = (markup: string) => {
+  let text = "";
+  let inTag = false;
+  for (const char of markup) {
+    if (inTag) inTag = char !== ">";
+    else if (char === "<") inTag = true;
+    else text += char;
+  }
+  return text;
+};
 const headings = (html: string, level: number) =>
-  [...html.matchAll(new RegExp(`<h${level}[^>]*>([\\s\\S]*?)</h${level}>`, "g"))].map((m) => m[1].replace(/<[^>]+>/g, ""));
+  [...html.matchAll(new RegExp(`<h${level}[^>]*>([\\s\\S]*?)</h${level}>`, "g"))].map((m) => textOf(m[1]));
 
 part("markup: owner of a paid extra store sees every choice");
 const owner = render("owner", "paid", true);
@@ -97,7 +111,7 @@ for (const [, tag, cls] of targets) {
   // .btn is inline-flex, centered, with a 48px minimum (app/globals.css), so tests/tap-targets.test.ts wants no min-h-11 beside it.
   is(`${tag} ${cls.slice(0, 40)}: at least 44px tall`, /\bmin-h-11\b/.test(cls) || /(^|\s)btn(\s|$)/.test(cls), true);
 }
-const names = [...owner.matchAll(/<a [^>]*>([\s\S]*?)<\/a>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
+const names = [...owner.matchAll(/<a [^>]*>([\s\S]*?)<\/a>/g)].map((m) => textOf(m[1]).trim());
 is("no link named by a bare word", names.filter((n) => /^(here|more|click here|link|this)$/i.test(n)), []);
 is("link names are unique", new Set(names).size, names.length);
 const component = read("components/studio-privacy.tsx");

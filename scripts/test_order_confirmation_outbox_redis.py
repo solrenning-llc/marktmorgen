@@ -438,6 +438,72 @@ def main():
             db.command("DEL", *renewal_keys)
         print("PASS: execution TIME rejects expired renewal admission before row/pool writes; future control retained")
 
+        # Selected digital options have their own retention-only scope. Never
+        # inherit course/physical/access permissions or enter a polling index.
+        option_row, option_keys = fixture("digital-option-retention")
+        option_keys = [k.replace(prefix, prefix + "option:") for k in option_keys]
+        made.update(option_keys)
+        option_row.update(originKind="digital_option", phase="digital_option_reserved", next=0)
+        option_row["sourceValue"] = json.dumps(dict(kind="confirmation", originKind="digital_option",
+            nonce=option_row["nonce"], accountId=option_row["accountId"], bodyDigest=option_row["bodyDigest"], session=""))
+        option_policy = dict(policy, coveredOrigins=["digital-option-retention"], ongoingStorageFunded=True,
+            digitalOptionRetentionEvidence="SYNTHETIC ONLY full pending lifetime")
+        def option_enqueue(row=option_row, p=option_policy, client=None):
+            return (client or db).command("EVAL", shared, 10, *option_keys, "enqueue", "", json.dumps(row), now,
+                131072, json.dumps(p), "")
+        for wrong in [policy, course_policy, dict(option_policy, coveredOrigins=["single-digital-confirmation"]),
+                      dict(option_policy, ongoingStorageFunded=False), dict(option_policy, digitalOptionRetentionEvidence=" ")]:
+            assert option_enqueue(p=wrong) == ["unknown"]
+        for field, value in [("phase", "awaiting_creation"), ("next", now), ("session", "cs_test_wrong"),
+                             ("expiresAt", now), ("checks", 1), ("owner", "a" * 48)]:
+            assert option_enqueue(dict(option_row, **{field: value})) == ["unknown"]
+        # ARGV time was captured before an asynchronous hop: storage must not
+        # begin after either cutoff merely because the old clock still fits.
+        expired_row = dict(option_row, authorizedAt=now - 200, expiresAt=now - 100)
+        expired_policy = dict(option_policy, admissionsUntil=now - 100)
+        assert db.command("EVAL", shared, 10, *option_keys, "enqueue", "", json.dumps(expired_row), now - 200,
+            131072, json.dumps(option_policy), "") == ["unknown"]
+        assert db.command("EVAL", shared, 10, *option_keys, "enqueue", "", json.dumps(dict(option_row, authorizedAt=now - 200)), now - 200,
+            131072, json.dumps(expired_policy), "") == ["unknown"]
+        assert db.command("EXISTS", *option_keys) == 0
+        first_option, profiles["option_enqueue"] = measured(option_enqueue)
+        assert first_option[0] == "queued" and profiles["option_enqueue"] <= 27
+        def option_race(_):
+            conn = LocalRedis()
+            try: return option_enqueue(client=conn)
+            finally: conn.sock.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as workers:
+            assert all(r[0] == "existing" for r in workers.map(option_race, range(32)))
+        raw_option = db.command("GET", option_keys[0])
+        source_option = db.command("GET", option_keys[1])
+        assert db.command("HGET", option_keys[5], "items") == "1"
+        assert db.command("HGET", option_keys[5], "bytes") == str(option_row["bytes"])
+        assert db.command("TTL", option_keys[0]) == -1 and db.command("TTL", option_keys[1]) == -1
+        assert db.command("ZSCORE", option_keys[2], option_row["id"]) is None
+        assert option_enqueue(dict(option_row, sealed="s1.substituted")) == ["existing", raw_option, source_option]
+        for op in ["claim", "dispatch", "accepted", "defer"]:
+            assert db.command("EVAL", shared, 10, *option_keys, op, raw_option, "", now,
+                131072, json.dumps(option_policy), "a" * 48) == ["unknown"]
+        for op in ["create", "bind", "cursor", "url"]:
+            assert change(op, option_row, option_keys, raw_option, expected=raw_option) == ["unknown"]
+        limited = dict(option_policy, globalItems=1, storeItems=1)
+        occupied, occupied_keys = fixture("option-shared-physical")
+        occupied_keys = [k.replace(prefix, prefix + "option:") for k in occupied_keys]
+        made.update(occupied_keys)
+        assert db.command("EVAL", shared, 10, *occupied_keys, "enqueue", "", json.dumps(occupied), now,
+            131072, json.dumps(limited), "") == ["full"]
+        option_fence = prefix + "option:erased-request"
+        made.add(option_fence)
+        assert db.command("EVAL", erasure_script, 2, option_keys[3], option_fence, "begin", request, recipient, "SYNTHETIC")[0] == "begun"
+        assert db.command("EVAL", erasure_script, 3, option_keys[0], option_keys[1], option_fence,
+            "mark", request, recipient, "SYNTHETIC") == ["other"]
+        assert json.loads(db.command("GET", option_keys[0]))["erasedPeople"] == ""
+        assert db.command("EVAL", shared, 10, *option_keys, "cancel", db.command("GET", option_keys[0]), "", now,
+            131072, "null", "") == ["canceled"]
+        assert db.command("GET", option_keys[0]) is None and db.command("GET", option_keys[1]) == source_option
+        assert db.command("HGET", option_keys[5], "items") == "0"
+        print("PASS: digital-option own lifetime scope, immutable CAS, one charged envelope, closed workers and existing erasure")
+
         print(json.dumps({"observed_commands_including_eval_and_redis_call": profiles, "supplier_invoice": False}))
         # Exercise production TypeScript plus the exact shared/paid/accounting
         # Lua together, under the same explicitly disposable loopback opt-in.
@@ -445,7 +511,7 @@ def main():
 import {build} from 'esbuild';
 import {spawnSync} from 'node:child_process';
 import {testAliases,testEnvironment} from './tests/test-config.mjs';
-for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts','pending-mail-recovery.test.ts','digital-renewal-admission-native.test.ts','single-digital-access-renewal.test.ts','renewal-isolated-custody.test.ts','renewal-mail-notice.test.ts','physical-option-checkout.test.ts','physical-option-coverage.test.ts','physical-option-origin.test.ts','physical-option-recovery.test.ts']) {
+for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts','digital-option-retention.test.ts','pending-mail-recovery.test.ts','digital-renewal-admission-native.test.ts','single-digital-access-renewal.test.ts','renewal-isolated-custody.test.ts','renewal-mail-notice.test.ts','physical-option-checkout.test.ts','physical-option-coverage.test.ts','physical-option-origin.test.ts','physical-option-recovery.test.ts']) {
 await build({entryPoints:['tests/'+file],bundle:true,platform:'node',format:'cjs',outfile:process.argv[1],logLevel:'error',alias:testAliases(file,process.cwd(),process.cwd()+'/tests')});
 const result=spawnSync(process.execPath,[process.argv[1]],{env:testEnvironment(process.env),stdio:'inherit'});
 if(result.status!==0){process.exitCode=result.status ?? 1;break;}

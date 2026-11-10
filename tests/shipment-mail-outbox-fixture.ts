@@ -70,7 +70,7 @@ export function shipmentOutboxFixture() {
             store.run(["SET",k[10],value.id]);store.run(["SADD",k[11],value.id]);
           }
           store.run(["SET", k[0], supplied]); store.run(["SET", k[1], value.sourceValue]);
-          if(value.originKind!=="course")store.run(["ZADD", k[2], now, value.id]);
+          if(value.originKind!=="course"&&value.originKind!=="digital_option")store.run(["ZADD", k[2], now, value.id]);
           for (const index of [3, 4, 7]) store.run(["SADD", k[index], value.id]);
           answer = ["queued", supplied];
         }

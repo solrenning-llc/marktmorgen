@@ -5,6 +5,8 @@
 import { singleDigitalAccessCovered, checkSingleDigitalRenewal, singleDigitalRenewalCopy, singleDigitalMessage, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity, verifySingleDigitalRenewal, singleDigitalRenewalDraft, activateSingleDigitalRenewal, type SingleDigitalRenewalDraft } from "@/lib/single-digital-access";
 import { storeForEmail, storeRef } from "@/lib/store";
 import { physicalOptionCovered } from "@/lib/physical-option-confirmation";
+import { readDigitalOptionPreintent } from "@/lib/digital-option-preintent";
+import type { DigitalOptionRequestSnapshot } from "@/lib/digital-option-body";
 import { createHash, randomBytes } from "node:crypto";
 import { openCourseOriginBinding, type OpenedCourseOriginBinding } from "@/lib/course-origin-binding";
 import { performance } from "node:perf_hooks";
@@ -31,7 +33,7 @@ const SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
 export const CONFIRMATION_ORIGIN_DUE = "nl:order-confirmation:due";
 export const CONFIRMATION_CREATE_REPLAY_MS = 23 * 3_600_000;
 export const CONFIRMATION_CREATE_LEASE_MS = 120_000;
-export type ConfirmationPhase = "course_reserved" | "awaiting_creation" | "creating" | "creation_unknown" | "awaiting_payment" | "queued" | "dispatching" | "refused" | "accepted";
+export type ConfirmationPhase = "course_reserved" | "digital_option_reserved" | "awaiting_creation" | "creating" | "creation_unknown" | "awaiting_payment" | "queued" | "dispatching" | "refused" | "accepted";
 export type ConfirmationOriginPayload = {
   body: string; preintentToken: string; intentFingerprint: string;
   /** Only the explicitly selected original product/store fields, never a
@@ -46,7 +48,7 @@ export type ConfirmationOriginPayload = {
 export type ConfirmationOrigin = {
   kind: "confirmation";
   /** Explicit extra origin; course binding stays course-only. Physical rows omit both fields. */
-  originKind?: "course" | "single_digital"; courseBindingFingerprint?: string;
+  originKind?: "course" | "single_digital" | "digital_option"; courseBindingFingerprint?: string;
   id: string; statsId: string; nonce: string; accountId: string;
   bodyDigest: string; intentFingerprint: string; bindingFingerprint: string; session: string; person: string;
   sourceValue: string; sealed: string; fingerprint: string; bytes: number;
@@ -124,8 +126,10 @@ function parse(raw: unknown): ConfirmationOrigin | null {
     const fields = ["kind", "id", "statsId", "nonce", "accountId", "bodyDigest", "intentFingerprint", "bindingFingerprint", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "next", "expiresAt", "state", "phase", "owner", "leaseUntil", "checks", "createAttempts", "reviewId", "recoveryCursor", "recoveryUpper", "erasedPeople", "erasureSaturated"];
     const course = row?.originKind === "course";
     const digital = row?.originKind === "single_digital";
-    if (row?.originKind !== undefined && !course && !digital) return null;
-    if (digital) fields.push("originKind");
+    const option = row?.originKind === "digital_option";
+    const reserveOnly = course || option;
+    if (row?.originKind !== undefined && !course && !digital && !option) return null;
+    if (digital || option) fields.push("originKind");
     if (course) fields.push("originKind", "courseBindingFingerprint");
     if (!row || Object.keys(row).length !== fields.length || !fields.every(key => Object.hasOwn(row, key)) || row.kind !== "confirmation" || typeof row.id !== "string" || !HASH.test(row.id) ||
         typeof row.statsId !== "string" || !STORE.test(row.statsId) || typeof row.nonce !== "string" || !HASH.test(row.nonce) ||
@@ -135,20 +139,21 @@ function parse(raw: unknown): ConfirmationOrigin | null {
         typeof row.bindingFingerprint !== "string" || (row.session === "" ? row.bindingFingerprint !== "" : !HASH.test(row.bindingFingerprint)) ||
         typeof row.sourceValue !== "string" || Buffer.byteLength(row.sourceValue) > 8_192 || typeof row.sealed !== "string" || !row.sealed.startsWith("s1.") ||
         !["queued", "preparing", "dispatching", "refused"].includes(String(row.state)) ||
-        !["course_reserved", "awaiting_creation", "creating", "creation_unknown", "awaiting_payment", "queued", "dispatching", "refused", "accepted"].includes(String(row.phase)) ||
+        !["course_reserved", "digital_option_reserved", "awaiting_creation", "creating", "creation_unknown", "awaiting_payment", "queued", "dispatching", "refused", "accepted"].includes(String(row.phase)) ||
         typeof row.recoveryCursor !== "string" || row.recoveryCursor !== "" && !SESSION.test(row.recoveryCursor) ||
         typeof row.owner !== "string" || !/^[a-f0-9]{0,48}$/.test(row.owner) || typeof row.reviewId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(row.reviewId) ||
         ![row.bytes, row.created, row.authorizedAt, row.next, row.expiresAt, row.leaseUntil, row.checks, row.createAttempts, row.recoveryUpper].every(v => typeof v === "number" && Number.isSafeInteger(v) && v >= 0) ||
         Number(row.bytes) < Buffer.byteLength(raw) || typeof row.erasedPeople !== "string" || !/^(?:[a-f0-9]{64}){0,64}$/.test(row.erasedPeople) ||
         typeof row.erasureSaturated !== "boolean") return null;
-    if (course ? typeof row.courseBindingFingerprint !== "string" || !HASH.test(row.courseBindingFingerprint) ||
-        row.phase !== "course_reserved" || row.next !== 0 || row.session !== "" || row.bindingFingerprint !== "" || row.state !== "queued" || row.owner !== "" || row.leaseUntil !== 0 || row.createAttempts !== 0 || row.checks !== 0
-        : row.phase === "course_reserved") return null;
+    if (course && (typeof row.courseBindingFingerprint !== "string" || !HASH.test(row.courseBindingFingerprint))) return null;
+    if (reserveOnly ? row.phase !== (course ? "course_reserved" : "digital_option_reserved") || row.next !== 0 || row.session !== "" || row.bindingFingerprint !== "" || row.state !== "queued" || row.owner !== "" || row.leaseUntil !== 0 || row.createAttempts !== 0 || row.checks !== 0
+        : row.phase === "course_reserved" || row.phase === "digital_option_reserved") return null;
     const source = data(JSON.parse(row.sourceValue));
-    if (!source || Object.keys(source).length !== (row.session ? 6 : 5) + (course ? 2 : digital ? 1 : 0) || source.kind !== "confirmation" || source.nonce !== row.nonce ||
+    if (!source || Object.keys(source).length !== (row.session ? 6 : 5) + (course ? 2 : digital || option ? 1 : 0) || source.kind !== "confirmation" || source.nonce !== row.nonce ||
         source.accountId !== row.accountId || source.bodyDigest !== row.bodyDigest || source.session !== row.session ||
         (row.session && source.bindingFingerprint !== row.bindingFingerprint)) return null;
     if (digital && source.originKind !== "single_digital") return null;
+    if (option && source.originKind !== "digital_option") return null;
     if (course && (source.originKind !== "course" || source.courseBindingFingerprint !== row.courseBindingFingerprint)) return null;
     return row as unknown as ConfirmationOrigin;
   } catch { return null; }
@@ -184,6 +189,7 @@ async function readOrigin(id: string, runtime: ShipmentMailRuntime = {}, renewal
     if (!opened.ok || hash(opened.value) !== row.fingerprint) return null;
     const payload = data(JSON.parse(opened.value));
     if (row.originKind === "single_digital" && new URLSearchParams(String(payload?.body)).get("metadata[mm_order_origin]") !== "single-digital-v1") return null;
+    if (row.originKind === "digital_option" && new URLSearchParams(String(payload?.body)).get("metadata[mm_order_origin]") !== "digital-option-v1") return null;
     if (!payload || typeof payload.body !== "string" || confirmationBodyDigest(payload.body) !== row.bodyDigest ||
         typeof payload.preintentToken !== "string" || hash(payload.preintentToken) !== row.intentFingerprint ||
         payload.intentFingerprint !== row.intentFingerprint || !data(payload.snapshot)) return null;
@@ -194,7 +200,37 @@ async function readOrigin(id: string, runtime: ShipmentMailRuntime = {}, renewal
 /** Physical and retention-only digital stages never consume a course source. */
 export async function readConfirmationOrigin(id: string, runtime: ShipmentMailRuntime = {}) {
   const found = await readOrigin(id, runtime);
-  return found && found.row.originKind !== "course" ? found : null;
+  return found && found.row.originKind !== "course" && found.row.originKind !== "digital_option" ? found : null;
+}
+
+/** Readback of retained evidence only, including after the preintent expires.
+ * No worker, payment, checkout URL or access capability consumes this kind. */
+export async function readDigitalOptionRetention(id: string, runtime: ShipmentMailRuntime = {}) {
+  const found = await readOrigin(id, runtime);
+  if (!found || found.row.originKind !== "digital_option") return null;
+  return found as typeof found & { payload: ConfirmationOriginPayload & { snapshot: { selected: DigitalOptionRequestSnapshot; store: Record<string, unknown> } } };
+}
+
+/** Same-process prepared originals only. The existing pool reserves the full
+ * uncertain storage lifetime under its own explicit review scope, before CAS.
+ * A persisted winner is evidence of retention, never permission to charge. */
+export async function reserveDigitalOptionRetention(receipt: unknown, runtime: ShipmentMailRuntime = {}): Promise<{ ok: true; id: string; admitted: false; permitsCheckout: false; grantsAccess: false } | { ok: false }> {
+  try {
+    const prepared = readDigitalOptionPreintent(receipt), p = confirmationOutboxPolicy(runtime);
+    if (!prepared || !p?.coveredOrigins?.includes("digital-option-retention") || !p.digitalOptionRetentionEvidence) return { ok: false };
+    const { snapshot: selected, store, preintent } = prepared;
+    const snapshot = { store, selected };
+    const result = await reserveOrigin({ statsId: selected.statsId, nonce: selected.nonce, accountId: selected.accountId,
+      body: selected.body, preintent, snapshot }, runtime, undefined, false, true);
+    if (!result.ok) return result;
+    const saved = await readDigitalOptionRetention(result.id, runtime);
+    // Initial preparation and the atomic enqueue already enforce expiry.
+    // A matching persisted winner reports retention only; a later expired
+    // receipt cannot revoke that evidence or grant payment/access authority.
+    if (!saved || saved.payload.preintentToken !== preintent.token ||
+        JSON.stringify(saved.payload.snapshot) !== JSON.stringify(snapshot)) return { ok: false };
+    return { ...result, admitted: false, permitsCheckout: false, grantsAccess: false };
+  } catch { return { ok: false }; }
 }
 
 type PersistedCourseBinding = OpenedCourseOriginBinding & { token: string; fingerprint: string };
@@ -251,9 +287,9 @@ async function reserveOrigin(input: {
   statsId: string | null; nonce: string; accountId: string; body: string;
   preintent: { token: string; expiresAtMs: number; intentFingerprint: string };
   snapshot: Record<string, unknown>;
-}, runtime: ShipmentMailRuntime = {}, course?: { token: string; fingerprint: string; selected: OpenedCourseOriginBinding["candidate"] }, digital = false): Promise<{ ok: true; id: string } | { ok: false }> {
+}, runtime: ShipmentMailRuntime = {}, course?: { token: string; fingerprint: string; selected: OpenedCourseOriginBinding["candidate"] }, digital = false, option = false): Promise<{ ok: true; id: string } | { ok: false }> {
   const p = confirmationOutboxPolicy(runtime);
-  if (!p || !canSeal() || digital && !p.coveredOrigins?.includes("single-digital-confirmation")) return { ok: false };
+  if (!p || !canSeal() || digital && !p.coveredOrigins?.includes("single-digital-confirmation") || option && (!p.coveredOrigins?.includes("digital-option-retention") || !p.digitalOptionRetentionEvidence)) return { ok: false };
   try {
     const own = data(input), preintent = data(own?.preintent);
     if (!own || !preintent || typeof own.statsId !== "string" || !STORE.test(own.statsId) || typeof own.nonce !== "string" || !HASH.test(own.nonce) ||
@@ -278,20 +314,22 @@ async function reserveOrigin(input: {
         original.until !== input.preintent.expiresAtMs || !ownerMatches) return { ok: false };
     const pipeline = runtime.pipeline ?? redisPipeline;
     const now = await serverNow(pipeline), id = confirmationOriginId(statsId, input.nonce);
-    if (now === null || Math.abs(now - (runtime.now ?? Date.now)()) > 60_000 || input.preintent.expiresAtMs <= now) return { ok: false };
+    const checkedAt = (runtime.now ?? Date.now)();
+    if (now === null || !Number.isSafeInteger(checkedAt) || Math.abs(now - checkedAt) > 60_000 || input.preintent.expiresAtMs <= now) return { ok: false };
     if (course && !openCourseOriginBinding(course.token, input.nonce, now)) return { ok: false };
     const payload: ConfirmationOriginPayload = { body: input.body, preintentToken: input.preintent.token, intentFingerprint: input.preintent.intentFingerprint, snapshot,
       ...(course ? { courseBindingToken: course.token } : {}) };
     const plain = JSON.stringify(payload);
     if (Buffer.byteLength(plain) > p.maxPayloadBytes) return { ok: false };
-    const row: ConfirmationOrigin = { kind: "confirmation", ...(course ? { originKind: "course" as const, courseBindingFingerprint: course.fingerprint } : digital ? { originKind: "single_digital" as const } : {}), id, statsId, nonce: input.nonce,
+    const row: ConfirmationOrigin = { kind: "confirmation", ...(course ? { originKind: "course" as const, courseBindingFingerprint: course.fingerprint } : digital ? { originKind: "single_digital" as const } : option ? { originKind: "digital_option" as const } : {}), id, statsId, nonce: input.nonce,
       accountId: input.accountId, bodyDigest, intentFingerprint: input.preintent.intentFingerprint, bindingFingerprint: "",
       session: "", person: hash(`unbound:${input.nonce}`),
-      sourceValue: JSON.stringify({ kind: "confirmation", nonce: input.nonce, accountId: input.accountId, bodyDigest, session: "", ...(course ? { originKind: "course", courseBindingFingerprint: course.fingerprint } : digital ? { originKind: "single_digital" } : {}) }),
+      sourceValue: JSON.stringify({ kind: "confirmation", nonce: input.nonce, accountId: input.accountId, bodyDigest, session: "", ...(course ? { originKind: "course", courseBindingFingerprint: course.fingerprint } : digital ? { originKind: "single_digital" } : option ? { originKind: "digital_option" } : {}) }),
       sealed: seal(plain, context(id)), fingerprint: hash(plain), bytes: 0,
-      created: now, authorizedAt: now, next: course ? 0 : now, expiresAt: input.preintent.expiresAtMs,
-      state: "queued", phase: course ? "course_reserved" : "awaiting_creation", owner: "", leaseUntil: 0, checks: 0, createAttempts: 0, reviewId: p.reviewId, recoveryCursor: "", recoveryUpper: 0, erasedPeople: "", erasureSaturated: false };
+      created: now, authorizedAt: now, next: course || option ? 0 : now, expiresAt: input.preintent.expiresAtMs,
+      state: "queued", phase: course ? "course_reserved" : option ? "digital_option_reserved" : "awaiting_creation", owner: "", leaseUntil: 0, checks: 0, createAttempts: 0, reviewId: p.reviewId, recoveryCursor: "", recoveryUpper: 0, erasedPeople: "", erasureSaturated: false };
     row.bytes = SHIPMENT_MAIL_MAX_ROW_BYTES + keys(row).reduce((n, key) => n + Buffer.byteLength(key), 0) * 2 + 16_384;
+    if (option && (row.bytes > p.storeBytes || row.bytes > p.globalBytes)) return { ok: false };
     const raw = JSON.stringify(row);
     if (!parse(raw)) return { ok: false };
     const reply = array(await pipeline([["EVAL", SHIPMENT_MAIL_SCRIPT, 10, ...keys(row), "enqueue", "", raw, now, SHIPMENT_MAIL_MAX_ROW_BYTES, JSON.stringify(p), ""]]));
@@ -766,7 +804,7 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       if (reply[0] !== "string" || Buffer.byteLength(reply[1]) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;
       const row = parse(reply[1]);
       if (!row) { const renewal = decodeRenewal(reply[1], reply[2]); return renewal?.row.id === id ? { raw: reply[1], keys: keys(renewal.row) } : { raw: reply[1] }; }
-      if (row.id !== id || row.originKind === "course") return { raw: reply[1] };
+      if (row.id !== id || row.originKind === "course" || row.originKind === "digital_option") return { raw: reply[1] };
       if (reply[2] !== row.sourceValue) return { raw: reply[1] };
       const opened = unseal(row.sealed, context(id));
       if (!opened.ok || hash(opened.value) !== row.fingerprint) return { raw: reply[1] };
@@ -796,7 +834,7 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       catch { counts.unknown++; } // retain source/lease and allow other paid work to proceed
       continue;
     }
-    if (found?.row.originKind === "course") { counts.unknown++; continue; }
+    if (found?.row.originKind === "course" || found?.row.originKind === "digital_option") { counts.unknown++; continue; }
     if (!found || found.row.accountId === DEMO_CONNECTED_ACCOUNT) { counts.unknown++; continue; }
     if (!physicalOriginCovered(found, p, now())) { counts.unknown++; continue; }
     if (found.row.originKind === "single_digital" && (!p.coveredOrigins?.includes("single-digital-confirmation") || now() >= found.row.expiresAt)) { counts.unknown++; continue; }
@@ -923,6 +961,7 @@ local ok,r=pcall(cjson.decode,raw)
 if #raw>131072 or not ok or type(r)~='table' or r.kind~='confirmation' or r.statsId~=store or redis.call('GET',KEYS[2])~=r.sourceValue then return {'unknown'} end
 if r.person==person then return {'matched'} end
 -- A resolved different buyer needs no retained hash for this request.
+-- Digital-option custody has no buyer binding step, so retains no unrelated hash.
 if r.phase~='course_reserved' and r.phase~='awaiting_creation' and r.phase~='creating' and r.phase~='creation_unknown' and r.phase~='awaiting_payment' then return {'other'} end
 if type(r.erasedPeople)~='string' or #r.erasedPeople>4096 or #r.erasedPeople%64~=0 or string.find(r.erasedPeople,'[^a-f0-9]') or type(r.erasureSaturated)~='boolean' then return {'unknown'} end
 for i=1,#r.erasedPeople,64 do if string.sub(r.erasedPeople,i,i+63)==person then return {'marked'} end end

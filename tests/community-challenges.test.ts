@@ -310,6 +310,15 @@ async function main(): Promise<void> {
     return commands.map((cmd, i) => (cmd[0] === "ZSCORE" && String(cmd[2]) === ch5.challenge.id ? ["?"] : replies[i]));
   }) as typeof redis.pipeline;
   is("a list read of an unknown shape: unknown, never deleted", await failed(() => deleteChallenge(again, ch5.challenge.id)), "unknown");
+  // A score that is not a number (text, empty) is not Redis's ZSCORE answer either: unknown, never "still kept" (Codex Z's
+  // residual LOW on #3452).
+  for (const odd of ["not-a-score", "", "NaN"]) {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await real(commands);
+      return commands.map((cmd, i) => (cmd[0] === "ZSCORE" && String(cmd[2]) === ch5.challenge.id ? odd : replies[i]));
+    }) as typeof redis.pipeline;
+    is(`a score that is not a number (${JSON.stringify(odd)}): unknown, never deleted`, await failed(() => deleteChallenge(again, ch5.challenge.id)), "unknown");
+  }
   redis.pipeline = real;
   is("the challenge is still there", redis.run(["EXISTS", key5]), 1);
 

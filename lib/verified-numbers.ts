@@ -154,9 +154,20 @@ export async function sendVerified(deadline: number): Promise<{ stores: number }
   const read = repliesFor(await redisPipeline([["GET", CURSOR_KEY]]), 1);
   const saved = read?.[0];
   if (!read || (saved !== null && typeof saved !== "string")) throw new UnknownReplyError("where the shared numbers' last pass stopped");
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
-  let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
-  let skip = Number(savedDone) || 0;
+  let cursor = "0";
+  let skip = 0;
+  if (saved !== null) {
+    // Only the writer's complete cursor|offset format is a saved position.
+    // Redis SCAN cursors are unsigned 64-bit decimals; keep them as strings.
+    const position = /^(0|[1-9]\d{0,19})\|(0|[1-9]\d{0,15})$/.exec(saved);
+    if (!position || position[0] !== saved ||
+      (position[1].length === 20 && position[1] > "18446744073709551615") ||
+      !Number.isSafeInteger(Number(position[2]))) {
+      throw new UnknownReplyError("the shared numbers' saved position");
+    }
+    cursor = position[1];
+    skip = Number(position[2]);
+  }
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
     let done = 0;

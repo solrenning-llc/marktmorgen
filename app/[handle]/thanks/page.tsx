@@ -115,6 +115,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   failed: { always: false },
   checking: { always: false },
   unavailable: { always: true },
+  changed: { always: true },
 };
 
 /**
@@ -1232,7 +1233,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   <form action="/api/store/upsell" method="post" className="px-5 py-5 sm:px-6">
                     <input type="hidden" name="handle" value={store.handle} />
                     <input type="hidden" name="session_id" value={sessionId} />
-                    <input type="hidden" name="step" value={offer.step.id} />
+                    <input type="hidden" name="step" value={offer.ref} />
                     <p className="st-label">{offer.afterNo ? t.beforeYouGo : t.oneMoreThing}</p>
                     <h2 id="offer-title" className="mt-1 text-xl font-semibold leading-snug tracking-[-0.01em]">
                       {offer.step.headline || t.titleFor(offer.target.title, money(offer.step.priceCents, store.currency))}

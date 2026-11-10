@@ -24,10 +24,14 @@ import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
 import { ForgetLessonPositions } from "@/components/forget-lesson-positions";
-import { devicePlaceKey } from "@/lib/lesson-position";
+import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { ForgetLastLesson } from "@/components/remember-last-lesson";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { takeBuyerRead } from "@/lib/buyer-actions";
+import { notesDownloadAfterAccess } from "@/lib/lesson-notes";
+import { LessonNotesKept } from "@/components/lesson-notes-kept";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -79,6 +83,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const access = await courseAccess(store, product, jar);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
   const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
+  const forgetPerson = access.state !== "open" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
@@ -112,6 +118,10 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const finished = studying && done !== null && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
+  // A student the course is no longer open to (a refund, an ended membership) still downloads, or deletes, their own
+  // notes here, as the privacy policy says (#lesson-notes): no lesson's box is there to give them. Only while they keep
+  // notes on this course (or when that cannot be read), never to any signed-in visitor (third review of #3031, M4).
+  const notesAfter = await notesDownloadAfterAccess(store.statsId ?? "", access, course.id, () => takeBuyerRead(store));
 
   // What the code knows of the course, never what anyone typed (292 [SQ3], lib/course-facts.ts).
   const facts = await readCourseFacts(course);
@@ -145,6 +155,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
         {/* Access not open for a signed-in student (a refund, a lost dispute, an ended membership, taken off):
             where they stopped in this course's videos is removed from their device (650 [WG10]). */}
         {forgetKey ? <ForgetLessonPositions courseId={course.id} learner={forgetKey} /> : null}
+        {forgetPerson ? <ForgetLastLesson courseId={course.id} person={forgetPerson} /> : null}
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -206,6 +217,14 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </p>
               ) : null}
             </div>
+          ) : null}
+
+          {/* Their private lesson notes stay theirs once the course is no longer open to them (a refund, an ended
+              membership; Claude 2's review of #3031, M4, and Claude 4's focal return, C4-2): download or delete them
+              here, only while they keep notes on it (notesDownloadAfterAccess), never to any signed-in visitor (third
+              review, M4). A student with the course open has them on each lesson. */}
+          {notesAfter ? (
+            <LessonNotesKept handle={store.handle} product={product.id} language={store.language} />
           ) : null}
 
           {open ? (

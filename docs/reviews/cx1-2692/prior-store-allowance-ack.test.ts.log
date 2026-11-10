@@ -1,0 +1,153 @@
+
+Actual paid resource allowance requires confirmed finite consumption
+  ok    uncertain reply refuses: lost
+  ok    exactly one two-command admission: lost
+  ok    committed use retained: lost
+  ok    next confirmation counts both uses: lost
+  ok    uncertain reply refuses: short
+  ok    exactly one two-command admission: short
+  ok    committed use retained: short
+  ok    next confirmation counts both uses: short
+  ok    uncertain reply refuses: string count
+  ok    exactly one two-command admission: string count
+  ok    committed use retained: string count
+  ok    next confirmation counts both uses: string count
+  ok    uncertain reply refuses: boolean count
+  ok    exactly one two-command admission: boolean count
+  ok    committed use retained: boolean count
+  ok    next confirmation counts both uses: boolean count
+  ok    uncertain reply refuses: unknown SET
+  ok    exactly one two-command admission: unknown SET
+  ok    committed use retained: unknown SET
+  ok    next confirmation counts both uses: unknown SET
+  ok    uncertain reply refuses: infinite
+  ok    exactly one two-command admission: infinite
+  ok    committed use retained: infinite
+  ok    next confirmation counts both uses: infinite
+  ok    uncertain reply refuses: fractional
+  ok    exactly one two-command admission: fractional
+  ok    committed use retained: fractional
+  ok    next confirmation counts both uses: fractional
+  ok    uncertain reply refuses: zero
+  ok    exactly one two-command admission: zero
+  ok    committed use retained: zero
+  ok    next confirmation counts both uses: zero
+  ok    uncertain reply refuses: extra member
+  ok    exactly one two-command admission: extra member
+  ok    committed use retained: extra member
+  ok    next confirmation counts both uses: extra member
+  ok    uncertain reply refuses: inherited
+  ok    exactly one two-command admission: inherited
+  ok    committed use retained: inherited
+  ok    next confirmation counts both uses: inherited
+  ok    uncertain reply refuses: accessor
+  ok    exactly one two-command admission: accessor
+  ok    committed use retained: accessor
+  ok    next confirmation counts both uses: accessor
+  ok    uncertain reply refuses: extra property
+  ok    exactly one two-command admission: extra property
+  ok    committed use retained: extra property
+  ok    next confirmation counts both uses: extra property
+  ok    uncertain reply refuses: symbol
+  ok    exactly one two-command admission: symbol
+  ok    committed use retained: symbol
+  ok    next confirmation counts both uses: symbol
+  ok    no getter invoked
+
+A displayed or spending count is exact, or unavailable
+  ok    strict view unavailable: empty
+  ok    single count is unknown, not a number: empty
+  ok    no retry or replacement reading: empty
+  ok    strict view unavailable: whitespace
+  ok    single count is unknown, not a number: whitespace
+  ok    no retry or replacement reading: whitespace
+  ok    strict view unavailable: leading zero
+  ok    single count is unknown, not a number: leading zero
+  ok    no retry or replacement reading: leading zero
+  ok    strict view unavailable: signed
+  ok    single count is unknown, not a number: signed
+  ok    no retry or replacement reading: signed
+  ok    strict view unavailable: exponent
+  ok    single count is unknown, not a number: exponent
+  ok    no retry or replacement reading: exponent
+  ok    strict view unavailable: fraction
+  ok    single count is unknown, not a number: fraction
+  ok    no retry or replacement reading: fraction
+  ok    strict view unavailable: negative
+  ok    single count is unknown, not a number: negative
+  ok    no retry or replacement reading: negative
+  ok    strict view unavailable: unsafe
+  ok    single count is unknown, not a number: unsafe
+  ok    no retry or replacement reading: unsafe
+  ok    strict view unavailable: missing
+  ok    single count is unknown, not a number: missing
+  ok    no retry or replacement reading: missing
+  ok    strict view unavailable: extra
+  ok    single count is unknown, not a number: extra
+  ok    no retry or replacement reading: extra
+  FAIL  strict view unavailable: extra field
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count is unknown, not a number: extra field
+        expected null
+        got      1
+  ok    no retry or replacement reading: extra field
+  FAIL  strict view unavailable: symbol
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count is unknown, not a number: symbol
+        expected null
+        got      1
+  ok    no retry or replacement reading: symbol
+  FAIL  strict view unavailable: inherited
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count is unknown, not a number: inherited
+        expected null
+        got      1
+  ok    no retry or replacement reading: inherited
+  FAIL  strict view unavailable: getter
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count is unknown, not a number: getter
+        expected null
+        got      1
+  ok    no retry or replacement reading: getter
+  FAIL  strict view unavailable: proxy
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count is unknown, not a number: proxy
+        expected null
+        got      1
+  ok    no retry or replacement reading: proxy
+  ok    confirmed count: null
+  ok    confirmed strict count: null
+  ok    confirmed count: 0
+  ok    confirmed strict count: 0
+  ok    confirmed count: 123
+  ok    confirmed strict count: 123
+  ok    confirmed count: 0
+  ok    confirmed strict count: 0
+  ok    confirmed count: 7
+  ok    confirmed strict count: 7
+  ok    transport failure is unknown, not a number
+
+Only an exact signed decrement authorizes the existing repair
+  FAIL  no repair from unknown: coerced negative
+        expected 1
+        got      2
+  FAIL  no repair from unknown: extra decrement
+        expected 1
+        got      2
+  FAIL  no repair from unknown: too negative
+        expected 1
+        got      2
+  FAIL  no repair from unknown: getter decrement
+        expected 1
+        got      2
+  ok    confirmed negative repair retained
+  FAIL  no read or decrement getter executed
+        expected 0
+        got      7
+
+115 checks, 15 failing.

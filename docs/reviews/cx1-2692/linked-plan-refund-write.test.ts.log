@@ -1,0 +1,65 @@
+
+The refund, once
+  ok    the first payment comes back in full
+  ok    a second click gives nothing more
+  ok    one refund at Stripe, for the policy's amount
+  ok    the lock is gone
+
+Two requests at once
+  ok    one is made, the other is told to wait
+  ok    one refund at Stripe
+
+A time-out after Stripe made it
+  ok    the answer lost: said failed, never made again
+  ok    asked again: nothing owed any more, still one refund
+  ok    retried before Stripe's reads catch up: the key replays the first refund, none new
+  ok    Stripe failing before it made anything: failed, lock released
+  ok    asked again once Stripe is back: made, once
+
+Pending and turned down
+  ok    a pending refund is reported as pending
+  ok    while it is pending, nothing new is made
+  ok    turned down: made again under a new key, once
+  ok    a refund already pending on the charge: nothing new
+
+The lock outlasts the write
+  ok    the lock covers the reading's budget, a list and a write for each payment, and a minute
+  ok    past the write's last moment: nothing made, failed, the lock released
+  ok    asked again in time: made, once
+
+Nothing owed, nothing made
+  ok    an open dispute: not owed
+  ok    outside the 30 days: not owed
+  ok    not decidable (part paid by a balance): unknown, nothing made
+  ok    another request holds the lock: busy, and its lock is left alone
+
+22 checks, all passing.
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11793:33)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:1:914
+    at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:1:901)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11313:29
+    at timed (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:4059:19)
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11312:43)
+    at onPlatformAt (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11338:10)
+    at refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11726:30)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11851:56)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11793:33)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:1:914
+    at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:1:901)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11313:29
+    at timed (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:4059:19)
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11312:43)
+    at onPlatformAt (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11338:10)
+    at refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11726:30)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11856:3)
+making a plan refund failed BillingError: Stripe billing failed (500 unknown): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11329:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11726:24)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-write.test.ts.cjs:11865:72) {
+  status: 500,
+  code: 'unknown'
+}

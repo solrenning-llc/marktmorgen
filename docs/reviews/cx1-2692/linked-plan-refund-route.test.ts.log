@@ -1,0 +1,81 @@
+
+Only from the review page, only by the owner
+  ok    no pass: nothing refunded, told on the review page
+  ok    a made-up pass: nothing refunded
+  ok    an admin of the store: refused before anything
+
+Confirmed on the review page
+  ok    refunded and ended
+  ok    one refund, for the amount shown; the plan ended
+  ok    one email, to the store's own address
+  ok    it says the amount and that the plan ended
+  ok    sent under the refund's own key, so a retry never sends it twice
+  ok    the same pass again: nothing more
+
+Another amount than the page showed
+  ok    the policy gives another amount now: nothing refunded, the new one shown
+  ok    and the stop set for it taken back
+  ok    an older copy of the page, once a newer one was opened: refused
+
+Not owed
+  ok    outside the window: told why on the review page, nothing changed
+
+Pressed twice, or answered part way
+  ok    two presses at once: one refund, and the second told it is being handled, never 'nothing'
+  ok    the refund write fails after we set the stop: 'could not confirm', the stop kept
+  ok    the refund write fails, the creator had set the stop: 'could not confirm', not 'nothing'
+  ok    the stop cannot be set: nothing was done, told so
+  ok    the store fails before any money moves: told nothing was done, never a raw error
+
+The words
+  ok    every reason is said in plain words, with the way to support
+  ok    part of a refund made: said so, with the stop kept and the way to support
+  ok    a renewal or a switch is refused with words true inside the window too (owner, 31/10/2026 15h41)
+  ok    the guarantee is once per person
+  ok    the window is the policy's
+  ok    not decidable: support, never a no
+  ok    what happens to the store uses the closing rules' own days
+  ok    the add-on is mentioned only when the store has it
+  ok    the letter's pending wording
+  ok    what happens says closing stops the renewals sold on the creator's own Stripe, never that it is untouched
+
+28 checks, all passing.
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:17820:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18314:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18809:18)
+    at async POST (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18871:13)
+    at async post (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19035:20)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19086:92) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:17820:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18314:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18809:18)
+    at async POST (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18871:13)
+    at async post (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19035:20)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19091:100) {
+  status: 500,
+  code: 'api_error'
+}
+setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:17820:11)
+    at async setCancelAtPeriodEnd (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:17941:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18803:9)
+    at async POST (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18871:13)
+    at async post (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19035:20)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19096:61) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: the refund request failed part way Error: a stand-in store failure
+    at store.pipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19102:83)
+    at redisPipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:9304:41)
+    at oneNoteReply (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18543:36)
+    at writeNote (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18555:24)
+    at refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18783:11)
+    at async POST (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:18871:13)
+    at async post (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19035:20)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-route.test.ts.cjs:19105:18)

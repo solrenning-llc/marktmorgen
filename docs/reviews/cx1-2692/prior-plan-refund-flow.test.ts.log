@@ -1,0 +1,312 @@
+
+Unreadable refund evidence never means zero or confirmed settlement
+  FAIL  parts amount unknown: null
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: null
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: 
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 123
+        expected "unknown"
+        got      "found"
+  FAIL  earlier amount unknown: 123
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: true
+        expected "unknown"
+        got      "partial"
+  FAIL  earlier amount unknown: true
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: -1
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: -1
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 0
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: 0
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 1.5
+        expected "unknown"
+        got      "partial"
+  FAIL  earlier amount unknown: 1.5
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 9007199254740992
+        expected "unknown"
+        got      "found"
+  FAIL  earlier amount unknown: 9007199254740992
+        expected "unknown"
+        got      "found"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  ok    parts incomplete evidence is unknown
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "found"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "found"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "found"
+  FAIL  a valid row cannot hide an unreadable refund
+        expected "unknown"
+        got      "found"
+  ok    confirmed part still settles
+  ok    confirmed earlier refund still found
+  ok    confirmed empty parts
+  ok    confirmed empty history
+  ok    an unrelated valid refund does not block history: null
+  ok    an unrelated valid refund does not block history: py_OtherEvidence0001
+  ok    nullable foreign metadata and status are not our refund
+  ok    the recorded charge identity need not have a card prefix
+  ok    own known non-card refund still found
+  ok    bounded reads without any provider write
+
+An unreadable earlier refund cannot end the real flow
+  FAIL  no confirmed refund or ending from an unreadable amount
+        expected [false,"active",true,0]
+        got      [true,"canceled",false,0]
+  FAIL  undecidable note retained for a later read
+        expected "string"
+        got      "object"
+
+Refunded and ended, in the safe order
+  ok    the first payment comes back and the plan is ended
+  ok    set to stop, then refunded, then ended
+  ok    ended at Stripe
+  ok    its open invoice voided, its draft deleted
+  ok    the store has no plan any more (the closing rules start)
+  ok    no note left
+  ok    no lock left
+
+Never twice
+  ok    a second click: the earlier refund is reported, nothing new
+  ok    two at once: one made, the other told to wait
+  ok    one refund at Stripe
+
+Not owed: the plan goes on as it was
+  ok    outside the 30 days: refused, nothing changed
+  ok    the stop set for it is taken back
+  ok    still paid, invoices untouched, no note
+  ok    a stop the creator had set is left as it was
+
+Failures on the way
+  ok    the stop cannot be set: nothing refunded
+  ok    and no note left
+  ok    Stripe failing at the refund: failed, and the stop KEPT while a refund may still turn up (no renewal meanwhile)
+  ok    the note stays for the daily job
+  ok    the daily job before SETTLE_SECONDS: left, stop still set
+  ok    after it, none found: the stop taken back, the note dropped, the plan untouched
+  ok    and the creator is told by email that nothing was refunded and the plan goes on
+  ok    made at Stripe but the answer lost: found on its own charge (noted before the write), the plan ended
+  ok    made, the answer lost and nothing readable after: the stop stays, the note too
+  ok    the daily job finds it on the charge and ends the plan; nothing renewed in between
+  ok    a pending refund: said so, the plan not ended on it, the stop and the note kept
+  ok    still pending at the daily job: left as it is
+  ok    succeeded: the daily job ends the plan
+  ok    the answer lost after Stripe made it: found by its metadata, the plan ended
+  ok    refunded but not ended yet: said so, the stop and the note stay
+  ok    the daily job ends it, once, and drops the note
+
+Every plan payment inside the guarantee's days (owner, 31/10/2026 15h41)
+  ok    pay 1 Feb, renew 1 Mar, ask 2 Mar: both payments back, the plan ended
+  ok    one email with the whole amount
+  ok    a payment inside the window whose time cannot be read: nothing refunded, the plan goes on
+  ok    only the first of two refunds went through: failed, not ended, the stop kept
+  ok    and it is answered as part of a refund
+  ok    the daily job never ends the plan on part of a refund
+  ok    asked again with the old amount after part of it: not ended, nothing more refunded
+  ok    asked again while a charge's refunds cannot be read: not ended, the note keeps both charges
+  ok    asked again: the rest given back, once, and the plan ended
+
+The add-on
+  ok    the add-on could not be set to stop: the plan's ending is not done, the note stays for the daily job
+  ok    the daily job sets the add-on to stop at the end of its paid month and drops the note
+
+The daily job
+  ok    a store a request is finishing now is left alone
+  ok    refunds unreadable: kept for tomorrow
+  ok    undecidable for 7 days: dropped, the stop taken back
+  ok    and the creator is told the refund could not be confirmed, the plan renews as usual, how to ask again
+  ok    the note of a store that is gone is dropped
+  ok    an exhausted deadline touches nothing
+
+Distinct refunds can cover distinct noted charges
+  ok    two unique refunds are settled
+
+One refund id cannot be evidence for two different charges
+  FAIL  duplicate refund across charge pages is unknown
+        expected "unknown"
+        got      "found"
+  ok    bounded reader calls and no writes
+
+The real daily settlement must retain a partially refunded plan
+  ok    setup: only one of two payments refunded, plan still active
+  ok    honest charge pages preserve the partial plan and note
+  FAIL  replayed refund id does not end the real subscription
+        expected "active"
+        got      "canceled"
+  FAIL  the undecidable note remains
+        expected "string"
+        got      "object"
+  ok    no additional refund was made
+  ok    exactly two charge pages were read
+
+95 checks, 31 failing.
+plan-refund: store e2c9cc26741c4ddebe9c12813651683d's email was not sent (no address or no sender)
+plan-refund: store 3bec7690bf8e4fb681e5e7705c2fbf1f's email was not sent (no address or no sender)
+plan-refund: store 3bec7690bf8e4fb681e5e7705c2fbf1f's email was not sent (no address or no sender)
+plan-refund: store 7c7d67caebd5489e9f0c1fcd76f77b25's email was not sent (no address or no sender)
+setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async setCancelAtPeriodEnd (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12186:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12944:9)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13293:51) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12559:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12950:18)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13298:16) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13128:33)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:852)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:914
+    at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:901)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12049:29
+    at timed (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:7024:19)
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12048:43)
+    at onPlatformAt (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12074:10)
+    at refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12559:30)
+plan-refund: store ea00757cada5409aa5f4c34c03b17c26's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13128:33)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:852)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:852)
+    at globalThis.fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13326:12)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:914
+    at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:901)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12049:29
+    at timed (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:7024:19)
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12048:43)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 unknown): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async partsOutcome (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12803:16)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12959:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13328:17) {
+  status: 500,
+  code: 'unknown'
+}
+plan-refund: store f53f2ce629284af19a5fe8fb363fd923's email was not sent (no address or no sender)
+plan-refund: store 251f73ef045249cc8e13c2e77b370c8d's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13128:33)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:852)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:852)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:914
+    at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:1:901)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12049:29
+    at timed (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:7024:19)
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12048:43)
+    at onPlatformAt (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12074:10)
+plan-refund: store 68eb8a8e36d946d0a4bf3403c0fd8967's email was not sent (no address or no sender)
+plan-refund: store 83da5846ca884a8998aa56e5b7f17831's email was not sent (no address or no sender)
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12559:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12950:18)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13372:15) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12545:32)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12950:18)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13381:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async partsOutcome (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12803:16)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12959:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13381:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a store's add-on failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async setCancelAtPeriodEnd (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12186:24)
+    at async syncAssistant (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12650:7)
+    at async endPlanNow (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12873:22)
+    at async finish (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12938:21)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12955:21)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13393:21) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store 1795044fa5e040b6acff4bc3e35f058a's email was not sent (no address or no sender)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async partsOutcome (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12803:16)
+    at async finishPlanRefunds (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13000:30)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13409:3) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async partsOutcome (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12803:16)
+    at async finishPlanRefunds (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13000:30)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13413:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: the refund asked for store 32d3d30f3f1c4c639c3c65a84fcab269 could not be decided in 7 days; its stop is taken back and its note dropped
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12065:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12559:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:12950:18)
+    at async retainedRefundIdentityEvidence (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13464:5)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-flow.test.ts.cjs:13423:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store 4043a6765bc648ff9ce08b0d984a21c0's email was not sent (no address or no sender)

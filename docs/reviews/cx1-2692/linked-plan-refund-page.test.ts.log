@@ -1,0 +1,27 @@
+
+The owner, a refund owed
+  ok    names the store
+  ok    the amount, on the button and in the review
+  ok    the amount's sentence names the payments listed, not which one they are
+  ok    the pass carries the amount shown
+  ok    what closing does to the store's data and to its renewals is said
+  ok    never that the creator's own Stripe account is untouched
+  ok    a way back of the same weight
+  ok    the shared studio layout remains the only skip-link owner
+  ok    the Help answer it links exists
+
+Not the owner
+  ok    told only the owner can, with no button and no pass
+
+Not owed
+  ok    the reason, and no button
+
+An earlier refund still being settled
+  ok    told it is being handled, with no button and no new pass
+
+The answers
+  ok    a refund that may have been made is never 'Nothing was refunded'
+  ok    a pending refund is not called refunded
+  ok    the days said are the daily job's
+
+15 checks, all passing.

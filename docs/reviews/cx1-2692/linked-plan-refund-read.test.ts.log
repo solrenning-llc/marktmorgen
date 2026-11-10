@@ -1,0 +1,94 @@
+
+The 30-day guarantee on the first payment
+  ok    the first payment within 30 days comes back in full
+  ok    a coupon: what the card paid, never the list price
+  ok    31 days later: nothing, and why
+  ok    a monthly renewal: nothing
+  ok    refunded in part: only what is left
+  ok    refunded in full already: nothing again
+
+Once per person
+  ok    another customer with the same address paid before: no second guarantee
+  ok    the same card paid before on another customer: no second guarantee
+  ok    the account's first payment was another store's: not here
+  ok    the first payment was this store's earlier plan: unknown, never a silent no
+  ok    the earlier invoice read as another invoice's reply: unknown, never judged as a renewal
+  ok    and once Stripe answers for it, it is this store's earlier plan (another invoice's reply)
+  ok    the earlier invoice read as a reply with no id: unknown, never judged as a renewal
+  ok    and once Stripe answers for it, it is this store's earlier plan (a reply with no id)
+  ok    the earlier invoice answered with null: unknown and unreadable, never "Stripe could not be reached"
+  ok    the earlier invoice answered with a string: unknown and unreadable, never "Stripe could not be reached"
+  ok    the earlier invoice answered with a number: unknown and unreadable, never "Stripe could not be reached"
+  ok    a trial's invoice paid with no charge: no payment yet
+  ok    more same-address customers than can be read: unknown, not no
+
+Disputes
+  ok    open on Stripe: no refund now
+  ok    open on the store's record: no refund, no request
+  ok    a dispute we won: the guarantee applies again
+
+Yearly plans: the months not started
+  ok    the monthly price of today's yearly price
+  ok    a yearly price never published: unknown
+  ok    four months started of twelve (Aug 15 to Dec 2): 69,000 − 4 × 6,900 − the fee
+  ok    tax comes back in proportion, rounded down
+  ok    Stripe's fee in another currency: unknown
+  ok    a first yearly payment within 30 days: the guarantee, in full
+
+What cannot be read is never a no
+  ok    part paid by a balance: unknown
+  ok    more charges than one page, the oldest listed recent: unknown
+  ok    a full page of declined charges inside the 30 days, more after it: unknown, never the guarantee skipped
+  ok    a payment inside the window with more pages after it: unknown, never a silent renewal
+  ok    more pages, but a payment before the window is listed: the renewal is a renewal
+  ok    a credit on the customer's balance: unknown, never the whole payment on top of it
+  ok    an amount owed on the balance (not a credit): the guarantee as before
+  ok    a balance that cannot be read: unknown
+  ok    an unreadable paid-invoice list is unknown, never no payment
+  ok    an unreadable paid-invoice list is unknown, never no payment
+  ok    an unreadable paid-invoice list is unknown, never no payment
+
+Partial history rows are unknown, never proof that nobody paid before
+  ok    a customer search row needs its identity and address
+  ok    a customer search row needs its identity and address
+  ok    a card search row needs its identity, state and time
+  ok    a card search row needs its identity, state and time
+  ok    a charge history row needs its identity, state and time
+  ok    a charge history row needs its identity, state and time
+  ok    an unknown status in this customer's history is unknown
+  ok    an unknown status in this customer's history is unknown
+  ok    an unknown status in this customer's history is unknown
+  ok    an unknown status in a same-address customer's history is unknown
+  ok    an unknown status in a same-address customer's history is unknown
+  ok    an unknown status in a same-address customer's history is unknown
+  ok    a succeeded but unpaid charge in this customer's history is unknown
+  ok    a succeeded but unpaid charge in a same-address customer's history is unknown
+  ok    a failed but paid charge in this customer's history is unknown
+  ok    a failed but paid charge in a same-address customer's history is unknown
+  ok    a pending charge older than this customer's first success is unknown
+  ok    a pending charge older than a same-address customer's first success is unknown
+  ok    Stripe failing: unknown
+  ok    no plan payment at all: nothing, with no request
+  ok    a subscription that is not this store's: unknown
+
+Every plan payment made within the guarantee's days (owner, 31/10/2026 15h41)
+  ok    the first payment and the renewal inside the window: both, in full
+  ok    the first part is the first payment
+  ok    asked after the first payment's days: the renewal is never judged a first payment
+  ok    a plan switch charged inside the window comes back too
+  ok    a renewal in an open dispute is left to the dispute; the first payment still comes back
+  ok    the first already given back (a refund cut half way): the rest of the window still comes back
+  ok    more payments in the window than one refund gives back at once: unknown, for support
+
+Bounds
+  ok    never more than 18 requests in one reading
+  ok    nothing is ever written to Stripe
+
+69 checks, all passing.
+reading a plan refund from Stripe failed BillingError: Stripe billing failed (500 unknown): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-read.test.ts.cjs:11320:11)
+    at async readPlanRefund (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-read.test.ts.cjs:11497:17)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-read.test.ts.cjs:11991:34) {
+  status: 500,
+  code: 'unknown'
+}

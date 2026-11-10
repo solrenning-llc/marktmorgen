@@ -1,0 +1,15 @@
+
+CX1 refund-page consistency and safe totals
+  ok    unknown status
+  ok    unknown owner
+  ok    wrong charge
+  ok    sum overflow never settles
+  ok    oversized terminal page unknown
+  ok    cross-charge currency mismatch unknown
+  ok    repeated id across foreign/own pages unknown
+  ok    unrelated nullable refund remains none
+  ok    pending coverage never settled
+  ok    genuine succeeded refund still found
+  ok    no provider write
+
+11 checks, all passing.

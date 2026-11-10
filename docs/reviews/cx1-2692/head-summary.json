@@ -1,0 +1,32 @@
+{
+  "plan-refund-flow.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down",
+      "reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down",
+      "reading a store's add-on failed BillingError: Stripe billing failed (500 api_error): down",
+      "reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down",
+      "reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down"
+    ]
+  },
+  "store-allowance-ack.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    transport failure is unknown, not a number",
+      "115 checks, all passing."
+    ]
+  },
+  "plan-refund-note-evidence.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 12",
+      "ℹ fail 0",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down"
+    ]
+  }
+}

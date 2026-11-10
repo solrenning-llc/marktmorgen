@@ -1,0 +1,47 @@
+▶ plan refund note replies stay exact
+  ✔ a missing HGET pipeline reply is not an absent recovery note (74.6381ms)
+  ✔ a Proxy HGET envelope cannot impersonate one absent note (57.8516ms)
+  ✔ an unreadable stored note is preserved and stops another refund (53.4985ms)
+  ✔ a lost initial HSET answer stops before the refund (69.438ms)
+  ✔ an accessor HSET reply is rejected without invoking it (60.3648ms)
+  ✔ the exact charge note is acknowledged before money moves (90.9592ms)
+  ✔ an unconfirmed HDEL cannot claim the finished recovery note is gone (108.7386ms)
+  ✔ an unknown HGETALL is not an empty recovery job (32.9514ms)
+  ✔ a Proxy HGETALL row list is not an empty recovery job (33.5524ms)
+  ✔ present debt evidence with a null entry is retained (97.0336ms)
+  ✔ present debt evidence with a valid entry followed by null is retained (84.0051ms)
+✔ plan refund note replies stay exact (770.3883ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 773.3031
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12040:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12534:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13015:18)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13394:9)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13388:5)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store 5d480ae0edc944498a946254d78f0f45's recovery note has unknown debt evidence; it is retained
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12040:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12534:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13015:18)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13394:9)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13388:5)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store 876e3f96ad2e4eb48123743cdee1c280's recovery note has unknown debt evidence; it is retained

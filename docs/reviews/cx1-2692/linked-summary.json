@@ -1,0 +1,62 @@
+{
+  "plan-refund-read.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    a failed but paid charge in this customer's history is unknown",
+      "  ok    a failed but paid charge in a same-address customer's history is unknown",
+      "  ok    Stripe failing: unknown",
+      "69 checks, all passing.",
+      "reading a plan refund from Stripe failed BillingError: Stripe billing failed (500 unknown): down"
+    ]
+  },
+  "plan-refund-write.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    Stripe failing before it made anything: failed, lock released",
+      "  ok    past the write's last moment: nothing made, failed, the lock released",
+      "22 checks, all passing.",
+      "making a plan refund failed TypeError: fetch failed",
+      "making a plan refund failed TypeError: fetch failed",
+      "making a plan refund failed BillingError: Stripe billing failed (500 unknown): down"
+    ]
+  },
+  "plan-refund-rules.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  renewals refunded only inside the guarantee's days",
+      "  FAIL  inside them, every payment for the same store since the first (owner, 31/10/2026 15h41; lib/plan-refund.ts)",
+      "  FAIL  once per person, by email address or by card (lib/plan-refund.ts personPaidBefore)",
+      "67 checks, 3 failing."
+    ]
+  },
+  "plan-refund-route.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    the store fails before any money moves: told nothing was done, never a raw error",
+      "28 checks, all passing.",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down",
+      "setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down",
+      "plan-refund: the refund request failed part way Error: a stand-in store failure"
+    ]
+  },
+  "plan-refund-page.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "15 checks, all passing."
+    ]
+  },
+  "essential-studio-allowance.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    essential failure refuses",
+      "58 checks, all passing."
+    ]
+  }
+}

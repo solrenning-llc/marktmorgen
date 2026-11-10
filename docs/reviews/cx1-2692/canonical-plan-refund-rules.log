@@ -1,0 +1,85 @@
+
+First payment, within the window: the whole payment, never more than was taken
+  ok    in full
+  ok    on the last second of the window
+  ok    one second late: nothing on a monthly payment
+  ok    no card fee taken from the guarantee
+  ok    fee not read yet does not hold the guarantee back
+  ok    a coupon: what was taken, not the list price
+  ok    tax shown on top comes back with it
+  ok    a partial refund already made: only the rest
+  ok    fully refunded already: nothing
+  ok    over-refunded record: nothing, never negative
+  ok    a zero charge: nothing was paid
+  ok    a charge that did not succeed: nothing
+  ok    a customer balance paid part of the invoice: cannot tell
+  ok    a first charge that was a switch, inside the window: still the guarantee
+
+Not the first payment
+  ok    a monthly renewal: nothing
+  ok    a switch charge: nothing (section 5)
+  ok    a billing reason this code does not know: cannot tell
+  ok    a monthly renewal inside 30 days: still nothing
+
+Disputes: never a refund on top of what the bank returns
+  ok    open (warning_needs_response): nothing now
+  ok    open (warning_under_review): nothing now
+  ok    open (needs_response): nothing now
+  ok    open (under_review): nothing now
+  ok    open (something_new): nothing now
+  ok    lost for part of the charge: cannot tell
+  ok    lost: the bank already returned it
+  ok    prevented: treated as already returned
+  ok    won: the policy applies again
+  ok    inquiry closed: the policy applies again
+
+Yearly: months not started, at the monthly price, less Stripe's fee
+  ok    second month: 2 kept
+  ok    first month (renewal, any time): 1 kept
+  ok    first yearly payment within 30 days: the guarantee instead
+  ok    first yearly payment after 30 days: months
+  ok    all twelve started: nothing
+  ok    a coupon so large the months kept cover it: nothing, never negative
+  ok    a switch charge on a yearly plan (maybe the yearly payment itself): cannot tell, never a silent no
+  ok    a debit balance (charge above the invoice total): cannot tell
+  ok    fee in another currency than the charge: cannot tell
+  ok    month 9 with a fee larger than the month left: the fee, not the months
+  ok    tax with a partial refund: the total never passes the policy
+  ok    fee not read yet: cannot tell
+  ok    monthly price unknown: cannot tell
+  ok    charged in another currency: cannot tell
+  ok    tax comes back for the part refunded
+  ok    a partial refund counts against the policy's figure
+  ok    refunded past the policy's figure: nothing more
+  ok    a disputed yearly payment: nothing
+
+Never more than was taken, whatever the input (10,000 random cases)
+  ok    no refund above what is left of the charge or the policy's total, none zero or fractional
+
+Bad data is never read as money
+  ok    negative amount
+  ok    fractional amount
+  ok    NaN refunded
+  ok    tax above amount
+  ok    negative fee
+  ok    a yearly monthly price that is not money
+
+Months start on Stripe's billing anchor
+  ok    Jan 31 + 1 month is Feb 28
+  ok    Jan 31 + 2 months is Mar 31
+  ok    before the period: none started
+  ok    at its first second: one
+  ok    Feb 28 14:59: still one
+  ok    Feb 28 15:00: two
+  ok    a year on: twelve, never more
+
+The rule is the one the refund page states
+  ok    the guarantee reads REFUND_DAYS
+  ok    months kept at the monthly price
+  ok    the card fee kept on a yearly refund
+  ok    renewals refunded only inside the guarantee's days
+  ok    inside them, every payment for the same store since the first (owner, 31/10/2026 15h41; lib/plan-refund.ts)
+  ok    once per person, by email address or by card (lib/plan-refund.ts personPaidBefore)
+  ok    never that the creator's Stripe customers are untouched (closing stops the renewals sold there)
+
+67 checks, all passing.

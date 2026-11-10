@@ -1,0 +1,62 @@
+
+Essential allowance requires its own finite committed acknowledgement
+  ok    unknown committed allowance refuses 0
+  ok    no retry or readback 0
+  ok    the committed count stays consumed 0
+  ok    unknown committed allowance refuses 1
+  ok    no retry or readback 1
+  ok    the committed count stays consumed 1
+  ok    unknown committed allowance refuses 2
+  ok    no retry or readback 2
+  ok    the committed count stays consumed 2
+  ok    unknown committed allowance refuses 3
+  ok    no retry or readback 3
+  ok    the committed count stays consumed 3
+  ok    unknown committed allowance refuses 4
+  ok    no retry or readback 4
+  ok    the committed count stays consumed 4
+  ok    unknown committed allowance refuses 5
+  ok    no retry or readback 5
+  ok    the committed count stays consumed 5
+  ok    unknown committed allowance refuses 6
+  ok    no retry or readback 6
+  ok    the committed count stays consumed 6
+  ok    unknown committed allowance refuses 7
+  ok    no retry or readback 7
+  ok    the committed count stays consumed 7
+  ok    unknown committed allowance refuses 8
+  ok    no retry or readback 8
+  ok    the committed count stays consumed 8
+  ok    unknown committed allowance refuses 9
+  ok    no retry or readback 9
+  ok    the committed count stays consumed 9
+  ok    unknown committed allowance refuses 10
+  ok    no retry or readback 10
+  ok    the committed count stays consumed 10
+  ok    unknown committed allowance refuses 11
+  ok    no retry or readback 11
+  ok    the committed count stays consumed 11
+  ok    computed count never executes
+  ok    essential failure refuses
+  ok    ordinary public guard behavior remains
+  ok    only first ten confirmed increments pass 1
+  ok    only first ten confirmed increments pass 2
+  ok    only first ten confirmed increments pass 3
+  ok    only first ten confirmed increments pass 4
+  ok    only first ten confirmed increments pass 5
+  ok    only first ten confirmed increments pass 6
+  ok    only first ten confirmed increments pass 7
+  ok    only first ten confirmed increments pass 8
+  ok    only first ten confirmed increments pass 9
+  ok    only first ten confirmed increments pass 10
+  ok    only first ten confirmed increments pass 11
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    actual essential studio admission refuses lost ACK
+  ok    actual essential admission never retries
+  ok    actual essential studio admission accepts next confirmed count
+
+58 checks, all passing.

@@ -1,0 +1,248 @@
+▶ plan refund note replies stay exact
+  ✖ a missing HGET pipeline reply is not an absent recovery note (1097.8499ms)
+  ✖ a Proxy HGET envelope cannot impersonate one absent note (350.6186ms)
+  ✖ an unreadable stored note is preserved and stops another refund (418.347ms)
+  ✖ a lost initial HSET answer stops before the refund (252.6477ms)
+  ✖ an accessor HSET reply is rejected without invoking it (387.1707ms)
+  ✖ the exact charge note is acknowledged before money moves (417.4771ms)
+  ✖ an unconfirmed HDEL cannot claim the finished recovery note is gone (377.7863ms)
+  ✖ an unknown HGETALL is not an empty recovery job (67.1542ms)
+  ✖ a Proxy HGETALL row list is not an empty recovery job (52.8457ms)
+  ✖ present debt evidence with a null entry is retained (269.3238ms)
+  ✖ present debt evidence with a valid entry followed by null is retained (341.5921ms)
+✖ plan refund note replies stay exact (4045.8802ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 0
+ℹ fail 12
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4065.5081
+
+✖ failing tests:
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13191:11
+✖ a missing HGET pipeline reply is not an absent recovery note (1097.8499ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async rejectsWithoutRefund (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13187:3)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13197:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13191:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13199:11
+✖ a Proxy HGET envelope cannot impersonate one absent note (350.6186ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async rejectsWithoutRefund (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13187:3)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13204:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13199:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13206:11
+✖ an unreadable stored note is preserved and stops another refund (418.347ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async rejectsWithoutRefund (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13187:3)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13211:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13206:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13214:11
+✖ a lost initial HSET answer stops before the refund (252.6477ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async rejectsWithoutRefund (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13187:3)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13227:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13214:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13230:11
+✖ an accessor HSET reply is rejected without invoking it (387.1707ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async rejectsWithoutRefund (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13187:3)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13242:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13230:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13245:11
+✖ the exact charge note is acknowledged before money moves (417.4771ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async rejectsWithoutRefund (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13187:3)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13259:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13245:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13262:11
+✖ an unconfirmed HDEL cannot claim the finished recovery note is gone (377.7863ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13267:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13262:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13271:11
+✖ an unknown HGETALL is not an empty recovery job (67.1542ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13277:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13271:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13280:11
+✖ a Proxy HGETALL row list is not an empty recovery job (52.8457ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13286:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13280:3)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13290:13
+✖ present debt evidence with a null entry is retained (269.3238ms)
+  AssertionError [ERR_ASSERTION]: ambiguous debt evidence cannot settle the plan
+  + actual - expected
+  
+  + 'canceled'
+  - 'active'
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13308:29)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13290:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'canceled',
+    expected: 'active',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13290:13
+✖ present debt evidence with a valid entry followed by null is retained (341.5921ms)
+  AssertionError [ERR_ASSERTION]: ambiguous debt evidence cannot settle the plan
+  + actual - expected
+  
+  + 'canceled'
+  - 'active'
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13308:29)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13290:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'canceled',
+    expected: 'active',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+plan-refund: store 5674a752c0874656b9cf5baea308dc87's email was not sent (no address or no sender)
+plan-refund: store 84a2edacf313478c87ee6f24517f18dd's email was not sent (no address or no sender)
+plan-refund: store 83516f552a6c412290b1ac7b1fae5dfa's email was not sent (no address or no sender)
+plan-refund: store e5bcb44302be49e4a2f35b188c9c5c0f's email was not sent (no address or no sender)
+plan-refund: store af0793655c6f4fa8bfdd15665d502d49's email was not sent (no address or no sender)
+plan-refund: store e55992fcc9744d7ca838c17f161ce8b0's email was not sent (no address or no sender)
+plan-refund: store 0b23ac5977a647aea6c188f8723140f9's email was not sent (no address or no sender)
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12040:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12534:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12925:18)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13296:9)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13290:5)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store e8f956d626ad451884e254dd263ba566's email was not sent (no address or no sender)
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12040:11)
+    at async refundPlanPayment (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12534:24)
+    at async refundAndEndPlan (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:12925:18)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13296:9)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2692\.cx1-evidence\plan-refund-note-evidence.test.ts.cjs:13290:5)
+    at async Test.run (node:internal/test_runner/test:1332:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store 54542f0f2b644a8887e19a2311a7d138's email was not sent (no address or no sender)

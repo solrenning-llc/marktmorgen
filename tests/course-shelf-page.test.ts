@@ -21,6 +21,7 @@ import { SHELF_REQUEST_UNITS, shelfShown } from "@/lib/course-shelf";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { ownKey } from "@/lib/paypal-sales";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
+import { focusAfter } from "@/components/course-shelf-studio";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -114,6 +115,15 @@ async function main(): Promise<void> {
   is("the studio offers the store's listed products, the course left out, and says so when they cannot be read", [studio.includes("<CourseShelfStudio"), /visibleIds\(store\)\.filter\(\(pid\) => pid !== product\.id/.test(studio), studio.includes("Your products could not be read just now")], [true, true, true]);
   const editor = read("components/course-shelf-studio.tsx");
   is("the editor moves with buttons, never by dragging, and only saves when asked", [editor.includes("draggable"), editor.includes("Move ${p.title} up"), editor.includes("Undo changes"), editor.includes('action: "shelf"')], [false, true, true, true]);
+  // The focus after each action of the editor (WCAG 2.4.3, independent review of ca3c397): never left on a button that went away or became disabled.
+  const row = (...ids: string[]) => ids.map((id) => ({ id, title: id }));
+  is("after Remove: the Remove of the row now in its place, or the one before at the end", [focusAfter({ kind: "remove", at: 0 }, row("b", "c"), 1), focusAfter({ kind: "remove", at: 2 }, row("a", "b"), 1)], [{ to: "remove", id: "b" }, { to: "remove", id: "b" }]);
+  is("after the last is removed: the Add list, or the shelf when nothing is left to add", [focusAfter({ kind: "remove", at: 0 }, [], 3), focusAfter({ kind: "remove", at: 0 }, [], 0)], [{ to: "add" }, { to: "shelf" }]);
+  is("a move to the top or the bottom: the row's other button, never the one now disabled", [focusAfter({ kind: "move", at: 1, by: -1 }, row("b", "a", "c"), 0), focusAfter({ kind: "move", at: 1, by: 1 }, row("a", "c", "b"), 0)], [{ to: "down", id: "b" }, { to: "up", id: "b" }]);
+  is("a move in the middle: the same button on the moved row", [focusAfter({ kind: "move", at: 2, by: -1 }, row("a", "c", "b", "d"), 0), focusAfter({ kind: "move", at: 1, by: 1 }, row("a", "c", "b", "d"), 0)], [{ to: "up", id: "c" }, { to: "down", id: "b" }]);
+  is("after Add: the Add list again, or the new row's Remove once the shelf is full", [focusAfter({ kind: "add", id: "b" }, row("a", "b"), 2), focusAfter({ kind: "add", id: "f" }, row("a", "b", "c", "d", "e", "f"), 2)], [{ to: "add" }, { to: "remove", id: "f" }]);
+  is("after Save or Undo, whose buttons go away: the shelf itself", focusAfter({ kind: "saved" }, row("a"), 1), { to: "shelf" });
+  is("the editor moves the focus there once the result is drawn, and the shelf can take it", [editor.includes("setPending(focusAfter("), editor.includes('ref={shelf} tabIndex={-1} role="group"'), (editor.match(/ data-focus=/g) ?? []).length], [true, true, 4]);
   const page = read("app/[handle]/course/[product]/page.tsx");
   is("the page reads it only for a student, never for the owner or a visitor", page.includes("const shelf = studying ? await shelfShown(store, course.shelf, product.id, access.learner.email) : [];"), true);
   is("under a heading of its own, each pick a link named by its title", /aria-labelledby="course-shelf-title"[\s\S]{0,200}<h2 id="course-shelf-title"[\s\S]{0,700}href=\{productPath\(store, item\)\}[\s\S]{0,300}\{item\.title\}/.test(page), true);

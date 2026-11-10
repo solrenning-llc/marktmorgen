@@ -482,9 +482,14 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
  * whether this session is a member; an answer of another shape counts as one.
  * Three commands, only for the sessions of such an account, for as long as its
  * mark lasts (at most SESSION_TTL_SECONDS and a day after the failed read).
+ * The three replies are read only in their exact shape (CX-123 rule 24): a
+ * pipeline cut short, with a reply too many, a hole, a getter or a Proxy is
+ * unknown, and an unknown lock is locked, never set free by a stray zero.
  */
 async function keptListed(session: string, owner: string, now: number): Promise<number> {
-  const [kept, member, left] = await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]);
+  const replies = repliesFor(await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]), 3);
+  if (!replies) return now + SESSION_TTL_SECONDS * 1000;
+  const [kept, member, left] = replies;
   if (countOf(kept) === 0 || countOf(member) === 0) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);

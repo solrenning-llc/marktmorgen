@@ -48,6 +48,7 @@ import { makePasskey } from "./passkey-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { dataKey as storeDataKey } from "@/lib/store-data";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 // One of the synthetic credentials the reviewed Resend fallback fixture knows (tests/resend-fixture-credentials.ts).
@@ -568,6 +569,12 @@ async function main(): Promise<void> {
   part("M4: when the keys cannot follow a move, the membership stays where it was");
   await putMember(third, ADA, "admin");
   const adaKey = await make(await openSession(ADA), "Ada's sheet", third);
+  // Codex N on #2036: her pipeline access is copied to the new address before the keys move; when the keys cannot
+  // follow, that copy and the room it took go back with the membership.
+  const pipelineAccessKey = `nl:crm:pacc:${third.statsId}`;
+  await realPipeline([["HSET", pipelineAccessKey, ADA, JSON.stringify({ sales0: "none" })]]);
+  const paccRoom = async () => Number((await realPipeline([["HGET", storeDataKey(third)!, "crm:pacc"]]))[0] ?? 0);
+  const roomBeforeMove = await paccRoom();
   hook = async (commands) => {
     if (!commands.some((c) => (c[0] === "HSET" || (c[0] === "EVAL" && c[1] === RECORD_SWAP)) && (c[1] === `nl:api:keys:${third.sid}` || c[3] === `nl:api:keys:${third.sid}`))) return;
     hook = null;
@@ -576,6 +583,8 @@ async function main(): Promise<void> {
   await moveMemberships(ADA, ADA2);
   hook = null;
   is("the membership stayed on the old address", [(await readTeam(third.sid)).members.some((m) => m.email === ADA), (await readTeam(third.sid)).members.some((m) => m.email === ADA2)], [true, false]);
+  is("pipeline access stays only with the address whose membership stayed", await realPipeline([["HGET", pipelineAccessKey, ADA], ["HGET", pipelineAccessKey, ADA2]]), [JSON.stringify({ sales0: "none" }), null]);
+  is("and the room the copy took is given back", await paccRoom(), roomBeforeMove);
   is("and the key is still hers there", (await shownKeys(third, ADA, "admin")).find((k) => k.name === "Ada's sheet")?.maker, "you");
   is("and still works", (await asApi(adaKey.body.key ?? "")).status, 200);
 

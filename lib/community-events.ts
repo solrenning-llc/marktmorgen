@@ -57,7 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -267,14 +267,42 @@ export async function upcomingEvents(id: string, now = Date.now()): Promise<Comm
 
 /**
  * Every event a community holds, soonest first, for the one-time walk that
- * puts what already exists into the search index (lib/community-index.ts).
+ * puts what already exists into the search index (lib/community-walk.ts).
  * Bounded by what a community keeps, which is what the index holds anyway.
+ *
+ * Read exactly (CX-123 rule 24, Claude 4 on #3263): the walk is marked done once, ever, so an unread calendar must
+ * never pass for an empty one. Only a list confirmed empty is no events, and only an event whose GET answered nil is
+ * one that is gone. A list or a row in any other shape (an id that is not an event's, text that is not an event)
+ * throws UnknownReplyError, and the walk stops unmarked. The walk is its only caller.
  */
 export async function allEvents(id: string): Promise<CommunityEvent[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MAX_KEPT_EVENTS]]);
-  const { ids } = flatIds(raw);
-  return readEvents(id, ids);
+  const what = "a community's calendar";
+  const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MAX_KEPT_EVENTS]]), 1)?.[0]);
+  // Member and score in pairs.
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
+  const ids = flat.filter((_, i) => i % 2 === 0);
+  if (!ids.length) return [];
+  if (ids.some((e) => !ITEM_ID.test(e))) throw new UnknownReplyError(what);
+  const rows = repliesFor(await redisPipeline(ids.map((e) => ["GET", eventKey(id, e)])), ids.length);
+  if (!rows) throw new UnknownReplyError(what);
+  return rows.flatMap((raw) => {
+    if (raw === null) return [];
+    const event = parseEvent(raw);
+    if (!event) throw new UnknownReplyError(what);
+    return [event];
+  });
+}
+
+/**
+ * How many events the walk of the archive reads, and pays for before it reads them (lib/community-walk.ts), read
+ * exactly (CX-123 rule 24, Claude 4 on #3263): ZCARD's own count, or UnknownReplyError, never 0 from an unknown answer.
+ */
+export async function eventCountExact(id: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the community's events count");
+  return Math.min(n, MAX_KEPT_EVENTS);
 }
 
 export type PastPage = { events: CommunityEvent[]; next: number | null };

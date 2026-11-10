@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { CrmSchemaReadUnavailable, readPipelinesExact } from "@/lib/crm";
 import { normaliseEmail } from "@/lib/auth";
 import { CRM_ID } from "@/lib/crm-rules";
-import { PipelineAccessBusyError, PipelineAccessChangedError, setPipelineChoices } from "@/lib/pipeline-access";
+import { PipelineAccessBusyError, PipelineAccessChangedError, PipelineAccessWriteUnconfirmed, setPipelineChoices } from "@/lib/pipeline-access";
 import { type AccessLog, type AccessMap, type PipelineAccess, accessLogWords, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof PipelineAccessBusyError) return refusal("busy", error.message, 409);
     if (error instanceof PipelineAccessChangedError) return refusal("changed", error.message, 409);
     if (error instanceof CrmSchemaReadUnavailable) return refusal("unavailable", "Your pipelines could not be read just now, so nothing was changed. Try again in a moment.", 503);
+    if (error instanceof PipelineAccessWriteUnconfirmed) return refusal("unavailable", error.message, 503);
     console.error("saving pipeline access failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

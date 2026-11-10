@@ -12,7 +12,7 @@ import { POST as CRM } from "@/app/api/store/crm/route";
 import { POST as PACC } from "@/app/api/store/pipeline-access/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { DROP_CRM_DEAL, dealVersion, readPipelines } from "@/lib/crm";
-import { copyPipelineAccess, readAllPipelineAccess, readPipelineAccess, writePipelineAccess } from "@/lib/pipeline-access";
+import { copyPipelineAccess, readAllPipelineAccess, readPipelineAccess, undoPipelineAccessCopy, writePipelineAccess } from "@/lib/pipeline-access";
 import { redisPipeline } from "@/lib/redis";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
@@ -106,9 +106,9 @@ async function main(): Promise<void> {
 
   part("Only pipeline ids are named");
   await writePipelineAccess(statsId, "sam@example.com", {}, store);
-  const linesBefore = (await readLog(store.sid)).length;
+  const linesBefore = (await readLog(store.sid))!.length;
   const proto = await pacc('{"email":"sam@example.com","choices":{"__proto__":"view"}}');
-  is("\"__proto__\" is not a pipeline: refused, nothing written, nothing logged", [proto.status, proto.body.error, await readPipelineAccess(statsId, "sam@example.com"), (await readLog(store.sid)).length - linesBefore], [400, "invalid", {}, 0]);
+  is("\"__proto__\" is not a pipeline: refused, nothing written, nothing logged", [proto.status, proto.body.error, await readPipelineAccess(statsId, "sam@example.com"), (await readLog(store.sid))!.length - linesBefore], [400, "invalid", {}, 0]);
   is("nor with a real one beside it, nor one at a time, nor constructor", [(await pacc('{"email":"sam@example.com","choices":{"__proto__":"view","wkshp1":"none"}}')).status, (await pacc({ email: "sam@example.com", pipeline: "__proto__", access: "view" })).status, (await pacc({ email: "sam@example.com", choices: { constructor: "view" } })).status], [400, 400, 400]);
 
   part("Who cannot be restricted is told why");
@@ -143,10 +143,10 @@ async function main(): Promise<void> {
 
   part("The activity log says what changed, pipeline by pipeline");
   await pacc({ email: "sam@example.com", choices: { wkshp1: "none", coach1: "none" } });
-  const line = (await readLog(store.sid))[0]?.what;
+  const line = (await readLog(store.sid))![0]?.what;
   is("only the pipeline that changed, with what it was", line, "Set sam@example.com's pipeline access. Workshops: no access (was can change)");
   await pacc({ email: "sam@example.com", choices: { wkshp1: "none", coach1: "none" } });
-  is("a Save that changes nothing says so", (await readLog(store.sid))[0]?.what, "Saved sam@example.com's pipeline access with no change");
+  is("a Save that changes nothing says so", (await readLog(store.sid))![0]?.what, "Saved sam@example.com's pipeline access with no change");
 
   part("Moving a sign-in");
   const roomOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
@@ -166,6 +166,28 @@ async function main(): Promise<void> {
   await redisPipeline([["HDEL", `nl:crm:pacc:${statsId}`, "zed@example.com"]]);
   await copyPipelineAccess(store, "zed@example.com", "yan@example.com");
   is("a copy of no restriction deletes the old field and gives its room back", [(await redisPipeline([["HGET", `nl:crm:pacc:${statsId}`, "yan@example.com"]]))[0], await roomOf()], [null, 0]);
+
+  part("A move that fails after the copy puts the new address back as it was (Codex N, #2036)");
+  const paccKey = `nl:crm:pacc:${statsId}`;
+  const setRoom = async (bytes: number) => { await redisPipeline([["HSET", dataKey(store)!, "crm:pacc", String(bytes)]]); };
+  const yanNow = async () => (await redisPipeline([["HGET", paccKey, "yan@example.com"]]))[0];
+  const carried = JSON.stringify({ wkshp1: "none" });
+  const earlier = JSON.stringify({ coach1: "view", wkshp1: "edit" });
+  const earlierWeight = dataBytes(["yan@example.com", earlier], 1);
+  await redisPipeline([["HDEL", paccKey, "yan@example.com"], ["HSET", paccKey, "zed@example.com", carried]]);
+  await setRoom(0);
+  await undoPipelineAccessCopy(store, "yan@example.com", await copyPipelineAccess(store, "zed@example.com", "yan@example.com"));
+  is("nothing there before: nothing after, and the copy's room given back", [await yanNow(), await roomOf()], [null, 0]);
+  await redisPipeline([["HSET", paccKey, "yan@example.com", earlier]]);
+  await setRoom(earlierWeight);
+  await undoPipelineAccessCopy(store, "yan@example.com", await copyPipelineAccess(store, "zed@example.com", "yan@example.com"));
+  is("an earlier record there: the same record after, its room as it was", [await yanNow(), await roomOf()], [earlier, earlierWeight]);
+  await redisPipeline([["HDEL", paccKey, "zed@example.com"], ["HSET", paccKey, "yan@example.com", earlier]]);
+  await setRoom(earlierWeight);
+  await undoPipelineAccessCopy(store, "yan@example.com", await copyPipelineAccess(store, "zed@example.com", "yan@example.com"));
+  is("no restriction to carry, the earlier record cleared by the copy: it comes back, with its room", [await yanNow(), await roomOf()], [earlier, earlierWeight]);
+  await redisPipeline([["HDEL", paccKey, "yan@example.com"]]);
+  await setRoom(0);
   const teamCode = readFileSync("lib/team.ts", "utf8");
   const move = teamCode.slice(teamCode.indexOf("export async function moveMemberships"));
   is("the old address's restrictions are forgotten under the team's lock, after the team names the new one", move.indexOf("await forgetPipelineAccess(store, before)") > move.indexOf("await saveTeam(sid,") && move.indexOf("await forgetPipelineAccess(store, before)") < move.indexOf("if (!role) continue;"), true);
@@ -234,9 +256,9 @@ async function main(): Promise<void> {
   const stagesKept = await crm(owner, { action: "pipeline", pipeline: { ...kept, stages: [...kept.stages, { id: "cmid01", name: "Talking", kind: "open" }] }, moves: {} });
   is("the owner still changes either one's stages, its name kept", stagesKept.status, 200);
   await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "edit" } });
-  is("the team's log tells them apart", (await readLog(store.sid))[0]?.what, "Set sam@example.com's pipeline access. Coaching: can only see (was no access)");
+  is("the team's log tells them apart", (await readLog(store.sid))![0]?.what, "Set sam@example.com's pipeline access. Coaching: can only see (was no access)");
   await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "none" } });
-  const twinLine = (await readLog(store.sid))[0]!;
+  const twinLine = (await readLog(store.sid))![0]!;
   is("and, on the team page, names the later one with its number", accessLogWords(twinLine.access!, accessLogNamer(await readPipelines(statsId))), "Set sam@example.com's pipeline access. coaching (2): no access (was can change)");
 
   part("Round 5: an access record that cannot be read is a known refusal");
@@ -246,7 +268,8 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const unreadAccess = await crm("sam@example.com", { action: "deal", deal: { title: "T", email: "", cents: 1, stage: "wnew01", note: "" } });
   redis.pipeline = real;
-  is("nothing was written, and the board is told so, never that it may have happened", [unreadAccess.status, unreadAccess.body.error], [503, "crm_schema_read_unavailable"]);
+  // main's #2989 answers an unread access record 503 "unavailable", a known refusal (lib/crm-response.ts REFUSALS).
+  is("nothing was written, and the board is told so, never that it may have happened", [unreadAccess.status, unreadAccess.body.error], [503, "unavailable"]);
 
   part("Round 5: a removal checked against one deal never removes a changed one");
   await writePipelineAccess(statsId, "sam@example.com", { coach1: "none" }, store);
@@ -306,7 +329,7 @@ async function main(): Promise<void> {
 
   part("Round 6: the log names each pipeline as it is named when the log is read");
   is("kept by pipeline id, with the name it had", [twinLine.what, twinLine.access], ["Set sam@example.com's pipeline access. coaching: no access (was can change)", { email: "sam@example.com", one: false, changes: [{ id: "sams01", name: "coaching", now: "none", was: "edit" }] }]);
-  const firstLine = (await readLog(store.sid)).find((l) => l.access?.changes.some((c) => c.id === "coach1"))!;
+  const firstLine = (await readLog(store.sid))!.find((l) => l.access?.changes.some((c) => c.id === "coach1"))!;
   is("(the owner removes the first Coaching)", (await crm(owner, { action: "unpipeline", id: "coach1", moveTo: "wnew01" })).status, 200);
   const namer = accessLogNamer(await readPipelines(statsId));
   is("the one left is named as it is now, never by a number that pointed at it before; the one removed is said as removed", [accessLogWords(twinLine.access!, namer), accessLogWords(firstLine.access!, namer)], ["Set sam@example.com's pipeline access. coaching: no access (was can change)", "Set sam@example.com's pipeline access. Coaching (since removed): can only see (was no access)"]);
@@ -338,14 +361,14 @@ async function main(): Promise<void> {
   const worst: AccessLog = { email: longest, one: false, changes: Array.from({ length: PIPELINES_BY_TIER.scale }, (_, i) => ({ id: `pipe${String(i).padStart(2, "0")}`, name: bigName, now: "none", was: "edit" })) };
   await logTeam(store.sid, { who: longest, role: "owner", what: accessLogWords(worst, (c) => c.name), access: worst });
   const worstRaw = await rawNewest();
-  is("the largest line fits: its details are dropped first, then its words shortened", [Buffer.byteLength(worstRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(worstRaw), "access"), (await readLog(store.sid))[0].what.startsWith("Set ")], [true, false, true]);
+  is("the largest line fits: its details are dropped first, then its words shortened", [Buffer.byteLength(worstRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(worstRaw), "access"), (await readLog(store.sid))![0].what.startsWith("Set ")], [true, false, true]);
   const many: AccessLog = { ...worst, email: "sam@example.com", changes: worst.changes.map((c) => ({ ...c, name: "P".repeat(MAX_PIPELINE_NAME) })) };
   await logTeam(store.sid, { who: owner, role: "owner", what: accessLogWords(many, (c) => c.name), access: many });
   const manyRaw = await rawNewest();
-  is("with usual addresses and names, every pipeline at once: its details dropped, its words (which name the pipelines) kept whole", [Buffer.byteLength(manyRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(manyRaw), "access"), (await readLog(store.sid))[0].what === accessLogWords(many, (c) => c.name).slice(0, 200)], [true, false, true]);
+  is("with usual addresses and names, every pipeline at once: its details dropped, its words (which name the pipelines) kept whole", [Buffer.byteLength(manyRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(manyRaw), "access"), (await readLog(store.sid))![0].what === accessLogWords(many, (c) => c.name).slice(0, 200)], [true, false, true]);
   const small: AccessLog = { email: "sam@example.com", one: true, changes: [{ id: "wkshp1", name: "Workshops", now: "view", was: "edit" }] };
   await logTeam(store.sid, { who: owner, role: "owner", what: accessLogWords(small, (c) => c.name), access: small });
-  is("a usual one keeps its details, so the team page names its pipeline as it is when shown", [Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, (await readLog(store.sid))[0].access], [true, small]);
+  is("a usual one keeps its details, so the team page names its pipeline as it is when shown", [Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, (await readLog(store.sid))![0].access], [true, small]);
   await logTeam(store.sid, { who: longest, role: "owner", what: "\u20AC".repeat(200) });
   is("and any line at all, its words shortened when they must be", Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, true);
   is("the registry counts the log from the same bound", readFileSync("tests/store-data-registry.ts", "utf8").includes("capped(LOG_LINES * (LOG_LINE_BYTES + 64)") && LOG_LINE_BYTES + 64 <= 512, true);
@@ -406,17 +429,102 @@ async function main(): Promise<void> {
   };
   const keptDeal = (await crm(owner, { action: "deal", deal: { title: "Kept", email: "", cents: 1, stage: checked.stages[0].id, note: "" } })).body.deal!.id;
   const keptPipes = String((await redisPipeline([["GET", pipesKey]]))[0]);
-  // A field kept by the full session, so that saving none in the locked one would take it away with its answers
-  // (main's rule since the merge: a locked session may save fields, never remove one; lib/two-step.ts "fields-remove").
-  is("(a field saved by the full session)", (await crm(owner, { action: "fields", fields: [{ id: "fielda", name: "Company", type: "text", options: [] }] })).status, 200);
+  // A field kept with every person's answers: the locked session's save below would take it away (C2-76's rule, lib/two-step.ts).
+  is("(a field saved)", (await crm(owner, { action: "fields", fields: [{ id: "lkfld1", name: "Company", type: "text", options: [] }] })).status, 200);
   const keptFields = (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0];
   const tried = [await asLocked({ action: "fields", fields: [] }), await asLocked({ action: "unpipeline", id: other.id, moveTo: checked.stages[0].id }), await asLocked({ action: "undeal", id: keptDeal })];
-  is("saving the fields, removing a pipeline and removing a deal are refused as locked", tried.map((t) => [t.status, t.body.error]), [[403, "locked"], [403, "locked"], [403, "locked"]]);
+  is("taking a field away, removing a pipeline and removing a deal are refused as locked", tried.map((t) => [t.status, t.body.error]), [[403, "locked"], [403, "locked"], [403, "locked"]]);
   is("and nothing was taken away", [(await redisPipeline([["HGET", dealsKey, keptDeal]]))[0] !== null, String((await redisPipeline([["GET", pipesKey]]))[0]) === keptPipes, (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0] === keptFields], [true, true, true]);
   const stillOpen = await asLocked({ action: "deal", version: await versionOf(keptDeal), deal: { id: keptDeal, title: "Kept, renamed" } });
   is("changing a deal is not", [stillOpen.status, stillOpen.body.ok], [200, true]);
   is("the board says why, never that the change could not be confirmed", readFileSync("components/deals-board.tsx", "utf8").includes("locked: \"You got in without your second step, so removing a deal, a pipeline or a field waits until two-step login turns off. Nothing was removed."), true);
   is("a full session still removes it", [(await crm(owner, { action: "undeal", id: keptDeal })).status], [200]);
+
+  part("Codex D (#2036): a partial access read never grants a restricted write");
+  await putMember(store, "sam@example.com", "support");
+  await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "none" }, store);
+  const dBody = { action: "deal", deal: { title: "D forbidden write", email: "", cents: 1, stage: "wnew01", note: "" } };
+  const dControl = await crm("sam@example.com", dBody);
+  is("D control: the real support session cannot write the hidden pipeline", [dControl.status,dControl.body.error], [403,"pipeline_access"]);
+  const dBefore = await real([["HLEN",dealsKey]]);
+  let dPartial = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if(commands.length===1 && commands[0][0]==="HGET" && commands[0][1]===`nl:crm:pacc:${statsId}` && commands[0][2]==="sam@example.com") { dPartial++; return []; }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const dAfterPartial = await crm("sam@example.com", dBody);
+  redis.pipeline = real;
+  const dCount = await real([["HLEN",dealsKey]]);
+  is("(the partial read was made)", dPartial > 0, true);
+  is("D partial read refuses and creates no deal", [dAfterPartial.status,dAfterPartial.body.error,dCount], [503,"unavailable",dBefore]);
+
+  part("Codex D (#2036): a restriction is said saved only on a confirmed write");
+  await writePipelineAccess(statsId,"sam@example.com",{},store);
+  let dDropped=0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if(commands.length===1 && commands[0][0]==="HSET" && commands[0][1]===`nl:crm:pacc:${statsId}` && commands[0][2]==="sam@example.com") { dDropped++; return []; }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const dSave=await pacc({email:"sam@example.com",choices:{wkshp1:"none"},was:{}});
+  redis.pipeline=real;
+  const dActual=await readPipelineAccess(statsId,"sam@example.com");
+  const dStillOpen=await crm("sam@example.com",dBody);
+  is("(the write was dropped)", dDropped > 0, true);
+  is("D unconfirmed restriction is never reported as saved: refused, saying it could not be confirmed", [dSave.status, dSave.body.error, dSave.body.ok, dSave.body.access], [503, "unavailable", false, undefined]);
+  is("and what is read is what is really there: no restriction, so the board does not show one", [dActual, dStillOpen.status], [{}, 200]);
+
+  part("Codex D (#2036): a lost answer after the access was applied is not said as nothing changed");
+  await writePipelineAccess(statsId,"sam@example.com",{},store);
+  let d9Applied=0;
+  redis.pipeline=(async(commands:(string|number)[][])=>{
+    if(commands.length===1&&commands[0][0]==="HSET"&&commands[0][1]===`nl:crm:pacc:${statsId}`&&commands[0][2]==="sam@example.com") {await real(commands);d9Applied++;return [];}
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const d9Answer=await pacc({email:"sam@example.com",choices:{wkshp1:"none"},was:{}});
+  redis.pipeline=real;
+  const d9Actual=await readPipelineAccess(statsId,"sam@example.com");
+  is("(the write landed, its answer lost)", [d9Applied, d9Actual], [1, { wkshp1: "none" }]);
+  is("D committed-but-unconfirmed restriction is never said unchanged: it says it could not be confirmed and to reload", [d9Answer.status, d9Answer.body.message?.includes("Nothing was changed"), d9Answer.body.message?.includes("Reload the page")], [503, false, true]);
+
+  part("Codex D (#2036): a membership never moves without both access reads confirmed");
+  const d9From="dsource@example.com",d9To="dtarget@example.com";
+  await putMember(store,d9From,"support");
+  await writePipelineAccess(statsId,d9From,{wkshp1:"none"},store);
+  is("D migration control: source cannot write the hidden pipeline",(await crm(d9From,{action:"deal",deal:{title:"D blocked migration",email:"",cents:1,stage:"wnew01",note:""}})).status,403);
+  let d9CopyRead=0;
+  redis.pipeline=(async(commands:(string|number)[][])=>{
+    // The copy reads the source's field by itself (fieldOf, main's #2989), so its partial answer is that one HGET's.
+    if(commands.length===1&&commands[0][0]==="HGET"&&commands[0][1]===`nl:crm:pacc:${statsId}`&&commands[0][2]===d9From) {d9CopyRead++;return [];}
+    return real(commands);
+  }) as typeof redis.pipeline;
+  try{await moveMemberships(d9From,d9To);}catch{/* refused: the membership stays */}
+  redis.pipeline=real;
+  const d9Members=(await readTeam(store.sid)).members.map(m=>m.email);
+  const d9TargetWrite=await crm(d9To,{action:"deal",deal:{title:"D migration bypass",email:"",cents:1,stage:"wnew01",note:""}});
+  is("(the partial read was made)", d9CopyRead > 0, true);
+  is("D partial ACL source read keeps original membership and restriction",[d9Members.includes(d9From),d9Members.includes(d9To),await readPipelineAccess(statsId,d9From)],[true,false,{wkshp1:"none"}]);
+  is("D target cannot write without confirmed migration of its restrictions",d9TargetWrite.status===200,false);
+
+  part("Codex D and G2 (#2036): an extra answer to the copy's one write never confirms it");
+  for (const [kind, from, to] of [["HSET", "dacksource@example.com", "dacktarget@example.com"], ["HDEL", "dackfree@example.com", "dackstale@example.com"]] as const) {
+    await putMember(store, from, "support");
+    // HSET: a restricted teammate's restriction is the copy. HDEL: a free teammate, and a field left on the new address that the copy clears.
+    if (kind === "HSET") await writePipelineAccess(statsId, from, { wkshp1: "none" }, store);
+    else await redisPipeline([["HSET", `nl:crm:pacc:${statsId}`, to, JSON.stringify({ wkshp1: "none" })]]);
+    let skipped = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === kind && commands[0][1] === `nl:crm:pacc:${statsId}` && commands[0][2] === to) { skipped++; return [1, 1]; }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try { await moveMemberships(from, to); } catch { /* refused: the membership stays */ }
+    redis.pipeline = real;
+    const team = (await readTeam(store.sid)).members.map((m) => m.email);
+    is(`${kind} answered [1, 1] and never applied: the membership stays on the old address`, [skipped, team.includes(from), team.includes(to)], [1, true, false]);
+    if (kind === "HSET") {
+      is("with its restriction", await readPipelineAccess(statsId, from), { wkshp1: "none" });
+      is("and the new address cannot write", (await crm(to, { action: "deal", deal: { title: "D extra ACK bypass", email: "", cents: 1, stage: "wnew01", note: "" } })).status === 200, false);
+    }
+  }
 
   done();
 }

@@ -37,6 +37,8 @@ part("Six months at least, from the day the creator was told (DSA Art. 20(1)-(2)
   });
   is("never shorter than six months, at month ends and year ends", spans, [true, true, true, true, true]);
   is("not a time: no deadline (never 'too late' on a date nobody can read)", [appealDeadline(""), appealDeadline("soon"), appealDeadline("2026-13-45T00:00:00Z")], [null, null, null]);
+  is("a time without its zone is not read (it would be local time on each machine)", [appealDeadline("2026-01-01T10:00"), appealDeadline("2026-01-01T10:00:00.000")], [null, null]);
+  is("a time with an offset is read", appealDeadline("2026-11-10T12:00:00-03:00") && appealDate(appealDeadline("2026-11-10T12:00:00-03:00")!.shown), "May 10, 2027");
 }
 
 part("A request is taken inside the period and refused after it, with the date and the court");
@@ -69,6 +71,9 @@ part("What a request may hold, checked before anything is written");
   is("text is cleaned, files kept with name, type and size", ok.ok ? ok.appeal : null,
     { decision: "product-p_123@r1a2b3c4d5e6f7a8", explanation: "The guide is\nmine.", attachments: [{ name: "licence.pdf", type: "application/pdf", bytes: 1024 }], at: "2026-11-11T00:00:00.000Z" });
   const problem = (raw: Record<string, unknown>) => { const r = readAppeal(raw, PRODUCT, [], now); return r.ok ? "taken" : r.problem; };
+  const controls = readAppeal({ explanation: "Mine\u0007 and‮ here", attachments: [{ name: "evil‮gnp.pdf\u0000", type: "application/pdf", bytes: 1 }] }, PRODUCT, [], now);
+  is("control and format characters are taken out of the words and the file's name", controls.ok ? [controls.appeal.explanation, controls.appeal.attachments[0].name] : null, ["Mine and here", "evil gnp.pdf"]);
+  is("a text that fits once its pasted spaces are made one is taken", problem({ explanation: `${"x ".repeat(1_400)}${" ".repeat(500)}end` }), "taken");
   is("empty explanation", problem({ explanation: "   " }), "explanation");
   is("no explanation", problem({}), "explanation");
   is("explanation over the ceiling is refused, never cut", problem({ explanation: "x".repeat(MAX_APPEAL_TEXT + 1) }), "explanation_long");
@@ -179,7 +184,11 @@ part("Each state's words, with its number and the reason of a final answer");
     "Request LA-0000-0001: Upheld.", "We looked again and kept our decision.", "Why: The notice names the original.",
     'You can still take our decision to a court: section 16 of our Terms, "Governing law", says which law and courts apply.',
   ]);
-  is("reversed product: back as it was", appealStateWords({ ...base, state: "reversed", moves: [{ state: "reversed", at: "x", by: "operator", reason: "Licence shown." }] }).slice(2), [
+  const reversed = { ...base, state: "reversed" as const, moves: [{ state: "reversed" as const, at: "x", by: "operator" as const, reason: "Licence shown." }] };
+  is("reversed product, putting it back not confirmed: never 'back as it was'", appealStateWords(reversed).slice(2), [
+    "Why: Licence shown.", "We are putting back what was taken down. This page will say when it is back.",
+  ]);
+  is("reversed product, putting it back confirmed: back as it was", appealStateWords(reversed, true).slice(2), [
     "Why: Licence shown.", "What was taken down is back as it was.",
   ]);
   is("reversed link: says it cannot be put back, never 'back as it was'", appealStateWords({ number: "LA-0000-0002", decision: decisionKey(LINK), state: "reversed", moves: [{ state: "reversed", at: "x", by: "operator", reason: "Licence shown." }] }).slice(2), [

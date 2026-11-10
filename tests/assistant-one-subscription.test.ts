@@ -352,10 +352,11 @@ async function main(): Promise<void> {
   // GETs platform-subscription-search already prices for the same essential event.
   const held = Math.min((startCalls as number) * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds + wait / 1000, cutoff / 1000);
   const extra = held - PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds;
-  is("the cutoff is the smaller bound, and it is longer than what is already priced", [cutoff / 1000 < (startCalls as number) * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds, extra > 0], [true, true]);
+  // The cutoff is the two GETs' time already priced for the same event: the start fits inside it and adds nothing.
+  is("the cutoff is the smaller bound, and it fits inside what is already priced", [cutoff / 1000 < (startCalls as number) * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds, cutoff / 1000, extra], [true, PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds, 0]);
   for (const tier of ["creator", "pro", "scale"] as const) {
     const expected = extra * PLATFORM_SUBSCRIPTION_SEARCH.memoryGb * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGbHour / 3600 * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow;
-    is(`${tier}: the seconds past the two GETs already priced, at every essential event of the month`, [line ? line.monthlyUsd(tier) : null, expected > 0], [expected, true]);
+    is(`${tier}: the seconds past the two GETs already priced, at every essential event of the month, are none`, [line ? line.monthlyUsd(tier) : null, expected], [0, 0]);
   }
 
   part("The start's cutoff holds: no Stripe request is sent past it, and no wait is begun that would end past it");

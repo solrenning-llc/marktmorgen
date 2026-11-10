@@ -157,6 +157,7 @@ export const fr: BuyerWords = {
   unitSaving: (percent) => `soit ${percent}\u00a0% d’économie`,
   chooseOptionFor: (title) => `Choisissez une option pour ${title}`,
   chooseOne: "Choisissez-en une",
+  optionFromLink: (label) => `Vous venez pour ${label}, cette option est donc choisie ci-dessous. Vous pouvez en choisir une autre.`,
   recommended: "Recommandé",
   recommendedAfter: " (recommandé)",
   howToPayFor: (title) => `Comment payer ${title}`,

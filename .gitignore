@@ -42,3 +42,7 @@ next-env.d.ts
 
 .vercel
 zapier/node_modules/
+
+# Python bytecode from the scripts
+__pycache__/
+*.pyc

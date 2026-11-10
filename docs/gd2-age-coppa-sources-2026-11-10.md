@@ -1,0 +1,28 @@
+# GD2(i) — Fontes de COPPA e limites da confirmação de idade
+
+Conferência: 10/11/2026. Unidade parcial de 568[GD2](i). O benefício é evitar implementar uma caixa contratual como se certificasse privacidade infantil ou trocar a política vigente por uma idade extraída de outra finalidade jurídica. Nenhuma caixa de idade foi implementada. Nenhuma data de nascimento, documento, biometria ou dado de criança foi coletado. Não houve conta, serviço, aceite, pagamento ou contato externo.
+
+## Fontes oficiais e alcance
+
+- [16 CFR Part 312, eCFR](https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-312), especialmente §§ 312.2–312.5, lidos em 10/11/2026. A página informa atualização do título até 6 de novembro de 2026 e se identifica como autoritativa, mas não edição oficial. Criança é pessoa com menos de 13 anos; a regra alcança operadores dirigidos a crianças e conhecimento efetivo da coleta infantil. Público misto é categoria própria. Aviso e consentimento parental verificável prévio têm condições e exceções específicas, não liberação geral.
+- [Regra final de 22/04/2025, 90 FR 16918](https://www.federalregister.gov/documents/2025/04/22/2025-05904/childrens-online-privacy-protection-rule), seção DATES lida em 10/11/2026: vigência em 23/06/2025; conformidade geral até 22/04/2026, com exceções de transição em 312.11(d)(1), (d)(4) e (g). Não reutilizar o prazo geral como tolerância futura.
+- [FAQ da FTC](https://www.ftc.gov/business-guidance/resources/complying-coppa-frequently-asked-questions), A.12, B.7, D.4–D.7 e H.3, lidas em 10/11/2026: orientação da equipe, não vinculante, cujo cabeçalho manda consultar a revisão de 2025. Termos proibindo crianças não resolvem, sozinhos, a classificação do serviço. A orientação distingue bloquear crianças em serviço de público geral de operar serviço dirigido a crianças/público misto; não autoriza usar o segundo como se fosse o primeiro. Operação no exterior não produz isenção automática para coleta infantil com o vínculo descrito na orientação.
+- [Notícia da FTC de 25/02/2026 sobre verificação etária](https://www.ftc.gov/news-events/news/press-releases/2026/02/ftc-issues-coppa-policy-statement-incentivize-use-age-verification-technologies-protect-children), lida em 10/11/2026: descreve discricionariedade de fiscalização condicionada a finalidade, minimização, exclusão e salvaguardas; não é dispensa geral. A íntegra da declaração e sua permanência sem alteração não foram certificadas nesta unidade. Não é autorização para coletar documentos ou contratar verificação.
+
+## Política existente e lacuna concreta
+
+Os Termos, seção 1, exigem **18 anos ou maioridade local mais alta** para usar os Serviços. A Política de Privacidade, seção 9, informa que os Serviços não se dirigem a menores de 18. São fatos do texto atual, não conclusão sobre todas as leis. COPPA não define uma idade universal de contratação; leis de capacidade e regras de outras jurisdições continuam pendentes. Nenhum desses textos ou identificadores foi alterado.
+
+Leitura de código no main consultado: app/api/store/claim/route.ts recebe endereço da loja, nome, bio e a opção de outra loja; não contém uma confirmação explícita de idade nessa rota. Isso não é teste de todos os ingressos ou prova de que um usuário menor passou pelo sistema. O ingresso de equipe em app/api/auth/join/route.ts é outro fluxo; não foi confundido com criação de loja. O presente teste documental confere a política dos arquivos atuais e os limites deste relato, sem autenticar uma pessoa.
+
+A caixa contratual pedida pelo dono deve ser separada da triagem COPPA. Segundo a FAQ H.3, uma caixa afirmando idade acima de 12, isoladamente, não é mecanismo neutro de triagem etária. Uma caixa de confirmação não é consentimento parental verificável por si só. Logo, não atribuir a uma declaração do criador prova de identidade, idade de compradores, classificação real da loja ou consentimento de pais. Esta é uma inferência de implementação a partir das fontes; o estudo não escolhe mecanismo de verificação.
+
+## Depende do dono
+
+Continuam pendentes o enquadramento factual do serviço e das lojas, a revisão das demais jurisdições e dos caminhos de ingresso, e o desenho que executa a política sem se passar por consentimento parental ou triagem neutra. A proibição pedida de lojas voltadas a menores de 13 ainda precisa de implementação e prova próprias; não foi considerada cumprida pelos Termos existentes. A confirmação precisa ser conferida pelo servidor, além da interface, e o comportamento de usuário já existente e acesso já pago deve preservar as regras do item 307. Nada aqui autoriza bloqueio retroativo ou exclusão de conteúdo.
+
+O desenho futuro precisa justificar os dados estritamente necessários, exclusão/exportação, prova e custeio. Custo futuro desconhecido nunca é zero; eventual fornecedor, retenção ou leitura nova requer teto e reserva antes do gasto, com os direitos completos dos planos no pior mês e nos intervalos mensal/anual. Custos fixos pertencem integralmente ao Marktmorgen, FX275. Não se calculou margem nem uma base mínima finita. Custos do próprio estudo/CI não foram medidos como zero.
+
+Sem I/O produtivo novo, chave ou retenção. PLANS_ON_SALE e OPENING_REQUESTED permanecem false. Preços, limites, comissão, tax gate, art. 9a e CURRENT_COMMERCIAL_TERMS não mudam. Este estudo não aplica uma dispensa nem certifica COPPA, capacidade contratual, idade de qualquer pessoa ou conclusão integral do GD2(i).
+
+Acessibilidade: documentação interna com títulos e links; 0 → 0 passos/decisões de interface. Sem navegador, pessoa, leitor de tela ou certificação AAA. Teste sintético documental, não teste de cumprimento jurídico ou de um cadastro real.

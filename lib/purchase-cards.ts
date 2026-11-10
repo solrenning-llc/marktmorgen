@@ -43,6 +43,7 @@ import {
   ORDERS_KEY_COMMANDS,
   ORDERS_LISTING_COMMANDS,
   ORDERS_PROGRESS_COMMANDS,
+  ORDERS_PROGRESS_MS,
 } from "@/lib/buyer-orders";
 import type { CardDelivery, CardKey, CardProgress, PurchaseCardModel } from "@/components/purchase-card";
 import type { OrdersShared } from "@/components/orders-shared";
@@ -146,12 +147,14 @@ export async function extrasFor(store: Store, email: string, listed: Purchase[],
  * before anything is read: every outline in one MGET read exactly (lib/course.ts, readCoursesExact), then every course's
  * lessons done in one round trip (lib/learn.ts, lessonsDoneIn). What could not be read, the store's room for it
  * included, is "unknown" for each course and said so on its card; the purchases themselves are still shown (rule 24).
+ * Waited on ORDERS_PROGRESS_MS at the most: a slow read is "unknown" too, so it never takes the opening past
+ * ORDERS_READ_MS and the whole list with it (review of #3522, MEDIUM). `ms` is for the tests.
  */
-async function progressOf(courses: { productId: string; courseId: string }[], email: string, meter: OrdersMeter): Promise<Extras["progress"]> {
-  const progress: Extras["progress"] = new Map();
-  if (!courses.length) return progress;
-  const unknown = () => new Map(courses.map(({ productId }) => [productId, "unknown" as const]));
-  try {
+export async function progressOf(courses: { productId: string; courseId: string }[], email: string, meter: OrdersMeter, ms = ORDERS_PROGRESS_MS): Promise<Extras["progress"]> {
+  if (!courses.length) return new Map();
+  const unknown = (): Extras["progress"] => new Map(courses.map(({ productId }) => [productId, "unknown" as const]));
+  const read = (async (): Promise<Extras["progress"]> => {
+    const progress: Extras["progress"] = new Map();
     await meter.take(new Set(courses.map(({ courseId }) => courseId)).size * ORDERS_PROGRESS_COMMANDS);
     const outlines = await readCoursesExact(courses.map(({ courseId }) => courseId));
     const done = await lessonsDoneIn([...outlines.values()] as Course[], email);
@@ -161,9 +164,18 @@ async function progressOf(courses: { productId: string; courseId: string }[], em
       progress.set(productId, found ?? "unknown");
     }
     return progress;
-  } catch (error) {
+  })().catch((error: unknown) => {
     if (!(error instanceof OrdersBusy || error instanceof OrdersLate)) console.error("reading course progress failed", error);
     return unknown();
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<Extras["progress"]>((resolve) => {
+    timer = setTimeout(() => resolve(unknown()), ms);
+  });
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -277,7 +289,7 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
     if (!found) return null;
     const id = `cp${createHash("sha256").update(`${purchase.reference}|${slot}`).digest("hex").slice(0, 10)}`;
     if (found === "unknown") return { id, text: words.progressUnread, percent: null };
-    return { id, text: words.lessonsDone(found.done, found.total), percent: Math.round((found.done / found.total) * 100) };
+    return { id, text: words.lessonsDone(found.done, found.total), percent: Math.floor((found.done / found.total) * 100) };
   };
 
   const reviewableIn = purchase.kind !== "imported" && inOrder(purchase).some((id) => extras.reviewing.has(id));

@@ -21,11 +21,11 @@ import OrdersPage from "@/app/[handle]/orders/page";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { OrdersBusy, type OrdersMeter, type Purchase, ordersLinkFor } from "@/lib/buyer-orders";
-import { ORDERS_PROGRESS_COMMANDS } from "@/lib/buyer-orders-rules";
+import { ORDERS_PROGRESS_COMMANDS, ORDERS_PROGRESS_MS, ORDERS_READ_MS } from "@/lib/buyer-orders-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { type Course, saveCourse } from "@/lib/course";
 import { lessonsDoneIn, markLesson } from "@/lib/learn";
-import { coursesOf, extrasFor } from "@/lib/purchase-cards";
+import { coursesOf, extrasFor, progressOf } from "@/lib/purchase-cards";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { type Store, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 
@@ -115,8 +115,8 @@ test("a course on the list says how far the buyer is, in words that describe its
   assert.ok(said, html);
   // The course's button is described by those words, so a screen reader says them with the course they are for.
   assert.match(html, new RegExp(`<a[^>]*aria-describedby="${said[1]}"[^>]*>${words.openTitle("Watercolor basics")}</a>`));
-  // The bar shows the same share, hidden from screen readers, which have the words.
-  assert.match(html, /<div class="cm-progress mt-2" aria-hidden="true"><span style="width:67%"><\/span><\/div>/);
+  // The bar shows the same share, hidden from screen readers, which have the words; rounded down, never showing done before it is.
+  assert.match(html, /<div class="cm-progress mt-2" aria-hidden="true"><span style="width:66%"><\/span><\/div>/);
   assert.ok(!html.includes("of 4 lessons"), "a lesson taken out is not counted");
 });
 
@@ -234,4 +234,26 @@ test("every language says how far the buyer is, and that it could not be checked
     }
   }
   assert.equal(ordersWords("en").lessonsDone(1, 1), "1 of 1 lesson done", "one lesson in the singular");
+});
+
+test("a slow read of the outlines never holds the list: past its own short wait every course says it could not check", async () => {
+  const { product } = await shop();
+  assert.ok(ORDERS_PROGRESS_MS > 0 && ORDERS_PROGRESS_MS * 4 < ORDERS_READ_MS, "a wait of its own, well inside the opening's");
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "MGET")) await new Promise((resolve) => setTimeout(resolve, 400));
+    return original(commands);
+  }) as typeof redis.pipeline;
+  try {
+    const meter = { take: async () => {} } as unknown as OrdersMeter;
+    const started = Date.now();
+    const read = await progressOf([{ productId: product, courseId: COURSE }], BUYER, meter, 50);
+    assert.ok(Date.now() - started < 300, "answered at its own wait, not the read's");
+    assert.equal(read.get(product), "unknown");
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.deepEqual((await progressOf([{ productId: product, courseId: COURSE }], BUYER, { take: async () => {} } as unknown as OrdersMeter, 2_000)).get(product), { done: 0, total: 3 }, "without delay it reads");
+  const source = (await import("node:fs")).readFileSync("lib/purchase-cards.ts", "utf8");
+  assert.ok(source.includes("}), email, meter);"), "the list waits on the default ORDERS_PROGRESS_MS");
 });

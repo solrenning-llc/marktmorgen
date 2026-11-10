@@ -173,15 +173,23 @@ export function readLabelOutcome(raw: unknown, change: BulkChange): LabelOutcome
   const noRoom = optional(a.noRoom);
   const failed = optional(a.failed);
   if (noRoom === null || failed === null) return null;
+  // The route always sends both lists. An undo puts back what each contact lost, so a removal says it for every
+  // address it changed, and an add only for addresses it changed; left out, short or naming another address, the
+  // answer is not in its shape and no undo is built on a guess (Codex H2, LOW on #3543).
   const rawTaken = change === "remove" ? a.removed : a.replaced;
-  if (rawTaken !== undefined && !Array.isArray(rawTaken)) return null;
+  if (!Array.isArray(rawTaken)) return null;
+  const changed = new Set(a.changed as string[]);
+  const named = new Set<string>();
   const taken: Taken[] = [];
-  for (const entry of (rawTaken as unknown[] | undefined) ?? []) {
+  for (const entry of rawTaken as unknown[]) {
     if (!entry || typeof entry !== "object") return null;
     const e = entry as Record<string, unknown>;
     if (typeof e.email !== "string" || typeof e.label !== "string" || !whole(e.at)) return null;
+    if (!changed.has(e.email) || named.has(e.email)) return null;
+    named.add(e.email);
     taken.push(entry as Taken);
   }
+  if (change === "remove" && named.size !== changed.size) return null;
   return { changed: a.changed as string[], taken, already: a.already, full: a.full, notOnList: a.notOnList, noRoom, failed };
 }
 

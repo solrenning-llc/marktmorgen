@@ -55,9 +55,16 @@ const distinct = (values: (string | null)[]) => [...new Set(values.filter((v): v
  * chosen orders is a polite live status; nothing is done before the confirmation (3.3.6), which gets focus; the
  * result gets focus and stays on the screen; a button in use is aria-disabled, never disabled, so focus stays on
  * it. No time limit and no motion.
+ *
+ * The list above already shows each order once: this table is a second copy, so it is drawn only while the box is
+ * open, and a closed box holds only its summary (the sales list keeps one row per order, tests/e2e/
+ * shipment-acknowledgment.mjs, and the page carries no hidden copy). What was chosen, asked or done is kept while it
+ * is closed. `defaultOpen` is for a render that starts open.
  */
-export function SalesBulkActions({ sales, canLabel, canExport }: { sales: BulkSaleRow[]; canLabel: boolean; canExport: boolean }) {
+export function SalesBulkActions({ sales, canLabel, canExport, defaultOpen = false }: { sales: BulkSaleRow[]; canLabel: boolean; canExport: boolean; defaultOpen?: boolean }) {
   const id = useId();
+  const [open, setOpen] = useState(defaultOpen);
+  const box = useRef<HTMLDetailsElement>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [action, setAction] = useState<Action>("resend");
   const [label, setLabel] = useState("");
@@ -77,6 +84,10 @@ export function SalesBulkActions({ sales, canLabel, canExport }: { sales: BulkSa
   useEffect(() => {
     if (allBox.current) allBox.current.indeterminate = selected.length > 0 && !all;
   });
+  // Opened before the page was ready: the toggle came before this listened, so it is read once here.
+  useEffect(() => {
+    if (box.current?.open) setOpen(true);
+  }, []);
   useEffect(() => {
     const next = focusNext.current;
     if (!next) return;
@@ -221,133 +232,137 @@ export function SalesBulkActions({ sales, canLabel, canExport }: { sales: BulkSa
   const needsLabel = action === "label-add" || action === "label-remove";
 
   return (
-    <details className="mt-6 rounded-[var(--r-md)] bg-white p-5">
+    <details ref={box} open={defaultOpen || undefined} onToggle={(event) => setOpen(event.currentTarget.open)} className="mt-6 rounded-[var(--r-md)] bg-white p-5">
       <summary className="flex min-h-11 cursor-pointer items-center font-semibold text-ink">Act on several orders at once</summary>
-      <h3 ref={title} tabIndex={-1} className="mt-3 text-base font-semibold text-ink">
-        Choose orders, then what to do
-      </h3>
-      <p className="mt-1 text-sm text-ink-soft">{`Up to ${MAX_BULK_SALES} orders at a time. Nothing happens until you confirm. Refunds and charges are never done here: make them one at a time in Stripe.`}</p>
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <caption className="sr-only">Orders you can choose</caption>
-          <thead>
-            <tr>
-              <th scope="col" className="w-12 p-0">
-                <label className="flex min-h-11 min-w-11 items-center justify-center">
-                  <input ref={allBox} type="checkbox" className="h-5 w-5" checked={all} onChange={toggleAll} />
-                  <span className="sr-only">{all ? "Choose no orders" : `Choose all ${sales.length} orders`}</span>
-                </label>
-              </th>
-              <th scope="col" className="px-2 py-2 font-semibold text-ink">Product</th>
-              <th scope="col" className="px-2 py-2 font-semibold text-ink">Buyer</th>
-              <th scope="col" className="px-2 py-2 font-semibold text-ink">Paid on</th>
-              <th scope="col" className="px-2 py-2 font-semibold text-ink">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sales.map((sale) => {
-              const day = new Date(sale.paidAt * 1000).toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" });
-              return (
-                <tr key={sale.reference} className="border-t border-line">
-                  <td className="p-0">
+      {open ? (
+        <>
+          <h3 ref={title} tabIndex={-1} className="mt-3 text-base font-semibold text-ink">
+            Choose orders, then what to do
+          </h3>
+          <p className="mt-1 text-sm text-ink-soft">{`Up to ${MAX_BULK_SALES} orders at a time. Nothing happens until you confirm. Refunds and charges are never done here: make them one at a time in Stripe.`}</p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full border-collapse text-left text-sm">
+              <caption className="sr-only">Orders you can choose</caption>
+              <thead>
+                <tr>
+                  <th scope="col" className="w-12 p-0">
                     <label className="flex min-h-11 min-w-11 items-center justify-center">
-                      <input type="checkbox" className="h-5 w-5" checked={selected.includes(sale.reference)} onChange={() => toggle(sale.reference)} />
-                      <span className="sr-only">{`Choose ${sale.title}, ${sale.email ?? "no email address"}, ${day}`}</span>
+                      <input ref={allBox} type="checkbox" className="h-5 w-5" checked={all} onChange={toggleAll} />
+                      <span className="sr-only">{all ? "Choose no orders" : `Choose all ${sales.length} orders`}</span>
                     </label>
-                  </td>
-                  <th scope="row" className="px-2 py-2 font-normal text-ink [overflow-wrap:anywhere]">{sale.title}</th>
-                  <td className="px-2 py-2 text-ink [overflow-wrap:anywhere]">{sale.email ?? "No email address"}</td>
-                  <td className="px-2 py-2 text-ink">{day}</td>
-                  <td className="px-2 py-2 text-ink">{Number.isSafeInteger(sale.amount) && sale.amount >= 0 ? formatMoney(sale.amount, sale.currency) : "Not known"}</td>
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-semibold text-ink">Product</th>
+                  <th scope="col" className="px-2 py-2 font-semibold text-ink">Buyer</th>
+                  <th scope="col" className="px-2 py-2 font-semibold text-ink">Paid on</th>
+                  <th scope="col" className="px-2 py-2 font-semibold text-ink">Amount</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p role="status" className="mt-2 text-sm font-semibold text-ink">{`${selected.length} of ${count(sales.length, "order", "orders")} chosen`}</p>
-      <form onSubmit={review} aria-busy={busy} className="mt-3" noValidate>
-        <fieldset>
-          <legend className="field-label">What to do with them</legend>
-          <div className="mt-1 flex flex-wrap gap-x-6">
-            {actions.map(({ value, words }) => (
-              <label key={value} className="flex min-h-11 items-center gap-2 text-sm text-ink">
-                <input type="radio" name={`${id}-action`} className="h-5 w-5" checked={action === value} onChange={() => {
+              </thead>
+              <tbody>
+                {sales.map((sale) => {
+                  const day = new Date(sale.paidAt * 1000).toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" });
+                  return (
+                    <tr key={sale.reference} className="border-t border-line">
+                      <td className="p-0">
+                        <label className="flex min-h-11 min-w-11 items-center justify-center">
+                          <input type="checkbox" className="h-5 w-5" checked={selected.includes(sale.reference)} onChange={() => toggle(sale.reference)} />
+                          <span className="sr-only">{`Choose ${sale.title}, ${sale.email ?? "no email address"}, ${day}`}</span>
+                        </label>
+                      </td>
+                      <th scope="row" className="px-2 py-2 font-normal text-ink [overflow-wrap:anywhere]">{sale.title}</th>
+                      <td className="px-2 py-2 text-ink [overflow-wrap:anywhere]">{sale.email ?? "No email address"}</td>
+                      <td className="px-2 py-2 text-ink">{day}</td>
+                      <td className="px-2 py-2 text-ink">{Number.isSafeInteger(sale.amount) && sale.amount >= 0 ? formatMoney(sale.amount, sale.currency) : "Not known"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p role="status" className="mt-2 text-sm font-semibold text-ink">{`${selected.length} of ${count(sales.length, "order", "orders")} chosen`}</p>
+          <form onSubmit={review} aria-busy={busy} className="mt-3" noValidate>
+            <fieldset>
+              <legend className="field-label">What to do with them</legend>
+              <div className="mt-1 flex flex-wrap gap-x-6">
+                {actions.map(({ value, words }) => (
+                  <label key={value} className="flex min-h-11 items-center gap-2 text-sm text-ink">
+                    <input type="radio" name={`${id}-action`} className="h-5 w-5" checked={action === value} onChange={() => {
+                        stale();
+                        setAction(value);
+                      }} />
+                    {words}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {needsLabel ? (
+              <div className="mt-3 text-sm">
+                <label htmlFor={`${id}-label`} className="field-label block">
+                  Label
+                </label>
+                <input id={`${id}-label`} className="field mt-1" value={label} onChange={(event) => {
                     stale();
-                    setAction(value);
-                  }} />
-                {words}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        {needsLabel ? (
-          <div className="mt-3 text-sm">
-            <label htmlFor={`${id}-label`} className="field-label block">
-              Label
-            </label>
-            <input id={`${id}-label`} className="field mt-1" value={label} onChange={(event) => {
-                stale();
-                setLabel(event.target.value);
-              }} aria-describedby={`${id}-label-hint`} />
-            <span id={`${id}-label-hint`} className="mt-1 block text-xs text-ink-soft">
-              Only buyers on your list have a contact to label. A label here sends no email and starts no automation.
-            </span>
-          </div>
-        ) : null}
-        <button type="submit" className="btn btn-secondary mt-4" aria-disabled={busy || undefined}>
-          Check what will happen
-        </button>
-        {error && !confirm && !done ? (
-          <p className="mt-2 text-sm text-danger-text" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </form>
-      {confirm ? (
-        <section aria-labelledby={`${id}-confirm`} className="mt-4 rounded-[var(--r-md)] bg-sand p-4">
-          <h4 id={`${id}-confirm`} ref={confirmTitle} tabIndex={-1} className="font-semibold text-ink">
-            Check before you confirm
-          </h4>
-          <p className="mt-1 text-sm text-ink">{confirm.words}</p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            {confirm.ready ? (
-              <button type="button" className="btn btn-primary" aria-disabled={busy || undefined} onClick={() => void apply()}>
-                Confirm
-              </button>
+                    setLabel(event.target.value);
+                  }} aria-describedby={`${id}-label-hint`} />
+                <span id={`${id}-label-hint`} className="mt-1 block text-xs text-ink-soft">
+                  Only buyers on your list have a contact to label. A label here sends no email and starts no automation.
+                </span>
+              </div>
             ) : null}
-            <button type="button" className="btn btn-secondary" onClick={() => {
-                stale();
-                focusNext.current = "title";
-              }}>
-              Go back
+            <button type="submit" className="btn btn-secondary mt-4" aria-disabled={busy || undefined}>
+              Check what will happen
             </button>
-          </div>
-          {error ? (
-            <p className="mt-2 text-sm text-danger-text" role="alert">
-              {error}
-            </p>
+            {error && !confirm && !done ? (
+              <p className="mt-2 text-sm text-danger-text" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </form>
+          {confirm ? (
+            <section aria-labelledby={`${id}-confirm`} className="mt-4 rounded-[var(--r-md)] bg-sand p-4">
+              <h4 id={`${id}-confirm`} ref={confirmTitle} tabIndex={-1} className="font-semibold text-ink">
+                Check before you confirm
+              </h4>
+              <p className="mt-1 text-sm text-ink">{confirm.words}</p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                {confirm.ready ? (
+                  <button type="button" className="btn btn-primary" aria-disabled={busy || undefined} onClick={() => void apply()}>
+                    Confirm
+                  </button>
+                ) : null}
+                <button type="button" className="btn btn-secondary" onClick={() => {
+                    stale();
+                    focusNext.current = "title";
+                  }}>
+                  Go back
+                </button>
+              </div>
+              {error ? (
+                <p className="mt-2 text-sm text-danger-text" role="alert">
+                  {error}
+                </p>
+              ) : null}
+            </section>
           ) : null}
-        </section>
-      ) : null}
-      {done ? (
-        <div className="mt-4">
-          <p ref={doneLine} tabIndex={-1} className="text-sm text-ink">
-            {done.words}
-          </p>
-          {done.undo ? (
-            <button type="button" className="btn btn-secondary btn-sm mt-2" aria-disabled={busy || undefined} onClick={() => void undo()}>
-              Undo
-            </button>
-          ) : done.noUndo ? (
-            <p className="mt-1 text-sm text-ink-soft">{done.noUndo}</p>
+          {done ? (
+            <div className="mt-4">
+              <p ref={doneLine} tabIndex={-1} className="text-sm text-ink">
+                {done.words}
+              </p>
+              {done.undo ? (
+                <button type="button" className="btn btn-secondary btn-sm mt-2" aria-disabled={busy || undefined} onClick={() => void undo()}>
+                  Undo
+                </button>
+              ) : done.noUndo ? (
+                <p className="mt-1 text-sm text-ink-soft">{done.noUndo}</p>
+              ) : null}
+              {error ? (
+                <p className="mt-2 text-sm text-danger-text" role="alert">
+                  {error}
+                </p>
+              ) : null}
+            </div>
           ) : null}
-          {error ? (
-            <p className="mt-2 text-sm text-danger-text" role="alert">
-              {error}
-            </p>
-          ) : null}
-        </div>
+        </>
       ) : null}
       <p role="status" className="sr-only">
         {live}

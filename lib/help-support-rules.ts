@@ -37,3 +37,18 @@ export function supportScreen(raw: unknown): string {
   const path = raw.split(/[?#]/)[0];
   return /^\/studio(\/[a-z0-9-]{1,40}){0,3}$/.test(path) ? path : "the studio";
 }
+
+/**
+ * When a store at the day's cap can send again, from the seconds left on its counter, rounded up so it is never
+ * earlier than true; a wait that could not be read is said as the window's own bound, never as "now".
+ */
+export function supportWaitWords(seconds: number | null): string {
+  if (seconds === null || !Number.isSafeInteger(seconds) || seconds <= 0) return "You can send again within 24 hours.";
+  if (seconds <= 60) return "You can send again in a minute.";
+  if (seconds < 3_600) {
+    const minutes = Math.ceil(seconds / 60);
+    return `You can send again in ${minutes} minutes.`;
+  }
+  const hours = Math.ceil(seconds / 3_600);
+  return hours === 1 ? "You can send again in an hour." : `You can send again in ${hours} hours.`;
+}

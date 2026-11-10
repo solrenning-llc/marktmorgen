@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/help/support/route";
-import { SupportHandoff, StudioHelp } from "@/components/studio-help";
+import { NO_ANSWER, SupportHandoff, StudioHelp } from "@/components/studio-help";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription } from "@/lib/store";
 import {
@@ -22,9 +22,12 @@ import {
   supportDraft,
   supportNumber,
   supportScreen,
+  supportWaitWords,
 } from "@/lib/help-support";
 import { paidPeriod } from "./billing-period-fixture";
-import { store as redis } from "./redis-stub";
+import { limitResetSeconds } from "@/lib/request-guard";
+import { advance, store as redis } from "./redis-stub";
+import { find, mount, texts } from "./client-hooks";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -33,7 +36,19 @@ const sent: { body: Sent; key: string | null }[] = [];
 /** Which sends fail, counted from the next one: "all", or the 1-based numbers of the calls that fail. */
 let failing: "none" | "all" | number[] = "none";
 let calls = 0;
+/** The signed-in creator a page's own relative requests are sent as, and what /api/store/help answers. */
+let pageCookie = "";
+let helpAnswer: { status: number; body: unknown } = { status: 502, body: { ok: false, error: "failed" } };
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  if (typeof input === "string" && input.startsWith("/")) {
+    if (input === "/api/store/help") return new Response(JSON.stringify(helpAnswer.body), { status: helpAnswer.status });
+    if (input === "/api/store/help/support") {
+      const headers = new Headers(init?.headers);
+      headers.set("cookie", pageCookie);
+      return POST(new NextRequest(`https://marktmorgen.com${input}`, { method: "POST", headers, body: init?.body as string }));
+    }
+    throw new Error(`unexpected page request ${input}`);
+  }
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     calls += 1;
@@ -47,8 +62,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const real = redis.pipeline.bind(redis);
 let countLost = false;
+let waitLost = false;
 redis.pipeline = (async (batch: Command[]) => {
   if (countLost && batch.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:rl:help-support:"))) throw new Error("synthetic Redis timeout");
+  if (waitLost && batch.some((c) => c[0] === "TTL")) throw new Error("synthetic Redis timeout");
   return real(batch);
 }) as typeof redis.pipeline;
 
@@ -148,7 +165,17 @@ async function main() {
   for (let i = 0; i < SUPPORT_PER_DAY - 2; i++) is(`request ${i + 3} goes`, (await send(cookie, { text: `Another question number ${i}.` })).status, 200);
   sent.length = 0;
   const busy = await send(cookie, { text: "One more question for today." });
-  is("the next one: 429, said in words", [busy.status, busy.data.error, String(busy.data.words).includes("Try again tomorrow")], [429, "busy", true]);
+  is("the next one: 429", [busy.status, busy.data.error], [429, "busy"]);
+  const waited = busy.data.retryInSeconds as number;
+  is("it says when, from the counter the first request opened: within the day, never more", waited > 86_000 && waited <= 86_400, true);
+  is("in words", String(busy.data.words), `Your store has sent ${SUPPORT_PER_DAY} requests to support in the last 24 hours, the most a day. You can send again in 24 hours. Or write to support@marktmorgen.com.`);
+  advance(20 * 3_600_000 + 60_000);
+  const later = await send(cookie, { text: "One more question for today." });
+  is("twenty hours on, still refused, and the wait is what is left, rounded up", [later.status, later.data.retryInSeconds, String(later.data.words).includes("You can send again in 4 hours.")], [429, 86_400 - 72_060, true]);
+  waitLost = true;
+  const noWait = await send(cookie, { text: "One more question for today." });
+  waitLost = false;
+  is("a wait that cannot be read is the window's own bound, never 'now'", [noWait.status, noWait.data.retryInSeconds, String(noWait.data.words).includes("You can send again within 24 hours.")], [429, null, true]);
   is("and nothing is sent", sent.length, 0);
 
   part("A count that cannot be read is never room: 503 and nothing sent");
@@ -185,6 +212,56 @@ async function main() {
   is("bounded like the server", open.includes(`maxLength="${MAX_SUPPORT_TEXT}"`), true);
   is("it says what is added and that no buyer's data goes", [open.includes("We add your store, your plan and this screen."), open.includes("Nothing about your buyers is sent.")], [true, true]);
   is("and the send is a button the creator presses, with a way back", [open.includes(">Send to support</button>"), open.includes(">Cancel</button>")], [true, true]);
+
+  part("The wait read from the counter: none for a counter that is not there");
+  is("no counter (TTL -2) is no wait known, never 'now'", await limitResetSeconds("help-support", "a-store-that-never-sent"), null);
+
+  part("The wait in words: rounded up, so never earlier than true");
+  is("each", [null, 0, -2, 30, 60, 61, 3_599, 3_600, 3_601, 86_400].map(supportWaitWords), [
+    "You can send again within 24 hours.", "You can send again within 24 hours.", "You can send again within 24 hours.",
+    "You can send again in a minute.", "You can send again in a minute.", "You can send again in 2 minutes.", "You can send again in 60 minutes.",
+    "You can send again in an hour.", "You can send again in 2 hours.", "You can send again in 24 hours.",
+  ]);
+
+  part("When the help gives no answer, a person can still be asked, about that same question");
+  (globalThis as { window?: unknown }).window = { location: { pathname: "/studio" } };
+  const helpBox = await mount(StudioHelp, { left: 10 });
+  const input = find(helpBox.tree(), (n) => n.type === "input")[0];
+  (input.props?.onChange as (e: { target: { value: string } }) => void)({ target: { value: "How do I sell in yen?" } });
+  await helpBox.settle();
+  const submit = () => (find(helpBox.tree(), (n) => n.type === "form")[0].props?.onSubmit as (e: { preventDefault: () => void }) => Promise<void>)({ preventDefault() {} });
+  await submit();
+  await helpBox.settle();
+  const offered = find(helpBox.tree(), (n) => n.type === SupportHandoff);
+  is("the help said it had no answer", texts(helpBox.tree()).join("").includes("No answer just now."), true);
+  is("and offers support, with the question asked and no answer invented", offered.map((n) => [n.props?.question, n.props?.answer]), [["How do I sell in yen?", NO_ANSWER]]);
+  helpAnswer = { status: 200, body: { ok: true, value: { answer: "Open Products.", sources: [] }, left: 9 } };
+  await submit();
+  await helpBox.settle();
+  is("an answer replaces it with the answer's own offer", find(helpBox.tree(), (n) => n.type === SupportHandoff).map((n) => [n.props?.question, n.props?.answer]), [["How do I sell in yen?", "Open Products."]]);
+
+  part("At the cap, the form itself says when to try again");
+  const third = "help-support-c@example.test";
+  pageCookie = await creator(third, "helpsupportc");
+  for (let i = 0; i < SUPPORT_PER_DAY; i++) await send(pageCookie, { text: `Question number ${i} of the day.` });
+  const box = await mount(SupportHandoff, { question: "How do I sell in yen?", answer: NO_ANSWER });
+  const opener = find(box.tree(), (n) => n.type === "button" && texts(n.props?.children).includes("Send this to support"))[0];
+  (opener.props?.onClick as () => void)();
+  await box.settle();
+  sent.length = 0;
+  await (find(box.tree(), (n) => n.type === "form")[0].props?.onSubmit as (e: { preventDefault: () => void }) => Promise<void>)({ preventDefault() {} });
+  await box.settle();
+  const said = find(box.tree(), (n) => n.props?.role === "status").map((n) => texts(n.props?.children).join(""));
+  is("the refusal with the wait, in a status region", said.some((t) => t.includes("You can send again in 24 hours.")), true);
+  // A refusal of the studio's own guard (lib/studio-route.ts) answers with `message`: it is said as written, never as "could not send".
+  const guardBox = await mount(SupportHandoff, { question: "How do I sell in yen?", answer: NO_ANSWER, startOpen: true });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ ok: false, error: "studio_used", message: "Too many of these today. Try again tomorrow, or write to support." }), { status: 429 })) as typeof fetch;
+  await (find(guardBox.tree(), (n) => n.type === "form")[0].props?.onSubmit as (e: { preventDefault: () => void }) => Promise<void>)({ preventDefault() {} });
+  await guardBox.settle();
+  globalThis.fetch = realFetch;
+  is("the guard's own sentence is shown", find(guardBox.tree(), (n) => n.props?.role === "status").map((n) => texts(n.props?.children).join("")), ["Too many of these today. Try again tomorrow, or write to support."]);
+  is("nothing sent, and nothing said sent", [sent.length, find(box.tree(), (n) => n.props?.["data-support-sent"] !== undefined).length], [0, 0]);
 
   done();
 }

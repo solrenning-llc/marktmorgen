@@ -19,7 +19,7 @@ import { randomBytes } from "node:crypto";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_TITLES } from "@/lib/plan";
-import { essentialLimitState } from "@/lib/request-guard";
+import { essentialLimitState, limitResetSeconds } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import {
@@ -29,6 +29,7 @@ import {
   SUPPORT_WINDOW_SECONDS,
   cleanSupportText,
   supportScreen,
+  supportWaitWords,
 } from "@/lib/help-support-rules";
 
 export * from "@/lib/help-support-rules";
@@ -57,12 +58,14 @@ export type SupportProblem = "short" | "long" | "busy" | "unknown" | "unsent";
 export const SUPPORT_PROBLEMS: Record<SupportProblem, string> = {
   short: "Write a few words about what you need first.",
   long: `That is too long to send. Keep it under ${MAX_SUPPORT_TEXT.toLocaleString("en-US")} characters.`,
-  busy: `Your store has sent ${SUPPORT_PER_DAY} requests to support in the last 24 hours, the most a day. Try again tomorrow, or write to ${SUPPORT_EMAIL}.`,
+  busy: `Your store has sent ${SUPPORT_PER_DAY} requests to support in the last 24 hours, the most a day.`,
   unknown: `We could not check how many requests your store sent today, so nothing was sent. Try again in a moment, or write to ${SUPPORT_EMAIL}.`,
   unsent: `We could not send your request just now, so nothing was sent. Try again in a moment, or write to ${SUPPORT_EMAIL}.`,
 };
 
-export type SupportResult = { ok: true; number: string; copied: boolean } | { ok: false; problem: SupportProblem; words: string };
+export type SupportResult =
+  | { ok: true; number: string; copied: boolean }
+  | { ok: false; problem: SupportProblem; words: string; retryInSeconds?: number | null };
 
 const refuse = (problem: SupportProblem): SupportResult => ({ ok: false, problem, words: SUPPORT_PROBLEMS[problem] });
 
@@ -79,7 +82,11 @@ export async function sendSupportRequest(
   if (text.length < MIN_SUPPORT_TEXT) return refuse("short");
   if (text.length > MAX_SUPPORT_TEXT) return refuse("long");
   const counted = await essentialLimitState("help-support", input.store.sid || input.store.handle, SUPPORT_PER_DAY, SUPPORT_WINDOW_SECONDS);
-  if (counted === "exceeded") return refuse("busy");
+  if (counted === "exceeded") {
+    // When the day's window starts again, read from the counter itself: the first request opened it, so it is not "tomorrow".
+    const retryInSeconds = await limitResetSeconds("help-support", input.store.sid || input.store.handle);
+    return { ok: false, problem: "busy", retryInSeconds, words: `${SUPPORT_PROBLEMS.busy} ${supportWaitWords(retryInSeconds)} Or write to ${SUPPORT_EMAIL}.` };
+  }
   if (counted !== "within") return refuse("unknown");
   const facts = [
     `Request ${number}, sent from the studio's help.`,

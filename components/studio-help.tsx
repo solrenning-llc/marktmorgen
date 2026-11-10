@@ -22,6 +22,8 @@ export function StudioHelp({ left: startLeft }: { left: number | null }) {
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [note, setNote] = useState("");
+  // The question the help could not answer: a person can still be asked about it.
+  const [unanswered, setUnanswered] = useState("");
   const [left, setLeft] = useState(startLeft);
   const allowanceId = useId();
 
@@ -30,6 +32,7 @@ export function StudioHelp({ left: startLeft }: { left: number | null }) {
     if (busy || question.trim().length < 3) return;
     setBusy(true);
     setNote("");
+    setUnanswered("");
     setAnswer(null);
     try {
       const response = await fetch("/api/store/help", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) });
@@ -39,6 +42,7 @@ export function StudioHelp({ left: startLeft }: { left: number | null }) {
         if (typeof data.left === "number") setLeft(data.left);
         return;
       }
+      setUnanswered(question.trim());
       setNote(
         data.error === "used"
           ? "This month's AI help is used up; it starts again with your next billing month. The help center is always open."
@@ -47,6 +51,7 @@ export function StudioHelp({ left: startLeft }: { left: number | null }) {
             : "No answer just now. Started attempts count toward the monthly allowance. Try again, or open the help center.",
       );
     } catch {
+      setUnanswered(question.trim());
       setNote("No answer just now. Started attempts count toward the monthly allowance. Try again, or open the help center.");
     } finally {
       setBusy(false);
@@ -96,11 +101,15 @@ export function StudioHelp({ left: startLeft }: { left: number | null }) {
       {answer ? <SupportHandoff key={`${answer.asked}
 ${answer.answer}`} question={answer.asked ?? ""} answer={answer.answer} /> : null}
       {note ? <p role="status" className="mt-3 text-sm font-semibold text-ink">{note}</p> : null}
+      {note && unanswered ? <SupportHandoff key={unanswered} question={unanswered} answer={NO_ANSWER} /> : null}
     </section>
   );
 }
 
 type Sent = { number: string; copied: boolean };
+
+/** What the draft says was answered when the help gave no answer at all. */
+export const NO_ANSWER = "The help gave no answer.";
 
 /**
  * "Send this to support" (lib/help-support.ts): after an answer, the question and the answer go to a person in
@@ -139,13 +148,14 @@ export function SupportHandoff({ question, answer, startOpen = false }: { questi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: draft, screen: window.location.pathname }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: Sent; words?: string };
+      // Our refusals say `words`; the studio's own guard (lib/studio-route.ts) says `message`: each is shown as written.
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: Sent; words?: string; message?: string };
       if (data.ok && data.value) {
         setSent(data.value);
         focusNext.current = "result";
         return;
       }
-      setNote(data.words || "We could not send your request just now, so nothing was sent. Try again in a moment.");
+      setNote(data.words || data.message || "We could not send your request just now, so nothing was sent. Try again in a moment.");
     } catch {
       setNote("We could not send your request just now, so nothing was sent. Try again in a moment.");
     } finally {

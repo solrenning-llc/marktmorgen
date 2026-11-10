@@ -1,0 +1,10 @@
+{
+  "cx1-generated-c0-prefix.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  first duplicate is retained",
+      "40 checks, 1 failing."
+    ]
+  }
+}

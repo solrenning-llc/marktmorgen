@@ -1,0 +1,11 @@
+--- head/lib/generated-code-check.ts
++++ causal-only/lib/generated-code-check.ts
+@@ -153,7 +153,7 @@
+ /** Whether a URL in a loading place points away from the store: another host, or a scheme that is not a plain file. */
+ export function outsideUrl(raw: string, allowedHosts: readonly string[]): boolean {
+   // Browsers remove tabs and line breaks; spaces inside an authority are not removed.
+-  const url = raw.trim().replace(/[\t\r\n]/g, "");
++  const url = raw.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "").trim().replace(/[\t\r\n]/g, "");
+   if (!url || url.startsWith("#")) return false;
+   if (/^data:image\/(?:png|jpeg|gif|webp|avif);/i.test(url)) return false;
+   // A failed authority match must not turn //user@host, ///host or an invalid port into a relative file.

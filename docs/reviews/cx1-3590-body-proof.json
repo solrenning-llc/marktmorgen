@@ -1,0 +1,94 @@
+{
+  "head": "aff6df7a7d8f984715422ba490a146bc07f759b9",
+  "priorRef": "79f00b19b",
+  "priorBlob": "b114548d38c14742d9959ddf173ed0ff2e68b759",
+  "headBody": "\n  // Browsers remove tabs and line breaks; spaces inside an authority are not removed.\n  const url = raw.trim().replace(/[\\t\\r\\n]/g, \"\");\n  if (!url || url.startsWith(\"#\")) return false;\n  if (/^data:image\\/(?:png|jpeg|gif|webp|avif);/i.test(url)) return false;\n  // A failed authority match must not turn //user@host, ///host or an invalid port into a relative file.\n  // URL parsing is local: it normalizes the destination without fetching it.\n  if (/^(?:https?|wss?):/i.test(url) || url.startsWith(\"//\")) {\n    try {\n      const destination = new URL(url, \"https://generated-code.invalid/\");\n      return !allowedHosts.some((host) => host.toLowerCase() === destination.hostname.toLowerCase());\n    } catch {\n      return true;\n    }\n  }\n  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return true;\n  // A relative address on the apps domain itself (\"/files/a.png\", \"a.png\", \"./a.png\"); \"\\\\host\" reads as \"//host\" to browsers.\n  return url.startsWith(\"\\\\\") || url.startsWith(\"/\\\\\");",
+  "priorBody": "\n  // Browsers ignore control characters and spaces inside a scheme (\"java\\tscript:\").\n  const url = raw.trim().replace(/[\\u0000-\\u001f\\u007f\\s]+/g, \"\");\n  if (!url || url.startsWith(\"#\")) return false;\n  if (/^data:image\\/(?:png|jpeg|gif|webp|avif);/i.test(url)) return false;\n  const host = url.match(/^(?:(?:https?|wss?):)?\\/\\/([^/?#:@]+)(?::\\d+)?(?:[/?#]|$)/i);\n  if (host) return !allowedHosts.map((h) => h.toLowerCase()).includes(host[1].toLowerCase());\n  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return true;\n  // A relative address on the apps domain itself (\"/files/a.png\", \"a.png\", \"./a.png\"); \"\\\\host\" reads as \"//host\" to browsers.\n  return url.startsWith(\"\\\\\") || url.startsWith(\"/\\\\\");",
+  "cases": [
+    {
+      "cp": 1,
+      "address": "//collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 1,
+      "address": "https://collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 2,
+      "address": "//collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 2,
+      "address": "https://collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 3,
+      "address": "//collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 3,
+      "address": "https://collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 8,
+      "address": "//collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 8,
+      "address": "https://collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 14,
+      "address": "//collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 14,
+      "address": "https://collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 31,
+      "address": "//collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    },
+    {
+      "cp": 31,
+      "address": "https://collector.example/p.png",
+      "head": false,
+      "prior": true,
+      "expected": true
+    }
+  ],
+  "scope": "Exact function bodies executed without importing module. These prefixed inputs do not enter the new URL branch. Native browser/URL API not executed here; URL normalization expectation independently read in WHATWG basic URL parser."
+}

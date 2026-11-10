@@ -1,0 +1,88 @@
+
+An unknown or external authority is never a relative file
+  ok    outside: "//files.store.example@collector.example/pixel.png"
+  ok    image refused: "//files.store.example@collector.example/pixel.png"
+  ok    image explains refusal: "//files.store.example@collector.example/pixel.png"
+  ok    outside: "//user:pass@collector.example/pixel.png"
+  ok    image refused: "//user:pass@collector.example/pixel.png"
+  ok    image explains refusal: "//user:pass@collector.example/pixel.png"
+  ok    outside: "///collector.example/pixel.png"
+  ok    image refused: "///collector.example/pixel.png"
+  ok    image explains refusal: "///collector.example/pixel.png"
+  ok    outside: "////collector.example/pixel.png"
+  ok    image refused: "////collector.example/pixel.png"
+  ok    image explains refusal: "////collector.example/pixel.png"
+  ok    outside: "//collector.example:bad/pixel.png"
+  ok    image refused: "//collector.example:bad/pixel.png"
+  ok    image explains refusal: "//collector.example:bad/pixel.png"
+  ok    outside: "//[not-an-ip]/pixel.png"
+  ok    image refused: "//[not-an-ip]/pixel.png"
+  ok    image explains refusal: "//[not-an-ip]/pixel.png"
+  ok    outside: "//files.store.example:99999/pixel.png"
+  ok    image refused: "//files.store.example:99999/pixel.png"
+  ok    image explains refusal: "//files.store.example:99999/pixel.png"
+  ok    outside: "//files.store.example .collector.example/pixel.png"
+  ok    image refused: "//files.store.example .collector.example/pixel.png"
+  ok    image explains refusal: "//files.store.example .collector.example/pixel.png"
+  ok    outside: "//files.store.example\u0000/pixel.png"
+  ok    image refused: "//files.store.example\u0000/pixel.png"
+  ok    image explains refusal: "//files.store.example\u0000/pixel.png"
+  ok    outside: "//%63ollector.example/pixel.png"
+  ok    image refused: "//%63ollector.example/pixel.png"
+  ok    image explains refusal: "//%63ollector.example/pixel.png"
+  ok    outside: "/\\collector.example/pixel.png"
+  ok    image refused: "/\\collector.example/pixel.png"
+  ok    image explains refusal: "/\\collector.example/pixel.png"
+  ok    outside: "\\\\collector.example/pixel.png"
+  ok    image refused: "\\\\collector.example/pixel.png"
+  ok    image explains refusal: "\\\\collector.example/pixel.png"
+  ok    outside: "https://collector.example/pixel.png"
+  ok    image refused: "https://collector.example/pixel.png"
+  ok    image explains refusal: "https://collector.example/pixel.png"
+  ok    outside: "javascript:alert(1)"
+  ok    image refused: "javascript:alert(1)"
+  ok    image explains refusal: "javascript:alert(1)"
+
+A browser URL parser confirms which successful attacks cross the boundary
+  ok    actual destination: //files.store.example@collector.example/pixel.png
+  ok    actual destination: //user:pass@collector.example/pixel.png
+  ok    actual destination: ///collector.example/pixel.png
+  ok    actual destination: ////collector.example/pixel.png
+
+The same guard covers form actions, CSS and fetch
+  ok    external destination refused
+  ok    external destination refused
+  ok    external destination refused
+
+Existing relative and permitted destinations remain available
+  ok    permitted: 
+  ok    permitted: #chart
+  ok    permitted: /files/chart.png
+  ok    permitted: files/chart.png
+  ok    permitted: ./chart.png
+  ok    permitted: ../chart.png
+  ok    permitted: /files/my chart.png
+  ok    permitted: //files.store.example/p.png
+  ok    permitted: https://files.store.example/p.png
+  ok    permitted: https://FILES.STORE.EXAMPLE:443/p.png
+  ok    permitted: http://files.store.example:8080/p.png
+  ok    permitted: wss://files.store.example/live
+  ok    permitted: data:image/png;base64,AAAA
+  ok    the caller must permit the host
+
+A second attribute never disguises the first destination the browser uses
+  ok    first external attribute refused: <img src="https://collector.example/p.png" src="/safe.png" alt="">
+  ok    first external attribute refused: <img SRC="https://collector.example/p.png" src="/safe.png" alt="">
+  ok    first external attribute refused: <img src="https://collector.example/p.png" src="/safe.png" SRC="/safe2.png" alt="">
+  ok    first external attribute refused: <img srcset="https://collector.example/p.png 2x" srcset="/safe.png 2x" alt="">
+  ok    first external attribute refused: <form action="https://collector.example/collect" action="/safe"><button>Send</button></form>
+  ok    first external attribute refused: <button formaction="https://collector.example/collect" formaction="/safe">Send</button>
+  ok    first external attribute refused: <div style="background:url(https://collector.example/p.png)" style="color:black">Chart</div>
+  ok    discarded attribute is not the destination: <img src="/safe.png" src="https://collector.example/p.png" alt="">
+  ok    discarded attribute is not the destination: <img SRC="/safe.png" src="https://collector.example/p.png" alt="">
+  ok    discarded attribute is not the destination: <form action="/safe" action="https://collector.example/collect"><button>Send</button></form>
+  ok    first empty value also wins
+  ok    three case variants keep the first
+  ok    a first password type cannot be disguised
+
+76 checks, all passing.

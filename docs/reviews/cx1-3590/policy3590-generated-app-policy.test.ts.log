@@ -1,0 +1,51 @@
+
+Origins: https, a host, nothing else
+  ok    a plain origin
+  ok    with a port
+  ok    http is refused
+  ok    a path is refused
+  ok    a wildcard is refused
+  ok    a source keyword is refused
+
+The apps domain is another site
+  ok    a subdomain of this site is the same site, refused
+  ok    another domain is another site
+  ok    not an origin: refused
+
+The policy of an app document
+  ok    nothing by default
+  ok    sandboxed with scripts only: no same origin, so no cookies or storage, no forms, no popups, no top navigation
+  ok    scripts: its own and the approved inline one by hash
+  ok    never eval, never any inline script
+  ok    no network unless given
+  ok    pictures from itself, data and the store's files
+  ok    no frames, workers, plug-ins, manifest
+  ok    no <base>, no form posting
+  ok    framed only by the store's own pages
+  ok    network only to what is given
+  ok    no store page to show it: refused
+  ok    an http origin anywhere: refused
+  ok    a source keyword smuggled in as an origin: refused
+  ok    a wildcard to frame it: refused
+
+Script hashes are the browser's
+  ok    sha256 of the exact text, base64
+  ok    one character changes it
+
+Headers
+  ok    the policy
+  ok    no referrer
+  ok    nosniff
+  ok    its own window group
+  ok    every powerful feature off
+
+The frame on a store page
+  ok    sandboxed with scripts only, no feature, no referrer, lazy
+  ok    named for screen readers
+  ok    never allow-same-origin
+  ok    without a title: no frame
+  ok    from another origin than the apps domain: no frame
+  ok    with a user in the address: no frame
+  ok    not an address: no frame
+
+37 checks, all passing.

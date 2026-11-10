@@ -1,0 +1,21 @@
+{
+  "cx1-generated-c0-prefix.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  numeric reference refuses external image 14 https://collector.example/p.png",
+      "  FAIL  external raw address refused 31 //collector.example/p.png",
+      "  FAIL  numeric reference refuses external image 31 //collector.example/p.png",
+      "  FAIL  external raw address refused 31 https://collector.example/p.png",
+      "  FAIL  numeric reference refuses external image 31 https://collector.example/p.png",
+      "40 checks, 24 failing."
+    ]
+  },
+  "generated-code-url-boundary.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "76 checks, all passing."
+    ]
+  }
+}

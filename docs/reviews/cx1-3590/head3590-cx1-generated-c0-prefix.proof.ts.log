@@ -1,0 +1,94 @@
+
+C0 at the start is removed by the native URL parser, never a relative path
+  ok    native destination 1 //collector.example/p.png
+  FAIL  external raw address refused 1 //collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 1 //collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 1 https://collector.example/p.png
+  FAIL  external raw address refused 1 https://collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 1 https://collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 2 //collector.example/p.png
+  FAIL  external raw address refused 2 //collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 2 //collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 2 https://collector.example/p.png
+  FAIL  external raw address refused 2 https://collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 2 https://collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 3 //collector.example/p.png
+  FAIL  external raw address refused 3 //collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 3 //collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 3 https://collector.example/p.png
+  FAIL  external raw address refused 3 https://collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 3 https://collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 8 //collector.example/p.png
+  FAIL  external raw address refused 8 //collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 8 //collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 8 https://collector.example/p.png
+  FAIL  external raw address refused 8 https://collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 8 https://collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 14 //collector.example/p.png
+  FAIL  external raw address refused 14 //collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 14 //collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 14 https://collector.example/p.png
+  FAIL  external raw address refused 14 https://collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 14 https://collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 31 //collector.example/p.png
+  FAIL  external raw address refused 31 //collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 31 //collector.example/p.png
+        expected false
+        got      true
+  ok    native destination 31 https://collector.example/p.png
+  FAIL  external raw address refused 31 https://collector.example/p.png
+        expected true
+        got      false
+  FAIL  numeric reference refuses external image 31 https://collector.example/p.png
+        expected false
+        got      true
+
+Ordinary destinations and the first attribute keep their meaning
+  ok    relative stays allowed
+  ok    allowed host stays allowed
+  ok    ordinary external stays refused
+  ok    first duplicate is retained
+
+40 checks, 24 failing.

@@ -141,7 +141,7 @@ test("an answer another job removed first is not counted, and the deletion still
 
 test("an answer another job removes from the part already read never makes the walk pass over one of theirs", async () => {
   // Theirs sit at both page boundaries (newest-first position RESEARCH_PAGE and its mirror from the oldest end), so a
-  // walk in either direction would pass over one if the removal shifted the list under it.
+  // walk in either direction that did not notice the list moving under it would pass over one.
   const seed: string[] = [];
   for (let i = 0; i < RESEARCH_PAGE * 3; i += 1) seed.push(answer(`q${i}@example.com`));
   const nearHead = answer("ana@example.com");
@@ -257,6 +257,25 @@ for (const [name, raw] of badReceipts) {
     });
   });
 }
+
+test("a list that moves under every walk is unknown, and nothing of theirs is removed", async () => {
+  const seed: string[] = [];
+  for (let i = 0; i < RESEARCH_PAGE * 2; i += 1) seed.push(answer(`m${i}@example.com`));
+  const mine = answer("ana@example.com");
+  seed.push(mine);
+  await world(seed, async (commands) => {
+    await assert.rejects(forgetResearchPerson("ana@example.com"), UnknownReplyError);
+    assert.equal(removals(commands).length, 0);
+    await assert.rejects(researchCopyPerson("ana@example.com"), UnknownReplyError);
+    assert.ok((await list()).includes(mine));
+  }, async (command) => {
+    if (command[0] === "LRANGE" && Number(command[2]) > 0) {
+      const [head] = (await pipeline([["LRANGE", RESPONSES_KEY, 0, 0]])) as string[][];
+      if (head[0] && head[0] !== mine) await pipeline([["LREM", RESPONSES_KEY, 0, head[0]]]); // Another deletion, every time.
+    }
+    return pipeline([command]);
+  });
+});
 
 test("a walk that does not reach the end of the list within its ceiling is unknown", async () => {
   const page = Array.from({ length: RESEARCH_PAGE }, (_, i) => answer(`ceiling${i}@example.com`));

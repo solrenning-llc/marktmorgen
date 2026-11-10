@@ -16,8 +16,8 @@
  *     though the thanks page wrote it down; bought again after the refund, it
  *     opens again; one the creator took the student off stays shut;
  *   - a course sold as a membership opens while Stripe calls it active,
- *     trialing or past due (the retry grace) and is "ended" once canceled or
- *     unpaid;
+ *     trialing or past due with a retry scheduled (the retry grace) and is
+ *     "ended" once canceled, unpaid or past due with no retry left;
  *   - a community opens for a paid, unrefunded purchase or a running
  *     membership, and for an offer added in one click after paying only while
  *     that payment stands;
@@ -71,8 +71,8 @@ const paid = (id: string, product: string, over: Record<string, unknown> = {}) =
   payment_intent: { id: `pi_${id.slice(8)}`, latest_charge: charge(4900, 0) },
   ...over,
 });
-const member = (id: string, product: string, status: string) =>
-  paid(id, product, { mode: "subscription", payment_intent: null, subscription: { id: `sub_${id.slice(8)}`, status } });
+const member = (id: string, product: string, status: string, nextAttempt: number | null = null) =>
+  paid(id, product, { mode: "subscription", payment_intent: null, subscription: { id: `sub_${id.slice(8)}`, status, latest_invoice: { id: `in_${id.slice(8)}`, next_payment_attempt: nextAttempt } } });
 
 async function main(): Promise<void> {
   redis.clear();
@@ -137,8 +137,10 @@ async function main(): Promise<void> {
     ["m4@example.com", "canceled", false],
     ["m5@example.com", "unpaid", false],
     ["m6@example.com", "incomplete_expired", false],
+    ["m7@example.com", "past_due", false],
   ] as const) {
-    sessions[email] = [member(`cs_test_${email.slice(0, 2)}00000000001`, club, status)];
+    // m3's renewal is still being retried; m7's has no retry left (tests/membership-past-due-retry.test.ts).
+    sessions[email] = [member(`cs_test_${email.slice(0, 2)}00000000001`, club, status, email === "m3@example.com" ? NOW + 86_400 : null)];
     is(`${status}: ${opens ? "open" : "shut"}`, await open(email), opens ? [club] : []);
   }
 

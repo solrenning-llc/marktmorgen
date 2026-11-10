@@ -27,7 +27,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
  * account, which is the only record of money that deserves the name.
  */
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
-import { DISPUTE_TAKES, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
+import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
 import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
@@ -1449,7 +1449,7 @@ export function readStoreDisputes(store: Store, since: number, pages = DISPUTE_P
   return readDisputes(store, since, pages);
 }
 
-/** One dispute as Stripe lists it, only in a state that takes the money (DISPUTE_TAKES). */
+/** One dispute as Stripe lists it, only one that takes the money (disputeTakes). */
 export type DisputeRow = { created: number; cents: number; currency: string; paymentIntent: string };
 
 /** How many pages of a hundred disputes are read for the numbers; the affiliate book reads as many. */
@@ -1457,8 +1457,9 @@ const DISPUTE_PAGES = 3;
 
 /**
  * The disputes opened on the creator's account since `since` (seconds) that
- * the bank is holding or the buyer won. At most DISPUTE_PAGES pages of a
- * hundred; `partial` when there were more.
+ * the bank is holding or gave back to the buyer (disputeTakes). At most
+ * DISPUTE_PAGES pages of a hundred; `partial` when there were more, or when a
+ * prevented dispute's money could not be read.
  */
 async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
   const out: DisputeRow[] = [];
@@ -1473,7 +1474,11 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (typeof row.status !== "string" || !DISPUTE_TAKES.has(row.status)) continue;
+      // A prevented dispute whose own money movement cannot be read is not
+      // counted, and the reading says it is partial (CX-123 rule 24).
+      const takes = disputeTakes(row);
+      if (takes === null) partial = true;
+      if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
       const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;

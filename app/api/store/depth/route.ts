@@ -13,7 +13,10 @@ export async function GET(request: NextRequest) {
   const store = access.store;
   if (!store || !id) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   try {
-    const [page, depth, partial] = await Promise.all([readPage(store.statsId, id), readDepth(store.statsId, id), readingsPartial(store)]);
+    // A page read whose answer is not known is said so (lib/studio-messages.ts page_unread), never measured as a page
+    // with no blocks (C4-20261106-2610-C6-153, unit B).
+    const [page, depth, partial] = await Promise.all([readPage(store.statsId, id).catch(() => null), readDepth(store.statsId, id), readingsPartial(store)]);
+    if (!page) return Response.json({ ok: false, error: "page_unread" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
     // While a second version of the whole page is tested, each visitor reads
     // one of two pages, so how far down "the page" is read is not a number
     // that means anything: none is given until the test ends.

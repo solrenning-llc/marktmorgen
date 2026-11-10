@@ -222,7 +222,7 @@ test("every store language says the card in its own words", () => {
   }
 });
 
-test("No thanks is kept by the server for a year, only for that store's course pages, and a wrong answer sets nothing", async () => {
+test("No thanks is kept by the server for a year, on both addresses of the course, and a wrong answer sets nothing", async () => {
   const post = (fields: Record<string, string>, headers: Record<string, string> = {}) =>
     noThanksRoute(new NextRequest("https://marktmorgen.com/api/store/course/no-thanks", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", host: "marktmorgen.com", ...headers }, body: new URLSearchParams(fields).toString() }));
   const course = "a".repeat(32);
@@ -231,10 +231,23 @@ test("No thanks is kept by the server for a year, only for that store's course p
   const cookie = fetched.headers.get("set-cookie") ?? "";
   assert.equal(fetched.status, 204);
   assert.ok(cookie.startsWith(`${nextStepCookie(course)}=1;`), cookie);
-  for (const part of [`Max-Age=${NEXT_STEP_NO_SECONDS}`, "Path=/@nextstep/course/", "SameSite=Lax", "HttpOnly", "Secure"]) assert.ok(cookie.includes(part), `${part} in ${cookie}`);
+  for (const part of [`Max-Age=${NEXT_STEP_NO_SECONDS}`, "Path=/;", "SameSite=Lax", "HttpOnly", "Secure"]) assert.ok(cookie.includes(part), `${part} in ${cookie}`);
   assert.equal(NEXT_STEP_NO_SECONDS, 365 * 86_400, "a year, as the privacy policy says");
   const plain = await post(good);
   assert.deepEqual([plain.status, plain.headers.get("location"), Boolean(plain.headers.get("set-cookie"))], [303, "https://marktmorgen.com/@nextstep/course/course000001", true], "without script, back to the course");
+  // On the store's own domain the course is /course/... (proxy.ts): the cookie comes back there too, and so does the answer.
+  const own = await noThanksRoute(new NextRequest("https://shop.example.test/api/store/course/no-thanks", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", host: "shop.example.test" }, body: new URLSearchParams(good).toString() }));
+  const ownCookie = own.headers.get("set-cookie") ?? "";
+  assert.deepEqual([own.status, own.headers.get("location")], [303, "https://shop.example.test/course/course000001"], "on its own domain, back to /course/...");
+  assert.ok(ownCookie.startsWith(`${nextStepCookie(course)}=1;`) && ownCookie.includes("Path=/;"), ownCookie);
+  // A cookie sent with Path=/ comes back on both addresses of the course, which a path such as /@nextstep/course/ never does on /course/.
+  // RFC 6265 5.1.4 path-match: the cookie's path is the request path, or a prefix of it ending at a "/".
+  const pathMatch = (cookiePath: string, path: string) => path === cookiePath || (path.startsWith(cookiePath) && (cookiePath.endsWith("/") || path[cookiePath.length] === "/"));
+  const sent = /Path=([^;]+)/.exec(cookie)?.[1] ?? "";
+  for (const path of ["/@nextstep/course/course000001", "/@nextstep/course/course000001/lessonaaaaa1", "/course/course000001", "/course/course000001/lessonaaaaa1"]) {
+    assert.ok(pathMatch(sent, path), `the cookie comes back on ${path}`);
+  }
+  assert.equal(pathMatch("/@nextstep/course/", "/course/course000001"), false, "a path of our address never comes back on the store's own domain");
   for (const bad of [{ ...good, course: "x" }, { ...good, handle: "Not A Handle!" }, { ...good, product: "../../x" }]) {
     const refused = await post(bad, { accept: "application/json" });
     assert.deepEqual([refused.status, refused.headers.get("set-cookie")], [400, null], JSON.stringify(bad));

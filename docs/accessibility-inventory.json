@@ -1542,6 +1542,7 @@
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
     "components/sales-goal-card.tsx",
+    "components/sales-lever-switch.tsx",
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
     "components/saved-sections.tsx",

@@ -8,7 +8,10 @@ export async function checkSalesLevers({browser,LOCAL,fixture,axeSource,is}){
  is("HT9 lever titles "+width,await root.locator("h3").allInnerTexts(),["Order bump","Upsell","Downsell","Bundle","Checkout recovery","Next offer"]);
  const text=await root.innerText();for(const phrase of ["before refunds, fees, taxes","must not be added together","Not separately measured","Not automatically enabled","Existing opt-outs and permissions are preserved"])is("HT9 honest scope "+phrase+" "+width,text.includes(phrase),true);
  is("HT9 no projected earnings "+width,/will earn|guaranteed|estimated revenue/i.test(text),false);
- is("HT9 no activation inputs "+width,await root.locator("input,button").count(),0);
+ is("HT9 no activation inputs "+width,await root.locator("input").count(),0);
+ // CD3: the only buttons are the lever switches the rules allow (checkout recovery, next offer), never pressed here.
+ is("CD3 only lever switches "+width,await root.locator("button:not([role=switch])").count(),0);
+ is("CD3 at most two switches "+width,await root.locator("[role=switch]").count()<=2,true);
  await root.getByRole("link",{name:"Review order bump settings",exact:true}).focus();
  is("HT9 setting link keyboard "+width,await root.getByRole("link",{name:"Review order bump settings",exact:true}).evaluate(node=>node===document.activeElement),true);
  await page.addScriptTag({content:axeSource});const audit=await root.evaluate(async node=>await window.axe.run(node,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}}));

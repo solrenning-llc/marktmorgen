@@ -161,6 +161,8 @@ export type LeverSwitch = Base & {
   before: string;
   /** What buyers see once it is on. */
   buyerSees: string;
+  /** The words for the press back, once this one is saved (switchBack). */
+  back: { label: string; before: string };
 };
 export type LeverControl =
   | LeverSwitch
@@ -175,6 +177,23 @@ const BLOCKED = {
   terms: "Switching this would set or change a price, a limit or a commission, so it is never switched from this screen. Open its settings to decide.",
   owner: "This needs a decision by the store's owner, so it is never switched from this screen. Open its settings.",
 };
+
+const RECOVERY_BEFORE = {
+  on: "A reminder goes only to a buyer who asks for one: one email with the link back to what they left, sent under the reminder limits that already apply. No charge is added to your plan.",
+  off: "Turning this off stops new reminder emails. Your postal address stays saved.",
+};
+
+/** What a press that turns the next offer on (to) or off says first; `back` when it puts back a setting just changed. */
+function nextBefore(to: boolean, addOn: LeverFacts["addOn"], back = false): string {
+  if (!to) {
+    return addOn === false
+      ? "Buyers do not see it now, because the Store assistant add-on is not active. Turning it off keeps it from coming back on its own when the add-on is."
+      : "Turning this off stops suggesting a next product after a purchase, on the page and in the confirmation email.";
+  }
+  if (back && addOn === false) return "Turning it back on puts back the setting you had. Buyers do not see it while the Store assistant add-on is not active.";
+  if (back && addOn === "unknown") return "Turning it back on puts back the setting you had. Whether buyers see it depends on the Store assistant add-on, which could not be read just now.";
+  return "After paying, a buyer may be shown one more of your own products, at its own price. Any AI choice is paid from the add-on's monthly allowance. It is never turned on for you.";
+}
 
 type Recovery = { enabled: boolean; address: string };
 type NextSetting = { on: boolean; email: boolean };
@@ -223,6 +242,8 @@ export function leverToggleFor(spec: LeverSpec, facts: LeverFacts): LeverControl
   const lower = spec.title.toLowerCase();
   const label = `${on ? "Turn off" : "Turn on"} ${lower}`;
 
+  const backLabel = `${on ? "Turn on" : "Turn off"} ${lower}`;
+
   if (spec.key === "recovery") {
     const saved = readRecovery(facts.store.recovery)!;
     const address = saved.address;
@@ -244,9 +265,8 @@ export function leverToggleFor(spec: LeverSpec, facts: LeverFacts): LeverControl
       body: { enabled: !on, address },
       undoBody: { enabled: on, address },
       label,
-      before: on
-        ? "Turning this off stops new reminder emails. Your postal address stays saved."
-        : "A reminder goes only to a buyer who asks for one: one email with the link back to what they left, sent under the reminder limits that already apply. No charge is added to your plan.",
+      before: RECOVERY_BEFORE[on ? "off" : "on"],
+      back: { label: backLabel, before: RECOVERY_BEFORE[on ? "on" : "off"] },
       buyerSees:
         "A buyer who leaves checkout without paying can ask for one reminder email with the link back. If your Stripe account is in the United States, Stripe's checkout also asks for consent.",
     };
@@ -269,11 +289,8 @@ export function leverToggleFor(spec: LeverSpec, facts: LeverFacts): LeverControl
     body: { next: { on: !on, email: on ? false : saved.email } },
     undoBody: { next: { on: saved.on, email: saved.email } },
     label,
-    before: on
-      ? facts.addOn === false
-        ? "Buyers do not see it now, because the Store assistant add-on is not active. Turning it off keeps it from coming back on its own when the add-on is."
-        : "Turning this off stops suggesting a next product after a purchase, on the page and in the confirmation email."
-      : "After paying, a buyer may be shown one more of your own products, at its own price. Any AI choice is paid from the add-on's monthly allowance. It is never turned on for you.",
+    before: nextBefore(!on, facts.addOn),
+    back: { label: backLabel, before: nextBefore(on, facts.addOn, true) },
     buyerSees: `One of your products under "${words.label(name)}", or under "${words.aiLabel}" when the assistant chose it, with a "${words.dismiss}" button.`,
   };
 }
@@ -320,4 +337,62 @@ export function toggleOutcome(control: LeverSwitch, reply: unknown): LeverOutcom
     undoBody: control.undoBody,
     undoSeconds: UNDO_SECONDS,
   };
+}
+
+/**
+ * The press back, once a switch is saved: the exact reverse (the state read
+ * goes back with the body read), with its own words. Its own reverse is the
+ * switch again.
+ */
+export function switchBack(control: LeverSwitch): LeverSwitch {
+  return {
+    ...control,
+    on: control.to,
+    to: control.on,
+    body: control.undoBody,
+    undoBody: control.body,
+    label: control.back.label,
+    before: control.back.before,
+    back: { label: control.label, before: control.before },
+  };
+}
+
+/**
+ * What the card's switch knows after its presses: whether the saved state is
+ * now the one its first press asked for ("unknown" once a reply did not
+ * confirm, rule 24: nothing more is sent until the page is reloaded),
+ * whether Undo is offered, and the last outcome.
+ */
+export type SwitchView = { flipped: boolean | "unknown"; undo: boolean; outcome: LeverOutcome | null };
+export const SWITCH_START: SwitchView = { flipped: false, undo: false, outcome: null };
+
+/** The switch as it stands in a view whose state is known. */
+export function switchNow(control: LeverSwitch, flipped: boolean): LeverSwitch {
+  return flipped ? switchBack(control) : control;
+}
+
+/**
+ * One press of the card's switch or of its Undo, through `post` (the card's
+ * fetch to the setting's own route). Undo is the press back, offered once
+ * after a saved switch and kept after a refusal; a press from an unknown
+ * state sends nothing. A thrown request is unknown, never refused or saved.
+ */
+export async function pressLever(
+  control: LeverSwitch,
+  view: SwitchView,
+  how: "switch" | "undo",
+  post: (route: LeverRoute, body: Record<string, unknown>) => Promise<unknown>,
+): Promise<SwitchView> {
+  if (view.flipped === "unknown" || (how === "undo" && !view.undo)) return view;
+  const active = switchNow(control, view.flipped);
+  let reply: unknown;
+  try {
+    reply = await post(active.route, active.body);
+  } catch {
+    reply = undefined;
+  }
+  const outcome = toggleOutcome(active, reply);
+  if (outcome.state === "saved") return { flipped: !view.flipped, undo: how === "switch", outcome };
+  if (outcome.state === "refused") return { ...view, outcome };
+  return { flipped: "unknown", undo: false, outcome };
 }

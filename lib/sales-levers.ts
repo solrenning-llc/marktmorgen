@@ -34,6 +34,11 @@ export function measureSalesLevers(sales:readonly PaidRecord[],currency:string,p
  if(complete)for(const key of ["bump","upsell","bundle","recovery"] as const)if(rows[key].records>0)rows[key].cents=totals[key];
  return {asOf:end.toISOString(),from:from.toISOString(),currency,complete,rows};
 }
+/** The saved on/off state of the two levers that have a setting, in the words the card shows (also after its own switch). */
+export function leverStateText(key:"recovery"|"next",on:boolean):string{
+ if(!on)return "Off in saved settings";
+ return key==="next"?"Enabled in saved settings; add-on gates still apply":"Enabled in saved settings";
+}
 export function salesLeverSettings(store:Store){
  const visible=store.catalog.items.filter(item=>(item.kind&KIND.hidden)===0),loaded=store.catalog.head.filter(item=>!item.hidden);
  const funnel=visible.some(item=>(item.kind&KIND.funnel)!==0);
@@ -42,7 +47,7 @@ export function salesLeverSettings(store:Store){
  {key:"upsell" as const,title:"Upsell",state:funnel?"A funnel is configured; review its offer steps":"No visible product funnel is configured",path:"#products",cost:"Configure a real product and its terms; the buyer chooses whether to accept."},
  {key:"downsell" as const,title:"Downsell",state:funnel?"A funnel is configured; review its decline path":"No visible product funnel is configured",path:"#products",cost:"A decline path needs your product choices; no offer or charge is invented."},
  {key:"bundle" as const,title:"Bundle",state:visible.some(item=>(item.kind&KIND.bundle)!==0)?"A visible bundle is configured":"No visible bundle is configured",path:"bundles",cost:"Available for your chosen products and published terms; no buyer is charged automatically."},
- {key:"recovery" as const,title:"Checkout recovery",state:store.recovery.enabled?"Enabled in saved settings":"Off in saved settings",path:"#recovery",cost:"Email, consent, sender, allowance and cost gates apply. Not automatically enabled."},
- {key:"next" as const,title:"Next offer",state:store.nextOffer.on?"Enabled in saved settings; add-on gates still apply":"Off in saved settings",path:"#answers",cost:"Store assistant add-on, data reads and optional AI have their own caps and reservation. Not automatically enabled."},
+ {key:"recovery" as const,title:"Checkout recovery",state:leverStateText("recovery",store.recovery.enabled),path:"#recovery",cost:"Email, consent, sender, allowance and cost gates apply. Not automatically enabled."},
+ {key:"next" as const,title:"Next offer",state:leverStateText("next",store.nextOffer.on),path:"#answers",cost:"Store assistant add-on, data reads and optional AI have their own caps and reservation. Not automatically enabled."},
  ];
 }

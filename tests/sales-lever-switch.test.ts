@@ -138,6 +138,7 @@ test("checkout recovery: off keeps the saved address; a refused switch says noth
   const refused = await pressLever(control, off, "undo", post);
   assert.equal(refused.outcome?.state, "refused");
   assert.match(refused.outcome!.text, /^Nothing was changed\./);
+  assert.match(refused.outcome!.text, /not available/);
   assert.equal(refused.flipped, true);
   assert.equal(refused.undo, true);
   assert.equal((await read()).recovery.enabled, false);

@@ -12,7 +12,7 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { canBeBumped } from "@/lib/product-extras";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
-import { imageUrl } from "@/lib/product-image";
+import { imageUrl, picturedFrom } from "@/lib/product-image";
 import { FunnelEditor } from "@/components/funnel-editor";
 import { offerableAfterPaying } from "@/lib/bundles";
 import { PageFunnelEditor, type SavedFunnel, type StepChoice } from "@/components/page-funnel-editor";
@@ -106,8 +106,9 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       bundle: Boolean(p.bundle),
       draft: p.hidden,
     }));
+  // The same rule as the offer itself (lib/upsell.ts funnelView), so the preview shows what buyers get.
   const pictures = listings
-    .filter((p) => p.image)
+    .filter((p) => picturedFrom(p))
     .map((p) => ({ id: p.id, title: p.title, src: imageUrl(p.image!) }));
 
   // Funnels of pages (lib/page-funnel.ts): every saved one, each step as the

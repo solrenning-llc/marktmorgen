@@ -15,6 +15,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -581,14 +582,16 @@ export async function readCourses(ids: string[]): Promise<Map<string, Course>> {
 
 /**
  * readCourses, read exactly (rule 24), for a person's deletion
- * (lib/person-erasure.ts erasureScope): a course is left out only when Redis
- * answers the exact null for it. A reply that is not a whole list of the ids
- * asked, or an outline kept but unreadable, throws UnknownReply, so the
- * deletion never takes an unknown read for "no such course" and answers done
- * while the person's records in that course are still kept.
+ * (lib/person-erasure.ts erasureScope) and a store's whole export
+ * (lib/store-export.ts): a course is left out only when Redis answers the
+ * exact null for it. A reply that is not a whole list of the ids asked, or an
+ * outline kept but unreadable, throws UnknownReply, so the deletion never
+ * takes an unknown read for "no such course" and answers done while the
+ * person's records in that course are still kept, and an export never hands
+ * over a file without a course as if the store had none. `what` names the
+ * reading in the error.
  */
-export async function readCoursesExact(ids: string[]): Promise<Map<string, Course>> {
-  const what = "the course outlines a person's deletion goes through";
+export async function readCoursesExact(ids: string[], what = "the course outlines a person's deletion goes through"): Promise<Map<string, Course>> {
   const found = new Map<string, Course>();
   const valid = [...new Set(ids.filter((id) => COURSE_ID_PATTERN.test(id)))];
   if (valid.length === 0) return found;
@@ -634,6 +637,21 @@ export async function readBody(courseId: string, lessonId: string): Promise<stri
   if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return "";
   const [raw] = await redisPipeline([["GET", bodyKey(courseId, lessonId)]]);
   return typeof raw === "string" ? raw : "";
+}
+
+/**
+ * A lesson's text read in its exact shape, for a caller that writes from it
+ * (lib/community-index.ts): "" only when there is none (an absent key), the
+ * text when it is one, and UnknownReplyError for any other reply, so an odd
+ * or partial answer is never taken as a lesson with no text (CX-123 rule 24).
+ */
+export async function readBodyKnown(courseId: string, lessonId: string): Promise<string> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return "";
+  const replies = repliesFor(await redisPipeline([["GET", bodyKey(courseId, lessonId)]]), 1);
+  const raw = replies?.[0];
+  if (raw === null) return "";
+  if (typeof raw === "string") return raw;
+  throw new UnknownReplyError("a lesson's text");
 }
 
 /**

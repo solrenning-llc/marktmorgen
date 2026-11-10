@@ -58,10 +58,12 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
   const [answer, setAnswer] = useState<FunnelExplanation | null>(null);
-  // Where focus goes once the next view is drawn: the explanation after a press, the button after hiding it
-  // (WCAG 2.4.3; Claude 6 on #3454). Nothing takes focus on the first drawing.
-  const focusNext = useRef<"answer" | "button" | null>(null);
-  const takeFocus = (which: "answer" | "button") => (element: { focus: () => void } | null) => {
+  // Where focus goes once the next view is drawn: the explanation after a press, the button after hiding it or
+  // after a refusal, or the sentence under it when the button is off by then, since an off button cannot take focus
+  // (WCAG 2.4.3; Claude 6 on #3454, and N1 of the focal). Nothing takes focus on the first drawing.
+  const focusNext = useRef<"answer" | "button" | "cost" | null>(null);
+  const backTo = (allowance: number | null) => (allowance === null || allowance < 1 ? "cost" : "button");
+  const takeFocus = (which: "answer" | "button" | "cost") => (element: { focus: () => void } | null) => {
     if (element && focusNext.current === which) {
       focusNext.current = null;
       element.focus();
@@ -88,10 +90,13 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
       } else {
         const reason = typeof body?.error === "string" ? body.error : "";
         setSaid(explainErrorText(reason));
+        const after = reason === "used" ? 0 : reason === "failed" && left !== null ? Math.max(0, left - 1) : left;
+        focusNext.current = backTo(after);
         if (reason === "failed" && left !== null) onLeft(Math.max(0, left - 1));
         if (reason === "used") onLeft(0);
       }
     } catch {
+      focusNext.current = backTo(left);
       setSaid(explainErrorText(""));
     } finally {
       setBusy(false);
@@ -107,7 +112,7 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-ink">
             {answer.todo.map((step, index) => <li key={index}>{step}</li>)}
           </ol>
-          <button type="button" className="btn btn-ghost mt-2 inline-flex min-h-11 items-center" onClick={() => { focusNext.current = "button"; setAnswer(null); setSaid("The explanation was hidden."); }}>
+          <button type="button" className="btn btn-ghost mt-2 inline-flex min-h-11 items-center" onClick={() => { focusNext.current = backTo(left); setAnswer(null); setSaid("The explanation was hidden."); }}>
             Hide the explanation
           </button>
         </div>
@@ -116,7 +121,7 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
           <button ref={takeFocus("button")} type="button" className="btn btn-ghost inline-flex min-h-11 items-center" aria-describedby={`${id}-cost`} disabled={busy || left === null || left < 1} onClick={ask}>
             {busy ? "Writing an explanation…" : "Explain this with AI"}
           </button>
-          <p id={`${id}-cost`} className="mt-1 text-xs text-ink-soft">
+          <p ref={takeFocus("cost")} tabIndex={-1} id={`${id}-cost`} className="mt-1 text-xs text-ink-soft">
             {left === null ? AI_ALLOWANCE_UNKNOWN : `${left < 1 ? "No AI writing jobs are left this month." : `Uses 1 of your ${left} AI writing jobs left this month.`} The check above stays as it is.`}
           </p>
         </>

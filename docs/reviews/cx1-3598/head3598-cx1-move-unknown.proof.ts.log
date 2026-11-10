@@ -1,0 +1,35 @@
+
+Unknown membership rows must not become proof that no membership exists
+  FAIL  unknown status: public opening and provider POST
+        expected ["refused",0]
+        got      ["opened",1]
+  FAIL  unknown status: reminder knowledge
+        expected "unknown"
+        got      false
+  FAIL  active with omitted metadata: public opening and provider POST
+        expected ["refused",0]
+        got      ["opened",1]
+  FAIL  active with omitted metadata: reminder knowledge
+        expected "unknown"
+        got      false
+  FAIL  active with null metadata: public opening and provider POST
+        expected ["refused",0]
+        got      ["opened",1]
+  FAIL  active with null metadata: reminder knowledge
+        expected "unknown"
+        got      false
+  FAIL  active with a numeric product: public opening and provider POST
+        expected ["refused",0]
+        got      ["opened",1]
+  FAIL  active with a numeric product: reminder knowledge
+        expected "unknown"
+        got      false
+  ok    active matching control: public opening and provider POST
+  ok    active matching control: reminder knowledge
+  ok    ended matching control: public opening and provider POST
+  ok    ended matching control: reminder knowledge
+  ok    active other product control: public opening and provider POST
+  ok    active other product control: reminder knowledge
+  ok    whole empty subscription list opens one checkout (control)
+
+15 checks, 8 failing.

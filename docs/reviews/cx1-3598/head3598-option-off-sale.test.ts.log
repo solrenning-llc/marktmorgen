@@ -1,0 +1,36 @@
+
+The flag as it is stored
+  ok    kept only when it is exactly true
+
+What a buyer may pick
+  ok    an option off sale is not offered
+  ok    the 'from' price is the lowest price still on sale
+  ok    a come-back offer naming it opens nothing; one on sale still opens
+  ok    all off sale: nothing to hand over, so not for sale
+  ok    a course whose prices are all off sale is not for sale either (never at its own price)
+  ok    a course with one price on sale is
+
+The checkout refuses it, even from an old link
+  ok    the option is written off sale where the store keeps it
+  ok    the product read back keeps it off sale, and keeps it for those who bought it
+  ok    an old link naming the option off sale: refused, Stripe never reached
+  ok    the option still on sale: opens as before, at its own price
+
+Never quoted by the affiliate directory or the store assistant
+  ok    with both on sale, the directory lists the lowest price
+  ok    with the lower one off sale, the directory lists the lowest price still on sale
+  ok    the assistant names only the prices on sale
+  ok    every price off sale: the directory lists nothing for it, and the assistant says it is not on sale
+
+Never given as a gift or bought for a group (Revisor 1 on #2685)
+  ok    the gift and group picker leaves it out, even when it is the pick
+  ok    a gift or group for it is refused, never guessed; one on sale is taken
+  ok    with every price off sale, it cannot be given or bought for a group at all
+  ok    with one on sale, it still can
+
+The payment plan reads only the prices on sale (sweep after Revisor 1 on #2685)
+  ok    a price off sale with no payment set does not pause the plan for the others
+  ok    the plan is never offered for the price off sale, even with a payment saved for it
+  ok    with every price off sale, the plan is paused
+
+22 checks, all passing.

@@ -1,0 +1,68 @@
+  ok    the store sends abandoned-checkout reminders, so its checkouts close in an hour
+
+B2: the mark lives as long as its checkout, and a minute
+  ok    Ada's checkout opens
+  ok    the checkout closes in about an hour
+  ok    the mark lives no longer than the checkout and a minute
+  ok    pressed again while it is open: the same checkout, none made
+  ok    two hours later, its checkout closed unpaid: a live one, not the closed one
+
+The closing time Stripe gave when the checkout was made is used, with no second read (Claude 4 A3 on #2690)
+  ok    opened; the mark lives as long as that checkout and a minute, though the session cannot be read
+  ok    and the session was not read again
+
+A checkout whose closing time cannot be read keeps the mark for the longest a checkout lives
+  ok    opened, and the mark kept a day and a minute (no second checkout while one may be open)
+
+B3: the mark is let go only when nothing was made at Stripe
+  ok    Stripe made the session but its answer was lost: the press says it is still being checked
+  ok    and a second press makes no second session, and says the last try is still being checked
+  ok    en: the words for a try still being checked exist and promise no minutes
+  ok    es: the words for a try still being checked exist and promise no minutes
+  ok    fr: the words for a try still being checked exist and promise no minutes
+  ok    de: the words for a try still being checked exist and promise no minutes
+  ok    it: the words for a try still being checked exist and promise no minutes
+  ok    nl: the words for a try still being checked exist and promise no minutes
+  ok    pt: the words for a try still being checked exist and promise no minutes
+  ok    Stripe refused to make it: nothing made, so the next press opens one
+
+B4: once the mark is gone, a membership Stripe shows live opens nothing more
+  ok    Cy's first checkout opens
+  ok    after the mark: no second checkout; the link says it was moved
+  ok    and the invitation now reads as kept
+  ok    Stripe's memberships cannot be read: refused, no checkout, and the next press may try again
+  ok    read whole the next time: it opens
+
+A5: Stripe shows the membership live and the write that notes it kept fails once (Claude 4 on #2690)
+  ok    the press says the membership was moved, and the mark is not left behind for a day
+  ok    the next press says it was moved too, and the invitation now reads as kept
+
+26 checks, all passing.
+opening a moved member's checkout failed moveopenmark TypeError: fetch failed: socket hang up
+    at globalThis.fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:64631:13)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:1:914
+    at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+    at __cx1fetch (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:1:901)
+    at C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:6372:29
+    at timed (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:4726:19)
+    at onAccount (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:6371:43)
+    at open (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:63965:12)
+    at createCheckout (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:63973:23)
+    at async withCartStockHolds (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:62445:55)
+opening a moved member's checkout failed moveopenmark StripeError: Stripe request failed (400 invalid_request_error): No such price.
+    at onAccount (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:6390:11)
+    at async createCheckout (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:63973:17)
+    at async withCartStockHolds (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:62445:55)
+    at async withStockHold (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:62431:16)
+    at async openMove (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:64490:18)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:64724:14) {
+  status: 400,
+  code: 'invalid_request_error',
+  stripeMessage: 'No such price.'
+}
+noting a moved membership as kept failed moveopenmark Error: redis: connection reset
+    at store.pipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:64749:13)
+    at redisPipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:2772:41)
+    at noteKept (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:64422:9)
+    at async openMove (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:64480:7)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3598\.cx1-evidence\move-open-mark.test.ts.cjs:64755:15)

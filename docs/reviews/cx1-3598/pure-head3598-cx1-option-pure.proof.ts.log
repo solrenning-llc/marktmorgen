@@ -1,0 +1,8 @@
+  ok    only offered option survives {}
+  ok    only offered option survives {"course":{"lessons":1}}
+  ok    only offered option survives {"podcast":{"episodes":1}}
+  ok    only offered option survives {"shipping":{}}
+  ok    empty options remain empty
+  ok    off-sale option retains delivery for an earlier buyer
+
+6 checks, all passing.

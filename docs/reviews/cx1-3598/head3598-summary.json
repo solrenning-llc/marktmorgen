@@ -1,0 +1,46 @@
+{
+  "cx1-move-unknown.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  active with omitted metadata: reminder knowledge",
+      "  FAIL  active with null metadata: public opening and provider POST",
+      "  FAIL  active with null metadata: reminder knowledge",
+      "  FAIL  active with a numeric product: public opening and provider POST",
+      "  FAIL  active with a numeric product: reminder knowledge",
+      "15 checks, 8 failing."
+    ]
+  },
+  "move-open-mark.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "A5: Stripe shows the membership live and the write that notes it kept fails once (Claude 4 on #2690)",
+      "26 checks, all passing.",
+      "opening a moved member's checkout failed moveopenmark TypeError: fetch failed: socket hang up",
+      "opening a moved member's checkout failed moveopenmark StripeError: Stripe request failed (400 invalid_request_error): No such price.",
+      "noting a moved membership as kept failed moveopenmark Error: redis: connection reset"
+    ]
+  },
+  "move-open-cost.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "5 checks, all passing."
+    ]
+  },
+  "option-off-sale.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "22 checks, all passing."
+    ]
+  },
+  "wg2-invite-erasure-unknown.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "7 checks, all passing."
+    ]
+  }
+}

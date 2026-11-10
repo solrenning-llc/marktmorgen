@@ -1,0 +1,13 @@
+{
+  "cx1-option-pure.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  only offered option survives {}",
+      "  FAIL  only offered option survives {\"course\":{\"lessons\":1}}",
+      "  FAIL  only offered option survives {\"podcast\":{\"episodes\":1}}",
+      "  FAIL  only offered option survives {\"shipping\":{}}",
+      "6 checks, 4 failing."
+    ]
+  }
+}

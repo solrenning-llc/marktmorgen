@@ -1,0 +1,13 @@
+
+An HMGET reply out of shape is unknown: the eraser does not report 0
+  ok    no reply at all
+  ok    a text instead of a list
+  ok    a shorter list
+  ok    a longer list
+  ok    a field that is neither text nor null
+
+Controls
+  ok    no invitation on either product: 0, nothing deleted
+  ok    a field whose record does not read is still deleted and counted
+
+7 checks, all passing.

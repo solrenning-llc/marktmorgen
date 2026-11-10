@@ -1,0 +1,8 @@
+  ok    five customer records, each with a full page of ended memberships: it opens
+  ok    one customer page, five subscription pages and the closing time this creation answer left out: seven
+  ok    one synthetic checkout only
+{"paidBefore":8,"paidAfter":8,"stripeGetPages":7,"transferredBytes":38356,"existingPublicStripePagesPerUnit":1}
+  ok    every Stripe page it may read is counted before the first read, at one page a unit
+  ok    too many customer records: one page read, no checkout made
+
+5 checks, all passing.

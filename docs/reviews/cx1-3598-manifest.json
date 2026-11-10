@@ -1,0 +1,1298 @@
+{
+  "paths": [
+    "app/[handle]/move/[product]/page.tsx",
+    "docs/limits-proposal-2026-10-18.md",
+    "docs/margin-alignment-2026-10-18.md",
+    "docs/pricing-optimization-2026-10-18.md",
+    "docs/pricing-optimization-milp-input-2026-10-18.json",
+    "docs/pricing-optimization-milp-output-2026-10-18.json",
+    "docs/pricing-usage-proposal-2026-10-18.md",
+    "docs/value-presentation-2026-10-18.md",
+    "lib/affiliate-directory.ts",
+    "lib/answers.ts",
+    "lib/buyer-words/move.ts",
+    "lib/checkout-sweep.ts",
+    "lib/data-families.ts",
+    "lib/gift-rules.ts",
+    "lib/imports.ts",
+    "lib/move-members.ts",
+    "lib/product-extras.ts",
+    "lib/product-option.ts",
+    "lib/store-checkout.ts",
+    "tests/move-invite-off-sale.test.ts",
+    "tests/move-open-cost.test.ts",
+    "tests/move-open-mark.test.ts",
+    "tests/move-remind-cut-list.test.ts",
+    "tests/named-price-gone.test.ts",
+    "tests/option-off-sale.test.ts",
+    "tests/store-data-registry.ts",
+    "tests/wg2-invite-erasure-unknown.test.ts",
+    "tests/wg2-kept-already-unknown.test.ts"
+  ],
+  "jsonInput": {
+    "deltaLeaves": [
+      {
+        "path": "/plans/creator/baseYear",
+        "old": 5973,
+        "new": 5974
+      },
+      {
+        "path": "/plans/creator/coefMonth/video",
+        "old": 5,
+        "new": 6
+      },
+      {
+        "path": "/plans/creator/coefYear/video",
+        "old": 70,
+        "new": 69
+      },
+      {
+        "path": "/plans/creator/coefYear/storage",
+        "old": 153,
+        "new": 152
+      },
+      {
+        "path": "/plans/creator/coefYear/visits",
+        "old": 1077,
+        "new": 1076
+      },
+      {
+        "path": "/plans/pro/options/0/netAtOnes",
+        "old": -1701,
+        "new": -1702
+      },
+      {
+        "path": "/plans/pro/options/0/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/1/netAtOnes",
+        "old": -822,
+        "new": -823
+      },
+      {
+        "path": "/plans/pro/options/1/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/2/netAtOnes",
+        "old": 42,
+        "new": 41
+      },
+      {
+        "path": "/plans/pro/options/2/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/3/netAtOnes",
+        "old": 678,
+        "new": 677
+      },
+      {
+        "path": "/plans/pro/options/3/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/4/netAtOnes",
+        "old": 1314,
+        "new": 1313
+      },
+      {
+        "path": "/plans/pro/options/4/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/5/netAtOnes",
+        "old": 1952,
+        "new": 1951
+      },
+      {
+        "path": "/plans/pro/options/5/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/6/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/7/netAtOnes",
+        "old": 3225,
+        "new": 3224
+      },
+      {
+        "path": "/plans/pro/options/7/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/8/netAtOnes",
+        "old": 3862,
+        "new": 3861
+      },
+      {
+        "path": "/plans/pro/options/8/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/9/netAtOnes",
+        "old": 4500,
+        "new": 4499
+      },
+      {
+        "path": "/plans/pro/options/9/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/10/netAtOnes",
+        "old": 5136,
+        "new": 5135
+      },
+      {
+        "path": "/plans/pro/options/10/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/11/netAtOnes",
+        "old": 5773,
+        "new": 5772
+      },
+      {
+        "path": "/plans/pro/options/11/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/12/netAtOnes",
+        "old": 6411,
+        "new": 6410
+      },
+      {
+        "path": "/plans/pro/options/12/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/13/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/14/netAtOnes",
+        "old": 7684,
+        "new": 7683
+      },
+      {
+        "path": "/plans/pro/options/14/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/15/netAtOnes",
+        "old": 8322,
+        "new": 8321
+      },
+      {
+        "path": "/plans/pro/options/15/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/16/netAtOnes",
+        "old": 8958,
+        "new": 8957
+      },
+      {
+        "path": "/plans/pro/options/16/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/17/netAtOnes",
+        "old": 9594,
+        "new": 9593
+      },
+      {
+        "path": "/plans/pro/options/17/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/18/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/19/netAtOnes",
+        "old": 10869,
+        "new": 10868
+      },
+      {
+        "path": "/plans/pro/options/19/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/20/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/21/netAtOnes",
+        "old": 12141,
+        "new": 12140
+      },
+      {
+        "path": "/plans/pro/options/21/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/22/netAtOnes",
+        "old": 12779,
+        "new": 12778
+      },
+      {
+        "path": "/plans/pro/options/22/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/23/netAtOnes",
+        "old": 13416,
+        "new": 13415
+      },
+      {
+        "path": "/plans/pro/options/23/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/24/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/25/netAtOnes",
+        "old": 14690,
+        "new": 14689
+      },
+      {
+        "path": "/plans/pro/options/25/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/26/netAtOnes",
+        "old": 15327,
+        "new": 15326
+      },
+      {
+        "path": "/plans/pro/options/26/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/27/netAtOnes",
+        "old": 15963,
+        "new": 15962
+      },
+      {
+        "path": "/plans/pro/options/27/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/28/netAtOnes",
+        "old": 16600,
+        "new": 16599
+      },
+      {
+        "path": "/plans/pro/options/28/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/29/netAtOnes",
+        "old": 17238,
+        "new": 17237
+      },
+      {
+        "path": "/plans/pro/options/29/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/30/netAtOnes",
+        "old": 17874,
+        "new": 17873
+      },
+      {
+        "path": "/plans/pro/options/30/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/31/netAtOnes",
+        "old": 18511,
+        "new": 18510
+      },
+      {
+        "path": "/plans/pro/options/31/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/32/netAtOnes",
+        "old": 19149,
+        "new": 19148
+      },
+      {
+        "path": "/plans/pro/options/32/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/33/netAtOnes",
+        "old": 19785,
+        "new": 19784
+      },
+      {
+        "path": "/plans/pro/options/33/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/34/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/35/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/36/netAtOnes",
+        "old": 21695,
+        "new": 21694
+      },
+      {
+        "path": "/plans/pro/options/36/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/37/netAtOnes",
+        "old": 22333,
+        "new": 22332
+      },
+      {
+        "path": "/plans/pro/options/37/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/38/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/39/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/40/netAtOnes",
+        "old": 24243,
+        "new": 24242
+      },
+      {
+        "path": "/plans/pro/options/40/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/41/netAtOnes",
+        "old": 24879,
+        "new": 24878
+      },
+      {
+        "path": "/plans/pro/options/41/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/42/netAtOnes",
+        "old": 25517,
+        "new": 25516
+      },
+      {
+        "path": "/plans/pro/options/42/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/43/netAtOnes",
+        "old": 26154,
+        "new": 26153
+      },
+      {
+        "path": "/plans/pro/options/43/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/44/netAtOnes",
+        "old": 26790,
+        "new": 26789
+      },
+      {
+        "path": "/plans/pro/options/44/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/45/netAtOnes",
+        "old": 27428,
+        "new": 27427
+      },
+      {
+        "path": "/plans/pro/options/45/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/46/netAtOnes",
+        "old": 28065,
+        "new": 28064
+      },
+      {
+        "path": "/plans/pro/options/46/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/47/netAtOnes",
+        "old": 28701,
+        "new": 28700
+      },
+      {
+        "path": "/plans/pro/options/47/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/48/netAtOnes",
+        "old": 29338,
+        "new": 29337
+      },
+      {
+        "path": "/plans/pro/options/48/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/49/netAtOnes",
+        "old": 29976,
+        "new": 29975
+      },
+      {
+        "path": "/plans/pro/options/49/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/50/netAtOnes",
+        "old": 30612,
+        "new": 30611
+      },
+      {
+        "path": "/plans/pro/options/50/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/51/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/52/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/53/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/54/netAtOnes",
+        "old": 33160,
+        "new": 33159
+      },
+      {
+        "path": "/plans/pro/options/54/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/55/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/56/netAtOnes",
+        "old": 34434,
+        "new": 34433
+      },
+      {
+        "path": "/plans/pro/options/56/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/57/netAtOnes",
+        "old": 35071,
+        "new": 35070
+      },
+      {
+        "path": "/plans/pro/options/57/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/58/netAtOnes",
+        "old": 35706,
+        "new": 35705
+      },
+      {
+        "path": "/plans/pro/options/58/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/59/netAtOnes",
+        "old": 36344,
+        "new": 36343
+      },
+      {
+        "path": "/plans/pro/options/59/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/60/netAtOnes",
+        "old": 36981,
+        "new": 36980
+      },
+      {
+        "path": "/plans/pro/options/60/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/61/netAtOnes",
+        "old": 37617,
+        "new": 37616
+      },
+      {
+        "path": "/plans/pro/options/61/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/62/netAtOnes",
+        "old": 38255,
+        "new": 38254
+      },
+      {
+        "path": "/plans/pro/options/62/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/63/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/64/netAtOnes",
+        "old": 39528,
+        "new": 39527
+      },
+      {
+        "path": "/plans/pro/options/64/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/65/netAtOnes",
+        "old": 40166,
+        "new": 40165
+      },
+      {
+        "path": "/plans/pro/options/65/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/66/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/67/netAtOnes",
+        "old": 41439,
+        "new": 41438
+      },
+      {
+        "path": "/plans/pro/options/67/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/68/netAtOnes",
+        "old": 42076,
+        "new": 42075
+      },
+      {
+        "path": "/plans/pro/options/68/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/69/netAtOnes",
+        "old": 42714,
+        "new": 42713
+      },
+      {
+        "path": "/plans/pro/options/69/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/70/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/71/netAtOnes",
+        "old": 43986,
+        "new": 43985
+      },
+      {
+        "path": "/plans/pro/options/71/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/72/netAtOnes",
+        "old": 44625,
+        "new": 44624
+      },
+      {
+        "path": "/plans/pro/options/72/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/73/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/74/netAtOnes",
+        "old": 45898,
+        "new": 45897
+      },
+      {
+        "path": "/plans/pro/options/74/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/75/netAtOnes",
+        "old": 46536,
+        "new": 46535
+      },
+      {
+        "path": "/plans/pro/options/75/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/76/netAtOnes",
+        "old": 47172,
+        "new": 47171
+      },
+      {
+        "path": "/plans/pro/options/76/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/77/netAtOnes",
+        "old": 47808,
+        "new": 47807
+      },
+      {
+        "path": "/plans/pro/options/77/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/78/netAtOnes",
+        "old": 48444,
+        "new": 48443
+      },
+      {
+        "path": "/plans/pro/options/78/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/79/netAtOnes",
+        "old": 49082,
+        "new": 49081
+      },
+      {
+        "path": "/plans/pro/options/79/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/80/netAtOnes",
+        "old": 49719,
+        "new": 49718
+      },
+      {
+        "path": "/plans/pro/options/80/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/81/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/82/netAtOnes",
+        "old": 50993,
+        "new": 50992
+      },
+      {
+        "path": "/plans/pro/options/82/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/83/netAtOnes",
+        "old": 51630,
+        "new": 51629
+      },
+      {
+        "path": "/plans/pro/options/83/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/84/netAtOnes",
+        "old": 52266,
+        "new": 52265
+      },
+      {
+        "path": "/plans/pro/options/84/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/85/netAtOnes",
+        "old": 52904,
+        "new": 52903
+      },
+      {
+        "path": "/plans/pro/options/85/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/86/netAtOnes",
+        "old": 53541,
+        "new": 53540
+      },
+      {
+        "path": "/plans/pro/options/86/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/87/netAtOnes",
+        "old": 54177,
+        "new": 54176
+      },
+      {
+        "path": "/plans/pro/options/87/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/88/netAtOnes",
+        "old": 54813,
+        "new": 54812
+      },
+      {
+        "path": "/plans/pro/options/88/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/89/netAtOnes",
+        "old": 55451,
+        "new": 55450
+      },
+      {
+        "path": "/plans/pro/options/89/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/90/netAtOnes",
+        "old": 56088,
+        "new": 56087
+      },
+      {
+        "path": "/plans/pro/options/90/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/91/netAtOnes",
+        "old": 56725,
+        "new": 56724
+      },
+      {
+        "path": "/plans/pro/options/91/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/92/netAtOnes",
+        "old": 57363,
+        "new": 57362
+      },
+      {
+        "path": "/plans/pro/options/92/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/93/netAtOnes",
+        "old": 57999,
+        "new": 57998
+      },
+      {
+        "path": "/plans/pro/options/93/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/94/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/95/netAtOnes",
+        "old": 59274,
+        "new": 59273
+      },
+      {
+        "path": "/plans/pro/options/95/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/96/netAtOnes",
+        "old": 59910,
+        "new": 59909
+      },
+      {
+        "path": "/plans/pro/options/96/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/97/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/98/netAtOnes",
+        "old": 61182,
+        "new": 61181
+      },
+      {
+        "path": "/plans/pro/options/98/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/99/netAtOnes",
+        "old": 61820,
+        "new": 61819
+      },
+      {
+        "path": "/plans/pro/options/99/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/100/netAtOnes",
+        "old": 62456,
+        "new": 62455
+      },
+      {
+        "path": "/plans/pro/options/100/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/101/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/102/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/103/netAtOnes",
+        "old": 64368,
+        "new": 64367
+      },
+      {
+        "path": "/plans/pro/options/103/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/104/netAtOnes",
+        "old": 65004,
+        "new": 65003
+      },
+      {
+        "path": "/plans/pro/options/104/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/105/netAtOnes",
+        "old": 65642,
+        "new": 65641
+      },
+      {
+        "path": "/plans/pro/options/105/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/106/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/107/netAtOnes",
+        "old": 66915,
+        "new": 66914
+      },
+      {
+        "path": "/plans/pro/options/107/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/108/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/109/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/110/netAtOnes",
+        "old": 68826,
+        "new": 68825
+      },
+      {
+        "path": "/plans/pro/options/110/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/111/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/112/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/113/netAtOnes",
+        "old": 70737,
+        "new": 70736
+      },
+      {
+        "path": "/plans/pro/options/113/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/114/netAtOnes",
+        "old": 71374,
+        "new": 71373
+      },
+      {
+        "path": "/plans/pro/options/114/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/115/netAtOnes",
+        "old": 72012,
+        "new": 72011
+      },
+      {
+        "path": "/plans/pro/options/115/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/116/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/117/netAtOnes",
+        "old": 73284,
+        "new": 73283
+      },
+      {
+        "path": "/plans/pro/options/117/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/118/netAtOnes",
+        "old": 73919,
+        "new": 73918
+      },
+      {
+        "path": "/plans/pro/options/118/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/119/netAtOnes",
+        "old": 74559,
+        "new": 74558
+      },
+      {
+        "path": "/plans/pro/options/119/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/120/netAtOnes",
+        "old": 75195,
+        "new": 75194
+      },
+      {
+        "path": "/plans/pro/options/120/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/121/netAtOnes",
+        "old": 75831,
+        "new": 75830
+      },
+      {
+        "path": "/plans/pro/options/121/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/122/netAtOnes",
+        "old": 76469,
+        "new": 76468
+      },
+      {
+        "path": "/plans/pro/options/122/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/123/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/124/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/125/netAtOnes",
+        "old": 78380,
+        "new": 78379
+      },
+      {
+        "path": "/plans/pro/options/125/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/126/netAtOnes",
+        "old": 79017,
+        "new": 79016
+      },
+      {
+        "path": "/plans/pro/options/126/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/127/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/128/netAtOnes",
+        "old": 80290,
+        "new": 80289
+      },
+      {
+        "path": "/plans/pro/options/128/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/129/netAtOnes",
+        "old": 80928,
+        "new": 80927
+      },
+      {
+        "path": "/plans/pro/options/129/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/130/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/131/netAtOnes",
+        "old": 82201,
+        "new": 82200
+      },
+      {
+        "path": "/plans/pro/options/131/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/132/netAtOnes",
+        "old": 82839,
+        "new": 82838
+      },
+      {
+        "path": "/plans/pro/options/132/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/options/133/netAtOnes",
+        "old": 83475,
+        "new": 83474
+      },
+      {
+        "path": "/plans/pro/options/133/usageMonthAtOnes",
+        "old": 2427,
+        "new": 2428
+      },
+      {
+        "path": "/plans/pro/baseYear",
+        "old": 9209,
+        "new": 9211
+      },
+      {
+        "path": "/plans/pro/coefMonth/ai",
+        "old": 335,
+        "new": 336
+      },
+      {
+        "path": "/plans/pro/coefYear/ai",
+        "old": 4025,
+        "new": 4024
+      },
+      {
+        "path": "/plans/pro/coefYear/storage",
+        "old": 1218,
+        "new": 1217
+      },
+      {
+        "path": "/plans/pro/coefYear/orders",
+        "old": 1136,
+        "new": 1135
+      },
+      {
+        "path": "/plans/pro/coefYear/transactional-email",
+        "old": 442,
+        "new": 441
+      },
+      {
+        "path": "/plans/scale/baseYear",
+        "old": 14901,
+        "new": 14907
+      },
+      {
+        "path": "/plans/scale/coefMonth/orders",
+        "old": 315,
+        "new": 316
+      },
+      {
+        "path": "/plans/scale/coefMonth/store-email",
+        "old": 72,
+        "new": 73
+      },
+      {
+        "path": "/plans/scale/coefYear/store-email",
+        "old": 871,
+        "new": 872
+      },
+      {
+        "path": "/plans/scale/coefYear/visits",
+        "old": 12660,
+        "new": 12661
+      }
+    ],
+    "structuralChanges": false
+  },
+  "scope": "28paths complete diff incl generated JSON; existing five document generators not rerun, no profitability certification"
+}

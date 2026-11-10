@@ -1,0 +1,12 @@
+
+Unknown membership rows must not become proof that no membership exists
+  ok    unknown status: public opening and provider POST
+  ok    active with omitted metadata: public opening and provider POST
+  ok    active with null metadata: public opening and provider POST
+  ok    active with a numeric product: public opening and provider POST
+  ok    active matching control: public opening and provider POST
+  ok    ended matching control: public opening and provider POST
+  ok    active other product control: public opening and provider POST
+  ok    whole empty subscription list opens one checkout (control)
+
+8 checks, all passing.

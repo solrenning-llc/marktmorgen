@@ -1,0 +1,16 @@
+  FAIL  only offered option survives {}
+        expected ["on"]
+        got      ["off","on"]
+  FAIL  only offered option survives {"course":{"lessons":1}}
+        expected ["on"]
+        got      ["off","on"]
+  FAIL  only offered option survives {"podcast":{"episodes":1}}
+        expected ["on"]
+        got      ["off","on"]
+  FAIL  only offered option survives {"shipping":{}}
+        expected ["on"]
+        got      ["off","on"]
+  ok    empty options remain empty
+  ok    off-sale option retains delivery for an earlier buyer
+
+6 checks, 4 failing.

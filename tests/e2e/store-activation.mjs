@@ -15,6 +15,12 @@ export async function checkStoreActivation({browser,LOCAL,fixture,axeSource,is})
  is("HT5 registration clock honest "+width,(await guide.innerText()).includes("This measures store registration, not an earlier sign-in or a sale."),true);
  is("HT5 manual publication step "+width,(await guide.innerText()).includes("Publish your first offer yourself"),true);
  await guide.locator("summary",{hasText:"Review the saved launch checklist"}).click();is("HT5 shared checklist "+width,(await guide.innerText()).includes("saved store activation checklist"),true);
+ // 766 [STN13]: the studio's search box is drawn by the server in its place, so the studio under it does not move
+ // when the page's script starts and a click begun before then (as above, in WebKit) still lands where it was aimed.
+ const served=await browser.newContext({viewport:{width,height:1000},javaScriptEnabled:false});let servedTop=null;
+ try{await served.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);const still=await served.newPage();await still.goto(LOCAL+"/studio?store="+fixture.sid);servedTop=await still.locator('[aria-labelledby="start-title"]').evaluate(node=>Math.round(node.getBoundingClientRect().top+scrollY));}finally{await served.close();}
+ await page.getByRole("combobox",{name:"Search the studio"}).waitFor();
+ is("STN13 search box does not move the studio when it appears "+width,await guide.evaluate(node=>Math.round(node.getBoundingClientRect().top+scrollY)),servedTop);
  await draft.locator("#setup-about").fill("I sell a synthetic lesson checklist.");
  await draft.getByRole("button",{name:"Draft my store",exact:true}).click();
  await draft.getByText("Products, as drafts",{exact:true}).waitFor();

@@ -352,6 +352,11 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/creator-research-room.ts KEEP_RESEARCH_ANSWER: the answer kept only while the list is under its ceiling, in one step.
+        if (key.startsWith("-- marktmorgen:research-answer-keep:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, max, row] = args;
+          return (this.run(["LLEN", list]) as number) >= Number(max) ? 0 : this.run(["LPUSH", list, row]);
+        }
         // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
         if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, lock, token] = args;

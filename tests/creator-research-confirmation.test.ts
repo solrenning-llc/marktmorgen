@@ -43,7 +43,7 @@ async function main() {
   assert.equal((await ask({...payload, consentResearch: false}, "192.0.2.3")).status, 400);
   assert.equal((await ask(payload, "192.0.2.4", "https://example.test")).status, 403);
   const pipeline = store.pipeline.bind(store);
-  store.pipeline = async commands => commands.some(command => command[0] === "LPUSH") ? [undefined] : pipeline(commands);
+  store.pipeline = async commands => commands.some(command => command[0] === "LPUSH" || command[0] === "EVAL") ? [undefined] : pipeline(commands);
   const errors: unknown[][] = [];
   const originalError = console.error;
   console.error = (...args: unknown[]) => { errors.push(args); };

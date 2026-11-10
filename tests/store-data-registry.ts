@@ -498,7 +498,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ref:mine:@lib/creator-invites.ts": company("A creator's credits", "The company's program for creators."),
   "nl:ref:mycode:@lib/creator-invites.ts": company("A creator's code", "The company's program for creators."),
   "nl:ref:owed@lib/creator-invites.ts": company("Credits owed", "The company's program for creators."),
-  "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research. One list, at most RESEARCH_MAX_ANSWERS (320) answers of at most RESEARCH_ANSWER_MAX_BYTES (12,288 bytes) each, read before each write and refused past it (lib/creator-research-room.ts, tests/creator-research-room.test.ts): RESEARCH_MAX_BYTES (3,932,160 bytes), under one backup part; answers older than 24 months go daily."),
+  "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research. One list, at most RESEARCH_MAX_ANSWERS (320) answers of at most RESEARCH_ANSWER_MAX_BYTES (12,288 bytes) each, counted and written in one step (KEEP_RESEARCH_ANSWER) and refused past it (lib/creator-research-room.ts, tests/creator-research-room.test.ts): RESEARCH_MAX_BYTES (3,932,160 bytes), under one backup part; answers older than 24 months go daily."),
   "nl:crm:deals:@lib/crm.ts": { what: "Deals: one slot a deal, at what it weighs, at most MAX_DEALS", room: ["lib/crm.ts"] },
   "nl:crm:tasks:@lib/crm.ts": {
     what: "Tasks about a person, at what they weigh, at most MAX_STORE_TASKS, and the store's count of them (TASK_COUNT_WEIGHT)",

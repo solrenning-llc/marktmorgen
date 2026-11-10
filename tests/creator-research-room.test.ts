@@ -10,8 +10,9 @@
  *
  * Now an answer is at most 12,288 bytes as stored (every real answer fits:
  * each field at its limit, three bytes a character, stays under it), and the
- * list holds at most 320 answers, read before the write and checked again on
- * the length the write answers, so two answers sent at once cannot both pass.
+ * list holds at most 320 answers, counted and written in one step
+ * (KEEP_RESEARCH_ANSWER), so answers sent at once, a lost reply or a failed
+ * step can never leave it past the ceiling (review of #3584, Codex T).
  * A full list is said honestly (503 "full"), never as saved.
  */
 import { readFileSync } from "node:fs";
@@ -81,39 +82,26 @@ async function main() {
     is("and the list holds 320", (await rows()).length, MAX_ANSWERS);
   }
 
-  part("Two answers at once: the one the write finds past the ceiling takes itself back");
+  part("Two answers at once for the last place: one kept, one refused as full");
   {
-    await fill(MAX_ANSWERS);
-    // Another answer was kept between this one's read and its write: the read says 319, the write finds 321.
-    store.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "LLEN" ? [MAX_ANSWERS - 1] : pipeline(commands));
-    const got = await ask({ ...payload, name: "Raced Creator" });
-    store.pipeline = pipeline;
-    is("refused as full, never said saved", got, [503, "full"]);
-    const kept = await rows();
-    is("the list holds 320, none of them the raced answer", [kept.length, kept.some((row) => row.includes("Raced Creator"))], [MAX_ANSWERS, false]);
+    await fill(MAX_ANSWERS - 1);
+    const both = await Promise.all([ask({ ...payload, name: "First Creator" }), ask({ ...payload, name: "Second Creator" })]);
+    is("one saved, one full", both.map(([status]) => status).sort(), [201, 503]);
+    is("the list holds 320", (await rows()).length, MAX_ANSWERS);
   }
 
-  part("An unread count or an unconfirmed take-back is never a saved answer (rule 24)");
+  part("A reply to the keeping step that is not exact is never a saved answer (rule 24)");
   {
-    await fill(3);
-    store.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "LLEN" ? ["3"] : pipeline(commands));
-    quiet(true);
-    const unread = await ask(payload);
-    quiet(false);
-    store.pipeline = pipeline;
-    is("a count not read as a number: 500, nothing kept", [unread, (await rows()).length], [[500, "server_error"], 3]);
-
-    await fill(MAX_ANSWERS);
-    store.pipeline = async (commands) => {
-      if (commands.length === 1 && commands[0][0] === "LLEN") return [MAX_ANSWERS - 1];
-      if (commands.length === 1 && commands[0][0] === "LREM") return [undefined];
-      return pipeline(commands);
-    };
-    quiet(true);
-    const lost = await ask(payload);
-    quiet(false);
-    store.pipeline = pipeline;
-    is("a take-back not answered 1: 500, not saved and not full", lost, [500, "server_error"]);
+    const keeping = (commands: (string | number)[][]) => commands.length === 1 && commands[0][0] === "EVAL";
+    for (const [label, reply] of [["a length as text", "3"], ["no reply", undefined], ["a length past the ceiling", MAX_ANSWERS + 1], ["a negative length", -1]] as const) {
+      await fill(3);
+      store.pipeline = async (commands) => (keeping(commands) ? [reply] : pipeline(commands));
+      quiet(true);
+      const got = await ask(payload);
+      quiet(false);
+      store.pipeline = pipeline;
+      is(`${label}: 500, not saved and not full`, got, [500, "server_error"]);
+    }
   }
 
   part("Eight answers at once never leave the list past its ceiling, whatever a reply says (review of #3584, Codex T)");

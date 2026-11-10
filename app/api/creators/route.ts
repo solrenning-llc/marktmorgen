@@ -11,7 +11,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
-import { RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, answerBytes } from "@/lib/creator-research-room";
+import { KEEP_RESEARCH_ANSWER, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, answerBytes } from "@/lib/creator-research-room";
 const RATE_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const MAX_BODY_BYTES = 20_000;
@@ -153,22 +153,14 @@ export async function POST(request: NextRequest) {
     if (count === null || count < 1) throw new UnknownReplyError("the creator research count");
     if (count > RATE_LIMIT) return fail(429, "rate_limited");
 
-    // The list's ceiling, read before the write: a count not read exactly keeps nothing (CX-123 rule 24).
-    const held = repliesFor(await redisPipeline([["LLEN", RESPONSES_KEY]]), 1);
-    const answers = held ? countOf(held[0]) : null;
-    if (answers === null) throw new UnknownReplyError("the creator research answers held");
-    if (answers >= RESEARCH_MAX_ANSWERS) return fail(503, "full");
-
-    const [saved] = await redisPipeline([["LPUSH", RESPONSES_KEY, row]]);
-    if (typeof saved !== "number" || !Number.isSafeInteger(saved) || saved < 1) {
-      throw new Error("Research storage did not confirm the saved answer");
-    }
-    // Another answer kept between the read and the write: the one the write finds past the ceiling takes itself back
-    // (its row is its own, by its random id), so the list never stays past it. Taken back only on an exact 1.
-    if (saved > RESEARCH_MAX_ANSWERS) {
-      const back = repliesFor(await redisPipeline([["LREM", RESPONSES_KEY, 1, row]]), 1);
-      if (!back || back[0] !== 1) throw new UnknownReplyError("taking back a creator research answer past the ceiling");
-      return fail(503, "full");
+    // The list's ceiling and the write in one step (lib/creator-research-room.ts): answers sent at once, a lost
+    // reply or a failed step never leave it past the ceiling. Only 0 is full and only a length inside the
+    // ceiling is saved; any other reply is not a confirmation (CX-123 rule 24).
+    const kept = repliesFor(await redisPipeline([["EVAL", KEEP_RESEARCH_ANSWER, 1, RESPONSES_KEY, RESEARCH_MAX_ANSWERS, row]]), 1);
+    const length = kept ? countOf(kept[0]) : null;
+    if (length === 0) return fail(503, "full");
+    if (length === null || length > RESEARCH_MAX_ANSWERS) {
+      throw new UnknownReplyError("keeping a creator research answer");
     }
   } catch (error) {
     console.error("creator research submission failed", error);

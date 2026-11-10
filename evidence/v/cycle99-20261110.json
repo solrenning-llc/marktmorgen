@@ -1,0 +1,310 @@
+{
+  "cycle": 99,
+  "date": "2026-11-10",
+  "agent": "Codex V",
+  "previous_checkpoint": "3ddb64c5e35875b59d18e5bd5559420847248d09",
+  "main": "8c17d25a888927b74f3a402d1c17dee5f551ddd4",
+  "norms": "Six-file exact delta from4ec34bab read: no CLAUDE/AGENTS/inbox/queue/reservations changes; previous full reads preserved. Fresh full ROOT read, archive dispensed.",
+  "review": {
+    "number": 3569,
+    "head": "3e56a2fdb89fea0aff15fedb89f7609eb2147478",
+    "verdict": "V MEDIUM6764767640 closed in cause; no new HIGH/MEDIUM in nominal correction delta",
+    "claim": "e92790286a38de10a4f4209634dc2b5351f63e0b",
+    "tests": "Same two formerly failing cases and three controls, all four caller APIs:11/11PASS,20additionalHTTP0Redis",
+    "cumulative": {
+      "redis": 19,
+      "mock_http": 100,
+      "real_network": 0
+    },
+    "cap": "Aggregate100HTTP FULLY CONSUMED; do not rerun/reset/raise/extract around cap. Same512MiBheap120s256KiB runner/guard.",
+    "evidence": "3f0384d4d1be79a59ee0641cad5d99bc514590f1/evidence/v/review-3569-return-20261110.json",
+    "evidence_exact_readback": true,
+    "comment": 6765869626,
+    "comment_exact_readback": true,
+    "channel": "8a938fe55527a785b4990a082d0989fe4a80c5b5",
+    "channel_exact_readback": true,
+    "localproof": "f0ba47b2d",
+    "worktree": "/workspace/scratch/aed9c38475cd/v91-3569",
+    "limitations": "Focal only, T first review credited, no global financial/live-provider/full types/lint/CI/queue certification. Seven exact-head aggregators success,three unfinished runs at read.",
+    "next": "Claude3 owns remaining gates and any first-review applicability. Await genuinely new delta/technical request; no replay."
+  },
+  "own": [
+    {
+      "number": 2999,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        }
+      ],
+      "last_comment": [
+        6729833140
+      ]
+    },
+    {
+      "number": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        }
+      ],
+      "last_comment": [
+        6762476485
+      ]
+    },
+    {
+      "number": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        }
+      ],
+      "last_comment": [
+        6718746483
+      ]
+    },
+    {
+      "number": 3500,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        }
+      ],
+      "last_comment": [
+        6760850295
+      ]
+    }
+  ],
+  "holds": {
+    "pr3024": {
+      "remote": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "local_candidate": "06a27f8e3cf68830f70cce4921cd9cd4368b3c2b",
+      "local_report_head": "1a9201616",
+      "worktree": "/workspace/scratch/aed9c38475cd/v80-3024-local",
+      "medium": "stale snapshot double room credit inherited from Z remains open remotely",
+      "pending": "C1 shared-file scope/cost review/lint disposition and independent return; prior lint heap512 aborted134 consumed/inconclusive, no retry/reset/raise",
+      "newest_author_comment": 6762476485,
+      "static_cost_evidence": "a01f788ab753111fd31c4de02518396ee42eeb91",
+      "static_cost_note": "conditional75 CAS segment, inherited100 handle loop,175 before cleanup if jointly reached; not jointly runtime proven/no global bound."
+    }
+  },
+  "queue": "2999/3206/3500 existing prior added_to_merge_queue events; no new queue/merge/push/cancel. 3024 remains not ready despite nine green.",
+  "next_work": "Fresh ROOT first, requested focals and own returns before new unclaimed reviews. #3570/#3572 H2, #3571 C3, #3568 C2 already owned: do not duplicate. #2036 short merge focal requested generally; check claims before taking. No new response3024; C1 responsible for scope/cost/lint disposition. All budgets and author heads preserved.",
+  "no_agents": true,
+  "no_product_push_merge_cancel_workflow": true
+}

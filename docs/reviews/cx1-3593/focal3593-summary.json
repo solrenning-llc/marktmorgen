@@ -1,0 +1,16 @@
+{
+  "cx1-template-multiline.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "5 checks, all passing."
+    ]
+  },
+  "template-text-rules.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "27 checks, all passing."
+    ]
+  }
+}

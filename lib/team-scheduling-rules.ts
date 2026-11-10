@@ -51,6 +51,15 @@ export const TEAM_MODE_SUMMARIES: Record<TeamMode, string> = {
 };
 
 /** Team calls one host may take in one of their days. */
+/**
+ * How often a team host's calendar is read again, and how old its last good
+ * reading may be before the host is left out (lib/host-calendar.ts reads
+ * these). Here, beside the other team rules, so the studio and the public
+ * pages say the server's figures and never type them.
+ */
+export const HOST_SYNC_MINUTES = 15;
+export const HOST_STALE_MINUTES = 45;
+
 export const DAILY_CAPS = [1, 2, 3, 4, 5, 6, 8, 10, 12] as const;
 
 /** One person who hosts a team event type. */

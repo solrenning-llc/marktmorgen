@@ -22,6 +22,7 @@ import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
 import { Stars } from "@/components/review-stars";
 import { imageUrl } from "@/lib/product-image";
+import { StudioEmptyState } from "@/components/empty-state";
 
 export const metadata: Metadata = {
   title: "Reviews — Marktmorgen",
@@ -51,7 +52,10 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   const { store } = view;
 
   // The writing help, for a reply drafted from a review (lib/ai.ts, replyToReview).
-  const ai = aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  // An allowance that could not be read is said in words by the AI boxes, never shown as 0 (rule 24, VR item 2).
+  const ai = aiAvailableFor(store)
+    ? await aiLeft(store).then((left) => ({ on: true, left }), () => ({ on: true, left: 0, known: false as const }))
+    : { on: false, left: 0 };
   const queue = query.view !== "all";
   const asked = Number(typeof query.page === "string" ? query.page : "1");
   const page = Number.isInteger(asked) && asked >= 1 ? asked : 1;
@@ -92,8 +96,8 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page,
   // every product's in one request.
   const summed = reviewed.slice(0, 30);
-  const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => new Map<string, never>());
-  const aiSummaries = summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
+  const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => null);
+  const aiSummaries = keptSummaries === null ? null : summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
   const tab = (view: "new" | "all", label: string) => (
     <Link
       href={studioPath(store, view === "new" ? "" : "view=all", "reviews")}
@@ -145,22 +149,20 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 <p className="mt-2 text-ink-soft">Reload to check your reviews. An unavailable list does not mean there are no reviews or that every review has been seen.</p>
               </div>
             ) : rows.length === 0 ? (
-              <div className="card mt-5 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">{current.total > 0 ? "No reviews on this page" : queue ? "Nothing new" : "No reviews yet"}</p>
-                <p className="mt-2 text-ink-soft">
-                  {current.total > 0
+              <StudioEmptyState
+                level={3}
+                className="card mt-5 p-6 sm:p-8"
+                title={current.total > 0 ? "No reviews on this page" : queue ? "Nothing new" : "No reviews yet"}
+                body={
+                  current.total > 0
                     ? "Choose an earlier page to see the reviews in this list."
                     : queue
                     ? "Every review has been seen. New ones, and reviews their buyers change, come back here."
-                    : "When a buyer reviews something, it appears here and on the product's page at the same moment."}
-                </p>
-                {/* Only when the store has no review at all, on either tab, and only for a role that can switch the requests on. */}
-                {current.total === 0 && numbers.size === 0 && can(view.role, "settings") ? (
-                  <a href="#asking-for-reviews" className="mt-3 inline-flex min-h-11 items-center font-semibold text-ink underline underline-offset-4">
-                    Ask buyers for a review
-                  </a>
-                ) : null}
-              </div>
+                    : "When a buyer reviews something, it appears here and on the product's page at the same moment."
+                }
+                // Only when the store has no review at all, on either tab, and only for a role that can switch the requests on.
+                action={current.total === 0 && numbers.size === 0 && can(view.role, "settings") ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined}
+              />
             ) : (
               <AiOn value={ai}>
                 <ul className="mt-5 space-y-3">
@@ -204,6 +206,8 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
             <div className="card p-5 sm:p-6">
               <p className="font-semibold text-ink">By product</p>
               {reviewed.length === 0 ? (
+                // Not the shared empty state (Codex Q on #2841): the totals' reader cannot tell "none" from "not read",
+                // so this says only that none can be shown here, never that there are none.
                 <p className="mt-2 text-sm text-ink-soft">No product review totals are available in this view.</p>
               ) : (
                 <ul className="mt-3 space-y-3">
@@ -285,7 +289,12 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
 
             <ReviewThemes voice={await readVoice(store).catch(() => null)} studioHome={studioPath(store)} />
 
-            <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} />
+            {aiSummaries === null ? (
+              <section aria-labelledby="ai-summaries-title" className="card p-5 sm:p-6">
+                <h2 id="ai-summaries-title" className="font-semibold text-ink">AI review summaries</h2>
+                <p role="status" className="mt-2 text-sm text-ink-soft">Review summaries couldn&apos;t be loaded. Reload to try again.</p>
+              </section>
+            ) : <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} canAsk={can(view.role, "settings")} />}
 
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>

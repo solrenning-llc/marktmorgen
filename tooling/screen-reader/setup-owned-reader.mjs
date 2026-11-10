@@ -1,5 +1,6 @@
 import {ownedRepositoryEnv} from "./owned-repository.mjs";
 import {spawnSync} from "node:child_process";
+import {realpathSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 const CLI=fileURLToPath(new URL("./node_modules/@guidepup/setup/bin/guidepup",import.meta.url));
 /** Only preparation is repeatable; the real reader and speech assertions run once. */
@@ -24,10 +25,12 @@ export async function setupOwnedReader(options={}){
  // A download can fail before preferences are installed. Only the pinned
  // macOS preferences asset plus an explicit network-fetch failure qualifies;
  // signature, mount, permission, timeout and unknown errors remain failures.
+ const cacheAsset="guidepup-voiceover-preferences-macos-26.dmg";
  const cacheDownload=platform==="darwin"&&!first.signal&&!first.error&&
   first.status!==null&&first.status!==0&&
-  output.includes("Failed to download Guidepup cache asset: guidepup-voiceover-preferences-macos-26.dmg")&&
-  output.includes("Cause: TypeError: fetch failed");
+  output.includes(`Failed to download Guidepup cache asset: ${cacheAsset}`)&&
+  (output.includes("Cause: TypeError: fetch failed")||
+   output.includes(`Cause: Error: Failed to download Guidepup cache asset: ${cacheAsset} (504 )`));
  if(!permissionPropagation&&!cacheDownload)throw Error("Reader preparation failed; no permitted recovery");
  // Repeat only idempotent preparation once. Never skip download validation,
  // change SIP/TCC protections, retry the reader pilot or convert failure to approval.
@@ -35,7 +38,12 @@ export async function setupOwnedReader(options={}){
  if(!succeeded(attempt()))throw Error("Reader preparation remained unavailable");
  return {attempts:2};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url)){
+/** Whether node was asked to run this file: compared as real paths, so a link matches and an import does not. */
+function isProgram(){
+ try{return Boolean(process.argv[1])&&realpathSync(fileURLToPath(import.meta.url))===realpathSync(process.argv[1]);}
+ catch{return false;}
+}
+if(isProgram()){
  setupOwnedReader().then(result=>console.log("Owned reader preparation completed; attempts="+result.attempts))
   .catch(()=>{console.error("Owned reader preparation failed; actual reader approval is unavailable.");process.exitCode=1;});
 }

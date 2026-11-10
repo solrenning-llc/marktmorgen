@@ -15,7 +15,7 @@ import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey,
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
-import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
+import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, BroadcastsUnreadable, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
 import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
@@ -26,10 +26,12 @@ import { normaliseEmail } from "@/lib/auth";
 import { courseProgress } from "@/lib/learn";
 import { idsOfKind } from "@/lib/catalog";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { DraftRemovalConflict, DraftRemovalUnconfirmed, DraftReadUnavailable, DraftWriteUnconfirmed, finishBroadcastDraft, removeDraft, saveDraft } from "@/lib/mail-drafts";
 import { copyOf, keepSending } from "@/lib/mail-reuse";
 import { setUpStarters } from "@/lib/mail-starters";
 import { readListings } from "@/lib/catalog";
+import { CrmSchemaReadUnavailable } from "@/lib/crm";
 import type { Permission } from "@/lib/team-roles";
 
 export const maxDuration = 60;
@@ -188,12 +190,19 @@ export async function POST(request: NextRequest) {
 
     if (action === "segment-save") {
       const saved = await saveSegment(store, body);
-      if (!saved.ok) return Response.json({ ok: false, error: `segment_${saved.reason}` }, { status: 400 });
+      // Groups that could not be read are a moment's trouble, not the creator's: 503, and nothing was saved.
+      if (!saved.ok) return Response.json({ ok: false, error: `segment_${saved.reason}` }, { status: saved.reason === "unavailable" ? 503 : 400 });
       return Response.json({ ok: true, segments: saved.segments });
     }
 
     if (action === "segment-remove") {
-      return Response.json({ ok: true, segments: await removeSegment(store, body.id) });
+      // Removed, but the groups left could not be read: never shown as none (CX-123 rule 24).
+      const segments = await removeSegment(store, body.id).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      });
+      if (!segments) return fail("segment_unread", 503);
+      return Response.json({ ok: true, segments });
     }
 
     if (action === "test") {
@@ -380,8 +389,12 @@ export async function POST(request: NextRequest) {
     console.error("an email action failed", error);
     if (error instanceof BroadcastCancellationUnconfirmed) return fail("broadcast_cancel_unconfirmed", 502);
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);
+    // An email's record that could not be read (rule 24): nothing was changed, never "not there".
+    if (error instanceof BroadcastsUnreadable) return fail("broadcast_read_unavailable", 503);
     if (error instanceof FlowWriteUnconfirmed) return fail("flow_write_unconfirmed", 502);
     if (error instanceof FlowRunUnavailable) return fail("flow_runs_unavailable", 503);
+    // A sequence's stages and fields are checked against the store's own; unknown ones save nothing (lib/crm.ts).
+    if (error instanceof CrmSchemaReadUnavailable) return fail("crm_schema_read_unavailable", 503);
     if (error instanceof DraftWriteUnconfirmed) return fail("draft_write_unconfirmed", 502);
     if (error instanceof DraftReadUnavailable) return fail("draft_read_unavailable", 503);
     if (error instanceof DraftRemovalConflict) return fail("draft_remove_conflict", 409);

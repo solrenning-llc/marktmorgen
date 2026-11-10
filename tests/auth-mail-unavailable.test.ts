@@ -29,6 +29,11 @@ function lostRequest(email: string) {
     body: new URLSearchParams({ email }),
   });
 }
+/** A neutral success: 200, ok, and a request's id for the emailed code (652 [WG12]), which every success carries alike. */
+const okWithRequest = async (response: Response) => {
+  const body = (await response.json()) as { ok?: unknown; request?: unknown; error?: unknown };
+  return [response.status, body.ok === true && body.error === undefined, typeof body.request === "string" && /^[0-9a-f]{64}$/.test(body.request)];
+};
 const tokenKeys = () => store.keys().filter(k => k.startsWith("nl:auth:link:") || k.startsWith("nl:auth:rec:link:"));
 async function main() {
   store.clear();
@@ -66,7 +71,7 @@ async function main() {
   const invalid = await signIn(signRequest("not-an-email"));
   is("invalid email still gets its existing response", [invalid.status, await invalid.json()], [400, { ok: false, error: "invalid_email" }]);
   const honey = await signIn(signRequest("known@example.test", { website: "a program" }));
-  is("honeypot remains neutral and successful", [honey.status, await honey.json()], [200, { ok: true }]);
+  is("honeypot remains neutral and successful", await okWithRequest(honey), [200, true, true]);
   const foreign = new NextRequest(`${ORIGIN}/api/auth/request`, { method: "POST", headers: { Host: "marktmorgen.com", Origin: "https://foreign.example.test", "Content-Type": "application/json" }, body: JSON.stringify({ email: "known@example.test" }) });
   is("cross-site requests are refused before sending", (await signIn(foreign)).status, 403);
   for (let i = 0; i < 8; i++) await signIn(signRequest("limited@example.test"));
@@ -95,12 +100,12 @@ async function main() {
       [[503, { ok: false, error: "server_error" }], [503, { ok: false, error: "server_error" }]]);
     is("a refused sender never posts a message", [fixture.calls.ses, fixture.calls.resend], [0, 0]);
     const demo = await signIn(signRequest(HOUSE_OWNER));
-    is("the deliberately ignored public demo owner keeps its neutral reply", [demo.status, await demo.json()], [200, { ok: true }]);
+    is("the deliberately ignored public demo owner keeps its neutral reply", await okWithRequest(demo), [200, true, true]);
     const unknownRecovery = await lost(lostRequest("unknown-post@example.test"));
     is("a recipient-dependent recovery outcome still cannot enumerate an account", [unknownRecovery.status, unknownRecovery.headers.get("location")], [303, `${ORIGIN}/signin/lost?status=sent`]);
     await fixture.setReady(true);
     const positive = await signIn(signRequest("accepted@example.test"));
-    is("actual SES acceptance preserves the successful route", [positive.status, await positive.json()], [200, { ok: true }]);
+    is("actual SES acceptance preserves the successful route", await okWithRequest(positive), [200, true, true]);
     is("the original login email goes to the original inbox", [fixture.sent.length, fixture.sent.at(-1)?.to, fixture.sent.at(-1)?.subject], [1, ["accepted@example.test"], "Your Marktmorgen login link"]);
     is("the link keeps its existing 15-minute lifetime", fixture.sent.at(-1)?.text.includes("stops working in 15 minutes"), true);
     is("the helper added no SES account read before the original sender", fixture.calls.account, 2);

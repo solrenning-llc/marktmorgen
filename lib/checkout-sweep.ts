@@ -6,8 +6,8 @@
  * buyer who closes the tab while Stripe is sending them there never lands,
  * and a checkout that closes unpaid has no page at all. So the five-minute
  * job walks the stores a slice at a time and, for each one that sells, asks
- * the creator's own Stripe account for the checkouts of the last day — one
- * request per hundred — and hands each on:
+ * the creator's own Stripe account for the completed and the expired
+ * checkouts of the last day — one request per hundred — and hands each on:
  *
  *   - a settled one that has not been confirmed gets its confirmation
  *     (lib/purchase-email.ts);
@@ -33,9 +33,12 @@
  * stars out of the average (lib/reviews.ts).
  *
  * Bounded three ways, so it can never run away with the job: a time budget
- * the caller sets, at most three pages of a hundred checkouts per store, and
+ * the caller sets, at most three pages of a hundred checkouts per store in
+ * each of its two walks (the completed checkouts, and the expired ones), and
  * a place in the list of stores kept in Redis, so each run carries on where
- * the last one stopped and every store is reached in turn. Both emails are
+ * the last one stopped and every store is reached in turn. Each walk keeps
+ * its own place too, so a store with more checkouts in a day than one run
+ * reads has them all read in turn (walkDay). Both emails are
  * guarded by their own marks, so a store seen twice is only work, never a
  * second email.
  */
@@ -47,6 +50,7 @@ import { revokeRefundedGroups } from "@/lib/group-buy";
 import { sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase, confirmationKey } from "@/lib/purchase-email";
@@ -56,12 +60,12 @@ import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { noteKept } from "@/lib/move-members";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
-import { affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
-import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
+import { AFFILIATE_ID_PATTERN, affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
+import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
-import { listOrder, listedAlready } from "@/lib/buyer-list";
+import { putOnList, listedAlready } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { isHouseStore } from "@/lib/house-store";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -314,8 +318,108 @@ export async function observeCheckoutTaxPage(store: Store, rows: unknown, value:
     return taxResult("recorded", taxOwn(result, "0") === 2 ? "duplicate" : "confirmed", taxOwn(result, "1") as number);
   } catch { return taxResult("unknown", "storage"); }
 }
-/** At most this many pages of a hundred checkouts are read per store per pass. */
+/**
+ * At most this many pages of a hundred checkouts are read per store per pass in each of its two walks (walkDay):
+ * the completed ones, and the expired ones on a store with reminders or a list. So at most 2 x 3 = 6 list calls each
+ * time a store is swept, 288 runs a UTC day (tests/plan-cost-registry.ts, NOT_A_COST.MAX_PAGES_PER_STORE).
+ */
 export const MAX_PAGES_PER_STORE = 3;
+
+/** The two walks of a store's checkouts: Stripe's own `status` of a Checkout Session, which the list filters on. */
+type WalkKind = "complete" | "expired";
+
+/**
+ * Where a walk of one store's checkouts of the last day left off: the run the walk began (seconds) and the last
+ * session it handled. One key a walk, kept a day (past it, nothing behind the place is in the day any more); keyed by
+ * the Stripe account and the store, so a store that changed accounts, or two stores on one account, never follow
+ * each other's place.
+ */
+const walkKey = (kind: WalkKind, account: string, store: Store) => `nl:sweep:walk:${kind}:${account}:${store.sid || store.handle}`;
+const WALK_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
+/**
+ * A walk that has taken longer than this to reach the end of the day's checkouts is said in the log, every run it
+ * goes on: an order paid in the last part of its checkout's day may then be read late, or leave the day before the
+ * walk reaches it (an hour is twelve runs, at most 3,600 sessions of one kind, when the store is reached every run).
+ */
+const WALK_LATE_SECONDS = 60 * 60;
+
+/**
+ * Walks one store's checkouts of the last day of one `kind`, newest first, at most MAX_PAGES_PER_STORE pages a run,
+ * and carries on next run from where this one stopped, so that every session of the day is read in turn, however
+ * many came after it (audit A2, 9 November 2026: read from the top every run, a paid order behind 300 newer
+ * sessions was never read, so its buyer who closed the tab was never confirmed). At the end of the day's sessions
+ * the place is let go and the next run starts again from the newest. A page is passed over only once it was handled
+ * before the deadline: one cut short by the deadline is read again next run. An order that failed is read again on
+ * the walk's next round, not the next run (it never holds the walk up). Throws, as before, when Stripe cannot be
+ * asked or answers a page that is not a list; a place Stripe no longer knows is let go then, so the next run starts
+ * from the newest instead of failing the same way.
+ */
+async function walkDay(store: Store, kind: WalkKind, since: number, deadline: number, counts: SweepCounts, handle: (rows: SessionRecord[]) => Promise<void>): Promise<void> {
+  const account = store.stripeAccountId as string;
+  const key = walkKey(kind, account, store);
+  const now = Math.floor(Date.now() / 1000);
+  const [saved] = repliesFor(await redisPipeline([["GET", key]]), 1) ?? [undefined];
+  let began = now;
+  let after = "";
+  if (typeof saved === "string") {
+    const [at, id] = saved.split("|");
+    const start = Number(at);
+    // A place in another shape is no place: the walk starts from the newest and writes its own.
+    if (Number.isSafeInteger(start) && start > 0 && start <= now && WALK_SESSION.test(id ?? "")) {
+      began = start;
+      after = id as string;
+    }
+  } else if (saved !== null) {
+    // Not known where the walk was (CX-123 rule 24): it starts from the newest this run, and the run says it failed,
+    // since the older sessions behind the place are not read this run.
+    counts.failed += 1;
+    console.error("the checkout sweep's place in a store's checkouts did not read; this run starts from the newest", store.handle, kind);
+  }
+  const resumed = after !== "";
+  const kept = after;
+  if (resumed && now - began > WALK_LATE_SECONDS) {
+    console.error(
+      "the checkout sweep has not reached the end of a store's checkouts of the day for over an hour: an order paid near the end of its checkout's day may be handled late, or not at all",
+      store.handle, kind, { walkingSeconds: now - began },
+    );
+  }
+  let place = after;
+  let ended = false;
+  try {
+    for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
+      const query = `/checkout/sessions?limit=100&status=${kind}&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
+      let listed: Record<string, unknown>;
+      try {
+        listed = await onAccount("GET", account, query);
+      } catch (error) {
+        // The place may be a session Stripe no longer lists: let it go, so the next run is not stuck on it.
+        if (page === 0 && resumed) place = "";
+        throw error;
+      }
+      // A page that is not a list is not "no checkouts" (CX-123 rule 24, L6): it stops this store's sweep, said as failed.
+      if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of checkouts");
+      const rows = listed.data as SessionRecord[];
+      await handle(rows);
+      // Each step of a page checks the deadline before its next order: a page that ends past it may not be whole,
+      // so the walk does not go past it (time only moves on, so before the deadline here means no step stopped early).
+      if (Date.now() >= deadline) break;
+      const last = rows[rows.length - 1];
+      if (listed.has_more !== true || !last || typeof last.id !== "string" || !WALK_SESSION.test(last.id)) {
+        ended = true;
+        break;
+      }
+      after = last.id;
+      place = last.id;
+    }
+  } finally {
+    // The end of the day's sessions, or a place let go: the next run starts from the newest. Otherwise the place is
+    // kept, with the run the walk began; nothing is written when the walk did not move.
+    const write = ended || place === ""
+      ? (typeof saved === "string" ? ["DEL", key] : null)
+      : place !== kept ? ["SET", key, `${began}|${place}`, "EX", CONFIRM_WITHIN_SECONDS] : null;
+    if (write) await redisPipeline([write]).catch((error) => console.error("keeping the checkout sweep's place failed", store.handle, kind, describe(error)));
+  }
+}
 
 export type SweepCounts = {
   stores: number;
@@ -343,6 +447,11 @@ function worthAsking(store: Store, requesting = false): boolean {
     (Boolean(store.stripeAccountId) && Boolean(store.listId) && sellsThings(store)) ||
     (Boolean(store.stripeAccountId) && sendsFromServer(store))
   );
+}
+
+/** What an order's error is said as in the log: its name and the start of its message, never the whole object. */
+function describe(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : typeof error;
 }
 
 /** One store: its checkouts of the last day, each handed to what it needs. */
@@ -396,23 +505,26 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   if (!worthAsking(store, requesting)) return;
   // A membership's renewals, sent to the creator's ad platforms as purchases
-  // of their own (lib/ad-events.ts): one read of the day's invoices, only on
-  // a store that sends from the server.
+  // of their own (lib/ad-events.ts): the day's paid invoices, read page by
+  // page up to its cap and within the pass's deadline, only on a store that
+  // sends from the server.
   if (store.stripeAccountId && sendsFromServer(store)) {
     await sendRenewals(store, Date.now(), deadline).catch((error) => console.error("sending renewals to ad platforms failed", store.handle, error));
   }
   const now = Math.floor(Date.now() / 1000);
   const since = now - CONFIRM_WITHIN_SECONDS;
   const reminding = recoveryOn(store);
-  let after = "";
-  for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
-    const listed = await onAccount(
-      "GET",
-      store.stripeAccountId as string,
-      `/checkout/sessions?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
-    );
-    const rows = Array.isArray(listed.data) ? (listed.data as SessionRecord[]) : [];
-
+  // An order that fails is counted once in this pass, however many of its steps failed (Claude 5 on #2977): its
+  // confirmation and its place on the list can both throw on the same unreadable record, and that is one order.
+  const failedOrders = new Set<string>();
+  const failOrder = (id: string): void => {
+    if (failedOrders.has(id)) return;
+    failedOrders.add(id);
+    counts.failed += 1;
+  };
+  // The day's completed checkouts, walked page by page across runs (walkDay): every paid order of the day is read,
+  // however many sessions of other kinds came after it (audit A2, 9 November 2026).
+  await walkDay(store, "complete", since, deadline, counts, async (rows) => {
     // Asked in one round trip: which of the paid ones were already confirmed.
     const paid = rows.filter((row) => isSettled(row) && typeof row.id === "string");
     // This is independent of the email's sent mark and cannot hold up an
@@ -431,17 +543,40 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // A partner's standing share has to be written for every sale, not only
     // the ones somebody referred, so the store's partners are read once here
     // and a sale is passed on when a link, a code or a partner touches it.
-    if (affiliatesOn(store)) {
-      const [owners, partners] = paid.length
-        ? await Promise.all([codeOwners(store), listPartners(store)])
-        : [new Map<string, string>(), []];
-      for (const row of paid) {
-        // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
-        // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
-        if (row.metadata?.kind === "tip" || row.metadata?.kind === "request") continue;
-        const code = owners.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
+    // Nothing here ends the store's pass (Claude 2 on #3238): the codes are read only when an order on the page
+    // carries one and no click, and a read that fails is null, never an empty map or list, so the orders that needed
+    // it are counted as failed and wait for the next pass (the writes are HSETNX, so a retry records a share once),
+    // while the confirmations, the library and the rest below go on. A click wins over a code (Codex H2 on #3238):
+    // an order whose `via` is an affiliate id is decided by noteSession without the codes, the same test it uses.
+    if (affiliatesOn(store) && paid.length) {
+      // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
+      // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
+      const sold = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request");
+      const needsCodes = (row: SessionRecord) =>
+        promoCodesOn(row as { discounts?: unknown }).length > 0 && !AFFILIATE_ID_PATTERN.test(row.metadata?.via ?? "");
+      const coded = sold.some(needsCodes);
+      const unread = (what: string) => (error: unknown): null => {
+        console.error(`reading ${what} failed; the sales that need them wait for the next run`, store.handle, describe(error));
+        return null;
+      };
+      const [owners, partners] = await Promise.all([
+        coded ? codeOwners(store).catch(unread("the codes given to affiliates")) : new Map<string, string>(),
+        listPartners(store).catch(unread("the store's partners")),
+      ]);
+      for (const row of sold) {
+        const id = row.id as string;
+        if (partners === null || (owners === null && needsCodes(row))) {
+          failOrder(id);
+          continue;
+        }
+        const code = owners?.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
         if (row.metadata?.via || code || partners.length) {
-          await noteSession(store, row as Parameters<typeof noteSession>[1], owners, partners);
+          try {
+            await noteSession(store, row as Parameters<typeof noteSession>[1], owners ?? undefined, partners);
+          } catch (error) {
+            failOrder(id);
+            console.error("an affiliate's sale was left for the next run", id, describe(error));
+          }
         }
       }
     }
@@ -477,14 +612,35 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       }
     }
     const confirming = canConfirm(store);
+    // Which confirmations already went: one exact answer per order, 0 or 1 (CX-123 rule 24, L6). Anything else is
+    // unknown, and that order waits for the next run's whole reading rather than being sent on a guess.
     const marks = paid.length && confirming
-      ? await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)]))
+      ? repliesFor(await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)])), paid.length)
       : [];
     for (let i = 0; confirming && i < paid.length && Date.now() < deadline; i += 1) {
-      if (Number(marks[i]) === 1) continue;
-      const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
-      if (outcome === "sent") counts.confirmed += 1;
-      if (outcome === "failed") counts.failed += 1;
+      const mark = marks ? countOf(marks[i]) : null;
+      // Unknown is said as failed (Claude 3 on #2714): past the confirmation window the order is not read again, so a
+      // silent skip would be a confirmation never sent and never noticed.
+      if (mark === null || mark > 1) {
+        failOrder(paid[i].id as string);
+        continue;
+      }
+      if (mark !== 0) continue;
+      try {
+        const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
+        if (outcome === "sent") counts.confirmed += 1;
+        if (outcome === "failed") failOrder(paid[i].id as string);
+      } catch (error) {
+        // One order's confirmation that throws (a record that does not read) never ends the store's pass: the orders
+        // behind it, the next pages, the library and the list go on (Claude 4, C4-2990). It is counted as failed, once,
+        // and logged by the order, not the buyer. When it is tried again depends on where it threw: before its
+        // "sending" mark was taken (a record that does not read), nothing is marked and the next run tries it; when
+        // the mark was taken and letting it go failed too, the runs skip it until the mark expires
+        // (SENDING_MARK_SECONDS in lib/purchase-email.ts, 15 minutes) and the first run after that tries it; after
+        // the email went (a throw after sending), it is marked sent and never sent again.
+        failOrder(paid[i].id as string);
+        console.error("a paid order's confirmation was left for the next run", paid[i].id, describe(error));
+      }
     }
 
     // Every buyer of an ordinary order finds this store in their library,
@@ -513,27 +669,53 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       });
       const listed = await listedAlready(ordinary.map((row) => row.id as string));
       for (let i = 0; i < ordinary.length && Date.now() < deadline; i += 1) {
-        if (listed[i]) continue;
+        if (listed[i] === true) continue;
+        // Not known whether it is on the list (CX-123 rule 24, L7): nothing done on it this run, and the run says so.
+        if (listed[i] === null) {
+          failOrder(ordinary[i].id as string);
+          continue;
+        }
         const row = ordinary[i];
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;
+        // One order that throws here (its products not read) never holds back the orders behind it (C4-2990): nothing
+        // marks it, so it is listed on the next run; it is counted as failed (once, with its confirmation), logged by
+        // the order, not the buyer. The try's body is left unindented on purpose: #2719 rewrites those lines.
+        try {
         const products = await listingsNamed(store, row.metadata);
-        if ((await listOrder(store, {
+        const outcome = await putOnList(store, {
           sessionId: row.id as string,
           email,
           news: row.metadata?.news === "yes",
           clicks: row.metadata?.news === "yes" && row.metadata?.clicks === "yes",
           created: typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000),
           products: products.map((p) => ({ id: p.id, title: p.title })),
-        })) === "done") counts.listed += 1;
+        });
+        if (outcome === "done") counts.listed += 1;
+        // A claim or a write not known to have landed is said as failed (Codex G on #2719); a no-op or another run's work is not.
+        else if (outcome === "failed") failOrder(row.id as string);
+        } catch (error) {
+          failOrder(row.id as string);
+          console.error("a paid order was left off the list for the next run", row.id, describe(error));
+        }
       }
     }
+  });
 
+  // The day's expired checkouts, walked the same way, for what an abandoned checkout starts: a reminder and the
+  // workflows. Only on a store that has either; open checkouts are never read, there is nothing to do with them yet.
+  if (reminding || store.listId) await walkDay(store, "expired", since, deadline, counts, async (rows) => {
     if (reminding) {
       for (const row of rows) {
         if (Date.now() >= deadline) break;
         if (row.status !== "expired" || row.consent?.promotions !== "opt_in") continue;
-        const outcome = await remindAbandoned(store, row);
+        // One checkout whose reminder cannot be decided (an unknown reply,
+        // CX-123 rule 24) is that checkout's failure only: the next buyer's
+        // reminder, the workflows and the later pages still go (CX-116).
+        const outcome = await remindAbandoned(store, row).catch((error) => {
+          console.error("a checkout reminder could not be decided", store.handle, error);
+          return "failed" as const;
+        });
         if (outcome === "sent") counts.reminded += 1;
         if (outcome === "failed") counts.failed += 1;
       }
@@ -546,12 +728,8 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     if (store.listId && rows.some((row) => row.status === "expired" && row.consent?.promotions === "opt_in") && Date.now() < deadline) {
       await startAbandonedWorkflows(store, rows).catch((error) => console.error("starting abandoned-checkout workflows failed", store.handle, error));
     }
-
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") break;
-    after = last.id;
-  }
-  // A store with no open payment request left comes off their list, once this pass has confirmed the day's.
+  });
+  // A store with no open payment request left comes off their list (settleStoreList counts the open ones itself).
   if (requesting) await settleStoreList(store.sid).catch(() => undefined);
 }
 
@@ -574,6 +752,11 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   let skip = Number(savedDone) || 0;
   // The stores with open payment requests, read once a run.
   const requesting = await storesWithRequests().catch(() => new Set<string>());
+  // Redis's SCAN may hand back the same key on more than one page (and a store
+  // moving between addresses is seen under both), so each store is swept at
+  // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and
+  // NOT_A_COST.PAYPAL_WATCH_BATCH in tests/plan-cost-registry.ts) hold.
+  const swept = new Set<string>();
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
@@ -584,6 +767,12 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
         continue;
       }
       if (Date.now() >= deadline) break;
+      const id = store.sid ? `sid:${store.sid}` : `handle:${store.handle}`;
+      if (swept.has(id)) {
+        done += 1;
+        continue;
+      }
+      swept.add(id);
       const reviewed = Boolean(store.stripeAccountId) && (await storeHasReviews(store).catch(() => false));
       const asks = Boolean(store.sid) && requesting.has(store.sid);
       if (worthAsking(store, asks) || reviewed || store.paypalSeller) {
@@ -633,8 +822,9 @@ async function startAbandonedWorkflows(store: Store, rows: SessionRecord[]): Pro
     if (!handles.has(meta.store ?? "") || !meta.product || !flows.some((f) => f.productId === meta.product)) continue;
     const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
     if (!email || typeof row.id !== "string") continue;
-    const [fresh] = await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]);
-    if (fresh === null) continue;
+    // Handed on only on an exact OK (CX-123 rule 24, L6): taken by an earlier run, or unknown, starts nothing.
+    const fresh = repliesFor(await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]), 1);
+    if (!fresh || fresh[0] !== "OK") continue;
     await enroll(store, email, { joined: false, abandoned: meta.product });
   }
 }

@@ -762,10 +762,14 @@ html {
  * its words stay above 9:1 (--ink-soft on --sand), and the ring outside it
  * keeps its full colour. The dashed edge (--line-off) is light, at 3:1 or
  * more, so an off button never looks louder than the ones that work. Hover
- * does not light it up.
+ * does not light it up. A round icon button (.icon-btn: the page editor's
+ * Move, Duplicate, Earlier, Later, Undo and Redo) takes the same signs; told off by a
+ * lighter gray alone, it was 1.07:1 from one that works.
  */
 .btn[aria-disabled="true"],
-.btn[aria-disabled="true"]:hover {
+.btn[aria-disabled="true"]:hover,
+.icon-btn[aria-disabled="true"],
+.icon-btn[aria-disabled="true"]:hover {
   opacity: 1;
   cursor: not-allowed;
   transform: none;
@@ -784,7 +788,9 @@ html {
 @media (forced-colors: active) {
   /* The system's colour for an unavailable control, and the dashed border still says "off". */
   .btn[aria-disabled="true"],
-  .btn[aria-disabled="true"]:hover {
+  .btn[aria-disabled="true"]:hover,
+  .icon-btn[aria-disabled="true"],
+  .icon-btn[aria-disabled="true"]:hover {
     color: GrayText;
     border-style: dashed;
     border-color: GrayText;
@@ -793,9 +799,11 @@ html {
    * No color of a button is animated in forced colors. WebKit animates them:
    * a button that turned usable was still drawn, for a moment, in GrayText on
    * the page's own sand (2.78:1, Studio AAA, inbox C4-35). It shows the
-   * system's colors at once instead.
+   * system's colors at once instead. The round icon buttons (.icon-btn) too,
+   * which take GrayText when off and keep Tailwind's transition-colors.
    */
-  .btn {
+  .btn,
+  .icon-btn {
     transition: none;
   }
 }
@@ -1480,8 +1488,21 @@ a.chip {
   outline-offset: 3px;
   box-shadow: 0 0 0 3px #fff;
 }
+/*
+ * A date or time field: its parts (month, day, hour, the calendar button) take
+ * the focus inside it, and on the calendar button Chromium no longer matches
+ * :focus-visible or even :focus on the field, only :focus-within, so its bands
+ * went with it (WCAG 2.4.13, /studio/email scheduling). These keep them on for
+ * as long as the focus is anywhere in it.
+ */
+.field:is([type="date"], [type="time"], [type="datetime-local"]):focus-within {
+  outline: 3px solid var(--violet-deep);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px #fff;
+}
 @media (forced-colors: active) {
-  .field:focus-visible {
+  .field:focus-visible,
+  .field:is([type="date"], [type="time"], [type="datetime-local"]):focus-within {
     outline: 3px solid CanvasText;
     outline-offset: 3px;
     box-shadow: none;
@@ -1600,8 +1621,10 @@ a.chip {
   flex: none;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  /* A 44 px target (2.5.5) that still sits on the first line of text. */
+  width: 44px;
+  height: 44px;
+  margin: -6px -6px -6px 0;
   border-radius: 8px;
   background: transparent;
   color: #fff;
@@ -1616,12 +1639,38 @@ a.chip {
   outline-offset: 2px;
   border-radius: 8px;
 }
+/*
+ * Focus not obscured (2.4.11, 2.4.12): components/toast.tsx sets data-place to
+ * the first corner that leaves the focused control clear, or to "hidden" when
+ * none does. The move is instant, never animated.
+ */
+.nb-toast-region[data-place^="top"] {
+  top: max(16px, env(safe-area-inset-top));
+  bottom: auto;
+}
+.nb-toast-region[data-place="hidden"] .nb-toast {
+  visibility: hidden;
+}
+@media (forced-colors: active) {
+  .nb-toast {
+    border: 2px solid CanvasText;
+  }
+}
 @media (min-width: 640px) {
   .nb-toast-region {
     left: auto;
     right: 24px;
     bottom: 24px;
     justify-content: flex-end;
+  }
+  .nb-toast-region[data-place^="top"] {
+    top: 24px;
+    bottom: auto;
+  }
+  .nb-toast-region[data-place$="start"] {
+    left: 24px;
+    right: auto;
+    justify-content: flex-start;
   }
   .nb-toast {
     width: auto;
@@ -1802,6 +1851,16 @@ a.chip {
   }
   to {
     transform: scaleX(1);
+  }
+}
+/* 654 [WG14] (b1): the line under a Path milestone's heading (components/path-milestone.tsx). Complete by default, which is
+   what a creator who asks for less motion sees; drawn once, left to right, only when motion is welcome. */
+.mm-milestone-line {
+  transform-origin: left;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mm-milestone-line {
+    animation: nb-draw 480ms ease-out 1 both;
   }
 }
 @keyframes nb-spin {
@@ -2020,6 +2079,7 @@ a.chip {
 .st-chat-mine {
   background: var(--st-accent-soft);
   color: var(--st-accent-text);
+  border: 1px solid var(--st-accent-text);
 }
 .st-chat-theirs {
   background: var(--st-bg);
@@ -2343,6 +2403,14 @@ a.chip {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
+  /* A 44 px target (WCAG 2.5.5) reaching into the band's own padding, so the band keeps its height. An inline block,
+     not flex: its words and the arrow after them flow as one sentence, the space before the arrow kept. The first
+     padding is for a browser without the lh unit. */
+  display: inline-block;
+  min-height: 2.75rem;
+  padding-block: 0.6875rem;
+  padding-block: calc((2.75rem - 1lh) / 2);
+  margin-block: -0.75rem;
 }
 /* The menu of a store's own pages (components/store-pages-nav.tsx). */
 .st-pages-nav {
@@ -2479,6 +2547,52 @@ select.st-field:not([multiple]),
 .st-footer-link:hover {
   color: var(--st-accent-text);
 }
+/* On the store front such a link mostly stands alone (the foot of the page, a search's way back, "Watch on ..."):
+   a 44 px target (WCAG 2.5.5 AAA). Not a summary, which would lose its disclosure triangle (below), nor a link
+   inside a quote's caption, which breaks with its sentence (2.5.5 exempts a link in a sentence). */
+[data-store-layout] .st-footer-link:not(summary, figcaption > *) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+/* A summary drawn as such a link (the presale's "Or join the waitlist") opens from a 44 px row by its padding, so it
+   stays a list item with its triangle. The first padding is for a browser without the lh unit. */
+[data-store-layout] summary.st-footer-link {
+  min-height: 2.75rem;
+  padding-block: 0.625rem;
+  padding-block: calc((2.75rem - 1lh) / 2);
+}
+/* A line of the store front's sentences, and of its questions, stays at or under 80 characters at any width (WCAG
+   1.4.8): the cards (li) keep the grid's columns, their words are capped. Counted in Chromium, 56ch let a real sentence
+   reach 81 a line and words of narrow letters (i, l, t, f, j, r) 126; at 34ch they measured 51 and 75.
+   Narrower glyphs: docs/accessibility-programme.md (tests/store-front-accessibility.test.ts). */
+@layer components {
+  /* In a layer, under Tailwind's utilities: a block's own max-w-* or mx-* still wins over the cap. */
+  [data-store-layout] :where(p, dd, blockquote, figcaption, summary) {
+    max-width: 34ch;
+  }
+  /* A p that is a box, not running text, keeps the column's whole width: the promotion band (p.st-card), the community
+     card (p > a.st-card), the search's line and the cart's total (p.flex), a note box (p.st-note). After the cap, at
+     the same weight. */
+  [data-store-layout] :where(p.flex, p.grid, p.st-card, p:has(> .st-card), p.st-note) {
+    max-width: none;
+  }
+  [data-store-layout] :where(p.text-center, .text-center > p) {
+    margin-inline: auto;
+  }
+}
+/* A note box (dashed) keeps the column's width, as on the product page; its words are capped by its own end padding.
+   Out of the layer, to win over the padding the box sets for itself. */
+[data-store-layout] p.st-note {
+  padding-inline-end: max(1.25rem, calc(100% - 34ch - 1.25rem));
+}
+/* A question of the store's FAQ opens from a 44 px row (WCAG 2.5.5), its words centered in it by padding, so the summary
+   stays a list item and keeps its disclosure triangle. The first padding is for a browser without the lh unit. */
+.st-faq > summary {
+  min-height: 2.75rem;
+  padding-block: 0.5rem;
+  padding-block: max(0px, calc((2.75rem - 1lh) / 2));
+}
 /* The pages of a long store: previous, where we are, next. */
 .st-pager {
   display: grid;
@@ -2501,9 +2615,10 @@ select.st-field:not([multiple]),
 .st-pager > :last-child {
   justify-self: end;
 }
+/* "Previous"/"Next" that cannot be pressed: readable (7:1, WCAG 1.4.6), told apart by its dashed edge, not its colour. */
 .st-pager-off {
   color: var(--st-muted);
-  opacity: 0.45;
+  border: 1px dashed var(--st-line);
 }
 @media (prefers-reduced-motion: reduce) {
   .st-pager-link:hover {
@@ -2788,6 +2903,11 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
     padding: 2.25rem 1.25rem;
     margin-inline: -0.5rem;
   }
+  /* A link on a band: black or white, whichever reads at 7:1 on it, always underlined (274 [AX1], lib/store-look.ts bandLink). */
+  .sp-style-bands .sp-band-phone > .sp-section a:not(.btn):not(.st-btn) {
+    color: var(--st-band-link);
+    text-decoration-line: underline;
+  }
   .sp-only-computer {
     display: none;
   }
@@ -2798,6 +2918,11 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
     border-radius: 1.75rem;
     padding: 3rem 2.5rem;
     margin-inline: -1.5rem;
+  }
+  /* A link on a band: black or white, whichever reads at 7:1 on it, always underlined (274 [AX1], lib/store-look.ts bandLink). */
+  .sp-style-bands .sp-band-computer > .sp-section a:not(.btn):not(.st-btn) {
+    color: var(--st-band-link);
+    text-decoration-line: underline;
   }
   .sp-only-phone {
     display: none;
@@ -3735,6 +3860,10 @@ a.sp-product:focus-visible {
   min-height: 1.5rem;
   font-size: 0.875rem;
 }
+/* A link on its own, not in a sentence: a 44 px target (WCAG 2.5.5 AAA, 274 [AX1]). */
+a.rv-line {
+  min-height: 2.75rem;
+}
 a.rv-line:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -4042,8 +4171,9 @@ a.rv-line:hover {
   border: 1px solid var(--st-line);
   padding: 0.6rem 0.85rem;
 }
+/* The reader's own bubble keeps an edge: the soft accent alone is barely apart from the card (1.4.11). */
 .cm-dm-mine {
-  border-color: transparent;
+  border-color: var(--st-accent-text);
   background: var(--st-accent-soft);
 }
 
@@ -5024,3 +5154,63 @@ html:has([data-product-editor]) {
     }
   }
 }
+
+/*
+ * A line of text on the store's product page, its reviews page and a call's booking page is at most 80 characters
+ * (WCAG 1.4.8 AAA, 274 [AX1]). 1ch is the width of "0", wider than an average letter: in Chromium 72ch still held
+ * 92-101 letters a line, 56ch at most 78 of real sentences but 126 of narrow letters (i, l, t, f, j, r, s), the store
+ * front's count in the same font. A line holds the cap over its glyphs' width in its own ch, whatever the size, so
+ * 34ch holds 126 x 34 / 56 = 77 and real sentences about 47. The words are capped, each in its own size (a detail is
+ * smaller than its title), never a card, a row or a button (li), so those keep their width. Narrower glyphs:
+ * docs/accessibility-programme.md. :where keeps it at no weight and @layer components puts it under Tailwind's
+ * utilities, so any width a block sets for itself still wins; a centered line stays centered (tests/product-page-accessibility.test.ts), and so do the lines of a box that centers its
+ * words with text-align (the countdown, a "By the numbers" card), which would otherwise sit at the left of it.
+ */
+@layer components {
+  /* In a layer, under Tailwind's utilities: a block's own max-w-*, mx-* or ml-* still wins over the cap. */
+  .st-measure :where(p, dd, blockquote, figcaption, .st-about li, .st-includes li, .sp-faq summary > span, .sp-benefit > span, .sp-fit-side li > span, .sp-inside span.block, .sp-step span.block, .sp-bonus span.block) {
+    max-width: 34ch;
+  }
+  .st-measure :where(p.text-center, li.text-center, .text-center > p, .sp-countdown > p, .sp-fact > dd) {
+    margin-inline: auto;
+  }
+  /* A p drawn as a box or a row keeps its width: the dashed notes, the rounded notices (a package's sessions, the
+     chosen time) and the cart's rows (discount, shipping, Total), which line up with its lines. */
+  .st-measure :where(p.flex, p.grid, p.st-note, p.rounded-2xl) {
+    max-width: none;
+  }
+}
+/* Their words are capped by the box's own padding instead, so the box keeps the card's width (1.4.8). Out of the
+   layer, to win over the padding the box sets for itself; the left padding stays what it was. */
+.st-measure p.st-note {
+  padding-inline-end: max(1.25rem, calc(100% - 34ch - 1.25rem));
+}
+.st-measure p.rounded-2xl {
+  padding-inline-end: max(1rem, calc(100% - 34ch - 1rem));
+}
+/* 654 [WG14] payment received */
+/* The mark beside "Payment received" (components/payment-received.tsx): complete by default, which is what a buyer who
+   asks for less motion sees; drawn once, 600 ms in all, only when motion is welcome. Only the stroke moves,
+   and only once. */
+.mm-paid-ring,
+.mm-paid-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+@keyframes mm-check-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mm-paid-ring {
+    animation: mm-check-draw 360ms ease-out 1 both;
+  }
+  .mm-paid-check {
+    animation: mm-check-draw 240ms ease-out 360ms 1 both;
+  }
+}
+/* end 654 [WG14] */

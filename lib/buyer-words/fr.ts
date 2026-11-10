@@ -204,6 +204,7 @@ export const fr: BuyerWords = {
     busy: { title: "Quelqu'un est en train de l'acheter", body: "Rien n'a été débité. Cliquez de nouveau sur acheter dans un instant." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis cliquez de nouveau sur acheter." },
     error: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans un instant." },
+    nocharges: { title: "Cette boutique ne peut pas accepter de paiements par carte pour le moment", body: "Rien n'a été débité. Réessayer ne fonctionnera pas tant que la boutique n'aura pas réglé le problème." },
     paused: { title: "Cette boutique ne prend pas de nouvelles commandes pour le moment", body: "Rien n'a été débité. Les nouvelles commandes rouvrent au début du mois prochain, ou avant." },
     "paypal-declined": {
       title: "PayPal n'a pas accepté le paiement",
@@ -313,6 +314,8 @@ export const fr: BuyerWords = {
   askTermsCut: () => "Je n'ai pas ici les conditions complètes. Posez la question au créateur avant d'acheter.",
 
   noLongerOnSale: "Ce produit n'est plus en vente.",
+  cardUnread: "Impossible de charger ce produit pour le moment. Réessayez dans un instant.",
+  cardBuyUnread: "L'achat n'est pas disponible pour le moment. Réessayez dans un instant.",
   seeStore: (store) => `Voir ${store}`,
   cardTestMode: `Mode test${S}: aucune vraie carte n'est débitée.`,
   cardCheckout: "Paiement sécurisé par Stripe, dans un nouvel onglet.",

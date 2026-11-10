@@ -63,6 +63,8 @@ import { deliveredIds, parseBundleItems, parsePick } from "@/lib/bundle-rules";
 import { type ExtraNotes, allExtraNotes } from "@/lib/extras-notes";
 import { parsePairs } from "@/lib/store-collections";
 import type { Store } from "@/lib/store";
+// Read as a namespace, so it never clashes with a named import of the same helpers.
+import * as redisReply from "@/lib/redis-reply";
 
 /**
  * How many things one store may list: two thousand.
@@ -754,6 +756,27 @@ export async function readListing(store: Store, id: string | null | undefined): 
   return (await readListings(store, [id]))[0] ?? null;
 }
 
+/**
+ * One listing read exactly (CX-123 rule 24; Claude 3 on #2910): null only when the store has no such product or its
+ * own record is confirmed absent (an exact null), "unknown" when that record answered anything but one record of this
+ * very product (no reply, a number, a list, text that is not a listing, another product's). A request that fails
+ * throws, as readListing does. What the store record holds whole (inline, or in the head) is not read again.
+ */
+export async function readListingExactly(store: Store, id: string | null | undefined): Promise<Listing | null | "unknown"> {
+  if (typeof id !== "string" || !id) return null;
+  const catalog = store.catalog;
+  if (catalog.inline || !productIds(store).includes(id)) return readListing(store, id);
+  const inHead = catalog.head.find((listing) => listing.id === id);
+  if (inHead) return inHead;
+  // A store record that names a product held elsewhere, but no place to read it from, cannot say it is gone.
+  if (!catalog.id || !isRedisConfigured()) return "unknown";
+  const replies = repliesFor(await redisPipeline([["GET", listingKey(catalog.id, id)]]), 1);
+  if (!replies) return "unknown";
+  if (replies[0] === null) return null;
+  const listing = typeof replies[0] === "string" && replies[0] ? parseListing(parseJson(replies[0])) : null;
+  return listing && listing.id === id ? listing : "unknown";
+}
+
 /** One listing when it is a course, or null; a store of null answers null. */
 export async function readCourseListing(store: Store | null, id: string | null | undefined): Promise<Listing | null> {
   const found = store ? await readListing(store, id) : null;
@@ -807,6 +830,56 @@ export function listingFinder(store: Store): (id: string | undefined) => Promise
 /** Listings of every product of one kind, in the creator's order. */
 export async function readKind(store: Store, kind: Kind): Promise<Listing[]> {
   return readListings(store, idsOfKind(store, kind));
+}
+
+/**
+ * readListings for code that must not take a product unread for no product
+ * (rule 24): the same listings, but a product the store record lists whose
+ * listing record answers missing, garbled or for another id, or a reply not
+ * one per key asked, throws UnknownReplyError instead of leaving it out.
+ * What the store record holds (inline, or in the head) is not read again.
+ */
+export async function readListingsExact(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+  }
+  if (asked.length === 0) return [];
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a catalog's listings: no catalog to read");
+    const keys = missing.map((id) => listingKey(catalog.id!, id));
+    const chunks: string[][] = [];
+    for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
+    const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((key) => ["GET", key]))));
+    const raws: unknown[] = [];
+    answers.forEach((answer, i) => {
+      const replies = repliesFor(answer, chunks[i].length);
+      if (!replies) throw new UnknownReplyError("a catalog's listings: not one reply per product");
+      raws.push(...replies);
+    });
+    missing.forEach((id, i) => {
+      const raw = raws[i];
+      // Redis's own null: the listing is confirmed not there, so the product is left out, as getMany does. Only that
+      // exact null; any other reply that is not this product's listing is unknown and throws.
+      if (raw === null) return;
+      const listing = typeof raw === "string" ? parseListing(parseJson(raw)) : null;
+      if (!listing || listing.id !== id) throw new UnknownReplyError("a catalog's listing of a product it lists");
+      found.set(id, listing);
+    });
+  }
+  return asked.flatMap((id) => {
+    const listing = found.get(id);
+    return listing ? [listing] : [];
+  });
+}
+
+/** readKind, read exactly (readListingsExact): a product of that kind that could not be read throws, never drops out; one Redis confirms is not there is left out. */
+export async function readKindExact(store: Store, kind: Kind): Promise<Listing[]> {
+  return readListingsExact(store, idsOfKind(store, kind));
 }
 
 /** The product a delivery id names, and the option when it is one. */
@@ -960,6 +1033,59 @@ export async function readCards(store: Store): Promise<Map<string, Card>> {
 /** Just the names, for the screens that want nothing else. */
 export async function readTitles(store: Store): Promise<Map<string, string>> {
   return new Map([...(await readCards(store))].map(([id, card]) => [id, card.title]));
+}
+
+/**
+ * The cards of these products only, by id: what a list of a few named products
+ * wants (the affiliate book names each membership payment by its product),
+ * without reading a listing record of up to MAX_PRODUCT_BYTES for a title.
+ * Ids the store does not have are left out, as readListings leaves them out;
+ * what the store record holds (inline, or in the head) is not read. The rest
+ * comes in one HMGET of the card hash, read exactly: anything but one string or
+ * nil for each product throws UnknownReplyError (rule 24), never a name. A
+ * product without a card in its shape (written before the cards existed) is
+ * read from its listing, once, and its card left behind, as readCards heals.
+ */
+export async function readCardsFor(store: Store, ids: Iterable<string>): Promise<Map<string, Card>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  const found = new Map<string, Card>();
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    for (const id of asked) {
+      const product = byId.get(id);
+      if (product) found.set(id, cardOf(product));
+    }
+    return found;
+  }
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  for (const id of asked) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  const rest = asked.filter((id) => !head.has(id));
+  if (!rest.length || !catalog.id || !isRedisConfigured()) return found;
+  const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+  const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+  if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+  const heal: string[] = [];
+  rest.forEach((id, i) => {
+    const raw = slots[i];
+    if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+    const card = raw === null ? null : parseCard(id, raw);
+    if (card) found.set(id, card);
+    else heal.push(id);
+  });
+  if (!heal.length) return found;
+  const listings = await readListings(store, heal);
+  for (const listing of listings) found.set(listing.id, cardOf(listing));
+  if (listings.length) {
+    await redisPipeline([["HSET", titlesKey(catalog.id), ...listings.flatMap((l) => [l.id, JSON.stringify([l.title, l.priceCents, l.page ? 1 : 0])])]]).catch((error) =>
+      console.error("filling the product cards failed", error),
+    );
+  }
+  return found;
 }
 
 /** When the studio's list is one page of a longer one, as the studio page read it. */

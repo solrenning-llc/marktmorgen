@@ -38,7 +38,7 @@ async function main() {
     let saved = false;
     redis.pipeline = async (commands) => {
       const command = commands[0];
-      if (!saved && commands.length === 1 && command[0] === "SET" && command[1] === key && !command.includes("NX")) {
+      if (!saved && commands.length === 1 && command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:agreement-save:v1") && command[4] === key) {
         if (mode !== "not applied") await pipeline(commands);
         saved = true;
         return [];

@@ -24,7 +24,8 @@ export async function GET(request: NextRequest) {
   if (creator instanceof Response) return creator;
   const { store } = creator;
   try {
-    const book = await readBook(store);
+    // The file names no product (batchFile), so nothing is read for the names.
+    const book = await readBook(store, undefined, { titles: false });
     // Anyone with a PayPal payment on its way is left out, so nobody is paid twice.
     const lines = payableLines(book, await onTheirWay(store));
     if (!lines.length) {

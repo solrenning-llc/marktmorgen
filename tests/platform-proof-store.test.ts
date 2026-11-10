@@ -9,7 +9,7 @@ import { type PlatformProofSnapshot, platformProof } from "@/lib/platform-proof"
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-type Store = { readPlatformProof?: () => Promise<PlatformProofSnapshot | null>; writePlatformProof?: (s: PlatformProofSnapshot, validDays: number) => Promise<void>; PROOF_KEY?: string };
+type Store = { readPlatformProof?: () => Promise<PlatformProofSnapshot | null>; writePlatformProof?: (s: PlatformProofSnapshot, validDays: number) => Promise<void>; PROOF_KEY?: string; PROOF_SNAPSHOT_MAX_BYTES?: number };
 const DAY = 86_400_000;
 const now = Date.UTC(2026, 10, 10, 6);
 const fresh: PlatformProofSnapshot = { asOf: new Date(now - 2 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z"), evidenceRef: "synthetic-count", mode: "live", excludesDemoAndTest: true, counts: { stores: 120, sales: 1500, activeCreators: 60 }, activeWindowDays: 30 };
@@ -63,6 +63,30 @@ async function main(): Promise<void> {
   let windowRefused = "";
   await write(fresh, 365).catch(() => { windowRefused = "refused"; });
   is("a window other than 30 or 40 days is never written", windowRefused, "refused");
+
+  part("A ceiling on the kept snapshot's size (Codex U on #3509)");
+  const max = lib.PROOF_SNAPSHOT_MAX_BYTES;
+  is("the ceiling is 1,024 bytes, as the key is sized", max, 1_024);
+  const bytes = (s: PlatformProofSnapshot) => Buffer.byteLength(JSON.stringify(s), "utf8");
+  const sized = (n: number): PlatformProofSnapshot => ({ ...fresh, evidenceRef: "r".repeat(n - bytes({ ...fresh, evidenceRef: "" })) });
+  redis.clear();
+  await write(sized(1_024), 30);
+  is("a snapshot of exactly 1,024 bytes is kept and read back", [bytes(sized(1_024)), (await read())?.evidenceRef.length], [1_024, sized(1_024).evidenceRef.length]);
+  redis.clear();
+  let writes = 0;
+  const counting = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: unknown[][]) => { writes += commands.filter((c) => c[0] === "SET").length; return counting(commands as never); }) as never;
+  let over = "";
+  await write(sized(1_025), 30).catch(() => { over = "refused"; });
+  await write({ ...fresh, evidenceRef: "r".repeat(2_048) }, 30).catch(() => { over += "+refused"; });
+  redis.pipeline = counting;
+  is("one byte over, or a 2,048-character reference, is refused before the database", [over, writes], ["refused+refused", 0]);
+  const multibyte = { ...fresh, evidenceRef: "é".repeat(520) };
+  let wide = "";
+  await write(multibyte, 30).catch(() => { wide = "refused"; });
+  is("the ceiling is in UTF-8 bytes, not characters", [bytes(multibyte) > 1_024, wide], [true, "refused"]);
+  redis.run(["SET", key, JSON.stringify(sized(1_025))]);
+  is("a kept value over the ceiling is not read as a snapshot", await read(), null);
   done();
 }
 

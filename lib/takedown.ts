@@ -30,6 +30,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { markTakenDown, readDraftPreview } from "@/lib/draft-preview";
 
 const REPORT_SECONDS = 400 * 86_400;
 const TOKEN_SECONDS = 60 * 86_400;
@@ -89,10 +90,19 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
   return sent ? "sent" : "error";
 }
 
-/** The product a notice's address points at (/@handle/p/<product>), when it points at one of this store's. */
+/**
+ * The product a notice's address points at (/@handle/p/<product>, or a draft's preview link /@handle/preview/<code>,
+ * lib/draft-preview.ts), when it points at one of this store's. A preview link that no longer opens points at nothing.
+ */
 export async function reportedProduct(report: Report, store: Store): Promise<Listing | null> {
   try {
     const parts = new URL(report.url).pathname.split("/").filter(Boolean);
+    const preview = parts.indexOf("preview");
+    if (preview >= 0) {
+      // Claude 6 on #3439, MEDIUM 1: a notice about a preview address maps to the draft it opens, in this store only.
+      const opened = await readDraftPreview(decodeURIComponent(parts[preview + 1] ?? ""));
+      return opened && store.statsId && opened.statsId === store.statsId ? await readListing(store, opened.productId) : null;
+    }
     const at = parts.indexOf("p");
     const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
     const id = segment ? productIdFromAddress(store, segment) : null;
@@ -270,6 +280,16 @@ async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "st
   return { what: "Your store's pages and sales, now switched off", howLong: "How long: until we switch your store back on, for example after your answer below." };
 }
 
+/**
+ * A product taken down after a notice also has its draft preview closed (Claude 6 on #3439, MEDIUM 1): its link ends at
+ * once and none opens or is made for it until it is published again (lib/draft-preview.ts). Run before a takedown's
+ * steps say it landed, on every path that says so, so a press after this failed marks it then; a write that is not
+ * confirmed throws. A store without a stats id never had a preview link to close.
+ */
+async function closePreview(store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>): Promise<void> {
+  if (action.type === "product" && store.statsId) await markTakenDown(store, action.id);
+}
+
 /** Takes it down. False when it went in the meantime (nothing was done); throws when the write's outcome is unknown. */
 async function apply(ref: string, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>): Promise<boolean> {
   if (action.type === "link") {
@@ -351,6 +371,7 @@ export async function sendOwedNotice(report: Report, store: Store, action: Exclu
         if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a notice's owed takedowns write");
         return "unconfirmed" as const;
       }
+      await closePreview(now, action);
       kept = { ...kept, applied: true };
       await writeSteps(key, kept);
     }
@@ -392,7 +413,8 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
       await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
     }
-    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905).
+    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905), its preview closed first.
+    await closePreview(store, action);
     steps = { ...steps, applied: true };
     await writeSteps(key, steps);
   } else {
@@ -402,6 +424,7 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
     if (!kept || kept.sent) return null;
     steps = kept;
     if (!steps.applied) {
+      await closePreview(store, action);
       steps = { ...steps, applied: true };
       await writeSteps(key, steps);
     }

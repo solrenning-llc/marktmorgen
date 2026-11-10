@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ENDING_KEY, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
+import { ENDING_KEY, GIVE_UP_DAYS, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
@@ -162,6 +162,36 @@ await t.test(`present debt evidence with a ${malformed} is retained`, async () =
   assert.equal(await shop.note(), damaged, "the unknown evidence remains byte-identical for recovery");
   assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0);
   assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
+});
+await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_DAYS, with the creator told (Claude 4's LOW on #2692)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number };
+  note.p = malformed === "null entry" ? [null] : [note.p[0], null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  const callsBefore = world.calls.length;
+  world.emails = [];
+
+  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+
+  assert.equal(await shop.note(), null, "past GIVE_UP_DAYS the unknown note is let go, never kept forever");
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0, "the plan is never ended on unknown debt evidence");
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("POST /refunds")).length, 0, "no refund is made on it");
+  assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
+  assert.equal(world.emails.length, 1, "the creator is told once");
+  assert.equal(world.emails[0].subject.endsWith("we could not confirm your refund"), true);
+  assert.equal(world.emails[0].text.includes("We could not confirm how much of the refund"), true, "the letter says what is not known, not that part went through");
+  assert.equal(world.emails[0].text.includes(note.m === 1 ? "set to stop at the end of the period you paid for" : "goes on as before"), true, "and says what happens to the plan, from the note");
+  assert.equal(world.emails[0].text.includes("support@marktmorgen.com"), true);
+
+  world.emails = [];
+  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
+  assert.equal(world.emails.length, 0, "a second run sends nothing more");
 });
 }
 });

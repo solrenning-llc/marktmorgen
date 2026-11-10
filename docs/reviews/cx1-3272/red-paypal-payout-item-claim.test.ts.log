@@ -1,0 +1,531 @@
+
+Healthy: written into the book once, never sent to PayPal again
+  ok    a clean settle writes the payout once
+  ok    asked again, nothing written twice
+  ok    the next payday sends nothing more: one PayPal batch
+  ok    the payout's id is one the creator can remove (12 hex)
+  ok    and it is removed
+
+Two settles at once: written once
+  ok    one payout in the book, $30
+
+The book write answered in an unknown shape, not written: kept on their way, never paid twice (probe B)
+  ok    no envelope: kept waiting, not counted paid
+  ok    no envelope: the book does not say paid
+  ok    no envelope: still on their way
+  ok    no envelope: not sent to PayPal again
+  ok    no envelope: read again with a clean answer, written once
+  ok    no envelope: one PayPal batch in all
+  ok    undefined: kept waiting, not counted paid
+  ok    undefined: the book does not say paid
+  ok    undefined: still on their way
+  ok    undefined: not sent to PayPal again
+  ok    undefined: read again with a clean answer, written once
+  ok    undefined: one PayPal batch in all
+  ok    null: kept waiting, not counted paid
+  ok    null: the book does not say paid
+  ok    null: still on their way
+  ok    null: not sent to PayPal again
+  ok    null: read again with a clean answer, written once
+  ok    null: one PayPal batch in all
+  ok    empty text: kept waiting, not counted paid
+  ok    empty text: the book does not say paid
+  ok    empty text: still on their way
+  ok    empty text: not sent to PayPal again
+  ok    empty text: read again with a clean answer, written once
+  ok    empty text: one PayPal batch in all
+  ok    another word: kept waiting, not counted paid
+  ok    another word: the book does not say paid
+  ok    another word: still on their way
+  ok    another word: not sent to PayPal again
+  ok    another word: read again with a clean answer, written once
+  ok    another word: one PayPal batch in all
+  ok    the number 2: kept waiting, not counted paid
+  ok    the number 2: the book does not say paid
+  ok    the number 2: still on their way
+  ok    the number 2: not sent to PayPal again
+  ok    the number 2: read again with a clean answer, written once
+  ok    the number 2: one PayPal batch in all
+  ok    an object: kept waiting, not counted paid
+  ok    an object: the book does not say paid
+  ok    an object: still on their way
+  ok    an object: not sent to PayPal again
+  ok    an object: read again with a clean answer, written once
+  ok    an object: one PayPal batch in all
+
+The book write landed, its reply lost: kept on their way, then found in the book (probe A)
+  ok    no envelope: kept waiting
+  ok    no envelope: read again, found in the book, no longer waiting
+  ok    no envelope: one payout, $30
+  ok    no envelope: one PayPal batch in all
+  ok    undefined: kept waiting
+  ok    undefined: read again, found in the book, no longer waiting
+  ok    undefined: one payout, $30
+  ok    undefined: one PayPal batch in all
+  ok    null: kept waiting
+  ok    null: read again, found in the book, no longer waiting
+  ok    null: one payout, $30
+  ok    null: one PayPal batch in all
+  ok    empty text: kept waiting
+  ok    empty text: read again, found in the book, no longer waiting
+  ok    empty text: one payout, $30
+  ok    empty text: one PayPal batch in all
+  ok    another word: kept waiting
+  ok    another word: read again, found in the book, no longer waiting
+  ok    another word: one payout, $30
+  ok    another word: one PayPal batch in all
+  ok    the number 2: kept waiting
+  ok    the number 2: read again, found in the book, no longer waiting
+  ok    the number 2: one payout, $30
+  ok    the number 2: one PayPal batch in all
+  ok    an object: kept waiting
+  ok    an object: read again, found in the book, no longer waiting
+  ok    an object: one payout, $30
+  ok    an object: one PayPal batch in all
+
+Redis failing on the book write: kept on their way, the settling does not throw
+  ok    the settling says so
+  ok    the book does not say paid on an outage
+  ok    and the affiliate is not sent again
+  ok    read again, written once
+
+The store's data room full: kept on their way over paydays, never sent again (probe C)
+  ok    day 1: kept waiting, the book does not say paid, one PayPal batch
+  ok    day 2: kept waiting, the book does not say paid, one PayPal batch
+  ok    day 3: kept waiting, the book does not say paid, one PayPal batch
+  ok    room again: written once
+  ok    one PayPal batch in all
+
+One line that cannot be written does not stop the others
+  ok    Ben written, Sara kept waiting
+  ok    read again, Sara written once, Ben not twice
+  ok    one PayPal batch in all
+
+A mark left by an earlier run, with no payout in the book: written once (not dropped)
+  ok    written into the book once
+  ok    the next payday sends nothing more
+
+A mark left by an earlier run, the payout in the book under its own id: nothing written twice
+  ok    found by its reference, no longer waiting
+
+A mark left by an earlier run, read in an unknown shape: kept on their way, nothing written
+  ok    no envelope: kept waiting, the book does not say paid
+  ok    undefined: kept waiting, the book does not say paid
+  ok    empty text: kept waiting, the book does not say paid
+  ok    the number 2: kept waiting, the book does not say paid
+  ok    an object: kept waiting, the book does not say paid
+
+A mark read back as any other text: confirmed by the book, so written once
+  ok    not in the book, so written once
+
+A mark left by an earlier run, the book's payouts read in an unknown shape: kept on their way
+  ok    no envelope: kept waiting, the book does not say paid
+  ok    undefined: kept waiting, the book does not say paid
+  ok    null: kept waiting, the book does not say paid
+  ok    empty text: kept waiting, the book does not say paid
+  ok    another word: kept waiting, the book does not say paid
+  ok    the number 2: kept waiting, the book does not say paid
+  ok    an object: kept waiting, the book does not say paid
+  ok    an odd list: kept waiting, the book does not say paid
+
+The affiliate's record read in an unknown shape: kept on their way, never paid twice (Claude 5 on #3272, finding 1)
+  FAIL  no envelope: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    no envelope: the book does not say paid, nothing written
+  FAIL  no envelope: still on their way
+        expected 1
+        got      0
+  FAIL  no envelope: not sent to PayPal again
+        expected 1
+        got      2
+  ok    no envelope: read again with a clean answer, written once
+  FAIL  no envelope: one PayPal batch in all
+        expected 1
+        got      2
+  FAIL  undefined: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    undefined: the book does not say paid, nothing written
+  FAIL  undefined: still on their way
+        expected 1
+        got      0
+  FAIL  undefined: not sent to PayPal again
+        expected 1
+        got      2
+  ok    undefined: read again with a clean answer, written once
+  FAIL  undefined: one PayPal batch in all
+        expected 1
+        got      2
+  FAIL  the number 1: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    the number 1: the book does not say paid, nothing written
+  FAIL  the number 1: still on their way
+        expected 1
+        got      0
+  FAIL  the number 1: not sent to PayPal again
+        expected 1
+        got      2
+  ok    the number 1: read again with a clean answer, written once
+  FAIL  the number 1: one PayPal batch in all
+        expected 1
+        got      2
+  FAIL  an object: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    an object: the book does not say paid, nothing written
+  FAIL  an object: still on their way
+        expected 1
+        got      0
+  FAIL  an object: not sent to PayPal again
+        expected 1
+        got      2
+  ok    an object: read again with a clean answer, written once
+  FAIL  an object: one PayPal batch in all
+        expected 1
+        got      2
+  FAIL  a list: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    a list: the book does not say paid, nothing written
+  FAIL  a list: still on their way
+        expected 1
+        got      0
+  FAIL  a list: not sent to PayPal again
+        expected 1
+        got      2
+  ok    a list: read again with a clean answer, written once
+  FAIL  a list: one PayPal batch in all
+        expected 1
+        got      2
+  FAIL  empty text: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    empty text: the book does not say paid, nothing written
+  FAIL  empty text: still on their way
+        expected 1
+        got      0
+  FAIL  empty text: not sent to PayPal again
+        expected 1
+        got      2
+  ok    empty text: read again with a clean answer, written once
+  FAIL  empty text: one PayPal batch in all
+        expected 1
+        got      2
+  FAIL  text that is not JSON: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    text that is not JSON: the book does not say paid, nothing written
+  FAIL  text that is not JSON: still on their way
+        expected 1
+        got      0
+  FAIL  text that is not JSON: not sent to PayPal again
+        expected 1
+        got      2
+  ok    text that is not JSON: read again with a clean answer, written once
+  FAIL  text that is not JSON: one PayPal batch in all
+        expected 1
+        got      2
+  FAIL  JSON that is not a record: kept waiting, not counted paid
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  ok    JSON that is not a record: the book does not say paid, nothing written
+  FAIL  JSON that is not a record: still on their way
+        expected 1
+        got      0
+  FAIL  JSON that is not a record: not sent to PayPal again
+        expected 1
+        got      2
+  ok    JSON that is not a record: read again with a clean answer, written once
+  FAIL  JSON that is not a record: one PayPal batch in all
+        expected 1
+        got      2
+
+The affiliate confirmed gone (no record): the line leaves the batch, nothing is sent again
+  ok    settled as before: no longer waiting, nothing written
+  ok    no one left to pay: one PayPal batch in all
+
+Written, its reply lost, then the data room full: found in the book without new room (Claude 5 on #3272, finding 2)
+  ok    the lost reply keeps it waiting
+  FAIL  day 1: found in the book, no longer waiting
+        expected [{"paid":0,"released":0,"waiting":0},0]
+        got      [{"paid":0,"released":0,"waiting":1},1]
+  FAIL  day 2: found in the book, no longer waiting
+        expected [{"paid":0,"released":0,"waiting":0},0]
+        got      [{"paid":0,"released":0,"waiting":1},1]
+  FAIL  day 3: found in the book, no longer waiting
+        expected [{"paid":0,"released":0,"waiting":0},0]
+        got      [{"paid":0,"released":0,"waiting":1},1]
+  ok    one payout, $30
+  ok    one PayPal batch in all
+
+Whether the book holds the payout, read in an unknown shape: kept on their way, nothing written
+  FAIL  no envelope: kept waiting, the book does not say paid
+        expected [{"paid":0,"released":0,"waiting":1},0,0]
+        got      [{"paid":1,"released":0,"waiting":0},3000,1]
+  ok    no envelope: not sent to PayPal again
+  FAIL  undefined: kept waiting, the book does not say paid
+        expected [{"paid":0,"released":0,"waiting":1},0,0]
+        got      [{"paid":1,"released":0,"waiting":0},3000,1]
+  ok    undefined: not sent to PayPal again
+  FAIL  empty text: kept waiting, the book does not say paid
+        expected [{"paid":0,"released":0,"waiting":1},0,0]
+        got      [{"paid":1,"released":0,"waiting":0},3000,1]
+  ok    empty text: not sent to PayPal again
+  FAIL  another word: kept waiting, the book does not say paid
+        expected [{"paid":0,"released":0,"waiting":1},0,0]
+        got      [{"paid":1,"released":0,"waiting":0},3000,1]
+  ok    another word: not sent to PayPal again
+  FAIL  the number 2: kept waiting, the book does not say paid
+        expected [{"paid":0,"released":0,"waiting":1},0,0]
+        got      [{"paid":1,"released":0,"waiting":0},3000,1]
+  ok    the number 2: not sent to PayPal again
+  FAIL  an object: kept waiting, the book does not say paid
+        expected [{"paid":0,"released":0,"waiting":1},0,0]
+        got      [{"paid":1,"released":0,"waiting":0},3000,1]
+  ok    an object: not sent to PayPal again
+  FAIL  the number 1 as text: kept waiting, the book does not say paid
+        expected [{"paid":0,"released":0,"waiting":1},0,0]
+        got      [{"paid":1,"released":0,"waiting":0},3000,1]
+  ok    the number 1 as text: not sent to PayPal again
+
+175 checks, 42 failing.
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47874:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47874:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47874:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47874:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47874:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47874:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47874:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47889:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47889:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47889:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47889:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47889:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47889:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47889:17)
+writing a PayPal payout into the book failed; it stays on its way Error: synthetic Redis outage
+    at store.pipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47900:39)
+    at redisPipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:2223:41)
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46816:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47903:18)
+writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.
+    at needData (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:10665:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46815:3)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47914:17) {
+  taken: {
+    ok: false,
+    reason: 'full',
+    used: 999999999,
+    room: 5000000,
+    message: "Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+  }
+}
+writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.
+    at needData (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:10665:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46815:3)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47914:17) {
+  taken: {
+    ok: false,
+    reason: 'full',
+    used: 999999999,
+    room: 5000000,
+    message: "Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+  }
+}
+writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.
+    at needData (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:10665:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46815:3)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47914:17) {
+  taken: {
+    ok: false,
+    reason: 'full',
+    used: 999999999,
+    room: 5000000,
+    message: "Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+  }
+}
+writing a PayPal payout into the book failed; it stays on its way Error: synthetic Redis outage
+    at store.pipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47925:45)
+    at redisPipeline (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:2223:41)
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46816:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47928:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a PayPal payout item's mark in an unknown shape
+    at earlierItemMark (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47576:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47624:15)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47955:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a PayPal payout item's mark in an unknown shape
+    at earlierItemMark (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47576:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47624:15)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47955:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a PayPal payout item's mark in an unknown shape
+    at earlierItemMark (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47576:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47624:15)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47955:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a PayPal payout item's mark in an unknown shape
+    at earlierItemMark (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47576:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47624:15)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47955:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a PayPal payout item's mark in an unknown shape
+    at earlierItemMark (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47576:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47624:15)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47955:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape
+    at payoutReferences (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46828:45)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47625:28)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47976:17)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46822:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:48021:42)
+writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.
+    at needData (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:10665:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46815:3)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:48024:17) {
+  taken: {
+    ok: false,
+    reason: 'full',
+    used: 999999999,
+    room: 5000000,
+    message: "Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+  }
+}
+writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.
+    at needData (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:10665:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46815:3)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:48024:17) {
+  taken: {
+    ok: false,
+    reason: 'full',
+    used: 999999999,
+    room: 5000000,
+    message: "Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+  }
+}
+writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.
+    at needData (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:10665:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:46815:3)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:47628:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\paypal-payout-item-claim.test.ts.cjs:48024:17) {
+  taken: {
+    ok: false,
+    reason: 'full',
+    used: 999999999,
+    room: 5000000,
+    message: "Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+  }
+}

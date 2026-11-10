@@ -1,0 +1,25 @@
+
+Control: a real recorded payout survives a stale batch without another payment
+  ok    a valid record means one payment and one batch
+
+An existing field with an unreadable payout is not a confirmed book record
+  ok    invalid JSON: unconfirmed book entry keeps the affiliate waiting
+  ok    invalid JSON: book has no readable paid amount
+CX1 receipt observation invalid JSON {"result":{"paid":0,"released":0,"waiting":1},"batches":1,"paid":0}
+  ok    invalid JSON: no second PayPal batch for the same commission
+  ok    empty text: unconfirmed book entry keeps the affiliate waiting
+  ok    empty text: book has no readable paid amount
+CX1 receipt observation empty text {"result":{"paid":0,"released":0,"waiting":1},"batches":1,"paid":0}
+  ok    empty text: no second PayPal batch for the same commission
+
+7 checks, all passing.
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered existing payout receipt in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\cx1-3272-book-receipt.proof.ts.cjs:46819:193)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\cx1-3272-book-receipt.proof.ts.cjs:47633:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\cx1-3272-book-receipt.proof.ts.cjs:47836:20)
+writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered existing payout receipt in an unknown shape
+    at addPayoutOnce (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\cx1-3272-book-receipt.proof.ts.cjs:46819:193)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async settlePayPal (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\cx1-3272-book-receipt.proof.ts.cjs:47633:25)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3272\.cx1-evidence\cx1-3272-book-receipt.proof.ts.cjs:47836:20)

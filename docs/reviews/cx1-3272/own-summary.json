@@ -1,0 +1,13 @@
+{
+  "cx1-3272-book-receipt.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  invalid JSON: unconfirmed book entry keeps the affiliate waiting",
+      "  FAIL  invalid JSON: no second PayPal batch for the same commission",
+      "  FAIL  empty text: unconfirmed book entry keeps the affiliate waiting",
+      "  FAIL  empty text: no second PayPal batch for the same commission",
+      "7 checks, 4 failing."
+    ]
+  }
+}

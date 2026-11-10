@@ -1,0 +1,11 @@
+{
+  "cx1-3272-book-receipt.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "7 checks, all passing.",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered existing payout receipt in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered existing payout receipt in an unknown shape"
+    ]
+  }
+}

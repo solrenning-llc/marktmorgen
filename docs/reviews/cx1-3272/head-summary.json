@@ -1,0 +1,60 @@
+{
+  "paypal-payout-item-claim.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered whether a payout is written down in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered whether a payout is written down in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered whether a payout is written down in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered whether a payout is written down in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered whether a payout is written down in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered whether a payout is written down in an unknown shape"
+    ]
+  },
+  "paypal-payouts.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "49 checks, all passing.",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable",
+      "paying affiliates with PayPal failed Error: Pending payout records are unavailable"
+    ]
+  },
+  "paypal-payouts-reconcile.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)",
+      "  ok    the write of its id failed, the '?' evidence is kept",
+      "43 checks, all passing."
+    ]
+  },
+  "paypal-payouts-unknown.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    the write of its id failed",
+      "  ok    the write of its id failed",
+      "45 checks, all passing."
+    ]
+  },
+  "paypal-settle-unknown.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    nothing settled on a read that failed",
+      "9 checks, all passing."
+    ]
+  },
+  "pending-payouts.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 33",
+      "ℹ fail 0"
+    ]
+  }
+}

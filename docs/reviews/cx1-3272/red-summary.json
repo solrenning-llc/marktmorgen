@@ -1,0 +1,14 @@
+{
+  "paypal-payout-item-claim.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered the payouts written down in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way UnknownReplyError: Redis answered a payout written down once in an unknown shape",
+      "writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.",
+      "writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.",
+      "writing a PayPal payout into the book failed; it stays on its way DataRoomError: Your store's data room is full (1,000 MB of 5 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+    ]
+  }
+}

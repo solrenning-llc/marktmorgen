@@ -1,0 +1,13 @@
+{
+  "cx1-3272-book-receipt.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  invalid JSON: unconfirmed book entry keeps the affiliate waiting",
+      "  FAIL  invalid JSON: book has no readable paid amount",
+      "  FAIL  empty text: unconfirmed book entry keeps the affiliate waiting",
+      "  FAIL  empty text: book has no readable paid amount",
+      "7 checks, 4 failing."
+    ]
+  }
+}

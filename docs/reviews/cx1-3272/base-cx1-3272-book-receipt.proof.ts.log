@@ -1,0 +1,23 @@
+
+Control: a real recorded payout survives a stale batch without another payment
+  ok    a valid record means one payment and one batch
+
+An existing field with an unreadable payout is not a confirmed book record
+  FAIL  invalid JSON: unconfirmed book entry keeps the affiliate waiting
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  FAIL  invalid JSON: book has no readable paid amount
+        expected 0
+        got      3000
+CX1 receipt observation invalid JSON {"result":{"paid":1,"released":0,"waiting":0},"batches":1,"paid":3000}
+  ok    invalid JSON: no second PayPal batch for the same commission
+  FAIL  empty text: unconfirmed book entry keeps the affiliate waiting
+        expected {"paid":0,"released":0,"waiting":1}
+        got      {"paid":1,"released":0,"waiting":0}
+  FAIL  empty text: book has no readable paid amount
+        expected 0
+        got      3000
+CX1 receipt observation empty text {"result":{"paid":1,"released":0,"waiting":0},"batches":1,"paid":3000}
+  ok    empty text: no second PayPal batch for the same commission
+
+7 checks, 4 failing.

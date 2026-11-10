@@ -1,0 +1,18 @@
+﻿diff --git a/.git/cx1-review-3272/lib/affiliates.ts b/.git/cx1-review-3272/.cx1-evidence/diagnostic/lib/affiliates.ts
+index fd17e03c0..a0cef7478 100644
+--- a/.git/cx1-review-3272/lib/affiliates.ts
++++ b/.git/cx1-review-3272/.cx1-evidence/diagnostic/lib/affiliates.ts
+@@ -2219,7 +2219,12 @@ export async function addPayoutOnce(store: Store, input: PayoutInput & { id: str
+   if (!store.statsId || !/^[0-9a-f]{12}$/.test(input.id)) throw new Error("a payout written once needs a store and a 12-hex id");
+   if (!(await readAffiliateExact(store, input.aff))) return "gone";
+   const there = repliesFor(await redisPipeline([["HEXISTS", payoutsKey(store.statsId), input.id]]), 1);
+-  if (there && there[0] === 1) return "held";
++  if (there && there[0] === 1) {
++    const heldReply = repliesFor(await redisPipeline([["HGET", payoutsKey(store.statsId), input.id]]), 1);
++    const held = heldReply ? parsePayout(heldReply[0]) : null;
++    if (!held || held.id !== input.id || held.aff !== input.aff || held.cents !== input.cents || held.currency !== input.currency || held.reference !== payoutReference(input.reference)) throw new UnknownReplyError("existing payout receipt");
++    return "held";
++  }
+   if (!there || there[0] !== 0) throw new UnknownReplyError("whether a payout is written down");
+   const payout = payoutOf(input, input.id);
+   const json = JSON.stringify(payout);

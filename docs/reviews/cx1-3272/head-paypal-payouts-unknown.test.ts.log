@@ -1,0 +1,73 @@
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A 4xx without PayPal's own error name (nameless) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-name) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-error) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+PayPal made the batch, and writing its id got no answer: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+PayPal made the batch, and writing its id got an error: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+45 checks, all passing.

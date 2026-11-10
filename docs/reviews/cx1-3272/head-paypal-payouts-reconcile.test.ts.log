@@ -1,0 +1,73 @@
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)
+  ok    the write of its id failed, the '?' evidence is kept
+  ok    both still on their way
+  ok    a press sends no new batch
+  ok    the next day's try gets the same batch back and settles it, paid once
+
+An affiliate changed their PayPal address before the retry: never sent to another recipient (review of Codex H2 on #2681, GRAVE)
+  ok    no request to PayPal, no batch
+  ok    nothing ever sent to the new address
+  ok    left for the creator's own check
+  ok    the address itself is never kept in the batch, only its fingerprint
+  ok    the fingerprint is keyed, never a plain hash of the address
+
+The same address: the retry sends the same recipients
+  ok    same recipients as the first request
+
+Before the retry, Stripe's refunds cannot be read: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    waiting for refunds that can be read, not a manual check
+
+Before the retry, Stripe's refunds took back every sale: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    less owed now than was sent: a manual check
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The month's counts are read only in their exact envelope (review of Codex G on #2681, LEVE)
+  ok    one answer of three counts is read
+  ok    two answers to one command: not known
+  ok    an inherited reply: not known
+  ok    a getter reply: not known
+  ok    a getter count: not known
+  ok    no getter was run
+  ok    a Proxy reply: not known
+  ok    a Proxy count list: not known
+  ok    no Proxy trap was run
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+
+43 checks, all passing.

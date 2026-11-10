@@ -1145,6 +1145,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A buyer's list of their own files for review on a lesson (750 [CD1] unit 5): after the door's one public request, mineUnits(n)
+      // more for the n records it reads, taken before they are read, each at its largest (tests/submission-buyer-cost.test.ts).
+      { file: "app/api/store/course/submission/route.ts", names: ["takeBuyerRead(store, units)"] },
+      { file: "lib/submission-store.ts", names: ["SUBMISSION_MINE_BYTES_PER_UNIT", "mineUnits", "if (units > 0 && !(await pay(units)))"] },
       // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // An opening of a buyer's orders page takes ORDERS_OPEN_UNITS before anything is read, and its meter more before each read
@@ -1356,6 +1360,8 @@ export const COST_LINES: CostLine[] = [
       // and closing one buyer action each; this route's own commands are SUBMISSION_STEP_COMMANDS, inside the hundred.
       { file: "app/api/store/course/submission/route.ts", names: ["takeBuyerRead(store)", "takeBuyerAction(store)"] },
       { file: "lib/submission-store.ts", names: ["SUBMISSION_STEP_COMMANDS"] },
+      // Withdrawing one of their files (unit 5) is one buyer action, taken before the record is read; its commands are SUBMISSION_STEP_COMMANDS.withdraw.
+      { file: "app/api/store/course/submission/route.ts", names: ["withdrawSubmission({ data: store"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read

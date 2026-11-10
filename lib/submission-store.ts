@@ -48,6 +48,8 @@ import {
   MAX_WAITING_PER_BUYER,
   type Submission,
   type SubmissionReply,
+  type SubmissionState,
+  type SubmittedFile,
   type SubmissionSetup,
   applySubmissionEvent,
   readSubmissionSetup,
@@ -69,7 +71,16 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  * tests/submission-store.test.ts. Each is far inside the hundred a buyer
  * action is priced at (tests/plan-cost-registry.ts, UNIT_COST.buyer).
  */
-export const SUBMISSION_STEP_COMMANDS = { open: 14, sign: 1, done: 13, abort: 5 } as const;
+export const SUBMISSION_STEP_COMMANDS = {
+  open: 14,
+  sign: 1,
+  done: 13,
+  abort: 5,
+  /** The buyer's list (unit 5): their index, then a record and, for one not kept, its open upload, for each of their entries. */
+  mine: 1 + 2 * MAX_SUBMISSIONS_PER_PERSON,
+  /** A withdrawal (unit 5): the lock, the record, its growth in the data room, the write, and the lock let go. */
+  withdraw: 12,
+} as const;
 /** Kept files the daily sweep deletes at most in one run; the rest wait for the next. */
 export const SUBMISSION_SWEEP_PER_RUN = 200;
 /** A file the sweep could not delete is tried again this much later, so it never holds back the files behind it. */
@@ -833,5 +844,152 @@ export async function replySubmission(
     if (replies[0] === null) return { ok: false as const, reason: "gone" as const };
     if (replies[0] !== "OK" || countOf(replies[1]) === null) throw new UnknownReplyError("a submission's reply");
     return { ok: true as const, submission: next };
+  });
+}
+
+// ------------------------------------------------------------ the buyer's own
+
+/**
+ * Bytes of the buyer's records one public request pays for (750 [CD1] unit
+ * 5): the size the private notes' download is paid at
+ * (lib/lesson-notes-rules.ts, NOTE_DOWNLOAD_BYTES_PER_UNIT), each a later
+ * page's price; tests/submission-buyer-cost.test.ts holds every count below
+ * what it pays.
+ */
+export const SUBMISSION_MINE_BYTES_PER_UNIT = 65_536;
+/** Public requests reading `records` of a buyer's records takes, beyond the one the request itself took: each at its largest. */
+export const mineUnits = (records: number) => Math.ceil((Math.max(0, records) * MAX_SUBMISSION_RECORD_BYTES) / SUBMISSION_MINE_BYTES_PER_UNIT);
+
+/** One of the buyer's own files on a lesson, as they are shown it: never their address, another buyer's, or a path but their own upload's. */
+export type MineRow =
+  | { id: string; state: "uploading"; file: SubmittedFile; at: number; pathname: string }
+  | {
+      id: string;
+      /** "unknown" when the kept state is none of the three: said, never guessed. */
+      state: SubmissionState | "unknown";
+      file: SubmittedFile;
+      note: string;
+      at: number;
+      keepUntil: number;
+      reply: { text: string; at: number } | null;
+    }
+  | { id: string; state: "unread" };
+
+const STATES: readonly string[] = ["submitted", "reviewed", "withdrawn"];
+
+/**
+ * The buyer's own files on one lesson, newest first, for the lesson page
+ * (750 [CD1] unit 5): their index read exactly, then, before any record is
+ * read, `pay` asked for the public requests the records take at their
+ * largest (mineUnits); refused, nothing more is read. Each record is read
+ * exactly; one that does not read is said ("unread", last), never left out;
+ * an upload still open is said as still sending, with its path so the buyer
+ * can give it up; an entry whose record and upload are both gone (its
+ * keeping time ended) is not shown.
+ */
+export async function buyerSubmissionsFor(
+  where: { folder: string; who: string; courseId: string; lessonId: string },
+  nowSeconds: number,
+  pay: (units: number) => Promise<boolean>,
+): Promise<{ ok: true; rows: MineRow[] } | { ok: false; reason: "resting" }> {
+  const entries = (await entriesOf(where.folder, where.who)).filter((entry) => entry.courseId === where.courseId && entry.lessonId === where.lessonId);
+  const units = mineUnits(entries.length);
+  if (units > 0 && !(await pay(units))) return { ok: false, reason: "resting" };
+  const rows: MineRow[] = [];
+  const unread: MineRow[] = [];
+  for (const entry of entries) {
+    let kept: KeptSubmission | null;
+    try {
+      kept = await readSubmission(where.folder, entry.id);
+      if (kept && (kept.who !== where.who || kept.target.kind !== "lesson" || kept.target.courseId !== where.courseId || kept.target.lessonId !== where.lessonId)) {
+        throw new UnknownReplyError("a buyer's submission");
+      }
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      unread.push({ id: entry.id, state: "unread" });
+      continue;
+    }
+    if (kept) {
+      rows.push({
+        id: kept.id,
+        state: STATES.includes(kept.state) ? kept.state : "unknown",
+        file: { name: String(kept.file?.name ?? ""), bytes: Number(kept.file?.bytes ?? 0), type: String(kept.file?.type ?? "") },
+        note: typeof kept.note === "string" ? kept.note : "",
+        at: kept.at,
+        keepUntil: kept.keepUntil,
+        reply: kept.reply ? { text: kept.reply.text, at: kept.reply.at } : null,
+      });
+      continue;
+    }
+    let door: Door | null;
+    try {
+      door = await readDoorById(where.folder, entry.id);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      unread.push({ id: entry.id, state: "unread" });
+      continue;
+    }
+    if (door && door.who === where.who) rows.push({ id: door.id, state: "uploading", file: { name: door.name, bytes: door.bytes, type: door.type }, at: door.at, pathname: door.pathname });
+  }
+  rows.sort((a, b) => ("at" in b ? b.at : 0) - ("at" in a ? a.at : 0));
+  return { ok: true, rows: [...rows, ...unread] };
+}
+
+export type Withdrawn =
+  | { ok: true; submission: KeptSubmission }
+  | { ok: false; reason: "gone" | "state" | "expired" | "full" | "unavailable" };
+
+/**
+ * The buyer withdraws one of their own files still waiting for review (750
+ * [CD1] unit 5), once, under the same lock as the creator's reply, so the
+ * two never cross: the record read exactly and moved submitted -> withdrawn
+ * (applySubmissionEvent), its growth counted in the store's data room, then
+ * its file deleted at the vault; only once the vault confirms it is the
+ * record written back with the time it had left, the file taken off the
+ * sweep's list and the buyer's place on the lesson let go. A file the vault
+ * did not delete is left waiting, as it was ("unavailable"). Another buyer's,
+ * another lesson's, a reviewed one and one past its keeping time are refused.
+ */
+export async function withdrawSubmission(
+  input: { data: DataStore; folder: string; who: string; courseId: string; lessonId: string; id: string },
+  nowSeconds: number,
+  steps: Pick<DoorSteps, "deleteVault"> = VAULT_STEPS,
+): Promise<Withdrawn> {
+  if (!ID.test(input.id)) return { ok: false, reason: "gone" };
+  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async (): Promise<Withdrawn> => {
+    const kept = await readSubmission(input.folder, input.id);
+    if (!kept || kept.who !== input.who || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId || kept.target.lessonId !== input.lessonId) {
+      return { ok: false, reason: "gone" };
+    }
+    const moved = applySubmissionEvent(kept, { event: "withdraw", actor: "buyer" }, nowSeconds);
+    if (!moved.ok) return { ok: false, reason: moved.reason === "expired" ? "expired" : "state" };
+    const next: KeptSubmission = { ...kept, ...moved.submission };
+    const json = submissionRecordJson(next);
+    if (json === null) throw new Error("submission_record_bytes");
+    const key = recordKey(input.folder, input.id);
+    const until = kept.keepUntil + SUBMISSION_SWEEP_GRACE_SECONDS;
+    const grown = dataBytes([key, json], 1) - dataBytes([key, JSON.stringify(kept)], 1);
+    if (grown > 0) {
+      const room = await takeData(input.data, [{ until: until * 1000, bytes: grown }], nowSeconds * 1000);
+      if (!room.ok) {
+        if (room.reason === "full") return { ok: false, reason: "full" };
+        throw new UnknownReplyError("the store's data room");
+      }
+    }
+    // The file goes first: a record says withdrawn only once nobody can open its file.
+    if (!(await steps.deleteVault([kept.path]).catch(() => false))) return { ok: false, reason: "unavailable" };
+    const replies = repliesFor(
+      await redisPipeline([
+        ["SET", key, json, "XX", "EX", Math.max(1, until - nowSeconds)],
+        ["ZREM", DUE_KEY, dueMember(input.folder, kept.path)],
+        ["ZREM", liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who), kept.id],
+      ]),
+      3,
+    );
+    if (!replies) throw new UnknownReplyError("a submission withdrawn");
+    // Deleted since it was read (the buyer's erasure, or its time): nothing was written.
+    if (replies[0] === null) return { ok: false, reason: "gone" };
+    if (replies[0] !== "OK" || countOf(replies[1]) === null || countOf(replies[2]) === null) throw new UnknownReplyError("a submission withdrawn");
+    return { ok: true, submission: next };
   });
 }

@@ -1423,6 +1423,7 @@
     "components/lesson-notes.tsx",
     "components/lesson-player.tsx",
     "components/lesson-quiz.tsx",
+    "components/lesson-submission.tsx",
     "components/lesson-task.tsx",
     "components/lesson-text.tsx",
     "components/letter-publish-control.tsx",

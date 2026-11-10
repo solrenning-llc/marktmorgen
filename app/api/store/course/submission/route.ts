@@ -8,7 +8,16 @@ import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey } from "@/lib/learn";
 import { costPauseCode, costStandingOf } from "@/lib/plan-standing";
 import { checkSubmissionFile, maySubmit } from "@/lib/submission-rules";
-import { abortSubmissionDoor, closeSubmissionDoor, liveCount, openSubmissionDoor, readSetupFor, signSubmissionDoor } from "@/lib/submission-store";
+import {
+  abortSubmissionDoor,
+  buyerSubmissionsFor,
+  closeSubmissionDoor,
+  liveCount,
+  openSubmissionDoor,
+  readSetupFor,
+  signSubmissionDoor,
+  withdrawSubmission,
+} from "@/lib/submission-store";
 import { PIECES_PER_ASK } from "@/lib/vault-rules";
 import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 
@@ -29,6 +38,8 @@ const text = (value: unknown, max: number) => (typeof value === "string" ? value
  *   { action: "sign", handle, product, lesson, pathname, numbers }
  *   { action: "done", handle, product, lesson, pathname, etags, note }
  *   { action: "abort", handle, product, lesson, pathname }
+ *   { action: "mine", handle, product, lesson }               the buyer's own files there (unit 5)
+ *   { action: "withdraw", handle, product, lesson, id }       one of them withdrawn (unit 5)
  *
  * Refused from another site. The store is found by its address, then one of
  * its public requests is taken before anything else is read for the request.
@@ -39,6 +50,9 @@ const text = (value: unknown, max: number) => (typeof value === "string" ? value
  * and the plan's storage, in that order. Every later step is for an upload
  * this buyer opened on this lesson of this store, read from the door kept for
  * it, never from the request. Anything that could not be read is refused.
+ * Listing and withdrawing are for the signed-in buyer's own files only, also
+ * once their access has ended: the list pays its reads before it makes them
+ * (mineUnits), and a withdrawal is one buyer action.
  *
  * Off while SUBMISSIONS_READY is false (lib/submission-switch.ts): the
  * trainers' page still says "Not yet".
@@ -55,7 +69,7 @@ export async function POST(request: NextRequest) {
   }
   if (!body || typeof body !== "object") return no("invalid");
   const action = text(body.action, 10);
-  if (!["open", "sign", "done", "abort"].includes(action)) return no("invalid");
+  if (!["open", "sign", "done", "abort", "mine", "withdraw"].includes(action)) return no("invalid");
 
   try {
     const found = await storeForHandleExactly(normaliseHandle(text(body.handle, 80)));
@@ -83,6 +97,23 @@ export async function POST(request: NextRequest) {
       if (!who) return no("signed_out", 401);
       const given = await abortSubmissionDoor(where, text(body.pathname, 400));
       return given === "done" ? yes({}) : given === "unknown" ? no("unknown", 404) : no("files_unavailable", 503);
+    }
+
+    // The buyer's own files on the lesson, and withdrawing one: theirs alone, whatever their access is now (unit 5).
+    if (action === "mine") {
+      if (!who) return no("signed_out", 401);
+      const listed = await buyerSubmissionsFor({ folder, who, courseId: course.id, lessonId: place.lesson.id }, now, (units) => takeBuyerRead(store, units));
+      return listed.ok ? yes({ submissions: listed.rows }) : no("resting", 503);
+    }
+    if (action === "withdraw") {
+      if (!who) return no("signed_out", 401);
+      if (!(await takeBuyerAction(store))) return no("resting", 503);
+      const withdrawn = await withdrawSubmission({ data: store, folder, who, courseId: course.id, lessonId: place.lesson.id, id: text(body.id, 40) }, now);
+      if (!withdrawn.ok) {
+        const status = { gone: 404, state: 409, expired: 409, full: 409, unavailable: 503 }[withdrawn.reason];
+        return no(withdrawn.reason === "gone" ? "unknown" : withdrawn.reason === "unavailable" ? "files_unavailable" : withdrawn.reason, status);
+      }
+      return yes({ submission: { id: withdrawn.submission.id, state: withdrawn.submission.state } });
     }
 
     const setup = await readSetupFor(course.id, place.lesson.id);

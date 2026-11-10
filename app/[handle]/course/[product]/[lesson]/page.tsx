@@ -39,6 +39,9 @@ import { videoStampText } from "@/lib/video-stamp";
 import { LessonNotes } from "@/components/lesson-notes";
 import { readNote } from "@/lib/lesson-notes";
 import { EmptyState } from "@/components/empty-state";
+import { LessonSubmission } from "@/components/lesson-submission";
+import { readSetupFor } from "@/lib/submission-store";
+import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -153,6 +156,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // The student's own private note (290 [SQ1]): read only for them, never for the creator or a visitor, and never on
   // a lesson held behind a quiz or work to hand in, whose saves the route refuses (Claude 2's review of #3031, L5).
   const note = student && open && !blocker ? await readNote(store.statsId ?? "", who, course.id, lesson.id) : null;
+  // What the creator asks a buyer to send for review here (750 [CD1] unit 5): read only while the feature is on, for a
+  // student with the lesson open on a paid course (the door takes no other); settings that do not read are said, never "nothing asked".
+  const submissionSetup = SUBMISSIONS_READY && student && open && !blocker && product.priceCents > 0 ? await readSetupFor(course.id, lesson.id).catch(() => "unknown" as const) : null;
   const mustPass = Boolean(student && quiz && lesson.quiz?.required && !passed.has(lesson.id));
   // Work to hand in, still holding the lessons after it shut.
   const mustHandIn = Boolean(student && task && lesson.task?.gate && !passed.has(lesson.id));
@@ -339,7 +345,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
               </div>
             ) : null}
 
-            {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task ? (
+            {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task && !submissionSetup ? (
               <EmptyState title={said.w.nothingYet} body={w.emptyLesson} className="mt-6" />
             ) : null}
 
@@ -368,6 +374,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 storeName={store.name}
                 language={store.language}
               />
+            ) : null}
+
+            {submissionSetup ? (
+              <LessonSubmission setup={submissionSetup} where={{ handle: store.handle, product: product.id, lesson: lesson.id }} storeName={store.name} language={store.language} />
             ) : null}
 
             {note ? (

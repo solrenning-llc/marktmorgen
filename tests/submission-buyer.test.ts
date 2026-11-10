@@ -9,7 +9,7 @@
  *     (kind and size) before anything is sent; a browser that names no type
  *     is read by the file's extension;
  *   - sending goes open, sign, the pieces, then done with the note, and says
- *     how far it got; cancelling gives the upload up at the door (abort) and
+ *     how far it got; Stop gives the upload up at the door (abort) and
  *     never closes it; a refusal says the door's own reason;
  *   - the buyer's own files on the lesson are listed (waiting, reviewed with
  *     the creator's reply, withdrawn, still sending), another buyer's and
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
       // The buyer presses Stop while the piece is on its way.
       put: async () => (stop.abort(), { status: 0, etag: null }),
     });
-    is("stopped, it says so", result, { ok: false, reason: "cancelled" });
+    is("stopped, it says so", result, { ok: false, reason: "stopped" });
     is("the upload is given up at the door, never closed", posted.map((p) => p.action), ["open", "sign", "abort"]);
     is("the one it opened", posted[2].pathname, "vault/p/sub_y/1-a.mp4");
   }
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
     stop.abort();
     const file = Object.assign(new Blob([new Uint8Array(10)], { type: "video/mp4" }), { name: "a.mp4" });
     const result = await sendSubmission(file, SETUP, route, "", { signal: stop.signal, post: async (body) => (posted.push(String(body.action)), { ok: true }) });
-    is("stopped before it began: nothing is opened", [result, posted], [{ ok: false, reason: "cancelled" }, []]);
+    is("stopped before it began: nothing is opened", [result, posted], [{ ok: false, reason: "stopped" }, []]);
   }
   {
     const posted: string[] = [];

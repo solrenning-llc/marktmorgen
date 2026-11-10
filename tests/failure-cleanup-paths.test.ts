@@ -193,7 +193,7 @@ async function main(): Promise<void> {
     "link-image del(result.removed.path)": "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
     "course del(files)": "handed-in work of a removed assignment, read from its own records",
     "course del(file.pathname)": "lesson files the course no longer holds, after it was written",
-    "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
+    "course/task deleteFile(path, \"site_cleanup\")": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
     "lib/takedown.ts del(done.removed.path)": "the own picture of the link the takedown removed, read from the record it wrote; link-image attach admits only a fresh or own name",

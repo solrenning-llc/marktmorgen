@@ -98,6 +98,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
+  "lib/backup-deletions.ts": { how: "marks", what: "Built but off: notes that the backup must delete its copy of a file already deleted, naming only the file (a hand-in's name holds a one-way fingerprint of your address, never the address)" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },

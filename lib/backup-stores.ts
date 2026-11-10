@@ -20,8 +20,11 @@
  * The only way to walk every store is a SCAN of the keyspace for
  * nl:store:owner:* (lib/store.ts storesAfter), so a page is a few SCAN steps
  * and one GET for each store found: at most BACKUP_STORES_SCANS_PER_PAGE
- * SCANs of BACKUP_STORES_SCAN_COUNT keys and one GET a store, each store's
- * record (at most MAX_STORE_BYTES) read once a day. The walk goes over the
+ * SCANs of BACKUP_STORES_SCAN_COUNT keys and at most
+ * BACKUP_STORES_READS_PER_PAGE GETs, each store's record (at most
+ * MAX_STORE_BYTES) read once a day; its worst page is priced by
+ * backupStoresPageWorstMicroUsd and counted against the review's own
+ * maxStoresPagesPerDay, never the listings' figure. The walk goes over the
  * whole keyspace, so the pages a day grow with every key of every store, not
  * only with the stores: the Worker reads at most its BACKUP_FILES_INDEX_PAGES
  * pages a day and alarms past them (stores_unavailable), which bounds the
@@ -30,13 +33,14 @@
  * larger R.
  */
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
-import { BACKUP_FILES_PAGE_ENTRIES, type BackupStoreRoom, type BackupStoresPage, parseStoresPage } from "@/lib/backup-files-contract";
+import { type BackupStoreRoom, type BackupStoresPage, parseStoresPage } from "@/lib/backup-files-contract";
 import { COMMUNITY_PICTURES, PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { type Tier, parseTier } from "@/lib/plan";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, scanPage } from "@/lib/redis-reply";
+import { UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS } from "@/lib/spend-cost-table";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
-import { STORE_ID_PATTERN, storeFolder } from "@/lib/store";
+import { MAX_STORE_BYTES, STORE_ID_PATTERN, storeFolder } from "@/lib/store";
 
 /** Keys one SCAN step looks at (a hint to Redis, which may answer a few more); one command whatever it finds. */
 export const BACKUP_STORES_SCAN_COUNT = 200;
@@ -47,8 +51,26 @@ export const BACKUP_STORES_SCANS_PER_PAGE = 40;
  * (lib/store.ts), so a page reads at most this plus one step's finds of them, in rounds of GET_BATCH.
  */
 export const BACKUP_STORES_FOUND_PER_PAGE = 50;
-/** Records read in one round: at most 10 MB a reply. */
+/** Records read in one round: at most 10 MB a reply, and all a page holds at once. */
 const GET_BATCH = 10;
+/**
+ * The most records one page reads: the scan stops once BACKUP_STORES_FOUND_PER_PAGE are found, and its last step
+ * may add one step's COUNT more. A SCAN that names more (COUNT is a hint) fails the page rather than read past it.
+ */
+export const BACKUP_STORES_READS_PER_PAGE = BACKUP_STORES_FOUND_PER_PAGE + BACKUP_STORES_SCAN_COUNT;
+/** Database commands of the worst stores page: every SCAN step and one GET for each record it may read. */
+export const BACKUP_STORES_PAGE_COMMANDS = BACKUP_STORES_SCANS_PER_PAGE + BACKUP_STORES_READS_PER_PAGE;
+/** Bytes the worst stores page reads: each record at MAX_STORE_BYTES, the most a store record may weigh. */
+export const BACKUP_STORES_PAGE_BYTES = BACKUP_STORES_READS_PER_PAGE * MAX_STORE_BYTES;
+
+/**
+ * What the worst stores page costs, in micro-dollars, rounded up: its commands and its bytes at Upstash's paid
+ * prices (lib/spend-cost-table.ts), never a free quota. A company cost of the backup: the review's
+ * maxStoresPagesPerDay pages a day at most (lib/backup-files-review.ts), so at most 31 times that a month.
+ */
+export function backupStoresPageWorstMicroUsd(): number {
+  return Math.ceil((BACKUP_STORES_PAGE_COMMANDS * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1e6 + (BACKUP_STORES_PAGE_BYTES * UPSTASH_MICRO_USD_PER_GB_TRANSFER) / 1e9);
+}
 
 /** R for a store of this tier, in bytes: what its plan lets it keep in the folders the backup copies, and its community's pictures. */
 export function backupRoomBytes(tier: Tier): number {
@@ -97,12 +119,22 @@ async function roomOf(raw: string): Promise<BackupStoreRoom> {
   return { store: await storeFolder(ref), roomBytes: backupRoomBytes(tier) };
 }
 
-/** One page of the stores to copy, from `cursor` (null: the start of the walk). Throws on anything that does not read exactly. */
+/**
+ * One page of the stores to copy, from `cursor` (null: the start of the walk). Throws on anything that does not
+ * read exactly, and on a SCAN that names more records than a page reads (BACKUP_STORES_READS_PER_PAGE).
+ *
+ * The records are read in rounds of GET_BATCH and each round is read as it arrives, so a page holds at most one
+ * round's replies (10 MB) at once. Past `stopAt` between rounds, the page answers the stores read so far,
+ * "cutoff", with a cursor back at the SCAN step whose records were not all read: the next call reads that step
+ * again (SCAN's cursor is where the walk was, not what it found), so no store is lost, and one named twice is
+ * read once by the Worker, at the larger R.
+ */
 export async function backupStoresPage(cursor: string | null, options: { now?: () => number; stopAt: number }): Promise<BackupStoresPage> {
   const now = options.now ?? Date.now;
   let scan = cursor ?? "0";
-  const keys = new Set<string>();
-  let steps = 0;
+  const seen = new Set<string>();
+  const steps: { from: string; keys: string[] }[] = [];
+  let found = 0;
   let stoppedByTime = false;
   do {
     if (now() >= options.stopAt) {
@@ -111,31 +143,39 @@ export async function backupStoresPage(cursor: string | null, options: { now?: (
     }
     const page = scanPage(await redisPipeline([["SCAN", scan, "MATCH", "nl:store:owner:*", "COUNT", BACKUP_STORES_SCAN_COUNT]]));
     if (!page) throw new UnknownReplyError("a SCAN of the stores");
-    for (const key of page.items) if (OWNER_KEY.test(key)) keys.add(key);
+    const keys = page.items.filter((key) => OWNER_KEY.test(key) && !seen.has(key));
+    for (const key of keys) seen.add(key);
+    found += keys.length;
+    // Never more records than the page is priced at: a step that names more fails the page, before any is read.
+    if (found > BACKUP_STORES_READS_PER_PAGE) throw new UnknownReplyError("a SCAN that names more stores than a page reads");
+    steps.push({ from: scan, keys });
     scan = page.next;
-    steps += 1;
-  } while (scan !== "0" && steps < BACKUP_STORES_SCANS_PER_PAGE && keys.size < BACKUP_STORES_FOUND_PER_PAGE);
-  if (keys.size > BACKUP_FILES_PAGE_ENTRIES) throw new UnknownReplyError("a SCAN that names more stores than a page holds");
+  } while (scan !== "0" && steps.length < BACKUP_STORES_SCANS_PER_PAGE && found < BACKUP_STORES_FOUND_PER_PAGE);
 
   const rooms = new Map<string, number>();
-  const list = [...keys];
-  if (list.length) {
-    const replies: unknown[] = [];
-    for (let at = 0; at < list.length; at += GET_BATCH) {
-      const batch = list.slice(at, at + GET_BATCH);
-      const read = repliesFor(await redisPipeline(batch.map((key) => ["GET", key])), batch.length);
-      if (!read) throw new UnknownReplyError("the store records");
-      replies.push(...read);
-    }
-    for (const reply of replies) {
-      // Gone between the SCAN and the GET: a store deleted, not one to copy.
-      if (reply === null) continue;
-      if (typeof reply !== "string") throw new UnknownReplyError("a store record");
-      const room = await roomOf(reply);
-      rooms.set(room.store, Math.max(rooms.get(room.store) ?? 0, room.roomBytes));
+  let resumeAt: string | null = null;
+  reading: for (const step of steps) {
+    for (let at = 0; at < step.keys.length; at += GET_BATCH) {
+      if (now() >= options.stopAt) {
+        resumeAt = step.from;
+        break reading;
+      }
+      const batch = step.keys.slice(at, at + GET_BATCH);
+      const replies = repliesFor(await redisPipeline(batch.map((key) => ["GET", key])), batch.length);
+      if (!replies) throw new UnknownReplyError("the store records");
+      for (const reply of replies) {
+        // Gone between the SCAN and the GET: a store deleted, not one to copy.
+        if (reply === null) continue;
+        if (typeof reply !== "string") throw new UnknownReplyError("a store record");
+        const room = await roomOf(reply);
+        rooms.set(room.store, Math.max(rooms.get(room.store) ?? 0, room.roomBytes));
+      }
     }
   }
   const stores = [...rooms].map(([store, roomBytes]) => ({ store, roomBytes }));
+  if (resumeAt !== null) {
+    return parseStoresPage({ version: 1, kind: "stores", stores, cursor: encodeStoresCursor(resumeAt), complete: false, reason: "cutoff" });
+  }
   const done = scan === "0" && !stoppedByTime;
   return parseStoresPage({
     version: 1,

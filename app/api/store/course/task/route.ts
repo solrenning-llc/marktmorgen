@@ -83,22 +83,22 @@ export async function POST(request: NextRequest) {
         if (!found) return no("missing");
         const extension = taskExtension(found.contentType);
         if (!extension || !path.endsWith(`.${extension}`)) {
-          await deleteFile(path).catch(() => {});
+          await deleteFile(path, "site_cleanup").catch(() => {});
           return no("type");
         }
         if (found.size > MAX_TASK_FILE_BYTES) {
-          await deleteFile(path).catch(() => {});
+          await deleteFile(path, "site_cleanup").catch(() => {});
           return no("too_big");
         }
         // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
         // in the store unaccounted for, and the bytes it may have taken are given back only if its mark says they entered.
         const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
-          await deleteFile(path).catch(() => {});
+          await deleteFile(path, "site_cleanup").catch(() => {});
           await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
           throw error;
         });
         if (!roomTaken) {
-          await deleteFile(path).catch(() => {});
+          await deleteFile(path, "site_cleanup").catch(() => {});
           return no("full");
         }
         taken = found.size;

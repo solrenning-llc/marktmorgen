@@ -1,5 +1,5 @@
 import { BACKUP_FILES_SOURCES, type BackupDeletionPage, type BackupFilesSource, type BackupStoresPage } from "@/lib/backup-files-contract";
-import { decodeDeletionsCursor, deletionsCursorExpired, deletionsPage } from "@/lib/backup-deletions";
+import { decodeDeletionsCursor, deletionRecordsOn, deletionsCursorExpired, deletionsPage } from "@/lib/backup-deletions";
 import { backupStoresPage, decodeStoresCursor } from "@/lib/backup-stores";
 import { BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import {
@@ -32,8 +32,10 @@ export const dynamic = "force-dynamic";
  *
  * The deletions page always carries a cursor, the point the next read
  * resumes from; one the site no longer keeps is a 409 "records_expired",
- * never an empty page. Each page kind has its own count of the day's reviewed
- * pages, taken before any database command but that count.
+ * never an empty page, and the page is a 503 while the records have no review
+ * of their own (lib/backup-deletions.ts). Each page kind has its own count of
+ * the day's reviewed pages, against its own figure of the review, taken
+ * before any database command but that count.
  *
  * A 404, with nothing listed and nothing counted, while its own secret is
  * unset or not the one sent, and while the owner's review of its cost is
@@ -84,6 +86,8 @@ export async function GET(request: Request): Promise<Response> {
 /** The stores page or the deletions page: `page` and an optional `cursor`, nothing else. */
 async function answerPage(kind: string, params: URLSearchParams, names: string[], review: NonNullable<ReturnType<typeof admitFilesReview>>, started: number): Promise<Response> {
   if ((kind !== "stores" && kind !== "deletions") || !names.every((name) => name === "page" || name === "cursor")) return refuse(400, "bad_request");
+  // No record is written while the records have no review of their own: an empty page would read as "nothing was deleted".
+  if (kind === "deletions" && !deletionRecordsOn()) return refuse(503, "deletions_unavailable");
   const text = params.get("cursor");
   const unavailable = `${kind}_unavailable`;
   let storesCursor: string | null = null;

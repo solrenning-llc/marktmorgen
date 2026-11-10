@@ -312,7 +312,7 @@ export async function erasePerson(
     // Deleted now; if the file store does not answer, handed to the daily job
     // that deletes uploads nobody kept (app/api/cron/courses), so they go
     // within a day by themselves.
-    await deleteFile(unique).catch(async (error: unknown) => {
+    await deleteFile(unique, "privacy_request").catch(async (error: unknown) => {
       console.error("deleting a person: their files go with the daily job instead", error);
       for (const path of unique) await noteTaskUpload(path, 0);
     });

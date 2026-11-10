@@ -62,7 +62,8 @@
  *     the last entry signed, losing none;
  *   - at most BACKUP_FILES_PAGES_PER_STORE provider pages a listing: a store
  *     with more objects is answered "over_bound", never complete (item 8);
- *   - at most the review's maxPagesPerDay pages a UTC day for each source,
+ *   - at most the review's maxPagesPerDay pages a UTC day for each source
+ *     (and its own maxStoresPagesPerDay and maxDeletionsPagesPerDay for those pages),
  *     counted before the provider is asked (one SET NX EX and one INCRBY, read
  *     in their exact shape, rule 24): past it 429, unreadable 503.
  *
@@ -154,12 +155,19 @@ export function admitFilesReview(raw: unknown): BackupFilesRouteReview | null {
     const descriptor = Object.getOwnPropertyDescriptor(raw, name);
     return descriptor && "value" in descriptor ? descriptor.value : undefined;
   };
-  const maxPagesPerDay = read("maxPagesPerDay");
+  const figure = (name: string): number | null => {
+    const value = read(name);
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 1_000_000 ? value : null;
+  };
+  // Each page kind's own figure (a review sized for listings never admits stores pages at that count): one missing is no review.
+  const maxPagesPerDay = figure("maxPagesPerDay");
+  const maxStoresPagesPerDay = figure("maxStoresPagesPerDay");
+  const maxDeletionsPagesPerDay = figure("maxDeletionsPagesPerDay");
   const reviewedAt = read("reviewedAt");
   const source = read("source");
-  if (typeof maxPagesPerDay !== "number" || !Number.isSafeInteger(maxPagesPerDay) || maxPagesPerDay < 1 || maxPagesPerDay > 1_000_000) return null;
+  if (maxPagesPerDay === null || maxStoresPagesPerDay === null || maxDeletionsPagesPerDay === null) return null;
   if (typeof reviewedAt !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(reviewedAt) || typeof source !== "string" || source.trim().length < 3) return null;
-  return { maxPagesPerDay, reviewedAt, source };
+  return { maxPagesPerDay, maxStoresPagesPerDay, maxDeletionsPagesPerDay, reviewedAt, source };
 }
 
 // -------------------------------------------------------------------- cursor
@@ -197,7 +205,7 @@ export function decodeFilesCursor(text: string, source: BackupFilesSource, store
 /** What the day's reviewed pages are counted for: each source's listing, and the stores and deletions pages. */
 export type BackupFilesPageKind = BackupFilesSource | "stores" | "deletions";
 
-/** Takes one of the day's reviewed pages for a source (or page) before the provider or the database is asked: "ok", "over" past it, "unknown" when the count cannot be read. */
+/** Takes one of the day's reviewed pages for a source (or page), against that kind's own figure of the review, before the provider or the database is asked: "ok", "over" past it, "unknown" when the count cannot be read. */
 export async function takeDayPage(source: BackupFilesPageKind, review: BackupFilesRouteReview, now = Date.now()): Promise<"ok" | "over" | "unknown"> {
   const key = `nl:backup:files:day:${new Date(now).toISOString().slice(0, 10)}:${source}`;
   try {
@@ -205,7 +213,8 @@ export async function takeDayPage(source: BackupFilesPageKind, review: BackupFil
     const reply: unknown = await redisPipeline([["SET", key, "0", "NX", "EX", 2 * 86_400], ["INCRBY", key, 1]]);
     const count = Array.isArray(reply) && reply.length === 2 && (reply[0] === null || reply[0] === "OK") ? reply[1] : undefined;
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
-    return count > review.maxPagesPerDay ? "over" : "ok";
+    const ceiling = source === "stores" ? review.maxStoresPagesPerDay : source === "deletions" ? review.maxDeletionsPagesPerDay : review.maxPagesPerDay;
+    return count > ceiling ? "over" : "ok";
   } catch {
     return "unknown";
   }

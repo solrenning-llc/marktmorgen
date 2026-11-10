@@ -1,5 +1,5 @@
 /** GD2(c): static generated-code checks use the destination the URL parser sees. No network IO. */
-import { checkGeneratedCode, outsideUrl } from "@/lib/generated-code-check";
+import { checkGeneratedCode, outsideUrl, tagsOf } from "@/lib/generated-code-check";
 import { done, is, part } from "./check";
 
 const allowed = ["files.store.example"];
@@ -47,4 +47,26 @@ for (const url of ["", "#chart", "/files/chart.png", "files/chart.png", "./chart
   is(`permitted: ${url}`, outsideUrl(url, allowed), false);
 }
 is("the caller must permit the host", outsideUrl("//files.store.example/p.png", []), true);
+
+// WHATWG HTML, attribute-name state: a later duplicate is discarded, including case variants.
+// https://html.spec.whatwg.org/multipage/parsing.html#attribute-name-state (read 2026-11-10).
+part("A second attribute never disguises the first destination the browser uses");
+for (const html of [
+  '<img src="https://collector.example/p.png" src="/safe.png" alt="">',
+  '<img SRC="https://collector.example/p.png" src="/safe.png" alt="">',
+  '<img src="https://collector.example/p.png" src="/safe.png" SRC="/safe2.png" alt="">',
+  '<img srcset="https://collector.example/p.png 2x" srcset="/safe.png 2x" alt="">',
+  '<form action="https://collector.example/collect" action="/safe"><button>Send</button></form>',
+  '<button formaction="https://collector.example/collect" formaction="/safe">Send</button>',
+  '<div style="background:url(https://collector.example/p.png)" style="color:black">Chart</div>',
+]) is(`first external attribute refused: ${html}`, checkGeneratedCode({ html, css: "", js: "" }).staticPass, false);
+
+for (const html of [
+  '<img src="/safe.png" src="https://collector.example/p.png" alt="">',
+  '<img SRC="/safe.png" src="https://collector.example/p.png" alt="">',
+  '<form action="/safe" action="https://collector.example/collect"><button>Send</button></form>',
+]) is(`discarded attribute is not the destination: ${html}`, checkGeneratedCode({ html, css: "", js: "" }).staticPass, true);
+is("first empty value also wins", tagsOf('<img src="" src="/later.png">')[0].attrs.get("src"), "");
+is("three case variants keep the first", tagsOf('<img SRC="/first.png" Src="/second.png" src="/third.png">')[0].attrs.get("src"), "/first.png");
+is("a first password type cannot be disguised", checkGeneratedCode({ html: '<input type="password" type="text" aria-label="Name">', css: "", js: "" }).findings.some((f) => f.rule === "sensitive_field"), true);
 done();

@@ -37,8 +37,10 @@
  * product holds: its course pages and worksheets, its podcast page, feed and
  * episodes, its PDF preview, its shared card, its file from the studio (the
  * team is refused) and the AI writing help (refused for everyone, so nothing
- * of it goes to an AI provider). A mark that cannot be read refuses the same
- * way (holdState, contentOpenTo).
+ * of it goes to an AI provider: a picture description is refused for its
+ * picture and the pictures on its sales page whichever product or page the
+ * request names, heldPictureRefusal). A mark that cannot be read refuses the
+ * same way (holdState, contentOpenTo).
  */
 import { createHash } from "node:crypto";
 import { emailForSession, normaliseEmail } from "@/lib/auth";
@@ -47,13 +49,16 @@ import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeRef } from "@/lib/store";
-import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
+import { productIdFromAddress, productIds, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { MAX_VAULT_PATH_BYTES } from "@/lib/vault-rules";
-import { holdFiles } from "@/lib/held-files";
+import { holdFiles, isFileHeld } from "@/lib/held-files";
 import { productFilePaths } from "@/lib/held-product-files";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
-import { heldIdsAmong, isHeldForReport, keepKey, touchesHeld } from "@/lib/child-safety-holds";
+import { heldIdsAmong, heldInCatalog, isHeldForReport, keepKey, touchesHeld } from "@/lib/child-safety-holds";
+import { imagePaths } from "@/lib/product-image";
+import { picturePaths } from "@/lib/sales-page";
+import { readPageExact } from "@/lib/sales-page-store";
 import { activeBumps, bumpTargets } from "@/lib/product-extras";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
@@ -185,6 +190,41 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
   try {
     const held = (await heldIdsAmong(store, productIds)).size > 0;
     return held ? Response.json({ ok: false, error: "on_hold" }, { status: 409 }) : null;
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
+}
+
+/**
+ * The answer the picture description (app/api/store/ai, kind "alt") gives
+ * instead of sending a held product's picture to the AI provider, or null to
+ * go on. The request names a product or a page of the store's own and sends
+ * a path, so the hold is read on the picture's owner, not on what is named:
+ * the picture's own mark (unit 3b, isFileHeld), then the marks of every
+ * product of the store (heldInCatalog, two MGETs at most),
+ * then, for each held product only, its listing and its sales page (both
+ * versions), exactly. 409 `on_hold`, without saying whose, when the path is a
+ * held product's picture, its smaller copy or a picture on its page; 503 when
+ * a mark, a held product's listing or its page cannot be read. It answers
+ * before the file store is read and before any model is asked.
+ */
+export async function heldPictureRefusal(store: Store, path: string): Promise<Response | null> {
+  try {
+    // The picture's own mark first (unit 3b, lib/held-files.ts): written when the product was held, whatever has
+    // happened to its listing or page since.
+    if (await isFileHeld(path)) return Response.json({ ok: false, error: "on_hold" }, { status: 409 });
+    for (const id of await heldInCatalog(store, productIds(store))) {
+      const listing = await readListingExactly(store, id);
+      if (listing === "unknown") throw new Error("A held product could not be read");
+      const paths = imagePaths(listing?.image);
+      if (store.statsId) {
+        const { page } = await readPageExact(store.statsId, id);
+        if (page) paths.push(...picturePaths(page));
+      }
+      if (paths.includes(path)) return Response.json({ ok: false, error: "on_hold" }, { status: 409 });
+    }
+    return null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });

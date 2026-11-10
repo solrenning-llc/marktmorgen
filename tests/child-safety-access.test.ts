@@ -36,10 +36,13 @@ import { saveCourse, type Course } from "@/lib/course";
 import { putMember } from "@/lib/team";
 import { holdReported } from "@/lib/child-safety";
 import { PIN_HEADER } from "@/lib/studio-route";
-import { addOption, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setProductFile, setProductHidden, setProductPodcast, setProductPreview, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, ensureStoreId, imageFolder, setProductCourse, setProductFile, setProductHidden, setProductImage, setProductPodcast, setProductPreview, setSitePages, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
+import { parsePage } from "@/lib/sales-page";
+import { writePage } from "@/lib/sales-page-store";
 import { readListing } from "@/lib/catalog";
 import { answering } from "./security/next-headers";
 import { drawn } from "./child-safety-access-og";
+import { reads as fileReads } from "./child-safety-access-blob";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -180,6 +183,36 @@ async function main(): Promise<void> {
     return [response.status, ((await response.json()) as { error?: string }).error];
   };
 
+  // The PDF's picture and a picture on its sales page, a picture of the free guide, and a page of the store's own
+  // (lib/site-page-rules.ts): placeholder file names, nothing in them.
+  const pictureFolder = await imageFolder(OWNER);
+  const heldPicture = `images/${pictureFolder}/${"a".repeat(32)}.webp`;
+  const heldPagePicture = `images/${pictureFolder}/${"c".repeat(32)}.webp`;
+  const freePicture = `images/${pictureFolder}/${"b".repeat(32)}.webp`;
+  await setProductImage(OWNER, pdfId, { path: heldPicture, width: 10, height: 10, alt: "", bytes: 1, small: null } as never);
+  await setProductImage(OWNER, freeId, { path: freePicture, width: 10, height: 10, alt: "", bytes: 1, small: null } as never);
+  await writePage(store.statsId!, pdfId, parsePage({ blocks: [{ id: "blk001", kind: "pictures", heading: "", items: [{ path: heldPagePicture, width: 10, height: 10, alt: "", caption: "" }] }] }), ROOM);
+  if (!(await setSitePages(OWNER, [{ id: "ourstory01", slug: "our-story", title: "Our story" }])).ok) throw new Error("no site page");
+  // What a picture description reached: the file store (tests/child-safety-access-blob.ts) or the model (a stand-in for fetch).
+  const describe = async (body: Record<string, unknown>) => {
+    // A fresh minute for the writing help's pace (AI_PER_MINUTE), which these asks would otherwise reach.
+    for (const key of redis.keys().filter((key) => key.startsWith("nl:rl:ai:"))) redis.run(["DEL", key]);
+    const read = fileReads.length;
+    let asked = false;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (new URL(input instanceof Request ? input.url : String(input)).hostname.endsWith("anthropic.com")) asked = true;
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+    try {
+      const answer = await ai({ kind: "alt", ...body });
+      const reached = [fileReads.slice(read).some((path) => path.startsWith("images/")) ? "file store" : "", asked ? "model" : ""].filter(Boolean);
+      return [...answer, reached.length ? reached.join(", ") : "nothing read"];
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  };
+
   part("Before any hold: the content is there for those it is for");
   is("the student opens the course", await front("student"), "shown");
   is("the listener's feed lists the podcast", (await feed())[0], 200);
@@ -238,6 +271,15 @@ async function main(): Promise<void> {
   is("a product that is not held gets past it (it has no readable file here)", (await ai({ kind: "page", product: freeId, readFile: true }))[1] !== "on_hold", true);
   is("the writing box says it is on hold, not that the allowance is unknown", readFileSync("components/ai-assist.tsx", "utf8").includes('on_hold: "This product is on hold'), true);
 
+  part("A held product's pictures go to no AI provider, whichever product or page names them");
+  const siteId = (await storeForEmail(OWNER))!.sitePages[0]?.id;
+  is("its picture, named under the held product itself, is refused before the file is read", await describe({ product: pdfId, path: heldPicture }), [409, "on_hold", "nothing read"]);
+  is("named under a product that is not held", await describe({ product: freeId, path: heldPicture }), [409, "on_hold", "nothing read"]);
+  is("a picture on its sales page, named under another product", await describe({ product: freeId, path: heldPagePicture }), [409, "on_hold", "nothing read"]);
+  is("named under a page of the store's own", await describe({ page: siteId, path: heldPicture }), [409, "on_hold", "nothing read"]);
+  is("a picture that is not a held product's still goes to the file store (nothing there here)", await describe({ product: freeId, path: freePicture }), [400, "invalid", "file store"]);
+  is("as from a page of the store's own", await describe({ page: siteId, path: freePicture }), [400, "invalid", "file store"]);
+
   part("A hold whose taking off the store did not go through: still read by nobody but the owner");
   if (!(await setProductHidden(OWNER, pdfId, false)).ok) throw new Error("not shown again");
   is("its preview is refused, and kept by no cache", await preview(pdfId), [404, "no-store", "This product has no preview."]);
@@ -256,6 +298,8 @@ async function main(): Promise<void> {
   is("the shared card does not name it", await card(pdfId), false);
   is("the team's studio download: try again later", (await download("editor", pdfId))[0], 503);
   is("the AI: try again later, nothing sent", await ai({ kind: "page", product: pdfId, readFile: true }), [503, "unavailable"]);
+  is("a picture description, under a product that is not held: try again later, nothing read", await describe({ product: freeId, path: freePicture }), [503, "unavailable", "nothing read"]);
+  is("under a page of the store's own too", await describe({ page: siteId, path: freePicture }), [503, "unavailable", "nothing read"]);
   is("the owner still sees the course", await front("owner"), "shown");
   redis.pipeline = real as typeof redis.pipeline;
 

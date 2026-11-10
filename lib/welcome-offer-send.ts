@@ -58,7 +58,7 @@ export type WelcomeHere = { product: Listing; percent: number; until: number; en
 export async function welcomeFor(store: Store, claim: Pick<Claim, "e" | "p" | "at">, nowSeconds = Math.floor(Date.now() / 1000)): Promise<WelcomeHere | null> {
   if (!welcomeOn(store) || !store.statsId || !isRedisConfigured() || claim.p === store.welcomeOffer.product) return null;
   const product = await readListing(store, store.welcomeOffer.product).catch(() => null);
-  if (!canOfferWelcome(store, product ?? null)) return null;
+  if (!product || !canOfferWelcome(store, product)) return null;
   // A bundle holding a product kept for a child-safety report is neither
   // offered nor sold (lib/child-safety-holds.ts); a hold that cannot be read
   // counts as held, so it is not offered either. One read, for a bundle only.

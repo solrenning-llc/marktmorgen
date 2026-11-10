@@ -196,7 +196,8 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
   if (!sent) return { ok: false, problem: "unsent", words: counted.tries >= MAX_TELL_TRIES ? TRIES_SPENT_WORDS : UNSENT_WORDS };
   const told: KeptAppeal = { ...counted, told: true };
   const replies = repliesFor(await redisPipeline([["SET", recordKey(store.sid, decision), JSON.stringify(told), "XX", "EX", KEEP_SECONDS]]), 1);
-  // The inbox has it; a mark that did not land only means Send it again stays offered, and its email is the same one.
+  // The inbox has it. A mark that did not land leaves Send it again offered, and a press of it is a new try with a new
+  // key, so the inbox may get this request once more: never more than MAX_TELL_TRIES in all, and never a buyer.
   if (!replies || replies[0] !== "OK") return { ok: true, kept: counted };
   return { ok: true, kept: told };
 }

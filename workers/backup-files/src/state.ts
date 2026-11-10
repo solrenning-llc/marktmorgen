@@ -34,7 +34,8 @@ export type ObjectState = {
   refusedDay: number | null;
 };
 export type VersionState = { key: string; etag: string; size: number; name: string; supersededAt: number };
-export type PendingRecord = { key: string; recordedAt: number; reason: BackupDeletionReason };
+/** `receivedAt`: when the Worker received it; its 30 and 90 days are counted from it, never from the site's clock alone (recordClock). */
+export type PendingRecord = { key: string; recordedAt: number; reason: BackupDeletionReason; receivedAt: number };
 export type DayCount = { day: number; objects: number; bytes: number };
 export type PartState = { partNumber: number; etag: string };
 export type UploadState = { key: string; etag: string; size: number; name: string; uploadId: string; parts: PartState[]; next: number };
@@ -148,8 +149,8 @@ function versionState(v: unknown, what: string): VersionState {
   return { key: text(o.key, `${what}.key`), etag: text(o.etag, `${what}.etag`, 256), size: whole(o.size, `${what}.size`), name: text(o.name, `${what}.name`), supersededAt: whole(o.supersededAt, `${what}.supersededAt`, 1) };
 }
 function pendingRecord(v: unknown, what: string): PendingRecord {
-  const o = exact(v, ["key", "recordedAt", "reason"], what);
-  return { key: text(o.key, `${what}.key`), recordedAt: whole(o.recordedAt, `${what}.recordedAt`, 1), reason: reason(o.reason, `${what}.reason`) };
+  const o = exact(v, ["key", "recordedAt", "reason", "receivedAt"], what);
+  return { key: text(o.key, `${what}.key`), recordedAt: whole(o.recordedAt, `${what}.recordedAt`, 1), reason: reason(o.reason, `${what}.reason`), receivedAt: whole(o.receivedAt, `${what}.receivedAt`, 1) };
 }
 function uploadState(v: unknown, what: string): UploadState {
   const o = exact(v, ["key", "etag", "size", "name", "uploadId", "parts", "next"], what);

@@ -64,6 +64,7 @@ import {
   type DayCount,
   type ObjectState,
   type PartState,
+  type PendingRecord,
   type StepState,
   type StoreState,
   type WorkerState,
@@ -101,6 +102,14 @@ export const BACKUP_FILES_INDEX_PAGES = 100;
 const HISTORY_DAYS = 40;
 const DAY_MS = 86_400_000;
 const WORKER_KEY = "state/worker.json";
+/**
+ * The archives of deletion records (deletions/<day>/...) whose records may not be in the saved Worker state yet
+ * (review of #3340, Claude 3, MEDIUM): written before a page of records counts as received, emptied only once the
+ * Worker's state that holds them is saved. Every run reads the archives it names again, so a record received on a
+ * run whose state could not be saved is never lost; one read twice is the same pending record, and counted twice it
+ * only holds deletions longer.
+ */
+const JOURNAL_KEY = "state/deletions-journal.json";
 
 export type BackupBucket = {
   get(key: string): Promise<unknown>;
@@ -181,6 +190,8 @@ type Ctx = {
   dirty: Set<string>;
   fresh: Map<string, Fresh>;
   recordsHold: boolean;
+  /** The journal's archive names, once read in this run (JOURNAL_KEY). */
+  journal: string[] | null;
 };
 
 const dayOf = (ms: number) => Math.floor(ms / DAY_MS);
@@ -305,9 +316,15 @@ async function loadStore(ctx: Ctx, store: string): Promise<StoreState> {
     for (const rec of mine) {
       const src = state.sources[rec.source];
       const known = src.pending.find((p) => p.key === rec.key);
-      if (!known) src.pending.push({ key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason });
-      else if (rec.recordedAt < known.recordedAt) known.recordedAt = rec.recordedAt;
-      src.received = addDay(src.received, dayOf(rec.receivedAt), 1, src.objects.get(rec.key)?.size ?? 0);
+      if (!known) {
+        src.pending.push({ key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason, receivedAt: rec.receivedAt });
+        src.received = addDay(src.received, dayOf(rec.receivedAt), 1, src.objects.get(rec.key)?.size ?? 0);
+      } else {
+        // The same record again (resent, or read again from its archive): its first arrival keeps counting, so a
+        // resend never postpones a deletion, and it is not counted twice in the store's share.
+        if (rec.recordedAt < known.recordedAt) known.recordedAt = rec.recordedAt;
+        if (rec.receivedAt < known.receivedAt) known.receivedAt = rec.receivedAt;
+      }
     }
     ctx.state.inbox = ctx.state.inbox.filter((r) => r.store !== store);
     ctx.dirty.add(store);
@@ -315,11 +332,19 @@ async function loadStore(ctx: Ctx, store: string): Promise<StoreState> {
   return state;
 }
 
+/**
+ * The time a record's 30 and 90 days are counted from (review of #3340, Claude 3, HIGH 2): the later of the site's
+ * recordedAt and the Worker's receivedAt, and never more than a day past its arrival. A record dated long before it
+ * arrived (a bug or a compromised site) therefore waits its 30 days and every hold like any other; one dated in the
+ * future cannot put itself off for good.
+ */
+const recordClock = (rec: PendingRecord) => Math.max(rec.receivedAt, Math.min(rec.recordedAt, rec.receivedAt + DAY_MS));
+
 function updateForced(ctx: Ctx, state: StoreState): void {
   let due = Infinity;
   for (const source of BACKUP_FILES_SOURCES) {
     const src = state.sources[source];
-    for (const rec of src.pending) due = Math.min(due, rec.recordedAt + BACKUP_FILES_HOLD_MAX_DAYS * DAY_MS);
+    for (const rec of src.pending) due = Math.min(due, recordClock(rec) + BACKUP_FILES_HOLD_MAX_DAYS * DAY_MS);
     for (const v of src.versions) due = Math.min(due, v.supersededAt + BACKUP_FILES_HOLD_MAX_DAYS * DAY_MS);
   }
   if (Number.isFinite(due)) ctx.state.forcedDue[state.store] = due;
@@ -387,11 +412,12 @@ async function applyDeletions(ctx: Ctx, state: StoreState, source: BackupFilesSo
   let held = 0;
   let heldOn = Infinity;
   for (const rec of [...src.pending]) {
-    const age = ctx.now - rec.recordedAt;
+    const since = recordClock(rec);
+    const age = ctx.now - since;
     if (age < after) continue;
     if (age < end && (rule.held || rule.forcedOnly)) {
       held += 1;
-      heldOn = Math.min(heldOn, rec.recordedAt + end);
+      heldOn = Math.min(heldOn, since + end);
       continue;
     }
     if (await eraseKey(ctx, state, source, rec.key)) {
@@ -405,6 +431,13 @@ async function applyDeletions(ctx: Ctx, state: StoreState, source: BackupFilesSo
   let versionsHeld = 0;
   let versionsOn = Infinity;
   for (const version of [...src.versions]) {
+    // A name a current object has again (its etag came back: A, then B, then A) is that object's copy, never pruned
+    // as the old version (review of #3340, Claude 3, HIGH 1); the version entry goes.
+    if ([...src.objects.values()].some((o) => o.name === version.name)) {
+      src.versions = src.versions.filter((v) => v !== version);
+      ctx.dirty.add(state.store);
+      continue;
+    }
     const age = ctx.now - version.supersededAt;
     if (age < keep) continue;
     if (age < end && (rule.held || rule.etagHeld || rule.forcedOnly)) {
@@ -447,8 +480,72 @@ async function forcedPass(ctx: Ctx): Promise<void> {
   }
 }
 
+function parseJournal(text: string | null): string[] {
+  if (text === null) return [];
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new BackupFilesStateError(`${JOURNAL_KEY} did not read as JSON`);
+  }
+  const o = value as { version?: unknown; files?: unknown } | null;
+  if (!o || typeof o !== "object" || Object.keys(o).sort().join() !== "files,version" || o.version !== 1 || !Array.isArray(o.files)) {
+    throw new BackupFilesStateError(`${JOURNAL_KEY} did not read as a journal`);
+  }
+  if (o.files.some((f) => typeof f !== "string" || !f.startsWith("deletions/"))) throw new BackupFilesStateError(`${JOURNAL_KEY} named something not an archive`);
+  return o.files as string[];
+}
+
+/** An archive of one page of records, read exactly with the contract's own parser; anything else stops the run. */
+function parseArchive(text: string, name: string): { receivedAt: number; records: ReturnType<typeof parseDeletionPage>["records"] } {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new BackupFilesStateError(`${name} did not read as JSON`);
+  }
+  const o = value as { version?: unknown; receivedAt?: unknown; records?: unknown } | null;
+  if (!o || typeof o !== "object" || Object.keys(o).sort().join() !== "receivedAt,records,version" || o.version !== 1 || !Number.isSafeInteger(o.receivedAt) || (o.receivedAt as number) < 1) {
+    throw new BackupFilesStateError(`${name} did not read as an archive of records`);
+  }
+  try {
+    const page = parseDeletionPage(JSON.stringify({ version: 1, kind: "deletions", records: o.records, cursor: null, complete: true, reason: "done" }));
+    return { receivedAt: o.receivedAt as number, records: page.records };
+  } catch {
+    throw new BackupFilesStateError(`${name} did not hold records as the contract reads them`);
+  }
+}
+
+/** Records of one page, received at `receivedAt`: into the inbox, counted in the source's share. */
+function receive(ctx: Ctx, records: ReturnType<typeof parseDeletionPage>["records"], receivedAt: number): void {
+  let unmapped = 0;
+  for (const rec of records) {
+    const store = storeOfKey(rec.source, rec.key);
+    if (store === null) {
+      unmapped += 1;
+      continue;
+    }
+    ctx.state.inbox.push({ ...rec, store, receivedAt });
+    ctx.state.received[rec.source] = addDay(ctx.state.received[rec.source], dayOf(receivedAt), 1, 0);
+  }
+  if (unmapped) raise(ctx, "record_unmapped", { count: unmapped });
+}
+
 /** 2. The deletion records, each page written into the backup bucket before it counts as received. */
 async function readRecords(ctx: Ctx): Promise<void> {
+  // First, the archives received on a run whose state may not have been saved (JOURNAL_KEY): read again, every run.
+  if (ctx.journal === null) {
+    ctx.run.boundary(2);
+    const journal = parseJournal(await readText(ctx.run, ctx.env.FILES_BUCKET, JOURNAL_KEY));
+    for (const name of journal) {
+      ctx.run.boundary(2);
+      const text = await readText(ctx.run, ctx.env.FILES_BUCKET, name);
+      if (text === null) throw new BackupFilesStateError(`${name} is named by the journal and missing`);
+      const archive = parseArchive(text, name);
+      receive(ctx, archive.records, archive.receivedAt);
+    }
+    ctx.journal = journal;
+  }
   const c = ctx.cycle;
   if (c.records === "failed") c.records = "pending";
   while (c.records === "pending") {
@@ -469,19 +566,14 @@ async function readRecords(ctx: Ctx): Promise<void> {
       return;
     }
     if (page.records.length) {
-      await writeText(ctx.run, ctx.env.FILES_BUCKET, `deletions/${isoDay(ctx.day)}/${ctx.now}-${c.recordsPages}.json`, JSON.stringify({ version: 1, receivedAt: ctx.now, records: page.records }));
+      const name = `deletions/${isoDay(ctx.day)}/${ctx.now}-${c.recordsPages}.json`;
+      await writeText(ctx.run, ctx.env.FILES_BUCKET, name, JSON.stringify({ version: 1, receivedAt: ctx.now, records: page.records }));
+      // Named in the journal before it counts as received, so it is read again until the state holding it is saved.
+      const journal: string[] = [...(ctx.journal ?? []), name];
+      await writeText(ctx.run, ctx.env.FILES_BUCKET, JOURNAL_KEY, JSON.stringify({ version: 1, files: journal }));
+      ctx.journal = journal;
     }
-    let unmapped = 0;
-    for (const rec of page.records) {
-      const store = storeOfKey(rec.source, rec.key);
-      if (store === null) {
-        unmapped += 1;
-        continue;
-      }
-      ctx.state.inbox.push({ ...rec, store, receivedAt: ctx.now });
-      ctx.state.received[rec.source] = addDay(ctx.state.received[rec.source], ctx.day, 1, 0);
-    }
-    if (unmapped) raise(ctx, "record_unmapped", { count: unmapped });
+    receive(ctx, page.records, ctx.now);
     c.recordsPages += 1;
     c.recordsCursor = page.cursor;
     if (page.complete) c.records = "done";
@@ -573,7 +665,11 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
       if (known.copied) src.versions.push({ key: known.key, etag: known.etag, size: known.size, name: known.name, supersededAt: ctx.now });
       if (src.upload?.key === known.key) await abortUpload(ctx, state, source);
     }
-    src.objects.set(entry.key, { key: entry.key, etag: entry.etag, size: entry.size, name, copied: false, missingSince: null, page, refusedDay: null });
+    // Its name may be a version kept from before (the etag came back): that copy is this object's again, already in
+    // the bucket, and leaves the versions so it is never pruned (review of #3340, Claude 3, HIGH 1).
+    const back = src.versions.some((v) => v.key === entry.key && v.name === name);
+    if (back) src.versions = src.versions.filter((v) => !(v.key === entry.key && v.name === name));
+    src.objects.set(entry.key, { key: entry.key, etag: entry.etag, size: entry.size, name, copied: back, missingSince: null, page, refusedDay: null });
   }
   if (changes) state.etagChanges = addDay(state.etagChanges, today, changes, 0);
   ctx.dirty.add(store);
@@ -981,6 +1077,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     dirty: new Set(),
     fresh: new Map(),
     recordsHold: false,
+    journal: null,
   };
   let stoppedBy: RunReport["stoppedBy"] = null;
   try {
@@ -1028,6 +1125,11 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     }
     cycle.sent = await sendAlarms(env, opts, run, day, cycle.alarms, cycle.sent);
     await writeText(run, files, WORKER_KEY, JSON.stringify({ ...state, cycle }));
+    // The state now holds every record the journal named: emptied only after it is saved (JOURNAL_KEY).
+    if (ctx.journal?.length) {
+      await writeText(run, files, JOURNAL_KEY, JSON.stringify({ version: 1, files: [] }));
+      ctx.journal = [];
+    }
     const report = reportOf(day, cycle, cycle.alarms, run, heartbeat, stoppedBy);
     await writeText(run, files, `reports/${isoDay(day)}.json`, JSON.stringify({ version: 1, ...report, subrequests: run.used + 1 }));
   } catch (error) {

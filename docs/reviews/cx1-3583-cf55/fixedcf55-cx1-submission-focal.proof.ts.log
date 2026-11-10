@@ -1,0 +1,14 @@
+
+Public answer and words after an uncertain synthetic acceptance
+  ok    synthetic acceptance really happened
+  ok    the route answer stays unknown
+  ok    the public words say it could not be confirmed
+  ok    the public words assert neither sending nor non-sending
+  ok    a retry does not dispatch again
+  ok    still one synthetic acceptance
+
+Original deletion/claim vector, unchanged expectations
+  ok    the real erasure-print writer ran before dispatch
+  ok    no dispatch after the erasure print
+
+8 checks, all passing.

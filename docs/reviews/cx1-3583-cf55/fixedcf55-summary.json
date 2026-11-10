@@ -1,0 +1,22 @@
+{
+  "cx1-submission-focal.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "8 checks, all passing."
+    ]
+  },
+  "submission-notice.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "87 checks, all passing."
+    ]
+  },
+  "plan-cost-registry.test.ts": {
+    "status": null,
+    "signal": "SIGTERM",
+    "error": "spawnSync C:\\Program Files\\nodejs\\node.exe ETIMEDOUT",
+    "summary": []
+  }
+}

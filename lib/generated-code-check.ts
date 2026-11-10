@@ -140,7 +140,11 @@ export function tagsOf(html: string): Tag[] {
   const tags: Tag[] = [];
   for (const match of html.matchAll(TAG)) {
     const attrs = new Map<string, string>();
-    for (const a of match[2].matchAll(ATTR)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ""));
+    for (const a of match[2].matchAll(ATTR)) {
+      const name = a[1].toLowerCase();
+      // HTML keeps the first attribute: a harmless duplicate cannot hide the URL or field the browser uses.
+      if (!attrs.has(name)) attrs.set(name, decodeEntities(a[2] ?? a[3] ?? a[4] ?? ""));
+    }
     tags.push({ name: match[1].toLowerCase(), attrs, index: match.index ?? 0, raw: match[0] });
   }
   return tags;

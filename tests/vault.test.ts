@@ -224,13 +224,13 @@ async function main() {
   const etags: string[] = [];
   for (const [i, address] of (addresses ?? []).entries()) etags.push((await send(address.url, big.slice(i * PIECE_BYTES, (i + 1) * PIECE_BYTES))) ?? "");
   is("closing it with a piece missing from the list is refused", await closeVaultUpload(pathname, etags.slice(0, 2)), { ok: false, reason: "invalid" });
-  // On the second upload of the same file: one upload makes one finish and one cancel in all (lib/vault.ts).
-  is("and with something that is not what the store answered", again.ok && await closeVaultUpload(again.upload.pathname, ["one", "two", "three"]), { ok: false, reason: "invalid" });
+  is("and with something that is not what the store answered", await closeVaultUpload(pathname, ["one", "two", "three"]), { ok: false, reason: "invalid" });
   const closed = await closeVaultUpload(pathname, etags);
   is("with every piece, it is joined and measured by the store itself", closed, { ok: true, file: { pathname, bytes: big.byteLength, contentType: "application/zip" } });
   is("the store holds the file exactly", md5(objects.get(pathname)?.bytes ?? new Uint8Array()), md5(big));
   const askedClosed = asked.length;
-  is("and the upload cannot be closed, or added to, a second time", [await closeVaultUpload(pathname, etags), await signPieces(pathname, [1])], [{ ok: false, reason: "tries" }, null]);
+  // The refused piece lists above asked R2 nothing and were not counted (lib/vault.ts): a second close is told the first one's answer.
+  is("and the upload cannot be joined, or added to, a second time", [await closeVaultUpload(pathname, etags), await signPieces(pathname, [1])], [closed, null]);
   is("and the store is not asked for that", asked.length, askedClosed);
 
   part("A small file goes up whole");

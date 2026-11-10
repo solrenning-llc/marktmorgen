@@ -130,6 +130,7 @@ export const VAULT_MEASURE_REQUESTS = 2;
  * first finish is written down with its answer, and a cancel once R2
  * confirmed it, so a repeat inside the count is answered from that record,
  * never from R2; a cancel R2 did not confirm may be asked again inside it.
+ * A finish refused for its piece list asks R2 nothing and is not counted.
  */
 export const VAULT_CONTROL_CALLS_PER_UPLOAD = 2;
 

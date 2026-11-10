@@ -399,16 +399,20 @@ export async function closeVaultUpload(
   const upload = before ? null : await readUpload(pathname);
   // Nothing open and nothing finished here: nothing to count or keep.
   if (!before && !upload) return { ok: false, reason: "unknown" };
+  // A piece list that cannot be this upload's is refused from the reads
+  // above, before it is counted: R2 is not asked, and nothing is written, so
+  // it is not one of the finish and cancel requests the start is priced for.
+  if (!before && upload?.uploadId && !piecesListed(upload.bytes, etags)) return { ok: false, reason: "invalid" };
   if (!(await countControl(pathname))) return { ok: false, reason: "tries" };
   if (before) return closedAnswer(pathname, before);
   if (!upload) return { ok: false, reason: "unknown" };
-  if (upload.uploadId) {
-    const count = pieceCount(upload.bytes);
-    // Refused before R2 is asked, so not this upload's one finish.
-    if (etags.length !== count || !etags.every((etag) => /^"?[0-9a-fA-F]{32}(-\d{1,5})?"?$/.test(etag))) return { ok: false, reason: "invalid" };
-  }
   const answer = await firstControl<ClosedUpload>(pathname, "done", { ok: false, reason: "unavailable" }, () => joinAndMeasure(config, upload, etags));
   return answer === "busy" ? { ok: false, reason: "busy" } : answer;
+}
+
+/** Whether `etags` is one tag the store could have answered for each piece of a file of `bytes`, in order. */
+function piecesListed(bytes: number, etags: string[]): boolean {
+  return etags.length === pieceCount(bytes) && etags.every((etag) => /^"?[0-9a-fA-F]{32}(-\d{1,5})?"?$/.test(etag));
 }
 
 type ClosedUpload = { ok: true; file: StoredFile } | { ok: false; reason: "unknown" | "invalid" | "unavailable" | "off" | "tries" | "busy" };

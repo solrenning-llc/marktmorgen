@@ -46,7 +46,7 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -1109,30 +1109,70 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
  */
 export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
-  const [orders] = await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]);
-  const flat = Array.isArray(orders) ? (orders as string[]) : [];
+  const from = Math.max(0, since);
+  // The refunds, member and score, as a list of text no longer than the LIMIT asked ([] is none); each score whole
+  // seconds, as the sweep writes it (REDIS_SCORE), and within the range asked. Anything else is unknown and throws,
+  // never "no refunds" nor a refund dated 0 (CX-123 rules 24 and 30).
+  const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(from), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0 || flat.length > 2 * (PAYPAL_REFUNDS_READ + 1)) throw new UnknownReplyError("the PayPal refunds");
   const listed: { order: string; at: number }[] = [];
-  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
+  for (let i = 1; i < flat.length; i += 2) {
+    if (!REDIS_SCORE.test(flat[i]) || Number(flat[i]) < from) throw new UnknownReplyError("a PayPal refund's date");
+  }
+  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) });
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
   let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));
-  const [records] = readable.length ? await redisPipeline([["MGET", ...readable.map((entry) => paidKey(entry.order))]]) : [[]];
-  const raws = Array.isArray(records) ? (records as unknown[]) : [];
+  // The records, read exactly (Codex Z on #2964; CX-123 rule 24): one reply to the one MGET, holding exactly one
+  // record per order asked. A record Redis answered as missing (null) leaves the reading partial; one in any other
+  // shape, or whose order, capture, cents or currency is not its own exact value, throws, so it is never a refund row
+  // read as complete.
+  const what = "a refunded PayPal sale's record";
+  const records = readable.length ? repliesFor(repliesFor(await redisPipeline([["MGET", ...readable.map((entry) => paidKey(entry.order))]]), 1)?.[0], readable.length) : [];
+  if (!records) throw new UnknownReplyError(what);
   readable.forEach((entry, i) => {
-    let paid: Paid | null = null;
-    try {
-      paid = typeof raws[i] === "string" ? (JSON.parse(raws[i] as string) as Paid) : null;
-    } catch {
-      paid = null;
+    const raw = records[i];
+    if (raw === null) {
+      missing = true;
+      return;
     }
-    if (paid && paid.store === statsId) out.push({ order: paid.order, capture: paid.capture, cents: paid.cents, currency: paid.currency, at: entry.at });
+    if (typeof raw !== "string") throw new UnknownReplyError(what);
+    let v: unknown;
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      throw new UnknownReplyError(what);
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new UnknownReplyError(what);
+    const r = v as Record<string, unknown>;
+    if (
+      r.order !== entry.order ||
+      typeof r.store !== "string" ||
+      typeof r.capture !== "string" ||
+      !CAPTURE_ID.test(r.capture) ||
+      !Number.isSafeInteger(r.cents) ||
+      (r.cents as number) < 0 ||
+      typeof r.currency !== "string" ||
+      !/^[A-Za-z]{3}$/.test(r.currency)
+    ) {
+      throw new UnknownReplyError(what);
+    }
+    // Another store's record under this store's refunds: not one of its refunds, and the reading is not complete.
+    if (r.store === statsId) out.push({ order: entry.order, capture: r.capture, cents: r.cents as number, currency: r.currency, at: entry.at });
     else missing = true;
   });
   return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
 }
 
+/**
+ * Every PayPal refund in full since `since`, or a throw: a partial reading (past PAYPAL_REFUNDS_READ, or a record
+ * missing) is not every refund, so the affiliate book (lib/affiliates.ts) reads it as refunds not checked and pays
+ * no commission on it, never as "these are all the refunds".
+ */
 export async function readPayPalRefunds(statsId: string | null, since: number): Promise<{ order: string; capture: string; cents: number; currency: string; at: number }[]> {
-  return (await readPayPalRefundsWithCoverage(statsId, since)).rows;
+  const read = await readPayPalRefundsWithCoverage(statsId, since);
+  if (read.partial) throw new Error("The PayPal refunds were not all read");
+  return read.rows;
 }
 
 /** What a payment is called where a refund names it: the capture, so it never mixes with a Stripe payment's id. */

@@ -124,7 +124,8 @@ test("control: the owner removes a member, and pressing Remove again is known fo
 for (const [label, shape] of SHAPES) {
   test(`access: a team record read as ${label} never lets a member past the required second step`, async () => {
     const store = await fixture();
-    await assert.rejects(() => withReply("GET", `nl:team:${store.sid}`, shape, () => teamTwoStepBlocks(store, ANA, "editor")), { name: "UnknownReplyError" });
+    // Main's reading (0dd864a79): taken as requiring the step, so the step is asked for (true), never skipped.
+    assert.equal(await withReply("GET", `nl:team:${store.sid}`, shape, () => teamTwoStepBlocks(store, ANA, "editor")), true);
   });
 
   test(`write: an invitation sent while the team reads as ${label} writes nothing and emails nobody`, async () => {
@@ -148,7 +149,8 @@ for (const [label, shape] of SHAPES) {
 
   test(`deletion: a team record read as ${label} never takes the store off the member's index`, async () => {
     const store = await fixture();
-    await assert.rejects(() => withReply("GET", `nl:team:${store.sid}`, shape, () => memberStores(ANA)), { name: "UnknownReplyError" });
+    // Main's reading (0dd864a79): the store is left out of the member's list and kept in the index, neither "on it" nor "gone".
+    assert.deepEqual(await withReply("GET", `nl:team:${store.sid}`, shape, () => memberStores(ANA)), []);
     const [members] = await redis.pipeline([["SMEMBERS", indexKey(ANA)]]);
     assert.deepEqual(members, [store.sid]);
   });
@@ -159,7 +161,9 @@ for (const [label, shape] of SHAPES) {
     assert.equal(made.ok, true);
     const key = made.ok ? made.key : "";
     assert.equal((await resolveKey(key))?.paused, false);
-    await assert.rejects(() => withReply("GET", `nl:team:${store.sid}`, shape, () => resolveKey(key)), { name: "UnknownReplyError" });
+    // Main's reading: the key is held paused for an unknown reason, read-only, never opened as the owner's.
+    const held = await withReply("GET", `nl:team:${store.sid}`, shape, () => resolveKey(key));
+    assert.deepEqual([held?.paused, held?.why, held?.write], [true, "unknown", false]);
   });
 }
 

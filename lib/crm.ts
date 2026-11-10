@@ -265,11 +265,11 @@ export async function readStages(statsId: string | null): Promise<Stage[]> {
   return allStages(await readPipelines(statsId));
 }
 
-/** The pipelines as saved, for a change made from them (639 [GL7](7), a teammate's access): CrmSchemaReadUnavailable when the record cannot be read, never the defaults in its place. */
-export async function readPipelinesExact(statsId: string | null): Promise<Pipeline[]> {
-  if (!statsId || !isRedisConfigured()) return [firstPipeline(DEFAULT_STAGES)];
-  return (await pipelineSnapshot(statsId)).pipelines;
-}
+/**
+ * The pipelines as saved, for a change made from them (639 [GL7](7), a teammate's access). Since main's
+ * readPipelines reads exactly too (CX-123 rules 24 and 30), this is the same reader under the name its callers use.
+ */
+export const readPipelinesExact = readPipelines;
 
 /** The pipelines exactly as saved, for a change: an unreadable or malformed record never stands in for the defaults. */
 async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelines: Pipeline[] }> {

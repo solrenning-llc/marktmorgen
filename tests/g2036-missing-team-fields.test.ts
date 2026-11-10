@@ -34,7 +34,8 @@ async function main(){
   }finally{redis.pipeline=f.pipe;}
   const stored=(await f.pipe([['GET',f.key]]))[0] as string;
   is(label+': malformed team is unknown',reading,'unknown');
-  is(label+': unknown gate refuses',gate,'refused');
+  // Main's reading (0dd864a79): an unknown team asks for the second step, never lets anyone past it.
+  is(label+': unknown gate asks for the second step',gate,'asked');
   is(label+': owner change refuses before rewriting',result,'refused');
   is(label+': stored healthy team remains byte-identical',stored,f.kept);
   is(label+': known original members remain',(await readTeam(f.shop.sid!)).members.map(m=>m.email),[amy,ben]);

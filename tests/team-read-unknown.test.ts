@@ -52,7 +52,8 @@ async function main(): Promise<void> {
     part(label);
     shape();
     is(`${label}: the team is not read as empty`, await readTeam(store.sid).then(() => "read", () => "unknown"), "unknown");
-    is(`${label}: a teammate is not let past the two-step rule`, await teamTwoStepBlocks(store, AMY, "admin").then((blocks) => (blocks ? "asked" : "let in"), () => "refused"), "refused");
+    // Main's reading (0dd864a79): an unknown team is taken as requiring the second step, so it is asked for, never skipped.
+    is(`${label}: a teammate is not let past the two-step rule: the step is asked for`, await teamTwoStepBlocks(store, AMY, "admin").then((blocks) => (blocks ? "asked" : "let in"), () => "refused"), "asked");
     const invited = await inviteMember(store, `new-${shapes.findIndex(([l]) => l === label)}@example.com`, "support", "https://marktmorgen.com").then(
       (answer) => JSON.stringify(answer),
       () => "refused",

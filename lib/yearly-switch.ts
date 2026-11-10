@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { chargedOf, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, keepWhileUnconfirmed, previewBody, previewKnown, refusedUnapplied, switchBody, switchKey, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -233,12 +233,14 @@ export async function switchYearly(store: Store, token: string, subscription: st
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
       let updated: Record<string, unknown>;
       try {
-        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+        // Under the switch's stable key, as a switch between tiers (lib/tier-switch.ts, switchKey).
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION, switchKey(subscription, at, price));
       } catch (error) {
-        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, or Stripe's own
-        // failure, after the update was sent: it may have been applied, so it is "unconfirmed", never "nothing changed"
-        // (Codex CX1 on #2764). Nothing is sent again.
-        if (error instanceof StripeError && error.status < 500) throw error;
+        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, Stripe's own
+        // failure, or its answer that this key is still running or was used (refusedUnapplied), after the update was
+        // sent: it may have been applied, so it is "unconfirmed", never "nothing changed" (Codex CX1 on #2764).
+        // Nothing is sent again, and the lock is left to run out (keepWhileUnconfirmed).
+        if (refusedUnapplied(error)) throw error;
         console.error("a move to yearly's charging update had no answer that can be read", error);
         return { ok: false, reason: "unconfirmed" };
       }
@@ -266,7 +268,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
       ).catch((error) => console.error("recording a move to yearly failed", error));
       await tell(store, account, found, updated, kept);
       return { ok: true, title: found.product.title };
-    });
+    }, keepWhileUnconfirmed);
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("moving a membership to yearly failed", error);

@@ -1024,6 +1024,9 @@ async function actOnDeals(
   return out;
 }
 
+/** What a step waiting on a store switched off after notices says (sendDueSteps). */
+const SWITCHED_OFF_WAIT = "Waiting: your store is switched off after notices about its content. It goes on by itself once your store is back on.";
+
 /**
  * People at a step that has to wait: each wait is counted on their run, and
  * each is tried again when lib/flow-retry.ts says, or stops there with
@@ -1209,12 +1212,38 @@ export async function sendDueSteps(
       }
       return;
     }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
+    // 24): no step is done, an email or an action. Each waits as every other wait does (waitOrStop: counted on the
+    // run, tried again a day later, MAX_WAITS_PER_RUN times at the most, then the run stops, saying why), queued only
+    // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
+    if (store.suspended) {
+      const waiting = await waitOrStop(flow.id, group, index, emails.map((email) => ({ email, reason: "switched_off" as const, note: SWITCHED_OFF_WAIT })), now);
+      const out = await queueHeld(waiting.queue);
+      const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
+      counts.later += later;
+      counts.dropped += emails.length - later;
+      const ended = waiting.outcomes.filter((o) => o.state === "failed");
+      await noteRuns(flow.id, ended.map((o) => ({ email: o.email, index, stepId: step.id, kind: step.action ? step.action.do : "email", state: "ended" as const, note: o.note, to: -1, status: "ended" as const })), now).catch((error) => console.error("writing workflow history failed", error));
+      return;
+    }
     // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was
     // taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or attempted for them, whatever
     // the step's condition says.
-    const [rows, ...scores] = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
-    const found = Array.isArray(rows) ? rows : [];
-    const held = new Set(emails.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    const reply: unknown = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
+    // Only an exact reply decides: a row that is exactly nil is "no longer on your list", a score that is exactly nil is
+    // "taken out". Any other shape is unknown: neither of those, and no go-ahead to send either. The batch goes back in
+    // the queue (sendDueSteps puts it back on a throw) and is done on a later run (CX-123 rule 24). Both the outer
+    // reply and the rows are read from their own slots (repliesFor): a hole, a getter or a Proxy is not a reply, so
+    // neither a missing row nor a missing score is ever read as nil or as held (Codex U on #3124).
+    const replies = repliesFor(reply, emails.length + 1);
+    const rows = replies ? repliesFor(replies[0], emails.length) : null;
+    const scores: unknown[] = replies ? replies.slice(1) : [];
+    const score = (s: unknown) => s === null || ((typeof s === "number" || (typeof s === "string" && s.trim() !== "")) && Number.isFinite(Number(s)));
+    if (!rows || rows.some((r) => r !== null && typeof r !== "string") || !scores.every(score)) {
+      throw new Error("A due workflow step's rows or lease entries could not be read");
+    }
+    const found: unknown[] = rows;
+    const held = new Set(emails.filter((_, i) => scores[i] !== null));
     counts.dropped += emails.length - held.size;
     // Who is still on the list, and of them, who has reached the sequence's
     // end and who this step is not for (lib/flow-rules.ts) — read from the

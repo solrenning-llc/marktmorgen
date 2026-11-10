@@ -248,7 +248,14 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
   const seen = new Set<string>();
   const add = (kind: TermsWarningKind, index: number, length: number, why: string, fix: string, replacement?: string) => {
     const key = `${kind}:${text.slice(index, index + length).toLowerCase()}`;
-    if (seen.has(key) || out.length >= MAX_WARNINGS) return;
+    if (seen.has(key)) return;
+    if (out.length >= MAX_WARNINGS) {
+      // Advisory warnings must never hide a reason to refuse publication.
+      if (!BLOCKING_KINDS.has(kind)) return;
+      const advisory = out.findIndex((warning) => !BLOCKING_KINDS.has(warning.kind));
+      if (advisory === -1) return;
+      out.splice(advisory, 1);
+    }
     seen.add(key);
     out.push({ kind, excerpt: excerptAt(text, index, length), why, fix, at: index, length, ...(replacement ? { replacement } : {}) });
   };

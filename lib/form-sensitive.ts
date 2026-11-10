@@ -12,7 +12,9 @@ import type { FormDef } from "@/lib/forms";
 export type SensitiveKind = "password" | "card" | "code" | "id";
 
 const RULES: readonly [SensitiveKind, RegExp][] = [
-  ["password", /^(?:(?:your|a|choose a|create a|enter your|new)\s+)?(?:password|passcode|passphrase)\b/i],
+  // Direct requests remain requests when prefixed with "please" or a common entry verb.
+  // A manager's name or a hint is not the password; keep that exception limited to the full label.
+  ["password", /^(?:(?:please\s+)?(?:enter|provide|type(?:\s+in)?|choose|create|confirm|re[-\s]?enter)\s+)?(?:(?:your|a|new|current)\s+)?(?:(?:account|email|current|new)\s+)?(?:password|passcode|passphrase)\b(?!\s+(?:manager(?:['’]s\s+name)?|hint)\s*[?:.!]*$)/i],
   ["card", /\b(?:(?:credit|debit)\s+card(?:\s+(?:number|no\.?|details))?|card\s+(?:number|no\.?|details)|cc\s+number)\b/i],
   ["code", /\b(?:cvv2?|cvc2?|cid\s+code|security\s+code|card\s+verification(?:\s+(?:code|value))?)\b/i],
   ["id", /\b(?:social\s+security(?:\s+number)?|ssn|passport\s+(?:number|no\.?)|driver'?s?\s+licen[cs]e\s+(?:number|no\.?)|national\s+id(?:entity)?(?:\s+(?:number|card))?|id\s+card\s+number|identity\s+(?:card\s+)?number)\b/i],

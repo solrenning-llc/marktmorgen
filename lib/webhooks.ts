@@ -68,6 +68,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 // The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
 import { COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -209,24 +210,35 @@ async function liveEndpoints(store: Pick<Store, "sid">, endpoints: Endpoint[], k
   const keyed = endpoints.filter((e) => e.key);
   if (!keyed.length) return endpoints;
   const ids = keyed.map((e) => e.key as string);
-  let states: Map<string, string>;
-  const unread = new Set<string>();
-  try {
-    states = await keyStates(store.sid ?? "", ids);
-  } catch (error) {
-    if (!keepUnread || !(error instanceof UnknownReplyError)) throw error;
-    states = new Map();
-    for (const id of new Set(ids)) {
-      try {
-        for (const [key, state] of await keyStates(store.sid ?? "", [id])) states.set(key, state);
-      } catch (one) {
-        if (!(one instanceof UnknownReplyError)) throw one;
-        unread.add(id);
-      }
-    }
-    console.error("WEBHOOK KEY STATE UNREAD: the endpoints of these API keys are queued and held until their state reads", store.sid, [...unread]);
-  }
+  const { states, unread } = keepUnread
+    ? await eachKeyState(store.sid ?? "", ids, (error) => error instanceof UnknownReplyError)
+    : { states: await keyStates(store.sid ?? "", ids), unread: new Set<string>() };
+  if (unread.size) console.error("WEBHOOK KEY STATE UNREAD: the endpoints of these API keys are queued and held until their state reads", store.sid, [...unread]);
   return endpoints.filter((e) => !e.key || states.get(e.key) === "live" || unread.has(e.key));
+}
+
+/**
+ * The state of each of these keys, read all at once and, when that answer cannot be read, each key on its own: the
+ * keys whose own state cannot be read come back in `unread`, never as in use, paused or revoked (rule 24), so one
+ * unreadable key never stands for the others. `unreadable` says which errors make a key unread; any other is thrown.
+ */
+async function eachKeyState(sid: string, ids: string[], unreadable: (error: unknown) => boolean): Promise<{ states: Map<string, string>; unread: Set<string> }> {
+  try {
+    return { states: await keyStates(sid, ids), unread: new Set() };
+  } catch (error) {
+    if (!unreadable(error)) throw error;
+  }
+  const states = new Map<string, string>();
+  const unread = new Set<string>();
+  for (const id of new Set(ids)) {
+    try {
+      for (const [key, state] of await keyStates(sid, [id])) states.set(key, state);
+    } catch (one) {
+      if (!unreadable(one)) throw one;
+      unread.add(id);
+    }
+  }
+  return { states, unread };
 }
 
 /** Why one endpoint is sent nothing now, or null when it is sent to. */
@@ -665,8 +677,16 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? [], true);
   if (!listening.length) return 0;
   const eventId = eventIdFor(statsId, type, seed);
-  const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
-  if (fresh === null) return 0;
+  // Made and sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an event already sent;
+  // "unknown" makes and sends nothing, lets go of the mark if it holds our own value (it may have landed; nothing was
+  // made on it), and throws, so the caller's retry is not told it went (Claude 2 on #3276).
+  const value = claimValue();
+  const fresh = await claimMark(eventKey(eventId), EVENT_SECONDS, value);
+  if (fresh === "taken") return 0;
+  if (fresh === "unknown") {
+    await releaseMark(eventKey(eventId), value);
+    throw new UnknownReplyError("a webhook event's once-only mark");
+  }
 
   // Every text cleaned and bounded where the message is made (cleanText), so what a delivery keeps is bounded.
   const body = JSON.stringify(cleanData({
@@ -784,8 +804,11 @@ export async function deliverDue(deadline: number, now = Date.now()): Promise<{ 
 
 // ---- The studio ---------------------------------------------------------------
 
-/** What the studio sees of an endpoint: never a secret, only until when the old one still signs. */
-export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string; oldSecretUntil?: string; held?: EndpointHeld };
+/**
+ * What the studio sees of an endpoint: never a secret, only until when the old one still signs. `keyState: "unknown"`:
+ * an API key added it and that key's state could not be read just now, so it is shown as neither sent to nor held.
+ */
+export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string; oldSecretUntil?: string; held?: EndpointHeld; keyState?: "unknown" };
 export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | "attempts" | "next" | "lastStatus" | "lastError" | "lastAt" | "createdAt" | "notSentPaused" | "resentFrom" | "resentAs" | "givenUp"> & {
   endpoint: string;
 };
@@ -802,8 +825,15 @@ export async function webhooksView(store: Store): Promise<WebhooksView> {
   const deliveries = ids.length ? await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)])) : [];
   const names = new Map((config?.endpoints ?? []).map((e) => [e.id, shortAddress(e.url)]));
   const keyed = (config?.endpoints ?? []).filter((e) => e.key);
-  const states = keyed.length ? await keyStates(store.sid ?? "", keyed.map((e) => e.key as string)) : new Map<string, string>();
-  const heldOf = (e: Endpoint): EndpointHeld | null => (!e.key ? null : states.get(e.key) === "live" ? null : states.get(e.key) === "paused" ? "paused" : "revoked");
+  // Each key on its own when they cannot all be read (LOW 3 of #3096, rule 24): an endpoint whose key's state, or the
+  // team record, does not read is marked unknown on its own row, and the rest of the view, its failed deliveries and
+  // their resend with it, is still shown. Whatever stopped the read, the state is unknown, never live or held.
+  const { states, unread } = keyed.length
+    ? await eachKeyState(store.sid ?? "", keyed.map((e) => e.key as string), () => true)
+    : { states: new Map<string, string>(), unread: new Set<string>() };
+  if (unread.size) console.error("WEBHOOK KEY STATE UNREAD: these endpoints are shown as state unknown", store.sid, [...unread]);
+  const heldOf = (e: Endpoint): EndpointHeld | null =>
+    !e.key || unread.has(e.key) ? null : states.get(e.key) === "live" ? null : states.get(e.key) === "paused" ? "paused" : "revoked";
   return {
     endpoints: (config?.endpoints ?? []).map((e) => ({
       id: e.id,
@@ -812,6 +842,7 @@ export async function webhooksView(store: Store): Promise<WebhooksView> {
       addedAt: e.addedAt,
       ...(e.previous && e.previousUntil ? { oldSecretUntil: new Date(e.previousUntil).toISOString() } : {}),
       ...(heldOf(e) ? { held: heldOf(e) as EndpointHeld } : {}),
+      ...(e.key && unread.has(e.key) ? { keyState: "unknown" as const } : {}),
     })),
     log: deliveries
       .map(parseDelivery)

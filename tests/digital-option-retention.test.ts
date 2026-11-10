@@ -87,6 +87,35 @@ test("an enqueue-looking response without a persisted winner cannot report succe
  f.runtime.pipeline=async commands=>commands.some(c=>c[0]==="EVAL")?[["queued",commands[0][15]]]:pipeline(commands);
  assert.deepEqual(await reserve(f.receipt,f.runtime),{ok:false});
 });
+
+for(const afterExpiryMs of [0,1])test(`confirmed retention remains evidence when its receipt expires after EVAL (+${afterExpiryMs}ms)`,async t=>{
+ const f=await fixture(),pipeline=f.runtime.pipeline!;let wrote=false;
+ f.runtime.pipeline=async commands=>{
+  const reply=await pipeline(commands);
+  if(commands.some(c=>c[0]==="EVAL")){
+   assert.equal(wrote,false);wrote=true;
+   t.mock.method(Date,"now",()=>f.receipt.expiresAtMs+afterExpiryMs);
+  }
+  return reply;
+ };
+ const result=await reserve(f.receipt,f.runtime);
+ assert.ok(wrote);assert.ok(result.ok,"the immutable persisted winner confirms retention after its receipt expires");
+ assert.deepEqual([result.admitted,result.permitsCheckout,result.grantsAccess],[false,false,false]);
+ const saved=await origin.readDigitalOptionRetention(result.id,f.runtime);assert.ok(saved);
+ assert.equal(saved.row.expiresAt,f.receipt.expiresAtMs);assert.equal(saved.row.phase,"digital_option_reserved");
+ assert.equal(saved.payload.body,f.request.body);
+ assert.equal(f.commands.filter(c=>c[0]==="EVAL").length,1);
+ const before=f.commands.length;
+ assert.deepEqual(await reserve(f.receipt,f.runtime),{ok:false},"an expired receipt cannot start another reservation");
+ assert.equal(f.commands.length,before);
+ assert.equal(await origin.readConfirmationOrigin(result.id,f.runtime),null);
+});
+
+test("a receipt already expired before reservation cannot spend or write",async t=>{
+ const f=await fixture();t.mock.method(Date,"now",()=>f.receipt.expiresAtMs);
+ assert.deepEqual(await reserve(f.receipt,f.runtime),{ok:false});assert.equal(f.commands.length,0);
+});
+
 test("an unknown local clock after the server read cannot create a new retained liability",async()=>{
  const f=await fixture(),pipeline=f.runtime.pipeline!;
  f.runtime.pipeline=async commands=>{const reply=await pipeline(commands);if(commands.some(c=>c[0]==="TIME"))f.runtime.now=()=>NaN;return reply;};

@@ -14,12 +14,26 @@ import { repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { firstSaleKey } from "@/lib/yearly-offer";
 import { firstSaleFromReply } from "@/lib/two-step-ask-rules";
+import { lockedUntil } from "@/lib/two-step";
 
 export async function firstSaleKnown(store: Pick<Store, "sid" | "handle">): Promise<number | null> {
   if (!isRedisConfigured()) return null;
   try {
     const replies = repliesFor(await redisPipeline([["GET", firstSaleKey(store)]]), 1);
     return replies ? firstSaleFromReply(replies[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The session's lock as the studio reads it (lib/two-step.ts lockedUntil): its day in milliseconds, 0 for unlocked,
+ * and null when it could not be read, never 0 (Codex H2 on #3511): an unread lock is unknown, and the ask is not shown
+ * on unknown. Never throws.
+ */
+export async function lockKnown(session: string | undefined): Promise<number | null> {
+  try {
+    return await lockedUntil(session);
   } catch {
     return null;
   }

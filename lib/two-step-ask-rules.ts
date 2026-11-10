@@ -13,7 +13,8 @@
  *     (noteFirstSale), read exactly by lib/two-step-ask.ts: not kept is "not
  *     yet", any other shape is unknown, and unknown asks nothing;
  *   - the person has no app turned on and no passkey (a passkey is a second
- *     step already), both read; a session that is locked has its own notice.
+ *     step already), both read; a session that is locked has its own notice,
+ *     and a lock that could not be read is unknown, never "unlocked".
  *
  * Dismissed once, remembered for the store in this browser, under
  * TWO_STEP_ASK_PREFIX and the store's 32-character id: a bounded key, and no
@@ -52,13 +53,13 @@ export function firstSaleFromReply(reply: unknown): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** An account with no second step at all, each read for sure: null is "not read". */
-export function noSecondStep(account: { appOn: boolean | null; passkeys: number | null; locked: boolean }): boolean {
-  return account.appOn === false && account.passkeys === 0 && !account.locked;
+/** An account with no second step at all, each read for sure, its session's lock too: null is "not read". */
+export function noSecondStep(account: { appOn: boolean | null; passkeys: number | null; locked: boolean | null }): boolean {
+  return account.appOn === false && account.passkeys === 0 && account.locked === false;
 }
 
 /** Whether the studio asks: an account with no second step, in a store whose first sale is known. */
-export function showTwoStepAsk(account: { firstSale: number | null; appOn: boolean | null; passkeys: number | null; locked: boolean }): boolean {
+export function showTwoStepAsk(account: { firstSale: number | null; appOn: boolean | null; passkeys: number | null; locked: boolean | null }): boolean {
   return noSecondStep(account) && typeof account.firstSale === "number" && account.firstSale > 0;
 }
 

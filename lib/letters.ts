@@ -151,11 +151,23 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
   }
 }
 
-/** Takes a published email off the store: its copy is deleted. */
+/**
+ * Takes a published email off the store: its copy is deleted, then its entry
+ * leaves the list. True once Redis confirms both (a count of 0 or 1 each, so
+ * one already off is off); false when it cannot be asked. Any other reply
+ * throws UnknownReplyError (CX-123 rule 24): the copy is what the email's own
+ * address reads, so a DEL that is not confirmed is not "taken off", and the
+ * entry stays on the list until then, so the studio still offers the next try.
+ */
 export async function unpublishLetter(store: Pick<Store, "sid">, id: string): Promise<boolean> {
   if (!LETTER_ID.test(id) || !isRedisConfigured() || !store.sid) return false;
-  const [, removed] = await redisPipeline([["DEL", recordKey(id)], ["ZREM", listKey(store.sid), id]]);
-  return Number(removed) === 1;
+  const deleted = repliesFor(await redisPipeline([["DEL", recordKey(id)]]), 1);
+  const copies = deleted ? countOf(deleted[0]) : null;
+  if (copies === null || copies > 1) throw new UnknownReplyError("taking an email's copy off the store");
+  const removed = repliesFor(await redisPipeline([["ZREM", listKey(store.sid), id]]), 1);
+  const entries = removed ? countOf(removed[0]) : null;
+  if (entries === null || entries > 1) throw new UnknownReplyError("taking an email off the store's list");
+  return true;
 }
 
 /** One of this store's published emails, or null. */

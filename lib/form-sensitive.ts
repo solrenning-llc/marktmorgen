@@ -30,7 +30,7 @@ function asksForPassword(label: string): boolean {
   // A short field name can name any service and combine login credentials.
   // Remove a suffix annotation only after the secret noun, then unwrap grouping.
   const fieldName = request.replace(/(\bpass(?:word|code|phrase)s?)\s*\([^)]*\)(?=\s*[:*?]?$)/gi, "$1")
-    .replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+    .replace(/[():&/+]/g, " ").replace(/\s+/g, " ").trim();
   return !/^(?:how|what|why|which|when|where|who|do|did|does|would|could|can|have|has|should|rate|describe|feedback|opinion|thoughts|experience|review)\b/i.test(fieldName) &&
     /^(?:(?:[\p{L}\p{N}'’\-]+|[&/+])\s+){0,3}pass(?:word|code|phrase)s?\s*[:*?]?$/iu.test(fieldName) ||
     /^(?:(?:a|the|new|current|account|email|login)\s+)*pass(?:word|code|phrase)s?\b/i.test(request);

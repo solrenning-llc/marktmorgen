@@ -1,0 +1,17 @@
+
+A source observation cannot become an approved tax parameter
+  ok    review preserves: Conferido em 10/11/2026
+  ok    review preserves: Vigência indicada: 01/01/2027
+  ok    review preserves: Inteiro teor da SB 122: não lido
+  ok    review preserves: Alíquota combinada máxima de 2027: desconhecida
+  ok    review preserves: Enquadramento real do Marktmorgen: não confirmado
+  ok    review preserves: Código, perfis e travas: inalterados
+  ok    review preserves: US$ 500.000
+  ok    review preserves: US$ 5.000.000
+  ok    review preserves: https://cdtfa.ca.gov/formspubs/L1036.pdf
+  ok    review preserves: https://cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/definitions.htm
+  ok    review preserves: https://cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/retailers.htm
+  ok    review preserves: https://cdtfa.ca.gov/lawguides/vol1/sutl/6203.html
+  ok    review preserves: não conclui o item 437
+
+13 checks, all passing.

@@ -1,0 +1,43 @@
+
+A source observation cannot become an approved tax parameter
+  FAIL  review preserves: Conferido em 10/11/2026
+        expected true
+        got      false
+  FAIL  review preserves: Vigência indicada: 01/01/2027
+        expected true
+        got      false
+  FAIL  review preserves: Inteiro teor da SB 122: não lido
+        expected true
+        got      false
+  FAIL  review preserves: Alíquota combinada máxima de 2027: desconhecida
+        expected true
+        got      false
+  FAIL  review preserves: Enquadramento real do Marktmorgen: não confirmado
+        expected true
+        got      false
+  FAIL  review preserves: Código, perfis e travas: inalterados
+        expected true
+        got      false
+  FAIL  review preserves: US$ 500.000
+        expected true
+        got      false
+  FAIL  review preserves: US$ 5.000.000
+        expected true
+        got      false
+  FAIL  review preserves: https://cdtfa.ca.gov/formspubs/L1036.pdf
+        expected true
+        got      false
+  FAIL  review preserves: https://cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/definitions.htm
+        expected true
+        got      false
+  FAIL  review preserves: https://cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/retailers.htm
+        expected true
+        got      false
+  FAIL  review preserves: https://cdtfa.ca.gov/lawguides/vol1/sutl/6203.html
+        expected true
+        got      false
+  FAIL  review preserves: não conclui o item 437
+        expected true
+        got      false
+
+13 checks, 13 failing.

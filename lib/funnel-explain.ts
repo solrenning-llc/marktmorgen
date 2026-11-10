@@ -90,13 +90,15 @@ const OVERTURNS = /\b(?:no (?:problem|issue|action)|nothing to (?:fix|do|change)
 
 /** A web address or an email address: the facts never hold one, so a line that carries one is never shown (Claude 6 on #3454). */
 const LINK = /(?:https?:\/\/|www\.)\S|[\w.+-]+@[\w-]+(?:\.[\w-]+)+/i;
+/** A web address written without http or www ("fix-funnel.example/login"), lower case as addresses are typed; ".js" is a library's name. */
+const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}\b(?:\/\S*)?/;
 
 /** The model's answer, kept only where the rules allow: plain lines, no link or address, no invented number, never overturning the check. */
 export function readExplanation(json: Record<string, unknown> | null, request: { prompt: string }): FunnelExplanation | null {
   if (!json) return null;
   const known = knownNumbers(request.prompt);
   const line = (value: unknown, max: number) =>
-    typeof value === "string" && !LINK.test(value) ? withoutInventedNumbers(value.replace(/\s+/g, " ").trim().slice(0, max * 2), known).slice(0, max).trim() : "";
+    typeof value === "string" && !LINK.test(value) && !BARE_LINK.test(value) ? withoutInventedNumbers(value.replace(/\s+/g, " ").trim().slice(0, max * 2), known).slice(0, max).trim() : "";
   const why = line(json.why, MAX_EXPLAIN_WHY);
   const todo = (Array.isArray(json.todo) ? json.todo : []).map((item) => line(item, MAX_EXPLAIN_STEP)).filter(Boolean).slice(0, MAX_EXPLAIN_TODO);
   if (!why || !todo.length) return null;

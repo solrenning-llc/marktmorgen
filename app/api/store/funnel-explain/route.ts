@@ -38,6 +38,9 @@ export async function POST(request: NextRequest) {
   if (!read.ok) return fail(read.reason, read.reason === "gone" ? 404 : 503);
   if (!read.checks.issues.some((found) => sameIssue(found, issue))) return fail("stale", 409);
   const done = await explainFunnelIssue(taken.store ?? store, issue, read.checks.funnel.name, read.checks.steps);
+  // AI writing is on (checked above), so an "off" from the counter is a reservation it could not confirm (lib/ai.ts
+  // counted): said as such, never "not part of this store's plan" (Claude 6 on #3454, N2). No model call was made.
+  if (!done.ok && done.reason === "off") return fail("unconfirmed", 503);
   if (!done.ok) return fail(done.reason, done.reason === "failed" ? 502 : 400);
   return Response.json({ ok: true, value: done.value, left: done.left });
 }

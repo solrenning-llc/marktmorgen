@@ -15,6 +15,8 @@ export function explainErrorText(reason: string): string {
       return "You have used this month's AI writing jobs. They come back when your plan's month renews.";
     case "off":
       return "AI writing is not part of this store's plan right now.";
+    case "unconfirmed":
+      return "We could not confirm your AI allowance just now. Reload the page in a minute to see your count, then try again.";
     case "allowance":
       return "We could not check your AI allowance just now. Nothing was used. Reload the page in a minute to try again.";
     case "long":
@@ -61,6 +63,7 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
   // Where focus goes once the next view is drawn: the explanation after a press, the button after hiding it
   // (WCAG 2.4.3; Claude 6 on #3454). Nothing takes focus on the first drawing.
   const focusNext = useRef<"answer" | "button" | null>(null);
+  const off = left === null || left < 1;
   const takeFocus = (which: "answer" | "button") => (element: { focus: () => void } | null) => {
     if (element && focusNext.current === which) {
       focusNext.current = null;
@@ -87,6 +90,8 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
         if (typeof body?.left === "number" && Number.isSafeInteger(body.left) && body.left >= 0) onLeft(body.left);
       } else {
         const reason = typeof body?.error === "string" ? body.error : "";
+        // Focus stays where the person pressed (the button, or the sentence saying why it is off now).
+        focusNext.current = "button";
         setSaid(explainErrorText(reason));
         if (reason === "failed" && left !== null) onLeft(Math.max(0, left - 1));
         if (reason === "used") onLeft(0);
@@ -113,10 +118,11 @@ export function FunnelIssueExplain({ funnelId, issue, left, onLeft }: {
         </div>
       ) : (
         <>
-          <button ref={takeFocus("button")} type="button" className="btn btn-ghost inline-flex min-h-11 items-center" aria-describedby={`${id}-cost`} disabled={busy || left === null || left < 1} onClick={ask}>
+          {/* A disabled button cannot take focus (Claude 6 on #3454, N1): with no job left, the sentence saying so takes it. */}
+          <button ref={off ? undefined : takeFocus("button")} type="button" className="btn btn-ghost inline-flex min-h-11 items-center" aria-describedby={`${id}-cost`} disabled={busy || off} onClick={ask}>
             {busy ? "Writing an explanation…" : "Explain this with AI"}
           </button>
-          <p id={`${id}-cost`} className="mt-1 text-xs text-ink-soft">
+          <p id={`${id}-cost`} ref={off ? takeFocus("button") : undefined} tabIndex={off ? -1 : undefined} className="mt-1 text-xs text-ink-soft">
             {left === null ? AI_ALLOWANCE_UNKNOWN : `${left < 1 ? "No AI writing jobs are left this month." : `Uses 1 of your ${left} AI writing jobs left this month.`} The check above stays as it is.`}
           </p>
         </>

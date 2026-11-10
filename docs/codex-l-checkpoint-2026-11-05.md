@@ -925,3 +925,142 @@ Full channel blob858662f436afb668f49e29370b7393a688d052e0 retrieved,5849050 stri
 Own2794 discussion FULL/all authors/bots remains10items/latest6704938554/no new return. Last CONFIRMED head427e9d81f5b507879fa4c14378d09702ff38a557/tree951a4612d42a0de24a9ba83c206ee04b10cdc763 NOT re-queried. HOLD2MEDIUM+LOW6701761695 and serial/disjoint ownership request1210/6702084665 remain pending. C5 recreatedaa5fca2a proof published/historicallyhashverified, NOT executed by L, not originalBYTE-ID. Historical nine successes NOT repolled. General MV closure alone does not grant occupied sources or close real regression findings. Before correction: nominal coordinator decision, fresh reservations/overlappingPRhead/channel audit, RESERVA beforeRED. Queue-only future eligibility still needs applicable cleanC4/R1/R2 opinions and nine NEW corrective-head successes, fresh clean native composition/head/expectedSHA.
 
 No source/test/head/mergeability/CI query or operation, product push/mainintegration/enqueue/merge, foreign/ref/reservations edit, additional unit/subagent/provider/commercial/account/contact/personal-data action or newGREEN. Checkpoint-only reconciliation is the sole remote write after closure. Serial Medium/C1coordinator/C4executor/no additional L unit unchanged. Temporary coordination wait remains an unfinished workflow, no background watcher.
+
+
+## 10 November 2026, 01:09 Fortaleza — CODEX90 assigned reviews delivered; shared2794 lease still pending
+
+FIRST canonical0fe82180/blob1449b2aa FULL149815 and current local31956bytes read; nine mandatory main docs FULL retrieved, unchanged versus00:10 (AGENTS9ee3c48d; C3res4321c420; C2res8ca22a09; Codex8df7b151; inboxd9893042). Initial current root4a240921d72a58da3b5da6e6b40e88b035b99bfd/FULL339955codeunits, all coordinator orders and L mentions reviewed. TODOS84 EXPRESS END79 persists; TODOS88 adds perCodex8open/3stacked/3newPRsperhour+antiduplicate. CODEX90 explicitly assigns L reviews3461f5e448278f/347917f2b4ea74. CODEX91 replaces queued>150/20min pause: continue local/reviews and consolidate publication when under150 OR cycleend; no status-only channel, only real result/RES/DONO. New explicit nominal reviews executed; these supersede stale noforeign-review restriction, not source ownership. No archivedgap retrieval required by80; no recoveredgap claim.
+
+Own2794 discussion10/latest6704938554 unchanged/all authors-bots; head427e9d81 historical lastconfirmed23:52, NOTqueriedthisrun. HOLD2MEDIUM+LOW6701761695 and sharedserialization1210/6702084665 still pending, no grant for shared product sources. C5 recreatedaa5 notexecuted and ninehistoricalsuccessesnotrepolled. Mainsegments partialhandling noted23:52 remains unverifiedonPR, no findingclosure. No extraunit selected or productpush/enqueue/merge/CI operation. New nominal reviews are separate read-only author-source work.
+
+RES before proof: privatechannelcommit06f5d974616de057ccb751f229da22bd89183577/blobc3dbc99fc81f30345d21b9e446e660bca35a507d, immutable readback EXACT freshprefix+oneRES line; no CAS409. Both current review heads matched assignments. Evidence scope deliberately extracted exact TypeScript bodies, NOT fullmodule/integration/nativeRedis/Blob/Stripe proof. Node24.22.1, timeout120s, V8heap384MiB, 200simulatedRediscommandguard. Execution exit0/11assertions,16simulatedRediscommands,0HTTP/provider. No claim measuredRSS/hardOS512MiB enforcement. No new findings: confirming peers' existing blockers with independently executed boundary controls/counterexamples.
+
+3461 headf5e448278f251d8c10afbe68e19f24ef5d6931b3: C6review5831329612 3MEDIUMs remain. M1 sourceinspection heldset absent from data-families58214024 but present registry0546c90a. M2 actual listTaskDoor advances0->72000 at+20h; +30h one-daycutoff21600 excludesfile; refusal route retains moved existing score. M3 actual takeTaskUpload applieddoorsZREM/nullreply removes newlyaddedhold, leaving bothlistsabsent; exactnumeric1controlholds, string1incorrectlyaccepted. Sourceassignment578b3dc1c6366d3a70b9f8c7abd08d9ac5270b21. I did NOTrerun C6fullmoduleproofs/registrytests or certify wholePRfinancials. Published requestchanges6758703456: https://github.com/solrenning-llc/marktmorgen/pull/3461#issuecomment-6758703456 . ExistingLOWroomcountleak+authorracepreserved.
+
+3479 head17f2b4ea74ecd45a9f04f548a6fa1bac997c9ee6: C4existingMEDIUM6749899830 confirmed; exact storeForId mapsGET12345tonull, exact notePendingDue ZREMsdurablemember, healthyretrydoesnotvisitorder; positivecontrolreinsertmemberreachescheckoutobservation. affiliates92f3a3bcfc1ecd9990cb07adfbf9881d870e654a/store43de2094f53407bdb8620c97a112461daca55745. Exactstore alternative28a43fd6cc4952f699d758722e4eec138d494608 read, noedit. Published requestchanges6758703691: https://github.com/solrenning-llc/marktmorgen/pull/3479#issuecomment-6758703691 . C4marklifetime/bookingLOWs+disconnectedPayPalnote notclosed; C3offheadapprovalnotpromoted. No fullaffiliateintegration/moneyapproval/CIclaim.
+
+Two real review results, not three; no fabricated third result or duplicate approval. Channel one line/result deliveredcommit9148c7a25ea6e88e11adc8ff94a1055fafdaec2b/blob6b800b600b2da41de8edf5f29d9705961d0ab75b; immutableFULLreadback EXACT. Freshroot0742b378/FULL341915 prefixpreserved. This supersedes lastchannel73c01383; historical409stillunpublished. Root<1MiB, no computedGitSHA/Base64roundtripclaim. Remotecheckpointappend preserves original149815prefix. Same singlecontinuity unchanged/no backgroundwatcher; pendingownserialization unfinished. No authorbranch/productsource/foreignref/reservations/CI/provider/commercial/account/PD edits. Next: targeted reviewerreturns orC1shared2794disposition; belowcap itemselection needs freshownership/antiduplicate audits. No invented quota/reset/currentGREEN.
+
+### Reproducible boundary evidence (extracted bodies + explicit mocks, not full module)
+
+```typescript
+import assert from 'node:assert/strict';
+type Store = Record<string, any>;
+type PendingSend = (...args:any[])=>any;
+type SessionLike = any;
+const DOORS_KEY="doors", HELD_KEY="held";
+const PENDING_DUE_KEY="due", PENDING_DUE_IDLE=240,PENDING_DUE_BATCH=50;
+const STORE_ID_PATTERN=/^[a-f0-9]{32}$/;
+const storeIdKey=(sid:string)=>"nl:store:id:"+sid;
+let mode="exact",reads=0,providerReads=0;
+const sets=new Map<string,Map<string,number>>();
+const set=(key:string)=>{if(!sets.has(key))sets.set(key,new Map());return sets.get(key)!;};
+const isRedisConfigured=()=>true;
+const repliesFor=(r:any,n:number)=>Array.isArray(r)&&r.length===n?r:null;
+const countOf=(r:any)=>typeof r==="number"&&Number.isInteger(r)&&r>=0?r:null;
+class UnknownReplyError extends Error{}
+class StripeUnknownError extends Error{}
+class PassTimeSpent extends Error{}
+const sendEmailOutcome=async()=>undefined;
+const stringList=(r:any)=>Array.isArray(r)&&r.every(x=>typeof x==="string")?r:null;
+const storeForEmail=async(_ref:string)=>({sid:"a".repeat(32),statsId:"b".repeat(32),stripeAccountId:"acct_synthetic"});
+const readPendingMark=async()=> "seen:0";
+const isFinal=(m:string)=>m==="told"||m.startsWith("credited:");
+const pendingWait=(_deadline?:number)=>0;
+const tellPending=async()=>undefined;
+const onAccount=async(_method:string,_acct:string,_url:string,..._rest:any[])=>{providerReads++;return{id:"cs_synthetic"};};
+const notePendingLinks=async(..._args:any[])=>({failed:[]});
+async function redisPipeline(commands:any[][]):Promise<any[]>{
+return commands.map(([op,key,...args])=>{
+reads++;if(reads>200)throw Error("simulation cap exceeded");
+if(op==="GET")return mode==="unknown-store"?12345:"synthetic-owner";
+if(op==="ZRANGEBYSCORE")return [...set(key).keys()];
+if(op==="ZADD"){const [score,member]=args;const added=set(key).has(member)?0:1;set(key).set(member,score);return added;}
+if(op==="ZREM"){const removed=set(key).delete(args[0])?1:0;
+if(key===DOORS_KEY&&mode==="unknown-remove")return null;
+if(key===DOORS_KEY&&mode==="string-remove")return "1";
+return removed;}
+throw Error("unexpected command "+op);});}
+export async function listTaskDoor(path: string, now = Date.now()): Promise<boolean> {
+  const added = countOf(repliesFor(await redisPipeline([["ZADD", DOORS_KEY, Math.floor(now / 1000), path]]), 1)?.[0]);
+  if (added !== 0 && added !== 1) throw new UnknownReplyError("an assignment upload's listing");
+  return added === 1;
+}
+export async function takeTaskUpload(path: string, now = Date.now()): Promise<boolean> {
+  const [added] = await redisPipeline([["ZADD", HELD_KEY, Math.floor(now / 1000), path]]);
+  const [removed] = await redisPipeline([["ZREM", DOORS_KEY, path]]);
+  if (Number(removed) === 1) return true;
+  if (Number(added) === 1) await redisPipeline([["ZREM", HELD_KEY, path]]).catch(() => null);
+  return false;
+}
+export async function storeForId(sid: string): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
+  const [ref] = await redisPipeline([["GET", storeIdKey(sid)]]);
+  if (typeof ref !== "string" || !ref) return null;
+  const store = await storeForEmail(ref);
+  return store && store.sid === sid ? store : null;
+}
+export async function notePendingDue(now = Math.floor(Date.now() / 1000), deadline?: number, send: PendingSend = sendEmailOutcome): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const read = repliesFor(await redisPipeline([["ZRANGEBYSCORE", PENDING_DUE_KEY, "-inf", now - PENDING_DUE_IDLE, "LIMIT", 0, PENDING_DUE_BATCH]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("the pending affiliate links' list");
+  let failed = 0;
+  for (const member of members) {
+    const [sid, session] = member.split("|");
+    try {
+      const store = sid ? await storeForId(sid) : null;
+      const valid = Boolean(store?.statsId && store.stripeAccountId && /^cs_[A-Za-z0-9_]{3,250}$/.test(session ?? ""));
+      const mark = valid ? await readPendingMark(store!.statsId as string, session) : null;
+      // Its store gone, or decided already: off the list.
+      if (!valid || (mark !== null && isFinal(mark))) {
+        await redisPipeline([["ZREM", PENDING_DUE_KEY, member]]);
+        continue;
+      }
+      let row: Record<string, unknown> | null = null;
+      try {
+        row = await onAccount("GET", store!.stripeAccountId as string, `/checkout/sessions/${session}`, undefined, undefined, undefined, pendingWait(deadline));
+        if (row.id !== session) throw new StripeUnknownError("a pending order's checkout");
+      } catch (error) {
+        // Its mark expired (two days undecided) and its checkout does not read either: the creator is told, with
+        // what is known, before it leaves the list; never dropped untold. Otherwise read again at the next run.
+        if (mark !== null || error instanceof PassTimeSpent) throw error;
+        await tellPending(store!, session, undefined, "unread", send);
+        if (isFinal((await readPendingMark(store!.statsId as string, session)) ?? "")) await redisPipeline([["ZREM", PENDING_DUE_KEY, member]]);
+        continue;
+      }
+      const counts = await notePendingLinks(store!, [row as SessionLike], now, undefined, undefined, send, deadline);
+      if (counts.failed.length) failed += 1;
+    } catch (error) {
+      failed += 1;
+      await redisPipeline([["ZADD", PENDING_DUE_KEY, now, member]]).catch(() => undefined);
+      console.error("a pending affiliate link on the sweep's list was left for the next run", member, error instanceof Error ? error.message : "");
+    }
+  }
+  return failed;
+}
+const results:any[]=[];
+const check=(name:string,actual:any,expected:any)=>{assert.deepEqual(actual,expected);results.push({name,observed:actual});};
+// Controls and counterexamples use exact function bodies from immutable review heads.
+mode="exact";await listTaskDoor("file-a",0);await listTaskDoor("file-a",20*3600*1000);
+check("3461 M2 confirmed: repeated listing advances original score to 20h",set(DOORS_KEY).get("file-a"),72000);
+check("3461 M2: at +30h old one-day sweep cutoff does not include file",set(DOORS_KEY).get("file-a")! <= 6*3600,false);
+sets.clear();mode="exact";set(DOORS_KEY).set("file-b",0);
+check("3461 take control exact removal accepted",await takeTaskUpload("file-b",0),true);
+check("3461 take control holds file",set(HELD_KEY).has("file-b"),true);
+sets.clear();mode="unknown-remove";set(DOORS_KEY).set("file-c",0);
+check("3461 M3: applied ZREM with null reply refuses hand-in",await takeTaskUpload("file-c",0),false);
+check("3461 M3: file loses both sweep listings",[set(DOORS_KEY).has("file-c"),set(HELD_KEY).has("file-c")],[false,false]);
+sets.clear();mode="string-remove";set(DOORS_KEY).set("file-d",0);
+check("3461 M3: nonnumeric string 1 incorrectly accepted",await takeTaskUpload("file-d",0),true);
+sets.clear();mode="unknown-store";const member="a".repeat(32)+"|cs_synthetic";set(PENDING_DUE_KEY).set(member,0);
+check("3479 M1: malformed store GET maps to null",await storeForId("a".repeat(32)),null);
+await notePendingDue(100000);
+check("3479 M1: pending order removed on unknown store",set(PENDING_DUE_KEY).has(member),false);
+mode="exact";await notePendingDue(100001);
+check("3479 M1: later healthy pass never reaches order",providerReads,0);
+set(PENDING_DUE_KEY).set(member,0);await notePendingDue(100002);
+check("3479 control: known store reaches checkout observation",providerReads,1);
+console.log(JSON.stringify({scope:"extracted exact source function bodies, synthetic boundary mocks; not full module/integration/native Redis/provider proof",results,commands:reads,http:0},null,2));
+
+```

@@ -6,6 +6,7 @@ import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_FILE_BYTES, maxFileLabel, readableSize } from "@/lib/product-file";
 import { EPISODE_ACCEPT, EPISODE_TYPES, type Episode, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, type Podcast } from "@/lib/podcast-rules";
+import { PodcastPublicFeed } from "@/components/podcast-public-feed";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -152,6 +153,8 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
           </ol>
         )}
       </section>
+
+      <PodcastPublicFeed productId={productId} episodes={podcast.episodes} />
     </div>
   );
 }

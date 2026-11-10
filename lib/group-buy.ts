@@ -752,8 +752,10 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   const finish = async (mark: Mark) => {
     if (!store.pastBuyers) await setPastBuyers(storeRef(store));
     for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, mark.at);
-    // The purchase was paid, so it is covered wherever its sale paid a share.
-    await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0);
+    // The purchase was paid, so it is covered wherever its sale paid a share. A count not confirmed leaves the mark
+    // short of done and the room held: an open of the link within the week does what follows the gift again, and
+    // counts the place once (lib/orders.ts).
+    if ((await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0)) === "unknown") return;
     // Only the open that turns the mark to done gives the room back (Claude 5's review of #2654): an open that
     // outlived its hold and one that came after it may both get here, and the hour's room is shared by every
     // checkout of the store, so a second give-back would take another order's room.

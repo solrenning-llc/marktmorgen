@@ -55,7 +55,7 @@ is("a store with no Stripe account has no renewals to read, and is not held back
 is("a store paid nothing still shows its currency", keptIn({ sales: { entries: [], complete: true }, renewals: null, refunds: { entries: [], complete: true }, disputes: { entries: [], complete: true } }, "2026-10-07", "gbp").lines.map((l) => [l.currency, l.keptCents]), [["gbp", 0]]);
 is("windows start 6, 29 and 89 days back", windowStarts("2026-10-13"), { d7: "2026-10-07", d30: "2026-09-14", d90: "2026-07-16" });
 is("a refund bigger than the window's sales gives a negative kept figure, not a hidden one", keptIn({ ...full(), sales: { entries: [], complete: true } }, "2026-10-07", "usd").lines[0].keptCents, 1500 - 1000 - 3000);
-is("the dispute states are the affiliate book's", [...DISPUTE_TAKES].sort(), ["lost", "needs_response", "under_review"]);
+is("the dispute states are the affiliate book's", [...DISPUTE_TAKES].sort(), ["lost", "needs_response", "prevented", "under_review"]);
 is("every window at once", Object.keys(keptByCurrency(full(), day, "usd")), ["d7", "d30", "d90"]);
 
 process.env.STRIPE_SECRET_KEY = "sk_test_retained_stand_in";

@@ -726,18 +726,20 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  *   the deletion mark's read, once in its life (ensureListId: 7 sent, measured in part K, the three lock and write
  *   scripts' two calls each counted too, 13). A try whose second read finds the person's own deletion completed during
  *   it takes back what it wrote of them (takeBack; parts M and N), at most takeBackCommands more for a product that is
- *   not a course: the purchase's HGET and HLEN, the store's SREM from each of the 14 keys of the stores they bought from
- *   (lib/buyer-library.ts forgetBoughtCommands), the affiliate bond's EVAL (HDEL_IF_EQUAL, lib/redis-reply.ts: its HGET
- *   and HDEL counted too, 3) and the purchase's HDEL; a course of the order adds four (dropEnrollment with its start:
- *   the EVAL and its two calls, and the DEL), where its hand-over's recordEnrollment adds two (line orders). The
- *   purchase already taken by the deletion sends fewer (no SREM, no HDEL; part N). 74 is the longest try with a
- *   take-back on top. Once a take-back succeeds the order leaves the list.
+ *   not a course: the purchase's HGET and HLEN, then one EVAL (TAKE_BACK_OWN, lib/paypal-delivery.ts; Codex C2 on #3449)
+ *   whose calls are counted too: the purchase's HGET and HLEN again, the store's SREM from each of the 14 keys of the
+ *   stores they bought from (lib/buyer-library.ts forgetBoughtCommands), the affiliate bond's HGET and HDEL and the
+ *   purchase's HDEL (22); a course of the order adds four (dropEnrollment with its start: the EVAL and its two calls,
+ *   and the DEL), where its hand-over's recordEnrollment adds two (line orders). The purchase already taken by the
+ *   deletion sends fewer (the bond's HDEL_IF_EQUAL EVAL and its two calls, no SREM, no HDEL; part N). 76 is the longest
+ *   try with a take-back on top. Once a take-back succeeds the order leaves the list; one that finds the purchase
+ *   changed since its read takes nothing back and the order stays owed (part O).
  *   The kept receipt is at most RECEIPT_MAIL_BYTES (lib/paypal-delivery.ts), written once and read back by each try; its key is priced as the
  *   order's in tests/store-data-registry.ts (nl:ppsell:mail:). The guarded Resend ledger's own EVALs are lib/resend-fallback-budget's.
  *   PAYPAL_RECEIPT_RETRY_COMMANDS is their product: the most one order's receipt retries send.
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
-export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 74, takeBackCommands: 20 } as const;
+export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 76, takeBackCommands: 22 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
 /**
  * The store's webhooks told of a PayPal payment refunded in full ("refund.issued", lib/paypal-delivery.ts, from the

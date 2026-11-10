@@ -150,6 +150,11 @@ export async function forgetBondPerson(statsId: string | null, email: string): P
   return Number(gone) || 0;
 }
 
+/** Where one buyer's bond is kept (its hash and field), for a script that takes it back with other writes (lib/paypal-delivery.ts). */
+export function bondPlace(statsId: string, email: string): { key: string; field: string } {
+  return { key: bondKey(statsId), field: buyerHash(statsId, email) };
+}
+
 /**
  * The command that forgets one buyer's bond (0 or 1), for a caller that reads its reply itself (lib/paypal-delivery.ts).
  * With `affiliateId`, only a bond to that affiliate, so a bond a later sale made to another one is kept.

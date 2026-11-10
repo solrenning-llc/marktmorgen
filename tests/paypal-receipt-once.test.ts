@@ -54,7 +54,7 @@ import { emailKey, storeKey } from "@/lib/learn";
 import { ROOM } from "./data-room";
 import { forgetNoted, noteForErasure } from "@/lib/erasure-index";
 import { liftCommand } from "@/lib/suppression";
-import { importedKey } from "@/lib/imported-purchases";
+import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { storesBoughtFrom } from "@/lib/buyer-library";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { addEndpoint } from "@/lib/webhooks";
@@ -860,7 +860,8 @@ async function main(): Promise<void> {
     const takenBack = noteRead >= 0 && listOut > noteRead ? listOut - noteRead - 1 : -1;
     console.log(`        the take-back sent ${takenBack} commands`);
     const declaredM = PAYPAL_HAND_OVER_RETRY as Record<string, number>;
-    is("the take-back, the affiliate bond's EVAL and its two calls aside, within the registry's takeBackCommands", takenBack > 0 && takenBack + 3 <= declaredM.takeBackCommands, true);
+    // The calls inside TAKE_BACK_OWN at their most: HGET and HLEN, 14 SREM, the bond's HGET and HDEL, the purchase's HDEL.
+    is("the take-back, with the calls inside its one EVAL at their most, within the registry's takeBackCommands", takenBack > 0 && takenBack + 19 <= declaredM.takeBackCommands, true);
     is("and the registry's longest try holds a take-back on top of the longest try measured (54 with KEEP_RECEIPT's calls and a list's first write)", declaredM.commandsPerReceiptTry >= 54 + declaredM.takeBackCommands, true);
     is("nothing was sent to them", copies(buyerM3).length, 0);
     is("the purchase that try wrote is taken back", purchasesOf(buyerM3), 0);
@@ -1093,6 +1094,65 @@ async function main(): Promise<void> {
   await sweep(11 / 60);
   is("the next try, its purchase already gone, takes the bond and the course back and the order leaves the list", [redis.run(["HEXISTS", bondKeyN, bondOf(buyerN3)]), redis.run(["HEXISTS", await ledgerOf(buyerN3), addedN.product.id]), (await listed()).includes(n3), purchasesOf(buyerN3)], [0, 0, false, 0]);
   await setAffiliateSetting("owner@example.com", { ...NO_AFFILIATES, enabled: true, percent: 30 });
+
+  part("O: a take-back that read this order's purchase keeps a later purchase written after that read (Codex C2 on #3449)");
+  startOfNextDay();
+  resendMode = "up";
+  const buyerO = "deleted-read-then-bought@example.com";
+  const LATER_JOB = "paypal:LATERORDER0000000001";
+  const laterJob = () => {
+    const raw = redis.run(["HGET", importedKey(statsId, buyerO), product.id]);
+    return typeof raw === "string" ? (JSON.parse(raw) as { job?: string }).job ?? null : null;
+  };
+  let o1 = "";
+  {
+    const pipeline = redis.pipeline.bind(redis);
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>((resolve) => (entered = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let heldWrite = false;
+    let heldRead = false;
+    const takeBackRead = (commands: (string | number)[][]) => commands.length === 2 && commands[0][0] === "HGET" && commands[0][1] === importedKey(statsId, buyerO) && commands[0][2] === product.id && commands[1][0] === "HLEN";
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!heldWrite && commands.some(writesPurchase)) {
+        // The person's own deletion completes before this try writes the purchase: the try's later check finds it.
+        heldWrite = true;
+        entered();
+        await released;
+        return pipeline(commands);
+      }
+      if (heldWrite && !heldRead && takeBackRead(commands)) {
+        heldRead = true;
+        // The take-back's read runs now; its answer is held while the person's deletion takes that purchase and a
+        // purchase of the same product they make later is written (the real grant writer).
+        const replies = await pipeline(commands);
+        const erasedAgain = await erasePerson(await fresh(), buyerO, { kind: "person" });
+        is("held after the take-back's read: the deletion completes and takes that purchase", [erasedAgain.ok, purchasesOf(buyerO)], [true, 0]);
+        ahead += 2_000;
+        const granted = await grantImported(statsId, LATER_JOB, [{ email: buyerO, productId: product.id, items: null }], Math.floor(Date.now() / 1000), store.sid);
+        is("then the later purchase is written, with its own job", [granted, laterJob()], [[true], LATER_JOB]);
+        return replies;
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    buyerFor = buyerO;
+    const opened = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!opened.ok) throw new Error(opened.reason);
+    o1 = opened.order;
+    const paying = paypalReturn(new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=harbor&token=${o1}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.60" } }));
+    await reached;
+    is("the person's own deletion completes before the try's purchase write", (await erasePerson(await fresh(), buyerO, { kind: "person" })).ok, true);
+    release();
+    await paying;
+    redis.pipeline = pipeline;
+    is("control: the take-back's read was reached and held", heldRead, true);
+  }
+  is("the later purchase is kept, with its own job", laterJob(), LATER_JOB);
+  is("and so is the store among those they bought from", (await storesBoughtFrom(buyerO)).includes(store.sid), true);
+  is("nothing was sent to them", copies(buyerO).length, 0);
+  await sweep(11 / 60);
+  is("the next try reads the later purchase, takes nothing back and the order leaves the list", [laterJob(), (await storesBoughtFrom(buyerO)).includes(store.sid), (await listed()).includes(o1)], [LATER_JOB, true, false]);
 
   done();
 }

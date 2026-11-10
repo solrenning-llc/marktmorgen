@@ -12,7 +12,7 @@ import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { forgetBoughtCommands } from "@/lib/buyer-library";
-import { forgetBondCommand } from "@/lib/affiliate-bond";
+import { bondPlace, forgetBondCommand } from "@/lib/affiliate-bond";
 import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -253,6 +253,22 @@ async function sameReceipt(store: Store, paid: Paid, made: PayPalReceipt, listId
   return keptReceipt(kept, made);
 }
 
+/**
+ * Takes back, in one step, what a hand-over wrote of a person deleted at their own request, bound to the purchase it
+ * read (Codex C2 on #3449): only while the purchase is still exactly the record read (KEYS[1] field ARGV[1] equal to
+ * ARGV[2]); otherwise -1 and nothing is touched, so a purchase they made after the read, and the store in their
+ * library and the bond that go with it, are kept. The store leaves their library (KEYS[3..], SREM ARGV[5]) only while
+ * this purchase is their only one here; the bond (KEYS[2] field ARGV[3]) only while it names this order's affiliate
+ * (ARGV[4]); the purchase last. 1 when the purchase was deleted.
+ */
+export const TAKE_BACK_OWN = `-- marktmorgen:paypal-take-back:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return -1 end
+if ARGV[5] ~= "" and redis.call("HLEN", KEYS[1]) == 1 then
+  for i = 3, #KEYS do redis.call("SREM", KEYS[i], ARGV[5]) end
+end
+if ARGV[3] ~= "" and redis.call("HGET", KEYS[2], ARGV[3]) == ARGV[4] then redis.call("HDEL", KEYS[2], ARGV[3]) end
+return redis.call("HDEL", KEYS[1], ARGV[1])`;
+
 /** The job a purchase's record names (lib/imported-purchases.ts grantImported), or null when it does not read so. */
 function grantJob(raw: string): string | null {
   try {
@@ -271,7 +287,9 @@ function grantJob(raw: string): string | null {
  * `paypal:<order>`), so a purchase they made after their deletion, and what goes with it, is kept: the courses of the
  * order taken off their ledger (dropEnrollment), the store out of the stores they bought from when this was their
  * only purchase here, the bond to the order's affiliate, and the purchase itself last, so a try stopped part way finds
- * it and takes back the rest.
+ * it and takes back the rest. The last three are one step bound to the purchase read (TAKE_BACK_OWN, Codex C2 on
+ * #3449): a purchase the deletion took and one they made after it, both after the read, are never taken for this one;
+ * then nothing is taken back in that try, and the order stays owed for the next, which reads again.
  *
  * The purchase already gone (review of #3449, MEDIUM 1): the deletion's erasers run one after another, and one that ran
  * before a write of this order left that write; the purchases' eraser runs after the courses' and the bonds', so a
@@ -302,17 +320,27 @@ async function takeBack(store: Store, paid: Paid, product: Listing, bundled: Map
   for (const id of [product.id, ...(product.bundle ?? [])]) {
     if ((id === product.id ? product : bundled.get(id))?.course) await dropEnrollment(store, paid.email, id, paid.at);
   }
-  const rest = [
-    ...(raw !== null && count === 1 ? forgetBoughtCommands(store.sid, paid.email) : []),
-    ...(paid.via ? [forgetBondCommand(statsId, paid.email, paid.via.aff)] : []),
-  ];
-  const zeroOrOne = (replies: unknown[] | null) => replies !== null && replies.every((reply) => reply === 0 || reply === 1);
-  if (rest.length && !zeroOrOne(repliesFor(await redisPipeline(rest), rest.length))) {
-    throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
+  if (raw === null) {
+    // The purchase already gone: only the bond to this order's affiliate (the course is above); no library, no purchase.
+    if (!paid.via) return;
+    const replies = repliesFor(await redisPipeline([forgetBondCommand(statsId, paid.email, paid.via.aff)]), 1);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
+    return;
   }
-  if (raw !== null && !zeroOrOne(repliesFor(await redisPipeline([["HDEL", key, product.id]]), 1))) {
-    throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
+  // This order's purchase read: the library, the bond and the purchase taken back together, and only while the
+  // purchase is still the record read (TAKE_BACK_OWN). One written after the read is kept, and so is what goes with it.
+  const library = forgetBoughtCommands(store.sid, paid.email).map((command) => String(command[1]));
+  const bond = paid.via ? bondPlace(statsId, paid.email) : null;
+  const replies = repliesFor(await redisPipeline([[
+    "EVAL", TAKE_BACK_OWN, 2 + library.length, key, bond ? bond.key : key, ...library,
+    product.id, raw, bond ? bond.field : "", paid.via ? paid.via.aff : "", library.length ? store.sid : "",
+  ]]), 1);
+  const reply = replies?.[0];
+  if (reply === -1) {
+    // Not taken back now: the purchase is no longer the one read. The order stays owed; the next try reads it again.
+    throw new Error("a deleted person's purchase changed after the take-back read it; nothing taken back in this try");
   }
+  if (reply !== 0 && reply !== 1) throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
 }
 
 /** Takes a handed-over order out of the list. Not known whether it left: it stays, and the next try finds it handed over. */

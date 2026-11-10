@@ -9,6 +9,7 @@ import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setCourseLessons, setProductCourse, setProductHidden, storeForEmail, storeFolder } from "@/lib/store";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
@@ -410,7 +411,9 @@ export async function POST(request: NextRequest) {
         const lesson = findLesson(course, lessonId);
         if (!lesson) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         // A new video deletes the one the lesson had: not from a session let in without its second step.
-        if (kind === "video" && lesson.lesson.video && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
+        const lock = kind === "video" && lesson.lesson.video ? await lockRead(lockedFor(request, "products", "replace")) : false;
+        if (lock instanceof Response) return lock;
+        if (lock) return refusedJson("locked");
         // The file has to sit in this account's folder for this very lesson,
         // and what it is is read from storage, not from the browser.
         const folder = await storeFolder(ref);

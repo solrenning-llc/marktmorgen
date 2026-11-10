@@ -4,6 +4,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { confirmRecoveryAddress, removeRecoveryAddress, startRecoveryAddress } from "@/lib/recovery-address";
 import { lockedUntil } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 
 /**
@@ -26,7 +27,9 @@ export async function POST(request: NextRequest) {
   const email = await emailForSession(session);
   if (!email) return Response.json({ ok: false, error: "signed_out" }, { status: 401 });
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  if ((await lockedUntil(session)) > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
+  const until = await lockRead(lockedUntil(session));
+  if (until instanceof Response) return until;
+  if (until > 0) return Response.json({ ok: false, error: "locked" }, { status: 403 });
 
   let body: Record<string, unknown>;
   try {

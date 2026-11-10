@@ -7,6 +7,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, type SalesPage, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
@@ -95,7 +96,9 @@ export async function POST(request: NextRequest) {
     const before = stored ? picturePaths(stored) : [];
     const shown = picturePaths(page);
     // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
-    if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
+    const lock = before.some((path) => !shown.includes(path)) ? await lockRead(lockedFor(request, "products", "replace")) : false;
+    if (lock instanceof Response) return lock;
+    if (lock) return refusedJson("locked");
     const fresh = shown.filter((path) => !before.includes(path));
     if (fresh.length > 0) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });

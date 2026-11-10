@@ -9,6 +9,7 @@ import {
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 /**
  * Puts a photo on the creator's page, or takes it off.
@@ -29,7 +30,9 @@ export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "page", Math.ceil(MAX_PHOTO_BYTES * 1.4) + 1_000, (sent) => (sent.remove === true ? "remove" : ""));
   if (!guarded.ok) return guarded.response;
   // So does a new one, which deletes the one there.
-  if (guarded.store.photoId && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");
+  const lock = guarded.store.photoId ? await lockRead(lockedFor(request, "page", "replace")) : false;
+  if (lock instanceof Response) return lock;
+  if (lock) return refusedJson("locked");
 
   try {
     if (guarded.body.remove === true) {

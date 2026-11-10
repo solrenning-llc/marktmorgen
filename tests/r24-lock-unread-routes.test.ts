@@ -35,6 +35,7 @@ import { addComment, readComment, setCommentsOn } from "@/lib/lesson-comments";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
+import { LOCK_UNREAD, LOCK_UNREAD_MESSAGE, lockOrUnread, lockRead } from "@/lib/two-step-unknown";
 import { POST as passkey } from "@/app/api/auth/passkey/route";
 import { POST as recoveryAddress } from "@/app/api/auth/recovery-address/route";
 import { POST as signoutAll } from "@/app/api/auth/signout-all/route";
@@ -246,6 +247,27 @@ async function main(): Promise<void> {
   is("saved without one of them (JSON)", await unreadJson(crm as Handler, json("/api/store/crm", full, { action: "fields", fields: [company] })), JSON_UNREAD);
   is("and both are still there", (await readFields(store.statsId!)).map((f) => f.id), ["fielda", "fieldb"]);
   is("control: with the lock read, they save", await read(crm as Handler, json("/api/store/crm", full, { action: "fields", fields: [company, goal] })), true);
+
+  part("The helper: only the read handed in is caught, and the words are the ones above");
+  is("the sentence is the one every answer says", LOCK_UNREAD_MESSAGE, SAID);
+  is("a read that answers is passed through as it is", [await lockOrUnread(Promise.resolve(0)), await lockRead(Promise.resolve(true)), await lockRead(Promise.resolve(1_700_000_000_000))], [0, true, 1_700_000_000_000]);
+  is("a read that failed is LOCK_UNREAD, never 0 or false", (await lockOrUnread(Promise.reject(new Error("SYNTHETIC")))) === LOCK_UNREAD, true);
+  let elsewhere = "";
+  try {
+    const lock = await lockRead(Promise.resolve(false));
+    if (lock instanceof Response) throw new Error("read as unread");
+    throw new Error("SYNTHETIC_AFTER_THE_READ");
+  } catch (error) {
+    elsewhere = error instanceof Error ? error.message : "";
+  }
+  is("an error after the read is not answered as an unread lock: it goes on to the route", elsewhere, "SYNTHETIC_AFTER_THE_READ");
+  const pageAnswer = (await lockRead(Promise.reject(new Error("SYNTHETIC")), { back: `${ORIGIN}/@${HANDLE}/community?space=a&x="b"`, to: "the community" })) as Response;
+  const html = await pageAnswer.text();
+  is(
+    "the page: English, one heading, the sentence, a way back said by its link, the address escaped, no cache",
+    [/<html lang="en">/.test(html), (html.match(/<h1>/g) ?? []).length, html.includes("Back to the community</a>"), html.includes('space=a&#38;x=&#34;b&#34;"'), pageAnswer.headers.get("cache-control")],
+    [true, 1, true, true, "no-store"],
+  );
 
   done();
 }

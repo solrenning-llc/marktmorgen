@@ -3,6 +3,7 @@ import { get } from "@/lib/blob";
 import { fileUrl } from "@/lib/file-store";
 import { isVaultPath } from "@/lib/vault-rules";
 import { type Refusal, studioAccess } from "@/lib/studio-route";
+import { LOCK_UNREAD_MESSAGE } from "@/lib/two-step-unknown";
 import { productFile } from "@/lib/store";
 import {
   DOWNLOAD_URL_SECONDS,
@@ -51,6 +52,7 @@ export async function GET(request: NextRequest) {
       used: [access.message || "This store's studio requests for now are used. Try again later.", 429],
       locked: ["You got in without your second step, so this waits until two-step login turns off. The date is at the top of your studio.", 403],
       two_step: ["This store asks everyone on its team to turn on two-step login first.", 403],
+      unread: [LOCK_UNREAD_MESSAGE, 503],
     };
     const [text, status] = words[access.reason];
     return new Response(text, { status });

@@ -41,6 +41,7 @@ import { doneLessons } from "@/lib/learn";
 import { writeFeedback } from "@/lib/ai";
 import { claimHandle, storeForEmail, type Listing } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { SITE_URL } from "@/lib/site-url";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
 
@@ -169,7 +170,10 @@ async function main(): Promise<void> {
   await claimHandle("creator@example.com", "teacher", "Escola Clara", "");
   const store = { ...(await storeForEmail("creator@example.com"))!, language: "pt" as const };
   const product = { id: "p1", title: "Vender melhor" } as Listing;
-  is("the creator is told", await tellCreatorOfWork({ store, product, courseId: course.id, lessonTitle: "One", origin: "https://marktmorgen.com" }), true);
+  // Handed in through another creator's domain: the studio link is still on this site (SITE_URL), never on the request's host.
+  is("the creator is told", await tellCreatorOfWork({ store, product, courseId: course.id, lessonTitle: "One", origin: "https://mallory-shop.example" }), true);
+  is("the studio link is on this site", sent[0]?.text.includes(`${SITE_URL}/studio/course/p1`), true);
+  is("never on the host the request named", sent[0]?.text.includes("mallory-shop.example"), false);
   is("not again within the hour", await tellCreatorOfWork({ store, product, courseId: course.id, lessonTitle: "One", origin: "https://marktmorgen.com" }), false);
   is("at the store's address", sent[0]?.to, "creator@example.com");
   const answered = { text: "", file: null, at: 1, state: "again" as const, feedback: "Diga para quem é.", reviewedAt: 2, tries: 1 };

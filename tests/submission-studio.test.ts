@@ -15,7 +15,9 @@
  *     a page at a time, newest first, and says a record it cannot read;
  *   - a reply is written once, moves the file to answered and lets the
  *     buyer's waiting place go; a second, an empty one, one for another course
- *     or for a file that is gone are refused; two at once never both pass.
+ *     or for a file that is gone are refused; two at once never both pass;
+ *   - the buyer is told of the reply once, and the studio hears whether the
+ *     email went (unit 6; the email itself in tests/submission-notice.test.ts).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -133,9 +135,20 @@ async function main(): Promise<void> {
   const who = `05${"a".repeat(30)}`;
   is("the buyer's place is held while it waits", await liveCount(FOLDER, COURSE, LESSONS[1], who, NOW), 1);
   is("an empty reply is refused", (await post({ action: "reply", id: "prod1", submission: target, text: "  " })).body, { ok: false, error: "reply" });
+  const counted = redis.pipeline.bind(redis);
+  let replyCommands = 0;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    replyCommands += batch.length;
+    return counted(batch);
+  }) as typeof redis.pipeline;
   const replied = await post({ action: "reply", id: "prod1", submission: target, text: "Knees out a little more." });
+  redis.pipeline = counted;
   is("it is answered", replied.body.state, "reviewed");
   is("with the words", (replied.body.reply as { text: string }).text, "Knees out a little more.");
+  // 750 [CD1] unit 6: the buyer is told by email, and the studio hears whether it went (no sender here, so it did not).
+  is("the studio is told whether the buyer was emailed", replied.body.emailed, false);
+  is("the reply is marked told, so it is never emailed twice", (await redis.pipeline([["EXISTS", `nl:sub:told:${FOLDER}:${target}`]]))[0], 1);
+  is("the reply and its notice stay inside the studio requests taken (20 commands each)", replyCommands <= 20 * (1 + SUBMISSION_REPLY_UNITS), true);
   is("its studio requests were taken first", state.events.includes(`allowance:studio:${SUBMISSION_REPLY_UNITS}`), true);
   is("the buyer's place is let go", await liveCount(FOLDER, COURSE, LESSONS[1], who, NOW), 0);
   is("a second reply is refused", await post({ action: "reply", id: "prod1", submission: target, text: "Again." }), { status: 409, body: { ok: false, error: "reviewed" } });

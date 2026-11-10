@@ -66,8 +66,8 @@ for (const action of STUDIO_ACTIONS.filter((entry) => entry.segment)) {
   const source = readFileSync(join(studio, action.segment, "page.tsx"), "utf8");
   const need = /studioView\([^;]*?,\s*"([a-z]+)"/.exec(source)?.[1] ?? null;
   is(`${action.id}: permission is the screen's own (${need})`, action.permission, need);
-  const module = STUDIO_MODULES.find((entry) => entry.segment === action.segment);
-  if (module) is(`${action.id}: the same permission as its card in the gallery`, action.permission, module.permission);
+  const screen = STUDIO_MODULES.find((entry) => entry.segment === action.segment);
+  if (screen) is(`${action.id}: the same permission as its card in the gallery`, action.permission, screen.permission);
 }
 
 part("each action on the home scrolls to a section the home draws, under its permission alone");
@@ -167,8 +167,8 @@ for (const role of ["owner", "admin", "editor", "support"] as const) {
   const ctx = context(role);
   for (const action of STUDIO_ACTIONS) {
     const shown = searchActions(action.title, ctx, href).some((result) => result.id === action.id);
-    const module = STUDIO_MODULES.find((entry) => entry.segment === action.segment);
-    const allowed = (action.permission === "member" || can(role, action.permission)) && (module?.when ? everything[module.when] : true);
+    const screen = STUDIO_MODULES.find((entry) => entry.segment === action.segment);
+    const allowed = (action.permission === "member" || can(role, action.permission)) && (screen?.when ? everything[screen.when] : true);
     is(`${role}: ${action.id} ${allowed ? "found" : "never found"}`, shown, allowed);
   }
 }
@@ -191,7 +191,8 @@ is("a result has no plan when the plan includes it", result("invoice")?.plan, nu
 part("recent actions: order only, and only what this list wrote");
 is("no words: the recent ones, most recent first", ids("", owner, ["tax", "email"]), ["tax", "email"]);
 is("no words and nothing recent: nothing", ids("", owner, []), []);
-is("recent breaks a tie: \"refund\" with the buyers opened last", ids("refund", owner, ["people"])[0], "people");
+is("without recent, a tie keeps the list's order: \"invite\" is the team first", ids("invite", owner)[0], "team");
+is("recent breaks a tie: \"invite\" with the creators' invite opened last", ids("invite", owner, ["invite"])[0], "invite");
 is("recent never lifts a worse fit above a better one", ids("post", owner, ["community"])[0], "blog");
 is("no words: a recent action the role may not open is left out", ids("", context("support"), ["tax", "inbox"]), ["inbox"]);
 is("remember puts it first", rememberAction(["tax", "email"], "email"), ["email", "tax"]);

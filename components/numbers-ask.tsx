@@ -11,8 +11,8 @@ const MESSAGES: Record<string, string> = {
   off: "Asking your numbers is not available right now.",
   numbers: "Your numbers could not be read just now. Try again in a moment.",
   slow: "A few questions a minute at most. Try again in a moment.",
-  failed: "No answer came back, and nothing was counted. Try again.",
-  server_error: "Something went wrong on our side. Nothing was counted; try again in a moment.",
+  failed: "No answer came back. Try again. This try counted as one of this month's AI jobs.",
+  server_error: "Something went wrong on our side. Try again in a moment. If the answer had already started, this try may have counted as one of this month's AI jobs.",
 };
 
 const WINDOW_WORDS: Record<AskWindow, string> = { d7: "last 7 days", d30: "last 30 days", d90: "last 90 days" };

@@ -59,6 +59,7 @@ import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
+import { cleanReviewText } from "@/lib/review-ai-summary-rules";
 import type { Store } from "@/lib/store";
 
 export type VoiceSource = "cancel" | "question" | "review" | "search";
@@ -167,16 +168,15 @@ redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
 redis.call("DEL", KEYS[1])
 return 1`;
 
-/** A text as it may be sent: one line, short, with addresses, phone numbers and links taken out. Pure. */
+/**
+ * A text as it may be sent: one line, short, with addresses, handles, phone
+ * numbers and links taken out. Pure. The same rule as the reviews' summary
+ * (cleanReviewText), so a web address without "http" or "www"
+ * ("janesmith.dev") is a link too, as the privacy policy says (663 [HF1]);
+ * cut at whole characters, never inside an emoji.
+ */
 export function cleanVoice(value: string, max = MAX_TEXT): string {
-  return value
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[email]")
-    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
-    .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, max);
+  return Array.from(cleanReviewText(value)).slice(0, max).join("");
 }
 
 /**
@@ -220,7 +220,7 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   const out: VoiceItem[] = [];
   for (const item of items) {
     const text = cleanVoice(item.text);
-    if (text.replace(/\[(email|link|number)\]/g, "").trim().length < 2) continue;
+    if (text.replace(/\[(email|handle|link|number)\]/g, "").trim().length < 2) continue;
     out.push({ ...item, text, id: out.length + 1 });
     if (out.length >= MAX_TEXTS) break;
   }

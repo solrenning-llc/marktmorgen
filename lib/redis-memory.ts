@@ -381,6 +381,20 @@ export class MemoryRedis {
           this.run(["SET", target, value]);
           return 1;
         }
+        // A submission's close (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE): written only while the buyer's place and
+        // entry are still there, and only when no record is.
+        if (key.startsWith("-- marktmorgen:submission-close-write:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, live, who, due, record, id, entry, keepUntil, until, liveSeconds, dueMember, json, seconds] = args;
+          if (this.run(["ZSCORE", live, id]) === null || this.run(["ZSCORE", who, entry]) === null) return 0;
+          if (Number(this.run(["EXISTS", record])) === 1) return -1;
+          this.run(["ZADD", live, "XX", keepUntil, id]);
+          this.run(["EXPIRE", live, liveSeconds]);
+          this.run(["ZADD", who, "XX", until, entry]);
+          this.run(["EXPIRE", who, liveSeconds]);
+          this.run(["ZADD", due, keepUntil, dueMember]);
+          this.run(["SET", record, json, "EX", seconds]);
+          return 1;
+        }
         // An agreement's record, written with its expiry only while the agreement's lock is the writer's (lib/agreement-store.ts, AGREEMENT_SAVE).
         if (key.startsWith("-- marktmorgen:agreement-save:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lock, target, token, value, seconds] = args;

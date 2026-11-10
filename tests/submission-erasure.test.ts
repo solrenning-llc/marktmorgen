@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     const onRecordWrite = (answer: "never answered" | "out of shape") => {
       const original = redis.pipeline.bind(redis);
       redis.pipeline = (async (list: (string | number)[][]) => {
-        if (list.some((command) => String(command[0]) === "SET" && String(command[1]).startsWith("nl:sub:rec:"))) {
+        if (list.some((command) => (String(command[0]) === "SET" || String(command[0]) === "EVAL") && command.some((arg) => String(arg).startsWith("nl:sub:rec:")))) {
           redis.pipeline = original;
           if (answer === "never answered") throw new Error("fetch failed");
           return [];
@@ -270,7 +270,7 @@ async function main(): Promise<void> {
     const original = redis.pipeline.bind(redis);
     let failed = 0;
     redis.pipeline = (async (list: (string | number)[][]) => {
-      const record = list.some((command) => String(command[0]) === "SET" && String(command[1]).startsWith("nl:sub:rec:"));
+      const record = list.some((command) => (String(command[0]) === "SET" || String(command[0]) === "EVAL") && command.some((arg) => String(arg).startsWith("nl:sub:rec:")));
       const readBack = String(list[0]?.[0]) === "GET" && String(list[0]?.[1]).startsWith("nl:sub:rec:");
       if ((failed === 0 && record) || (failed === 1 && readBack)) {
         failed += 1;

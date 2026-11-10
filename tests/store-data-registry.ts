@@ -42,7 +42,7 @@
  * keep at one time, for the closing days after a plan ends
  * (PER_PAYMENT_LINES).
  */
-import { CHILD_SAFETY_HOLDS_PER_DAY } from "@/lib/child-safety";
+import { CHILD_SAFETY_HOLDS_PER_DAY, HELD_LIST_BYTES } from "@/lib/child-safety";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import type { Tier } from "@/lib/plan";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -963,7 +963,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:csa:alert:@lib/child-safety-alerts.ts": company("An open child-safety or intimate-image report's reminder: kind, Marktmorgen address, store handle, what was done, dates and the hashes of its handled links, never the reporter's words or address", "The company's own record of a report to the support inbox: at most OPEN_ALERTS_MAX (200) open at once, each gone when marked handled, after its last reminder, or by itself in ALERT_KEEP_SECONDS (32 days)."),
   "nl:csa:alerts@lib/child-safety-alerts.ts": company("The open child-safety reports by when each reminder is next due", "The company's one list, at most OPEN_ALERTS_MAX (200) members, each taken out when its report ends; the list itself gone by itself 32 days after the last report."),
   "nl:csa:once:@lib/child-safety-alerts.ts": company("Which reminder one child-safety or intimate-image request opened that UTC day: a hash of its kind, the request's hash and the day, holding only the alert's random id, never the reporter's words or address", "The company's claim that keeps a retry of the same request from opening a second alert: one per open alert (at most OPEN_ALERTS_MAX, 200), taken back with an alert that could not be opened, gone by itself in ALERT_ONCE_SECONDS (2 days)."),
-  "nl:csa:files:@lib/child-safety.ts": short("Where a product kept for a child-safety report keeps its files (at most HELD_LIST_PATHS paths), for the owner to find them after a closing or an erasure: 400 days (18 U.S.C. 2258A(h))", "day", 400, 48_000 * CHILD_SAFETY_HOLDS_PER_DAY),
+  "nl:csa:files:@lib/child-safety.ts": short("Where a product kept for a child-safety report keeps its files (at most HELD_LIST_PATHS paths and HELD_LIST_BYTES, built from the vault path rules), for the owner to find them after a closing or an erasure: 400 days (18 U.S.C. 2258A(h))", "day", 400, (HELD_LIST_BYTES + KEY) * CHILD_SAFETY_HOLDS_PER_DAY),
   "nl:csa:file:@lib/held-files.ts": short("A file of a product kept for a child-safety report, by a hash of its path or video id: never deleted or handed out for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 96),
   "nl:csa:keep:@lib/child-safety-holds.ts": short("A product kept for a child-safety report: not removed, changed or published again, nor its files, options, picture, page, episodes or lessons replaced or deleted, for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 64),
   "nl:csa:held:@lib/child-safety.ts": short("Which products child-safety reports took off a store that day (a set of at most the cap's product ids), two days: the cap on the automatic step", "studio", 2, 128),

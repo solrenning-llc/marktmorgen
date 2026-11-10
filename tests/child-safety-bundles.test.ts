@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, HANDLE, "Hold Bundles", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1HoldBundles0001", true);
+  await setStripeAccount(OWNER, "acct_1TestHoldBnd01", true);
   await setSubscription(OWNER, { customerId: "cus_holdbundles", subscriptionId: "sub_holdbundles", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
   const session = await openSession(OWNER);
   const send = async (route: Handler, path: string, body: Record<string, unknown>) => {
@@ -144,11 +144,11 @@ async function main(): Promise<void> {
     const reads = source.match(/readListings\(store, bumpTargets\(product\)\)[^\n]*/g) ?? [];
     is(`${page}: every box read goes through offerableTargets`, reads.length > 0 && reads.every((read) => read.includes("offerableTargets(store, found)")), true);
   }
-  is("a ticked box of the held product is refused", await sale(front, [reported]), "box");
-  is("the first box ticked the old way is refused too", await sale(front, ["yes"]), "box");
-  is("a ticked box of a bundle holding it is refused", await sale(front, [heldBundle]), "box");
-  is("a ticked box of a product not held goes on", await sale(front, [partC]), null);
-  is("no box ticked goes on", await sale(front, []), null);
+  is("a checked box of the held product is refused", await sale(front, [reported]), "box");
+  is("the first box checked the old way is refused too", await sale(front, ["yes"]), "box");
+  is("a checked box of a bundle holding it is refused", await sale(front, [heldBundle]), "box");
+  is("a checked box of a product not held goes on", await sale(front, [partC]), null);
+  is("no box checked goes on", await sale(front, []), null);
 
   part("A box pointed at it after the report");
   is("at the held product", await send(extrasRoute as Handler, "extras", { id: other, bump: { productId: reported, price: "9", pitch: "" }, slot: 0 }), ON_HOLD);

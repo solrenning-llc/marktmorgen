@@ -36,6 +36,8 @@ import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { holdsProductsOrThrow } from "@/lib/community-access";
+import { MAX_MOVED_INTO, readMovedIndex } from "@/lib/purchase-move-index";
+import { takePublicRequest } from "@/lib/traffic";
 import { TOKEN_PATTERN, learnerFrom, storeKey } from "@/lib/learn";
 import { LETTER_ID, type Letter, membersOnly } from "@/lib/letter-rules";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -78,11 +80,35 @@ export type LetterReader =
  * Whether this address holds one of the email's products now (cached for
  * minutes). Throws when it cannot be known (Stripe or the database could not
  * be asked), so a failed ask is never read as "holds none of them".
+ *
+ * A buyer may have moved their purchases at this store to another address
+ * (611 [WP10]; lib/purchase-move-index.ts). An address that moved away holds
+ * nothing here any more; an address that purchases moved to holds what each
+ * of its old addresses (at most MAX_MOVED_INTO) holds, each asked as the
+ * address itself is, after one more of the store's public requests is taken
+ * for it. When the index cannot be read, nothing changes: the address holds
+ * what it bought itself, as if nothing moved, never nothing.
  */
 export async function holdsLetter(store: Store, letter: Letter, email: string): Promise<boolean> {
   if (!membersOnly(letter) || !store.sid) return false;
   const products = letter.products!;
-  return holdsProductsOrThrow(store, products, email, okKey(store.sid, products, email), "1");
+  const sid = store.sid;
+  const holds = (address: string) => holdsProductsOrThrow(store, products, address, okKey(sid, products, address), "1");
+  let moved: Awaited<ReturnType<typeof readMovedIndex>>;
+  try {
+    moved = await readMovedIndex(sid, email);
+  } catch (error) {
+    console.error("the moved addresses could not be read; who may read an email is answered as if nothing moved", error);
+    return holds(email);
+  }
+  if (moved.movedTo) return false;
+  if (await holds(email)) return true;
+  const olds = moved.movedFrom.slice(0, MAX_MOVED_INTO);
+  if (!olds.length) return false;
+  // Each old address is one more reading, paid before it is made: no room is unknown, never "holds none".
+  if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length))) throw new UnknownReplyError("the store's room to read moved purchases");
+  for (const old of olds) if (await holds(old)) return true;
+  return false;
 }
 
 /** Who is looking at this email, and whether they may read its words, asked afresh. */

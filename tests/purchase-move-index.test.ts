@@ -61,7 +61,8 @@ redis.run = (c: (string | number)[]) => {
 };
 
 const indexKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:moved:") || k.startsWith("nl:pm:into:")).sort();
-const indexState = () => indexKeys().map((k) => `${k}=${JSON.stringify(redis.run(["TYPE", k]) === "hash" ? redis.run(["HGETALL", k]) : redis.run(["GET", k]))}`);
+// An empty hash is no key in Redis: the in-memory stand-in may keep one after a read of a missing hash.
+const indexState = () => indexKeys().map((k) => `${k}=${JSON.stringify(redis.run(["TYPE", k]) === "hash" ? redis.run(["HGETALL", k]) : redis.run(["GET", k]))}`).filter((line) => !line.endsWith("=[]"));
 
 async function main(): Promise<void> {
   redis.clear();

@@ -35,6 +35,11 @@
  * forgetMovedPerson). An address the store deleted is never written here.
  * A reply that is not exactly what was asked for is unknown, never "not
  * moved" (rule 24).
+ *
+ * An address holds the purchases of at most MAX_MOVED_INTO old ones, and
+ * one that holds any does not move again ("holds-moved"): a reader asks
+ * the creator's Stripe account about each old address directly, one step,
+ * so a second step would lose what came over in the first.
  */
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
@@ -43,13 +48,20 @@ import type { MoveRequest } from "@/lib/purchase-move-rules";
 import { claimPurchaseMove, readPurchaseMove } from "@/lib/purchase-moves";
 import { type Told, tellCreatorOfMove } from "@/lib/purchase-move-notice";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { giveData, takeData } from "@/lib/store-data";
 import type { Store } from "@/lib/store";
 import { suppressedAmong } from "@/lib/suppression";
 
 const ID = /^[0-9a-f]{32}$/;
+/**
+ * The most old addresses whose purchases one address may hold at a store. Each
+ * reader asks about each of them (one more reading of the creator's Stripe
+ * account each, unit 4b onward), so the index never holds more: a move into an
+ * address that already holds this many is refused ("too-many").
+ */
+export const MAX_MOVED_INTO = 5;
 const print = (sid: string, address: string) => createHash("sha256").update(`nimbus-pm-moved:${sid}:${normaliseEmail(address)}`).digest("hex").slice(0, 32);
 const movedKey = (sid: string, address: string) => `nl:pm:moved:${sid}:${print(sid, address)}`;
 const intoKey = (sid: string, address: string) => `nl:pm:into:${sid}:${print(sid, address)}`;
@@ -127,7 +139,7 @@ export async function readMovedIndex(sid: string, raw: string): Promise<{ movedT
 
 export type MoveApplied =
   | { state: "moved"; told: Told }
-  | { state: "not-ready" | "expired" | "gone" | "deleted" | "already-moved" | "full" | "unknown"; told: null };
+  | { state: "not-ready" | "expired" | "gone" | "deleted" | "already-moved" | "too-many" | "holds-moved" | "full" | "unknown"; told: null };
 
 const stop = (state: Exclude<MoveApplied["state"], "moved">): MoveApplied => ({ state, told: null });
 
@@ -166,10 +178,19 @@ export async function applyPurchaseMove(store: Store, id: string, now = Date.now
   const text = markText(mark);
   try {
     // An address that already moved, by another request, is not moved again: nothing is taken or written.
-    const held = repliesFor(await redisPipeline([["GET", movedKey(store.sid, from)]]), 1);
+    const held = repliesFor(
+      await redisPipeline([["GET", movedKey(store.sid, from)], ["HLEN", intoKey(store.sid, from)], ["HLEN", intoKey(store.sid, to)], ["HEXISTS", intoKey(store.sid, to), from]]),
+      4,
+    );
     if (!held) return stop("unknown");
     const before = markOf(held[0], "a moved address's mark");
+    const [holding, holdingTo, already] = held.slice(1).map((reply) => countOf(reply));
+    if (holding === null || holdingTo === null || (already !== 0 && already !== 1)) return stop("unknown");
     if (before && before.id !== id) return stop("already-moved");
+    // One step only: an address that holds moved purchases keeps them where they are.
+    if (holding > 0) return stop("holds-moved");
+    // A second try of this move is already counted among them.
+    if (already === 0 && holdingTo >= MAX_MOVED_INTO) return stop("too-many");
 
     // The room first: what the two lines keep, for as long as they are kept. Set, not added, so a second try takes nothing more.
     const bytes = dataBytes([movedKey(store.sid, from), text, intoKey(store.sid, to), from, id], 2);

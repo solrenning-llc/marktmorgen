@@ -67,11 +67,12 @@ export const MOVE_LINK_COMMANDS = 6;
 export const MOVE_CONFIRM_COMMANDS = MOVE_LINK_COMMANDS + 1 + 4 + 2 + 4;
 /**
  * Commands writing a move into the index makes at the most (lib/purchase-move-index.ts): the claim (the request and
- * its marks read, the mark with its read-back), the deleted people, the old address's mark read, the data room's
+ * its marks read, the mark with its read-back), the deleted people, the old address's mark and both addresses'
+ * holdings read (4), the data room's
  * script billed as four, the mark with its read-back and its read again, the line, and the creator's notice mark with
  * its read-back and its release. The notice itself is one of the store's emails, taken from its figure.
  */
-export const MOVE_APPLY_COMMANDS = 4 + 2 + 1 + 1 + 4 + 3 + 1 + 3;
+export const MOVE_APPLY_COMMANDS = 4 + 2 + 1 + 4 + 4 + 3 + 1 + 3;
 
 const MAX_BODY_BYTES = 2_000;
 const sec = (ms: number) => Math.floor(ms / 1000);
@@ -289,6 +290,9 @@ function movedAs(applied: MoveApplied, moved: "both" | "done"): ConfirmState {
       return applied.state;
     case "already-moved":
       return "elsewhere";
+    case "too-many":
+    case "holds-moved":
+      return "limit";
     case "gone":
       return "link";
     case "full":

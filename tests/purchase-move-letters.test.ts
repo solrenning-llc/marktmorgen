@@ -117,6 +117,10 @@ async function main(): Promise<void> {
   is("and still what it bought itself", await reads("ana.new@example.com", knifeLetter), true);
   is("the old address no longer reads it, though its answer was kept for minutes", await reads("ana.old@example.com"), false);
 
+  odd = { command: "INCRBY", prefix: "nl:traffic:r:", reply: "not a count", times: 1 };
+  is("no room to read the old address: unknown, never \"holds none\"", await reads("ana.new@example.com"), "unknown");
+  odd = null;
+
   part("An index that cannot be read changes nothing, and is never read as nothing");
   odd = { command: "GET", prefix: "nl:pm:moved:", reply: 7, times: 1 };
   is("the old address keeps what it bought", await reads("ana.old@example.com"), true);

@@ -116,6 +116,54 @@ async function main() {
     is("a take-back not answered 1: 500, not saved and not full", lost, [500, "server_error"]);
   }
 
+  part("Eight answers at once never leave the list past its ceiling, whatever a reply says (review of #3584, Codex T)");
+  {
+    const writes = (commands: (string | number)[][]) => commands.some((c) => c[0] === "LPUSH" || c[0] === "EVAL");
+    /** Eight answers sent together, each held at its count read until all eight have read it (or 200 ms). */
+    const eight = async (fault: (commands: (string | number)[][], replies: unknown[]) => unknown[], dropTakeBack = false) => {
+      let read = 0;
+      let open: () => void = () => {};
+      const all = new Promise<void>((resolve) => {
+        open = resolve;
+        setTimeout(resolve, 200);
+      });
+      store.pipeline = (async (commands: (string | number)[][]) => {
+        if (commands.length === 1 && commands[0][0] === "LLEN") {
+          const replies = await pipeline(commands);
+          read += 1;
+          if (read >= 8) open();
+          await all;
+          return replies;
+        }
+        // A take-back that does not apply (the command or its effect lost): nothing is removed, and it says so.
+        if (dropTakeBack && commands.some((c) => c[0] === "LREM")) return commands.map(() => 0);
+        return fault(commands, await pipeline(commands));
+      }) as typeof store.pipeline;
+      quiet(true);
+      const got = await Promise.all(Array.from({ length: 8 }, (_, i) => ask({ ...payload, name: `Concurrent ${i}` })));
+      quiet(false);
+      store.pipeline = pipeline;
+      return got;
+    };
+    const statuses = (got: [number, string][]) => got.map(([status]) => status).sort().join(",");
+
+    await fill(MAX_ANSWERS - 1);
+    const healthy = await eight((_, replies) => replies);
+    is("control: all healthy, exactly one kept", [statuses(healthy), (await rows()).length], ["201,503,503,503,503,503,503,503", MAX_ANSWERS]);
+
+    await fill(MAX_ANSWERS - 1);
+    const unapplied = await eight((_, replies) => replies, true);
+    is("a take-back that did not apply leaves the list at 320, never past it", (await rows()).length, MAX_ANSWERS);
+    is("and only one is said saved", unapplied.filter(([status]) => status === 201).length <= 1, true);
+
+    await fill(MAX_ANSWERS - 1);
+    // Each write applied, its reply lost on the way back.
+    const lost = await eight((commands, replies) => (writes(commands) ? replies.map(() => undefined) : replies));
+    is("writes applied with their replies lost leave the list at 320, never past it", (await rows()).length, MAX_ANSWERS);
+    is("and none is said saved: a lost reply is not a confirmation", lost.some(([status]) => status === 201), false);
+    is("a later healthy answer is refused as full and the list stays at 320", [await ask(payload), (await rows()).length], [[503, "full"], MAX_ANSWERS]);
+  }
+
   part("An answer past its byte ceiling is refused before anything is kept");
   {
     await fill(0);

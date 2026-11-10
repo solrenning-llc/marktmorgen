@@ -25,6 +25,7 @@ import { newUpsellKey, readUpsell, settlePendingOffers, takeUpsell } from "@/lib
 import { QUEUE_KEY, deliverDue, emitEvent, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
+import { shownRef } from "./upsell-ref-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_money_only";
 process.env.RESEND_API_KEY = "re_test_r24_money_only";
@@ -98,6 +99,8 @@ function paidCheckout(id: string, product: string, fingerprint: string, via = ""
   };
 }
 
+/** The offer step's reference the page posts, read once the store holds its funnel. */
+let STEP = "kit001";
 const world = (async () => {
   redis.clear();
   await claimHandle(OWNER, "r24money", "R24 Money", "");
@@ -117,6 +120,8 @@ const world = (async () => {
   const plain = (await storeForEmail(OWNER))!;
   // The programme on, read from the store as the page would have it.
   const withAffiliates: Store = { ...plain, affiliates: { ...plain.affiliates, enabled: true } };
+  // The step as the thanks page's form names it (lib/upsell.ts, offerRef: answered only on the terms the page drew).
+  STEP = await shownRef(plain, "kit001");
   return { front, plain, withAffiliates, browser: newUpsellKey() };
 })();
 
@@ -129,7 +134,7 @@ test("an offer with an affiliate nobody approved is charged, without a share (co
   const session = nextSession();
   sessions[session] = paidCheckout(session, front, browser.fingerprint, AFFILIATE);
   const before = charges.length;
-  const result = await takeUpsell({ store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+  const result = await takeUpsell({ store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT });
   assert.equal(result.kind, "done");
   assert.equal(charges.length, before + 1);
   assert.equal(charges.at(-1)?.get("metadata[via]"), null);
@@ -144,7 +149,7 @@ for (const [label, reply] of [["a Redis failure", "throw"]] as [string, unknown]
     sessions[session] = paidCheckout(session, front, browser.fingerprint, AFFILIATE);
     const before = charges.length;
     await withReply(isAffiliateRead, reply, async () => {
-      const outcome = await takeUpsell({ store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT }).then(
+      const outcome = await takeUpsell({ store: withAffiliates, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT }).then(
         (result) => result.kind,
         () => "rejected",
       );
@@ -157,7 +162,7 @@ for (const [label, reply] of [["a Redis failure", "throw"]] as [string, unknown]
 const isClaim = (session: string) => (cmd: Cmd) => cmd[0] === "SET" && cmd[1] === `nl:upsell:${session}` && cmd.includes("NX");
 
 const yes = (store: Store, session: string, secret: string) =>
-  takeUpsell({ store, session, secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+  takeUpsell({ store, session, secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT });
 const outcomeOf = (work: Promise<{ kind: string }>) => work.then((result) => result.kind, () => "threw");
 
 // Revisor 1 on #2897: a claim that landed with its reply lost is ours. It is read back by its own value
@@ -232,7 +237,7 @@ test("an offer's once-only claim already held (null) charges nothing and says do
   const session = nextSession();
   sessions[session] = paidCheckout(session, front, browser.fingerprint);
   const before = charges.length;
-  const result = await withReply(isClaim(session), null, () => takeUpsell({ store: plain, session, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT }));
+  const result = await withReply(isClaim(session), null, () => takeUpsell({ store: plain, session, secret: browser.secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT }));
   assert.equal(result.kind, "done");
   assert.equal(charges.length, before);
 });

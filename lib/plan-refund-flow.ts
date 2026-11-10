@@ -49,6 +49,7 @@ import { LOCK_SECONDS, type PlanRefundMade, refundPlanPayment } from "@/lib/plan
 import { dropPause } from "@/lib/plan-pause";
 import { syncAssistant } from "@/lib/assistant-billing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef } from "@/lib/store";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
@@ -81,6 +82,14 @@ export const GIVE_UP_DAYS = 7;
 export const MAX_REFUND_PAGES = 3;
 /** The most notes the daily job looks at in one run. */
 export const MAX_NOTES = 50;
+/**
+ * The store id whose note the daily job looked at last. The next run starts after it (store ids in order, from the
+ * start again after the last), so a note kept because its refund does not read never holds back the others: with N
+ * notes, each one is looked at within ceil(N / MAX_NOTES) runs that are not cut short.
+ */
+export const NEXT_KEY = "nl:plan-refund:next";
+/** The place goes by itself when the job has not moved it for this long (no note left to look at). */
+const NEXT_SECONDS = 30 * 86_400;
 /** Before the note: the refund's own `created` may be a few seconds before ours. */
 const CLOCK_SLACK = 300;
 const LIVE = ["active", "trialing", "past_due", "unpaid", "paused"];
@@ -460,21 +469,37 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
  * The daily job's part (app/api/cron/closing): each note left by a request that did not finish is decided. Its
  * refund found: the plan is ended. Not found SETTLE_SECONDS after the note: none was made, and a stop we set is
  * taken back. Not decidable: kept and tried again tomorrow, said in the log after GIVE_UP_DAYS. One failure never
- * stops the rest.
+ * stops the rest. At most MAX_NOTES a run, starting after the store looked at last (NEXT_KEY), so notes kept undecided
+ * never take the turn of the ones after them.
  */
 export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ ended: number; dropped: number; left: number }> {
   const counts = { ended: 0, dropped: 0, left: 0 };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
-  const [raw] = await redisPipeline([["HGETALL", ENDING_KEY]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
-  const fields: [string, unknown][] = [];
-  for (let i = 0; i + 1 < flat.length && fields.length < MAX_NOTES; i += 2) fields.push([String(flat[i]), flat[i + 1]]);
-  counts.left = Math.max(0, flat.length / 2 - fields.length);
+  // Rule 24: the notes and the job's place, each read exactly. One that does not read is unknown: nothing is decided
+  // on a guess (the caller logs it and the next run tries again), never "no notes" or "start from the top".
+  const replies = repliesFor(await redisPipeline([["HGETALL", ENDING_KEY], ["GET", NEXT_KEY]]), 2);
+  if (!replies) throw new UnknownReplyError("the plan refund notes and the daily job's place");
+  const flat = stringList(replies[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(`HGETALL ${ENDING_KEY}`);
+  const last = replies[1];
+  if (last !== null && typeof last !== "string") throw new UnknownReplyError(`GET ${NEXT_KEY}`);
+  const all: [string, string][] = [];
+  for (let i = 0; i < flat.length; i += 2) all.push([flat[i], flat[i + 1]]);
+  // Fair turns: store ids in order, starting after the one looked at last, so every note has its turn however many
+  // stay undecided (finding of Claude 5, 6732230896, and Codex G, G102-Q). Unread notes are never let go to make room.
+  all.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const after = last === null ? 0 : all.findIndex(([sid]) => sid > last);
+  const start = after < 0 ? 0 : after;
+  const fields: [string, string][] = [];
+  for (let j = 0; j < Math.min(MAX_NOTES, all.length); j += 1) fields.push(all[(start + j) % all.length]);
+  counts.left = all.length - fields.length;
+  let passed: string | null = null;
   for (const [sid, value] of fields) {
     if (Date.now() >= deadline) {
       counts.left += 1;
       continue;
     }
+    passed = sid;
     let held;
     try {
       held = await takeLock(flowKeyOf(sid), FLOW_LOCK_SECONDS, 0);
@@ -542,6 +567,16 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
       counts.left += 1;
     } finally {
       await releaseLock(held);
+    }
+  }
+  // The place moves only past the notes whose turn came (not those the deadline left), so none loses its turn. Not
+  // written: the next run looks at the same notes again, which delays the others by a run and decides nothing wrong.
+  if (passed !== null) {
+    try {
+      const [set] = await redisPipeline([["SET", NEXT_KEY, passed, "EX", NEXT_SECONDS]]);
+      if (set !== "OK") console.error("plan-refund: the daily job's place was not confirmed written; the next run may look at the same notes again");
+    } catch (error) {
+      console.error("plan-refund: the daily job's place could not be written; the next run may look at the same notes again", error);
     }
   }
   return counts;

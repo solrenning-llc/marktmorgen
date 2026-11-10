@@ -51,7 +51,8 @@ import { checkChosenFile, sendSubmission } from "@/lib/submission-upload";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import { LessonSubmission } from "@/components/lesson-submission";
 import type { DataStore } from "@/lib/store-data";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
+import { mount, texts } from "./client-hooks";
 import { COURSE, FOLDER, LESSON, resetWorld, state } from "./submission-upload-world";
 import { done, is, part } from "./check";
 
@@ -282,12 +283,17 @@ async function main(): Promise<void> {
     is("Bob cannot withdraw Ana's", await withdrawSubmission({ ...lesson2, who: BOB, id: third.id }, NOW + 600, steps), { ok: false, reason: "gone" });
     is("nor on another lesson", await withdrawSubmission({ ...lesson2, lessonId: LESSON, id: third.id }, NOW + 600, steps), { ok: false, reason: "gone" });
     is("nothing was deleted for them", calls, []);
+    // The decision is kept before the vault is asked (review of #3574): a file the vault did not delete is withdrawn
+    // all the same, said as not deleted, and due on the sweep's list from now, so it goes with the next sweep.
+    const stuck = await sent(ANA, "Stuck.", "lesson0002ab", false, NOW + 550);
     const failing = vault({ deleteVault: async () => false });
-    is("a file the vault did not delete is not withdrawn", await withdrawSubmission({ ...lesson2, id: third.id }, NOW + 600, failing.steps), { ok: false, reason: "unavailable" });
-    is("it still waits", (await readSubmission(FOLDER, third.id))?.state, "submitted");
+    const notDeleted = await withdrawSubmission({ ...lesson2, id: stuck.id }, NOW + 600, failing.steps);
+    is("a file the vault did not delete is withdrawn, and said as not deleted", notDeleted.ok ? { state: notDeleted.submission.state, deleted: notDeleted.deleted } : notDeleted, { state: "withdrawn", deleted: false });
+    is("kept as withdrawn", (await readSubmission(FOLDER, stuck.id))?.state, "withdrawn");
+    is("and due on the sweep's list from now", Number((await redis.pipeline([["ZSCORE", "nl:sub:due", `${FOLDER}|${stuck.path}`]]))[0]), NOW + 600);
     const places = await liveCount(FOLDER, COURSE, "lesson0002ab", ANA, NOW + 600);
     const done1 = await commandsOf(() => withdrawSubmission({ ...lesson2, id: third.id }, NOW + 600, steps));
-    is("withdrawn", done1.value.ok ? { state: done1.value.submission.state, closedAt: done1.value.submission.closedAt } : done1.value, { state: "withdrawn", closedAt: NOW + 600 });
+    is("withdrawn", done1.value.ok ? { state: done1.value.submission.state, closedAt: done1.value.submission.closedAt, deleted: done1.value.deleted } : done1.value, { state: "withdrawn", closedAt: NOW + 600, deleted: true });
     is("its file deleted first", calls, [`vault:delete:${third.path}`]);
     is("kept as withdrawn", (await readSubmission(FOLDER, third.id))?.state, "withdrawn");
     is("its place on the lesson let go", await liveCount(FOLDER, COURSE, "lesson0002ab", ANA, NOW + 600), places - 1);
@@ -333,7 +339,7 @@ async function main(): Promise<void> {
     is("signed out, nothing withdrawn", (await call({ ...route, action: "withdraw", id: fourth.id })).status, 401);
     resetWorld();
     const withdrawn = await call({ ...route, action: "withdraw", id: fourth.id });
-    is("its buyer withdraws it", withdrawn.body, { ok: true, submission: { id: fourth.id, state: "withdrawn" } });
+    is("its buyer withdraws it", withdrawn.body, { ok: true, submission: { id: fourth.id, state: "withdrawn" }, deleted: true });
     is("after one buyer action, and its file deleted", state.events.filter((e) => e === "action" || e === "vault:delete"), ["action", "vault:delete"]);
     is("kept as withdrawn", (await readSubmission(FOLDER, fourth.id))?.state, "withdrawn");
     resetWorld();
@@ -357,7 +363,7 @@ async function main(): Promise<void> {
     is("a real file input, with its label", /<label[^>]*for="submission-file"/.test(html) && /<input[^>]*type="file"[^>]*id="submission-file"|<input[^>]*id="submission-file"[^>]*type="file"/.test(html), true);
     is("it takes only the kinds asked", /accept="\.mp4,\.mov,\.webm,\.pdf"/.test(html), true);
     is("the kinds and the largest file are said beside it", html.includes(w.largest("200 MB")) && html.includes(w.kinds.video) && html.includes(w.kinds.pdf), true);
-    is("and how long the file is kept", html.includes(w.keptFor("Ana's Gym".replace("'", "&#x27;"), 30)), true);
+    is("and how long the file is kept", html.includes(w.keptFor("Ana's Gym".replaceAll("'", "&#x27;"), 30)), true);
     is("the hint is tied to the input", /aria-describedby="submission-file-hint"/.test(html), true);
     is("the note has its own label", /<label[^>]*for="submission-note"/.test(html), true);
     is("its list says it is loading, politely", /role="status"[^>]*>[^<]*Loading your files/.test(html), true);
@@ -381,6 +387,69 @@ async function main(): Promise<void> {
     const brazilian = ["você", "arquivo", "equipe", "Tente de novo", "tente de novo", "Tentar de novo", "Carregando", "Enviando", "Esperando", "conexão", "aceitos", "recado", "Confira", "3.000"];
     is("Portuguese is Portugal's: no Brazilian word or number format", brazilian.filter((word) => pt.includes(word)), []);
     is("and says ficheiro, as the store's other Portuguese does", pt.includes("ficheiro"), true);
+  }
+
+  // Review of #3574 (Codex U, three MÉDIOs).
+  part("Stop: nothing kept is said only when the door confirmed the upload was given up");
+  for (const [label, abortAnswer, expected] of [
+    ["control: the door gave it up", { ok: true }, "stopped"],
+    ["the door could not give it up", { ok: false, error: "files_unavailable" }, "stopped_unconfirmed"],
+    ["the door could not be reached", { ok: false, error: "server_error" }, "stopped_unconfirmed"],
+  ] as const) {
+    const posted: string[] = [];
+    const stop = new AbortController();
+    const file = Object.assign(new Blob([new Uint8Array(10)], { type: "video/mp4" }), { name: "a.mp4" });
+    const result = await sendSubmission(file, SETUP, route, "", {
+      signal: stop.signal,
+      wait: async () => undefined,
+      post: async (body) => {
+        posted.push(String(body.action));
+        if (body.action === "open") return { ok: true, upload: { pathname: "vault/p/sub_w/1-a.mp4", pieces: 1, pieceBytes: 16 * MiB, multipart: true } };
+        if (body.action === "sign") return { ok: true, pieces: [{ number: 1, url: "https://vault.example.test/p", type: null }] };
+        return abortAnswer;
+      },
+      put: async () => (stop.abort(), { status: 0, etag: null }),
+    });
+    is(`${label}: ${expected}`, [result, posted[posted.length - 1]], [{ ok: false, reason: expected }, "abort"]);
+  }
+  is("and \"nothing was kept\" is never what a stop that was not confirmed says", SUBMISSIONS_WORDS.en.stoppedUnconfirmed?.includes("Nothing was kept"), false);
+
+  part("A file past its keeping time is never said to be deleted on the clock alone");
+  {
+    const w = SUBMISSIONS_WORDS.en;
+    const past = Math.floor(Date.now() / 1000) - 86_400;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ ok: true, submissions: [{ id: "e".repeat(32), state: "submitted", file: { name: "old.mp4", bytes: 5 * MiB, type: "video/mp4" }, note: "", at: past - 30 * 86_400, keepUntil: past, reply: null }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    const box = await mount(LessonSubmission as (props: Record<string, unknown>) => unknown, { setup: SETUP, where: route, storeName: "Ana's Gym", language: "en" });
+    const said = texts(box.tree()).join(" ");
+    box.unmount();
+    is("its row is listed", said.includes("old.mp4"), true);
+    is("never \"Deleted\" from the date alone: the sweep may not have deleted it yet", said.includes("Deleted "), false);
+    is("its keeping time is said as ended", said.includes("Keeping time ended"), true);
+    is("and how long a file is kept never promises the deletion as done", /Then it is deleted\./.test(w.keptFor("S", 30)), false);
+  }
+
+  part("A withdrawal never overwrites a reply the creator confirmed meanwhile");
+  {
+    const race = await sent(ANA, "Race.", "lesson0002ab", false, NOW + 900);
+    const lesson2 = { ...at(ANA, "lesson0002ab"), data: SHOP as DataStore };
+    let replied: unknown = "not asked";
+    // While the vault deletes the file, the lock's time runs out, and the creator's reply takes it and is confirmed.
+    const slow = vault({
+      deleteVault: async () => {
+        advance(31_000);
+        replied = await replySubmission({ data: SHOP as DataStore, folder: FOLDER, courseId: COURSE, id: race.id, reply: { text: "Confirmed creator review", file: null } }, NOW + 931);
+        return true;
+      },
+    });
+    const withdrawn = await withdrawSubmission({ ...lesson2, id: race.id }, NOW + 900, slow.steps);
+    const kept = await readSubmission(FOLDER, race.id);
+    const confirmed = (replied as { ok?: boolean }).ok === true;
+    is("a reply confirmed to the creator is still there", confirmed ? kept?.state === "reviewed" && kept?.reply?.text === "Confirmed creator review" : true, true);
+    is("and never both told done: withdrawn to the buyer and answered to the creator", confirmed && withdrawn.ok, false);
   }
 
   done();

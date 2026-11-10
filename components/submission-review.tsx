@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/toast";
 import { MAX_SUBMISSION_REPLY, type SubmissionReply, type SubmissionState, type SubmittedFile } from "@/lib/submission-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -42,7 +42,7 @@ export function size(bytes: number): string {
 }
 
 /** One kept file: what the buyer sent, and the reply, written and then checked before it is sent. */
-function ReviewEntry({ productId, item }: { productId: string; item: Extract<ReviewItem, { unread?: undefined }> }) {
+export function ReviewEntry({ productId, item }: { productId: string; item: Extract<ReviewItem, { unread?: undefined }> }) {
   const [state, setState] = useState(item.state);
   const [reply, setReply] = useState(item.reply);
   const [text, setText] = useState("");
@@ -50,9 +50,24 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirm = useRef<HTMLDivElement>(null);
+  const textBox = useRef<HTMLTextAreaElement>(null);
+  const kept = useRef<HTMLDivElement>(null);
+  // Where focus goes once the control that held it is gone (WCAG 2.4.3): moved after the next render, when the
+  // new elements are in place.
+  const focusTo = useRef<"confirm" | "text" | "reply" | null>(null);
+  const setFocusTo = (to: "confirm" | "text" | "reply") => {
+    focusTo.current = to;
+  };
   const prefix = `review-${item.id}`;
+  useEffect(() => {
+    const to = focusTo.current;
+    if (!to) return;
+    focusTo.current = null;
+    ({ confirm, text: textBox, reply: kept })[to].current?.focus();
+  });
 
   async function send() {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -65,11 +80,13 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
       if (!data.ok || !data.reply) {
         setError(ERRORS[data.error ?? ""] ?? STUDIO_MESSAGES[data.error ?? ""] ?? ERRORS.unavailable);
         setChecking(false);
+        setFocusTo("text");
         return;
       }
       setState(data.state ?? "reviewed");
       setReply(data.reply);
       setChecking(false);
+      setFocusTo("reply");
       // Said as it is: the email goes from the store's own emails, and a spent month or a bounced address sends none.
       toast(
         data.emailed === true
@@ -79,6 +96,7 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
     } catch {
       setError(ERRORS.unavailable);
       setChecking(false);
+      setFocusTo("text");
     } finally {
       setBusy(false);
     }
@@ -98,7 +116,7 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
         </div>
       ) : null}
       {reply ? (
-        <div className="mt-3 border-t border-line pt-3">
+        <div ref={kept} tabIndex={-1} className="mt-3 border-t border-line pt-3">
           <p className="field-label">{`Your reply, ${day(reply.at)}`}</p>
           <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink">{reply.text}</p>
         </div>
@@ -111,12 +129,13 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
             setError(null);
             setChecking(true);
             // The check is moved to, so a keyboard or screen reader user lands on what to confirm.
-            requestAnimationFrame(() => confirm.current?.focus());
+            setFocusTo("confirm");
           }}
         >
           <label className="block">
             <span className="field-label">Your reply</span>
             <textarea
+              ref={textBox}
               className="field mt-2"
               rows={4}
               maxLength={MAX_SUBMISSION_REPLY}
@@ -136,10 +155,20 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
                 Send this reply? It cannot be changed once it is sent, and the buyer is emailed about it once.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className="btn btn-primary btn-sm" disabled={busy} aria-busy={busy} onClick={send}>
+                {/* Kept focusable while it sends (aria-disabled), so focus never leaves the check. */}
+                <button type="button" className="btn btn-primary btn-sm" aria-disabled={busy} aria-busy={busy} onClick={send}>
                   {busy ? "Sending…" : "Send the reply"}
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setChecking(false)}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  aria-disabled={busy}
+                  onClick={() => {
+                    if (busy) return;
+                    setChecking(false);
+                    setFocusTo("text");
+                  }}
+                >
                   Change it
                 </button>
               </div>
@@ -168,23 +197,24 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
  */
 export function SubmissionReview({ productId }: { productId: string }) {
   const [items, setItems] = useState<ReviewItem[] | null>(null);
-  const [next, setNext] = useState<number | null>(null);
+  const [next, setNext] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(before?: number) {
+  async function load(before?: string) {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      const after = before === undefined ? "" : `&before=${before}`;
+      const after = before === undefined ? "" : `&before=${encodeURIComponent(before)}`;
       const response = await fetch(`/api/store/course/submissions?id=${encodeURIComponent(productId)}&list=1${after}`, { cache: "no-store" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; rows?: ReviewItem[]; next?: number | null };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; rows?: ReviewItem[]; next?: string | null };
       if (!data.ok || !Array.isArray(data.rows)) {
         setError(ERRORS[data.error ?? ""] ?? STUDIO_MESSAGES[data.error ?? ""] ?? ERRORS.unavailable);
         return;
       }
       setItems(before === undefined ? data.rows : [...(items ?? []), ...data.rows]);
-      setNext(typeof data.next === "number" ? data.next : null);
+      setNext(typeof data.next === "string" ? data.next : null);
     } catch {
       setError(ERRORS.unavailable);
     } finally {
@@ -199,7 +229,7 @@ export function SubmissionReview({ productId }: { productId: string }) {
       </h2>
       <p className="mt-1 text-sm text-ink-soft">Files buyers sent you for review on this course&rsquo;s lessons, newest first.</p>
       {items === null ? (
-        <button type="button" className="btn btn-secondary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={() => load()}>
+        <button type="button" className="btn btn-secondary btn-sm mt-3" aria-disabled={busy} aria-busy={busy} onClick={() => load()}>
           {busy ? "Opening…" : "Show files to review"}
         </button>
       ) : items.length === 0 ? (
@@ -221,7 +251,7 @@ export function SubmissionReview({ productId }: { productId: string }) {
             )}
           </ul>
           {next !== null ? (
-            <button type="button" className="btn btn-secondary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={() => load(next)}>
+            <button type="button" className="btn btn-secondary btn-sm mt-3" aria-disabled={busy} aria-busy={busy} onClick={() => load(next)}>
               {busy ? "Opening…" : "Show older files"}
             </button>
           ) : null}

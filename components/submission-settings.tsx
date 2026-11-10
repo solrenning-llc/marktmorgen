@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
 import {
@@ -67,7 +67,19 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
   const [error, setError] = useState<string | null>(null);
   const [undo, setUndo] = useState<SubmissionSetup | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
+  const main = useRef<HTMLButtonElement>(null);
+  // Once the form or the undo line that held focus is gone, focus goes to the panel's main button (WCAG 2.4.3),
+  // after the next render, when it is in place.
+  const focusMain = useRef(false);
+  const setFocusMain = (on: boolean) => {
+    focusMain.current = on;
+  };
   const prefix = `submission-${lessonId}`;
+  useEffect(() => {
+    if (!focusMain.current) return;
+    focusMain.current = false;
+    main.current?.focus();
+  });
   useLeaveGuard(draft !== null && JSON.stringify(draft) !== opened && !busy);
 
   async function read(): Promise<SubmissionSetup | null | undefined> {
@@ -91,6 +103,7 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
   }
 
   async function open() {
+    if (busy) return;
     const now = setup === undefined ? await read() : setup;
     if (now === undefined) return;
     const fresh: Draft = now ?? { instruction: "", kinds: ["video"], maxBytes: DEFAULT_SUBMISSION_BYTES, keepDays: DEFAULT_SUBMISSION_KEEP_DAYS };
@@ -99,6 +112,7 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
   }
 
   async function send(next: SubmissionSetup | null): Promise<{ ok: boolean; was?: SubmissionSetup | null }> {
+    if (busy) return { ok: false };
     setBusy(true);
     setError(null);
     try {
@@ -139,7 +153,7 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
             Ask buyers of this course to send you a video, a photo or a PDF for this lesson, and answer each one in writing.
           </p>
         )}
-        <button type="button" className="btn btn-secondary btn-sm mt-2" disabled={busy} aria-busy={busy} onClick={open}>
+        <button ref={main} type="button" className="btn btn-secondary btn-sm mt-2" aria-disabled={busy} aria-busy={busy} onClick={open}>
           {busy ? "Opening…" : setup === undefined ? "Open these settings" : setup ? "Change what you ask for" : "Ask for a submission"}
         </button>
         {undo ? (
@@ -148,11 +162,12 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              disabled={busy}
+              aria-disabled={busy}
               onClick={async () => {
                 const done = await send(undo);
                 if (done.ok) {
                   setUndo(null);
+                  setFocusMain(true);
                   toast("Asking for files again, as before.");
                 }
               }}
@@ -181,6 +196,7 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
         if (done.ok) {
           toast("Saved. Buyers of this course are asked for a file on this lesson.");
           setDraft(null);
+          setFocusMain(true);
         }
       }}
     >
@@ -240,22 +256,23 @@ export function SubmissionSettings({ productId, lessonId }: { productId: string;
       </label>
       {errorLine}
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-        <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm">
+        <button type="submit" aria-busy={busy} aria-disabled={busy} className="btn btn-primary btn-sm">
           {busy ? "Saving…" : "Save"}
         </button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); setError(null); }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); setError(null); setFocusMain(true); }}>
           Cancel
         </button>
         {setup ? (
           <button
             type="button"
             className="btn btn-ghost btn-sm ml-auto"
-            disabled={busy}
+            aria-disabled={busy}
             onClick={async () => {
               const done = await send(null);
               if (done.ok) {
                 setDraft(null);
                 setUndo(done.was ?? setup);
+                setFocusMain(true);
               }
             }}
           >

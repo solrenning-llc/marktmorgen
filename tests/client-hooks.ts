@@ -20,8 +20,29 @@ const same = (a?: unknown[], b?: unknown[]) => !!a && !!b && a.length === b.leng
 
 export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmount: () => void };
 
-/** Renders `component(props)`, runs its effects, and re-renders on every state change. */
-export async function mount<P>(component: (props: P) => unknown, props: P): Promise<Mounted> {
+type RefNode = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
+/** Every ref object a host element of the tree is given (`ref={someRef}`), with that element. */
+function refsOf(node: unknown, out: [{ current: unknown }, RefNode][] = []): [{ current: unknown }, RefNode][] {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) {
+    node.forEach((child) => refsOf(child, out));
+    return out;
+  }
+  const n = node as RefNode;
+  const ref = n.props?.ref;
+  if (typeof n.type === "string" && ref && typeof ref === "object" && "current" in ref) out.push([ref as { current: unknown }, n]);
+  refsOf(n.props?.children, out);
+  return out;
+}
+
+/**
+ * Renders `component(props)`, runs its effects, and re-renders on every state change.
+ * With `attach`, each ref object a host element is given is set, as React does, before
+ * the effects run: to what `attach` answers for that element (a stand-in with focus(),
+ * for example), and back to null once the element is no longer rendered.
+ */
+export async function mount<P>(component: (props: P) => unknown, props: P, options: { attach?: (node: RefNode) => unknown } = {}): Promise<Mounted> {
+  let attached = new Set<{ current: unknown }>();
   const slots: Slot[] = [];
   let index = 0;
   let dirty = false;
@@ -85,6 +106,15 @@ export async function mount<P>(component: (props: P) => unknown, props: P): Prom
       last = component(props);
     } finally {
       internals.H = before;
+    }
+    if (options.attach) {
+      const now = new Set<{ current: unknown }>();
+      for (const [ref, node] of refsOf(last)) {
+        now.add(ref);
+        if (!attached.has(ref)) ref.current = options.attach(node);
+      }
+      for (const ref of attached) if (!now.has(ref)) ref.current = null;
+      attached = now;
     }
     while (pending.length) pending.shift()!();
   };

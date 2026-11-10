@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
         const status = { gone: 404, state: 409, expired: 409, full: 409, unavailable: 503 }[withdrawn.reason];
         return no(withdrawn.reason === "gone" ? "unknown" : withdrawn.reason === "unavailable" ? "files_unavailable" : withdrawn.reason, status);
       }
-      return yes({ submission: { id: withdrawn.submission.id, state: withdrawn.submission.state } });
+      return yes({ submission: { id: withdrawn.submission.id, state: withdrawn.submission.state }, deleted: withdrawn.deleted });
     }
 
     const setup = await readSetupFor(course.id, place.lesson.id);

@@ -184,8 +184,9 @@ export function LessonSubmission({
       setSaid(w.sent(storeName));
       status.current?.focus();
       void load();
-    } else if (result.reason === "stopped") {
-      setSaid(w.stopped);
+    } else if (result.reason === "stopped" || result.reason === "stopped_unconfirmed") {
+      // "Nothing was kept" only when the door confirmed it; otherwise said as not confirmed (review of #3574).
+      setSaid(result.reason === "stopped" ? w.stopped : w.stoppedUnconfirmed);
       status.current?.focus();
       void load();
     } else {
@@ -201,7 +202,8 @@ export function LessonSubmission({
     setWorking(null);
     if (answer.ok) {
       setAsking(null);
-      setSaid(w.withdrawn(row.file.name));
+      // Its file is said deleted only when the door confirmed it; otherwise it is due to be deleted (the sweep).
+      setSaid(answer.deleted === true ? w.withdrawn(row.file.name) : w.withdrawnPending(row.file.name));
       status.current?.focus();
       void load();
       // Not withdrawn: the question stays open, with the reason said as an alert, and focus stays on its button.
@@ -320,7 +322,7 @@ export function LessonSubmission({
                       </button>
                     ) : (
                       <>
-                        <p className="st-muted mt-1">{row.keepUntil * 1000 > list.now ? w.keptUntil(day(row.keepUntil)) : w.deletedOn(day(row.keepUntil))}</p>
+                        <p className="st-muted mt-1">{row.keepUntil * 1000 > list.now ? w.keptUntil(day(row.keepUntil)) : w.keepingEnded(day(row.keepUntil))}</p>
                         {row.note ? (
                           <div className="mt-2">
                             <p className="st-label">{w.yourNote}</p>

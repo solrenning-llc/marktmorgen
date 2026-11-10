@@ -1,0 +1,218 @@
+diff --git a/docs/reservations/claude3.md b/docs/reservations/claude3.md
+index 4321c4205..14463b1d5 100644
+--- a/docs/reservations/claude3.md
++++ b/docs/reservations/claude3.md
+@@ -14,3 +14,4 @@ Only Claude 3 edits this file (owner, through Claude 1's inbox message C3-7, 02/
+ | Claude 3 | Rule-30 sweep from #2517: money subscription replies checked for their own id | claude3/sub-identity-money | `lib/closing-holds.ts`, `lib/plan-disputes.ts`, `lib/plan-refund.ts`, `tests/closing-holds-own-reply.test.ts`, `tests/plan-dispute.test.ts`, `tests/plan-refund-read.test.ts`, `lib/closing-refunds.ts`, `tests/closing-refunds-own-reply.test.ts` | 07/11/2026 16h15 |
+ | Claude 3 | Rule-30 follow-up: closing-holds acts only on list rows of the subscription asked for | claude3/closing-holds-rows | `lib/closing-holds.ts`, `tests/closing-holds-own-reply.test.ts`, `tests/store-closing-fair.test.ts` | 07/11/2026 16h45 |
+ | Claude 3 | The offer after paying refuses a store that cannot sell (suspended, sales closed) and a product that cannot be sold, before any Stripe charge or write | claude3/upsell-can-sell | `app/api/store/upsell/route.ts`, `lib/upsell.ts`, `tests/upsell-can-sell.test.ts` | 08/11/2026 |
++| Claude 3 | Claude 4's LOW on #2692: a plan-refund note with damaged debt evidence is let go after GIVE_UP_DAYS and the creator told (stacked on codex/c-mr2-refund-allowance-evidence) | claude3/plan-refund-damaged-note | `lib/plan-refund-flow.ts`, `lib/plan-refund-words.ts`, `tests/plan-refund-note-evidence.test.ts` | 10/11/2026 15h40 |
+diff --git a/lib/plan-refund-flow.ts b/lib/plan-refund-flow.ts
+index 8ce9432fe..239f4c967 100644
+--- a/lib/plan-refund-flow.ts
++++ b/lib/plan-refund-flow.ts
+@@ -50,7 +50,7 @@ import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef
+ import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
+ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+ import { SUPPORT_EMAIL } from "@/lib/creator-research";
+-import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
++import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter, planRefundUnknownLetter } from "@/lib/plan-refund-words";
+ import { randomBytes } from "node:crypto";
+ import { types } from "node:util";
+ import { UnknownReplyError } from "@/lib/redis-reply";
+@@ -94,7 +94,11 @@ export type Note = { s: string; at: number; t: number; m: 0 | 1; p?: NotedPart[]
+ /** A charge the refund was about to give back, and how much (written before any money moves). */
+ export type NotedPart = { c: string; a: number };
+ 
+-const INVALID_NOTED_PARTS = Symbol("invalid noted plan-refund parts");
++/**
++ * A note whose debt list is present but damaged: what remains owed is unknown. Its plan, its time and whether we set
++ * a stop are still read, so the daily job can let it go after GIVE_UP_DAYS and tell the creator (Claude 4 on #2692).
++ */
++type DamagedNote = { damaged: true; s: string; at: number; m: 0 | 1 };
+ 
+ export type PlanRefundFlow =
+   /** Given back; `ended` false: the plan is ended by the daily job. `earlier`: given back by an earlier request. */
+@@ -105,7 +109,7 @@ export type PlanRefundFlow =
+ type Row = Record<string, unknown>;
+ const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
+ 
+-function readNote(raw: unknown): Note | typeof INVALID_NOTED_PARTS | null {
++function readNote(raw: unknown): Note | DamagedNote | null {
+   if (typeof raw !== "string") return null;
+   try {
+     const v = JSON.parse(raw) as Partial<Note>;
+@@ -116,7 +120,7 @@ function readNote(raw: unknown): Note | typeof INVALID_NOTED_PARTS | null {
+     // A legacy note may have no debt list. Once `p` is present, however, every entry is durable evidence of what
+     // remains owed. Treating a damaged present list as absent would fall back to a store-wide search and could
+     // mistake one refund for the whole multi-charge debt.
+-    if (hasParts && !p) return INVALID_NOTED_PARTS;
++    if (hasParts && !p) return { damaged: true, s: v.s, at: v.at, m: v.m === 1 ? 1 : 0 };
+     return { s: v.s, at: v.at, t, m: v.m === 1 ? 1 : 0, ...(p ? { p } : {}) };
+   } catch {
+     return null;
+@@ -152,7 +156,7 @@ const noteOf = async (sid: string): Promise<Note | null> => {
+   const raw = await oneNoteReply(["HGET", ENDING_KEY, sid], "the plan-refund recovery note");
+   if (raw === null) return null;
+   const note = readNote(raw);
+-  if (!note || note === INVALID_NOTED_PARTS) throw new UnknownReplyError("the plan-refund recovery note");
++  if (!note || "damaged" in note) throw new UnknownReplyError("the plan-refund recovery note");
+   return note;
+ };
+ 
+@@ -528,9 +532,26 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
+     }
+     try {
+       const note = readNote(value);
+-      if (note === INVALID_NOTED_PARTS) {
+-        console.error(`plan-refund: store ${sid}'s recovery note has unknown debt evidence; it is retained`);
+-        counts.left += 1;
++      if (note && "damaged" in note) {
++        // Retained, byte for byte, for GIVE_UP_DAYS: no refund, no end and no stop taken back on it. Past them it is let
++        // go, the plan as it is (a stop stays), and the creator is told that what was refunded could not be confirmed,
++        // what Stripe shows of the plan, and to write to support; never kept forever with only a log line.
++        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
++          console.error(`plan-refund: store ${sid}'s recovery note has unknown debt evidence; it is retained`);
++          counts.left += 1;
++          continue;
++        }
++        const damagedStore = await storeForId(sid);
++        console.error(`plan-refund: store ${sid}'s recovery note had unknown debt evidence for ${GIVE_UP_DAYS} days; it is dropped and the creator told`);
++        await dropNote(sid);
++        if (damagedStore) {
++          // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
++          // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
++          const sub = await subscriptionOf(note.s);
++          const plan = !sub ? "unknown" : sub.status === "canceled" ? "ended" : stopSet(sub) ? "stops" : "renews";
++          await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan }), `plan-refund-unknown:${sid}:${note.at}`);
++        }
++        counts.dropped += 1;
+         continue;
+       }
+       const store = note ? await storeForId(sid) : null;
+diff --git a/lib/plan-refund-words.ts b/lib/plan-refund-words.ts
+index 6794b0c9a..3c45edd3d 100644
+--- a/lib/plan-refund-words.ts
++++ b/lib/plan-refund-words.ts
+@@ -145,3 +145,29 @@ export const REFUND_DONE: Record<string, { tone: "success" | "warn"; title: stri
+   none: { tone: "warn", title: "Nothing was refunded", body: "The reason is below." },
+   owner: { tone: "warn", title: "Only the store's owner can ask for this refund", body: "Ask the owner of this store to open this page." },
+ };
++
++/**
++ * When a refund's record of what was still owed was damaged and stayed unreadable for GIVE_UP_DAYS: we do not know how
++ * much went through, so the letter says only that, the plan as Stripe shows it (or to check the studio when it cannot
++ * be read), and who settles it (Claude 4 on #2692 and #3585).
++ */
++export function planRefundUnknownLetter(o: { store: string; plan: "stops" | "renews" | "ended" | "unknown" }): { subject: string; text: string } {
++  const store = o.store || "your store";
++  return {
++    subject: `${store}: we could not confirm your refund`,
++    text: [
++      `We could not confirm how much of the refund you asked for on your Marktmorgen plan for ${store} went through.`,
++      "",
++      o.plan === "stops"
++        ? "Your plan is set to stop at the end of the period you paid for, and nothing more will be charged for it."
++        : o.plan === "renews"
++          ? "Your plan goes on and renews as usual unless you cancel it in your studio."
++          : o.plan === "ended"
++            ? "Your plan has ended, and nothing more will be charged for it."
++            : "We could not read your plan just now, so check your plan in your studio to see whether it renews.",
++      `Reply to this email or write to ${SUPPORT_ADDRESS}, and we will check your refund and settle anything still owed.`,
++      "",
++      "Marktmorgen",
++    ].join("\n"),
++  };
++}
+diff --git a/tests/plan-refund-note-evidence.test.ts b/tests/plan-refund-note-evidence.test.ts
+index 51bbb1424..729d7c1ed 100644
+--- a/tests/plan-refund-note-evidence.test.ts
++++ b/tests/plan-refund-note-evidence.test.ts
+@@ -5,7 +5,7 @@
+  */
+ import assert from "node:assert/strict";
+ import test from "node:test";
+-import { ENDING_KEY, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
++import { ENDING_KEY, GIVE_UP_DAYS, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
+ import { redisPipeline } from "@/lib/redis";
+ import { store as redis } from "./redis-stub";
+ import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
+@@ -163,5 +163,78 @@ await t.test(`present debt evidence with a ${malformed} is retained`, async () =
+   assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0);
+   assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
+ });
++await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_DAYS, with the creator told (Claude 4's LOW on #2692)`, async () => {
++  await reset();
++  const shop = await paidShop({ at: NOW - 20 * DAY });
++  shop.addPayment(NOW - 2 * DAY);
++  world.refundsLeft = 1;
++  try { await refundAndEndPlan(await shop.store(), NOW); }
++  finally { world.refundsLeft = null; }
++  const store = await shop.store();
++  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number };
++  note.p = malformed === "null entry" ? [null] : [note.p[0], null];
++  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
++  const callsBefore = world.calls.length;
++  world.emails = [];
++  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
++  try {
++  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
++
++  assert.equal(await shop.note(), null, "past GIVE_UP_DAYS the unknown note is let go, never kept forever");
++  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0, "the plan is never ended on unknown debt evidence");
++  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("POST /refunds")).length, 0, "no refund is made on it");
++  assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
++  assert.equal(world.emails.length, 1, "the creator is told once");
++  assert.equal(world.emails[0].subject.endsWith("we could not confirm your refund"), true);
++  assert.equal(world.emails[0].text.includes("We could not confirm how much of the refund"), true, "the letter says what is not known, not that part went through");
++  assert.equal(world.emails[0].text.includes("set to stop at the end of the period you paid for"), true, "and says what Stripe shows of the plan: the stop this refund set is still there");
++  assert.equal(world.emails[0].text.includes("support@marktmorgen.com"), true);
++
++  world.emails = [];
++  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
++  assert.equal(world.emails.length, 0, "a second run sends nothing more");
++  } finally {
++    delete process.env.RESEND_API_KEY;
++  }
++});
++}
++
++for (const plan of ["the creator's own stop", "kept by the creator", "unreadable", "gone at Stripe"] as const) {
++await t.test(`the give-up letter says what Stripe shows of the plan, not the note's flag: ${plan} (Claude 4's LOW on #3585)`, async () => {
++  await reset();
++  const shop = await paidShop({ at: NOW - 20 * DAY, stopSet: plan === "the creator's own stop" });
++  shop.addPayment(NOW - 2 * DAY);
++  world.refundsLeft = 1;
++  try { await refundAndEndPlan(await shop.store(), NOW); }
++  finally { world.refundsLeft = null; }
++  const store = await shop.store();
++  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number; s: string };
++  note.p = [null];
++  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
++  const row = world.subs.get(note.s)!;
++  if (plan === "kept by the creator") row.cancel_at_period_end = false;
++  if (plan === "unreadable") row.status = 42;
++  if (plan === "gone at Stripe") world.subs.delete(note.s);
++  const callsBefore = world.calls.length;
++  world.emails = [];
++  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
++  try {
++    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
++  } finally {
++    delete process.env.RESEND_API_KEY;
++  }
++  assert.equal(await shop.note(), null);
++  assert.equal(world.calls.slice(callsBefore).filter((call) => !call.startsWith("GET ")).filter((call) => call.includes("/subscriptions/") || call.startsWith("POST /refunds")).length, 0, "the letter only reads the plan; nothing is changed or refunded");
++  assert.equal(world.emails.length, 1);
++  const text = world.emails[0].text;
++  const said = {
++    stops: text.includes("set to stop at the end of the period you paid for"),
++    renews: text.includes("renews as usual"),
++    ended: text.includes("Your plan has ended"),
++    check: text.includes("check your plan in your studio"),
++  };
++  const expected = plan === "the creator's own stop" ? "stops" : plan === "kept by the creator" ? "renews" : plan === "gone at Stripe" ? "ended" : "check";
++  assert.deepEqual(Object.entries(said).filter(([, on]) => on).map(([k]) => k), [expected], `the letter says only "${expected}" (note m was ${note.m})`);
++});
+ }
+ });

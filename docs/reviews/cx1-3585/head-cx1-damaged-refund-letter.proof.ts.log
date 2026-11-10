@@ -1,0 +1,78 @@
+✔ damaged-note letter: stops control (361.0543ms)
+✔ damaged-note letter: renews control (139.8738ms)
+✖ damaged-note letter: unknown status (150.7438ms)
+✖ damaged-note letter: missing stop flag (119.3741ms)
+✖ damaged-note letter: string stop flag (150.6511ms)
+✖ damaged-note letter: string cancel_at (121.6712ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 2
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1055.317
+
+✖ failing tests:
+
+test at .cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12839:32
+✖ damaged-note letter: unknown status (150.7438ms)
+  AssertionError [ERR_ASSERTION]: unknown provider evidence must select the uncertainty sentence
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3585\.cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12859:29)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'We could not confirm how much of the refund you asked for on your Marktmorgen plan for Flow 3 went through.\n\nYour plan goes on and renews as usual unless you cancel it in your studio.\nReply to this email or write to support@marktmorgen.com, and we will check your refund and settle anything still owed.\n\nMarktmorgen',
+    expected: /We could not read your plan just now/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12839:32
+✖ damaged-note letter: missing stop flag (119.3741ms)
+  AssertionError [ERR_ASSERTION]: unknown provider evidence must select the uncertainty sentence
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3585\.cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12859:29)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'We could not confirm how much of the refund you asked for on your Marktmorgen plan for Flow 4 went through.\n\nYour plan goes on and renews as usual unless you cancel it in your studio.\nReply to this email or write to support@marktmorgen.com, and we will check your refund and settle anything still owed.\n\nMarktmorgen',
+    expected: /We could not read your plan just now/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12839:32
+✖ damaged-note letter: string stop flag (150.6511ms)
+  AssertionError [ERR_ASSERTION]: unknown provider evidence must select the uncertainty sentence
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3585\.cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12859:29)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'We could not confirm how much of the refund you asked for on your Marktmorgen plan for Flow 5 went through.\n\nYour plan goes on and renews as usual unless you cancel it in your studio.\nReply to this email or write to support@marktmorgen.com, and we will check your refund and settle anything still owed.\n\nMarktmorgen',
+    expected: /We could not read your plan just now/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12839:32
+✖ damaged-note letter: string cancel_at (121.6712ms)
+  AssertionError [ERR_ASSERTION]: unknown provider evidence must select the uncertainty sentence
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3585\.cx1-evidence\cx1-damaged-refund-letter.proof.ts.cjs:12859:29)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'We could not confirm how much of the refund you asked for on your Marktmorgen plan for Flow 6 went through.\n\nYour plan goes on and renews as usual unless you cancel it in your studio.\nReply to this email or write to support@marktmorgen.com, and we will check your refund and settle anything still owed.\n\nMarktmorgen',
+    expected: /We could not read your plan just now/,
+    operator: 'match',
+    diff: 'simple'
+  }
+plan-refund: store dc887f6307f64cdfa2c206c431b74683's recovery note had unknown debt evidence for 7 days; it is dropped and the creator told
+plan-refund: store b852a9544dd54aa6b662ac39cd1371d1's recovery note had unknown debt evidence for 7 days; it is dropped and the creator told
+plan-refund: store edc6da49200941948dbf9fcbabd317af's recovery note had unknown debt evidence for 7 days; it is dropped and the creator told
+plan-refund: store d037c40497964830b2bc1fd6a96cd5f4's recovery note had unknown debt evidence for 7 days; it is dropped and the creator told
+plan-refund: store 280eafcb42474deb9bced0cc9e5d75f9's recovery note had unknown debt evidence for 7 days; it is dropped and the creator told
+plan-refund: store 4026902c508941bbac5ce0c4489922ab's recovery note had unknown debt evidence for 7 days; it is dropped and the creator told

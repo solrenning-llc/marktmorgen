@@ -1,0 +1,26 @@
+{
+  "cx1-damaged-refund-letter.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "ℹ fail 4",
+      "✖ failing tests:",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {"
+    ]
+  },
+  "plan-refund-note-evidence.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "✖ failing tests:",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down",
+      "making a plan refund failed BillingError: Stripe billing failed (500 api_error): down",
+      "making a plan refund failed Error: CX1 aggregate http cap",
+      "reading a plan payment's refunds failed Error: CX1 aggregate http cap"
+    ]
+  }
+}

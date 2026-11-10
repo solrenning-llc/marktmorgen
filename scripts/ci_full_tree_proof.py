@@ -29,7 +29,12 @@ def current_repo(env=os.environ):
 REPO = current_repo()
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 WORKFLOWS = {
-    "product-checks": {"verify", "form-opportunity-redis", "Mobile render (candidate)", "Cross-browser (firefox)", "Cross-browser (webkit)"},
+    # The jobs of product-checks.yml as GitHub names them, matrix expanded: every share of npm test and every part of
+    # the browser file on every engine must have passed.
+    "product-checks": {"verify", "form-opportunity-redis", "Mobile render (candidate)"}
+        | {"Behavior regressions (" + str(shard) + "/4)" for shard in range(1, 5)}
+        | {"Copying a whole store (chromium " + str(part) + "/3)" for part in range(1, 4)}
+        | {"Cross-browser (" + browser + " " + str(part) + "/3)" for browser in ("firefox", "webkit") for part in range(1, 4)},
     "dependency-security": {"audit"},
     "accessibility-real-readers": {"Real reader entry (windows-latest)", "Real reader entry (macos-latest)"},
 }

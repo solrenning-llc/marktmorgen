@@ -1,0 +1,71 @@
+
+The days
+  ok    a whole number from 1 to the cap, and nothing else
+  ok    the cap is 90 days
+  ok    the next charge moves exactly the days given
+  ok    a running membership's next charge, and why another has none to move
+  ok    a membership on a schedule of changes is left alone
+
+What the studio is shown
+  ok    only this store's running memberships of that address, each with its next charge
+  ok    the discount's own reading still reads the same memberships (healthy control)
+
+Refused before Stripe is asked
+  ok    another store's membership
+  ok    a payment plan
+  ok    one set to end
+  ok    one behind on a payment
+  ok    no days, or more than the cap
+  ok    a next charge that is not the one the creator saw
+  ok    nothing was sent to Stripe for any of them
+
+An answer that cannot be read records nothing as done
+  ok    Stripe failing: unknown
+  ok    Stripe answering without the date asked for: unknown
+  ok    Redis answering the claim in an unknown shape: unknown
+  ok    and Stripe was not asked then
+  ok    no log line and no email for any of them
+  ok    Stripe saying no: refused, nothing changed
+  ok    the membership still has its date
+
+Giving the days
+  ok    given, with the new next charge
+  ok    on the creator's account, by trial_end with no proration, with an idempotency key
+  ok    the membership's next charge on Stripe moved exactly 14 days
+  ok    who gave it, when and how many days is in the activity log
+  ok    the member is emailed once
+  ok    and the email was taken from the store's own emails first
+  ok    in the store's language, with the new date
+  ok    pressing again with the date seen before: the date already moved, nothing more
+
+Two presses at once
+  ok    one gives the days, the other is told it is under way
+  ok    Stripe asked once, the member emailed once
+  ok    a trial's end moved exactly the days given
+
+The member's words
+  ok    in every language a membership speaks
+  ok    each its own, not English again
+  ok    one day and many
+
+Who may give them
+  ok    only a role that may touch payments
+  ok    the studio draws it only for that role
+  ok    an admin is refused by the route, and Stripe is not asked
+  ok    the route asks for the payments permission
+
+The studio's form
+  ok    a labeled whole number with its bounds and a hint
+  ok    a review step that shows the new date before anything changes
+  ok    the result announced and errors said
+
+42 checks, all passing.
+giving a member free days failed StripeError: Stripe request failed (500 unknown): Something went wrong on Stripe's end.
+    at onAccount (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2979\.cx1-evidence\member-free-days.test.ts.cjs:16028:11)
+    at async giveFreeDays (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2979\.cx1-evidence\member-free-days.test.ts.cjs:64355:14)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-2979\.cx1-evidence\member-free-days.test.ts.cjs:64830:34) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: "Something went wrong on Stripe's end."
+}
+Stripe's answer to free days did not carry the new date sub_live000001

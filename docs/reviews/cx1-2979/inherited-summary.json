@@ -1,0 +1,14 @@
+{
+  "cx1-2979-discount-write.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  unknown discount sends no POST",
+      "  FAIL  empty object: unknown receipt must not be reported done",
+      "  FAIL  empty array: unknown receipt must not be reported done",
+      "  FAIL  null: unknown receipt must not be reported done",
+      "  FAIL  foreign subscription: unknown receipt must not be reported done",
+      "11 checks, 6 failing."
+    ]
+  }
+}

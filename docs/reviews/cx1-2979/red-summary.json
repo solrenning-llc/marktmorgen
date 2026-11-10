@@ -1,0 +1,14 @@
+{
+  "member-discount-exact.test.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "  FAIL  the discount route: 503 unavailable, saying it could not check",
+      "  FAIL  the discount route's apply: 503 unavailable, nothing changed",
+      "  FAIL  the free days route: 503 unavailable, saying it could not check",
+      "  FAIL  the free days route's give: 503 unavailable, nothing changed",
+      "  FAIL  both pages",
+      "58 checks, 52 failing."
+    ]
+  }
+}

@@ -1,0 +1,110 @@
+
+Healthy control: Stripe's own shapes read as before
+  ok    no discount: found, the code goes on once
+  ok    a discount already there (an id): refused, nothing sent
+  ok    a discount already there (expanded): refused, nothing sent
+  ok    Stripe's shapes: an id, an object, none, the old single field
+
+A membership's `discounts` in another shape is not 'no discount'
+  ok    a list object: shown as not known, never as no discount
+  ok    a list object: the code is not put on, nothing sent to Stripe
+  ok    one id as text: shown as not known, never as no discount
+  ok    one id as text: the code is not put on, nothing sent to Stripe
+  ok    missing: shown as not known, never as no discount
+  ok    missing: the code is not put on, nothing sent to Stripe
+  ok    null: shown as not known, never as no discount
+  ok    null: the code is not put on, nothing sent to Stripe
+  ok    a number: shown as not known, never as no discount
+  ok    a number: the code is not put on, nothing sent to Stripe
+  ok    an old single `discount` in another shape is not known
+
+A list in another shape is 'could not check', never 'no membership'
+  ok    customers without data: the memberships are not known
+  ok    customers without data: apply is refused as not known, nothing sent
+  ok    customers without data: free days read none of it as no membership
+  ok    customers without data: free days are not given, nothing sent
+  ok    customers without has_more: the memberships are not known
+  ok    customers without has_more: apply is refused as not known, nothing sent
+  ok    customers without has_more: free days read none of it as no membership
+  ok    customers without has_more: free days are not given, nothing sent
+  ok    customers as a list of rows: the memberships are not known
+  ok    customers as a list of rows: apply is refused as not known, nothing sent
+  ok    customers as a list of rows: free days read none of it as no membership
+  ok    customers as a list of rows: free days are not given, nothing sent
+  ok    a customer row that cannot be read: the memberships are not known
+  ok    a customer row that cannot be read: apply is refused as not known, nothing sent
+  ok    a customer row that cannot be read: free days read none of it as no membership
+  ok    a customer row that cannot be read: free days are not given, nothing sent
+  ok    more customers than one page: the memberships are not known
+  ok    more customers than one page: apply is refused as not known, nothing sent
+  ok    more customers than one page: free days read none of it as no membership
+  ok    more customers than one page: free days are not given, nothing sent
+  ok    subscriptions with data as an object: the memberships are not known
+  ok    subscriptions with data as an object: apply is refused as not known, nothing sent
+  ok    subscriptions with data as an object: free days read none of it as no membership
+  ok    subscriptions with data as an object: free days are not given, nothing sent
+  ok    subscriptions without has_more: the memberships are not known
+  ok    subscriptions without has_more: apply is refused as not known, nothing sent
+  ok    subscriptions without has_more: free days read none of it as no membership
+  ok    subscriptions without has_more: free days are not given, nothing sent
+  ok    a subscription row that cannot be read: the memberships are not known
+  ok    a subscription row that cannot be read: apply is refused as not known, nothing sent
+  ok    a subscription row that cannot be read: free days read none of it as no membership
+  ok    a subscription row that cannot be read: free days are not given, nothing sent
+  ok    subscriptions over more pages than are read: the memberships are not known
+  ok    subscriptions over more pages than are read: apply is refused as not known, nothing sent
+  ok    subscriptions over more pages than are read: free days read none of it as no membership
+  ok    subscriptions over more pages than are read: free days are not given, nothing sent
+  ok    the discount route: 503 unavailable, saying it could not check
+  ok    the discount route's apply: 503 unavailable, nothing changed
+  ok    the free days route: 503 unavailable, saying it could not check
+  ok    the free days route's give: 503 unavailable, nothing changed
+  ok    healthy control: nobody under that address is still 'none'
+
+A member's memberships over more than one page are all read
+  ok    both pages
+
+The studio
+  ok    a membership whose discount could not be read gets no button and says so
+
+58 checks, all passing.
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: not an object
+a member's memberships could not be read whole Stripe answered a list in another shape: not an object
+a member's memberships could not be read whole Stripe answered a list in another shape: not an object
+a member's memberships could not be read whole Stripe answered a list in another shape: not an object
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: 1 row(s) could not be read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list

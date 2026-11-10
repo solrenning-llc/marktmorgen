@@ -1,0 +1,177 @@
+
+Healthy control: Stripe's own shapes read as before
+  ok    no discount: found, the code goes on once
+  ok    a discount already there (an id): refused, nothing sent
+  ok    a discount already there (expanded): refused, nothing sent
+  ok    Stripe's shapes: an id, an object, none, the old single field
+
+A membership's `discounts` in another shape is not 'no discount'
+  FAIL  a list object: shown as not known, never as no discount
+        expected [null]
+        got      [false]
+  FAIL  a list object: the code is not put on, nothing sent to Stripe
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  one id as text: shown as not known, never as no discount
+        expected [null]
+        got      [false]
+  FAIL  one id as text: the code is not put on, nothing sent to Stripe
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  missing: shown as not known, never as no discount
+        expected [null]
+        got      [false]
+  FAIL  missing: the code is not put on, nothing sent to Stripe
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  null: shown as not known, never as no discount
+        expected [null]
+        got      [false]
+  FAIL  null: the code is not put on, nothing sent to Stripe
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  a number: shown as not known, never as no discount
+        expected [null]
+        got      [false]
+  FAIL  a number: the code is not put on, nothing sent to Stripe
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  an old single `discount` in another shape is not known
+        expected [null,null]
+        got      [false,true]
+
+A list in another shape is 'could not check', never 'no membership'
+  FAIL  customers without data: the memberships are not known
+        expected "unreadable"
+        got      []
+  FAIL  customers without data: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  customers without data: free days read none of it as no membership
+        expected "unreadable"
+        got      []
+  FAIL  customers without data: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  customers without has_more: the memberships are not known
+        expected "unreadable"
+        got      [{"id":"sub_exact00001","status":"active","product":"prod000001","amount":2900,"currency":"usd","interval":"month","discounted":false}]
+  FAIL  customers without has_more: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  customers without has_more: free days read none of it as no membership
+        expected "unreadable"
+        got      [{"id":"sub_exact00001","product":"prod000001","amount":2900,"currency":"usd","interval":"month","nextCharge":1796058669,"blocked":null}]
+  FAIL  customers without has_more: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"unknown"},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001","/subscriptions/sub_exact00001 trial_end=1796490669&proration_behavior=none&metadata[free_days]=5&metadata[free_days_from]=1796058669"]]
+  FAIL  customers as a list of rows: the memberships are not known
+        expected "unreadable"
+        got      []
+  FAIL  customers as a list of rows: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  customers as a list of rows: free days read none of it as no membership
+        expected "unreadable"
+        got      []
+  FAIL  customers as a list of rows: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  a customer row that cannot be read: the memberships are not known
+        expected "unreadable"
+        got      []
+  FAIL  a customer row that cannot be read: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  a customer row that cannot be read: free days read none of it as no membership
+        expected "unreadable"
+        got      []
+  FAIL  a customer row that cannot be read: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  more customers than one page: the memberships are not known
+        expected "unreadable"
+        got      [{"id":"sub_exact00001","status":"active","product":"prod000001","amount":2900,"currency":"usd","interval":"month","discounted":false}]
+  FAIL  more customers than one page: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  more customers than one page: free days read none of it as no membership
+        expected "unreadable"
+        got      [{"id":"sub_exact00001","product":"prod000001","amount":2900,"currency":"usd","interval":"month","nextCharge":1796058669,"blocked":null}]
+  FAIL  more customers than one page: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"unknown"},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001","/subscriptions/sub_exact00001 trial_end=1796490669&proration_behavior=none&metadata[free_days]=5&metadata[free_days_from]=1796058669"]]
+  FAIL  subscriptions with data as an object: the memberships are not known
+        expected "unreadable"
+        got      []
+  FAIL  subscriptions with data as an object: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  subscriptions with data as an object: free days read none of it as no membership
+        expected "unreadable"
+        got      []
+  FAIL  subscriptions with data as an object: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  subscriptions without has_more: the memberships are not known
+        expected "unreadable"
+        got      [{"id":"sub_exact00001","status":"active","product":"prod000001","amount":2900,"currency":"usd","interval":"month","discounted":false}]
+  FAIL  subscriptions without has_more: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":true},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001"]]
+  FAIL  subscriptions without has_more: free days read none of it as no membership
+        expected "unreadable"
+        got      [{"id":"sub_exact00001","product":"prod000001","amount":2900,"currency":"usd","interval":"month","nextCharge":1796058669,"blocked":null}]
+  FAIL  subscriptions without has_more: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"unknown"},["/subscriptions/sub_exact00001 discounts[0][promotion_code]=promo_active0001","/subscriptions/sub_exact00001 trial_end=1796490669&proration_behavior=none&metadata[free_days]=5&metadata[free_days_from]=1796058669"]]
+  FAIL  a subscription row that cannot be read: the memberships are not known
+        expected "unreadable"
+        got      []
+  FAIL  a subscription row that cannot be read: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  a subscription row that cannot be read: free days read none of it as no membership
+        expected "unreadable"
+        got      []
+  FAIL  a subscription row that cannot be read: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  subscriptions over more pages than are read: the memberships are not known
+        expected "unreadable"
+        got      [{"id":"sub_more000000x","status":"active","product":"prod000001","amount":2900,"currency":"usd","interval":"month","discounted":false}]
+  FAIL  subscriptions over more pages than are read: apply is refused as not known, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  subscriptions over more pages than are read: free days read none of it as no membership
+        expected "unreadable"
+        got      [{"id":"sub_more000000x","product":"prod000001","amount":2900,"currency":"usd","interval":"month","nextCharge":1796058669,"blocked":null}]
+  FAIL  subscriptions over more pages than are read: free days are not given, nothing sent
+        expected [{"ok":false,"reason":"unavailable"},[]]
+        got      [{"ok":false,"reason":"not_member"},[]]
+  FAIL  the discount route: 503 unavailable, saying it could not check
+        expected [503,"unavailable",true]
+        got      [200,null,false]
+  FAIL  the discount route's apply: 503 unavailable, nothing changed
+        expected [503,"unavailable",true,0]
+        got      [409,"not_member",false,0]
+  FAIL  the free days route: 503 unavailable, saying it could not check
+        expected [503,"unavailable",true]
+        got      [200,null,false]
+  FAIL  the free days route's give: 503 unavailable, nothing changed
+        expected [503,"unavailable",true,0]
+        got      [409,"not_member",false,0]
+  ok    healthy control: nobody under that address is still 'none'
+
+A member's memberships over more than one page are all read
+  FAIL  both pages
+        expected ["sub_first00001","sub_second0001"]
+        got      ["sub_first00001"]
+
+The studio
+  ok    a membership whose discount could not be read gets no button and says so
+
+58 checks, 52 failing.
+Stripe's answer to free days did not carry the new date sub_exact00001
+Stripe's answer to free days did not carry the new date sub_exact00001
+Stripe's answer to free days did not carry the new date sub_exact00001

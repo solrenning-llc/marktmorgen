@@ -1,0 +1,39 @@
+{
+  "member-discount-exact.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "58 checks, all passing."
+    ]
+  },
+  "member-discount.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "14 checks, all passing."
+    ]
+  },
+  "member-free-days.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "  ok    Stripe failing: unknown",
+      "42 checks, all passing.",
+      "giving a member free days failed StripeError: Stripe request failed (500 unknown): Something went wrong on Stripe's end."
+    ]
+  },
+  "member-free-days-paid.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "32 checks, all passing."
+    ]
+  },
+  "email-field-keyboards.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "4 checks, all passing."
+    ]
+  }
+}

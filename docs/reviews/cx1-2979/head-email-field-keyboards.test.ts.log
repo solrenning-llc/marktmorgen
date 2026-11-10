@@ -1,0 +1,6 @@
+  ok    the email fields the audit counted: 16 inputs (two with a type chosen in code), 23 EmailFields (the twenty-second: a buyer's withdrawal, 588 [KB9]; the twenty-third: a creator's withdrawal from their plan, 588 [KB9] unit 3) and 8 EmailInputs (the seventh: a member's address for a discount, 616 [WP15](8); the eighth: a member's address for free days, 641 [WG1])
+  ok    every one says whose address it is (autocomplete)
+  ok    someone else's address is not offered the creator's own
+  ok    nor is the address a store moves to ("Move to")
+
+4 checks, all passing.

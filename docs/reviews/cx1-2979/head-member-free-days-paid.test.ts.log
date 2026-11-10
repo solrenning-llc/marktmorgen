@@ -1,0 +1,54 @@
+
+A paying member given free days is still a paying member
+  ok    control, before: paying, at $29 a month, nobody in a trial
+  ok    the free days are given
+  ok    Stripe now says trialing, to the next charge plus the days
+  ok    while the days run: still counted paying, MRR whole, nobody in a free trial
+  ok    while the days run: their product row says the same
+  ok    while the days run: the months they paid are not erased
+  ok    while the days run: the same months, the same MRR each
+  ok    after the days end and the next charge is paid: no trial ended, none converted
+  ok    after: paying, MRR whole
+
+Given again while they run: still paid
+  ok    more days are given
+  ok    still counted paying, nobody in a free trial
+
+An earlier real trial on the same membership is still one
+  ok    control, before: the trial that ended 30 days ago converted
+  ok    free days are given on it
+  ok    while the days run: that trial still ended and converted, and the member is paying
+  ok    after: the free days are never a second trial
+
+Free days inside a real trial leave it a trial
+  ok    free days are given on a trial
+  ok    never paid: still in a free trial, not paying
+
+The yearly offer
+  ok    control: a paying monthly member is offered yearly
+  ok    control: a member in a real trial is offered yearly
+  ok    while paid free days run: not offered (Stripe would charge nothing for the switch)
+  ok    after they end: the email that offers it counts the payments from the real start
+  ok    control: a real trial that ended a week ago is too recent for the email
+
+An answer from Stripe that cannot be read is not 'no membership' (rule 24)
+  ok    control: the member's running membership is found
+  ok    customers out of shape: not known, never "has no running membership"
+  ok    customers out of shape: giving says Stripe could not be read, never "not a membership of this member"
+  ok    subscriptions out of shape: not known, never "has no running membership"
+  ok    subscriptions out of shape: giving says Stripe could not be read, never "not a membership of this member"
+  ok    no has_more: not known, never "has no running membership"
+  ok    no has_more: giving says Stripe could not be read, never "not a membership of this member"
+  ok    more pages: not known, never "has no running membership"
+  ok    more pages: giving says Stripe could not be read, never "not a membership of this member"
+  ok    control: an address with no customer is a confirmed none
+
+32 checks, all passing.
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: data is not a list
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: has_more is not true or false
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read
+a member's memberships could not be read whole Stripe answered a list in another shape: more pages than are read

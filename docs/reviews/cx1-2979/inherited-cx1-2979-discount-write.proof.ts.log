@@ -1,0 +1,29 @@
+
+Controls: healthy receipt and pre-dispatch unknown
+  ok    matching known receipt is accepted
+  FAIL  unknown discount cannot authorize a write
+        expected false
+        got      true
+  FAIL  unknown discount sends no POST
+        expected 0
+        got      1
+
+A successful transport is not proof the requested subscription was updated
+  ok    empty object: request reached mocked provider once
+  FAIL  empty object: unknown receipt must not be reported done
+        expected false
+        got      true
+  ok    empty array: request reached mocked provider once
+  FAIL  empty array: unknown receipt must not be reported done
+        expected false
+        got      true
+  ok    null: request reached mocked provider once
+  FAIL  null: unknown receipt must not be reported done
+        expected false
+        got      true
+  ok    foreign subscription: request reached mocked provider once
+  FAIL  foreign subscription: unknown receipt must not be reported done
+        expected false
+        got      true
+
+11 checks, 6 failing.

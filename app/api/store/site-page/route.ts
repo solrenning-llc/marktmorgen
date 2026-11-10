@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { StoreFullError, imageFolder, setSitePages } from "@/lib/store";
+import { StoreFullError, appendSitePages, imageFolder, setSitePages } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
-import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
+import { pageCopy } from "@/lib/site-page-copy";
+import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
@@ -22,6 +23,7 @@ const refuse = (error: string, status = 400) => Response.json({ ok: false, error
  * what the "page" role may change (lib/team-roles.ts).
  *
  *   { action: "add", title, slug?, starter? }   a new page, empty or from a starter's blocks
+ *   { action: "copy", id }                      a copy of one, kept back, without its pictures (lib/site-page-copy.ts)
  *   { action: "meta", id, title, slug, nav, target }
  *   { action: "order", ids }
  *   { action: "remove", id }                    the page, its blocks and the pictures only it showed
@@ -63,6 +65,40 @@ export async function POST(request: NextRequest) {
         await writePage(saved.store.statsId, siteKey(page.id), { ...parsePage({}), blocks, hidden: true }, saved.store);
       }
       return Response.json({ ok: true, pages: saved.store.sitePages, id: page.id });
+    }
+
+    if (action === "copy") {
+      // 582 [KB3]: the same blocks and words on a new page, kept back from visitors and out of the menu.
+      if (!found || !SITE_PAGE_ID.test(found.id)) return refuse("unknown", 404);
+      if (pages.length >= MAX_SITE_PAGES) return refuse("too_many");
+      // The original read exactly: an answer nobody can read is never copied as an empty page.
+      let held = { ...EMPTY_PAGE, blocks: [] as PageBlock[] };
+      if (store.statsId) {
+        try {
+          held = (await readPageExact(store.statsId, siteKey(found.id))).page ?? held;
+        } catch (error) {
+          console.error("reading a store page before copying it failed", error);
+          return refuse("page_unread", 503);
+        }
+      }
+      const made = pageCopy(found, held, pages, randomBytes(5).toString("hex"));
+      if (!made) return refuse("taken");
+      // Added to the store's latest list under its lock: never over a newer list, never past the most pages.
+      const saved = await appendSitePages(ref, [made.entry]);
+      if (!saved.ok) return refuse(saved.reason === "none" ? "unknown" : "copy_conflict", saved.reason === "none" ? 404 : 409);
+      if (made.page.blocks.length) {
+        const statsId = saved.store.statsId;
+        if (!statsId) return refuse("copy_blocks", 500);
+        try {
+          // Its pictures were left out (lib/site-page-copy.ts), so there is none to claim, check or release.
+          await writePage(statsId, siteKey(made.entry.id), made.page, saved.store);
+        } catch (error) {
+          if (error instanceof StoreFullError) return refuse("copy_blocks_full", 409);
+          console.error("writing a copied store page failed", error);
+          return refuse("copy_blocks", 500);
+        }
+      }
+      return Response.json({ ok: true, pages: saved.store.sitePages, id: made.entry.id, pictures: made.pictures });
     }
 
     if (action === "meta") {

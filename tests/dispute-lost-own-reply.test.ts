@@ -125,6 +125,15 @@ async function main() {
     await notJudged("prevented with an amount that is not a whole number", whole(dispute({ status: "prevented", balance_transactions: moves("-2000") })));
     await notJudged("prevented with three money moves", whole(dispute({ status: "prevented", balance_transactions: moves(-1, -1, -1) })));
 
+    part("A proved loss decides beside a prevented row whose money cannot be read (Codex V on #3569)");
+    const unread = dispute({ id: "du_disputeown02", status: "prevented" });
+    got = await read(whole(dispute(), unread));
+    is("its own lost row, then an unreadable prevented one: lost", [got.lost, got.door, got.given], [true, true, true]);
+    got = await read(whole(unread, dispute()));
+    is("an unreadable prevented row, then its own lost one: lost", [got.lost, got.door, got.given], [true, true, true]);
+    await notJudged("its own lost row beside another charge's unreadable prevented row", whole(dispute(), dispute({ id: "du_disputeown02", status: "prevented", charge: OTHER_CHARGE })));
+    await notJudged("an unreadable prevented row beside a won one", whole(dispute({ status: "won" }), unread));
+
     part("A row that is not an object");
     await notJudged("a row that is text", whole(dispute({ status: "won" }), "du_disputeown02"));
     await notJudged("a row that is null", whole(null));

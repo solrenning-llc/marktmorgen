@@ -29,6 +29,8 @@ import {
   FeedGone, bookedCalendar, bookedCalendarFeed, calendarView, ensureFeedToken, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
+import { isVideoRoom, roomsFor } from "@/lib/call-rooms";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
@@ -294,6 +296,32 @@ async function main(): Promise<void> {
     // listing (one GET each) and every booking at the measured rate, is within the shape.
     const fixedMeasured = forty - 40 * perBooking - CALENDAR_POLL_SHAPE.commands;
     is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + MAX_PRODUCTS + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
+  }
+
+  part("Each booking's room is read in shared MGETs, not four GETs a booking: the feed's making at its worst (calendar-feed room, 10 November 2026)");
+  {
+    // A one-to-one call that makes a video room for every booking: the most a booking's room asks of the database.
+    const ROOM_KEYS_PER_MGET = 100;
+    const setup = { kind: "weekly", minutes: 30, tz: "UTC", weekly: [], noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "", video: true, meet: null, inPerson: false, place: null, seats: 1, sessions: [] } as never;
+    const start = Date.UTC(2034, 0, 2, 10);
+    const n = 40;
+    const asks = Array.from({ length: n }, (_, i) => ({ product: "pv", setup, session: `cs_test_room${String(i).padStart(4, "0")}`, start: start + i * 3_600_000, end: start + i * 3_600_000 + 1_800_000 }));
+    const roomsCalls = "r".repeat(32);
+    const reads = Math.ceil((4 * n) / ROOM_KEYS_PER_MGET);
+    const made = await counted(() => roomsFor(roomsCalls, asks));
+    is(`${n} rooms made: each a room, read in ${reads} MGETs and each made once (SET NX, GET): measured ${made.commands}`, [made.value.every(isVideoRoom), made.commands <= reads + 2 * n], [true, true]);
+    const again = await counted(() => roomsFor(roomsCalls, asks));
+    is(`read again: the same rooms in ${reads} MGETs, nothing made: measured ${again.commands}`, [again.value.join() === made.value.join(), again.commands <= reads], [true, true]);
+    const perBooking = (calendarBuildCommands(0, 500) - calendarBuildCommands(0, 0)) / 500;
+    is(`a making prices each booking at its room's making and its share of the moves' and rooms' MGETs (${perBooking.toFixed(2)} <= ${(2 + 0.01 + 0.04).toFixed(2)})`, perBooking <= 2 + 1 / 100 + 4 / ROOM_KEYS_PER_MGET, true);
+    // Rule 24: an MGET answered off its shape is unknown, never a booking without a room (nor one made in its place).
+    const real = redis.pipeline;
+    redis.pipeline = async (batch) => (batch.some((c) => c[0] === "MGET") ? batch.map(() => ["only one"]) : real(batch));
+    const off = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
+    redis.pipeline = async (batch) => (batch.some((c) => c[0] === "MGET") ? batch.map(() => Array.from({ length: ROOM_KEYS_PER_MGET }, () => 7)) : real(batch));
+    const wrongType = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
+    redis.pipeline = real;
+    is("an MGET answered short, or with a value that is neither text nor nothing, is unknown and throws", [off, wrongType], ["unknown", "unknown"]);
   }
 
   part("A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)");

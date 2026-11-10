@@ -89,6 +89,28 @@ const CHARGE_PATTERN = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 /** Statuses a refund still on its way has: it may yet fail, and Stripe already counts it in amount_refunded. */
 const REFUND_ON_ITS_WAY = new Set(["pending", "requires_action"]);
 const REFUND_STATUS_KNOWN = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
+
+/**
+ * The checkout a refund's payment was looked up for, read exactly (rules 24 and 30; Claude 3's M1 and Claude 4's
+ * MEDIUM on #3462): null only for an exact empty list, the session only for an exact list of one session of that very
+ * payment (its own id, `payment_intent` equal to the one looked up, metadata a plain object or null). Anything else
+ * (data not a list, a row in another shape, a session for another payment, more than one row or page, a body that is
+ * not a list) throws StripeListUnreadable: unknown, never "not a call", so the refund is not marked as read.
+ */
+function lookedUpSession(reply: unknown, intent: string): Record<string, unknown> | null {
+  const page = readStripePage(
+    reply,
+    (row) => {
+      const meta = ownField(row, "metadata");
+      return ownField(row, "payment_intent") === intent && (meta === null || plainObject(meta));
+    },
+    SESSION_ID,
+  );
+  if (page.unreadable > 0) throw new StripeListUnreadable("a checkout session of the payment in another shape");
+  if (page.hasMore || page.rows.length > 1) throw new StripeListUnreadable("more than one checkout session for one payment");
+  return page.rows[0] ?? null;
+}
 const centsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
 /**
@@ -543,11 +565,20 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         continue;
       }
       lookups -= 1;
-      const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
+      let session: Record<string, unknown> | null;
+      try {
+        session = lookedUpSession(await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`), intent);
+      } catch (error) {
+        if (!(error instanceof StripeListUnreadable)) throw error;
+        // Unknown is not "not a call": not marked as read, held for the next pass and looked up again, each try one of
+        // the run's REFUND_LOOKUPS (the ceiling), until a lookup reads.
+        console.error("reading refunds for meetings: a checkout lookup in another shape; looked up again later", { store: store.handle, account, refund: id, error: error.message });
+        later();
+        continue;
+      }
       const meta = ((session?.metadata ?? {}) as Record<string, string>) ?? {};
-      const isCall = !!session && typeof session.id === "string" && meta.kind === "call" && handles.has(meta.store ?? "");
-      if (!isCall) {
+      const isCall = !!session && meta.kind === "call" && handles.has(meta.store ?? "");
+      if (!isCall || !session) {
         // Not a call of this store: nothing to end, whatever becomes of the refund.
         await redisPipeline([["SADD", seenKey(callsId), id], keepSeen()]);
         passed();

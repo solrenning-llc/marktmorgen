@@ -92,7 +92,15 @@ part("What is kept after the write");
   is("bytes, not characters: a multi-byte answer over the ceiling holds too", afterWrite(FP, T0, 200, "é".repeat(MAX_KEPT_ANSWER_BYTES / 2 + 1), "done"), { action: "hold" });
   is("an answer at the ceiling is kept", afterWrite(FP, T0, 200, "x".repeat(MAX_KEPT_ANSWER_BYTES), "done").action, "keep");
   const atCeiling = afterWrite(FP, T0, 200, "é".repeat(MAX_KEPT_ANSWER_BYTES / 2), "done");
-  is("the largest record fits its stated ceiling", atCeiling.action === "keep" ? new TextEncoder().encode(atCeiling.record).length <= MAX_IDEMPOTENCY_RECORD_BYTES * 2 : false, true);
+  is("a record kept is never over the priced ceiling, as stored", atCeiling.action === "keep" ? new TextEncoder().encode(atCeiling.record).length <= MAX_IDEMPOTENCY_RECORD_BYTES : true, true);
+  // The escaped worst case: an answer within 8 KB whose quotes double once stored inside the record.
+  const quotes = JSON.stringify({ note: "\"".repeat(4_000) });
+  is("an answer within 8 KB that escapes past the record's ceiling is held, never kept over it", [new TextEncoder().encode(quotes).length <= MAX_KEPT_ANSWER_BYTES, afterWrite(FP, T0, 200, quotes, "done").action], [true, "hold"]);
+  const controls = "\u0001".repeat(2_000);
+  is("control characters, six bytes each once escaped, are held too", afterWrite(FP, T0, 200, controls, "done").action, "hold");
+  const near = afterWrite(FP, T0, 200, JSON.stringify({ note: "\"".repeat(1_900) }), "done");
+  is("and one that still fits once escaped is kept", near.action, "keep");
+  is("readRecord reads nothing over the ceiling, so a kept record is always readable", [near.action === "keep" ? readRecord(near.record) !== null : false, readRecord(JSON.stringify({ state: "done", fp: FP, at: T0, status: 200, body: "y".repeat(MAX_IDEMPOTENCY_RECORD_BYTES) }))], [true, null]);
 }
 
 part("A write whose answer can be larger than is kept refuses a key before it runs");

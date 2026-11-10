@@ -189,7 +189,13 @@ test("the outcome is saved only on the route's exact confirmation of the asked s
     assert.match(outcome.text, /Nothing was changed/);
     assert.match(outcome.text, pattern, error);
   }
-  assert.equal(toggleOutcome(on, { ok: false, error: "something_new" }).state, "refused");
+  // A server error, or a code not known to come before any write, may follow an applied write: unknown, never "Nothing was changed".
+  for (const error of ["server_error", "something_new"]) {
+    const outcome = toggleOutcome(on, { ok: false, error });
+    assert.equal(outcome.state, "unknown", error);
+    assert.doesNotMatch(outcome.text, /Nothing was changed/);
+    assert.match(outcome.text, /reload/i);
+  }
 });
 
 test("undo lasts a few seconds and every sentence is plain US English without sales pressure", () => {

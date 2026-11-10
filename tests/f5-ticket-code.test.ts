@@ -139,7 +139,7 @@ async function main(): Promise<void> {
     process.env.STRIPE_SECRET_KEY = STRIPE_B;
     is("the Stripe key rotated with no NIMBUS_DATA_KEY: still no code is made", made(), "refused:no_key");
     process.env.NIMBUS_DATA_KEY = DATA;
-    is("NIMBUS_DATA_KEY set afterwards: the code sold under it reads", readTicketCode(sold, NOW).ok, true);
+    is("NIMBUS_DATA_KEY set again: the code sold under it reads", readTicketCode(sold, NOW).ok, true);
 
     restore("NIMBUS_DATA_KEY", before.d);
     restore("STRIPE_SECRET_KEY", before.s);

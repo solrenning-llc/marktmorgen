@@ -1,0 +1,281 @@
+{
+  "cycle": 106,
+  "agent": "Codex V",
+  "date": "2026-11-10",
+  "previous_checkpoint": "362c41f8d79d7051614112434e4d0550bf121a3d",
+  "main": "f6ef221443876025eb6286940d687bf97799dd8e",
+  "norms": "FreshFULLROOT2cdb14f0.. andsuccessivefreshROOT; no mainchange fromCP105,fullpriorCLAUDE/AGENTS/inbox/queue/reservationsretained. TODOS95/97 read, scopesC2/C3/C6/CX4 notV; noC13206dequeueor3024disposition. Newclaims3580C2/3581CX1/3582C2/3579H2/3062CX1 notduplicated.",
+  "own_heads": [
+    {
+      "number": 2999,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "state": "open",
+      "merged": false,
+      "checks": {
+        "required": [
+          {
+            "name": "All checks (product-checks)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (codeql)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-buyer-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-product-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-signup-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-studio-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-public-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-real-readers)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (dependency-security)",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ],
+        "active": 0
+      }
+    },
+    {
+      "number": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "state": "open",
+      "merged": false,
+      "checks": {
+        "required": [
+          {
+            "name": "All checks (product-checks)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (codeql)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-public-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-buyer-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-studio-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-real-readers)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-product-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-signup-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (dependency-security)",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ],
+        "active": 0
+      }
+    },
+    {
+      "number": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "state": "open",
+      "merged": false,
+      "checks": {
+        "required": [
+          {
+            "name": "All checks (accessibility-public-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-product-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (codeql)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-studio-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-real-readers)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-signup-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-buyer-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (product-checks)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (dependency-security)",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ],
+        "active": 0
+      }
+    },
+    {
+      "number": 3500,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "state": "open",
+      "merged": false,
+      "checks": {
+        "required": [
+          {
+            "name": "All checks (product-checks)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (codeql)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-signup-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-buyer-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-studio-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-public-matrix)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-product-actions)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (accessibility-real-readers)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "All checks (dependency-security)",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ],
+        "active": 0
+      }
+    }
+  ],
+  "qualification2999": {
+    "candidate": "8e2a10279ecdf999663a53fd1052b5317ae20f49",
+    "tree": "028a93982bb5613be8706b5abb62bddf3a8c3db7",
+    "worktree": "/workspace/scratch/aed9c38475cd/v105-2999-local",
+    "proof_head": "cf4f1475c675c40c4bb3796eabe0d3a438f973ac",
+    "proof_preparation": "3be5c8946a58c1c48de5f50ad222b18639dfde67",
+    "scope": "Conflictresolution candidate source unchanged; own proofsonly local additions; sixuntrackedexecutedCJSbundles NOTin durablearchive, hashesretained",
+    "tests": {
+      "member_price": 76,
+      "prior_proof_gaps": 18,
+      "single_digital": 7,
+      "own_member_coupon_digital_intersection": 2,
+      "plan_cost_registry": 26,
+      "store_data_registry": 7,
+      "total": 136,
+      "pass": 136
+    },
+    "ledger": {
+      "redis": 1778,
+      "http": 51,
+      "real_network": 0
+    },
+    "cap": "NEWcomposedgraph20kRedis100HTTPmockaggregate BEFOREdispatch;120s512MiB256KiB/networkdeniedbeforeimports; all6executionsfirstPASS, historicalcapsnotreset",
+    "claim": "272351e93a35e22f121677c53db8b5763f548282",
+    "claim_exact": true,
+    "claim409": "FirstCAS409;wait>=120seconds,newROOTappendedwithoutrestoringolddeletedlines;exactreadbackBEFOREfirstexecution. Ownproofcommitpreparedwhilewait. Optionalmissingaliascatfailedbeforeexecution; testAliasesneedsnosidecar; noexecutionretry.",
+    "evidence": "92dcd60780ba51e7a42b17192ae42551b2be7373/evidence/v/2999-main-qualification-20261110.json",
+    "decoded_bytes": 26897,
+    "decoded_sha256": "2947789dfb90c8ba346f0c78e6468e05ae71d6086302ca7171e6cc4a01dc693c",
+    "evidence_exact": true,
+    "comment": 6775325096,
+    "comment_exact": true,
+    "channel": "dab09693395c2ee89688e48755631026762706e6",
+    "channel_exact": true,
+    "next": "C1/S independentfinancial/conflictfocal requestedonexactcandidate; nofulltypeslint/build/browser/nativeRedis/globalmargin/newheadCI. DoNOTpushproofheadcf4f; actualproductcandidate8e2a only. Prior qualifiedchain+Sregistrycreditnotautoapprove. Remoteheadc5dbstillqueued; noattempt/bypass/dequeue. Afterfocal+ordinarygates+dequeue publishsamebranchonce expectedhead, nevernewPR."
+  },
+  "inherited": {
+    "2999_published": "conflict only lib/store-checkout.ts; nativevirtualtreeb6a1f0037063c4c2a18673109a5704b47631dc68",
+    "3024_published": "conflict only lib/community-walk.ts imports; virtualtreed034abb4a3d005e8c7a818af3518d825212106b0",
+    "3024_candidate": "06a27f8.. conflict same community-walk.ts; virtualtree8a04063e77708627686c8955830c798d2c1618b0. Existingsharedscope/cost/lint134HOLDs intact; noresolution/semanticreplay.",
+    "3206_published": "conflict docs/reservations/codex.md; virtualtree0dcefee0dd24cfa8a004379a7a79f06a2fc1721c",
+    "3206_candidate": "1b9cad.. clean vsf6ef tree43fb3c8e3b9ee152efaddd6ff9a50c24e5b8814b/diffcheckPASS; serverequivd0f431...stillawaitC1dequeue. NOretrywithoutactualclearance.",
+    "3500_published": "clean vsf6ef tree881417d1b548f05e85909fa347c639cff97100ba/diffcheckPASS",
+    "3500_candidate": "13dddb29f.. clean vsf6ef tree244488c5ca73ff4fd47c10006ee6cc384da7c09a/diffcheckPASS. OptionalLOWpatchLOCALpreserved; noheadchurn/duplicatecomment"
+  },
+  "prior_ledgers_and_holds": "CP105 andearlierunchanged,3024specificC1scope/cost/lint134holds,3206awaitC1dequeueandcandidatefocal,3500optional13ddlocalonly.3569HTTP100exhausted/3118Redis14695HTTP0/outbox23modeled0native unchanged. No other runtime increments.",
+  "next_work": "FIRST freshROOTandCP106; prioritizenominal2999focal/dequeue3206/scope3024withoutduplicateask. Seekgenuinelynewfreework. Noautomationchange/subagent/productrefpush/CIrerun/cancel/queue/merge."
+}

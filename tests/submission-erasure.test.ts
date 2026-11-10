@@ -260,6 +260,37 @@ async function main(): Promise<void> {
     is("and the list is empty", await due(), []);
   }
 
+  part("A file completed whose record and its recovery both fail still reaches the sweep (review of #3570, Codex C2)");
+  {
+    await redis.pipeline([["DEL", "nl:sub:due"]]);
+    const { steps, calls } = world();
+    const who = "4".repeat(32);
+    const both = await send(who, lesson(10), steps, true);
+    // The record write and then the read-back that would recover it are each sent and never answered, and neither ran.
+    const original = redis.pipeline.bind(redis);
+    let failed = 0;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      const record = list.some((command) => String(command[0]) === "SET" && String(command[1]).startsWith("nl:sub:rec:"));
+      const readBack = String(list[0]?.[0]) === "GET" && String(list[0]?.[1]).startsWith("nl:sub:rec:");
+      if ((failed === 0 && record) || (failed === 1 && readBack)) {
+        failed += 1;
+        if (failed === 2) redis.pipeline = original;
+        throw new Error("fetch failed");
+      }
+      return original(list);
+    }) as typeof redis.pipeline;
+    const result = await threw(() =>
+      closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(10), who, data: SHOP, note: "" }, both.path, ["e"], NOW, steps),
+    );
+    redis.pipeline = original;
+    is("control: both requests failed, and the close is not known", [failed, result], [2, "Error: fetch failed"]);
+    is("control: no record was written", await readSubmission(FOLDER, both.id), null);
+    is("its file is kept for now", calls.filter((call) => call.startsWith("delete")), []);
+    is("but it is on the sweep's list all the same", await due(), [both.path]);
+    is("so the sweep deletes it once the keeping time ends", await sweepSubmissions(NOW + 31 * DAY, steps), { deleted: 1, retried: 0 });
+    is("that file", calls.filter((call) => call.startsWith("delete")), [`delete ${both.path}`]);
+  }
+
   done();
 }
 

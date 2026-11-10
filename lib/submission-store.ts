@@ -74,7 +74,7 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
 export const SUBMISSION_STEP_COMMANDS = {
   open: 14,
   sign: 1,
-  done: 13,
+  done: 14,
   abort: 5,
   /** The buyer's list (unit 5): their index, then a record and, for one not kept, its open upload, for each of their entries. */
   mine: 1 + 2 * MAX_SUBMISSIONS_PER_PERSON,
@@ -473,8 +473,40 @@ export async function closeSubmissionDoor(
   if (note.length > MAX_SUBMISSION_NOTE) return { ok: false, reason: "note" };
   const door = await ownDoor(pathname, where.folder, where.courseId, where.lessonId, where.who);
   if (!door) return { ok: false, reason: "unknown" };
+  // One close of an upload at a time (review of #3568, Codex C2): the door is taken off Redis in one step before
+  // the vault is asked, so another close of the same upload finds it gone and stops there. No other close can then
+  // write a record for this file, and the read-back below, when it reads "no record", cannot be overtaken by one.
+  // In the same request, the file's end is set before the vault completes it (review of #3570, Codex C2): it goes on
+  // the sweep's list at its keeping time first, so a file completed whose record and its recovery both fail is still
+  // deleted when that time ends. A record written later sets the same entry again; an upload never completed costs
+  // the sweep one delete.
+  const keepUntil = submissionKeepUntil(nowSeconds, Math.min(door.keepDays, MAX_SUBMISSION_KEEP_DAYS));
+  const putBack = async () => {
+    // Nothing was kept: the door is put back for the rest of its day, so the buyer can close it again.
+    const left = door.at + UPLOAD_SECONDS - nowSeconds;
+    if (left <= 0) return;
+    const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
+    if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
+  };
+  const taken = repliesFor(
+    await redisPipeline([
+      ["GETDEL", doorKey(door.folder, door.id)],
+      ["ZADD", DUE_KEY, "NX", keepUntil, dueMember(door.folder, pathname)],
+    ]),
+    2,
+  );
+  if (!taken) throw new UnknownReplyError("a submission upload taken to close");
+  if (taken[0] === null) return { ok: false, reason: "unknown" };
+  if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to close");
+  if (countOf(taken[1]) === null) {
+    await putBack();
+    throw new UnknownReplyError("a submission file put on the sweep's list");
+  }
   const closed = await steps.closeReservedVault(pathname, etags);
-  if (!closed.ok) return { ok: false, reason: closed.reason };
+  if (!closed.ok) {
+    await putBack();
+    return { ok: false, reason: closed.reason };
+  }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
   const drop = async () => {
     const gone = await steps.deleteVault([pathname]).catch(() => false);
@@ -484,7 +516,6 @@ export async function closeSubmissionDoor(
     await drop();
     return { ok: false, reason: "invalid" };
   }
-  const keepUntil = submissionKeepUntil(nowSeconds, Math.min(door.keepDays, MAX_SUBMISSION_KEEP_DAYS));
   const kept: KeptSubmission = {
     id: door.id,
     target: { kind: "lesson", courseId: door.courseId, lessonId: door.lessonId },
@@ -543,11 +574,10 @@ export async function closeSubmissionDoor(
         ["EXPIRE", who, LIVE_SECONDS],
         ["ZADD", DUE_KEY, keepUntil, dueMember(door.folder, pathname)],
         ["SET", key, json, "EX", until - nowSeconds, "NX"],
-        ["DEL", doorKey(door.folder, door.id)],
         ["ZADD", listKey(door.folder, door.courseId), until, listMember(door.lessonId, door.id)],
         ["EXPIRE", listKey(door.folder, door.courseId), LIVE_SECONDS],
       ]),
-      11,
+      10,
     );
   } catch (error) {
     // Sent and never answered: the write may have landed, so its file is kept for the record that may name it.
@@ -565,13 +595,12 @@ export async function closeSubmissionDoor(
     countOf(replies[6]) === null ||
     replies[7] !== "OK" ||
     countOf(replies[8]) === null ||
-    countOf(replies[9]) === null ||
-    replies[10] !== 1
+    replies[9] !== 1
   ) {
-    // Answered out of shape, or the record's place taken by another close of the same upload first: a record may
-    // name this file, so it is read back exactly, and the file deleted only when Redis confirms there is none.
-    // A record there (this close's, or the other close's, at the same path) keeps it; a read-back that does not
-    // read keeps it too, never deleted on a guess.
+    // Answered out of shape, or the record's place taken: a record may name this file, so it is read back exactly,
+    // and the file deleted only when Redis confirms there is none. This close holds the door alone (taken above),
+    // so no other close can write that record after the read. A record there keeps the file; a read-back that
+    // does not read keeps it too, never deleted on a guess.
     const back = await readBack();
     if (back && back[0] === null) await drop();
     throw new UnknownReplyError("a submission record's write");
@@ -756,13 +785,28 @@ export type ReviewRow = { lessonId: string; id: string; submission: KeptSubmissi
  * its buyer deleted) is taken off the list. `before` is the last page's
  * cursor. Answers the rows and the cursor of the next page, or null.
  */
-export async function reviewList(folder: string, courseId: string, nowSeconds: number, before?: number): Promise<{ rows: ReviewRow[]; next: number | null }> {
+/**
+ * Where the next page of the "To review" list starts: the last score shown, and how many members at that score
+ * were shown already. Files closed in the same second share their score, so a score alone would skip the rest of
+ * them (review of #3571, Claude 3); written "score:skip" in the page's address.
+ */
+export type ReviewCursor = { before: number; skip: number };
+export const reviewCursorText = (cursor: ReviewCursor) => `${cursor.before}:${cursor.skip}`;
+/** A cursor as the page's address carries it; null when it does not read as one. */
+export function readReviewCursor(text: string | null): ReviewCursor | null {
+  const match = /^(\d{1,15}):(\d{1,9})$/.exec(text ?? "");
+  if (!match) return null;
+  const cursor = { before: Number(match[1]), skip: Number(match[2]) };
+  return Number.isSafeInteger(cursor.before) && Number.isSafeInteger(cursor.skip) ? cursor : null;
+}
+
+export async function reviewList(folder: string, courseId: string, nowSeconds: number, cursor?: ReviewCursor): Promise<{ rows: ReviewRow[]; next: ReviewCursor | null }> {
   const key = listKey(folder, courseId);
-  const top = before !== undefined && Number.isSafeInteger(before) ? `(${before}` : "+inf";
+  const top = cursor ? `${cursor.before}` : "+inf";
   const replies = repliesFor(
     await redisPipeline([
       ["ZREMRANGEBYSCORE", key, "-inf", nowSeconds],
-      ["ZREVRANGEBYSCORE", key, top, `(${nowSeconds}`, "WITHSCORES", "LIMIT", 0, SUBMISSION_LIST_PAGE + 1],
+      ["ZREVRANGEBYSCORE", key, top, `(${nowSeconds}`, "WITHSCORES", "LIMIT", cursor?.skip ?? 0, SUBMISSION_LIST_PAGE + 1],
     ]),
     2,
   );
@@ -794,7 +838,13 @@ export async function reviewList(folder: string, courseId: string, nowSeconds: n
     else rows.push({ lessonId, id, submission });
   }
   if (gone.length) await redisPipeline([["ZREM", key, ...gone]]).catch(() => undefined);
-  return { rows, next: page.length > SUBMISSION_LIST_PAGE ? shown[shown.length - 1].score : null };
+  if (page.length <= SUBMISSION_LIST_PAGE) return { rows, next: null };
+  // The next page starts at the last score shown, past every member at that score already shown on this page and
+  // the ones before it, less those just taken off the list (a removal that failed shows one row twice, never none).
+  const last = shown[shown.length - 1].score;
+  const tied = shown.filter((row) => row.score === last && !gone.includes(row.member)).length;
+  const skip = (cursor && cursor.before === last ? cursor.skip : 0) + tied;
+  return { rows, next: { before: last, skip } };
 }
 
 export type Replied =

@@ -186,10 +186,13 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   }
 
   const selling = canSell(store);
+  // A failed stock read is its own mark (rule 24): stockLeft's null means no limit, so its failure is UNREAD.
+  const UNREAD = "unread" as const;
   const [coming, stock, noKeys, related, summary] = await Promise.all([
     // Unknown is null, never "not coming soon" (CX-123 rule 24): the card then draws no buy button.
     soonOne(store, product.id).catch(() => null),
-    stockLeft(store, product).catch(() => null),
+    // A failed stock read is UNREAD, never stockLeft's own null, which means "no limit" (rule 24): no buy button either.
+    stockLeft(store, product).catch(() => UNREAD),
     // Unknown is null, never "keys left" (CX-123 rule 24; Claude 4 on #2910): the card then draws no buy button.
     outOfKeys(store, product).catch(() => null),
     // A box never offers a product kept for a child-safety report, nor a bundle holding one (lib/child-safety-holds.ts).
@@ -197,13 +200,14 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
   const soon = coming?.soon ?? false;
-  // With the key count unknown, how many are left is not said either.
-  const count = noKeys === null ? null : noKeys ? 0 : stock;
+  const stockUnread = stock === UNREAD;
+  // With the key count or the stock unknown, how many are left is not said either.
+  const count = noKeys === null || stockUnread ? null : noKeys ? 0 : stock;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  // Whether it is coming soon, or whether a key is left, could not be read: buying, the waitlist or the pre-order cannot
-  // be told apart, or the product may be sold out, so the card says buying is not available just now, and its title
-  // still leads to the product's page.
-  const computed = coming && noKeys !== null
+  // Whether it is coming soon, whether a key is left or how many are in stock could not be read: buying, the waitlist or
+  // the pre-order cannot be told apart, or the product may be sold out, so the card says buying is not available just
+  // now, and its title still leads to the product's page.
+  const computed = coming && noKeys !== null && !stockUnread
     ? pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day))
     : { action: { kind: "none" as const, text: speech(store).w.cardBuyUnread }, label: "" };
   const page = tag(productPath(store, product));

@@ -140,9 +140,17 @@ function exact(value: unknown): Application | null {
   return coherent(copy) ? copy : null;
 }
 
-/** Reads a stored record. Anything that is not exactly one, or names a field twice, is null: unknown. */
+/**
+ * Reads a stored record. Anything that is not exactly one, or names a field twice, is null: unknown.
+ *
+ * Every field this file writes is drawn from characters JSON never escapes (hex, the offer's letters, digits,
+ * the state's words), so a record written here holds no backslash. One that does was not written here, and an
+ * escape is how one name can be spelled two ways ("state" and "state") that JSON.parse folds into one
+ * field, keeping the last (Codex C2 on #3526): refused before the count below, so each name is counted as it
+ * decodes, never only as it is spelled.
+ */
 export function parseApplication(raw: unknown): Application | null {
-  if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > MAX_RECORD_BYTES) return null;
+  if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > MAX_RECORD_BYTES || raw.includes("\\")) return null;
   for (const field of FIELDS) {
     if ((raw.match(new RegExp(`"${field}"\\s*:`, "g")) ?? []).length > 1) return null;
   }

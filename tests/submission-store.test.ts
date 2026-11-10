@@ -12,7 +12,9 @@
  *     sign, close or give it up;
  *   - closing writes the record once, with its time to live the keeping time
  *     and a week, counted in the data room, and holds the place to the keeping time;
- *     a file that does not match, a full room or an unknown reply deletes the file;
+ *     a file that does not match, a full room or a record Redis confirms was not
+ *     written deletes the file; a record that may have been written (its answer
+ *     lost, or another close of the same upload first) keeps it;
  *   - each step's Redis commands stay inside SUBMISSION_STEP_COMMANDS.
  */
 import { MAX_SUBMISSION_NOTE, MAX_WAITING_PER_BUYER, type SubmissionSetup } from "@/lib/submission-rules";
@@ -104,6 +106,37 @@ function breakNext(name: string) {
     return original(list);
   }) as typeof redis.pipeline;
 }
+/**
+ * The next pipeline whose first command is `name` is sent to Redis and runs, but its answer is lost on the
+ * way back (answered with nothing); with `thenGet`, the read-back after it is answered out of shape too.
+ */
+function landThenLose(name: string, thenGet = false) {
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = (async (list: (string | number)[][]) => {
+    if (String(list[0]?.[0]) === name) {
+      redis.pipeline = original;
+      if (thenGet) breakNext("GET");
+      await original(list);
+      return [];
+    }
+    return original(list);
+  }) as typeof redis.pipeline;
+}
+/** The next pipeline whose first command is `name` is never answered: the request fails, whether it ran is not known. */
+function sendThenFail(name: string, runs: boolean) {
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = (async (list: (string | number)[][]) => {
+    if (String(list[0]?.[0]) === name) {
+      redis.pipeline = original;
+      if (runs) await original(list);
+      throw new Error("fetch failed");
+    }
+    return original(list);
+  }) as typeof redis.pipeline;
+}
+/** Redis as it answers when nothing stands in, put back between cases so a stand-in one case left unused never reaches the next. */
+const PIPELINE = redis.pipeline;
+const idOf = (path: string) => readVaultPath(path)?.ownerId.slice(4) ?? "";
 const threw = async (work: () => Promise<unknown>) => work().then(() => "no", (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
 
 async function main(): Promise<void> {
@@ -253,6 +286,65 @@ async function main(): Promise<void> {
     breakNext("ZADD");
     is("a record write answered out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("and the file it would have named is deleted", w.calls.includes("vault:delete"), true);
+    is("Redis confirms no record was written", await readSubmission(FOLDER, idOf(path)), null);
+  }
+  part("A record that may have been written never loses its file (review of #3568, Codex C2)");
+  {
+    const lesson = "lesson0008ab";
+    const at = { ...where(), lessonId: lesson };
+    const w = world();
+    const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
+    const path = opened.ok ? opened.upload.pathname : "";
+    landThenLose("ZADD");
+    is("a record written whose answer was lost is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
+    is("its file is kept", w.calls.includes("vault:delete"), false);
+    is("for the record that names it", (await readSubmission(FOLDER, idOf(path)))?.path, path);
+  }
+  {
+    redis.pipeline = PIPELINE;
+    const lesson = "lesson0009ab";
+    const at = { ...where(), lessonId: lesson };
+    const w = world();
+    const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
+    const path = opened.ok ? opened.upload.pathname : "";
+    landThenLose("ZADD", true);
+    is("a lost answer whose read-back is out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
+    is("and the file is kept, never deleted on a guess", w.calls.includes("vault:delete"), false);
+  }
+  {
+    redis.pipeline = PIPELINE;
+    const lesson = "lesson0010ab";
+    const at = { ...where(), lessonId: lesson };
+    const w = world();
+    const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
+    const path = opened.ok ? opened.upload.pathname : "";
+    sendThenFail("ZADD", true);
+    is("a write sent and never answered is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "Error: fetch failed");
+    is("and the file is kept: the write may have landed", w.calls.includes("vault:delete"), false);
+    is("as it did here", (await readSubmission(FOLDER, idOf(path)))?.path, path);
+  }
+  {
+    redis.pipeline = PIPELINE;
+    const lesson = "lesson0011ab";
+    const at = { ...where(), lessonId: lesson };
+    let arrived = 0;
+    let both: () => void = () => undefined;
+    const met = new Promise<void>((resolve) => (both = resolve));
+    // The vault confirms both closes of the same upload, and neither goes on until both have passed the door.
+    const w = world({
+      closeReservedVault: async (pathname) => {
+        arrived += 1;
+        if (arrived === 2) both();
+        await met;
+        return { ok: true, file: { pathname, bytes: 50 * MiB, contentType: "video/mp4" } };
+      },
+    });
+    const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
+    const path = opened.ok ? opened.upload.pathname : "";
+    const results = await Promise.all([0, 1].map(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps).then((value) => (value.ok ? "ok" : value.reason), (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : String(error)))));
+    is("two closes at once: one is kept, the other is unknown", [...results].sort(), ["ok", "unknown"]);
+    is("the one that lost never deletes the kept one's file", w.calls.includes("vault:delete"), false);
+    is("which its record still names", (await readSubmission(FOLDER, idOf(path)))?.path, path);
   }
   {
     const lesson = "lesson0006ab";

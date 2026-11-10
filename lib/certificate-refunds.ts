@@ -163,11 +163,15 @@ async function takeChecks(sid: string, n: number, ceiling: number): Promise<void
 
 /**
  * For a row tried again, at its first take in a pass, counts its `n` checks in the part of the month's checks kept for
- * rows tried again, while that part was not spent before them (so a row of more courses than it holds is still tried
- * again once a month); throws RetriesSpent when it was. The month's checks are taken after it, as for any row.
+ * rows tried again; throws RetriesSpent unless the take fits in what is left of that part, or the part is still
+ * untouched (so a row of more courses than the part holds is still tried again once a month). Rows tried again so
+ * take at most max(part, one row) checks a month (focal review of #3409 at db9262b3, Claude 4: a whole take used to
+ * pass while the part was not spent before it, so two large rows took past the part and a third past the month).
+ * The month's checks are taken after it, as for any row.
  */
 async function takeRetries(sid: string, n: number, part: number): Promise<void> {
-  if ((await countUp(retriesKey(sid, monthOf()), n)) - n >= part) throw new RetriesSpent();
+  const after = await countUp(retriesKey(sid, monthOf()), n);
+  if (after - n >= part || (after > part && after - n > 0)) throw new RetriesSpent();
 }
 
 /** What the set of rows handled says of some rows: the ids handled, and when each row left unknown may be tried again. */

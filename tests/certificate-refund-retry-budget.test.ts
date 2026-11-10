@@ -240,6 +240,48 @@ async function main(): Promise<void> {
   is("the five-course row is withdrawn (no name on the page)", publicName((await record(stuckFiveId))!), null);
   is("the one-course row is withdrawn (no name on the page)", publicName((await record(stuckOneId))!), null);
 
+  // Focal of Claude 4 at db9262b3 (MÉDIO): the part for rows tried again let a whole take through while the part was
+  // not spent before it, so on the Store plan (part 25) two 20-course rows passed it (0 -> 20, 20 -> 40) and the second
+  // took the month's checks past its total; a healthy full refund later in the month was then not withdrawn.
+  part("MÉDIO: three rows of 20 courses left unknown never spend the checks a healthy refund needs");
+  // A month of its own: the first day of the month after the one the parts above ended in, 06:00 UTC.
+  const at = new Date(Date.now());
+  shift = Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1, 6) - realNow();
+  const wideMonth = new Date(Date.now()).toISOString().slice(0, 7);
+  // Course ids must read as course ids (32 hex characters), so the tag is hex: a course that does not read is no course,
+  // and its row would be marked handled without ever asking for the buyer's courses.
+  const wide = await storeWith("wide@example.com", "wideschool", "acct_1TestRetryWide", 20, "b2");
+  is("the school is on the Store plan, with 20 courses", [wide.store.tier, wide.courseIds.length], ["creator", 20]);
+  const stuckWideIds: string[] = [];
+  for (const i of [1, 2, 3]) {
+    const email = `stuckw${i}@example.com`;
+    const stuck = buy(wide.handle, email, wide.products.slice(0, 20));
+    stuckWideIds.push(await issue(wide, email, `Stuck Wide ${i}`));
+    refundInFull(stuck);
+    unreadable.add(email);
+  }
+  // Another row of the same day, read and withdrawn at once: a five-course bundle, 5 checks and 1 to mark it handled.
+  const early = buy(wide.handle, "earlyw@example.com", wide.products.slice(0, 5));
+  const earlyId = await issue(wide, "earlyw@example.com", "Early Example");
+  refundInFull(early);
+  for (let day = 0; day < 10; day += 1) {
+    for (let p = 0; p < 3; p += 1) await run(wide);
+    shift += DAY_MS;
+  }
+  const wideTries = [1, 2, 3].map((i) => triedOn.get(`stuckw${i}@example.com`)?.size ?? 0);
+  is("each 20-course row was tried on its first day (its buyer's courses asked for)", wideTries.every((tries) => tries >= 1), true);
+  is("after the first day, rows were tried again", wideTries.some((tries) => tries >= 2), true);
+  is("the other row of day 0 is withdrawn (no name on the page)", publicName((await record(earlyId))!), null);
+  is("unknown never withdraws: the three 20-course rows' certificates still stand", await Promise.all(stuckWideIds.map(stands)), [true, true, true]);
+  is("the month's checks taken stay within the Store plan's total", (await total(wide)) <= checks.creator, true);
+  const zoeWide = buy(wide.handle, "zoew@example.com", wide.products.slice(0, 1));
+  const zoeWideId = await issue(wide, "zoew@example.com", "Zoe Example");
+  refundInFull(zoeWide);
+  for (let p = 0; p < 3; p += 1) await run(wide);
+  is("still the same month (day 10)", new Date(Date.now()).toISOString().slice(0, 7), wideMonth);
+  is("a healthy full refund on day 10 is withdrawn within the month (no name on the page)", publicName((await record(zoeWideId))!), null);
+  is("the month's checks taken still stay within the Store plan's total", (await total(wide)) <= checks.creator, true);
+
   Date.now = realNow;
   done();
 }

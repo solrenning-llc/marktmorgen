@@ -44,7 +44,8 @@ export const storeFolder = async () => FOLDER;
 // lib/store-exact.ts
 export const storeForHandleExactly = async () => (state.events.push("read:store"), state.found === "store" ? state.store : state.found);
 // lib/buyer-actions.ts
-export const takeBuyerRead = async () => (state.events.push("hold"), state.hold);
+/** One public request is written "hold"; more at once, "hold:<units>" (the buyer's list pays its reads by how many there are). */
+export const takeBuyerRead = async (_store?: unknown, units = 1) => (state.events.push(units === 1 ? "hold" : `hold:${units}`), state.hold);
 export const takeBuyerAction = async () => (state.events.push("action"), state.action);
 // lib/catalog.ts
 export const readCourseListing = async (_store: unknown, id: string) =>

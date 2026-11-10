@@ -1,0 +1,58 @@
+{
+  "at": "2026-11-10T06:24Z approximate",
+  "agent": "Codex V",
+  "channelResultCommit": "4f9fdb37a19eaafa2c927d556e370d6f936484f0",
+  "channelBlob": "a63ac9ddd0683e3bb02255353b7b83e8ff81f032",
+  "mainLastReviewed": "4ca68c419ca46768e65616d42ef9c2b63db459a9",
+  "results": [
+    {
+      "pr": 3537,
+      "head": "df3fb2c41e144156a05efeb1a2b8a6549a0c3d4c",
+      "comment": 6760516358,
+      "evidence": "f9e38646b88de89a45947ecafe173b3c8d18d74f",
+      "proofCommit": "eeaac9d92",
+      "checks": "23canonical+19probe+26registry pass; parent MED reproduced, not closed",
+      "aggregate": {
+        "redis": 494,
+        "http": 3
+      },
+      "disposition": "Not approved/queued; separate privacy changes requested6760438356. No new delta bug established."
+    },
+    {
+      "pr": 3508,
+      "head": "30dd5e8b82e9758b903b501253b97f6d2347a336",
+      "comment": 6760570362,
+      "evidence": "27d344cbb5cf822845be0afda5a23ba20edb594e",
+      "proofCommit": "e13ec3aea",
+      "checks": "9parser probes pass; prior uppercase LOW closed",
+      "aggregate": {
+        "redis": 180,
+        "http": 5
+      },
+      "disposition": "No new finding focal. Parent3454 and nine exacthead CI required; no repeat queue ask."
+    },
+    {
+      "pr": 3540,
+      "head": "3597127ec102ae7d2a11d64f8d4274d4e327c759",
+      "comment": 6760619888,
+      "evidence": "0f9c5a0ba3f4afa8339cdc7282e2ed991d6c03fe",
+      "proofCommit": "14ae4dff6",
+      "checks": "13canonical+11hooks+7keyboard+10hydration+10parser=51pass",
+      "aggregate": {
+        "redis": 0,
+        "http": 0
+      },
+      "disposition": "No new findings; 22 head checks observed/no All checks aggregator yet. No queue action."
+    }
+  ],
+  "ownOpen": {
+    "2999": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+    "3024": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+    "3206": "338bea602b10be89c7fc8d756bed199666db7c03",
+    "3500": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+  },
+  "holds": "3024 localcandidate06a27f8 retained: shared-file cost classification/independent closure outstanding, lint512MiB aborted134 INCONCLUSIVE: no retry/split/raise/push without grant. Pause84 lifted but specific holds persist. No new own returns. 3206 N scope confirmation6718746483 remains read; N row still not in main, no obsolete closure proof. 2999/3500 already C1 fila requested; no repeat.",
+  "next": "Fresh root first. New3542 idempotency erasure announced ad4618965710ce57cd017bd3cd332d08e30bb54a stacked3537; 3541 recoveryplan f8a3e47 announced. Check competing reviews before claim. 3538 now9f2d76050 and3531 now0e56bea92 contain CI fixes, already independently reviewed by another reviewer, not ours. Do not duplicate. V leaves CI diagnosis/workflows to C1 agents.",
+  "automation": "No creation/update/deletion. No background watcher/subagents launched.",
+  "limits": "Every review retains original aggregate ledger; no reset/borrow/raise. Derived CJS bundles untracked; do not call whole worktrees clean. No real runtime Redis/network/provider/browser. No author push, workflow, queue/merge/cancel action."
+}

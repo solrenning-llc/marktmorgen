@@ -27,7 +27,7 @@ import {
   showTwoStepAsk,
   twoStepAskKey,
 } from "@/lib/two-step-ask-rules";
-import { firstSaleKnown } from "@/lib/two-step-ask";
+import * as askServer from "@/lib/two-step-ask";
 import { claimValue } from "@/lib/claim-mark";
 import { firstSaleKey } from "@/lib/yearly-offer";
 import { store as redis } from "./redis-stub";
@@ -61,9 +61,9 @@ async function main() {
   }
 
   redis.clear();
-  is("the server reader: no mark is 0", await firstSaleKnown(shop), 0);
+  is("the server reader: no mark is 0", await askServer.firstSaleKnown(shop), 0);
   await redis.pipeline([["SET", firstSaleKey(shop), claimValue(1730000000)]]);
-  is("the server reader: the mark noteFirstSale writes reads as its day", await firstSaleKnown(shop), 1730000000);
+  is("the server reader: the mark noteFirstSale writes reads as its day", await askServer.firstSaleKnown(shop), 1730000000);
   const original = redis.pipeline.bind(redis);
   const replies: [string, unknown][] = [
     ["no envelope", []],
@@ -74,7 +74,7 @@ async function main() {
   for (const [label, reply] of replies) {
     redis.pipeline = async () => reply as unknown[];
     try {
-      is(`the server reader: ${label} is unknown (null)`, await firstSaleKnown(shop), null);
+      is(`the server reader: ${label} is unknown (null)`, await askServer.firstSaleKnown(shop), null);
     } finally {
       redis.pipeline = original;
     }
@@ -83,7 +83,7 @@ async function main() {
     throw new Error("synthetic network failure");
   };
   try {
-    is("the server reader: Redis not answering is unknown (null)", await firstSaleKnown(shop), null);
+    is("the server reader: Redis not answering is unknown (null)", await askServer.firstSaleKnown(shop), null);
   } finally {
     redis.pipeline = original;
   }
@@ -93,7 +93,7 @@ async function main() {
     return original(sent);
   };
   try {
-    await firstSaleKnown(shop);
+    await askServer.firstSaleKnown(shop);
   } finally {
     redis.pipeline = original;
   }
@@ -110,6 +110,25 @@ async function main() {
   is("a passkey is a second step: not asked", showTwoStepAsk({ ...bare, passkeys: 1, firstSale: 1730000000 }), false);
   is("passkeys unread: not asked", showTwoStepAsk({ ...bare, passkeys: null, firstSale: 1730000000 }), false);
   is("a locked session has its own notice: not asked", showTwoStepAsk({ ...bare, locked: true, firstSale: 1730000000 }), false);
+  // Codex H2 on #3511: a lock that could not be read is unknown, never "unlocked" (rule 24).
+  is("the session's lock unread: no second step is not taken for sure", noSecondStep({ ...bare, locked: null as unknown as boolean }), false);
+  is("the session's lock unread: not asked, even after the first sale", showTwoStepAsk({ ...bare, locked: null as unknown as boolean, firstSale: 1730000000 }), false);
+
+  part("The studio's lock read: only lockedUntil failing is unknown (null), never 0 (Codex H2 on #3511)");
+  const lockKnown = (askServer as unknown as { lockKnown?: (session: string | undefined) => Promise<number | null> }).lockKnown;
+  const SESSION = "ab".repeat(32);
+  redis.clear();
+  is("a session with no lock, read for sure: 0 (unlocked)", lockKnown ? await lockKnown(SESSION) : "no reader", 0);
+  is("no session: 0, as lockedUntil answers", lockKnown ? await lockKnown(undefined) : "no reader", 0);
+  const before = redis.pipeline.bind(redis);
+  redis.pipeline = async () => {
+    throw new Error("synthetic network failure");
+  };
+  try {
+    is("Redis not answering the lock: unknown (null), not 0", lockKnown ? await lockKnown(SESSION) : "no reader", null);
+  } finally {
+    redis.pipeline = before;
+  }
 
   part("Dismissed once, remembered per store, in this browser");
   is("the key is the store's own", twoStepAskKey(SID), `${TWO_STEP_ASK_PREFIX}${SID}`);
@@ -155,10 +174,11 @@ async function main() {
 
   part("The studio draws it from what it already reads, and it never blocks selling");
   const page = read("app/studio/page.tsx");
-  is("the first sale is read only for an account with no second step", page.includes("const soldFirstAt = store && noSecondStep({ appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedTill > 0 }) ? await firstSaleKnown(store) : null;"), true);
+  is("the first sale is read only for an account with no second step, the lock read for sure", page.includes("const soldFirstAt = store && noSecondStep({ appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? await firstSaleKnown(store) : null;"), true);
+  is("the lock is read by lockKnown (null when unread), never lockedUntil(...).catch(() => 0)", [page.includes("lockKnown(cookieStore.get(SESSION_COOKIE)?.value)"), page.includes("lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => 0)")], [true, false]);
   is(
     "drawn only under the rule",
-    page.includes("{store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedTill > 0 }) ? <TwoStepAsk sid={store.sid} /> : null}"),
+    page.includes("{store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} /> : null}"),
     true,
   );
   is("drawn once on the page", page.split("<TwoStepAsk ").length - 1, 1);

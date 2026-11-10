@@ -134,6 +134,13 @@ const HOW: Record<LeverKey, string> = {
   next: "The next offer links to your product page, and the order placed from there is not tagged, so it cannot be told apart from other orders.",
 };
 
+/** One kept amount, exactly: a currency code and non-negative whole cents and orders. */
+function exactAmount(value: unknown): value is LeverAmount {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const amount = value as Record<string, unknown>;
+  return typeof amount.currency === "string" && CODE.test(amount.currency) && exact(amount.cents) && exact(amount.orders);
+}
+
 const orders = (count: number) => `${count} ${count === 1 ? "order" : "orders"}`;
 
 /** The card's two sentences: what the lever earned (or "Not measured yet.") and how it is counted, from its row and whether its reading is complete. Pure. */
@@ -143,9 +150,11 @@ export function leverEarnedWords(row: LeverEarned | KeptLeverMeasure | undefined
   }
   const how = HOW[key];
   if (!row.measured) return { line: "Not measured yet.", how };
-  const [first, ...others] = Array.isArray(row.amounts) ? row.amounts : [];
-  // A kept row without the store's own currency first, or with a count that is not exact, is not shown as a figure.
-  if (!first || !CODE.test(first.currency) || !Number.isSafeInteger(row.left)) return { line: "Not measured yet.", how };
+  // A kept row is read back from storage: unless every amount (a currency code, exact non-negative cents and
+  // orders) and the count left are exact, it is not shown as a figure (rule 24, review of #3582).
+  const amounts: unknown = row.amounts;
+  if (!Array.isArray(amounts) || !amounts.length || !amounts.every(exactAmount) || !exact(row.left)) return { line: "Not measured yet.", how };
+  const [first, ...others] = amounts as LeverAmount[];
   const atLeast = !complete || row.left > 0 ? "at least " : "";
   let line = `Earned in the last 30 days: ${atLeast}${formatMoney(first.cents, first.currency)} from ${orders(first.orders)}`;
   if (row.left > 0) line += `; ${row.left === 1 ? "1 more order is" : `${row.left} more orders are`} not counted, because ${row.left === 1 ? "its" : "their"} exact amount is not in the payment record`;

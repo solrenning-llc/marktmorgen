@@ -37,6 +37,11 @@ import { ORIGIN_PER_BYTE, UNIT_COST, closureCost, request } from "./plan-cost-re
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { LIST_CONTACTS_PER_COMMAND, listDownloadHeld, listDownloadUnits, listPageMost } from "@/lib/list-download";
 
+// closureCost (tests/plan-cost-registry.ts) adds its parts in its own order; summed here in another order, the two
+// floating-point totals can differ in the last bit (2.8e-17 on Scale with main's figures). A billionth of a dollar
+// of room is far below any cent the check is about.
+const FLOAT_ROOM_USD = 1e-9;
+
 const N = 3_000;
 
 type Store = NonNullable<Awaited<ReturnType<typeof storeForEmail>>>;
@@ -234,7 +239,7 @@ async function main(): Promise<void> {
     for (const tier of ["creator", "pro", "scale"] as const) {
       const closure = closureCost(tier) as ReturnType<typeof closureCost> & { lists?: number };
       const priced = typeof listCost === "function" && typeof endedLists === "number" ? endedLists * (listCost as (bytes: number) => number)(DATA_ROOM_BYTES[tier] + MAX_STORE_BYTES) : NaN;
-      is(`${tier}: the closing carries ENDED_LIST_DOWNLOADS list downloads, each at the largest list its room can hold`, [typeof closure.lists === "number" && closure.lists > 0, closure.lists === priced, closure.total >= closure.deletes + closure.follows + closure.exports + closure.prepare + (closure.lists ?? NaN)], [true, true, true]);
+      is(`${tier}: the closing carries ENDED_LIST_DOWNLOADS list downloads, each at the largest list its room can hold`, [typeof closure.lists === "number" && closure.lists > 0, closure.lists === priced, closure.total >= closure.deletes + closure.follows + closure.exports + closure.prepare + (closure.lists ?? NaN) - FLOAT_ROOM_USD], [true, true, true]);
     }
   }
 

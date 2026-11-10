@@ -48,7 +48,7 @@ function readOthers(raw: number): number | null {
 export function flatCommissionOn(baseCents: number, flatCents: number, othersPercent: number): number | null {
   const flat = readFlatCents(flatCents);
   const others = readOthers(othersPercent);
-  if (flat === null || others === null || !Number.isInteger(baseCents)) return null;
+  if (flat === null || others === null || !Number.isSafeInteger(baseCents)) return null;
   if (baseCents <= 0) return 0;
   const room = MAX_COMMITTED_SHARE - others;
   if (room <= 0) return 0;
@@ -64,9 +64,9 @@ export function flatAfterRefund(earnedCents: number, paidCents: number, refunded
   const others = readOthers(othersPercent);
   if (
     others === null ||
-    !Number.isInteger(earnedCents) || earnedCents < 0 ||
-    !Number.isInteger(paidCents) ||
-    !Number.isInteger(refundedCents) || refundedCents < 0
+    !Number.isSafeInteger(earnedCents) || earnedCents < 0 ||
+    !Number.isSafeInteger(paidCents) ||
+    !Number.isSafeInteger(refundedCents) || refundedCents < 0
   ) {
     return null;
   }
@@ -93,7 +93,7 @@ export type FlatProblem = "amount" | "over-cap" | "unknown";
 export function flatProblem(flatCents: number, priceCents: number, othersPercent: number): FlatProblem | null {
   const flat = readFlatCents(flatCents);
   if (flat === null) return "amount";
-  if (readOthers(othersPercent) === null || !Number.isInteger(priceCents) || priceCents < 0) return "unknown";
+  if (readOthers(othersPercent) === null || !Number.isSafeInteger(priceCents) || priceCents < 0) return "unknown";
   const earned = flatCommissionOn(priceCents, flat, othersPercent);
   if (earned === null) return "unknown";
   return earned < flat ? "over-cap" : null;

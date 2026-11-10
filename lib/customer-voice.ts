@@ -49,6 +49,7 @@
  *   nl:voice:<statsId>:<yyyy-mm>   the month's summary, about two months
  *   nl:voice:lock:<statsId>         one reading at a time, two minutes, holding its own token
  */
+import { cleanReviewText } from "@/lib/review-ai-summary-rules";
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { membershipNumbers } from "@/lib/membership-numbers";
@@ -167,16 +168,13 @@ redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
 redis.call("DEL", KEYS[1])
 return 1`;
 
-/** A text as it may be sent: one line, short, with addresses, phone numbers and links taken out. Pure. */
+/**
+ * A text as it may be sent: one line, short, with addresses, handles, phone numbers and links taken out, by the
+ * reviews summary's own rule (cleanReviewText, #1973), so a web address written without http or www
+ * ("janesmith.dev") is a link too (663 [HF1]). Pure.
+ */
 export function cleanVoice(value: string, max = MAX_TEXT): string {
-  return value
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[email]")
-    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
-    .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, max);
+  return Array.from(cleanReviewText(value)).slice(0, max).join("");
 }
 
 /**

@@ -31,7 +31,8 @@ import { NewTab } from "@/components/new-tab";
 
 type Site = { domain: string; home: string; company: string; about: string; found: (FoundAddress & { refuses: boolean })[] };
 
-const MESSAGES: Record<string, string> = {
+/** What each refusal of app/api/store/outreach means (663 [HF1]: a try that reached the writing job says it counted). */
+export const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   ...PITCH_PROBLEMS,
   address: "That does not look like a website address. Type it like brand.com.",
@@ -40,7 +41,7 @@ const MESSAGES: Record<string, string> = {
   notes: "Say in a sentence or two what you would offer them.",
   used: "This month's writing help is used up. It starts again on the first of the month.",
   off: "Writing help is not switched on for this store yet.",
-  failed: "The email could not be written just now. Nothing was counted. Try again in a moment.",
+  failed: "The email could not be written just now. Try again in a moment. This try counted as one of this month's writing jobs.",
   full: "Your list of pitches is full. Mark the old ones as answered or delete old drafts first.",
   room: STUDIO_MESSAGES.store_full,
   busy: "This can't be saved right now. Nothing was counted. Try again in a minute.",
@@ -48,7 +49,7 @@ const MESSAGES: Record<string, string> = {
   day: "That is today's limit of site reads. Try again tomorrow.",
   signed_out: "Your session ended. Log in again.",
   unknown: "That pitch is no longer here. Reload the page.",
-  server_error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
+  server_error: "Something went wrong on our side. Try again in a moment. If the email had already started, this try may have counted as one of this month's writing jobs.",
 };
 
 const STATUS_WORDS: Record<PitchStatus, string> = {

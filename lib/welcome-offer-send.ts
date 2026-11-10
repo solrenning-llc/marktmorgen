@@ -51,7 +51,8 @@ export type WelcomeHere = { product: Listing; percent: number; until: number; en
 /**
  * The offer for the person a free copy's link was sent to: begun at the
  * moment they asked, once, and read back from then on. Null when the store
- * has none, or the free product is the one offered.
+ * has none, or the free product is the one offered. Throws UnknownReplyError
+ * when the start answers in no known shape (rule 24): never a live offer.
  */
 export async function welcomeFor(store: Store, claim: Pick<Claim, "e" | "p" | "at">, nowSeconds = Math.floor(Date.now() / 1000)): Promise<WelcomeHere | null> {
   if (!welcomeOn(store) || !store.statsId || !isRedisConfigured() || claim.p === store.welcomeOffer.product) return null;
@@ -61,12 +62,25 @@ export async function welcomeFor(store: Store, claim: Pick<Claim, "e" | "p" | "a
   const start = Number.isFinite(asked) && asked > 0 && asked <= nowSeconds ? asked : nowSeconds;
   const key = startKey(store.statsId, claim.e);
   const ttl = endsAt(start, store.welcomeOffer.hours) - nowSeconds + KEEP_AFTER_SECONDS;
-  const [made, kept] = await redisPipeline([
-    ["SET", key, String(start), "NX", "EX", Math.max(60, ttl)],
-    ["GET", key],
-  ]);
-  if (made !== null) await redisPipeline([["INCR", countKey(store.statsId)]]).catch(() => undefined);
-  const began = Number(kept) || start;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", key, String(start), "NX", "EX", Math.max(60, ttl)],
+      ["GET", key],
+    ]),
+    2,
+  );
+  const made = replies ? replies[0] : undefined;
+  const kept = replies ? replies[1] : undefined;
+  // Counted only on an exact "OK" (CX-123 rule 24): nil is a person whose offer already began; any other answer is
+  // unknown, so nobody is counted on it, and it is said.
+  if (made === "OK") await redisPipeline([["INCR", countKey(store.statsId)]]).catch(() => undefined);
+  else if (made !== null) console.error("starting a welcome offer answered in no known shape; not counted");
+  // The start decides whether the offer ended (rule 24): known only on "OK" or nil and a start read back as a string
+  // of digits. Anything else is unknown, never "it began now": no offer is shown on it, no checkout, no reminder.
+  if (!replies || (made !== "OK" && made !== null) || typeof kept !== "string" || !/^[1-9][0-9]*$/.test(kept)) {
+    throw new UnknownReplyError("the start of a person's welcome offer");
+  }
+  const began = Number(kept);
   const until = endsAt(began, store.welcomeOffer.hours);
   return { product: product as Listing, percent: store.welcomeOffer.percent, until, ended: nowSeconds >= until };
 }
@@ -192,7 +206,14 @@ export async function openWelcome(
 ): Promise<OpenResult> {
   const claim = await readClaimFull(token);
   if (!claim || claim.h !== store.handle) return { ok: false, reason: "expired" };
-  const offer = await welcomeFor(store, claim, nowSeconds);
+  let offer: WelcomeHere | null;
+  try {
+    offer = await welcomeFor(store, claim, nowSeconds);
+  } catch (error) {
+    // An unknown start (rule 24) or a failed read: nothing opened, said as unavailable.
+    console.error("reading a welcome offer for its checkout failed", store.handle, error);
+    return { ok: false, reason: "unavailable" };
+  }
   if (!offer) return { ok: false, reason: "unavailable" };
   if (offer.ended) return { ok: false, reason: "expired" };
   const product = await readProduct(store, offer.product.id);

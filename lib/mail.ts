@@ -351,29 +351,67 @@ export async function reserve(store: Store, n: number, listOnly = false): Promis
  * Zero when the store has no allowance or the count cannot be written.
  */
 export async function takeFromMonth(store: Store, n: number): Promise<number> {
-  if (!Number.isSafeInteger(n) || n <= 0 || !store.listId || !isRedisConfigured()) return 0;
-  const allowance = monthlyAllowance(store);
-  const window = windowOf(store);
-  if (!Number.isSafeInteger(allowance) || allowance <= 0 || !window) return 0;
-  if (!(await admitNonPaying(store))) return 0;
-  if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return 0;
+  const month = await monthToTake(store, n);
+  if (!month) return 0;
   try {
-    const key = usedKey(store.listId, window);
-    const results = await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 70 * 86400]]);
-    const total = confirmedCount(results[0], n);
-    if (results.length !== 2 || total === null) return 0;
-    const over = Math.min(n, Math.max(0, total - allowance));
-    if (over > 0) await redisPipeline([["DECRBY", key, over]]);
-    return n - over;
+    return await takeCounted(month.key, n, month.allowance);
   } catch {
     return 0;
   }
 }
 
-/** Gives back to the store's month what takeFromMonth took for emails that did not go. */
+/**
+ * takeFromMonth for a caller that refuses on an unknown answer (a members import's start, lib/imports.ts): the same
+ * rules and the same counter, but a count whose reply has another shape throws UnknownReplyError (CX-123 rule 24)
+ * instead of answering 0. What that reply may have taken is not given back, as in takeFromMonth.
+ */
+export async function takeFromMonthExact(store: Store, n: number): Promise<number> {
+  const month = await monthToTake(store, n);
+  return month ? takeCounted(month.key, n, month.allowance) : 0;
+}
+
+/** The month takeFromMonth takes from, or null when it can send none: no allowance, window, list or place, or a funded period not reserved. */
+async function monthToTake(store: Store, n: number): Promise<{ key: string; allowance: number } | null> {
+  if (!Number.isSafeInteger(n) || n <= 0 || !store.listId || !isRedisConfigured()) return null;
+  const allowance = monthlyAllowance(store);
+  const window = windowOf(store);
+  if (!Number.isSafeInteger(allowance) || allowance <= 0 || !window) return null;
+  if (!(await admitNonPaying(store))) return null;
+  if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return null;
+  return { key: usedKey(store.listId, window), allowance };
+}
+
+/** Takes up to `n` under `allowance` on the month's counter; a count in another shape throws UnknownReplyError. */
+async function takeCounted(key: string, n: number, allowance: number): Promise<number> {
+  const results = repliesFor(await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 70 * 86400]]), 2);
+  const total = results ? confirmedCount(results[0], n) : null;
+  if (total === null) throw new UnknownReplyError("the month's emails used");
+  const over = Math.min(n, Math.max(0, total - allowance));
+  if (over > 0) await redisPipeline([["DECRBY", key, over]]);
+  return n - over;
+}
+
+/**
+ * Gives back up to ARGV[1] of a count, never below zero (second review on #3384, HIGH): a give-back that comes twice,
+ * or for more than was taken, never leaves the month's count below what went, so nothing else can send past the plan
+ * on it. The count is read exactly (CX-123 rule 24): absent is nothing to give back; a whole number is taken down by
+ * at most itself; any other value is an error, and nothing is changed. Answers how many were given back.
+ */
+export const GIVE_BACK_FLOOR = `-- marktmorgen:give-back-floor:v1
+local held = redis.call('GET', KEYS[1])
+if not held then return 0 end
+if not string.match(held, '^-?%d+$') then return redis.error_reply('ERR give-back-floor: not a count') end
+local back = math.min(tonumber(ARGV[1]), tonumber(held))
+if back <= 0 then return 0 end
+redis.call('DECRBY', KEYS[1], back)
+return back`;
+/** What GIVE_BACK_FLOOR costs beside the DECRBY it replaces: the EVAL and its GET, which Upstash bills one by one beside the DECRBY. */
+export const GIVE_BACK_FLOOR_EXTRA_COMMANDS = 2;
+
+/** Gives back to the store's month what takeFromMonth took for emails that did not go, never below zero (GIVE_BACK_FLOOR). */
 export async function giveBackToMonth(store: Store, n: number): Promise<void> {
   const window = windowOf(store);
-  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["DECRBY", usedKey(store.listId, window), n]]);
+  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n]]);
 }
 
 /** Gives back what was taken for a batch that was not sent. */

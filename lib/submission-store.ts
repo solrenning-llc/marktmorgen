@@ -426,8 +426,10 @@ export type DoorClosed =
  * vault (closeReservedVault, which gives the storage reservation back for the
  * file now kept), then the record written, counted in the store's data room
  * until it expires, and the file put on the daily sweep's list for the end of
- * its keeping time. A file whose record cannot be kept is deleted, never left
- * in the store unaccounted for.
+ * its keeping time. A file whose record Redis confirms was not written is
+ * deleted, never left in the store unaccounted for; a file whose record may
+ * have been written (its answer lost, or another close of the same upload
+ * there first) is kept, never deleted from under a record that names it.
  */
 export async function closeSubmissionDoor(
   where: DoorWhere & { data: DataStore; note: unknown },
@@ -468,55 +470,62 @@ export async function closeSubmissionDoor(
     folder: door.folder,
   };
   const json = submissionRecordJson(kept);
+  const until = keepUntil + SUBMISSION_SWEEP_GRACE_SECONDS;
+  const key = recordKey(door.folder, door.id);
   try {
     if (json === null) throw new Error("submission_record_bytes");
-    const until = keepUntil + SUBMISSION_SWEEP_GRACE_SECONDS;
-    const key = recordKey(door.folder, door.id);
     const room = await takeData(where.data, [{ until: until * 1000, bytes: dataBytes([key, json], 1) }], nowSeconds * 1000);
     if (!room.ok) {
       await drop();
       if (room.reason === "full") return { ok: false, reason: "full" };
       throw new UnknownReplyError("the store's data room");
     }
-    // The place and the entry are held to the keeping time first, and the file put on the sweep's list:
-    // a record written with its place lost would let a fourth in, one off the list would never be swept.
-    const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
-    const who = whoKey(door.folder, door.who);
-    const entry = entryOf(door.courseId, door.lessonId, door.id, pathname);
-    const replies = repliesFor(
-      await redisPipeline([
-        ["ZADD", live, "XX", keepUntil, door.id],
-        ["ZSCORE", live, door.id],
-        ["EXPIRE", live, LIVE_SECONDS],
-        ["ZADD", who, "XX", until, entry],
-        ["ZSCORE", who, entry],
-        ["EXPIRE", who, LIVE_SECONDS],
-        ["ZADD", DUE_KEY, keepUntil, dueMember(door.folder, pathname)],
-        ["SET", key, json, "EX", until - nowSeconds, "NX"],
-        ["DEL", doorKey(door.folder, door.id)],
-      ]),
-      9,
-    );
-    if (
-      !replies ||
-      countOf(replies[0]) !== 0 ||
-      String(replies[1]) !== String(keepUntil) ||
-      replies[2] !== 1 ||
-      countOf(replies[3]) !== 0 ||
-      String(replies[4]) !== String(until) ||
-      replies[5] !== 1 ||
-      countOf(replies[6]) === null ||
-      replies[7] !== "OK" ||
-      countOf(replies[8]) === null
-    ) {
-      throw new UnknownReplyError("a submission record's write");
-    }
-    return { ok: true, submission: kept };
   } catch (error) {
-    // The file is kept in the vault but nothing says whose it is: it goes.
+    // No record was sent: the file is kept in the vault but nothing says whose it is, so it goes.
     await drop();
     throw error;
   }
+  // The place and the entry are held to the keeping time first, and the file put on the sweep's list:
+  // a record written with its place lost would let a fourth in, one off the list would never be swept.
+  const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
+  const who = whoKey(door.folder, door.who);
+  const entry = entryOf(door.courseId, door.lessonId, door.id, pathname);
+  // A write sent and never answered may have landed: its file is kept for the record that may name it.
+  const replies = repliesFor(
+    await redisPipeline([
+      ["ZADD", live, "XX", keepUntil, door.id],
+      ["ZSCORE", live, door.id],
+      ["EXPIRE", live, LIVE_SECONDS],
+      ["ZADD", who, "XX", until, entry],
+      ["ZSCORE", who, entry],
+      ["EXPIRE", who, LIVE_SECONDS],
+      ["ZADD", DUE_KEY, keepUntil, dueMember(door.folder, pathname)],
+      ["SET", key, json, "EX", until - nowSeconds, "NX"],
+      ["DEL", doorKey(door.folder, door.id)],
+    ]),
+    9,
+  );
+  if (
+    !replies ||
+    countOf(replies[0]) !== 0 ||
+    String(replies[1]) !== String(keepUntil) ||
+    replies[2] !== 1 ||
+    countOf(replies[3]) !== 0 ||
+    String(replies[4]) !== String(until) ||
+    replies[5] !== 1 ||
+    countOf(replies[6]) === null ||
+    replies[7] !== "OK" ||
+    countOf(replies[8]) === null
+  ) {
+    // Answered out of shape, or the record's place taken by another close of the same upload first: a record may
+    // name this file, so it is read back exactly, and the file deleted only when Redis confirms there is none.
+    // A record there (this close's, or the other close's, at the same path) keeps it; a read-back that does not
+    // read keeps it too, never deleted on a guess.
+    const back = await redisPipeline([["GET", key]]).then((answer) => repliesFor(answer, 1), () => null);
+    if (back && back[0] === null) await drop();
+    throw new UnknownReplyError("a submission record's write");
+  }
+  return { ok: true, submission: kept };
 }
 
 /** Gives the buyer's own open upload up: the provider's session cancelled, then the place, the entry and the door let go. */

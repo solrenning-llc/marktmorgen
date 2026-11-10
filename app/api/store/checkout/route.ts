@@ -257,6 +257,9 @@ export async function POST(request: NextRequest) {
     let abTest = "";
     let ab: string | undefined;
     if (product.page && bucket !== null && !gift && !group) {
+      // A page whose read is not known never blocks the sale, and no version is claimed for it: the buyer goes on to
+      // Stripe with no metadata[ab], and the test counts nothing (C4-20261106-2610-C6-153, unit B;
+      // tests/checkout-ab-page-unknown.test.ts).
       const page = await readPage(store.statsId, product.id).catch(() => null);
       const test = page ? runningTest(page) : null;
       if (page && test && pageShown(page)) {

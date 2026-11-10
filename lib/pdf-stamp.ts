@@ -38,6 +38,7 @@ import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file
 import { isFileHeld } from "@/lib/held-files";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/product-file";
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
@@ -242,6 +243,10 @@ export async function stampedCopy(
     if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
       await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
     }
+    // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
+    // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
+    // for a later try: emptying it now would delete the copy handed over below.
+    await retryStampDrops(RETRY_PER_CALL, copyFolder(file)).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
     return copy;
   } catch (error) {
     console.error("stamping a file failed; handing over the original", error);
@@ -250,15 +255,70 @@ export async function stampedCopy(
 }
 
 /**
- * Deletes every stamped copy made from a file, once the file itself is gone.
- * Best effort, like every other clean-up of storage here.
+ * Folders of stamped copies whose deletion failed, each tried again until its copies are gone: every copy carries
+ * a buyer's email and counts in the store's paid storage, so a failed deletion is never counted as done.
+ */
+export const DROP_QUEUE = "nl:stamp:drop";
+/** How many such folders one removal or one new copy tries again: a few calls to the file store at most. */
+const RETRY_PER_CALL = 2;
+/** What copyFolder makes, and so the only thing read from the list that is ever listed and deleted. */
+const COPY_FOLDER = new RegExp(`^(?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/$`);
+
+/** Deletes every file in a folder of stamped copies. Throws when the folder cannot be listed whole or a file not deleted. */
+async function deleteFolder(folder: string): Promise<void> {
+  const copies = await listFiles(folder);
+  for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));
+}
+
+/** Puts a folder down to be tried again. False when that could not be confirmed (rule 24: SADD answers 0 or 1). */
+async function noteDrop(folder: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  try {
+    const replies = repliesFor(await redisPipeline([["SADD", DROP_QUEUE, folder]]), 1);
+    const added = replies ? countOf(replies[0]) : null;
+    return added === 0 || added === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tries again up to `limit` folders a deletion left behind, and answers how many were emptied. A folder leaves the
+ * list only after every copy in it is confirmed deleted; the first that fails stops the try and stays. A list read
+ * in any shape but an exact list of text throws (UnknownReplyError), and nothing is deleted on it.
+ */
+export async function retryStampDrops(limit: number, keep?: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["SRANDMEMBER", DROP_QUEUE, limit]]), 1);
+  const folders = replies ? stringList(replies[0]) : null;
+  if (!folders || folders.length > limit) throw new UnknownReplyError("the stamped copies to delete");
+  let emptied = 0;
+  for (const folder of folders) {
+    // `keep` is the folder of a copy being handed over right now: it stays on the list for a later try, so a new
+    // copy is never deleted by its own call (Codex M on #3312).
+    if (!COPY_FOLDER.test(folder) || folder === keep) continue;
+    await deleteFolder(folder);
+    const gone = repliesFor(await redisPipeline([["SREM", DROP_QUEUE, folder]]), 1);
+    const count = gone ? countOf(gone[0]) : null;
+    if (count === null || count > 1) throw new UnknownReplyError("a folder of deleted copies taken off the list");
+    emptied += 1;
+  }
+  return emptied;
+}
+
+/**
+ * Deletes every stamped copy made from a file, once the file itself is gone. It never fails the removal that
+ * called it (the file is already off the product): a folder the file store could not list whole or empty is put
+ * down in DROP_QUEUE and tried again by the next removal or new copy, and the log says so when even that cannot be.
  */
 export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | "contentType">): Promise<void> {
   if (!isStampable(file)) return;
+  await retryStampDrops(RETRY_PER_CALL).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
+  const folder = copyFolder(file);
   try {
-    const copies = await listFiles(copyFolder(file));
-    for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));
+    await deleteFolder(folder);
   } catch (error) {
-    console.error("could not delete stamped copies", error);
+    if (await noteDrop(folder)) console.error("could not delete stamped copies; put down to be tried again", error);
+    else console.error(`could not delete stamped copies in ${folder}, and nothing will try again: the list could not be written`, error);
   }
 }

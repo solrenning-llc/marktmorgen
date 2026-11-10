@@ -199,6 +199,48 @@ async function main(): Promise<void> {
   is("then refused although kept", (await get(`${pid}.xml`)).status, 503);
   await original([["SET", `nl:traffic:r:${folder}:${window}`, 0]]);
 
+  part("The hold comes before the listing is read: a missing or unknown listing is admitted first and paid (Codex H2 on #3513)");
+  // The product held off the catalog's head, as a store with many products keeps most of them: its listing is a GET.
+  const offHead = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(offHead);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, k === "head" && Array.isArray(v) ? [] : offHead(v)]));
+    return value;
+  };
+  const catalogId = store.catalog.id!;
+  const listingGet = `GET nl:catalog:${catalogId}:l:${pid}`;
+  const listingAs = (reply: unknown) => (commands: (string | number)[][]) => {
+    if (commands.length === 1 && commands[0].map(String).join(" ") === listingGet) return reply;
+    return original(commands).then((replies: unknown) => (Array.isArray(replies) ? replies.map((r) => (typeof r === "string" && r.includes('"head"') ? JSON.stringify(offHead(JSON.parse(r))) : r)) : replies));
+  };
+  for (const [what, reply] of [["missing (null)", [null]], ["unknown (a number)", [7]]] as const) {
+    forgetPublicFeeds();
+    await original([["SET", `nl:traffic:r:${folder}:${window}`, spent + 10]]);
+    bend = listingAs(reply);
+    for (let n = 0; n < 3; n += 1) {
+      sent.length = 0;
+      const answer = await get(`${pid}.xml`);
+      is(`${what}, window spent, request ${n + 1}: 503 resting, the listing never read`, [answer.status, Boolean(answer.headers.get("retry-after")), sent.includes(listingGet)], [503, true, false]);
+    }
+    bend = null;
+    await original([["SET", `nl:traffic:r:${folder}:${window}`, 0]]);
+  }
+  forgetPublicFeeds();
+  bend = listingAs([null]);
+  before = await requestsIn(folder, window);
+  sent.length = 0;
+  const missing = await get(`${pid}.xml`);
+  bend = null;
+  is("missing, with room: read after the hold, 404, and the base kept (the store and the listing read), the rest given back", [missing.status, sent.includes(listingGet), (await requestsIn(folder, window)) - before], [404, true, PUBLIC_FEED_BUILD_UNITS]);
+  forgetPublicFeeds();
+  bend = listingAs([7]);
+  before = await requestsIn(folder, window);
+  const unknown = await get(`${pid}.xml`);
+  bend = null;
+  is("unknown, with room: 503, and the whole hold kept (unknown is never zero)", [unknown.status, (await requestsIn(folder, window)) - before], [503, PUBLIC_FEED_HOLD_UNITS]);
+  await original([["SET", `nl:traffic:r:${folder}:${window}`, 0]]);
+  forgetPublicFeeds();
+  is("control: the feed is built again with the listing on the head", (await get(`${pid}.xml`)).status, 200);
+
   part("Rule 24: a record that cannot be read gives a 503, never an empty feed, and is not kept");
   const bents: [string, string, unknown][] = [
     ["the settings: no reply", `GET nl:pod:${POD}:public`, []],
@@ -319,6 +361,7 @@ async function main(): Promise<void> {
   is("no signed media, no file store, no fetch", [/signedMedia|@vercel\/blob|@\/lib\/blob|fetch\(/.test(source)], [false]);
   const hold = source.indexOf("holdPublicRequests(store, PUBLIC_FEED_HOLD_UNITS, now)");
   is("held before the podcast is read, and the bytes taken before the body is sent", hold > 0 && hold < source.indexOf("readPodcast(") && source.indexOf("sendUnits(feed.bytes)") < source.lastIndexOf("new Response(body"), true);
+  is("held before the listing is read", hold > 0 && hold < source.indexOf("readListingExactly(store"), true);
 }
 
 main()

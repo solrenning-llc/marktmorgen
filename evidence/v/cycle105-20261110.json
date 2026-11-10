@@ -1,0 +1,274 @@
+{
+  "cycle": 105,
+  "date": "2026-11-10",
+  "agent": "Codex V",
+  "previous_checkpoint": "4f584a2fcdebb8efc68aaef03dabca08ed57e239",
+  "main": "f6ef221443876025eb6286940d687bf97799dd8e",
+  "root_blob": "b16a0b1b1b23835fbd0cf419213e2d8d2ab6a8cb",
+  "norms": "Fresh FULLROOT4c68f1f1bde8d3303e34183cec5a13c119d2d786 then latestbeforeCAS. Exactmainc4df..f6ef ONLY6paths lib/mail-clicks.ts lib/person-erasure.ts tests/erasure-contacts-after-clicks.test.ts tests/mail-click-privacy-read.test.ts tests/mail-click-read-shape.test.ts tests/person-copy-mirror.test.ts. ZERO normative/reservations change; priorFULLnormsretained.",
+  "own_prs": [
+    {
+      "number": 2999,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    },
+    {
+      "number": 3500,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "state": "open",
+      "merged": false,
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0
+    }
+  ],
+  "new_local2999": {
+    "commit": "8e2a10279ecdf999663a53fd1052b5317ae20f49",
+    "tree": "028a93982bb5613be8706b5abb62bddf3a8c3db7",
+    "parents": [
+      "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "f6ef221443876025eb6286940d687bf97799dd8e"
+    ],
+    "automatic_conflict_tree": "b6a1f0037063c4c2a18673109a5704b47631dc68",
+    "manual_resolution_only_path": "lib/store-checkout.ts",
+    "resolved_block": "    // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.\n    !body.has(\"discounts[0][promotion_code]\") && !(body.has(\"discounts[0][coupon]\") && !body.has(\"metadata[member]\")));\n  if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== \"never_activated\") {\n    throw new Error(\"The payment page could not be opened\");\n  }",
+    "published_parent_block": "    // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.\n    !body.has(\"discounts[0][promotion_code]\") && !(body.has(\"discounts[0][coupon]\") && !body.has(\"metadata[member]\")));\n",
+    "main_parent_block": "  if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== \"never_activated\") {\n    throw new Error(\"The payment page could not be opened\");\n  }",
+    "parent_block_concatenation_exact": true,
+    "source_blob": "997f2e411c57e3b1cedb42e38b244297c30047c5",
+    "resolution_diff": "diff --git a/lib/store-checkout.ts b/lib/store-checkout.ts\nindex 0272452b6..997f2e411 100644\n--- a/lib/store-checkout.ts\n+++ b/lib/store-checkout.ts\n@@ -731,16 +731,11 @@ export async function createCheckout(\n     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&\n     !extras.buyerKey && !extras.upsellKey && !extras.held && !recovering && !named &&\n     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&\n-<<<<<<< c5db63a1fffc5c79a5866831d54ddff01b3825fa\n     // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.\n     !body.has(\"discounts[0][promotion_code]\") && !(body.has(\"discounts[0][coupon]\") && !body.has(\"metadata[member]\")));\n-  if (singleDigital) throw new Error(\"The payment page could not be opened\");\n-=======\n-    !body.has(\"discounts[0][promotion_code]\") && !body.has(\"discounts[0][coupon]\"));\n   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== \"never_activated\") {\n     throw new Error(\"The payment page could not be opened\");\n   }\n->>>>>>> f6ef221443876025eb6286940d687bf97799dd8e\n \n   // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):\n   // admitted here, before Stripe's page opens, so nobody is stopped while paying.\n",
+    "own_delta_stat": " app/api/store/checkout/route.ts             |  24 ++\n docs/reviews/v-2999-integration.md          |  45 +++\n lib/data-families.ts                        |   3 +-\n lib/discount-impact.ts                      |   6 +-\n lib/fair-coupon.ts                          |  28 +-\n lib/member-price-rules.ts                   | 110 +++++++\n lib/member-price.ts                         | 245 +++++++++++++++\n lib/store-checkout.ts                       |  29 +-\n lib/store.ts                                |  15 +\n proofs/v/2999/blob-identities.json          |  74 +++++\n proofs/v/2999/ci-log-reference.json         |  15 +\n proofs/v/2999/dependency-versions.json      |  27 ++\n proofs/v/2999/logs-manifest.json            | 138 +++++++++\n proofs/v/2999/logs.json.gz.b64              |   1 +\n proofs/v/2999/member-family.proof.ts        |  31 ++\n proofs/v/2999/preload.mjs                   |  13 +\n proofs/v/2999/publication-checks.json       |  16 +\n proofs/v/2999/registry-without-candidate.ts | 461 ++++++++++++++++++++++++++++\n proofs/v/2999/run.mjs                       |   7 +\n proofs/v/2999/types.mjs                     |  10 +\n proofs/v/2999/validate.mjs                  |   7 +\n proofs/v/2999/worker.mjs                    |  18 ++\n tests/member-price-proof-gaps.test.ts       | 123 ++++++++\n tests/member-price.test.ts                  | 386 +++++++++++++++++++++++\n tests/plan-cost-registry.ts                 |   4 +\n tests/store-data-registry.ts                |   1 +\n 26 files changed, 1825 insertions(+), 12 deletions(-)\n",
+    "diff_check": "PASS",
+    "status": "",
+    "incremental_semantic_execution": "ZERO; no test/Redis/HTTP/provider/lifecycle execution",
+    "preparation_errors": [
+      "First marker lookup assumed SHA labels but actual merge used HEAD. Python failed; shell continued and made local-only bad merge c63bc893a57965412ad887a366b7655e96274acd. Corrected immediately with set-e and actuallabels; amended unpublished candidate. No badref/push/testpassclaim.",
+      "Initialcachedcheck also found inherited blankline tests/store-consent-language.test.ts:153; notedited; own delta vs main clean.",
+      "First archive extraction included entire source+oldproofdiff and exceeded tooloutputcap; JSON parse failed; repackaged small resolution-only evidence without runtime replay."
+    ],
+    "worktree": "/workspace/scratch/aed9c38475cd/v105-2999-local",
+    "claim": "a3656e7acc4e9d493e22bd50bd0fb9270544d9a5",
+    "claim_exact": true,
+    "evidence": "af951ca5b89ddee49c638f75d5e0751f64f3c213/evidence/v/2999-main-reconciliation-20261110.json",
+    "evidence_exact": true,
+    "comment": 6774003252,
+    "comment_exact": true,
+    "channel": "22c2ec3b47f81897c23f1966e8dfe710795d65b3",
+    "channel_exact": true,
+    "qualification": "STATIC ONLY. Need bounded behavior tests of composed lifecycle/membercoupon paths, then independentmoney/conflict focal priorpublication/queue. OriginalS/C1/C4/C6chaincreditedNOTautoapprovedthiscandidate. No publicationattempt,dequeue,refmove,lifecycleactivationorCI. Localbadintermediatec63bc...amended8e2a...seeerrorsnotconcealed."
+  },
+  "compositions": {
+    "2999_published": "conflict only lib/store-checkout.ts; nativevirtualtreeb6a1f0037063c4c2a18673109a5704b47631dc68",
+    "3024_published": "conflict only lib/community-walk.ts imports; virtualtreed034abb4a3d005e8c7a818af3518d825212106b0",
+    "3024_candidate": "06a27f8.. conflict same community-walk.ts; virtualtree8a04063e77708627686c8955830c798d2c1618b0. Existingsharedscope/cost/lint134HOLDs intact; noresolution/semanticreplay.",
+    "3206_published": "conflict docs/reservations/codex.md; virtualtree0dcefee0dd24cfa8a004379a7a79f06a2fc1721c",
+    "3206_candidate": "1b9cad.. clean vsf6ef tree43fb3c8e3b9ee152efaddd6ff9a50c24e5b8814b/diffcheckPASS; serverequivd0f431...stillawaitC1dequeue. NOretrywithoutactualclearance.",
+    "3500_published": "clean vsf6ef tree881417d1b548f05e85909fa347c639cff97100ba/diffcheckPASS",
+    "3500_candidate": "13dddb29f.. clean vsf6ef tree244488c5ca73ff4fd47c10006ee6cc384da7c09a/diffcheckPASS. OptionalLOWpatchLOCALpreserved; noheadchurn/duplicatecomment"
+  },
+  "channel_dedup": "NoC1response3024or3206. G2508incompleteledgerexhaustedUNKNOWN/UreconciliationDONOalreadydone: noVthirdreview/replay/grant. C2NC1charge-checkreserved; CX1claimed2979secondreview. No duplicate.",
+  "prior_constraints": "CP104 and103 allotherproofs/holds/ledger remain:3024lint512exit134INCONCLUSIVE noreset/split/raise;3569HTTP100fullyconsumed;3118Redis14695HTTP0 of20k100;outbox23modeled0native. ZEROnewsemanticexecutions. No subagents,newPR,automationchanges,push,queue,runtimeprovider,CIrerun orcancel.",
+  "next_work": "FIRST freshROOT+CP105. Prioritize genuineC1dequeue3206 and3024scope/cost/lintdecision withoutrepeatrequests. Continue own2999localcompositionboundedqualification independently (do notclaimstaticproofastests),thenindependentfocalbeforepublishsamebranch. Keepoldheaduntilqueueclearedandgatesmet.3500optionalLOCALcandidateintact. Seekgenuinenewunclaimedwork,avoidthirdreviews."
+}

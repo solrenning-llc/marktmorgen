@@ -32,16 +32,13 @@ const OLD = "old-plan-shop";
 const SUB = "sub_ReleasedPlan01";
 const CUSTOMER = "cus_ReleasedPlan01";
 
-const listed: Record<string, unknown>[] = [];
+/** What was asked of Stripe: recordUnpaidRenewal works from the reply the daily job already has, so nothing (Claude 2's LEVE on #3379). */
 const asked: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
   if (url.origin !== "https://api.stripe.com" || method !== "GET") throw new Error(`unexpected external operation: ${method} ${url}`);
   asked.push(url.pathname);
-  if (url.pathname === "/v1/subscriptions") return Response.json({ object: "list", data: listed, has_more: false });
-  const one = listed.find((row) => url.pathname === `/v1/subscriptions/${row.id}`);
-  if (one) return Response.json(one);
   return Response.json({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
@@ -50,6 +47,9 @@ function plan(status: string, over: Record<string, unknown> = {}): Record<string
   return {
     id: SUB,
     status,
+    // As Stripe always sends them: since #3251, stateOf reads a subscription without its own stop fields as unknown.
+    cancel_at: null,
+    cancel_at_period_end: false,
     created: NOW - 90 * DAY,
     metadata: { store: OLD },
     customer: { id: CUSTOMER, email: owner },
@@ -83,6 +83,7 @@ async function main() {
     is(`${label}: recorded`, await recordUnpaidRenewal(plan("past_due")), true);
     is(`${label}: the store keeps the date`, ((await storeForEmail(owner))!.renewalUnpaidSince ?? 0) > 0, true);
     if (reclaimed) is(`${label}: the new holder of the name is not touched`, ((await storeForEmail(other))?.renewalUnpaidSince ?? 0) > 0, false);
+    is(`${label}: Stripe is not asked`, asked, []);
   }
 
   part("the other way round: never by the name alone");
@@ -94,6 +95,7 @@ async function main() {
     is("nothing was written", ((await storeForEmail(owner))!.renewalUnpaidSince ?? 0) > 0, false);
     is("an add-on is not a plan", await recordUnpaidRenewal(plan("past_due", { metadata: { store: OLD, addon: "assistant" } })), null);
     is("no customer address to look by: nothing found, nothing written", await recordUnpaidRenewal(plan("past_due", { customer: CUSTOMER })), null);
+    is("Stripe is not asked", asked, []);
   }
   done();
 }

@@ -780,7 +780,8 @@ test('review: a reused current or previous name is not blocked by canceled Delet
  */
 function fundedPlan(named:string,customer:Record<string,unknown>|string={id:'cus_Test000001',email:'owner@example.test'}){
  const created=Math.floor(Date.now()/1000);
- return{id:'sub_Test000001',customer,created,status:'active',metadata:{store:named,funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+ // cancel_at and cancel_at_period_end as Stripe always sends them: since #3251 stateOf reads a subscription without them as unknown.
+ return{id:'sub_Test000001',customer,created,status:'active',cancel_at:null,cancel_at_period_end:false,metadata:{store:named,funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
 }
 const renamedOwner={...store,handle:'harbor-new',stripeCustomerId:'cus_Test000001',previousHandles:['harbor'],releasedHandles:[]} as Store;
 const releasedOwner={...store,handle:'harbor-new',stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:['harbor']} as Store;

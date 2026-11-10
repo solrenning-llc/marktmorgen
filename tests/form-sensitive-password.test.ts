@@ -45,6 +45,14 @@ for (const label of [
   "Login (email and password)",
   "Gmail password (required)",
   "User name / password",
+  "Email&password",
+  "Email/password",
+  "Email+password",
+  "Email &password",
+  "Username/password",
+  "Login(email+password)",
+  "Login(email/password)",
+  "Gmail:password",
   "Could you share your Gmail password?",
   "Which is your password?",
   "Do you reuse your passwords? Enter your password",
@@ -79,6 +87,8 @@ for (const label of [
   "What makes your password strong?",
   "Did you forget your password last month?",
   "Your feedback on my password course",
+  "How do you use email/password sign-in?",
+  "Which password manager/email tool do you use?",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");
@@ -89,6 +99,8 @@ for (const html of [
   '<label>Instagram password<input type="text"></label>',
   '<input type="text" aria-label="Gmail password">',
   '<input type="text" placeholder="Email &amp; password">',
+  '<input type="text" aria-label="Email&amp;password">',
+  '<input type="text" placeholder="Login(email/password)">',
   '<label>Login (email and password)<input type="text"></label>',
 ]) {
   const result = checkGeneratedCode({ html, css: "", js: "" });

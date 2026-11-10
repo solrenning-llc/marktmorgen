@@ -57,12 +57,15 @@ export default async function MovePage({ params, searchParams }: Params) {
   // The price the email named is gone (an option removed, even the last): said, never swapped for another (lib/move-members.ts, openMove).
   const priceGone = Boolean(invite && product?.recurring && namedPriceGone(product, invite.o));
   // What stops the member here, and what happened on the last press: a refused page or too many tries leave the button.
-  // Moved already (kept), or its state cannot be read: said so, with no button (Revisor 1 on #2685).
-  const blocking = !invite ? m.notices.expired : invite.kept !== 0 ? m.notices.done : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
+  // Moved already (kept): said so, with no button (Revisor 1 on #2685). Its state cannot be read: said to be unknown,
+  // never moved, with no button either (Claude 4's MÉDIO on #2685).
+  const unknownState = Boolean(invite?.keptUnknown);
+  const blocking = !invite ? m.notices.expired : unknownState ? m.notices.unknown : invite.kept !== 0 ? m.notices.done : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
   // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];
-  const notice = priceGone ? m.notices.price : (said ?? blocking);
+  // An unknown state is what the page says, whatever the address carries: never "moved" from a status in the link.
+  const notice = unknownState ? m.notices.unknown : priceGone ? m.notices.price : (said ?? blocking);
   // Where the prices offered today are, when the one named is gone: the product's own page, while buyers can see it.
   const pricesLink = priceGone && product && !product.hidden ? product : null;
   // A draft is named only to whoever holds this move's private invitation; otherwise it is a product not known here (MM-SA-30).

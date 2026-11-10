@@ -296,19 +296,31 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   return { to: invite.e, subject: m.reminderSubject(product.title).slice(0, 200), text };
 }
 
+/** How many customer records under one address keptAlready reads: more is not read whole, so it throws. */
+const KEPT_CUSTOMERS_READ = 10;
+
+/**
+ * A Stripe list page's items, only when the page says it is whole: its `data` a list, `has_more` exactly false and no
+ * more items than were asked for. Anything else is null, never an empty or complete list (B4, Claude 4 on #2685).
+ */
+function wholeList(page: Record<string, unknown>, limit: number): unknown[] | null {
+  return Array.isArray(page.data) && page.has_more === false && page.data.length <= limit ? page.data : null;
+}
+
 /** Whether this address has a live membership to this product on the creator's account now. */
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
   // CX-123 rule 24 (rule 30 of Claude 4's sweep, C4-2890): a list without its data is unknown, never "not kept": it
-  // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it.
-  const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
-  if (!Array.isArray(customers.data)) throw new Error("a member's customers did not read");
-  for (const customer of customers.data as { id?: unknown }[]) {
-    if (typeof customer.id !== "string") continue;
-    const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
-    if (!Array.isArray(subs.data)) throw new Error("a member's subscriptions did not read");
-    const list = subs.data as { status?: unknown; metadata?: Record<string, string> | null }[];
+  // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it. So is a list
+  // cut short or that does not say it is whole (Claude 4's LEVE on #2685): a live membership may lie beyond it.
+  const customers = wholeList(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(KEPT_CUSTOMERS_READ) })}`), KEPT_CUSTOMERS_READ);
+  if (!customers) throw new Error("a member's customers did not read whole");
+  for (const customer of customers as { id?: unknown }[]) {
+    if (typeof customer?.id !== "string") continue;
+    const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`), 100);
+    if (!subs) throw new Error("a member's subscriptions did not read whole");
+    const list = subs as { status?: unknown; metadata?: Record<string, string> | null }[];
     if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
   }
   return false;
@@ -347,7 +359,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" | "unknown" };
 
 /** The open mark's value once a try's outcome is not known (a checkout may exist): later presses say so. */
 const OPEN_UNKNOWN = "unknown";
@@ -365,7 +377,10 @@ export async function openMove(
   const invite = await readMove(store, productId, token);
   if (!invite) return { ok: false, reason: "expired" };
   // Kept already, or its state cannot be read (KEPT_UNKNOWN): the link opens nothing more, at any price, so one
-  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was moved.
+  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was moved only when it was;
+  // a state that cannot be read is said to be unknown, never moved (Claude 4's MÉDIO on #2685), so nobody lets
+  // their old membership lapse on our word.
+  if (invite.keptUnknown) return { ok: false, reason: "unknown" };
   if (invite.kept !== 0) return { ok: false, reason: "done" };
   const stored: Product | null = await readProduct(store, productId);
   // A price the creator has since taken off sale stays open to this member alone while the invitation is not yet
@@ -497,16 +512,14 @@ export const MOVE_STRIPE_PAGES = 1 + MOVE_CUSTOMERS_READ + 1;
 async function liveMembership(store: Store, email: string, productId: string): Promise<boolean | null> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return null;
-  const whole = (page: Record<string, unknown>, limit: number): unknown[] | null =>
-    Array.isArray(page.data) && page.has_more === false && page.data.length <= limit ? page.data : null;
   try {
     // At most MOVE_CUSTOMERS_READ records under the address: more is not read whole, so nothing opens (the cost bound).
-    const customers = whole(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(MOVE_CUSTOMERS_READ) })}`), MOVE_CUSTOMERS_READ);
+    const customers = wholeList(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(MOVE_CUSTOMERS_READ) })}`), MOVE_CUSTOMERS_READ);
     if (!customers) return null;
     for (const customer of customers) {
       const id = customer && typeof customer === "object" ? (customer as { id?: unknown }).id : undefined;
       if (typeof id !== "string" || !/^cus_[A-Za-z0-9]+$/.test(id)) return null;
-      const subs = whole(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
+      const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
       if (!subs) return null;
       for (const sub of subs) {
         if (!sub || typeof sub !== "object") return null;

@@ -56,7 +56,7 @@ import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
 import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, stillListed, wouldList } from "@/lib/directory-index";
-import type { LanguageCode } from "@/lib/store-language";
+import { isLanguage, type LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -295,6 +295,46 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
   return [...rows].sort((a, b) => b.topRate - a.topRate || b.earning - a.earning || a.name.localeCompare(b.name, "en"));
 }
 
+const isRecord = (raw: unknown): raw is Record<string, unknown> => typeof raw === "object" && raw !== null && !Array.isArray(raw);
+const isWhole = (raw: unknown): raw is number => typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0;
+const isShare = (raw: unknown): raw is number => typeof raw === "number" && Number.isFinite(raw) && raw >= 0 && raw <= 100;
+const isText = (raw: unknown): raw is string => typeof raw === "string";
+const INTERVALS: readonly unknown[] = ["day", "week", "month", "year"];
+
+function isDirectoryProduct(raw: unknown): raw is DirectoryProduct {
+  if (!isRecord(raw)) return false;
+  if (!isText(raw.id) || !isText(raw.title) || !isWhole(raw.priceCents) || !isShare(raw.rate) || !isWhole(raw.earnCents)) return false;
+  if (raw.image !== null && !isText(raw.image)) return false;
+  if (raw.months !== undefined && !isWhole(raw.months)) return false;
+  if (raw.interval !== undefined && !INTERVALS.includes(raw.interval)) return false;
+  if (raw.trialDays !== undefined && !isWhole(raw.trialDays)) return false;
+  if (raw.intro !== undefined && typeof raw.intro !== "boolean") return false;
+  return raw.paidInFull === undefined || typeof raw.paidInFull === "boolean";
+}
+
+function isDirectoryNumbers(raw: unknown): raw is DirectoryNumbers {
+  if (!isRecord(raw)) return false;
+  return (
+    isWhole(raw.affiliates) && isWhole(raw.since) && isWhole(raw.clicks) && isWhole(raw.clickSales) &&
+    (raw.conversion === null || isShare(raw.conversion)) && (raw.per100Cents === null || isWhole(raw.per100Cents)) &&
+    isWhole(raw.sales) && isWhole(raw.earnedCents) && isWhole(raw.paidCents)
+  );
+}
+
+/**
+ * One kept row, in the exact shape a build writes (Codex CX1 on #3062): a row read back from Redis that is not one is
+ * never shown, since the page draws every field of it (components/affiliate-directory.tsx).
+ */
+export function isDirectoryRow(raw: unknown): raw is DirectoryRow {
+  if (!isRecord(raw)) return false;
+  if (!isText(raw.handle) || !raw.handle || !isText(raw.name) || !isLanguage(raw.language) || !isText(raw.currency) || !raw.currency) return false;
+  if (!isShare(raw.percent) || !isShare(raw.topRate) || !isWhole(raw.topEarnCents)) return false;
+  if (!isWhole(raw.days) || (raw.rule !== "first" && raw.rule !== "last") || typeof raw.lifetime !== "boolean") return false;
+  if (!isWhole(raw.payday) || !isWhole(raw.hold) || typeof raw.buyers !== "boolean" || !isWhole(raw.earning)) return false;
+  if (!Array.isArray(raw.products) || !raw.products.every(isDirectoryProduct)) return false;
+  return raw.numbers === null || isDirectoryNumbers(raw.numbers);
+}
+
 /**
  * Every listed program, read from the stores themselves, kept a few minutes.
  *
@@ -321,8 +361,9 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
   if (typeof kept === "string") {
     try {
-      const rows = JSON.parse(kept) as DirectoryRow[];
-      if (Array.isArray(rows)) return rows;
+      const rows: unknown = JSON.parse(kept);
+      // A kept page with any row out of shape is read again below, never shown (Codex CX1 on #3062).
+      if (Array.isArray(rows) && rows.every(isDirectoryRow)) return rows;
     } catch {
       // Read again below.
     }
@@ -416,7 +457,10 @@ async function lastDirectory(room: "full" | "unknown"): Promise<DirectoryRow[]> 
     last = null;
   }
   const { sids, rows } = (last ?? {}) as { sids?: unknown; rows?: unknown };
-  if (!Array.isArray(sids) || !Array.isArray(rows) || sids.length !== rows.length || sids.some((sid) => typeof sid !== "string" || !sid)) {
+  if (
+    !Array.isArray(sids) || !Array.isArray(rows) || sids.length !== rows.length || sids.some((sid) => typeof sid !== "string" || !sid) ||
+    !rows.every(isDirectoryRow)
+  ) {
     throw new UnknownReplyError("the directory's last build (GET)");
   }
   const listed = await stillListed(sids as string[]);

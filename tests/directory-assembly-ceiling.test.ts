@@ -238,6 +238,44 @@ async function main(): Promise<void> {
   await listed("baker@example.com", true);
   is("healthy control: the last build, checked, is the list", await attempt(), ["breadhouse", "cakeshop"]);
 
+  part("Every row of a kept build is read in its exact shape (Codex CX1 on #3062)");
+  {
+    const kept = JSON.parse(String(await get(LAST))) as { sids: string[]; rows: Record<string, unknown>[] };
+    const first = kept.rows[0];
+    const product = (first.products as Record<string, unknown>[])[0];
+    const bent: [string, unknown][] = [
+      ["a row that is null", null],
+      ["a row that is a number", 1],
+      ["an empty row", {}],
+      ["products that are null", { ...first, products: null }],
+      ["a language not on the site", { ...first, language: "xx" }],
+      ["a share in words", { ...first, percent: "5" }],
+      ["a negative day count", { ...first, days: -1 }],
+      ["a rule of neither kind", { ...first, rule: "middle" }],
+      ["numbers that are an empty object", { ...first, numbers: {} }],
+      ["a product with no title", { ...first, products: [{ ...product, title: null }] }],
+      ["a product earning a fraction of a cent", { ...first, products: [{ ...product, earnCents: 1.5 }] }],
+    ];
+    for (const [label, row] of bent) {
+      const text = JSON.stringify({ sids: kept.sids, rows: [row, ...kept.rows.slice(1)] });
+      await listed("baker@example.com", true);
+      const read = await counted(() => attempt(), (c) =>
+        c.some((command) => command[0] === "GET" && command[1] === LAST) ? original(c).then((replies) => c.map((command, at) => (command[0] === "GET" ? text : replies[at]))) : undefined,
+      );
+      is(`a kept build with ${label} is unknown, never shown`, read.result, "UnknownReplyError");
+    }
+    // The kept page itself: a row out of shape is not shown; the visit reads on as if no page was kept.
+    await listed("baker@example.com", true);
+    await original([["SET", DIRECTORY_CACHE, JSON.stringify([null]), "EX", 300]]);
+    is("a kept page with a row out of shape is not shown: the last build, checked, is", await attempt(), ["breadhouse", "cakeshop"]);
+    await listed("baker@example.com", true);
+    await original([["SET", DIRECTORY_CACHE, JSON.stringify([{ ...first, products: null }]), "EX", 300]]);
+    is("nor one whose products are null", await attempt(), ["breadhouse", "cakeshop"]);
+    await original([["DEL", DIRECTORY_CACHE]]);
+    await listed("baker@example.com", true);
+    is("healthy control again: the kept build as written is the list", await attempt(), ["breadhouse", "cakeshop"]);
+  }
+
   part("#2921's mark still comes first: a held or failed mark builds nothing and counts nothing");
   advance(WINDOW_MS);
   await original([["DEL", DIRECTORY_CACHE], ["DEL", COUNT], ["SET", DIRECTORY_BUILD, "failed", "EX", 600]]);

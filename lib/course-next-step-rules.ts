@@ -142,3 +142,14 @@ export function nextStepShown(input: {
 export function nextStepPlace(where: { page: "course" | "lesson"; finishedNow: boolean }): boolean {
   return where.page === "course" || where.finishedNow;
 }
+
+/**
+ * Whether the lesson a student is on is the moment they finish the course: it
+ * has no lesson after it, it is marked done, and so is every lesson the course
+ * has now. Lessons done that could not be read (null) are not finished.
+ */
+export function finishedNow(input: { lessons: readonly string[]; done: ReadonlySet<string> | null; at: string; hasNext: boolean }): boolean {
+  const { lessons, done } = input;
+  if (!done || input.hasNext || !lessons.length || !done.has(input.at)) return false;
+  return lessons.every((id) => done.has(id));
+}

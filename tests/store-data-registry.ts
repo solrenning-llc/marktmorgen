@@ -931,6 +931,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sub:who:@lib/submission-store.ts": room("Everything of one buyer's sent for review in a store, each with its file's path, for the copy of their data and their erasure: at most MAX_SUBMISSIONS_PER_PERSON, each entry counted in the room for the longest keeping time and a week before it is written", "lib/submission-store.ts"),
   "nl:sub:due@lib/submission-store.ts": company("Every kept submission file by when its keeping time ends, for the daily sweep", "One sorted set for every store, each member a buyer action's (priced in buyer-actions), taken off when its file is deleted, within the longest keeping time and a day."),
   "nl:sub:list:@lib/submission-store.ts": room("A course's kept files for the studio's \"To review\" list, by when each record goes: each member counted in the room at the open, for the longest keeping time and a week", "lib/submission-store.ts"),
+  "nl:none@lib/submission-notice.ts": company("A key that is never written", "Read in place of a list a store does not have."),
+  "nl:sub:told:@lib/submission-notice.ts": short("A buyer's reply email claimed once, so a creator's reply to their file is never emailed twice (750 [CD1] unit 6; SUBMISSION_TOLD_SECONDS, two days)", "own", 2, MARK),
   "nl:sub:rec:@lib/submission-store.ts": room("A buyer's file sent for review, its record kept to the creator's keeping time and a week, counted in the room until it expires", "lib/submission-store.ts"),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },

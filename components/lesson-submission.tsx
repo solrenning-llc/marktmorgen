@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MAX_SUBMISSION_NOTE, MAX_WAITING_PER_BUYER, SUBMISSION_KINDS, type SubmissionSetup, submissionAccept } from "@/lib/submission-rules";
-import { checkChosenFile, postSubmissionDoor, sendSubmission, type SubmissionPlace } from "@/lib/submission-upload";
+import { checkChosenFile, freshReplyIds, postSubmissionDoor, readSeenReplies, seenRepliesKey, seenRepliesValue, sendSubmission, type SubmissionPlace } from "@/lib/submission-upload";
 import { type SubmissionsWords, submissionsWords } from "@/lib/buyer-words/submissions";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 
@@ -76,6 +76,8 @@ export function LessonSubmission({
   const [asking, setAsking] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
+  /** Replies this device had not shown before this visit (unit 6): marked "New reply" until the page is left. */
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   const picker = useRef<HTMLInputElement>(null);
   const stop = useRef<AbortController | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
@@ -84,20 +86,46 @@ export function LessonSubmission({
   const kinds = setup === "unknown" ? "" : new Intl.ListFormat(locale, { type: "disjunction" }).format(SUBMISSION_KINDS.filter((kind) => setup.kinds.includes(kind)).map((kind) => w.kinds[kind]));
   const largest = setup === "unknown" ? "" : sizeText(setup.maxBytes, locale, w);
 
+  /**
+   * The list as it came, with the replies this device has not shown yet
+   * marked, then remembered as shown. What the browser keeps is only reply
+   * ids; when it cannot be read or written, no badge is guessed and the
+   * replies show as always.
+   */
+  function shown(next: List) {
+    setList(next);
+    if (typeof next === "string") return;
+    const key = seenRepliesKey(where);
+    let seen: Set<string> | null = null;
+    try {
+      seen = readSeenReplies(window.localStorage.getItem(key));
+    } catch {
+      seen = null;
+    }
+    const added = freshReplyIds(next.rows, seen);
+    const present = new Set(next.rows.map((row) => row.id));
+    setFresh((before) => new Set([...before, ...added].filter((id) => present.has(id))));
+    try {
+      window.localStorage.setItem(key, seenRepliesValue(next.rows));
+    } catch {
+      // Not kept on this device: the badge may show again next time, and nothing else changes.
+    }
+  }
+
   async function load() {
     setList("loading");
-    setList(listOf(await postSubmissionDoor({ action: "mine", ...where })));
+    shown(listOf(await postSubmissionDoor({ action: "mine", ...where })));
   }
 
   useEffect(() => {
     // Read once when the box is first shown; again only when the buyer asks or after a change.
     if (setup === "unknown") return;
-    let shown = true;
+    let mounted = true;
     void postSubmissionDoor({ action: "mine", ...where }).then((answer) => {
-      if (shown) setList(listOf(answer));
+      if (mounted) shown(listOf(answer));
     });
     return () => {
-      shown = false;
+      mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -260,6 +288,7 @@ export function LessonSubmission({
           <p ref={status} tabIndex={-1} className={said ? "st-note mt-4 text-sm" : "sr-only"} role="status">{said ?? ""}</p>
 
           <h3 id="submission-list-title" className="mt-6 font-semibold">{w.listHeading}</h3>
+          {fresh.size > 0 ? <p className="mt-1 text-sm font-semibold">{w.newReplies(fresh.size)}</p> : null}
           {listError ? <p className="st-note mt-2 text-sm" role="alert">{listError}</p> : null}
           {list === "loading" ? (
             <p className="st-muted mt-2 text-sm" role="status">{w.loading}</p>
@@ -279,7 +308,12 @@ export function LessonSubmission({
                   <li key={row.id} className="rounded-xl px-4 py-3 text-sm" style={{ border: "1px solid var(--st-line)" }}>
                     <p className="break-all font-semibold" style={{ color: "var(--st-text)" }}>{row.file.name}</p>
                     <p className="st-muted mt-1">{`${sizeText(row.file.bytes, locale, w)} · ${w.sentOn(day(row.at))}`}</p>
-                    <p className="mt-1 font-semibold">{w.states[row.state]}</p>
+                    <p className="mt-1 font-semibold">
+                      {w.states[row.state]}
+                      {fresh.has(row.id) ? (
+                        <span className="st-label ml-2 inline-block rounded-full px-2 py-0.5" style={{ border: "1px solid var(--st-text)", color: "var(--st-text)" }}>{w.newReply}</span>
+                      ) : null}
+                    </p>
                     {row.state === "uploading" ? (
                       <button type="button" className="btn st-btn mt-2" disabled={working === row.id} aria-busy={working === row.id} onClick={() => void cancelUpload(row)}>
                         {working === row.id ? w.working : w.cancelUpload(row.file.name)}

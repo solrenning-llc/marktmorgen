@@ -29,9 +29,11 @@ import {
   SUBMISSION_NOTICE_COMMANDS,
   SUBMISSION_TOLD_SECONDS,
   type NoticeMessage,
+  noticeSender,
   replyNoticeMessage,
   tellBuyerOfReply,
 } from "@/lib/submission-notice";
+import { courseSender } from "@/lib/learn";
 import { freshReplyIds, readSeenReplies, seenRepliesKey, seenRepliesValue } from "@/lib/submission-upload";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import type { KeptSubmission } from "@/lib/submission-store";
@@ -95,6 +97,7 @@ async function main(): Promise<void> {
   is("to the buyer's own address", mail.to, first.buyer);
   is("counted against the store's own emails, taken before it is sent", mail.meter, { by: "store", store: STORE, kind: "email" });
   is("from the store's course sender", mail.from.startsWith('"Ana\'s Gym via Marktmorgen" <'), true);
+  is("the same From line as every course email (lib/learn.ts)", [mail.from, noticeSender({ name: 'A "quoted" <name>\r\n' })], [courseSender(STORE), courseSender({ name: 'A "quoted" <name>\r\n' } as Store)]);
   is("an honest subject", mail.subject, "Ana's Gym replied to your work on “The squat”");
   is("the lead says which file and where", mail.text.startsWith("Ana's Gym reviewed squat.mp4, the file you sent for “The squat” in Strong in 30 Days."), true);
   is("the reply, whole", mail.text.includes("Knees out a little more. <b>Good</b> depth & pace."), true);
@@ -177,8 +180,8 @@ async function main(): Promise<void> {
 
   part("In the store's language");
   const pt = replyNoticeMessage({ store: { ...STORE, language: "pt" } as unknown as Store, ...where, submission: first });
-  is("the subject", pt.subject, "Ana's Gym respondeu ao seu trabalho em “The squat”");
-  is("the page's language", pt.html.includes('<html lang="pt-BR">'), true);
+  is("the subject", pt.subject, "Ana's Gym respondeu ao seu trabalho em «The squat»");
+  is("the page's language", pt.html.includes('<html lang="pt-PT">'), true);
   for (const [code, words] of Object.entries(SUBMISSIONS_WORDS)) {
     const said = [words.mailSubject("S", "L"), words.mailLead("S", "f", "L", "C"), words.mailWrote("S"), words.mailOpen, words.mailOpenLink("L"), words.mailWhy, words.mailSentBy("S"), words.newReply, words.newReplies(2)];
     is(`${code}: every word of the email and the badge is there`, said.every((t) => typeof t === "string" && t.length > 0), true);

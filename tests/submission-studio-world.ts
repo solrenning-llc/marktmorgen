@@ -41,7 +41,7 @@ export const text = (value: unknown, max: number) => (typeof value === "string" 
 export async function readListingExactly(_store: unknown, id: string) {
   state.events.push("read:listing");
   if (state.listing === "unknown") return "unknown" as const;
-  return id === "prod1" && state.listing === "course" ? { id: "prod1", course: { id: COURSE } } : null;
+  return id === "prod1" && state.listing === "course" ? { id: "prod1", title: "Strong in 30 Days", course: { id: COURSE } } : null;
 }
 // lib/course.ts
 const course = { id: COURSE, modules: [{ id: "unit1", lessons: LESSONS.map((id, i) => ({ id, title: `Lesson ${i + 1}` })) }] };
@@ -56,6 +56,9 @@ export function findLesson(_course: unknown, lessonId: string) {
 // lib/store.ts
 export const storeFolder = async () => FOLDER;
 export const storeRef = () => "owner@example.test";
+// Read by lib/auth.ts (through lib/handle-prefill.ts), which the buyer's reply email loads for its address checks (unit 6).
+export const normaliseHandle = (raw: string) => raw.trim().replace(/^@+/, "").toLowerCase();
+export const newAddressProblem = () => null;
 // lib/store-allowance.ts
 export async function takeAllowance(_store: unknown, kind: string, n = 1) {
   state.events.push(`allowance:${kind}:${n}`);

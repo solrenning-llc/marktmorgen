@@ -152,3 +152,43 @@ export async function sendSubmission(
     return { ok: false, reason: thrown instanceof VaultUploadError ? thrown.reason : "server_error" };
   }
 }
+
+// ------------------------------------------------- replies not shown yet (unit 6)
+
+/** Where this browser keeps which replies on a lesson it has already shown: one key per lesson. */
+export const seenRepliesKey = (where: SubmissionPlace) => `mm:submission-replies:${where.handle}:${where.product}:${where.lesson}`;
+
+const REPLY_ID = /^[0-9a-f]{32}$/;
+/** The most reply ids kept for one lesson: a buyer's files there never pass it (MAX_SUBMISSIONS_PER_PERSON is lower). */
+const MAX_SEEN = 50;
+
+/**
+ * What this browser remembers having shown on a lesson (750 [CD1] unit 6):
+ * nothing kept is an empty set (nothing shown yet on this device); a kept
+ * value that is not a list of reply ids is unknown (null), never "all seen"
+ * and never "none seen", so no badge is guessed from it.
+ */
+export function readSeenReplies(raw: string | null): Set<string> | null {
+  if (raw === null) return new Set();
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!Array.isArray(value) || value.length > MAX_SEEN || !value.every((id) => typeof id === "string" && REPLY_ID.test(id))) return null;
+    return new Set(value as string[]);
+  } catch {
+    return null;
+  }
+}
+
+type ListedRow = { id: string; state: string; reply?: unknown };
+const replied = (row: ListedRow) => row.state === "reviewed" && Boolean(row.reply);
+
+/** The replies in the list this browser has not shown yet; none when what it remembers is unknown. */
+export function freshReplyIds(rows: readonly ListedRow[], seen: ReadonlySet<string> | null): Set<string> {
+  if (!seen) return new Set();
+  return new Set(rows.filter((row) => replied(row) && !seen.has(row.id)).map((row) => row.id));
+}
+
+/** What this browser keeps after showing the list: the ids of the replies in it, nothing about what they say. */
+export function seenRepliesValue(rows: readonly ListedRow[]): string {
+  return JSON.stringify(rows.filter((row) => replied(row) && REPLY_ID.test(row.id)).map((row) => row.id).slice(0, MAX_SEEN));
+}

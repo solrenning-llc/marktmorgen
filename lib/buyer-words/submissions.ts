@@ -66,6 +66,16 @@ const en = {
   cancelFailed: "The upload could not be canceled right now. Try again in a minute.",
   unloadedSetup: "What this lesson asks you to send could not be loaded. Reload the page to try again.",
   working: "Working…",
+  mailSubject: (store: string, lesson: string) => `${store} replied to your work on “${lesson}”`,
+  mailLead: (store: string, file: string, lesson: string, course: string) => `${store} reviewed ${file}, the file you sent for “${lesson}” in ${course}.`,
+  mailWrote: (store: string) => `${store} wrote:`,
+  mailOpen: "See the reply and your files on the lesson page:",
+  mailOpenLink: (lesson: string) => `Open “${lesson}”`,
+  mailWhy: "You get this email because you sent this file for review. It is about your file only, and it is sent once for each reply.",
+  mailSentBy: (store: string) => `Sent by Marktmorgen on behalf of ${store}.`,
+  newReply: "New reply",
+  newReplies: (count: number) =>
+    count === 1 ? "1 new reply since this device last showed this list." : `${n("en-US", count)} new replies since this device last showed this list.`,
 };
 
 export type SubmissionsWords = typeof en;
@@ -128,6 +138,18 @@ const es: SubmissionsWords = {
   cancelFailed: "No se pudo cancelar el envío en este momento. Inténtalo de nuevo en un minuto.",
   unloadedSetup: "No se pudo cargar lo que esta lección te pide enviar. Recarga la página para intentarlo de nuevo.",
   working: "Un momento…",
+  mailSubject: (store, lesson) => `${store} respondió a tu trabajo en «${lesson}»`,
+  mailLead: (store, file, lesson, course) => `${store} revisó ${file}, el archivo que enviaste para «${lesson}» en ${course}.`,
+  mailWrote: (store) => `${store} escribió:`,
+  mailOpen: "Mira la respuesta y tus archivos en la página de la lección:",
+  mailOpenLink: (lesson) => `Abrir «${lesson}»`,
+  mailWhy: "Recibes este correo porque enviaste este archivo para revisión. Trata solo de tu archivo y se envía una vez por cada respuesta.",
+  mailSentBy: (store) => `Enviado por Marktmorgen en nombre de ${store}.`,
+  newReply: "Respuesta nueva",
+  newReplies: (count) =>
+    count === 1
+      ? "1 respuesta nueva desde la última vez que este dispositivo mostró esta lista."
+      : `${n("es-ES", count)} respuestas nuevas desde la última vez que este dispositivo mostró esta lista.`,
 };
 
 const fr: SubmissionsWords = {
@@ -188,6 +210,18 @@ const fr: SubmissionsWords = {
   cancelFailed: "L’envoi n’a pas pu être annulé pour le moment. Réessayez dans une minute.",
   unloadedSetup: "Ce que cette leçon vous demande d’envoyer n’a pas pu être chargé. Rechargez la page pour réessayer.",
   working: "Un instant…",
+  mailSubject: (store, lesson) => `${store} a répondu à votre travail sur « ${lesson} »`,
+  mailLead: (store, file, lesson, course) => `${store} a examiné ${file}, le fichier que vous avez envoyé pour « ${lesson} » dans ${course}.`,
+  mailWrote: (store) => `${store} a écrit :`,
+  mailOpen: "Voyez la réponse et vos fichiers sur la page de la leçon :",
+  mailOpenLink: (lesson) => `Ouvrir « ${lesson} »`,
+  mailWhy: "Vous recevez cet e-mail parce que vous avez envoyé ce fichier pour examen. Il ne concerne que votre fichier et il est envoyé une fois pour chaque réponse.",
+  mailSentBy: (store) => `Envoyé par Marktmorgen au nom de ${store}.`,
+  newReply: "Nouvelle réponse",
+  newReplies: (count) =>
+    count === 1
+      ? "1 nouvelle réponse depuis que cet appareil a affiché cette liste pour la dernière fois."
+      : `${n("fr-FR", count)} nouvelles réponses depuis que cet appareil a affiché cette liste pour la dernière fois.`,
 };
 
 const de: SubmissionsWords = {
@@ -248,6 +282,18 @@ const de: SubmissionsWords = {
   cancelFailed: "Das Senden konnte gerade nicht abgebrochen werden. Versuche es in einer Minute erneut.",
   unloadedSetup: "Was du in dieser Lektion senden sollst, konnte nicht geladen werden. Lade die Seite neu, um es erneut zu versuchen.",
   working: "Einen Moment…",
+  mailSubject: (store, lesson) => `${store} hat auf deine Arbeit zu „${lesson}“ geantwortet`,
+  mailLead: (store, file, lesson, course) => `${store} hat ${file} angesehen, die Datei, die du für „${lesson}“ in ${course} gesendet hast.`,
+  mailWrote: (store) => `${store} schreibt:`,
+  mailOpen: "Die Antwort und deine Dateien findest du auf der Seite der Lektion:",
+  mailOpenLink: (lesson) => `„${lesson}“ öffnen`,
+  mailWhy: "Du bekommst diese E-Mail, weil du diese Datei zur Durchsicht gesendet hast. Sie betrifft nur deine Datei und kommt einmal für jede Antwort.",
+  mailSentBy: (store) => `Gesendet von Marktmorgen im Auftrag von ${store}.`,
+  newReply: "Neue Antwort",
+  newReplies: (count) =>
+    count === 1
+      ? "1 neue Antwort, seit dieses Gerät diese Liste zuletzt gezeigt hat."
+      : `${n("de-DE", count)} neue Antworten, seit dieses Gerät diese Liste zuletzt gezeigt hat.`,
 };
 
 const it: SubmissionsWords = {
@@ -308,6 +354,18 @@ const it: SubmissionsWords = {
   cancelFailed: "Non è stato possibile annullare l’invio in questo momento. Riprova tra un minuto.",
   unloadedSetup: "Non è stato possibile caricare ciò che questa lezione ti chiede di inviare. Ricarica la pagina per riprovare.",
   working: "Un momento…",
+  mailSubject: (store, lesson) => `${store} ha risposto al tuo lavoro su “${lesson}”`,
+  mailLead: (store, file, lesson, course) => `${store} ha esaminato ${file}, il file che hai inviato per “${lesson}” in ${course}.`,
+  mailWrote: (store) => `${store} ha scritto:`,
+  mailOpen: "Guarda la risposta e i tuoi file nella pagina della lezione:",
+  mailOpenLink: (lesson) => `Apri “${lesson}”`,
+  mailWhy: "Ricevi questa email perché hai inviato questo file per la revisione. Riguarda solo il tuo file e viene inviata una volta per ogni risposta.",
+  mailSentBy: (store) => `Inviata da Marktmorgen per conto di ${store}.`,
+  newReply: "Nuova risposta",
+  newReplies: (count) =>
+    count === 1
+      ? "1 nuova risposta dall’ultima volta che questo dispositivo ha mostrato questo elenco."
+      : `${n("it-IT", count)} nuove risposte dall’ultima volta che questo dispositivo ha mostrato questo elenco.`,
 };
 
 const nl: SubmissionsWords = {
@@ -368,6 +426,18 @@ const nl: SubmissionsWords = {
   cancelFailed: "Het versturen kon nu niet worden geannuleerd. Probeer het over een minuut opnieuw.",
   unloadedSetup: "Wat je bij deze les moet insturen, kon niet worden geladen. Laad de pagina opnieuw om het nog eens te proberen.",
   working: "Even geduld…",
+  mailSubject: (store, lesson) => `${store} heeft gereageerd op je werk bij ‘${lesson}’`,
+  mailLead: (store, file, lesson, course) => `${store} heeft ${file} bekeken, het bestand dat je hebt ingestuurd voor ‘${lesson}’ in ${course}.`,
+  mailWrote: (store) => `${store} schreef:`,
+  mailOpen: "Bekijk de reactie en je bestanden op de pagina van de les:",
+  mailOpenLink: (lesson) => `‘${lesson}’ openen`,
+  mailWhy: "Je krijgt deze e-mail omdat je dit bestand hebt ingestuurd om te laten bekijken. Hij gaat alleen over je bestand en wordt één keer per reactie verstuurd.",
+  mailSentBy: (store) => `Verstuurd door Marktmorgen namens ${store}.`,
+  newReply: "Nieuwe reactie",
+  newReplies: (count) =>
+    count === 1
+      ? "1 nieuwe reactie sinds dit apparaat deze lijst voor het laatst liet zien."
+      : `${n("nl-NL", count)} nieuwe reacties sinds dit apparaat deze lijst voor het laatst liet zien.`,
 };
 
 const pt: SubmissionsWords = {
@@ -428,6 +498,18 @@ const pt: SubmissionsWords = {
   cancelFailed: "Não foi possível cancelar o envio agora. Tente de novo em um minuto.",
   unloadedSetup: "Não foi possível carregar o que esta aula pede para você enviar. Recarregue a página para tentar de novo.",
   working: "Um momento…",
+  mailSubject: (store, lesson) => `${store} respondeu ao seu trabalho em «${lesson}»`,
+  mailLead: (store, file, lesson, course) => `${store} analisou ${file}, o ficheiro que enviou para «${lesson}» em ${course}.`,
+  mailWrote: (store) => `${store} escreveu:`,
+  mailOpen: "Veja a resposta e os seus ficheiros na página da aula:",
+  mailOpenLink: (lesson) => `Abrir «${lesson}»`,
+  mailWhy: "Recebe este e-mail porque enviou este ficheiro para análise. Diz respeito apenas ao seu ficheiro e é enviado uma vez por cada resposta.",
+  mailSentBy: (store) => `Enviado pela Marktmorgen em nome de ${store}.`,
+  newReply: "Resposta nova",
+  newReplies: (count) =>
+    count === 1
+      ? "1 resposta nova desde a última vez que este dispositivo mostrou esta lista."
+      : `${n("pt-PT", count)} respostas novas desde a última vez que este dispositivo mostrou esta lista.`,
 };
 
 export const SUBMISSIONS_WORDS: Record<LanguageCode, SubmissionsWords> = { en, es, fr, de, it, nl, pt };

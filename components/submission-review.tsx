@@ -61,7 +61,7 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "reply", id: productId, submission: item.id, text }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; state?: SubmissionState; reply?: SubmissionReply & { at: number } };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; state?: SubmissionState; reply?: SubmissionReply & { at: number }; emailed?: boolean };
       if (!data.ok || !data.reply) {
         setError(ERRORS[data.error ?? ""] ?? STUDIO_MESSAGES[data.error ?? ""] ?? ERRORS.unavailable);
         setChecking(false);
@@ -70,7 +70,12 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
       setState(data.state ?? "reviewed");
       setReply(data.reply);
       setChecking(false);
-      toast("Reply saved with the file.");
+      // Said as it is: the email goes from the store's own emails, and a spent month or a bounced address sends none.
+      toast(
+        data.emailed === true
+          ? "Reply saved with the file. The buyer was emailed."
+          : "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson.",
+      );
     } catch {
       setError(ERRORS.unavailable);
       setChecking(false);
@@ -128,7 +133,7 @@ function ReviewEntry({ productId, item }: { productId: string; item: Extract<Rev
           {checking ? (
             <div ref={confirm} tabIndex={-1} className="notice mt-3" role="group" aria-labelledby={`${prefix}-check`}>
               <p id={`${prefix}-check`} className="text-sm text-ink">
-                Send this reply? It cannot be changed once it is sent.
+                Send this reply? It cannot be changed once it is sent, and the buyer is emailed about it once.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" className="btn btn-primary btn-sm" disabled={busy} aria-busy={busy} onClick={send}>

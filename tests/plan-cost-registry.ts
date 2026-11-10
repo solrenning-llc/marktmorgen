@@ -1814,6 +1814,9 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/payment-requests.ts": STORE, "lib/payment-request-store.ts": ORDER,
   // A proposal or agreement to sign, its new versions and its signed copies are the store's own emails (18 October 2026).
   "lib/agreements.ts": STORE,
+  // The buyer told of the creator's reply to a file they sent for review (750 [CD1] unit 6): one store email per reply, taken
+  // from the store's emails before it goes, once (its mark), never to a bounced, complained or deleted address.
+  "lib/submission-notice.ts": STORE,
 };
 
 /**

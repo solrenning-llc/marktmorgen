@@ -18,8 +18,13 @@
 import { pageWords } from "@/lib/page-translate";
 import type { BlockKind, PageBlock, SalesPage } from "@/lib/sales-page";
 
-/** A part marked to write, on one line, as lib/mail-body.ts reads it. */
-const MARKED = /⟦[^⟧\n]*⟧/;
+/**
+ * A part marked to write, over as many lines as it runs (LF or CRLF): a page
+ * holds its words whole, so a part written over two lines is still one part,
+ * and is refused as the route's earlier check of the page's JSON refused it
+ * (Codex CX1 on #3581).
+ */
+const MARKED = /⟦[^⟧]*⟧/;
 /** A part in [brackets] on one line, not a link's words ("[label](https://…)"). */
 const BRACKETED = /\[[^\]\n]{2,}\](?!\()/g;
 /** The longest part said back to the creator. */

@@ -20,6 +20,7 @@ import { STARTER_PROMPTS, templateLeft } from "@/lib/template-text";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId } from "@/lib/store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
+import type { TextBlock } from "@/lib/sales-page";
 import { POST as savePage } from "@/app/api/store/page/route";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { store as redis } from "./redis-stub";
@@ -51,10 +52,10 @@ async function main(): Promise<void> {
     );
     return { status: response.status, data: (await response.json().catch(() => ({}))) as Record<string, unknown> };
   };
-  const why = { id: "text0001", kind: "text", heading: "Why", body: "Because it works for me." };
-  const marked = { id: "text0002", kind: "text", heading: "About me", body: "I teach bread. ⟦Add one sentence about who you are⟧" };
-  const bracketed = { id: "text0003", kind: "text", heading: "Size and materials", body: STARTER_PART };
-  const own = { id: "text0004", kind: "text", heading: "Notes", body: "Sizes run small [see the chart] and ship in 2 days [US only]." };
+  const why: TextBlock = { id: "text0001", kind: "text", heading: "Why", body: "Because it works for me." };
+  const marked: TextBlock = { id: "text0002", kind: "text", heading: "About me", body: "I teach bread. ⟦Add one sentence about who you are⟧" };
+  const bracketed: TextBlock = { id: "text0003", kind: "text", heading: "Size and materials", body: STARTER_PART };
+  const own: TextBlock = { id: "text0004", kind: "text", heading: "Notes", body: "Sizes run small [see the chart] and ship in 2 days [US only]." };
   /** A part ⟦like this⟧ written over two lines, with either line ending (Codex CX1, #3581). */
   const twoLines = [
     ["LF", { ...marked, body: "⟦Write the first line\nand the second line⟧" }],
@@ -102,8 +103,8 @@ async function main(): Promise<void> {
   is("a part ⟦like this⟧ over two lines is one part, with either line ending", [partIn("Hi ⟦first\nsecond⟧ there", []), partIn("Hi ⟦first\r\nsecond⟧ there", [])], ["⟦first\nsecond⟧", "⟦first\r\nsecond⟧"]);
   is("a part in the search line is found and said there", templateLeft({ blocks: [why], seoTitle: "Bread", seoDescription: "⟦Say who it is for⟧" }), { field: "search", block: null, kind: null, part: "⟦Say who it is for⟧" });
   is("a part in the headline being tested is found", templateLeft({ blocks: [why], test: { id: "t1", headline: "[Your product]", sub: "" } as never })?.field, "test");
-  is("a long part is shortened when said back", (templateTextIn({ blocks: [{ ...why, body: `⟦${"x".repeat(400)}⟧` } as never] }, [])?.part ?? "").length, MAX_PART_SHOWN);
-  is("the creator's own brackets stay words", templateLeft({ blocks: [own as never] }), null);
+  is("a long part is shortened when said back", (templateTextIn({ blocks: [{ ...why, body: `⟦${"x".repeat(400)}⟧` }] }, [])?.part ?? "").length, MAX_PART_SHOWN);
+  is("the creator's own brackets stay words", templateLeft({ blocks: [own] }), null);
   is("the message says the block, the part and the two ways on", [
     templateLeftMessage({ field: "block", part: "[Your product]" }, "Text", "site"),
     templateLeftMessage({ field: "search", part: "⟦Say who⟧" }, null, "product"),

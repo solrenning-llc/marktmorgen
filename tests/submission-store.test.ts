@@ -70,6 +70,7 @@ function world(overrides: Partial<DoorSteps> = {}) {
 }
 const ask = (who = ANA, bytes = 50 * MiB, nowSeconds = NOW) => ({
   store: SHOP,
+  data: SHOP as DataStore,
   folder: FOLDER,
   courseId: COURSE,
   lessonId: LESSON,
@@ -156,7 +157,13 @@ async function main(): Promise<void> {
     is("room held by uploads still open", await openSubmissionDoor(ask(BOB), pending.steps), { ok: false, reason: "pending" });
     const down = world({ openReservedVault: async () => ({ ok: false, reason: "unavailable" }) });
     is("the vault did not answer", await openSubmissionDoor(ask(BOB), down.steps), { ok: false, reason: "unavailable" });
-    const unknown = world({ openReservedVault: async () => { throw new Error("storage_unknown"); } });
+    const roomUsed = (await dataUsed(SHOP))?.used ?? 0;
+  await takeData(SHOP, [{ slot: "p:filler-open", bytes: Math.max(0, contentRoomFor(SHOP, NOW) - roomUsed - 64), set: true }]);
+  const noRoom = world();
+  is("a full data room takes no place", await openSubmissionDoor(ask(BOB), noRoom.steps), { ok: false, reason: "full" });
+  is("and spends nothing", noRoom.calls, []);
+  await takeData(SHOP, [{ slot: "p:filler-open", bytes: 0, set: true }]);
+  const unknown = world({ openReservedVault: async () => { throw new Error("storage_unknown"); } });
     is("storage that could not be measured is unknown, never room", await threw(() => openSubmissionDoor(ask(BOB), unknown.steps)), "Error: storage_unknown");
     is("and gives its place back", await liveCount(FOLDER, COURSE, LESSON, BOB, NOW), 0);
     const lost = world();

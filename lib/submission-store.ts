@@ -55,7 +55,7 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  * tests/submission-store.test.ts. Each is far inside the hundred a buyer
  * action is priced at (tests/plan-cost-registry.ts, UNIT_COST.buyer).
  */
-export const SUBMISSION_STEP_COMMANDS = { open: 6, sign: 1, done: 7, abort: 3 } as const;
+export const SUBMISSION_STEP_COMMANDS = { open: 7, sign: 1, done: 7, abort: 3 } as const;
 
 const ID = /^[0-9a-f]{32}$/;
 const PART = /^[A-Za-z0-9_-]{1,64}$/;
@@ -225,6 +225,8 @@ export const VAULT_STEPS: DoorSteps = { reserveStoreUpload, openReservedVault, r
 /** Who is opening, and on what: all of it already decided by the route (maySubmit, checkSubmissionFile). */
 export type DoorAsk = {
   store: UploadStore;
+  /** The store's data room (lib/store-data.ts), where the buyer's place is counted. */
+  data: DataStore;
   folder: string;
   courseId: string;
   lessonId: string;
@@ -237,10 +239,11 @@ export type DoorAsk = {
 
 export type DoorOpened =
   | { ok: true; upload: OpenedUpload }
-  | { ok: false; reason: "busy" | "budget" | "room" | "pending" | "off" | "invalid" | "unavailable" };
+  | { ok: false; reason: "busy" | "full" | "budget" | "room" | "pending" | "off" | "invalid" | "unavailable" };
 
 /**
- * Opens the upload: a place among the buyer's three, the month's upload
+ * Opens the upload: the place's bytes taken in the store's data room, a
+ * place among the buyer's three, the month's upload
  * allowance, then the plan's storage reserved and the provider's session
  * opened (openReservedVault, which measures under the reservation's lock).
  * Each step refused gives back the ones before it that can be given back;
@@ -250,6 +253,12 @@ export type DoorOpened =
 export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_STEPS): Promise<DoorOpened> {
   const id = randomBytes(16).toString("hex");
   const live = liveKey(ask.folder, ask.courseId, ask.lessonId, ask.who);
+  // The place is counted in the store's data room, for as long as a place can be kept, before it is written.
+  const room = await takeData(ask.data, [{ until: (ask.nowSeconds + LIVE_SECONDS) * 1000, bytes: dataBytes([live, id], 1) }], ask.nowSeconds * 1000);
+  if (!room.ok) {
+    if (room.reason === "full") return { ok: false, reason: "full" };
+    throw new UnknownReplyError("the store's data room");
+  }
   if (!(await takePlace(live, id, ask.nowSeconds + UPLOAD_SECONDS, ask.nowSeconds))) return { ok: false, reason: "busy" };
   let opened: Awaited<ReturnType<typeof openReservedVault>> | null = null;
   try {

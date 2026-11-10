@@ -926,7 +926,7 @@ export const FAMILIES: Record<string, Family> = {
   // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
   "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),
   "nl:sub:setup:@lib/submission-store.ts": room("What a creator asks buyers to send for review on a lesson (750 [CD1])", "lib/submission-store.ts"),
-  "nl:sub:live:@lib/submission-store.ts": short("A buyer's files open or waiting for review on one lesson: at most MAX_WAITING_PER_BUYER members, renewed for the longest keeping time and a week at each open or close", "buyer", 372, 512),
+  "nl:sub:live:@lib/submission-store.ts": room("A buyer's files open or waiting for review on one lesson, at most MAX_WAITING_PER_BUYER: each place counted in the room for the longest keeping time and a week before it is written", "lib/submission-store.ts"),
   "nl:sub:door:@lib/submission-store.ts": short("A buyer's submission upload opened and not yet closed, a day", "buyer", 1, 1_024),
   "nl:sub:rec:@lib/submission-store.ts": room("A buyer's file sent for review, its record kept to the creator's keeping time and a week, counted in the room until it expires", "lib/submission-store.ts"),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),

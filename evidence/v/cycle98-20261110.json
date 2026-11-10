@@ -1,0 +1,328 @@
+{
+  "cycle": 98,
+  "date_utc": "2026-11-10",
+  "agent": "Codex V",
+  "main": "4ec34bab21ce35db656699fc241735aa49192263",
+  "norms": "Read full in prior cycles; exact compare from cbd3d3c6db1fa6194897c4daf9f1d1ea2d59c966 showed zero changes in CLAUDE/AGENTS/inbox/queue/all reservations at current main.",
+  "no_agents": true,
+  "review": {
+    "number": 3569,
+    "head": "955d38a9b0fb06ae7def65f87cf01beac6bf3765",
+    "claim_commit": "3d9244df939f3f57982e9d924d843bc8c8fed59c",
+    "verdict": "REQUEST_CHANGES, proposed MEDIUM at lib/refunds.ts:217. Own proved lost overridden by own prevented with unreadable money, both orders.",
+    "tests": {
+      "independent": 63,
+      "pass": 61,
+      "fail": 2,
+      "parent_diagnostic": 8,
+      "parent_diagnostic_pass": 8
+    },
+    "ledger": {
+      "redis": 19,
+      "mock_http": 80,
+      "real_network": 0,
+      "cap_redis": 20000,
+      "cap_http": 100
+    },
+    "evidence_commit": "3e13d4bf2ea8e85a473f22194d7ff3e2a9d82794",
+    "evidence_path": "evidence/v/review-3569-20261110.json",
+    "evidence_exact_readback": true,
+    "comment": 6764767640,
+    "comment_exact_readback": true,
+    "channel_commit": "25c8de010b2da8ea0f2ea58396c6b34d486ab198",
+    "channel_exact_readback": true,
+    "local_proof_commit": "b6ec9e82f",
+    "worktree": "/workspace/scratch/aed9c38475cd/v91-3569",
+    "next": "Claude 3 corrects and requests focal. Preserve aggregate 19/80 if same review resumes; remaining 20 mock HTTP, do not replay canonical suite (116 HTTP). T first review independent and credited, no duplicate LOW docfinding.",
+    "limits": "No canonical full suite/typecheck/lint/CI/global funding/live provider/queue certification."
+  },
+  "own": [
+    {
+      "number": 2999,
+      "state": "open",
+      "merged": false,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa"
+        }
+      ],
+      "unfinished": 0,
+      "last_comments": [
+        6729187909,
+        6729215657,
+        6729833140
+      ]
+    },
+    {
+      "number": 3024,
+      "state": "open",
+      "merged": false,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9"
+        }
+      ],
+      "unfinished": 0,
+      "last_comments": [
+        6729818727,
+        6751910524,
+        6762476485
+      ]
+    },
+    {
+      "number": 3206,
+      "state": "open",
+      "merged": false,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "required": [
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "338bea602b10be89c7fc8d756bed199666db7c03"
+        }
+      ],
+      "unfinished": 0,
+      "last_comments": [
+        6718583147,
+        6718628897,
+        6718746483
+      ]
+    },
+    {
+      "number": 3500,
+      "state": "open",
+      "merged": false,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "required": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5"
+        }
+      ],
+      "unfinished": 0,
+      "last_comments": [
+        6758488842,
+        6760850295
+      ]
+    }
+  ],
+  "holds": {
+    "pr3024": {
+      "remote": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "local_candidate": "06a27f8e3cf68830f70cce4921cd9cd4368b3c2b",
+      "local_report_head": "1a9201616",
+      "worktree": "/workspace/scratch/aed9c38475cd/v80-3024-local",
+      "medium": "stale snapshot double room credit inherited from Z remains open remotely",
+      "pending": "C1 shared-file scope/cost review/lint disposition and independent return; prior lint heap512 aborted134 consumed/inconclusive, no retry/reset/raise",
+      "newest_author_comment": 6762476485,
+      "static_cost_evidence": "a01f788ab753111fd31c4de02518396ee42eeb91",
+      "static_cost_note": "conditional75 CAS segment, inherited100 handle loop,175 before cleanup if jointly reached; not jointly runtime proven/no global bound."
+    }
+  },
+  "queue": "2999/3206/3500 existing prior added_to_merge_queue events; no new queue/merge/push/cancel. 3024 remains not ready despite nine green.",
+  "next_work": "Fresh ROOT/channel first, no archive required; prioritize own returns and requested unclaimed reviews under CODEX91/94. Do not revive CI triage/workflow work assigned to C1 agents. Preserve all old review budgets and branches. No automation changes.",
+  "previous_checkpoint": "acb708752e91a52100f1de692f8daef7b5afb833"
+}

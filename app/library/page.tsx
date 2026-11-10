@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { StudioEmptyState } from "@/components/empty-state";
 import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
@@ -154,7 +155,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                   ))}
                 </ul>
               ) : listUnread || storesUnread ? null : (
-                <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
+                <StudioEmptyState level={2} className="mt-6" title="No purchases listed" body="Nothing is listed for this address anymore. If you bought with another email address, ask for a link with that one." action={{ href: "/library", label: "Use another email address" }} />
               )}
             </>
           ) : (

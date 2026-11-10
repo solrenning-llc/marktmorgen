@@ -41,6 +41,7 @@ type ErasureBy = "team" | "person";
 
 export const PERSON_DATA: PersonData[] = [
   { file: "lib/checkout-sweep.ts", how: "none", what: "Checkout observations are inactive: there is no production persistence policy. Synthetic integration tests may keep a hashed checkout reference, provider creation time, country/state, currency and gross amount under an absolute expiry of at most one day. No name, email or street address is kept; fiscal coverage remains incomplete. Enabling real records needs a separate scope, retention, erasure and cost review." },
+  { file: "lib/discount-schedule.ts", how: "none", what: "A discount code's start and end (511 [CK3]): the code's word, its times and its tries, by the store; nothing about any buyer, so deleting a person changes nothing here" },
   { file: "lib/redis-memory.ts", how: "none", what: "In-memory database adapter: follows callers' keys and deletions and keeps no separate per-person index" },
   // ---------------------------------------------------------------- the list and email
   { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },

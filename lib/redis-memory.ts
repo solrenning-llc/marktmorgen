@@ -209,6 +209,17 @@ export class MemoryRedis {
           this.run(["HSET", slots, who, id]);
           return 1;
         }
+        // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
+        if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
+          const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;
+          const now = this.run(["GET", sub]);
+          if ((typeof now === "string" ? now : "") !== expected) return 0;
+          this.run(["SET", sub, json]);
+          if (path !== "") this.run(["HSET", files, path, bytes]);
+          this.run(review === "1" ? ["ZADD", waiting, at, member] : ["ZREM", waiting, member]);
+          this.run(["ZADD", all, at, member]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;
@@ -340,6 +351,19 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
+        if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, lock, from, to, seconds] = args;
+          if (this.run(["GET", lock]) !== from) return 0;
+          this.run(["SET", lock, to, "EX", seconds]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:call-hold-if-locked:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, diary, token, field, value] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["HSET", diary, field, value]);
+          return 1;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;
@@ -374,6 +398,20 @@ export class MemoryRedis {
           const targets = args.slice(2, count + 1);
           if (this.run(["GET", lock]) !== args[count + 1]) return 0;
           for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
+        // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
+        // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
+        if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, lock, target, open, due, token, mode, value, seconds, id, openScore, member, dueScore] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          const there = Number(this.run(["EXISTS", target]));
+          if ((mode === "new" && there !== 0) || (mode !== "new" && there !== 1)) return 2;
+          this.run(["SET", target, value, "EX", seconds]);
+          if (mode === "edit") {
+            this.run(openScore === "" ? ["ZREM", open, id] : ["ZADD", open, openScore, id]);
+            this.run(dueScore === "" ? ["ZREM", due, member] : ["ZADD", due, dueScore, member]);
+          }
           return 1;
         }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {
@@ -1106,6 +1144,57 @@ export class MemoryRedis {
           this.run(["SET", gone, "1", "EX", seconds]);
           return taken;
         }
+        // lib/erasure-index.ts FORGET_NOTED and FORGET_NOTED_PART, step for step, read as Redis reads: a missing or
+        // empty container is not a key, and a note of another type is refused before anything is deleted (the plain
+        // SMEMBERS and ZRANGEBYSCORE here would make an empty one instead).
+        if (key.startsWith("-- marktmorgen:forget-noted:v2\n") || key.startsWith("-- marktmorgen:forget-noted-part:v2\n")) {
+          const count = Number(args[0]);
+          const named = args.slice(1, count + 1);
+          const argv = args.slice(count + 1);
+          const [index, notes] = named;
+          const filled = (one: string) => {
+            this.live(one);
+            const value = this.data.get(one);
+            return value instanceof Set || value instanceof Map ? value.size > 0 : Array.isArray(value) ? value.length > 0 : value !== undefined;
+          };
+          const members = (one: string, kind: "set" | "zset"): string[] => {
+            if (!filled(one)) return [];
+            const value = this.data.get(one);
+            if (kind === "set" && value instanceof Set) return [...value];
+            if (kind === "zset" && Array.isArray(value) && typeof value[0] === "object") return this.run(["ZRANGEBYSCORE", one, "-inf", "+inf"]) as string[];
+            throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          };
+          const remove = (keys: string[]) => {
+            let gone = 0;
+            for (const one of new Set(keys)) {
+              if (filled(one)) gone += 1;
+              this.run(["DEL", one]);
+            }
+            return gone;
+          };
+          if (!Number.isSafeInteger(count) || count < 2 || named.length !== count) throw new Error("MemoryRedis: unsupported EVAL");
+          if (key.startsWith("-- marktmorgen:forget-noted-part:v2\n")) {
+            if (count < 3 || argv.length) throw new Error("MemoryRedis: unsupported EVAL");
+            const records = named.slice(2);
+            const typeOf = (one: string) => (filled(one) ? this.run(["TYPE", one]) : "none");
+            const [setType, zsetType] = [typeOf(index), typeOf(notes)];
+            if ((setType !== "none" && setType !== "set") || (zsetType !== "none" && zsetType !== "zset")) return -1;
+            // As a real redis-server runs it: the DEL, then SREM and ZREM; a set or sorted set left empty is no longer a key.
+            const gone = remove(records);
+            for (const [one, kind, verb] of [[index, "set", "SREM"], [notes, "zset", "ZREM"]] as const) {
+              if (!members(one, kind).length) continue;
+              this.run([verb, one, ...records]);
+              if (!filled(one)) this.run(["DEL", one]);
+            }
+            return gone;
+          }
+          const raw = members(index, "set");
+          const scored = members(notes, "zset");
+          const read = Number(argv[0]);
+          if (!Number.isSafeInteger(read) || raw.length !== read || scored.length !== argv.length - 1 - read) return "changed";
+          if (!argv.slice(1, read + 1).every((one) => raw.includes(one)) || !argv.slice(read + 1).every((one) => scored.includes(one))) return "changed";
+          return [remove(named), (read ? 1 : 0) + (argv.length - 1 - read ? 1 : 0)];
+        }
         // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.
         if (key.startsWith("-- marktmorgen:stock-admit:v1\n")) {
           const count = Number(args[0]);
@@ -1142,6 +1231,19 @@ export class MemoryRedis {
             if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
           }
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
+          return 1;
+        }
+        // lib/closing-holds.ts CALL_BUDGET_ONCE: a closing's call budget, set once per ending, step for step (Codex S on #3309).
+        if (key.startsWith("-- marktmorgen:closing-call-budget:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, work, calls, ending] = args;
+          this.live(work);
+          const held = this.data.get(work);
+          if (held instanceof Map && held.size === 0) this.data.delete(work);
+          const type = this.run(["TYPE", work]);
+          if (type !== "hash" && type !== "none") return -1;
+          if (this.run(["HGET", work, "of"]) === ending) return 0;
+          this.run(["DEL", work]);
+          this.run(["HSET", work, "calls", calls, "of", ending]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));

@@ -18,7 +18,7 @@ import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
-import { courseAccess, doneLessons, emailKey, touchStudent } from "@/lib/learn";
+import { courseAccess, doneLessonsOrUnknown, emailKey, touchStudent } from "@/lib/learn";
 import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
@@ -90,13 +90,14 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // A course still holding a ready structure's example titles is hidden and shown to its owner only (540 [CU1]).
   if (product.hidden && exampleTitlesLeft(course) > 0 && !(open && access.learner.owner)) redirect(`/@${store.handle}`);
   const who = studying ? emailKey(access.learner.email) : "";
+  // Null: the lessons done could not be read just now; said so, never shown as 0 done (rule 24).
   const [done, passed, certificate] = studying
     ? await Promise.all([
-        doneLessons(course.id, access.learner.email),
+        doneLessonsOrUnknown(course.id, access.learner.email),
         passedForGate(course.id, who),
         course.certificate ? certificateOf(course.id, who) : Promise.resolve(null),
       ])
-    : [new Set<string>(), new Set<string>(), null];
+    : [new Set<string>() as Set<string> | null, new Set<string>(), null];
   if (open && !access.learner.owner) {
     const { email } = access.learner;
     after(() => touchStudent(course.id, email, access.start, store));
@@ -109,7 +110,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   }
   // Lessons a quiz that has to be passed still holds shut, for this student.
   const held = studying ? heldBack(course, passed) : new Map<string, string>();
-  const finished = studying && hasFinished(course, done, passed);
+  const finished = studying && done !== null && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
 
@@ -117,10 +118,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const facts = await readCourseFacts(course);
   const all = lessonsInOrder(course);
   const total = lessonCount(course);
-  const doneCount = all.filter(({ lesson }) => done.has(lesson.id)).length;
+  const known = done ?? new Set<string>();
+  const doneCount = all.filter(({ lesson }) => known.has(lesson.id)).length;
   const reachable = (entry: (typeof all)[number]) => isOpen(course, entry.unit, start!) && !held.has(entry.lesson.id);
   const next = open
-    ? all.find((entry) => !done.has(entry.lesson.id) && reachable(entry)) ?? all.find(reachable)
+    ? all.find((entry) => !known.has(entry.lesson.id) && reachable(entry)) ?? all.find(reachable)
     : null;
   const preview = all.find(({ lesson }) => lesson.preview);
   const base = `/@${store.handle}/course/${product.id}`;
@@ -221,7 +223,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
 
           {open ? (
             <div className="mt-6">
-              {!access.learner.owner ? (
+              {access.learner.owner ? null : done === null ? (
+                <p className="st-note text-sm" role="status">{w.progressUnknown}</p>
+              ) : (
                 <>
                   <p className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>
                     {w.doneOf(doneCount, total)}
@@ -238,10 +242,10 @@ export default async function CoursePage({ params, searchParams }: Params) {
                     <div className="h-full rounded-full" style={{ width: `${total ? Math.round((doneCount / total) * 100) : 0}%`, background: "var(--st-accent)" }} />
                   </div>
                 </>
-              ) : null}
+              )}
               {next ? (
                 <Link href={`${base}/${next.lesson.id}`} className="btn st-btn btn-lg mt-5">
-                  {doneCount === 0 ? w.startFirst : doneCount >= total ? w.startOver : w.continueOn}
+                  {done === null ? w.openFirst : doneCount === 0 ? w.startFirst : doneCount >= total ? w.startOver : w.continueOn}
                 </Link>
               ) : (
                 <p className="st-muted mt-5 text-sm">{w.opensSoon}</p>
@@ -283,6 +287,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
                         <button type="submit" className="btn st-btn">{w.getCertificate}</button>
                       </div>
                     </form>
+                  ) : done === null ? (
+                    <p className="st-muted mt-1 text-sm">{w.certProgressUnknown}</p>
                   ) : (
                     <p className="st-muted mt-1 text-sm">{w.certHow(mustPass)}</p>
                   )}
@@ -350,7 +356,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </p>
           ) : null}
           <div className="mt-4">
-            <CourseOutline course={course} base={base} start={start} done={done} held={held} language={store.language} />
+            <CourseOutline course={course} base={base} start={start} done={known} held={held} language={store.language} />
           </div>
         </div>
 

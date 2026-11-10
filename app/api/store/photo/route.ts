@@ -18,7 +18,10 @@ import { lockedFor } from "@/lib/two-step";
  * bytes are is decided by the bytes themselves.
  *
  * The new picture is written and the store pointed at it before the old one is
- * deleted, so the page never points at a photo that is not there.
+ * deleted, so the page never points at a photo that is not there. A photo taken
+ * off is deleted first and the store stops pointing at it after, so a delete
+ * Redis does not confirm is answered as an error, the studio still shows the
+ * photo, and the next try deletes it (CX-123 rule 24).
  */
 export async function POST(request: NextRequest) {
   // Base64 is a third bigger than the bytes it carries, plus the JSON around it.
@@ -30,11 +33,14 @@ export async function POST(request: NextRequest) {
 
   try {
     if (guarded.body.remove === true) {
+      const shown = guarded.store.photoId;
+      await deletePhoto(shown);
       const result = await setPhotoId(guarded.ref, null);
       if (!result.ok) {
         return Response.json({ ok: false, error: result.reason }, { status: 400 });
       }
-      await deletePhoto(result.was);
+      // One put on the page since this request was read is deleted too.
+      if (result.was !== shown) await deletePhoto(result.was);
       return Response.json({ ok: true, photoId: null });
     }
 

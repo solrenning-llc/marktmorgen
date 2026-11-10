@@ -318,6 +318,47 @@ async function main(): Promise<void> {
   report = await runAt(0);
   is("300 + 150 bytes copied in 32 days against 4 × 100: the second waits", [copies().length, has(report, "files_copy_ceiling"), has(report, "files_room")], [1, true, false]);
 
+  part("every source read counts against the 4R before it is made, whatever the copy's outcome (Codex H2 M1 on #3340)");
+  const chargedNow = (): number => {
+    const saved = files.json(`state/stores/${S}.json`) as { read?: { bytes: number }[] } | null;
+    return Array.isArray(saved?.read) ? saved.read.reduce((n, d) => n + d.bytes, 0) : -1;
+  };
+  const rangeBytes = (range: string | null) => {
+    const m = range ? /^bytes=(\d+)-(\d+)$/.exec(range) : null;
+    return m ? Number(m[2]) - Number(m[1]) + 1 : 0;
+  };
+  const originBytes = () => world.calls.filter((c) => c.url.startsWith("https://src.test/")).reduce((n, c) => n + rangeBytes(c.range), 0);
+  const chargedAtRead: [number, number][] = [];
+  const watched = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (href.startsWith("https://src.test/")) chargedAtRead.push([chargedNow(), originBytes() + rangeBytes(new Headers(init?.headers).get("range"))]);
+    return fakeFetch(input, init);
+  };
+  const R = 1_000_000;
+  fresh([{ store: S, roomBytes: R }]);
+  setListing("blob", S, [{ key: `stores/${S}/same.bin`, etag: '"same1"', bytes: big(R, 3) }]);
+  files.putFault = (key) => (key.startsWith("copies/") ? "null" : undefined);
+  for (let hour = 1; hour <= 5; hour++) report = await runAt(0, hour, { fetch: watched });
+  is("five hourly runs whose copy write is refused read the source at most 4R, and the fifth is refused files_copy_ceiling", [originBytes() <= BACKUP_FILES_COPY_TIMES * R, has(report, "files_copy_ceiling"), copies().length], [true, true, 0]);
+  is("each read was charged and saved in the store's state before it was made", chargedAtRead.length > 0 && chargedAtRead.every(([charged, upTo]) => charged >= upTo), true);
+  is("the refused reads stay counted (unknown is never zero): 4R charged, 0 copied", [chargedNow(), (files.json(`state/stores/${S}.json`) as { copied?: unknown[] } | null)?.copied?.length], [BACKUP_FILES_COPY_TIMES * R, 0]);
+  files.putFault = () => undefined;
+  report = await runAt(1, 1, { fetch: watched });
+  is("the next day, inside the same 32 days, the ceiling still holds: no read, nothing copied", [originBytes() <= BACKUP_FILES_COPY_TIMES * R, copies().length, has(report, "files_copy_ceiling")], [true, 0, true]);
+  fresh([{ store: S, roomBytes: R }]);
+  setListing("blob", S, [{ key: `stores/${S}/same.bin`, etag: '"same1"', bytes: big(R, 3) }]);
+  report = await runAt(0, 1, { fetch: watched });
+  is("healthy control: one read of R, charged R, copied once", [originBytes(), chargedNow(), copies().length, report.heartbeat], [R, R, 1, true]);
+  const two = 2 * BACKUP_FILES_PART_BYTES + 1_000_000;
+  fresh([{ store: S, roomBytes: two / 2 }]);
+  chargedAtRead.length = 0;
+  setListing("blob", S, [{ key: `stores/${S}/twice.mp4`, etag: '"t1"', bytes: big(two, 5) }]);
+  files.partFault = (n) => (n === 2 ? null : undefined);
+  for (let hour = 1; hour <= 10; hour++) report = await runAt(0, hour, { fetch: watched });
+  is("a large file whose second part keeps failing: its parts' reads stay within 4R across runs, then files_copy_ceiling", [originBytes() <= BACKUP_FILES_COPY_TIMES * (two / 2), has(report, "files_copy_ceiling"), copies().length], [true, true, 0]);
+  is("and every part read was charged and saved before it was made", chargedAtRead.length > 0 && chargedAtRead.every(([charged, upTo]) => charged >= upTo), true);
+  files.partFault = () => undefined;
+
   part("a large file is copied in parts that resume across runs, state saved after each part");
   fresh([{ store: S, roomBytes: 100_000_000 }]);
   const video = { key: `stores/${S}/lesson.mp4`, etag: '"v1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000_000, 7) };

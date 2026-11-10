@@ -187,7 +187,7 @@ await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_
   assert.equal(world.emails.length, 1, "the creator is told once");
   assert.equal(world.emails[0].subject.endsWith("we could not confirm your refund"), true);
   assert.equal(world.emails[0].text.includes("We could not confirm how much of the refund"), true, "the letter says what is not known, not that part went through");
-  assert.equal(world.emails[0].text.includes(note.m === 1 ? "set to stop at the end of the period you paid for" : "goes on as before"), true, "and says what happens to the plan, from the note");
+  assert.equal(world.emails[0].text.includes("set to stop at the end of the period you paid for"), true, "and says what Stripe shows of the plan: the stop this refund set is still there");
   assert.equal(world.emails[0].text.includes("support@marktmorgen.com"), true);
 
   world.emails = [];

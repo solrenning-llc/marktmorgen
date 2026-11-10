@@ -534,8 +534,8 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
       const note = readNote(value);
       if (note && "damaged" in note) {
         // Retained, byte for byte, for GIVE_UP_DAYS: no refund, no end and no stop taken back on it. Past them it is let
-        // go, the plan as it is (a stop we set stays, so nothing more is charged), and the creator is told that what
-        // was refunded could not be confirmed and to write to support; never kept forever with only a log line.
+        // go, the plan as it is (a stop stays), and the creator is told that what was refunded could not be confirmed,
+        // what Stripe shows of the plan, and to write to support; never kept forever with only a log line.
         if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
           console.error(`plan-refund: store ${sid}'s recovery note has unknown debt evidence; it is retained`);
           counts.left += 1;
@@ -544,7 +544,13 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         const damagedStore = await storeForId(sid);
         console.error(`plan-refund: store ${sid}'s recovery note had unknown debt evidence for ${GIVE_UP_DAYS} days; it is dropped and the creator told`);
         await dropNote(sid);
-        if (damagedStore) await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, stopped: note.m === 1 }), `plan-refund-unknown:${sid}:${note.at}`);
+        if (damagedStore) {
+          // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
+          // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
+          const sub = await subscriptionOf(note.s);
+          const plan = !sub ? "unknown" : sub.status === "canceled" ? "ended" : stopSet(sub) ? "stops" : "renews";
+          await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan }), `plan-refund-unknown:${sid}:${note.at}`);
+        }
         counts.dropped += 1;
         continue;
       }

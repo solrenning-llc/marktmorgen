@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
@@ -32,8 +33,14 @@ export async function GET(request: NextRequest) {
     if (!isRedisConfigured() || !isSenderConfigured()) {
       return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     }
-    const [got] = await redisPipeline([["SET", "nl:mail-check:lock", "1", "NX", "EX", 170]]);
-    if (got === null) return Response.json({ ok: true, busy: true });
+    // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+    // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+    // own value, so a run never deletes another run's lock. It is held longer than maxDuration (180 s) with room, so
+    // it cannot run out while this run still works (the cutoff stops requests, not the function).
+    const lock = claimValue();
+    const got = await claimMark("nl:mail-check:lock", 210, lock);
+    if (got === "taken") return Response.json({ ok: true, busy: true });
+    if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
     try {
       let accountChecks: Check[];
       let accountFailed = false;
@@ -101,7 +108,7 @@ export async function GET(request: NextRequest) {
       await redisPipeline(statusRunCommands(STATUS_CHECKS[0].key, at, statusRunResult(checks))).catch((error) => console.error("keeping the mail check's run for the status page failed", error));
       return Response.json({ ok, checks, usage }, { headers: { "Cache-Control": "no-store" } });
     } finally {
-      await redisPipeline([["DEL", "nl:mail-check:lock"]]).catch(() => {});
+      await releaseMark("nl:mail-check:lock", lock);
     }
   })).catch(() => Response.json({ ok: false, error: "unavailable" }, {
     status: 503, headers: { "Cache-Control": "no-store" },

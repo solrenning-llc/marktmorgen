@@ -184,7 +184,7 @@ async function main(): Promise<void> {
   // account) and every connected call answers 403 account_invalid ("does not have access to account").
   const k = await closingStore("wrongkey");
   await told(k);
-  await setStripeAccount(k.email, "acct_1WrongKeyStore01");
+  await setStripeAccount(k.email, "acct_1WrongKeyShop1");
   const ks = await storeForEmail(k.email);
   if (!ks) throw new Error("no store");
   await savePaidPeriod(ks, "sub_wrongkey000001", { inv: "in_wrongkey000001", amt: 6000, cur: "usd", ps: Math.floor((k.ended - 10 * DAY) / 1000), pe: Math.floor((k.ended + 50 * DAY) / 1000), e: "wrongkey-member@example.com" });

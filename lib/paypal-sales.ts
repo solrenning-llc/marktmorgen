@@ -51,7 +51,7 @@ import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
 import { saleOff, salePrice } from "@/lib/store-sale";
-import { sendEmail } from "@/lib/email";
+import { sendEmailPinned } from "@/lib/email";
 import { isPaidUp } from "@/lib/billing";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -714,9 +714,21 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
 }
 
 /**
+ * A PayPal receipt as deliverPayPal makes it: every field that decides the bytes a sender is given for it (the
+ * meter is the same for every one). lib/paypal-delivery.ts keeps the first one made, so every try sends it again.
+ */
+export type PayPalReceipt = { from: string; to: string; subject: string; text: string; replyTo?: string; idempotencyKey: string };
+
+/**
  * Hands a paid PayPal purchase over, once: written down under the buyer's
  * PayPal address, a course dated from today, and the receipt emailed with
- * the link to the list of purchases.
+ * the link to the list of purchases. True only when the sender accepted the
+ * receipt; false when it refused it, its answer is unknown or it threw, so
+ * the caller keeps the order to send it again (lib/paypal-delivery.ts), under
+ * the same idempotency key, through the same sender (sendEmailPinned) and
+ * with the same bytes (keep); false too when mayEmail said no or keep gave
+ * none, with no receipt sent.
+ * Every other step is written once (HSETNX, SET NX).
  */
 export async function deliverPayPal(input: {
   store: Store;
@@ -726,16 +738,24 @@ export async function deliverPayPal(input: {
   from: string;
   recordStart: (email: string, productId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
-}): Promise<void> {
+  /** Asked just before the receipt, before its link: no sends no receipt this time (an unknown throws first). */
+  mayEmail?: () => Promise<boolean>;
+  /**
+   * Given the receipt just made, before anything is sent: the receipt to send (the one kept from its first try, so
+   * every try is the same bytes), or null for none this time. A throw sends nothing, as a sender's refusal.
+   */
+  keep?: (receipt: PayPalReceipt) => Promise<PayPalReceipt | null>;
+}): Promise<boolean> {
   const { store, paid, product, base } = input;
-  if (!store.statsId) return;
+  if (!store.statsId) return false;
   const items = product.bundle?.length ? product.bundle : null;
   await grantImported(store.statsId, `paypal:${paid.order}`, [{ email: paid.email, productId: product.id, items }], paid.at, store.sid);
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
   for (const id of [product.id, ...(items ?? [])]) await input.recordStart(paid.email, id, paid.at);
-  const link = (await input.ordersLink(paid.email)) ?? `${base}/orders`;
+  const go = !input.mayEmail || (await input.mayEmail());
+  const link = go ? ((await input.ordersLink(paid.email)) ?? `${base}/orders`) : "";
   const g = givingWords(store.language);
-  await sendEmail({ meter: { by: "order" },
+  const made = (): PayPalReceipt => ({
     from: input.from,
     to: paid.email,
     subject: g.ppSubject(product.title).slice(0, 200),
@@ -756,10 +776,18 @@ export async function deliverPayPal(input: {
     ].join("\n"),
     replyTo: store.email,
     idempotencyKey: `nimbus-paypal:${paid.order}`,
-  }).catch((error) => console.error("a PayPal purchase email failed", error));
+  });
+  const receipted = go && await (async () => {
+    const receipt = input.keep ? await input.keep(made()) : made();
+    return receipt !== null && (await sendEmailPinned({ meter: { by: "order" }, ...receipt }));
+  })().catch((error) => {
+    console.error("a PayPal purchase email failed", error);
+    return false;
+  });
   // One of the month's orders, like a card checkout's (lib/orders.ts). Not counted until
   // 17 October 2026, so a store's PayPal sales were in no plan's figure.
   await countOrder(store, `paypal:${paid.order}`, paid.cents);
+  return receipted === true;
 }
 
 /**

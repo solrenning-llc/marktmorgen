@@ -119,6 +119,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
+  "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:",
   // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
   "nl:tip:co:",
 ];
@@ -364,6 +365,12 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
   "nl:ppsell:refunded:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
+  // A PayPal receipt tried again (lib/paypal-delivery.ts, lib/email.ts sendEmailPinned): the time of its first try,
+  // named by the order and holding only that time, gone within RECEIPT_MARK_SECONDS; the sender kept for its key, the company's, a day.
+  "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1),
+  // The receipt as first made (lib/paypal-delivery.ts), so every try sends the same bytes: the store's words and the
+  // buyer's address, named by the order, gone within RECEIPT_MAIL_SECONDS, and with the person (lib/erasure-index.ts).
+  "nl:ppsell:mail:": er(1),
   "nl:pre:": E, "nl:pre:give:": X(1), "nl:pre:jobs": I, "nl:pre:pi:": X(430),
   "nl:preview:": T("prepare", 400),
   "nl:product:about:": E, "nl:product:landing:": E, "nl:product:note:": E, "nl:product:page:": E, "nl:product:pages:": E, "nl:product:pics:": E,

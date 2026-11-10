@@ -728,6 +728,22 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
+        // lib/paypal-delivery.ts, KEEP_RECEIPT: a receipt kept and noted for the person's deletion, unless their print
+        // says they were deleted at or after the payment (0, nothing written); else [1 when this SET kept it or 0, the
+        // receipt kept], the second dropped when nothing is kept, as Redis ends a Lua table at its first nil.
+        if (key.startsWith("-- marktmorgen:paypal-receipt-keep:v1\n") && args[0] === "3" && args.length === 11) {
+          const [, receipt, erased, notes, value, seconds, print, paidAt, score, oldest, notesSeconds] = args;
+          this.scriptCalls += 1;
+          const at = this.run(["HGET", erased, print]);
+          if (at !== null && !(String(at).trim() !== "" && Number.isFinite(Number(at)) && Number(at) < Number(paidAt))) return 0;
+          this.scriptCalls += 5;
+          this.run(["ZADD", notes, score, receipt]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
+          this.run(["EXPIRE", notes, notesSeconds]);
+          const written = this.run(["SET", receipt, value, "NX", "EX", seconds]);
+          const kept = this.run(["GET", receipt]);
+          return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
+        }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
         if (key.startsWith("-- marktmorgen:grant-unless-erased:v1\n") && Number(args[0]) >= 3 && args.length === 1 + Number(args[0]) + 1 + 4 * (Number(args[0]) - 2)) {

@@ -554,6 +554,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:none@lib/suppression.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:sender:@lib/email.ts": company("Emails handed to the sender, a month", "One count a month, the company's."),
   "nl:ses:once:@lib/email.ts": company("An email already handed over", "The company's, minutes."),
+  "nl:mail:pin:@lib/email.ts": company("The sender an email tried again under one key went to", "The company's, a day."),
+  "nl:mail:pin:@lib/paypal-delivery.ts": company("The sender a PayPal receipt's key went to, as lib/email.ts keeps it", "Read only (pinnedSenderKey): lib/email.ts writes it, the company's, a day."),
   "nl:ses:rest:@lib/email.ts": company("A batch's rest already handed over", "The company's, minutes."),
   "nl:ses:told:@lib/email.ts": company("The owner told of the sender", "One key a day, the company's."),
   "nl:@lib/erasure-index.ts": company("Not a key: the start every key noted for a deletion must have", "Read only, to check what is deleted."),
@@ -775,6 +777,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
   "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),
+  "nl:ppsell:receipt:@lib/paypal-delivery.ts": short("When a paid order's receipt was first tried, a week", "order", 7, MARK, KIND("paypal")),
+  // RECEIPT_MAIL_BYTES and RECEIPT_MAIL_SECONDS of lib/paypal-delivery.ts (held by tests/paypal-receipt-once.test.ts, part J).
+  "nl:ppsell:mail:@lib/paypal-delivery.ts": short("A paid order's receipt as first made, so every try sends the same email, a day", "order", 1, 8 * KB, KIND("paypal")),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },

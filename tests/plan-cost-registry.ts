@@ -1343,6 +1343,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)"] },
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
+      // A buyer's file for review (750 [CD1] unit 2): every step takes one public request first (takeBuyerRead), opening
+      // and closing one buyer action each; this route's own commands are SUBMISSION_STEP_COMMANDS, inside the hundred.
+      { file: "app/api/store/course/submission/route.ts", names: ["takeBuyerRead(store)", "takeBuyerAction(store)"] },
+      { file: "lib/submission-store.ts", names: ["SUBMISSION_STEP_COMMANDS"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
@@ -1737,7 +1741,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "assist-day": guard("A daily limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-store": guard("A per-minute limit per store under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
-  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
+  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "submission-open": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),

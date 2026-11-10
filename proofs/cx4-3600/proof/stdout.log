@@ -1,0 +1,19 @@
+{"mode":"timeout","status":503,"error":"unavailable","posts":0,"writes":0}
+✔ unknown counter timeout offers retry instead of blaming rate (39.478ms)
+{"mode":"malformed","status":503,"error":"unavailable","posts":0,"writes":0}
+✔ unknown counter malformed offers retry instead of blaming rate (5.0512ms)
+{"mode":"unconfigured","status":503,"error":"unavailable","posts":0,"writes":0}
+✔ unknown counter unconfigured offers retry instead of blaming rate (2.1126ms)
+✔ confirmed exceeded counter retains its genuine rate refusal (1.8869ms)
+✔ healthy save retains one supplier POST and one sealed setting (27.9366ms)
+{"mode":"stop-after-refused","status":200,"posts":10,"writes":1}
+✔ stop remains possible after ten refused supplier tests (30.2408ms)
+{"syntheticCommands":30,"syntheticPosts":11,"requestBytes":1243,"externalRequests":0}
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 128.6369

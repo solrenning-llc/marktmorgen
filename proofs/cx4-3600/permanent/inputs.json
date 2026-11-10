@@ -1,0 +1,254 @@
+{
+  "inputs": {
+    "lib/money.ts": {
+      "bytes": 11100,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/paid-coverage.ts": {
+      "bytes": 257,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/payment-ledger-coverage.ts": {
+      "bytes": 652,
+      "imports": [
+        {
+          "path": "lib/paid-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/paid-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/sales-goal-rules.ts": {
+      "bytes": 4167,
+      "imports": [
+        {
+          "path": "lib/payment-ledger-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/payment-ledger-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/path-rules.ts": {
+      "bytes": 30688,
+      "imports": [
+        {
+          "path": "lib/money.ts",
+          "kind": "import-statement",
+          "original": "@/lib/money"
+        },
+        {
+          "path": "lib/sales-goal-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/sales-goal-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/path-board-rules.ts": {
+      "bytes": 2328,
+      "imports": [
+        {
+          "path": "lib/path-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/redis-memory.ts": {
+      "bytes": 134378,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "lib/path-board-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-board-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "tests/chat-counter-admission-world.ts": {
+      "bytes": 2196,
+      "imports": [
+        {
+          "path": "lib/redis-memory.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-memory"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/redis-reply.ts": {
+      "bytes": 6384,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/secret-box.ts": {
+      "bytes": 8595,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/chat-kind.ts": {
+      "bytes": 950,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/chat-summary.ts": {
+      "bytes": 5524,
+      "imports": [
+        {
+          "path": "tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        },
+        {
+          "path": "lib/redis-reply.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-reply"
+        },
+        {
+          "path": "lib/secret-box.ts",
+          "kind": "import-statement",
+          "original": "@/lib/secret-box"
+        },
+        {
+          "path": "lib/chat-kind.ts",
+          "kind": "import-statement",
+          "original": "@/lib/chat-kind"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/request-guard.ts": {
+      "bytes": 16493,
+      "imports": [
+        {
+          "path": "tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        }
+      ],
+      "format": "esm"
+    },
+    "app/api/store/chat-summary/route.ts": {
+      "bytes": 2565,
+      "imports": [
+        {
+          "path": "tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/store-request"
+        },
+        {
+          "path": "lib/chat-summary.ts",
+          "kind": "import-statement",
+          "original": "@/lib/chat-summary"
+        },
+        {
+          "path": "lib/request-guard.ts",
+          "kind": "import-statement",
+          "original": "@/lib/request-guard"
+        },
+        {
+          "path": "tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/store"
+        }
+      ],
+      "format": "esm"
+    },
+    "tests/chat-counter-admission.test.ts": {
+      "bytes": 7301,
+      "imports": [
+        {
+          "path": "node:assert/strict",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "app/api/store/chat-summary/route.ts",
+          "kind": "import-statement",
+          "original": "@/app/api/store/chat-summary/route"
+        },
+        {
+          "path": "tests/chat-counter-admission-world.ts",
+          "kind": "import-statement",
+          "original": "./chat-counter-admission-world"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "proofs/cx4-3600/permanent/bundle.cjs": {
+      "imports": [
+        {
+          "path": "node:assert/strict",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        }
+      ],
+      "exports": [],
+      "entryPoint": "tests/chat-counter-admission.test.ts",
+      "inputs": {
+        "tests/chat-counter-admission.test.ts": {
+          "bytesInOutput": 7929
+        },
+        "lib/redis-memory.ts": {
+          "bytesInOutput": 117671
+        },
+        "lib/money.ts": {
+          "bytesInOutput": 1600
+        },
+        "lib/path-board-rules.ts": {
+          "bytesInOutput": 590
+        },
+        "tests/chat-counter-admission-world.ts": {
+          "bytesInOutput": 1634
+        },
+        "lib/redis-reply.ts": {
+          "bytesInOutput": 1594
+        },
+        "lib/secret-box.ts": {
+          "bytesInOutput": 1537
+        },
+        "lib/chat-kind.ts": {
+          "bytesInOutput": 346
+        },
+        "lib/chat-summary.ts": {
+          "bytesInOutput": 1591
+        },
+        "lib/request-guard.ts": {
+          "bytesInOutput": 1572
+        },
+        "app/api/store/chat-summary/route.ts": {
+          "bytesInOutput": 1708
+        }
+      },
+      "bytes": 139326
+    }
+  }
+}

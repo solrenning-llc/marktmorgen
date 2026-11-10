@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\quality.py", line 10, in <module>
+    types=run(['node','--max-old-space-size=1024','node_modules/typescript/bin/tsc','--noEmit','-p',str(out/'tsconfig.json')]);(out/'types.log').write_text(types);print('types pass',flush=True)
+  File "C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\quality.py", line 6, in run
+    r=subprocess.run(args,capture_output=True,text=True,encoding='utf8',timeout=secs)
+  File "C:\Users\vinic\AppData\Local\Python\pythoncore-3.14-64\Lib\subprocess.py", line 556, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\vinic\AppData\Local\Python\pythoncore-3.14-64\Lib\subprocess.py", line 1220, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\vinic\AppData\Local\Python\pythoncore-3.14-64\Lib\subprocess.py", line 1663, in _communicate
+    raise TimeoutExpired(self.args, orig_timeout)
+subprocess.TimeoutExpired: Command '['node', '--max-old-space-size=1024', 'node_modules/typescript/bin/tsc', '--noEmit', '-p', 'proofs\\cx4-3600\\tsconfig.json']' timed out after 120 seconds

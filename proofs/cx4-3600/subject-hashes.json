@@ -1,0 +1,97 @@
+{
+  "head": "9cb50bbbecbce57d3fd90e890614103af6a6e0bb",
+  "want": "16.4.5",
+  "installed": "16.4.5",
+  "files": [
+    {
+      "path": "app/api/store/chat-summary/route.ts",
+      "git": "e56a3e5ab954867318b66627220b3d1351a17d7c",
+      "sha256": "cdcbc8af6f39ff0e7b8491527e90da7ac35b1f2e5e5b4ad5992af976741ad329"
+    },
+    {
+      "path": "docs/reviews/cx2-2741-recovery.md",
+      "git": "1b7eda96890c05b146badfaee78bd6aef9a860d0",
+      "sha256": "eb5a93983fe20edde46a29b7b5ff4b75351e31e5ad3c3387233e47e1ec1ad9b0"
+    },
+    {
+      "path": "docs/reviews/z-chat-counter-refusal.md",
+      "git": "2bf0a273ad122b7b849d757ed1ca05416cb7b9ec",
+      "sha256": "f75724b9af2b713d56b71f558e7559bf21af5d4d7d5f4f74292a4bfba49f3d74"
+    },
+    {
+      "path": "docs/reviews/z-chat-refusal-local.md",
+      "git": "dc1fa2402e2c86ee4c06b6767ceaac2823cede93",
+      "sha256": "9d8c6f2004e237515a8fc8c9604c256136e5d278707677fcaa57122749bafb8c"
+    },
+    {
+      "path": "docs/reviews/z-chat-removal-low.md",
+      "git": "15168cabd2f6fce979f71370d367a6de30f06940",
+      "sha256": "32d3b44beace2b8e5b1e1255556c5d2dd243084aadf0ac69d48f48defc9d5004"
+    },
+    {
+      "path": "proofs/z-chat-counter-refusal.mjs",
+      "git": "5c5b23b183aa3e739135b3ce47ea67a6b76ea42e",
+      "sha256": "5cf49902d9e20f66cf8c6ae7c4c03f4d0c135371cfd05c54b892bddf8cc6a1d0"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/medium-red-low-recovered/bundle.sha256",
+      "git": "502311da82d8b490ca21c85d147c6112d36886ee",
+      "sha256": "5ac92660aa3652eddcad964054cc4f6e4e96b95eb689d6d6273f9a30430016d7"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/medium-red-low-recovered/counter-preload.cjs",
+      "git": "e09966ea2953485d6aeb07d8e2c42a936e6309cd",
+      "sha256": "59697dee8f4ab932d4c950691ca743ec4616eec0c3e14c294393f6fa2401adbe"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/medium-red-low-recovered/inputs.json",
+      "git": "64b9747108ada9cc0811ce0bd2de0d3f3bf08a62",
+      "sha256": "5ba1f3d33b8bbbe8af5d26e8b897717db3dca070baf85d861237a67f5cbf4b25"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/medium-red-low-recovered/result.json",
+      "git": "90add39ea17849599a286b08934d63c0d815c8a8",
+      "sha256": "89d06dbcacf0e16baa113a12507b38fe06daeca158d349ed92feecfd00894a0e"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/medium-red-low-recovered/stderr.log",
+      "git": "8656c82ad2743142410cd414aaefc84afbf17adf",
+      "sha256": "14498f967f117c82c5433cc1c7dd00152e87a39a3e4fef7c37b1a4243ada7665"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/medium-red-low-recovered/stdout.log.json",
+      "git": "9d3f4ebefe88b1e775aa861b142e9ea73d8abfdd",
+      "sha256": "99416b7dd83acc63932651787fc9872008971565fc57ac9500239c0aa2c38dc6"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/preload.mjs",
+      "git": "21dd1aba7efe726c24e4a47001d76b2fb0205924",
+      "sha256": "d90bad4feb8d9a42ad2ee023ad717ba41b65dd66ee61f17b5f5e2e2631bba0ae"
+    },
+    {
+      "path": "proofs/z-chat-refusal-local/runner.mjs",
+      "git": "c1edc98f41a073273d7cd7a2dacf6246c1578b14",
+      "sha256": "6595c818a1e86773506ed2603dd0b42dafc15efe324ea5cd5f40bf559d451d4f"
+    },
+    {
+      "path": "tests/chat-counter-admission-world.ts",
+      "git": "76a35f72f8c70f2eeafdc6b0c0f6cb01c15eb861",
+      "sha256": "d016cd85e2357a82334d113466c8c89d9654daebca52059849596afcd743eb4c"
+    },
+    {
+      "path": "tests/chat-counter-admission.test.ts",
+      "git": "117e6e34e343fe357f52dd20c53eb9f71303f4c7",
+      "sha256": "20d513969cc9233495e903964327af2c2164c7d68ea67338ed2bca567f0a21b2"
+    },
+    {
+      "path": "tests/test-config.mjs",
+      "git": "02ac66947aefab220d0177fbd57ba7135f9b4bf1",
+      "sha256": "412ceccf21e3f7071770694523fe5169e2014f067ee32d4af56b7ff1bd0a02f1"
+    },
+    {
+      "path": "tests/z-chat-counter-refusal.proof.ts",
+      "git": "da1fa6cfc637adb1fedda958b46294afe156307d",
+      "sha256": "1102d105529ddbeb88a35c800cbe62cb07260a3056eec298a45231a5ec95cc05"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "label": "red",
+    "bytes": 135238,
+    "sha256": "0469ff684cb52b7ec2789e8a6d6b4ee2726fb9a2eb1ba91e2c5615aaa511b943"
+  },
+  {
+    "label": "proof",
+    "bytes": 135345,
+    "sha256": "b6bfd365c1bacab7b71747e85c0668d1fe261b480f2e37803d2862412ba35a78"
+  },
+  {
+    "label": "permanent",
+    "bytes": 139326,
+    "sha256": "94b62ef538a19a42b96fd37c161dca575b4c33419ec2e62da3066d2668d2148f"
+  },
+  {
+    "label": "guard",
+    "bytes": 124990,
+    "sha256": "a88098c6a6b11d7b53609cbd623784152a1a1620872e4a18ce3c490c9970eeb6"
+  },
+  {
+    "label": "own",
+    "bytes": 135449,
+    "sha256": "9f9e1f3f064f9c3ba35553495c7bcad60d2d2ba73e914e0469d5efbcc9304e56"
+  }
+]

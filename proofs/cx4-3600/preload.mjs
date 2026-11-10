@@ -1,0 +1,17 @@
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
+import tls from 'node:tls';
+import dns from 'node:dns';
+import {syncBuiltinESMExports} from 'node:module';
+const limits=JSON.parse(process.env.CX4_LIMITS);
+const ledger={redis:0,http:0,bytes:0,network:0};
+const admit=(kind,amount=1)=>{if(!Number.isSafeInteger(amount)||amount<0||ledger[kind]+amount>limits[kind]){process.stderr.write('CX4_CAP '+kind+'\n');process.exit(86);}ledger[kind]+=amount;};
+globalThis.__cx4Redis=()=>admit('redis');
+const deny=()=>{ledger.network++;throw Error('CX4_NETWORK_DENIED');};
+for(const [service,keys] of [[http,['request','get']],[https,['request','get']],[net,['connect','createConnection']],[tls,['connect']],[dns,['lookup','resolve']]])for(const key of keys)service[key]=deny;
+net.Socket.prototype.connect=deny;
+let fetchValue=deny;
+Object.defineProperty(globalThis,'fetch',{configurable:false,get(){return fetchValue;},set(fn){fetchValue=(input,init)=>{admit('http');admit('bytes',Buffer.byteLength(String(init?.body??'')));if(String(input)!=='https://hooks.slack.com/services/synthetic/test-fixture-only'||init?.method!=='POST')throw Error('CX4_UNDECLARED_MOCK_DESTINATION');return fn(input,init);};}});
+syncBuiltinESMExports();
+process.on('exit',()=>process.stderr.write('CX4_LEDGER '+JSON.stringify(ledger)+'\n'));

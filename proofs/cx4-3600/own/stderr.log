@@ -1,0 +1,85 @@
+FAIL invalid URL omitted refuses without deleting an existing setting AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+200 !== 400
+
+    at C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2737:31
+    at async check (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2717:5)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2728:7) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 200,
+  expected: 400,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+FAIL invalid URL null refuses without deleting an existing setting AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+200 !== 400
+
+    at C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2737:31
+    at async check (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2717:5)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2728:7) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 200,
+  expected: 400,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+FAIL invalid URL number refuses without deleting an existing setting AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+200 !== 400
+
+    at C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2737:31
+    at async check (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2717:5)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2728:7) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 200,
+  expected: 400,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+FAIL invalid URL boolean refuses without deleting an existing setting AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+200 !== 400
+
+    at C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2737:31
+    at async check (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2717:5)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2728:7) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 200,
+  expected: 400,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+FAIL invalid URL array refuses without deleting an existing setting AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+200 !== 400
+
+    at C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2737:31
+    at async check (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2717:5)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2728:7) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 200,
+  expected: 400,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+FAIL invalid URL object refuses without deleting an existing setting AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+200 !== 400
+
+    at C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2737:31
+    at async check (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2717:5)
+    at async main (C:\Users\vinic\Projects\marktmorgen-cx4\.git\cx4-review-3600\proofs\cx4-3600\own\bundle.cjs:2728:7) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 200,
+  expected: 400,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+CX4_LEDGER {"redis":108,"http":8,"bytes":904,"network":0}

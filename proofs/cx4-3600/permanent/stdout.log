@@ -1,0 +1,54 @@
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown missing refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown null refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown object refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown empty refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown partial refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown unknown SET refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown null count refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown text count refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown zero refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown negative refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown NaN refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown infinite refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown fraction refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown unsafe refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown extra refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown sparse refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown inherited refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown getter refuses before chat POST/write
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS counter timeout refuses before actual chat POST/write
+{"status":503,"counterCommands":0,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS missing counter configuration refuses without commands
+{"status":503,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS lost acknowledgement retains the committed counter
+PASS confirmed counter posts and seals once after exactly two counter commands
+PASS ten confirmed saves succeed and the eleventh refuses
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS confirmed exceeded counter keeps its refusal
+PASS sales toggle remains outside provider-test counter
+PASS authorization refusal precedes counter and provider
+PASS invalid provider URL retains known refusal
+PASS confirmed removal deletes the sealed address without a provider POST
+PASS removal bypasses only the provider-test counter: unknown
+PASS removal bypasses only the provider-test counter: exceeded
+PASS removal bypasses only the provider-test counter: whitespace
+31 passed; 0 failed

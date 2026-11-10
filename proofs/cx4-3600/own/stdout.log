@@ -1,0 +1,11 @@
+{"label":"omitted","status":200,"body":{"ok":true,"result":"removed"},"deleted":true,"commands":["SET","INCR","DEL"]}
+{"label":"null","status":200,"body":{"ok":true,"result":"removed"},"deleted":true,"commands":["SET","INCR","DEL"]}
+{"label":"number","status":200,"body":{"ok":true,"result":"removed"},"deleted":true,"commands":["SET","INCR","DEL"]}
+{"label":"boolean","status":200,"body":{"ok":true,"result":"removed"},"deleted":true,"commands":["SET","INCR","DEL"]}
+{"label":"array","status":200,"body":{"ok":true,"result":"removed"},"deleted":true,"commands":["SET","INCR","DEL"]}
+{"label":"object","status":200,"body":{"ok":true,"result":"removed"},"deleted":true,"commands":["SET","INCR","DEL"]}
+PASS explicit whitespace removal ignores an exceeded provider-test counter
+PASS unauthorized removal cannot touch configuration or provider
+PASS unknown counter refuses a URL while leaving the existing setting
+PASS invalid provider URL never posts or changes a kept setting
+4 PASS; 6 FAIL

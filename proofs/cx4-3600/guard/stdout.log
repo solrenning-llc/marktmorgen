@@ -1,0 +1,40 @@
+
+withinLimit: only the exact reply is read
+  ok    withinLimit, an empty reply: refused, never room
+  ok    withinLimit, only the SET's answer: refused, never room
+  ok    withinLimit, a third answer: refused, never room
+  ok    withinLimit, a SET answered false: refused, never room
+  ok    withinLimit, a count that is null: refused, never room
+  ok    withinLimit, a count written as text: refused, never room
+  ok    withinLimit, a count of zero: refused, never room
+  ok    withinLimit, a count that is true: refused, never room
+  ok    withinLimit, a fractional count: refused, never room
+  ok    withinLimit, a negative count: refused, never room
+  ok    withinLimit, a reply that is not a list: refused, never room
+  ok    withinLimit, a returned list whose shape cannot be inspected: refused, never room
+  ok    withinLimit: the first of the window (SET "OK", count 1) is within
+  ok    withinLimit: the last within (SET null, count 5) is within
+  ok    withinLimit: past the limit (count 6) is refused as before
+  ok    withinLimit: Redis that cannot be asked still lets the request through, as before
+  ok    withinLimit: the real counter still counts
+
+withinMonth: only the exact reply is read
+  ok    withinMonth, an empty reply: refused, never room
+  ok    withinMonth, only the SET's answer: refused, never room
+  ok    withinMonth, a third answer: refused, never room
+  ok    withinMonth, a SET answered false: refused, never room
+  ok    withinMonth, a count that is null: refused, never room
+  ok    withinMonth, a count written as text: refused, never room
+  ok    withinMonth, a count of zero: refused, never room
+  ok    withinMonth, a count that is true: refused, never room
+  ok    withinMonth, a fractional count: refused, never room
+  ok    withinMonth, a negative count: refused, never room
+  ok    withinMonth, a reply that is not a list: refused, never room
+  ok    withinMonth, a returned list whose shape cannot be inspected: refused, never room
+  ok    withinMonth: the first of the window (SET "OK", count 1) is within
+  ok    withinMonth: the last within (SET null, count 5) is within
+  ok    withinMonth: past the limit (count 6) is refused as before
+  ok    withinMonth: Redis that cannot be asked still lets the request through, as before
+  ok    withinMonth: the real counter still counts
+
+34 checks, all passing.

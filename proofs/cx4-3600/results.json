@@ -1,0 +1,131 @@
+{
+  "head": "9cb50bbbecbce57d3fd90e890614103af6a6e0bb",
+  "limits": {
+    "redis": 20000,
+    "http": 100,
+    "bytes": 100000
+  },
+  "used": {
+    "redis": 474,
+    "http": 50,
+    "bytes": 5650,
+    "network": 0
+  },
+  "results": [
+    {
+      "label": "red",
+      "status": 1,
+      "signal": null,
+      "ledger": {
+        "redis": 56,
+        "http": 11,
+        "bytes": 1243,
+        "network": 0
+      },
+      "stdoutTail": [
+        "      at TestContext.<anonymous> (C:\\Users\\vinic\\Projects\\marktmorgen-cx4\\.git\\cx4-review-3600\\proofs\\cx4-3600\\red\\bundle.cjs:2776:25)",
+        "      at async Test.run (node:internal/test_runner/test:1332:7)",
+        "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+        "    generatedMessage: true,",
+        "    code: 'ERR_ASSERTION',",
+        "    actual: 429,",
+        "    expected: 200,",
+        "    operator: 'strictEqual',",
+        "    diff: 'simple'",
+        "  }"
+      ]
+    },
+    {
+      "label": "proof",
+      "status": 0,
+      "signal": null,
+      "ledger": {
+        "redis": 54,
+        "http": 11,
+        "bytes": 1243,
+        "network": 0
+      },
+      "stdoutTail": [
+        "✔ stop remains possible after ten refused supplier tests (30.2408ms)",
+        "{\"syntheticCommands\":30,\"syntheticPosts\":11,\"requestBytes\":1243,\"externalRequests\":0}",
+        "ℹ tests 6",
+        "ℹ suites 0",
+        "ℹ pass 6",
+        "ℹ fail 0",
+        "ℹ cancelled 0",
+        "ℹ skipped 0",
+        "ℹ todo 0",
+        "ℹ duration_ms 128.6369"
+      ]
+    },
+    {
+      "label": "permanent",
+      "status": 0,
+      "signal": null,
+      "ledger": {
+        "redis": 184,
+        "http": 20,
+        "bytes": 2260,
+        "network": 0
+      },
+      "stdoutTail": [
+        "{\"status\":429,\"counterCommands\":2,\"posts\":0,\"postBytes\":0,\"settingCommands\":0,\"settingBytes\":0}",
+        "PASS confirmed exceeded counter keeps its refusal",
+        "PASS sales toggle remains outside provider-test counter",
+        "PASS authorization refusal precedes counter and provider",
+        "PASS invalid provider URL retains known refusal",
+        "PASS confirmed removal deletes the sealed address without a provider POST",
+        "PASS removal bypasses only the provider-test counter: unknown",
+        "PASS removal bypasses only the provider-test counter: exceeded",
+        "PASS removal bypasses only the provider-test counter: whitespace",
+        "31 passed; 0 failed"
+      ]
+    },
+    {
+      "label": "guard",
+      "status": 0,
+      "signal": null,
+      "ledger": {
+        "redis": 72,
+        "http": 0,
+        "bytes": 0,
+        "network": 0
+      },
+      "stdoutTail": [
+        "  ok    withinMonth, a negative count: refused, never room",
+        "  ok    withinMonth, a reply that is not a list: refused, never room",
+        "  ok    withinMonth, a returned list whose shape cannot be inspected: refused, never room",
+        "  ok    withinMonth: the first of the window (SET \"OK\", count 1) is within",
+        "  ok    withinMonth: the last within (SET null, count 5) is within",
+        "  ok    withinMonth: past the limit (count 6) is refused as before",
+        "  ok    withinMonth: Redis that cannot be asked still lets the request through, as before",
+        "  ok    withinMonth: the real counter still counts",
+        "",
+        "34 checks, all passing."
+      ]
+    },
+    {
+      "label": "own",
+      "status": 1,
+      "signal": null,
+      "ledger": {
+        "redis": 108,
+        "http": 8,
+        "bytes": 904,
+        "network": 0
+      },
+      "stdoutTail": [
+        "{\"label\":\"null\",\"status\":200,\"body\":{\"ok\":true,\"result\":\"removed\"},\"deleted\":true,\"commands\":[\"SET\",\"INCR\",\"DEL\"]}",
+        "{\"label\":\"number\",\"status\":200,\"body\":{\"ok\":true,\"result\":\"removed\"},\"deleted\":true,\"commands\":[\"SET\",\"INCR\",\"DEL\"]}",
+        "{\"label\":\"boolean\",\"status\":200,\"body\":{\"ok\":true,\"result\":\"removed\"},\"deleted\":true,\"commands\":[\"SET\",\"INCR\",\"DEL\"]}",
+        "{\"label\":\"array\",\"status\":200,\"body\":{\"ok\":true,\"result\":\"removed\"},\"deleted\":true,\"commands\":[\"SET\",\"INCR\",\"DEL\"]}",
+        "{\"label\":\"object\",\"status\":200,\"body\":{\"ok\":true,\"result\":\"removed\"},\"deleted\":true,\"commands\":[\"SET\",\"INCR\",\"DEL\"]}",
+        "PASS explicit whitespace removal ignores an exceeded provider-test counter",
+        "PASS unauthorized removal cannot touch configuration or provider",
+        "PASS unknown counter refuses a URL while leaving the existing setting",
+        "PASS invalid provider URL never posts or changes a kept setting",
+        "4 PASS; 6 FAIL"
+      ]
+    }
+  ]
+}

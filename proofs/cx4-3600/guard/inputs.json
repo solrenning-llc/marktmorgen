@@ -1,0 +1,164 @@
+{
+  "inputs": {
+    "lib/money.ts": {
+      "bytes": 11100,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/paid-coverage.ts": {
+      "bytes": 257,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/payment-ledger-coverage.ts": {
+      "bytes": 652,
+      "imports": [
+        {
+          "path": "lib/paid-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/paid-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/sales-goal-rules.ts": {
+      "bytes": 4167,
+      "imports": [
+        {
+          "path": "lib/payment-ledger-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/payment-ledger-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/path-rules.ts": {
+      "bytes": 30688,
+      "imports": [
+        {
+          "path": "lib/money.ts",
+          "kind": "import-statement",
+          "original": "@/lib/money"
+        },
+        {
+          "path": "lib/sales-goal-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/sales-goal-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/path-board-rules.ts": {
+      "bytes": 2328,
+      "imports": [
+        {
+          "path": "lib/path-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/redis-memory.ts": {
+      "bytes": 134378,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "lib/path-board-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-board-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "tests/redis-stub.ts": {
+      "bytes": 1011,
+      "imports": [
+        {
+          "path": "lib/redis-memory.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-memory"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/request-guard.ts": {
+      "bytes": 16493,
+      "imports": [
+        {
+          "path": "tests/redis-stub.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        }
+      ],
+      "format": "esm"
+    },
+    "tests/check.ts": {
+      "bytes": 2527,
+      "imports": [],
+      "format": "esm"
+    },
+    "tests/request-guard-shape.test.ts": {
+      "bytes": 3700,
+      "imports": [
+        {
+          "path": "lib/request-guard.ts",
+          "kind": "import-statement",
+          "original": "@/lib/request-guard"
+        },
+        {
+          "path": "tests/redis-stub.ts",
+          "kind": "import-statement",
+          "original": "./redis-stub"
+        },
+        {
+          "path": "tests/check.ts",
+          "kind": "import-statement",
+          "original": "./check"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "proofs/cx4-3600/guard/bundle.cjs": {
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        }
+      ],
+      "exports": [],
+      "entryPoint": "tests/request-guard-shape.test.ts",
+      "inputs": {
+        "lib/redis-memory.ts": {
+          "bytesInOutput": 117426
+        },
+        "lib/money.ts": {
+          "bytesInOutput": 1600
+        },
+        "lib/path-board-rules.ts": {
+          "bytesInOutput": 590
+        },
+        "tests/redis-stub.ts": {
+          "bytesInOutput": 194
+        },
+        "lib/request-guard.ts": {
+          "bytesInOutput": 1990
+        },
+        "tests/check.ts": {
+          "bytesInOutput": 920
+        },
+        "tests/request-guard-shape.test.ts": {
+          "bytesInOutput": 2057
+        }
+      },
+      "bytes": 124990
+    }
+  }
+}

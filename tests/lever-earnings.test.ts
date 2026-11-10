@@ -154,6 +154,54 @@ test("the card says what is exact: zero only from a complete reading, 'at least'
   assert.equal(leverEarnedWords(leverEarnings([], "", false, now).rows.bump, "bump", true).line, "Not measured yet.");
 });
 
+test("a kept row whose figures do not read exactly is 'Not measured yet', never a figure (review of #3582, Codex C2, M1)", async () => {
+  const usd = (cents: unknown, orders: unknown) => ({ currency: "usd", cents, orders });
+  const eur = (cents: unknown, orders: unknown) => ({ currency: "eur", cents, orders });
+  const row = (amounts: unknown, left: unknown = 0) => ({ measured: true, amounts, left }) as unknown as LeverEarned;
+  const bad: [string, LeverEarned][] = [
+    ["null cents", row([usd(null, 1)])],
+    ["negative cents", row([usd(-900, 1)])],
+    ["cents as a string", row([usd("900", 1)])],
+    ["fractional cents", row([usd(9.5, 1)])],
+    ["fractional orders", row([usd(900, 1.5)])],
+    ["negative orders", row([usd(900, -1)])],
+    ["negative left", row([usd(900, 1)], -1)],
+    ["fractional left", row([usd(900, 1)], 0.5)],
+    ["a null second amount", row([usd(900, 1), null])],
+    ["a second amount with null cents", row([usd(900, 1), eur(null, 1)])],
+    ["a second amount with a bad currency", row([usd(900, 1), { currency: "EURO", cents: 100, orders: 1 }])],
+    ["amounts that are not a list", row({ 0: usd(900, 1) })],
+  ];
+  for (const [label, kept] of bad) {
+    let line: string;
+    try {
+      line = leverEarnedWords(kept, "upsell", true).line;
+    } catch (error) {
+      line = `threw ${String(error)}`;
+    }
+    assert.equal(line, "Not measured yet.", label);
+  }
+  // Healthy controls: a valid zero, an exact figure, other currencies, and orders left.
+  assert.equal(leverEarnedWords(row([usd(0, 0)]), "upsell", true).line, "Earned in the last 30 days: $0 from 0 orders.");
+  assert.equal(leverEarnedWords(row([usd(900, 1)]), "upsell", true).line, "Earned in the last 30 days: $9 from 1 order.");
+  assert.match(leverEarnedWords(row([usd(900, 1), eur(500, 2)]), "upsell", true).line, /Also .5 from 2 orders in EUR, not added together\./);
+  assert.match(leverEarnedWords(row([usd(900, 1)], 2), "upsell", true).line, /at least \$9 from 1 order; 2 more orders are not counted/);
+  // Through the real card: a malformed kept row renders as not measured and never throws.
+  redis.clear();
+  await claimHandle("earnedbad@example.test", "earnedbadfixture", "Synthetic earned", "");
+  const store = (await storeForEmail("earnedbad@example.test"))!;
+  const reading = leverEarnings([], "usd", false, now);
+  const kept = { ...reading, rows: { ...reading.rows, upsell: row([usd(900, 1), null]), bump: row([usd(null, 1)]) } } as unknown as LeverReading;
+  let html = "";
+  try {
+    html = renderToStaticMarkup(createElement(SalesLevers, { store, reading: kept, canConfigure: false }));
+  } catch (error) {
+    html = `threw ${String(error)}`;
+  }
+  assert.doesNotMatch(html, /\$0 from 1 order|threw/);
+  assert.equal((html.match(/Not measured yet\./g) ?? []).length, 5);
+});
+
 test("measureSalesLevers is this count: the studio's kept reading carries it, with no provider call", () => {
   const original = globalThis.fetch;
   let calls = 0;

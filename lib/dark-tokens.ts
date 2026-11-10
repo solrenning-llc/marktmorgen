@@ -110,14 +110,15 @@ export function contrastRatio(a: string, b: string): number {
 
 
 /**
- * Stage 2: the pages the dark tokens are proved on. tests/dark-scheme-switch.test.ts reads every color pair these
- * pages and their components draw and holds each to AAA with the tokens on. A page is covered when it has this
- * class, which only the policy pages (components/legal-page.tsx) carry; every other page stays light even when the
- * reader chose dark, until stage 3 moves it off its fixed light colors and the test proves it too. A browser that
- * cannot read :has() keeps every page light.
+ * The pages the dark tokens are proved on. tests/dark-scheme-switch.test.ts reads every color pair these pages, their
+ * layouts and their components draw and holds each to AAA with the tokens on. A page is covered when it carries one
+ * of these marks: `.legal-body`, drawn only by the policy pages' frame (components/legal-page.tsx, stage 2), or
+ * `data-dark-ready` on a page's own outer element, added screen by screen in stage 3 once that screen is off its
+ * fixed light colors; the test finds every page with either mark and proves it. Every other page stays light even
+ * when the reader chose dark. A browser that cannot read :has() keeps every page light.
  */
-export const DARK_READY = ".legal-body";
-export const DARK_SELECTOR = `:root[data-color-scheme="dark"]:has(${DARK_READY})`;
+export const DARK_READY = [".legal-body", "[data-dark-ready]"] as const;
+export const DARK_SELECTOR = `:root[data-color-scheme="dark"]:has(${DARK_READY.join(", ")})`;
 
 /**
  * The light palette's own tokens, given their dark role on the covered pages. The light indigo is both a link's color
@@ -128,6 +129,8 @@ export const LEGACY_TOKENS: Record<string, DarkToken> = {
   "violet-deep": "link",
   "violet-ink": "link",
   violet: "action-bg",
+  // Stage 3: the roles that were a fixed white in the light palette (app/globals.css :root).
+  surface: "sand-deep",
 };
 
 /**
@@ -147,12 +150,10 @@ export const DARK_OVERRIDES: readonly { selector: string; set: Record<string, st
   // Red text is error copy: its own token, not the red of a mark.
   { selector: ".text-danger", set: { color: "var(--danger-text)" } },
   // Boxes drawn on white: a raised surface instead.
-  { selector: ".card", set: { background: "var(--sand)" } },
   { selector: ".card-flat", set: { background: "var(--sand)" } },
   { selector: ".notice", set: { background: "var(--sand)" } },
   { selector: ".chip", set: { background: "var(--sand-deep)" } },
   { selector: ".field", set: { background: "var(--sand-deep)", "border-color": "var(--line-off)" } },
-  { selector: ".btn-secondary", set: { "background-color": "var(--sand-deep)" } },
   { selector: ".btn-light", set: { "background-color": "var(--sand-deep)" } },
   // Coming later in the sheet at the same weight, the overrides above would win over a variant's own fill, so each
   // variant says its fill again. A state (:hover, :focus) weighs more and keeps its own.
@@ -163,7 +164,6 @@ export const DARK_OVERRIDES: readonly { selector: string; set: Record<string, st
   { selector: ".notice-error", set: { background: "var(--danger-soft)" } },
   { selector: ".notice-info", set: { background: "var(--lilac)" } },
   // White labels on the indigo or the red, which turn light: the dark label instead.
-  { selector: ".btn-primary", set: { color: "var(--action-on)" } },
   { selector: ".btn-danger-solid", set: { color: "var(--action-on)" } },
   { selector: ".btn-danger-solid:hover", set: { "background-color": "var(--danger-text)" } },
   { selector: ".nb-toast", set: { color: "var(--action-on)" } },

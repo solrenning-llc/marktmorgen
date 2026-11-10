@@ -23,7 +23,7 @@ import { DARK_OVERRIDES, DARK_OVERRIDE_PREFIX, DARK_READY, DARK_SELECTOR, DARK_B
 import { dynamicPolicy } from "@/lib/csp";
 import { ColorSchemeSwitch, chooseColorScheme } from "@/components/color-scheme-switch";
 import AccessibilityPage from "@/app/accessibility/page";
-import { closure, pagePairs, pagesUsing } from "./dark-pairs";
+import { closure, layoutsOf, pagePairs, pagesMarked, pagesUsing } from "./dark-pairs";
 import { done, is, part } from "./check";
 
 const read = (f: string) => readFileSync(f, "utf8").replace(/\r\n/g, "\n");
@@ -179,10 +179,13 @@ delete (g as { document?: unknown }).document;
 
 part("Every color pair the covered pages draw is AAA with the dark tokens on");
 const css = read("app/globals.css");
-const pages = pagesUsing("@/components/legal-page");
-const files = closure([...pages, "app/layout.tsx"]);
+const legal = pagesUsing("@/components/legal-page");
+const marked = pagesMarked();
+const pages = [...legal, ...marked];
+const files = closure([...pages, ...pages.flatMap(layoutsOf)]);
 const proof = pagePairs(css, DARK_SELECTOR, files);
 is("the covered pages include the accessibility, privacy and terms pages", ["app/accessibility/page.tsx", "app/privacy/page.tsx", "app/terms/page.tsx"].every((p) => pages.includes(p)), true);
+is("and the studio screens marked ready, each read inside its own layouts", [marked, layoutsOf("app/studio/paused/page.tsx").every((l) => files.includes(l))], [["app/studio/paused/page.tsx"], true]);
 is("their components are read too: the menu, the footer, the toast", ["components/site-nav.tsx", "components/site-footer.tsx", "components/toast.tsx", "components/color-scheme-switch.tsx"].every((f) => files.includes(f)), true);
 is("every color is one the proof can read; none is guessed", [...new Set(proof.unread)], []);
 const failing = proof.pairs.filter((p) => p.ratio < p.min).map((p) => `${p.where}: ${p.fg} on ${p.bg} = ${p.ratio.toFixed(2)} (needs ${p.min})`);
@@ -197,23 +200,29 @@ const end = css.indexOf(DARK_BLOCK_END);
 const tokensOnly = css.slice(0, start) + css.slice(start, end).split("\n").filter((l) => !l.startsWith(DARK_OVERRIDE_PREFIX) && !Object.keys(LEGACY_TOKENS).some((t) => l.startsWith(`  --${t}:`))).join("\n") + css.slice(end);
 const bare = pagePairs(tokensOnly, DARK_SELECTOR, files);
 is("with the stage 1 tokens alone, the same pages fail (white boxes, black text, dark indigo links)", bare.pairs.filter((p) => p.ratio < p.min).length > 50, true);
-for (const o of DARK_OVERRIDES.filter((x) => [".text-black", ".card-flat", ".btn-primary"].includes(x.selector))) {
+for (const o of DARK_OVERRIDES.filter((x) => [".text-black", ".card-flat", ".nb-toast"].includes(x.selector))) {
   const without = css.split("\n").filter((l) => l !== `${DARK_OVERRIDE_PREFIX}${o.selector} { ${Object.entries(o.set).map(([k, v]) => `${k}: ${v};`).join(" ")} }`).join("\n");
   is(`taking out ${o.selector} alone makes it fail`, pagePairs(without, DARK_SELECTOR, files).pairs.some((p) => p.ratio < p.min), true);
 }
+for (const role of ["surface", "action-on"]) {
+  const lines = css.slice(start, end).split("\n").filter((l) => l.startsWith(`  --${role}:`));
+  const without = css.slice(0, start) + css.slice(start, end).split("\n").filter((l) => !l.startsWith(`  --${role}:`)).join("\n") + css.slice(end);
+  is(`the role token --${role} has its dark value, and without it the pages fail (its light value is a white)`, [lines.length, pagePairs(without, DARK_SELECTOR, files).pairs.some((p) => p.ratio < p.min)], [1, true]);
+}
 
 part("Dark colors reach only the pages the proof read");
-is("the gate is the class only the policy pages' frame draws", [DARK_READY, DARK_SELECTOR], [".legal-body", ':root[data-color-scheme="dark"]:has(.legal-body)']);
+is("the gate is the policy pages' frame or a page's own mark", [DARK_READY, DARK_SELECTOR], [[".legal-body", "[data-dark-ready]"], ':root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])']);
 const carriers: string[] = [];
 const scan = (dir: string) => {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name).replace(/\\/g, "/");
     if (statSync(p).isDirectory()) scan(p);
-    else if (/\.tsx$/.test(name) && /["'`\s]legal-body["'`\s]/.test(read(p))) carriers.push(p);
+    else if (/\.tsx$/.test(name) && /["'`\s]legal-body["'`\s]|data-dark-ready/.test(read(p))) carriers.push(p);
   }
 };
 ["app", "components"].forEach(scan);
-is("only components/legal-page.tsx draws it, and every page drawn with it is in the proof", [carriers, pages.every((p) => files.includes(p))], [["components/legal-page.tsx"], true]);
+is("only the frame and the marked pages draw a mark, and every page drawn with one is in the proof", [carriers.sort(), pages.every((p) => files.includes(p))], [["app/studio/paused/page.tsx", "components/legal-page.tsx"], true]);
+is("the mark sits on a page's outer element only: no component can switch a page on by itself", carriers.filter((c) => c.startsWith("components/") && c !== "components/legal-page.tsx"), []);
 is("a field's edge is drawn with the off-control token, proved at 3:1 on the page (1.4.11)", DARK_OVERRIDES.find((o) => o.selector === ".field")?.set["border-color"], "var(--line-off)");
 
 done();

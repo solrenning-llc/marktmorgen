@@ -550,3 +550,25 @@ export function pagePairs(css: string, darkSelector: string | null, files: strin
   unread.push(...c.unread);
   return { pairs, unread, used };
 }
+
+/** Every page.tsx under app/ that marks itself covered with `data-dark-ready` (stage 3, screen by screen). */
+export function pagesMarked(dir = "app"): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const f = `${dir}/${name}`;
+    if (statSync(f).isDirectory()) out.push(...pagesMarked(f));
+    else if (name === "page.tsx" && /\sdata-dark-ready=/.test(read(f))) out.push(f);
+  }
+  return out.sort();
+}
+
+/** The layouts a page is drawn inside: every layout.tsx from app/ down to the page's own folder. */
+export function layoutsOf(page: string): string[] {
+  const parts = page.split("/").slice(0, -1);
+  const out: string[] = [];
+  for (let i = 1; i <= parts.length; i++) {
+    const f = `${parts.slice(0, i).join("/")}/layout.tsx`;
+    if (existsSync(f)) out.push(f);
+  }
+  return out;
+}

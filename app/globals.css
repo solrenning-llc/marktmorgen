@@ -59,6 +59,9 @@
   --ink: #111827;        /* 16.3:1 on ivory */
   --ink-soft: #343d4a;   /* 10.08:1 on ivory */
   --ink-mute: #394150;   /*  9.42:1 on ivory; 7.34:1 on lilac-deep */
+  /* Roles that were fixed colors (dark mode, stage 3): the same white here, their own value in the dark. */
+  --surface: #fff;       /* a box or a button drawn on the page */
+  --action-on: #fff;     /* a filled button's label */
 
   /*
    * The dark family: three steps of the one navy, not three colours.
@@ -177,6 +180,7 @@
   --color-ink-soft: var(--ink-soft);
   --color-ink-mute: var(--ink-mute);
   --color-paper: var(--paper);
+  --color-surface: var(--surface);
   --color-sand: var(--sand);
   --color-sand-deep: var(--sand-deep);
   --color-line: var(--line);
@@ -860,7 +864,7 @@ html {
 }
 .btn-primary {
   background-color: var(--violet);
-  color: #fff;
+  color: var(--action-on);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     0 10px 24px -10px rgba(59, 56, 144, 0.65);
@@ -881,7 +885,7 @@ html {
   color: var(--violet-ink);
 }
 .btn-secondary {
-  background-color: #fff;
+  background-color: var(--surface);
   color: var(--ink);
   border-color: var(--line-strong);
   box-shadow: var(--shadow-xs);
@@ -975,7 +979,7 @@ html {
 /* --------------------------------------------------------------- cards */
 
 .card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid transparent;
   border-radius: var(--r-lg);
   /*
@@ -5217,7 +5221,7 @@ html:has([data-product-editor]) {
 
 /* 274 [AX1] dark mode: dark tokens (lib/dark-tokens.ts). */
 /* Only for a reader who chose dark (lib/color-scheme.ts), only on the pages DARK_READY names. Generated: edit the module. */
-:root[data-color-scheme="dark"]:has(.legal-body) {
+:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready]) {
   color-scheme: dark;
   --paper: #10151d;
   --sand: #161c26;
@@ -5247,32 +5251,30 @@ html:has([data-product-editor]) {
   --violet-deep: var(--link);
   --violet-ink: var(--link);
   --violet: var(--action-bg);
+  --surface: var(--sand-deep);
   --background: var(--paper);
   --foreground: var(--ink);
 }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .text-black { color: var(--ink); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .bg-white { background-color: var(--sand); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .bg-white\/92 { background-color: color-mix(in srgb, var(--paper) 92%, transparent); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .focus\:bg-white:focus { background-color: var(--sand-deep); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .bg-ink { background-color: var(--sand-deep); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .text-danger { color: var(--danger-text); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .card { background: var(--sand); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .card-flat { background: var(--sand); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice { background: var(--sand); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .chip { background: var(--sand-deep); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .field { background: var(--sand-deep); border-color: var(--line-off); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-secondary { background-color: var(--sand-deep); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-light { background-color: var(--sand-deep); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .chip-brand { background: var(--lilac); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .chip-dark { background: var(--fill-dark); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-success { background: var(--mint-soft); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-warn { background: var(--amber-soft); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-error { background: var(--danger-soft); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .notice-info { background: var(--lilac); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-primary { color: var(--action-on); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-danger-solid { color: var(--action-on); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .btn-danger-solid:hover { background-color: var(--danger-text); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .nb-toast { color: var(--action-on); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .nb-toast-close { color: var(--action-on); }
-:where(:root[data-color-scheme="dark"]:has(.legal-body)) .on-dark ::selection { color: var(--on-dark); background: rgba(255, 255, 255, 0.2); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .text-black { color: var(--ink); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .bg-white { background-color: var(--sand); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .bg-white\/92 { background-color: color-mix(in srgb, var(--paper) 92%, transparent); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .focus\:bg-white:focus { background-color: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .bg-ink { background-color: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .text-danger { color: var(--danger-text); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .card-flat { background: var(--sand); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .notice { background: var(--sand); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .chip { background: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .field { background: var(--sand-deep); border-color: var(--line-off); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .btn-light { background-color: var(--sand-deep); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .chip-brand { background: var(--lilac); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .chip-dark { background: var(--fill-dark); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .notice-success { background: var(--mint-soft); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .notice-warn { background: var(--amber-soft); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .notice-error { background: var(--danger-soft); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .notice-info { background: var(--lilac); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .btn-danger-solid { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .btn-danger-solid:hover { background-color: var(--danger-text); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .nb-toast { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .nb-toast-close { color: var(--action-on); }
+:where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) .on-dark ::selection { color: var(--on-dark); background: rgba(255, 255, 255, 0.2); }
 /* end dark tokens */

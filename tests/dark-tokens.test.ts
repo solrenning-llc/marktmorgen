@@ -55,8 +55,8 @@ is("the block is there, byte for byte as the module makes it", css.includes(dark
 is("once", css.split(DARK_BLOCK_START).length - 1, 1);
 const block = css.slice(css.indexOf(DARK_BLOCK_START), css.indexOf(DARK_BLOCK_END));
 const selectors = [...block.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g)].map((m) => m[1].trim());
-is("its tokens apply only under the attribute, on a covered page", selectors[0], ':root[data-color-scheme="dark"]:has(.legal-body)');
-is("every other rule in it too", selectors.slice(1).filter((s) => !s.startsWith(':where(:root[data-color-scheme="dark"]:has(.legal-body)) ')), []);
+is("its tokens apply only under the attribute, on a covered page", selectors[0], ':root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])');
+is("every other rule in it too", selectors.slice(1).filter((s) => !s.startsWith(':where(:root[data-color-scheme="dark"]:has(.legal-body, [data-dark-ready])) ')), []);
 is("no prefers-color-scheme rule anywhere: the device's setting counts only when the reader chose \"Match my device\"", /prefers-color-scheme/.test(css), false);
 
 const sources: string[] = [];

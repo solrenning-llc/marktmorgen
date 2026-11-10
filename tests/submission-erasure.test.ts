@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     const onRecordWrite = (answer: "never answered" | "out of shape") => {
       const original = redis.pipeline.bind(redis);
       redis.pipeline = (async (list: (string | number)[][]) => {
-        if (list.some((command) => String(command[0]) === "SET" && String(command[1]).startsWith("nl:sub:rec:"))) {
+        if (list.some((command) => (String(command[0]) === "SET" || String(command[0]) === "EVAL") && command.some((arg) => String(arg).startsWith("nl:sub:rec:")))) {
           redis.pipeline = original;
           if (answer === "never answered") throw new Error("fetch failed");
           return [];
@@ -270,7 +270,7 @@ async function main(): Promise<void> {
     const original = redis.pipeline.bind(redis);
     let failed = 0;
     redis.pipeline = (async (list: (string | number)[][]) => {
-      const record = list.some((command) => String(command[0]) === "SET" && String(command[1]).startsWith("nl:sub:rec:"));
+      const record = list.some((command) => (String(command[0]) === "SET" || String(command[0]) === "EVAL") && command.some((arg) => String(arg).startsWith("nl:sub:rec:")));
       const readBack = String(list[0]?.[0]) === "GET" && String(list[0]?.[1]).startsWith("nl:sub:rec:");
       if ((failed === 0 && record) || (failed === 1 && readBack)) {
         failed += 1;
@@ -289,6 +289,37 @@ async function main(): Promise<void> {
     is("but it is on the sweep's list all the same", await due(), [both.path]);
     is("so the sweep deletes it once the keeping time ends", await sweepSubmissions(NOW + 31 * DAY, steps), { deleted: 1, retried: 0 });
     is("that file", calls.filter((call) => call.startsWith("delete")), [`delete ${both.path}`]);
+  }
+
+  part("An erasure that runs while a close is at the vault is never undone by that close (Claude 1 on #3570)");
+  {
+    const who = "7".repeat(32);
+    let erased: number | string = "not run";
+    const erasedFiles: string[] = [];
+    const racing = world({
+      closeReservedVault: async (pathname) => {
+        // The buyer's erasure runs while the vault completes the file, and says done.
+        erased = await forgetSubmissionsPerson(FOLDER, who, erasedFiles, world().steps);
+        return { ok: true, file: { pathname, bytes: 5 * MiB, contentType: "video/mp4" } };
+      },
+    });
+    const opened = await openSubmissionDoor(ask(who, lesson(30)), racing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const path = opened.upload.pathname;
+    const id = path.split("/")[2].slice(4);
+    const closed = await closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(30), who, data: SHOP, note: "Private note." }, path, ["e"], NOW, racing.steps).catch((error: unknown) => ({ thrown: String(error) }));
+    is("control: the erasure ran and said done, naming the file", [erased, erasedFiles.includes(path)], [0, true]);
+    is("the close is not said kept", (closed as { ok?: boolean }).ok === true, false);
+    is("after an erasure said done, no record of the erased buyer remains", await readSubmission(FOLDER, id), null);
+    // An empty index counts as none (Redis drops a sorted set with no member; the stand-in may keep the key).
+    const left = await redis.pipeline([["ZCARD", `nl:sub:who:${FOLDER}:${who}`], ["ZSCORE", "nl:sub:due", `${FOLDER}|${path}`]]);
+    is("nor their index, nor a sweep entry written again by the close", [left[0], left[1]], [0, null]);
+    is("and the completed file is deleted", racing.calls.includes(`delete ${path}`), true);
+
+    // Control: with no erasure, a close still keeps its record.
+    const plain = world();
+    const sent = await send("9".repeat(32), lesson(31), plain.steps);
+    is("an ordinary close keeps its record", (await readSubmission(FOLDER, sent.id))?.state, "submitted");
   }
 
   done();

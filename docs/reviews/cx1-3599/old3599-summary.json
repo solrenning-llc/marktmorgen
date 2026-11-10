@@ -1,0 +1,14 @@
+{
+  "cx1-meet-contract.proof.ts": {
+    "status": 1,
+    "signal": null,
+    "summary": [
+      "✖ failing tests:",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {",
+      "      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {"
+    ]
+  }
+}

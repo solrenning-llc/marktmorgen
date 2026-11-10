@@ -1,0 +1,26 @@
+{
+  "cx1-meet-refusal.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 24",
+      "ℹ fail 0"
+    ]
+  },
+  "cx1-meet-contract.proof.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 6",
+      "ℹ fail 0"
+    ]
+  },
+  "meet-return-counter-admission.test.ts": {
+    "status": 0,
+    "signal": null,
+    "summary": [
+      "ℹ tests 46",
+      "ℹ fail 0"
+    ]
+  }
+}

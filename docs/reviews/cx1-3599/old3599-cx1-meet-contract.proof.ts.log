@@ -1,0 +1,124 @@
+✖ google refusal preserves a usable connection context: exceeded (86.3885ms)
+✖ google refusal preserves a usable connection context: null-count (13.5611ms)
+✖ zoom refusal preserves a usable connection context: exceeded (13.8305ms)
+✖ zoom refusal preserves a usable connection context: null-count (17.0561ms)
+✖ host refusal preserves a usable connection context: exceeded (15.2921ms)
+✖ host refusal preserves a usable connection context: null-count (19.2896ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 0
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 182.502
+
+✖ failing tests:
+
+test at .cx1-evidence\cx1-meet-contract.proof.ts.cjs:4864:121
+✖ google refusal preserves a usable connection context: exceeded (86.3885ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  303 !== 429
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3599\.cx1-evidence\cx1-meet-contract.proof.ts.cjs:4884:31)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 303,
+    expected: 429,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-meet-contract.proof.ts.cjs:4864:121
+✖ google refusal preserves a usable connection context: null-count (13.5611ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  303 !== 503
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3599\.cx1-evidence\cx1-meet-contract.proof.ts.cjs:4884:31)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 303,
+    expected: 503,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-meet-contract.proof.ts.cjs:4864:121
+✖ zoom refusal preserves a usable connection context: exceeded (13.8305ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '/studio/calendar'
+  - '/studio/meetings'
+             ^
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3599\.cx1-evidence\cx1-meet-contract.proof.ts.cjs:4880:31)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '/studio/calendar',
+    expected: '/studio/meetings',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-meet-contract.proof.ts.cjs:4864:121
+✖ zoom refusal preserves a usable connection context: null-count (17.0561ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '/studio/calendar'
+  - '/studio/meetings'
+             ^
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3599\.cx1-evidence\cx1-meet-contract.proof.ts.cjs:4880:31)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '/studio/calendar',
+    expected: '/studio/meetings',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-meet-contract.proof.ts.cjs:4864:121
+✖ host refusal preserves a usable connection context: exceeded (15.2921ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  303 !== 429
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3599\.cx1-evidence\cx1-meet-contract.proof.ts.cjs:4884:31)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 303,
+    expected: 429,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .cx1-evidence\cx1-meet-contract.proof.ts.cjs:4864:121
+✖ host refusal preserves a usable connection context: null-count (19.2896ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  303 !== 503
+  
+      at TestContext.<anonymous> (C:\Users\vinic\Projects\marktmorgen-cx1\.git\cx1-review-3599\.cx1-evidence\cx1-meet-contract.proof.ts.cjs:4884:31)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 303,
+    expected: 503,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

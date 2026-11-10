@@ -1,0 +1,14 @@
+✔ google refusal preserves a usable connection context: exceeded (66.7395ms)
+✔ google refusal preserves a usable connection context: null-count (27.7936ms)
+✔ zoom refusal preserves a usable connection context: exceeded (24.8617ms)
+✔ zoom refusal preserves a usable connection context: null-count (13.8053ms)
+✔ host refusal preserves a usable connection context: exceeded (15.8877ms)
+✔ host refusal preserves a usable connection context: null-count (17.2016ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 178.6481

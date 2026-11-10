@@ -1,0 +1,32 @@
+✔ google unknown guard missing (131.5579ms)
+✔ google unknown guard partial (8.4017ms)
+✔ google unknown guard extra (7.4661ms)
+✔ google unknown guard negative (7.4067ms)
+✔ google unknown guard zero (13.0478ms)
+✔ google unknown guard fraction (11.8431ms)
+✔ google unknown guard text (7.4979ms)
+✔ google unknown guard null (7.3906ms)
+✔ google unknown guard bad SET (8.2125ms)
+✔ google unknown guard getter (7.3138ms)
+✔ google unknown guard exceeded (6.2164ms)
+✔ google unknown guard unsafe (4.9231ms)
+✔ zoom unknown guard missing (10.1119ms)
+✔ zoom unknown guard partial (12.7615ms)
+✔ zoom unknown guard extra (5.5085ms)
+✔ zoom unknown guard negative (9.3407ms)
+✔ zoom unknown guard zero (10.2765ms)
+✔ zoom unknown guard fraction (5.1725ms)
+✔ zoom unknown guard text (6.887ms)
+✔ zoom unknown guard null (14.0122ms)
+✔ zoom unknown guard bad SET (5.3109ms)
+✔ zoom unknown guard getter (6.5128ms)
+✔ zoom unknown guard exceeded (6.3938ms)
+✔ zoom unknown guard unsafe (6.4165ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 341.456

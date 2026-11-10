@@ -134,7 +134,8 @@ test("nothing is written into the programme until the person answers", () => {
   const at = aff.indexOf("if (input.alreadyHere)");
   assert.ok(at > 0, "the recognising branch should exist");
   const branch = aff.slice(at, at + 1_600);
-  assert.doesNotMatch(branch, /writeAffiliate|acceptPartnership/, "recognising somebody is not agreeing for them");
+  // Rule 23: the record writers are now writeNewAffiliate and changeAffiliate; none of them may be here either.
+  assert.doesNotMatch(branch, /writeAffiliate|writeNewAffiliate|changeAffiliate|acceptPartnership/, "recognising somebody is not agreeing for them");
   assert.match(branch, /offerPartnership\(/, "it leaves an offer");
   // The reason belongs in the comment over the branch, which is above `at`.
   assert.match(
@@ -169,7 +170,8 @@ test("accepting goes through the same record every other partner is made from", 
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function acceptPartnership");
   const body = aff.slice(at, at + 1_200);
-  assert.match(body, /openAffiliateLink\(store, token\)/, "the same path an opened invitation takes");
+  // Altered 2026-11-07 (rule 23): the path now also carries who pays for reading the program (`charge`).
+  assert.match(body, /openAffiliateLink\(store, token, charge\)/, "the same path an opened invitation takes, paid by whoever answers");
   assert.match(body, /k: 1, p: share/, "carrying the same approval and the same share");
 });
 

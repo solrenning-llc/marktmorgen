@@ -1,0 +1,1 @@
+let n=0;global.__zCounterAdmission=()=>{if(n>=200){process.stderr.write('COUNTER_CAP\n');process.exit(86);}n++;};process.on('exit',()=>process.stderr.write('COUNTER_ADMISSIONS '+n+'\n'));

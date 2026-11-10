@@ -117,7 +117,17 @@ async function main(): Promise<void> {
   is("it says what to do before the link exists, in a live region", drawn.includes('aria-live="polite"') && drawn.includes("Choose at least two products to make the link."), true);
   is("nothing with fewer than two products to choose", renderToStaticMarkup(createElement(CartLinkBuilder, { address: base, products: [{ id: "aaaaaa", title: "Bread" }] })), "");
   const studio = readFileSync("app/studio/page.tsx", "utf8");
-  is("shown in the studio where a cart is offered, from the products a cart takes", studio.includes("{offersCart(store) ? <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await cartLinkProducts(store)} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} /> : null}"), true);
+  // A part of its own (#2900), whose count the next store write waits for (tests/studio-today-removal-order.test.ts).
+  is(
+    "shown in the studio where a cart is offered, from the products a cart takes",
+    [
+      "{offersCart(store) ? (async () => {",
+      "const products = cartLinkProducts(store);",
+      "serverWrite.done = products;",
+      "return <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await products} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} />;",
+    ].every((line) => studio.includes(line)),
+    true,
+  );
   done();
 }
 

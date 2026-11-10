@@ -679,12 +679,16 @@ export async function customerType(store: Store, email: string | null, sessionId
   if (!email || !store.stripeAccountId) return null;
   try {
     const query = new URLSearchParams({ limit: "10", "customer_details[email]": email });
-    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown };
-    // A list without its rows is not known, never a buyer who had not paid before.
-    if (!Array.isArray(listed.data)) return null;
+    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
+    // A page in an unknown shape is a reading not made (CX-123 rule 24): unknown (null), as a failed read is.
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of checkouts that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more checkouts in a shape that cannot be read");
     const rows = listed.data as AdsSession[];
     const before = rows.some((row) => row.id !== sessionId && row.payment_status === "paid" && typeof row.created === "number" && row.created < created);
-    return before ? "returning" : "new";
+    if (before) return "returning";
+    // None earlier on this page while Stripe has more: an earlier paid checkout may be on the next one.
+    if (listed.has_more) throw new Error("Stripe has more checkouts for this address than one page");
+    return "new";
   } catch {
     return null;
   }
@@ -822,16 +826,56 @@ type InvoiceRow = {
 };
 
 /**
+ * The most pages of the day's paid invoices one renewals pass reads (100 each), as the member scores read
+ * memberships. A cap of its own, not lib/api-read-rules.ts's RENEWAL_PAGES (the numbers' renewals read).
+ */
+const AD_RENEWAL_PAGES = 10;
+
+/**
  * Each membership renewal paid in the last day, as a purchase of its own, for
- * a membership whose first checkout carried the buyer's yes: one read of the
- * creator's invoices per pass, only on a store that sends from the server.
+ * a membership whose first checkout carried the buyer's yes: the creator's
+ * invoices of the day, every page of them up to AD_RENEWAL_PAGES, read once per
+ * pass, only on a store that sends from the server. A day with more pages than
+ * the cap sends the renewals read and then fails for the unread rest.
  */
 export async function sendRenewals(store: Store, now = Date.now(), deadline = Infinity): Promise<number> {
   if (!store.statsId || !store.stripeAccountId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const since = Math.floor(now / 1000) - 86400;
-  const listed = (await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}`)) as { data?: unknown };
+  // A page in an unknown shape, more pages than the cap, or a pass out of time, is a reading not made
+  // (CX-123 rule 24): it fails as Stripe not answering does (the sweep logs it and tries again next pass),
+  // never as "no renewals".
+  const listedRows: InvoiceRow[] = [];
+  let whole = false;
+  let after = "";
+  for (let page = 0; page < AD_RENEWAL_PAGES; page += 1) {
+    // A pass past its deadline asks no page after the first: it fails as a page not read does, and the
+    // sweep tries again next pass, never "no renewals" (Claude 2, review 6707563715 on #3054).
+    if (page > 0 && Date.now() >= deadline) throw new Error("Stripe's paid invoices of the day not read: the pass ran out of time");
+    const listed = await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of invoices that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more invoices in a shape that cannot be read");
+    const pageRows = listed.data as InvoiceRow[];
+    listedRows.push(...pageRows);
+    if (!listed.has_more) {
+      whole = true;
+      break;
+    }
+    const last = pageRows[pageRows.length - 1];
+    if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of invoices with no last one to go on from");
+    after = last.id;
+  }
+  const count = await sendRenewalRows(store, store.statsId, listedRows, now, deadline);
+  // More pages than the cap: the renewals read in their exact shape are sent above, each a purchase of its
+  // own with its own mark, so nothing unread is taken as absent; the pass still fails for the unread rest,
+  // never "no renewals" (Claude 1, independent review on #3054 at 31b99d82: main sent the newest 100).
+  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${AD_RENEWAL_PAGES} pages; ${count} renewal(s) of the pages read sent`);
+  return count;
+}
+
+/** Sends the renewals among invoice rows read in their exact shape, each once (its own SET NX mark); answers how many went. */
+async function sendRenewalRows(store: Store, statsId: string, listedRows: InvoiceRow[], now: number, deadline: number): Promise<number> {
   const handles = saleHandles(store);
-  const rows = ((Array.isArray(listed.data) ? listed.data : []) as InvoiceRow[]).filter((row) => {
+  const rows = listedRows.filter((row) => {
     if (typeof row.id !== "string" || row.billing_reason !== "subscription_cycle" || row.status !== "paid") return false;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     return Boolean(meta.ads) && handles.has(meta.store ?? "") && typeof row.amount_paid === "number" && row.amount_paid > 0;
@@ -846,7 +890,7 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
   if (!marks) return 0;
   const left = rows.filter((_, i) => markSeen(marks[i]) === false);
   if (!left.length) return 0;
-  const stored = await readStored(store.statsId);
+  const stored = await readStored(statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
   const kept = await redisPipeline(left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]));
   let count = 0;

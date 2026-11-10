@@ -19,6 +19,8 @@ const S = " ";
 
 const en = {
   pageTitle: "Your order",
+  /** Beside the drawn mark once Stripe confirmed the payment (components/payment-received.tsx, 654 [WG14]). */
+  paymentReceived: "Payment received",
   /** What a page that found no paid order says, by what was found instead. */
   notices: {
     unpaid: {
@@ -61,6 +63,7 @@ const en = {
     failed: "That offer was not charged.",
     checking: "We are still hearing back from Stripe about that offer. Open this page again in a minute: it is charged once at most.",
     unavailable: "That offer is no longer open, so nothing was charged for it.",
+    changed: "That offer was changed while you were reading it, so nothing was charged. Below is the offer as it is now, so you can decide again.",
   } as Record<string, string>,
   remindDayHour: ", and reminders follow a day and an hour before",
   remindHour: ", and a reminder follows an hour before",
@@ -185,7 +188,7 @@ const en = {
   oneMoreThing: "One more thing",
   titleFor: (title: string, price: string) => `${title} for ${price}`,
   onItsOwn: (price: string) => `${price} on its own`,
-  yesAdd: (price: string) => `Yes, add it for ${price}`,
+  yesAdd: (price: string) => `Yes, buy now for ${price}`,
   noThanks: "No thanks",
   offerNote: (store: string) =>
     `Yes charges the card you just used, once, on ${store}'s own account. No thanks charges nothing. You can also simply leave this page.`,
@@ -236,6 +239,7 @@ export type ThanksWords = typeof en;
 
 const es: ThanksWords = {
   pageTitle: "Tu pedido",
+  paymentReceived: "Pago recibido",
   notices: {
     unpaid: {
       title: "Este pedido no se ha pagado",
@@ -276,6 +280,7 @@ const es: ThanksWords = {
     failed: "Esa oferta no se cobró.",
     checking: "Seguimos esperando la respuesta de Stripe sobre esa oferta. Vuelve a abrir esta página en un minuto: como mucho se cobra una vez.",
     unavailable: "Esa oferta ya no está disponible, así que no se cobró nada por ella.",
+    changed: "Esa oferta cambió mientras la leías, así que no se cobró nada. Abajo está la oferta tal como es ahora, por si quieres decidir de nuevo.",
   },
   remindDayHour: ", y recibirás recordatorios un día y una hora antes",
   remindHour: ", y recibirás un recordatorio una hora antes",
@@ -391,7 +396,7 @@ const es: ThanksWords = {
   oneMoreThing: "Una cosa más",
   titleFor: (title, price) => `${title} por ${price}`,
   onItsOwn: (price) => `${price} por separado`,
-  yesAdd: (price) => `Sí, añadirlo por ${price}`,
+  yesAdd: (price) => `Sí, comprar ahora por ${price}`,
   noThanks: "No, gracias",
   offerNote: (store) =>
     `Sí cobra una vez en la tarjeta que acabas de usar, en la cuenta propia de ${store}. No, gracias no cobra nada. También puedes simplemente salir de esta página.`,
@@ -438,6 +443,7 @@ const es: ThanksWords = {
 
 const fr: ThanksWords = {
   pageTitle: "Votre commande",
+  paymentReceived: "Paiement reçu",
   notices: {
     unpaid: {
       title: "Cette commande n'a pas été payée",
@@ -478,6 +484,7 @@ const fr: ThanksWords = {
     failed: "Cette offre n'a pas été débitée.",
     checking: `Nous attendons encore la réponse de Stripe pour cette offre. Rouvrez cette page dans une minute${S}: elle n'est débitée qu'une fois au plus.`,
     unavailable: "Cette offre n'est plus disponible, rien n'a donc été débité pour elle.",
+    changed: "Cette offre a changé pendant que vous la lisiez, rien n'a donc été débité. Elle est présentée ci-dessous telle qu'elle est maintenant, pour que vous puissiez décider à nouveau.",
   },
   remindDayHour: ", et des rappels suivront un jour et une heure avant",
   remindHour: ", et un rappel suivra une heure avant",
@@ -593,7 +600,7 @@ const fr: ThanksWords = {
   oneMoreThing: "Encore une chose",
   titleFor: (title, price) => `${title} pour ${price}`,
   onItsOwn: (price) => `${price} seul`,
-  yesAdd: (price) => `Oui, l'ajouter pour ${price}`,
+  yesAdd: (price) => `Oui, acheter maintenant pour ${price}`,
   noThanks: "Non merci",
   offerNote: (store) =>
     `Oui débite une fois la carte que vous venez d'utiliser, sur le compte de ${store}. Non merci ne débite rien. Vous pouvez aussi simplement quitter cette page.`,
@@ -641,6 +648,7 @@ const fr: ThanksWords = {
 
 const de: ThanksWords = {
   pageTitle: "Ihre Bestellung",
+  paymentReceived: "Zahlung erhalten",
   notices: {
     unpaid: {
       title: "Diese Bestellung wurde nicht bezahlt",
@@ -681,6 +689,7 @@ const de: ThanksWords = {
     failed: "Dieses Angebot wurde nicht belastet.",
     checking: "Wir warten noch auf die Antwort von Stripe zu diesem Angebot. Öffnen Sie diese Seite in einer Minute erneut: Es wird höchstens einmal belastet.",
     unavailable: "Dieses Angebot gilt nicht mehr, daher wurde dafür nichts belastet.",
+    changed: "Dieses Angebot wurde geändert, während Sie es gelesen haben, daher wurde nichts belastet. Unten sehen Sie das Angebot, wie es jetzt ist, damit Sie neu entscheiden können.",
   },
   remindDayHour: ", und Erinnerungen folgen einen Tag und eine Stunde vorher",
   remindHour: ", und eine Erinnerung folgt eine Stunde vorher",
@@ -796,7 +805,7 @@ const de: ThanksWords = {
   oneMoreThing: "Noch etwas",
   titleFor: (title, price) => `${title} für ${price}`,
   onItsOwn: (price) => `${price} einzeln`,
-  yesAdd: (price) => `Ja, für ${price} hinzufügen`,
+  yesAdd: (price) => `Ja, jetzt für ${price} kaufen`,
   noThanks: "Nein danke",
   offerNote: (store) =>
     `Ja belastet die Karte, die Sie gerade benutzt haben, einmal, auf dem eigenen Konto von ${store}. Nein danke belastet nichts. Sie können diese Seite auch einfach verlassen.`,
@@ -844,6 +853,7 @@ const de: ThanksWords = {
 
 const it: ThanksWords = {
   pageTitle: "Il tuo ordine",
+  paymentReceived: "Pagamento ricevuto",
   notices: {
     unpaid: {
       title: "Questo ordine non è stato pagato",
@@ -884,6 +894,7 @@ const it: ThanksWords = {
     failed: "Quell'offerta non è stata addebitata.",
     checking: "Stiamo ancora aspettando la risposta di Stripe su quell'offerta. Riapri questa pagina tra un minuto: viene addebitata al massimo una volta.",
     unavailable: "Quell'offerta non è più disponibile, quindi non è stato addebitato nulla.",
+    changed: "Quell'offerta è cambiata mentre la leggevi, quindi non è stato addebitato nulla. Qui sotto trovi l'offerta com'è ora, così puoi decidere di nuovo.",
   },
   remindDayHour: ", e seguiranno promemoria un giorno e un'ora prima",
   remindHour: ", e seguirà un promemoria un'ora prima",
@@ -999,7 +1010,7 @@ const it: ThanksWords = {
   oneMoreThing: "Un'ultima cosa",
   titleFor: (title, price) => `${title} a ${price}`,
   onItsOwn: (price) => `${price} da solo`,
-  yesAdd: (price) => `Sì, aggiungilo a ${price}`,
+  yesAdd: (price) => `Sì, acquista ora a ${price}`,
   noThanks: "No grazie",
   offerNote: (store) =>
     `Sì addebita una volta la carta che hai appena usato, sul conto di ${store}. No grazie non addebita nulla. Puoi anche semplicemente lasciare questa pagina.`,
@@ -1047,6 +1058,7 @@ const it: ThanksWords = {
 
 const nl: ThanksWords = {
   pageTitle: "Je bestelling",
+  paymentReceived: "Betaling ontvangen",
   notices: {
     unpaid: {
       title: "Deze bestelling is niet betaald",
@@ -1087,6 +1099,7 @@ const nl: ThanksWords = {
     failed: "Dat aanbod is niet afgeschreven.",
     checking: "We wachten nog op antwoord van Stripe over dat aanbod. Open deze pagina over een minuut opnieuw: het wordt hooguit één keer afgeschreven.",
     unavailable: "Dat aanbod geldt niet meer, dus er is niets voor afgeschreven.",
+    changed: "Dat aanbod is veranderd terwijl je het las, dus er is niets afgeschreven. Hieronder staat het aanbod zoals het nu is, zodat je opnieuw kunt beslissen.",
   },
   remindDayHour: ", en herinneringen volgen een dag en een uur vooraf",
   remindHour: ", en een herinnering volgt een uur vooraf",
@@ -1202,7 +1215,7 @@ const nl: ThanksWords = {
   oneMoreThing: "Nog één ding",
   titleFor: (title, price) => `${title} voor ${price}`,
   onItsOwn: (price) => `${price} los`,
-  yesAdd: (price) => `Ja, voeg toe voor ${price}`,
+  yesAdd: (price) => `Ja, nu kopen voor ${price}`,
   noThanks: "Nee bedankt",
   offerNote: (store) =>
     `Ja schrijft één keer af van de kaart die je net gebruikte, op de eigen rekening van ${store}. Nee bedankt schrijft niets af. Je kunt deze pagina ook gewoon verlaten.`,
@@ -1250,6 +1263,7 @@ const nl: ThanksWords = {
 
 const pt: ThanksWords = {
   pageTitle: "A sua encomenda",
+  paymentReceived: "Pagamento recebido",
   notices: {
     unpaid: {
       title: "Esta encomenda não foi paga",
@@ -1290,6 +1304,7 @@ const pt: ThanksWords = {
     failed: "Essa oferta não foi cobrada.",
     checking: "Ainda estamos a aguardar a resposta da Stripe sobre essa oferta. Abra esta página novamente daqui a um minuto: é cobrada no máximo uma vez.",
     unavailable: "Essa oferta já não está disponível, por isso nada foi cobrado por ela.",
+    changed: "Essa oferta foi alterada enquanto a lia, por isso nada foi cobrado. Abaixo está a oferta tal como é agora, para que possa decidir de novo.",
   },
   remindDayHour: ", e seguem-se lembretes um dia e uma hora antes",
   remindHour: ", e segue-se um lembrete uma hora antes",
@@ -1405,7 +1420,7 @@ const pt: ThanksWords = {
   oneMoreThing: "Só mais uma coisa",
   titleFor: (title, price) => `${title} por ${price}`,
   onItsOwn: (price) => `${price} em separado`,
-  yesAdd: (price) => `Sim, acrescentar por ${price}`,
+  yesAdd: (price) => `Sim, comprar agora por ${price}`,
   noThanks: "Não, obrigado",
   offerNote: (store) =>
     `Sim cobra uma vez o cartão que acabou de usar, na conta própria de ${store}. Não, obrigado não cobra nada. Também pode simplesmente sair desta página.`,

@@ -48,6 +48,20 @@ for (const url of ["", "#chart", "/files/chart.png", "files/chart.png", "./chart
 }
 is("the caller must permit the host", outsideUrl("//files.store.example/p.png", []), true);
 
+// WHATWG URL basic parser removes leading/trailing C0 controls and space before parsing a URL.
+part("Leading URL controls cannot turn an external authority into a relative path");
+for (let value = 0; value <= 0x20; value += 1) {
+  const control = String.fromCharCode(value);
+  const external = `${control}//collector.example/p.png${control}`;
+  is(`URL parser sees an external host after C0 ${value}`, new URL(external, "https://apps.store.example/").hostname, "collector.example");
+  is(`outside guard sees the same host after C0 ${value}`, outsideUrl(external, allowed), true);
+  is(`permitted host survives C0 ${value}`, outsideUrl(`${control}//files.store.example/p.png${control}`, allowed), false);
+  is(`relative path survives C0 ${value}`, outsideUrl(`${control}/files/p.png${control}`, allowed), false);
+}
+is("a leading C0 cannot hide a JavaScript scheme", outsideUrl("\u0001javascript:alert(1)", allowed), true);
+is("a leading C0 cannot hide an HTTP scheme", outsideUrl("\u0001https://collector.example/p.png", allowed), true);
+is("a literal C0 in a script URL cannot hide its external load", checkGeneratedCode({ html: "", css: "", js: 'fetch("\u0001//collector.example/p.png")' }, { allowedHosts: allowed }).staticPass, false);
+
 // WHATWG HTML, attribute-name state: a later duplicate is discarded, including case variants.
 // https://html.spec.whatwg.org/multipage/parsing.html#attribute-name-state (read 2026-11-10).
 part("A second attribute never disguises the first destination the browser uses");

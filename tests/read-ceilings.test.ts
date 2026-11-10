@@ -357,14 +357,23 @@ async function main(): Promise<void> {
   is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && STORE_READING_SHAPES.length === 3, true);
   is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst), true);
   {
-    // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
-    // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
-    // and one more heavy reading a day would pass it. Computed as that test computes it.
+    // Inbox C4-33 (1), as decided by Claude 1 in C1-20261110-1455-TODOS-95, item 1 (decision (a)): the room left under
+    // the first payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) is
+    // reserved for the open PRs #3480, #3409, #3502 and #3411, and this check counts that reserve. Their measured
+    // deltas on the Store's refunded first year are +$0.019 (#3480), +$0.0187 (#3409), +$0.007 to +$0.014 (#3502) and
+    // +$0.0018 (#3411): $0.0535 at most together. RESERVED_STORE_ROOM_USD rounds that up to $0.10, nearly twice it,
+    // so a remeasured delta a little dearer still fits without moving this figure. The room left after the reserve
+    // would still hold more heavy readings a day, but HEAVY_READINGS_PER_DAY stays 2: the day's heavy readings are a
+    // limit the creator sees, and changing one is forbidden (same decision). So the figure is held at 2 by name, and
+    // a raise, however small, fails here instead of passing silently. Computed as plan-margin computes it.
+    const RESERVED_STORE_ROOM_USD = 0.1;
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
     const oneMore = 32 * (heavyWorst - lightWorst);
     is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
-    is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
+    is(`and with the room reserved for the open PRs #3480, #3409, #3502 and #3411 on top ($${RESERVED_STORE_ROOM_USD.toFixed(2)}, C1-20261110-1455-TODOS-95)`, year + RESERVED_STORE_ROOM_USD < 65, true);
+    is("the day's heavy readings stay 2: raising them changes a limit the creator sees, which is forbidden (C1-20261110-1455-TODOS-95, item 1)", HEAVY_READINGS_PER_DAY, 2);
+    console.log(`  Store refunded first year: $${year.toFixed(4)} of US$ 65; reserve $${RESERVED_STORE_ROOM_USD.toFixed(2)}; one more heavy reading a day $${oneMore.toFixed(4)}; room after the reserve $${(65 - year - RESERVED_STORE_ROOM_USD).toFixed(4)}`);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

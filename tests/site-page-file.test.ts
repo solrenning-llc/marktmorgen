@@ -87,6 +87,9 @@ async function main(): Promise<void> {
   const changed = { ...file, blocks: [...(file.blocks as PageBlock[]), { id: "zzzzzzzz", kind: "nonsense" }] };
   is("not one of these files, or changed so its blocks would not be kept", [(await post({ action: "import", file: { format: "other", version: 1, blocks: [] } })).data.error, (await post({ action: "import", file: { ...file, version: 2 } })).data.error, (await post({ action: "import", file: changed })).data.error, (await post({ action: "import", file: "text" })).data.error, await count()], ["file", "file", "file", "file", before]);
   is("the reader alone: a good file reads; one whose picture is not a picture of a store is refused whole", [readPageFile(file).ok, readPageFile({ ...file, blocks: [{ ...pictures, items: [{ ...picture, path: "https://elsewhere.example/x.jpg" }] }] }).ok], [true, false]);
+  const longHeading = { ...file, blocks: (file.blocks as PageBlock[]).map((b) => (b.kind === "text" ? { ...b, heading: "x".repeat(5_000) } : b)) };
+  const longBody = { ...file, blocks: (file.blocks as PageBlock[]).map((b) => (b.kind === "text" ? { ...b, body: "y".repeat(100_000) } : b)) };
+  is("a file edited so a block would be kept cut short is refused whole, never kept shortened (review of #3538)", [(await post({ action: "import", file: longHeading })).data.error, readPageFile(longBody).ok, await count()], ["file", false, before]);
   const pipeline = redis.pipeline;
   redis.pipeline = async (commands) => (commands.some((c) => c[0] === "HEXISTS") ? [] : pipeline.call(redis, commands));
   let unread: Awaited<ReturnType<typeof post>>;
@@ -96,6 +99,16 @@ async function main(): Promise<void> {
     redis.pipeline = pipeline;
   }
   is("forms nobody could read never decide a form is not this store's", [unread.status, unread.data.error, await count()], [503, "forms_unread", before]);
+  // No room for the blocks: refused before the page is listed, the list exactly as it was (review of #3538).
+  const listBefore = JSON.stringify((await storeForEmail(OWNER))!.sitePages);
+  redis.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes("marktmorgen:store-data:v1") ? [[0, 999_999_999]] : pipeline.call(redis, commands));
+  let full: Awaited<ReturnType<typeof post>>;
+  try {
+    full = await post({ action: "import", file });
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("no room for the blocks: nothing listed, nothing kept", [full.status, full.data.error, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBefore], [409, "copy_full", true]);
   const now = (await storeForEmail(OWNER))!.sitePages;
   await setSitePages(OWNER, [...now, ...Array.from({ length: MAX_SITE_PAGES - now.length }, (_, n) => ({ id: `f${String(n).padStart(9, "0")}`, slug: `filler-${n}`, title: `Filler ${n}`, nav: false, target: "", from: -1 }))]);
   is("a store with its most pages takes none", [(await post({ action: "import", file })).data.error, await count()], ["too_many", MAX_SITE_PAGES]);

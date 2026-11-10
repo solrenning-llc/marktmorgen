@@ -65,8 +65,28 @@ export function readPageFile(raw: unknown): ReadFile {
   const problem = pageProblem(sent, page);
   if (problem === "too_big") return { ok: false, reason: "too_big" };
   if (problem) return { ok: false, reason: "file" };
+  // pageProblem tells back a block, a picture or a video not kept, but the reader also shortens a heading, a text or a
+  // list it keeps (review of #3538): every field it keeps must be what the file holds, else the file is refused whole.
+  if (!page.blocks.every((block, i) => keptAsSent(block, (value.blocks as unknown[])[i]))) return { ok: false, reason: "file" };
   if (page.blocks.some((block) => !SITE_KINDS.includes(block.kind))) return { ok: false, reason: "kind" };
   return { ok: true, title: siteTitle(value.title), page };
+}
+
+/** Whether every field the reader kept of a block is, value for value, what the file holds for it. */
+function keptAsSent(kept: PageBlock, sent: unknown): boolean {
+  if (!sent || typeof sent !== "object" || Array.isArray(sent)) return false;
+  const raw = sent as Record<string, unknown>;
+  return Object.entries(kept).every(([field, value]) => same(value, raw[field]));
+}
+
+/** The same value, field for field and item for item, whatever the order of an object's keys. */
+function same(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((item, i) => same(item, b[i]));
+  if (a && typeof a === "object") {
+    if (!b || typeof b !== "object" || Array.isArray(b)) return false;
+    return Object.entries(a as Record<string, unknown>).every(([k, v]) => same(v, (b as Record<string, unknown>)[k]));
+  }
+  return a === b;
 }
 
 /** The forms a page's blocks name, to be checked against the store's own. */

@@ -90,6 +90,29 @@ async function main(): Promise<void> {
     redis.pipeline = pipeline;
   }
   is("an original nobody could read is never copied as an empty page, and nothing is added", [unread, (await storeForEmail(OWNER))!.sitePages.length], [[503, "page_unread"], listBefore]);
+  // A store with no room left for the copy's blocks: refused with nothing added, never an empty page left behind.
+  const listBeforeFull = JSON.stringify((await storeForEmail(OWNER))!.sitePages);
+  redis.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes("marktmorgen:store-data:v1") ? [[0, 999_999_999]] : pipeline.call(redis, commands));
+  let fullRoom: [number, string];
+  try {
+    const r = await post({ action: "copy", id: SITE });
+    fullRoom = [r.status, ((await r.json()) as { error?: string }).error ?? ""];
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("no room for the blocks: refused before the page is listed, and the list is exactly as it was", [fullRoom, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBeforeFull], [[409, "copy_full"], true]);
+  // The list refusing after the blocks were written (an address taken since): the blocks are taken back.
+  const keysBefore = [...redis.keys()].filter((k) => k.startsWith(`nl:product:page:${statsId}:site-`)).length;
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:")) ? Promise.reject(new Error("synthetic: the list write fails")) : pipeline.call(redis, commands));
+  let listRefused = 0;
+  try {
+    listRefused = (await post({ action: "copy", id: SITE })).status;
+  } catch {
+    listRefused = -1;
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("the list write failing leaves no page and no blocks behind", [listRefused !== 200, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBeforeFull, [...redis.keys()].filter((k) => k.startsWith(`nl:product:page:${statsId}:site-`)).length], [true, true, keysBefore]);
   const now = (await storeForEmail(OWNER))!.sitePages;
   await setSitePages(OWNER, [...now, ...Array.from({ length: MAX_SITE_PAGES - now.length }, (_, n) => ({ id: `f${String(n).padStart(9, "0")}`, slug: `filler-${n}`, title: `Filler ${n}`, nav: false, target: "", from: -1 }))]);
   const full = await post({ action: "copy", id: SITE });

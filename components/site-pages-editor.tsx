@@ -17,8 +17,8 @@ const MESSAGES: Record<string, string> = {
   forbidden: "Your role on this store does not include its pages.",
   page_unread: "This page could not be read just now, so no copy was made. Try again in a moment.",
   copy_conflict: "Your pages changed while the copy was being made, so none was made. Reload the page and try again.",
-  copy_blocks: "The copy was added to your pages, but its blocks could not be saved. Open it, remove it and try again.",
-  copy_blocks_full: "The copy was added to your pages, but your store has no room left for its blocks. Remove something, then remove the copy and try again.",
+  copy_failed: "The page could not be saved just now. Reload to check your pages before trying again.",
+  copy_full: "Your store has no room left for this page's blocks, so none was added. Remove something you no longer need first.",
   file: "That file is not a page from Marktmorgen, or it was changed so its blocks cannot be kept as they are. Nothing was added.",
   too_big: "That page is bigger than a page may be. Nothing was added.",
   kind: "That file holds a kind of block a store's own page cannot have. Nothing was added.",
@@ -71,13 +71,15 @@ export function SitePagesList({ pages, selected, sid }: { pages: SitePage[]; sel
   async function bring(chosen: File | undefined) {
     if (!chosen) return;
     setError(null);
-    if (chosen.size > MAX_PAGE_FILE_BYTES) return setError(MESSAGES.too_big);
+    // Read only a file that could be a page at all, then measured as the route receives it: compact.
+    if (chosen.size > MAX_PAGE_FILE_BYTES * 4) return setError(MESSAGES.too_big);
     let file: unknown;
     try {
       file = JSON.parse(await chosen.text());
     } catch {
       return setError(MESSAGES.file);
     }
+    if (new TextEncoder().encode(JSON.stringify({ action: "import", file })).length > MAX_PAGE_FILE_BYTES) return setError(MESSAGES.too_big);
     setBusy(true);
     const a = await call({ action: "import", file });
     setBusy(false);
@@ -171,6 +173,7 @@ export const EXPORT_HELP = "Download as a file: this page's title and blocks, as
 
 /** What a file brings, said beside the file box (582 [KB3]). */
 export const IMPORT_HELP = "A page you downloaded from a store here. It comes in hidden from visitors and out of the menu. Pictures, and the products and forms this store does not have, are left out.";
+// The file names the page's products and forms by their ids, never resolved in another store; no buyer, order or address is in it.
 
 /** What is said once a page is downloaded. */
 export function exportDoneWords(pictures: number): string {
@@ -246,7 +249,7 @@ export function SitePageSettings({
     link.href = url;
     link.download = pageFileName(page);
     link.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     toast(exportDoneWords(typeof a.pictures === "number" ? a.pictures : 0));
   }
 

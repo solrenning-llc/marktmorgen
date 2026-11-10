@@ -48,8 +48,8 @@ import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_P
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
-import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES } from "./plan-cost-registry";
-import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
+import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
+import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_PROGRESS_COMMANDS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
 
 /** What an opening of the orders page, a bundle's products and a batch of older purchases keep above what they cost: a tenth (C3-83, 4 November 2026). */
@@ -302,6 +302,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok((ORDERS_OPEN_UNITS - 1) * laterPageCost() < ORDERS_SPARE * ORDERS_OPEN_READ, `${ORDERS_OPEN_UNITS} units, one more than needed`);
   assert.ok(laterPageCost() >= ORDERS_UNIT_COMMANDS * ORDERS_METERED_COMMAND, `${laterPageCost()} < ${ORDERS_UNIT_COMMANDS} x ${ORDERS_METERED_COMMAND}`);
   assert.ok(ORDERS_LISTING_COMMANDS * ORDERS_METERED_COMMAND >= ORDERS_METERED_LISTING, `${ORDERS_LISTING_COMMANDS} x ${ORDERS_METERED_COMMAND} < ${ORDERS_METERED_LISTING}`);
+  // A course's progress on the list (560 [AS1]): its outline and its lessons done, counted above what they cost, and no more than needed.
+  assert.ok(ORDERS_PROGRESS_COMMANDS * ORDERS_METERED_COMMAND >= ORDERS_METERED_PROGRESS, `${ORDERS_PROGRESS_COMMANDS} x ${ORDERS_METERED_COMMAND} < ${ORDERS_METERED_PROGRESS}`);
+  assert.ok((ORDERS_PROGRESS_COMMANDS - 1) * ORDERS_METERED_COMMAND < ORDERS_METERED_PROGRESS, `${ORDERS_PROGRESS_COMMANDS} commands, one more than needed`);
   // A download's lookup of its one purchase is DOWNLOAD_LOOKUP_UNITS public requests, after its grant and before anything else: more than its wait and fixed reads cost.
   assert.ok(DOWNLOAD_LOOKUP_UNITS * laterPageCost() >= DOWNLOAD_LOOKUP_READ, `${DOWNLOAD_LOOKUP_UNITS} x ${laterPageCost()} < ${DOWNLOAD_LOOKUP_READ}`);
   // Showing a bundle's products on that list is ORDERS_BUNDLE_UNITS public requests, after its grant and before anything else: a download's lookup and its answer

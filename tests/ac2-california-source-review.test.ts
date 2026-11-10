@@ -11,6 +11,8 @@ for (const required of [
   "Inteiro teor da SB 122: não lido",
   "Alíquota combinada máxima de 2027: desconhecida",
   "Enquadramento real do Marktmorgen: não confirmado",
+  "jogos digitais de entretenimento",
+  "uso educacional ou de treinamento",
   "Código, perfis e travas: inalterados",
   "US$ 500.000",
   "US$ 5.000.000",

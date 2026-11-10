@@ -3,6 +3,18 @@ import { afterEach, beforeEach, test } from "node:test";
 import { addLink, countLinks, findLink, linkKey, readLinks, removeLink, retarget } from "@/lib/short-links";
 import { GET } from "@/app/l/[code]/route";
 import { store as redis } from "./redis-stub";
+import { UnknownReplyError } from "@/lib/redis-reply";
+
+/** True when `work` did not report a save: it threw, or answered { ok: false }. */
+async function refused(work: () => Promise<unknown>): Promise<boolean> {
+  try {
+    const out = await work();
+    return typeof out === "object" && out !== null && (out as { ok?: unknown }).ok === false;
+  } catch {
+    return true;
+  }
+}
+
 
 const pipeline = redis.pipeline.bind(redis);
 const owner = { sid: "store-evidence", statsId: "stats-evidence" };
@@ -21,15 +33,16 @@ for (const reply of [[], [undefined], [null], [false], [""], [-1], [1.5], [Numbe
 for (const reply of [[], [null], [undefined], [false], [[] , null], [[null]], [[1]], [[""]], [[JSON.stringify(kept), false]]]) test(`HVALS ${JSON.stringify(reply)} cannot become empty or partial inventory`, async () => {
   inject("HVALS", reply); await assert.rejects(readLinks(owner.statsId));
 });
-// A record that is there but that this code cannot read is a fact, not an unknown reply (Claude 5 on #2527): it is left
-// out of the list, exactly as the public link treats it as ended, and the records that can be read stay listed.
-for (const [reply, codes] of [[[["bad-json"]], []], [[[JSON.stringify(kept), "bad-json"]], [kept.code]], [[[JSON.stringify({ ...kept, made: null })]], []]] as const) test(`HVALS ${JSON.stringify(reply)} leaves out only the record it cannot read`, async () => {
-  inject("HVALS", [...reply]); assert.deepEqual((await readLinks(owner.statsId)).map((l) => l.code), codes);
+// A record that is there but that this code cannot read makes the store's list unknown (main since #2892, Claude 5 and
+// Claude 6): the cap and the name check need every kept link, so the list is never shown shorter. The public link
+// still treats such a record as ended (findLink).
+for (const reply of [[["bad-json"]], [[JSON.stringify(kept), "bad-json"]], [[JSON.stringify({ ...kept, made: null })]]]) test(`HVALS ${JSON.stringify(reply)} is an unknown list, never one with a record left out`, async () => {
+  inject("HVALS", [...reply]); await assert.rejects(readLinks(owner.statsId), UnknownReplyError);
 });
 test("an unknown inventory cannot authorize creating a duplicate name", async () => {
   let writes = 0;
   redis.pipeline = async commands => { if (commands[0][0] === "HVALS") return [null]; writes += 1; return pipeline(commands); };
-  await assert.rejects(addLink(owner, { name: "post", place: "other", target: { kind: "store" } }, () => true));
+  assert.equal(await refused(() => addLink(owner, { name: "post", place: "other", target: { kind: "store" } }, () => true)), true);
   assert.equal(writes, 0);
 });
 
@@ -58,7 +71,8 @@ for (const action of ["add", "retarget", "remove"] as const) for (const receipt 
     const work = action === "add" ? () => addLink(owner, { name: "new-post", place: "other", target: { kind: "store" } }, () => true)
       : action === "retarget" ? () => retarget(owner.statsId, kept.code, { kind: "product", id: "guide" }, () => true)
       : () => removeLink(owner.statsId, kept.code);
-    await assert.rejects(work());
+    // Refused (a throw, or main's { ok: false, reason: "unavailable" } with the link taken back), never "saved".
+    assert.equal(await refused(work), true);
   });
 }
 

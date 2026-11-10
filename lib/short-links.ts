@@ -25,7 +25,7 @@
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { CODE, CODE_LETTERS, MAX_LINKS, type ShortLink, linkName, linkPlace, readTarget } from "@/lib/short-link-rules";
 
 export { type LinkTarget, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
@@ -70,7 +70,6 @@ function record(raw: unknown): Kept | null | "unreadable" {
   return parse(raw) ?? "unreadable";
 }
 
-const newestFirst = (list: Kept[]): ShortLink[] => [...list].sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
 
 const confirmedCount = (raw: unknown) => raw === 0 || raw === 1;
 
@@ -84,23 +83,24 @@ export async function countLinks(statsId: string | null): Promise<number> {
   return n;
 }
 
-/** A store's links, the newest first. */
+/**
+ * A store's links, the newest first. HVALS answers an empty list when there
+ * are none, never another shape: a reply missing, of another shape or with a
+ * member that is not a string is unknown and throws UnknownReplyError
+ * (CX-123 rule 24), so neither the cap nor "one link to a name" is decided on
+ * it (addLink). Initial studio rendering is a separate, deferred caller concern.
+ */
 export async function readLinks(statsId: string | null): Promise<ShortLink[]> {
-  if (!statsId) return [];
-  if (!isRedisConfigured()) throw new Error("Short link inventory is unavailable");
-  const raw = await one(["HVALS", storeKey(statsId)]);
-  if (!Array.isArray(raw)) throw new Error("Short link inventory is incomplete");
-  const list: Kept[] = [];
-  const codes = new Set<string>();
-  for (let i = 0; i < raw.length; i += 1) {
-    const kept = record(raw[i]);
-    if (kept === null) throw new Error("Short link inventory is invalid");
-    // A record this code cannot read, another store's or a second one for the same code is left out of the list,
-    // as the public link treats it as ended (Claude 5 on #2527): one old record never takes the list down.
-    if (kept === "unreadable" || kept.statsId !== statsId || codes.has(kept.code)) continue;
-    codes.add(kept.code); list.push(kept);
-  }
-  return newestFirst(list);
+  if (!statsId || !isRedisConfigured()) return [];
+  const raw = stringList(repliesFor(await redisPipeline([["HVALS", storeKey(statsId)]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("a store's short links");
+  const list = raw.map((value) => {
+    const link = parse(value);
+    // A kept member that cannot be read or attributed here cannot be excluded from the cap or name check.
+    if (!link || link.statsId !== statsId) throw new UnknownReplyError("a store's short link");
+    return link;
+  });
+  return list.sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
 }
 
 /** The link a code names, with its store, or null. */
@@ -126,7 +126,12 @@ export async function addLink(
   const target = readTarget(input.target, isProduct);
   if (!target) return { ok: false, reason: "target" };
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
-  const links = await readLinks(store.statsId);
+  // Unknown is never "no links": the cap and the name are not checked on it, so nothing is written (CX-123 rule 30).
+  const links = await readLinks(store.statsId).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+  if (!links) return { ok: false, reason: "unavailable" };
   if (links.length >= MAX_LINKS) return { ok: false, reason: "full" };
   // One link to a name: two would add their results together on one row.
   if (links.some((l) => l.name === name)) return { ok: false, reason: "taken" };
@@ -134,14 +139,24 @@ export async function addLink(
     // randomInt draws each letter evenly; a byte taken modulo 31 would favour the first eight.
     const code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
     const kept: Kept = { code, name, place: linkPlace(input.place), target, made: now, sid: store.sid, statsId: store.statsId };
-    const got = await one(["SET", linkKey(code), JSON.stringify(kept), "NX"]).catch(() => undefined);
-    if (got === null) continue;
-    if (got !== "OK") return { ok: false, reason: "unavailable" };
-    if (!confirmedCount(await one(["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]))) throw new Error("Short link index write is unconfirmed");
-    // Saved: a list that cannot be read again just after is the one read before with this link added, never a
-    // "did not save" that would make the next try answer "taken" (Claude 5 on #2527, P5).
-    const after = await readLinks(store.statsId).catch(() => null);
-    return { ok: true, link: shown(kept), links: after ?? newestFirst([kept, ...links.map((l) => ({ ...l, sid: store.sid, statsId: store.statsId }))]) };
+    const replies = repliesFor(await redisPipeline([["SET", linkKey(code), JSON.stringify(kept), "NX"]]), 1);
+    // SET NX answers "OK" when it wrote and null when the code was taken: any other reply is unknown, and the link is
+    // not added to the store's list on it (CX-123 rule 24).
+    if (replies?.[0] === null) continue;
+    if (replies?.[0] !== "OK") return { ok: false, reason: "unavailable" };
+    // HSET answers how many fields it added: any other reply is unknown, and the link is taken back from both places,
+    // so neither "made" is said nor a working code is left outside the store's list (Claude 6 on #2892, CX-123 rule 24).
+    const listed = countOf(repliesFor(await redisPipeline([["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]]), 1)?.[0]);
+    if (listed === null) {
+      await redisPipeline([["DEL", linkKey(code)], ["HDEL", storeKey(store.statsId), code]]);
+      return { ok: false, reason: "unavailable" };
+    }
+    // The list as it is after, for the panel; when it cannot be read the panel keeps its own and adds this one.
+    const after = await readLinks(store.statsId).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    });
+    return { ok: true, link: shown(kept), links: after ?? [shown(kept), ...links] };
   }
   return { ok: false, reason: "unavailable" };
 }

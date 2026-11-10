@@ -16,6 +16,7 @@ import { GET } from "@/app/l/[code]/route";
 import { addLink, findLink, linkKey, readLinks, removeLink, retarget } from "@/lib/short-links";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 const pipeline = redis.pipeline.bind(redis);
 let sid = "", statsId = "", code = "";
@@ -86,18 +87,18 @@ test("C5 P2: an unreadable entry in this store's list never ends another store's
   assert.deepEqual([redis.run(["GET", linkKey(code)]), redis.run(["HGET", index(), code])], [theirs, null]);
 });
 
-test("C5 P3: with an unreadable sibling, ending another link answers the list", async () => {
+test("C5 P3: with an unreadable sibling, ending another link still ends it; the list after is unknown, never shorter", async () => {
   const other = await make("second");
   redis.run(["HSET", index(), "qqqqqq", broken("qqqqqq")]);
-  const links = await removeLink(statsId, other);
-  assert.deepEqual(links.map((l) => l.code), [code]);
+  // The route answers this as "unread" (503: the change was made, reload), main's answer since #2892.
+  await assert.rejects(removeLink(statsId, other), UnknownReplyError);
   assert.equal(redis.run(["GET", linkKey(other)]), null);
+  assert.equal(redis.run(["HGET", index(), other]), null);
 });
 
-test("C5: the store's list leaves out what it cannot read and keeps the rest", async () => {
+test("C5: a kept link the list cannot read makes the list unknown, never one with it left out (main since #2892)", async () => {
   redis.run(["HSET", index(), "qqqqqq", broken("qqqqqq")]);
-  redis.run(["HSET", index(), "rrrrrr", broken("rrrrrr", "other-stats").replace('"1000"', "1000")]);
-  assert.deepEqual((await readLinks(statsId)).map((l) => l.code), [code]);
+  await assert.rejects(readLinks(statsId), UnknownReplyError);
 });
 
 test("C5: changing an unreadable link's target is refused, nothing written", async () => {

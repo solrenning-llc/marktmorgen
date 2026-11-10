@@ -17,6 +17,8 @@ O calendário é mensal; Visa usa pagamentos do mesmo mês. A data de recebiment
 
 A [FAQ oficial do Stripe](https://support.stripe.com/questions/monitoring-program-faq), lida em 10/11/2026 e também sem data de revisão declarada, diz `exceeds` nos critérios VAMP; a tabela do guia não resolve sozinha igualdade versus ultrapassagem. A FAQ data a redução para 1,5% em 01/04/2026, preservando 2,2% em CEMEA. Descreve exclusões para resolução prévia/Compelling Evidence 3.0 e agregação por descritor/adquirente. Isso não prova quais eventos a conta Standard conectada disponibiliza ao Marktmorgen. Não presumir deduplicação de TC15/TC40, exclusão de reembolso ou acesso a dados completos.
 
+Há outra divergência pendente: a FAQ, na seção sobre cálculo do ECP da Mastercard, indica pelo menos 100 contestações e taxa de 1%; o guia, na seção ECM, apresenta 100–299 e 1,5–2,99% (início em 1,5%). As duas fontes foram relidas em 10/11/2026. A divergência exige conferência nas regras vigentes da própria Mastercard e do enquadramento da conta; não escolhemos uma taxa, não tratamos ECP e ECM como categorias idênticas e nenhum desses números está liberado para o código.
+
 Faltam fontes das próprias bandeiras conferidas integralmente e vigentes, inclusive condições regionais/adquirente e fronteiras exatas. Referências a PDFs e trechos de busca não foram tratados como leitura integral. Não houve contato com Stripe, Visa ou Mastercard.
 
 ## Aplicação futura e custo

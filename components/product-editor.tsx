@@ -712,7 +712,7 @@ function ProductForm({
               ))}
             </select>
             <p id={`product-every-count-help-${id}`} className="mt-1 text-sm text-ink-soft">
-              The page, the checkout and every email say exactly this. Charging every few weeks or months does not go with an
+              Your store&apos;s pages, the checkout and the purchase emails say exactly this. Charging every few weeks or months does not go with an
               introductory price, a yearly price, a set number of payments or plans members switch between.
             </p>
           </div>

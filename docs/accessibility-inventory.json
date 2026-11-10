@@ -1891,6 +1891,7 @@
     "app/api/store/podcast/link/route.ts",
     "app/api/store/podcast/open/route.ts",
     "app/api/store/podcast/play/[token]/[episode]/route.ts",
+    "app/api/store/podcast/public/[handle]/[product]/route.ts",
     "app/api/store/podcast/route.ts",
     "app/api/store/preorder/route.ts",
     "app/api/store/preview/route.ts",

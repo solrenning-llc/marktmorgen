@@ -118,7 +118,19 @@ function list(value, what) {
 
 /** The timeout-minutes of the analyze job of codeql.yml; none readable throws. @param {string} yaml */
 export function codeqlTimeout(yaml) {
-  const minutes = /\n {2}analyze:\n(?: {4}.*\n| {6,}.*\n|\s*\n)*? {4}timeout-minutes: (\d+)\n/.exec(String(yaml))?.[1];
+  // Read line by line (CodeQL js/redos on #3426): the job's lines are indented four spaces or more, or blank; the
+  // first line indented less ends it, so another job's timeout is never taken for analyze's.
+  const lines = String(yaml).split("\n");
+  const start = lines.indexOf("  analyze:");
+  let minutes;
+  for (const line of start < 0 ? [] : lines.slice(start + 1)) {
+    if (/^ {0,3}\S/.test(line)) break;
+    const found = /^ {4}timeout-minutes: (\d+)$/.exec(line);
+    if (found) {
+      minutes = found[1];
+      break;
+    }
+  }
   if (!minutes || Number(minutes) <= 0) throw new Error("unreadable CodeQL analyze timeout-minutes");
   return Number(minutes);
 }

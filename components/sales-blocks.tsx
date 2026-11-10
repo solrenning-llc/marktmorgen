@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Icon } from "@/components/icons";
 import { VideoEmbed } from "@/components/video-embed";
+import { VideoWindow } from "@/components/video-window";
 import { Countdown } from "@/components/countdown";
 import { wordsIn } from "@/lib/buyer-words";
 import { DEFAULT_LANGUAGE, LANGUAGES, type LanguageCode } from "@/lib/store-language";
@@ -321,6 +322,16 @@ function RowElementView({ element, ctx, level }: { element: RowElement; ctx: Blo
           <VideoEmbed video={element.video} title={element.title || ctx.productTitle} poster={null} inert={ctx.preview} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
         </div>
       );
+    case "video-window":
+      // In the studio's preview the button is drawn, never pressed, as the other buttons are: nothing opens, nothing loads.
+      if (ctx.preview) {
+        return (
+          <span className="btn st-btn sp-row-btn">
+            {element.label} <span className="sp-video-window-mark">{blockWords(ctx.lang ?? DEFAULT_LANGUAGE).videoWindowMark}</span>
+          </span>
+        );
+      }
+      return <VideoWindow video={element.video} title={element.title} label={element.label} lang={ctx.lang ?? DEFAULT_LANGUAGE} />;
   }
 }
 

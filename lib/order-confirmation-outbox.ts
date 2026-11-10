@@ -1060,7 +1060,11 @@ export async function enqueueSingleDigitalRenewal(store: Store, capsule: string,
   const paid=await checkSingleDigitalRenewal(store,capsule);
   if(paid.status!=="paid")return {ok:false,reason:paid.status==="not_paid"?"not_paid":"unknown"};
   const pipeline = runtime.pipeline ?? redisPipeline, now = await serverNow(pipeline);
-  if (now === null || Math.abs(now-(runtime.now??Date.now)()) > 60_000) return { ok:false,reason:"unknown" };
+  let localNow: number;
+  try { localNow = (runtime.now ?? Date.now)(); }
+  catch { return { ok:false,reason:"unknown" }; }
+  if (now === null || !Number.isSafeInteger(localNow) || localNow < 0 ||
+      Math.abs(now-localNow) > 60_000 || now > p.admissionsUntil || localNow > p.admissionsUntil) return { ok:false,reason:"unknown" };
   const id = hash(`single-digital-renewal\n${store.statsId}\n${requestNonce}`), person = hash(identity.email), capsuleDigest = hash(capsule);
   const payload: RenewalPayload = { capsule, storeRef:storeRef(store) }, plain = JSON.stringify(payload);
   if (Buffer.byteLength(plain) > p.maxPayloadBytes) return { ok:false,reason:"unknown" };

@@ -253,6 +253,7 @@ def main():
         assert int(db.command("HGET", keys[5], "items")) == before_items - 1
         assert db.command("SISMEMBER", keys[7], held["id"]) == 0
         print("PASS:origin cancellation erases its actual paid-person index and protected row, releases one shared reservation and retains only the400day matching source")
+        print(json.dumps({"proof": "CX121-parent-integration-red", "observed_paid_profiles": {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]}}), flush=True)
         assert {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]} == {"paid": 20, "dispatch": 16, "accepted_unsettled": 19, "settlement_retry": 19, "cancel_paid": 25}
         print(json.dumps({"paid_worker_commands_including_eval_and_redis_call": {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]}, "supplier_invoice": False}))
 
@@ -412,6 +413,31 @@ def main():
         assert db.command("HGET", course_keys[5], "items") == "0"
         print("PASS: course explicit coverage,32CAS rivals,immutable winner,unsupported stages closed,shared cap and original erasure/retention")
 
+        # A network-old ARGV clock cannot extend the paid admission window.
+        # Future and expired controls use real TIME, without sleeping or a provider.
+        for expired in [False, True]:
+            clock = db.command("TIME")
+            executed = int(clock[0]) * 1000 + int(clock[1]) // 1000
+            earlier = executed - 200
+            renewal, renewal_keys = fixture("renewal-cutoff-" + str(expired))
+            renewal.update(originKind="single_digital_renewal", purpose="single-digital-access-renewal",
+                           phase="renewal_queued", capsuleDigest="b" * 64, created=earlier,
+                           authorizedAt=earlier, next=earlier)
+            renewal_keys += ["nl:order-confirmation:renewal:capsule:SYNTHETIC:" + renewal["capsuleDigest"],
+                             "nl:order-confirmation:renewal:store:SYNTHETIC"]
+            renewal_keys[:10] = [k.replace(prefix, prefix + "renewal-cutoff:" + str(expired) + ":") for k in renewal_keys[:10]]
+            made.update(renewal_keys)
+            renewal_policy = dict(policy, admissionsUntil=executed - 100 if expired else executed + 3600000,
+                                  coveredOrigins=["single-digital-confirmation", "single-digital-access-renewal"],
+                                  singleDigitalAccessEvidence="SYNTHETIC ONLY", singleDigitalRenewalEvidence="SYNTHETIC ONLY")
+            answer = db.command("EVAL", shared, 12, *renewal_keys, "enqueue", "", json.dumps(renewal), earlier,
+                                131072, json.dumps(renewal_policy), "")
+            assert answer[0] == ("unknown" if expired else "queued"), "real execution TIME must enforce the cutoff before retention"
+            assert db.command("EXISTS", renewal_keys[0]) == (0 if expired else 1)
+            assert db.command("HGET", renewal_keys[5], "items") == (None if expired else "1")
+            db.command("DEL", *renewal_keys)
+        print("PASS: execution TIME rejects expired renewal admission before row/pool writes; future control retained")
+
         # Selected digital options have their own retention-only scope. Never
         # inherit course/physical/access permissions or enter a polling index.
         option_row, option_keys = fixture("digital-option-retention")
@@ -485,7 +511,7 @@ def main():
 import {build} from 'esbuild';
 import {spawnSync} from 'node:child_process';
 import {testAliases,testEnvironment} from './tests/test-config.mjs';
-for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts','digital-option-retention.test.ts','pending-mail-recovery.test.ts','digital-renewal-admission-native.test.ts','single-digital-access-renewal.test.ts','renewal-isolated-custody.test.ts','renewal-mail-notice.test.ts']) {
+for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts','digital-option-retention.test.ts','pending-mail-recovery.test.ts','digital-renewal-admission-native.test.ts','single-digital-access-renewal.test.ts','renewal-isolated-custody.test.ts','renewal-mail-notice.test.ts','physical-option-checkout.test.ts','physical-option-coverage.test.ts','physical-option-origin.test.ts','physical-option-recovery.test.ts']) {
 await build({entryPoints:['tests/'+file],bundle:true,platform:'node',format:'cjs',outfile:process.argv[1],logLevel:'error',alias:testAliases(file,process.cwd(),process.cwd()+'/tests')});
 const result=spawnSync(process.execPath,[process.argv[1]],{env:testEnvironment(process.env),stdio:'inherit'});
 if(result.status!==0){process.exitCode=result.status ?? 1;break;}

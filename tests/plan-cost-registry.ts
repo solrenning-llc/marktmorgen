@@ -90,6 +90,9 @@ import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
+import { SEARCH_PAGE } from "@/lib/community-search";
+import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
+import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
@@ -210,6 +213,18 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * cleanup/failures/retention must precede first activation; lifecycle is not
  * financial evidence. Never restore never_activated after any use while
  * payloads or uncertain reserves remain. Future tails are unknown/rejected.
+ * CX-121 physical-refusal construction adds two individually expiring
+ * HASH fields (state/date/checkout only;400days) in the existing company
+ * pools. Before enqueue, HLEN+pending reserves finite summary cardinality
+ * (technical10000), separately from pending globalItems/storeItems. No new
+ * key family or public limit. Strict Lua snapshots precede value transfer;
+ * personal copy/erasure and full-pool fulfillment add bounded operations.
+ * Redis7.4.12 isolated EVAL+internal observed maxima: enqueue27, claim16,
+ * dispatch16, refusal32, explicit no-POST16; these are component measurements,
+ * not full lifetime
+ * costs, supplier invoices, reviewed funding or an amendment to ORDER.
+ * Refusal-field copies, failure tails and erasure/trigger costs remain
+ * UNKNOWN/rejected until a complete independent admission precedes IO.
  * The new account-wide Resend budget is also NOT funded by this order
  * coefficient or by a paid provider quota alone. Its permanent schema1
  * ledger, schema2 claims, pending/unknown holds without TTL, exact35-day
@@ -599,6 +614,38 @@ export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 
 export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 
+/**
+ * Review ceilings for a community search and the walk of its archive, paid
+ * for since 4 November 2026 (lib/community-read-rules.ts). What working
+ * through a body costs past what a request's shape holds, a heavy request's
+ * CPU and wait for each megabyte.
+ */
+const searchBodyWork = (bytes: number) => bytes * DB_BYTE + (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
+/** The most a product's listing, and one of a community's messages, posts, events or members, takes in any script. */
+export const SEARCH_LISTING_BYTES = 16_384;
+export const READ_ROOM_MESSAGE_BYTES = 3_200;
+export const READ_DM_MESSAGE_BYTES = 6_500;
+export const READ_POST_BYTES = 16_000;
+/**
+ * One search of a community past its page: the four indexes and their next
+ * page, a page of results and what is drawn beside it (a hundred commands at
+ * the most, with the posts, the products and the people of a page), the
+ * room's last MAX_CHAT_KEPT messages where it is on, and SEARCH_MESSAGES of
+ * each conversation read.
+ */
+export function searchRead(size: { room: boolean; conversations: number }): number {
+  const page = SEARCH_PAGE * (READ_POST_BYTES + SEARCH_LISTING_BYTES + 2_048);
+  return request("heavy", 100, page) + searchBodyWork(page)
+    + (size.room ? COMMAND + searchBodyWork(MAX_CHAT_KEPT * READ_ROOM_MESSAGE_BYTES) : 0)
+    + size.conversations * (COMMAND + searchBodyWork(SEARCH_MESSAGES * READ_DM_MESSAGE_BYTES));
+}
+/** One check of who holds a product or an event: its cached answer read and written, and up to three calls to Stripe waited on at 2 GB. */
+export const ACCESS_CHECK_READ = 4 * COMMAND + 3 * (EXPORT_PAGE_SECONDS * MEMORY_SECOND + searchBodyWork(64_000));
+/** One step of the walk of a community's archive: its commands, the bytes it reads, and its round trip waited on. */
+export function walkRead(commands: number, bytes: number): number {
+  return commands * COMMAND + searchBodyWork(bytes) + 0.05 * MEMORY_SECOND;
+}
+
 /** One host's calendar read: its commands, and the wait for the calendar, held at 2 GB inside the page that asked. */
 export const TEAM_READING = 7 * COMMAND + 1 * MEMORY_SECOND + 0.05 * CPU_SECOND;
 /** Commands a view of a team call's page costs: each host's claims, and one MGET of every host's calendar state and connection plus the round-robin counts (lib/team-booking.ts). */
@@ -944,6 +991,10 @@ export const COST_LINES: CostLine[] = [
     },
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
+      // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
+      { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
+      { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
+      { file: "lib/community-walk.ts", names: ["walkUnits(", "indexedWords(", "INDEXED_WORDS_BYTES"] },
       { file: "lib/traffic.ts", names: ["countRequest", "takePublicRequest", "requestsKey"] },
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
@@ -1357,15 +1408,17 @@ export const NOT_A_COST: Record<string, string> = {
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
   STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
-  DEMO_SESSIONS_PER_DAY: "Sessions the whole site may open in a day, the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.38 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
-  DEMO_COMMANDS_PER_DAY: "Database commands every demo session together may send in a day, reserved at the worst before a session opens: the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.38 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
-  DEMO_SESSIONS_PER_ADDRESS_PER_DAY: "Demo sessions one address or network may open in a day: a pace that only refuses, inside the day's caps of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.38 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
-  DEMO_SESSION_WORST_COMMANDS: "The most commands one demo session can send, reserved whole when it opens: inside the day's commands of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.38 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
-  DEMO_REFUSALS_PER_DAY: "Refused demo requests counted in a day, past which the door answers after one read and writes nothing: priced at their worst in the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.38 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
-  DEMO_REFUSALS_PER_ADDRESS_PER_DAY: "Refused demo requests one address or network may count in a day, each counted for the whole site only inside it, so one address cannot spend the day's DEMO_REFUSALS_PER_DAY: a pace that only refuses, inside the day's counted refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.38 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
-  DEMO_REFUSAL_WORST_COMMANDS: "The commands one refused demo request sends at the most, priced with the refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.38 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_SESSIONS_PER_DAY: "Sessions the whole site may open in a day, the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_COMMANDS_PER_DAY: "Database commands the demo's accepted openings and actions together may send in a day (refusals are priced apart, DEMO_REFUSALS_PER_DAY), reserved at the worst before a session opens: the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_SESSIONS_PER_ADDRESS_PER_DAY: "Demo sessions one address or network may open in a day: a pace that only refuses, inside the day's caps of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_SESSION_WORST_COMMANDS: "The most commands one demo session can send, reserved whole when it opens: inside the day's commands of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_REFUSALS_PER_DAY: "Refused demo requests counted in a day, past which the door answers after its reads (one, or two for a made-up cookie) and writes nothing: priced at their worst in the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_REFUSALS_PER_ADDRESS_PER_DAY: "Refused demo requests one address or network may count in a day, each counted for the whole site only inside it, so one address cannot spend the day's DEMO_REFUSALS_PER_DAY: a pace that only refuses, inside the day's counted refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_REFUSALS_PER_SESSION: "Refused actions one live demo session may count in its own record, whoever shares its address, past which its next actions are answered after one read and write nothing: priced with each day's openings in the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  DEMO_REFUSAL_WORST_COMMANDS: "The commands one refused demo request sends at the most, priced with the refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   LOST_DISPUTE_PAGES: "Pages of Stripe's closing events (GET /events, up to 100 each) read per store per run by each of the three five-minute jobs that take things back after a lost dispute (lib/refunds.ts, lostDisputesSince; lib/licence-keys.ts, lib/call-meetings.ts, lib/review-proof.ts), so at most 3 x LOST_DISPUTE_PAGES calls a store every five minutes, inside each run's deadline and with no other call per dispute: a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call. Each lost dispute read becomes one row, handled once (its event id kept as read), with the store commands a refund row of the same job takes (SISMEMBER, SADD and EXPIRE of the read set, and the closing write: the key revoked, the meeting ended, the review marked), at most 100 x LOST_DISPUTE_PAGES rows a job a run, inside the same schedule and deadline as the refund rows. When there are more than a run may read, the job keeps its place in one key (GET at the start, then, once every row read is handled, one SMISMEMBER of the read set and SET or DEL: 3 commands a run, lib/refunds.ts, lostCursorKey and confirmLostRead; a run that could not handle every row writes nothing) and the next run reads on from there.",
   GIVEN_UP_LINES_PER_DAY: "A cap on the lines passed-over Stripe events leave for each endpoint of a store a day, at most MAX_ENDPOINTS endpoints a store a day, past which one summary line an endpoint counts the rest (lib/webhooks.ts, markGivenUp): no endpoint is called and no delivery taken; what the lines keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:evt:), and the job that writes them is the five-minute schedule's (a company fixed cost).",
+  SKIPPED_LINES_PER_DAY: "A cap on the lines a store's log gets in a UTC day for messages not kept (too large to keep, or made with the month's webhook deliveries used), each reason on its own, past which one summary line an endpoint counts the rest (lib/webhooks.ts, skippedLines): no endpoint is called and no delivery taken; what the lines and the day's counts keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:wait:).",
   DISPUTE_LOOKUPS_PER_STORE: "The same job's separate budget of calls per store per run to tell whose a disputed payment is (lib/webhooks.ts, paymentMeta): inside the same schedule, the same ten as before, each call of a membership's lookup counted.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   QUIET_PER_HOUR: "Sale notifications to the creator's phone: one per counted order at most, inside the order's compute.",

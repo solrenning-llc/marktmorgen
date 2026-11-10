@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { enqueueShipmentMail, shipmentMailOf } from "@/lib/shipment-mail-outbox";
+import { enqueueShipmentMail, shipmentMailOf, SHIPMENT_MAIL_REFUSED_SCRIPT } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf, runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 import { createCheckout } from "@/lib/store-checkout";
 import { shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
@@ -9,6 +9,14 @@ import { physicalPaidFixture } from "./order-confirmation-paid-fixture";
 import { store as redis } from "./redis-stub";
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 const reads = new Set(["TYPE", "SCARD", "SMEMBERS", "GET", "GETRANGE"]);
+const onlyReads = (command: (string | number)[]) => reads.has(String(command[0])) ||
+  (command[0] === "EVAL" && command[1] === SHIPMENT_MAIL_REFUSED_SCRIPT && command[2] === 1 && command[4] === "list");
+test("shipping copy permits only its bounded read-only Lua mode", () => {
+  assert.equal(onlyReads(["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 1, "synthetic-pool", "list", "", ""]), true);
+  assert.equal(onlyReads(["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 1, "synthetic-pool", "erase", "", ""]), false);
+  assert.equal(onlyReads(["EVAL", "another Lua script", 1, "synthetic-pool", "list", "", ""]), false);
+  assert.equal(onlyReads(["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 2, "synthetic-pool", "list", "", ""]), false);
+});
 
 test("never-activated copies read nothing, even with an unavailable storage adapter", async () => {
   const runtime = { pipeline: async () => { throw Error("must not read"); } };
@@ -31,7 +39,7 @@ test("shipping copy decrypts only the scoped person's original message, retired 
   }
   assert.deepEqual(await shipmentMailOf(input.statsId, "other@example.test", runtime), []);
   assert.deepEqual(await shipmentMailOf("other_store", input.message.to, runtime), []);
-  assert.ok(world.commands.every(c => reads.has(String(c[0]))));
+  assert.ok(world.commands.every(onlyReads));
   const index = `nl:ship:mail:person:${input.statsId}:${hash(input.message.to)}`;
   const ids = redis.run(["SMEMBERS", index]) as string[];
   redis.run(["SADD", `nl:ship:mail:person:other_store:${hash(input.message.to)}`, ids[0]]);
@@ -79,5 +87,5 @@ test("four genuine pending shipping messages stay inside the personal copy's sup
   const rows = await shipmentMailOf("copy_four", "buyer@example.test", { ...runtime, lifecycle: "retired" });
   assert.equal(rows.length, 4);
   assert.deepEqual(new Set(rows.map(r => (r as {subject: string}).subject)), new Set(["Parcel 0", "Parcel 1", "Parcel 2", "Parcel 3"]));
-  assert.ok(world.commands.every(c => reads.has(String(c[0]))));
+  assert.ok(world.commands.every(onlyReads));
 });

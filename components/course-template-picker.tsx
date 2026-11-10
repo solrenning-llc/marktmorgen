@@ -43,7 +43,14 @@ export function CourseTemplatePicker({
         Pick one to see what it adds. Nothing is saved until you say so, and you can change every title and day afterward.
       </p>
 
-      <fieldset className="mt-4 min-w-0">
+      <fieldset
+        className="mt-4 min-w-0"
+        aria-disabled={busy || undefined}
+        onClickCapture={(event) => { if (busy) event.preventDefault(); }}
+        onKeyDown={(event) => {
+          if (busy && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", " "].includes(event.key)) event.preventDefault();
+        }}
+      >
         <legend className="field-label">Pick a structure</legend>
         <div className="mt-2 grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
           {COURSE_TEMPLATES.map((template) => (
@@ -56,7 +63,7 @@ export function CourseTemplatePicker({
                 name="course-template"
                 value={template.id}
                 checked={chosen?.id === template.id}
-                onChange={() => setChosen(template)}
+                onChange={() => { if (!busy) setChosen(template); }}
                 className="mt-1 h-4 w-4 shrink-0"
               />
               <span className="min-w-0">
@@ -105,7 +112,7 @@ export function CourseTemplatePicker({
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            disabled={busy}
+            aria-disabled={busy || undefined}
             aria-busy={busy}
             onClick={async () => {
               if (busy) return;
@@ -117,7 +124,7 @@ export function CourseTemplatePicker({
           </button>
         ) : null}
         {/* "Start from scratch" picked: its own button does what it says; otherwise the way out of the structures is "Keep an empty course". */}
-        <button type="button" className={`btn btn-sm ${scratch ? "btn-primary" : "btn-ghost"}`} disabled={busy} onClick={onSkip}>
+        <button type="button" className={`btn btn-sm ${scratch ? "btn-primary" : "btn-ghost"}`} aria-disabled={busy || undefined} onClick={() => { if (!busy) onSkip(); }}>
           {scratch ? "Start from scratch" : "Keep an empty course"}
         </button>
       </div>

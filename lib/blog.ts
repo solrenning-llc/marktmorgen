@@ -1,4 +1,5 @@
 import {EVERGREEN_GUIDES,DIGITAL_FILE_GUIDE_EXTRA,DIGITAL_FILE_GUIDE_FAQ} from "@/lib/evergreen-guides";
+import { COMMUNITY_PLATFORM_GUIDE } from "@/lib/community-platform-guide";
 /**
  * The whole blog lives here: categories, posts and the blocks each post is
  * built from. Nothing is fetched at run time, so a post page is a static file.
@@ -48,6 +49,7 @@ export const BLOG_CATEGORIES = [
 ] as const;
 
 const BASE_BLOG_POSTS: BlogPost[] = [
+COMMUNITY_PLATFORM_GUIDE,
 ...EVERGREEN_GUIDES,
 {
   "slug": "how-much-kajabi-costs-in-2026",

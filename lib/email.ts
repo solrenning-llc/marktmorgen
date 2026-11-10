@@ -656,6 +656,10 @@ async function dispatchBatch(
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
       if (result.uncertain === true) return "retry";
+      // No dispatch authorization means no provider POST for that message,
+      // not a terminal recipient refusal or a completed batch. A partial
+      // accepted prefix keeps its existing markers and must never fall back.
+      if (result.notPosted === true) return result.taken.length > 0 ? "retry" : "refused";
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {

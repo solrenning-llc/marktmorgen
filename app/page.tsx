@@ -102,7 +102,7 @@ export default function Home() {
     <div className={`${MORNING_FONTS} hm`}>
       <MorningHeader />
 
-      <main id="content" data-static-reading data-home-page className="hm-body">
+      <main id="content" tabIndex={-1} data-static-reading data-home-page className="hm-body">
         <section aria-labelledby="home-hero-heading" className="hm-hero" data-home-hero>
           <div aria-hidden="true" className="hm-sky-layer">
             <div className="hm-blob hm-sun-glow" />

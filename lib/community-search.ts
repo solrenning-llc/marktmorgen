@@ -153,6 +153,89 @@ export function indexBytes(parts: string[]): number {
   return distinct(parts).length * INDEX_WORD_BYTES;
 }
 
+/**
+ * A reply that counts something, or null: an absent, negative or odd reply is
+ * never read as none (Codex I, #2316), so nothing is ever paid for as if it
+ * held nothing.
+ */
+export function countOf(raw: unknown): number | null {
+  if (typeof raw === "number") return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+  if (typeof raw === "string" && /^\d{1,15}$/.test(raw)) return Number(raw);
+  return null;
+}
+
+/**
+ * As many of a thing's own words as one read of them takes (indexedWords):
+ * every word index writes it under (MAX_INDEXED_WORDS) and as many more
+ * again, for a set writes at the same moment left holding more than one
+ * version's words. The read asks for one more than this, so a set holding
+ * more is seen to, never read whole.
+ */
+export const INDEXED_WORDS_READ = 2 * MAX_INDEXED_WORDS;
+/**
+ * What one read of a thing's own words costs at the most, in bytes: the
+ * words it asks for (INDEXED_WORDS_READ, and one more), each at its longest
+ * with its quotes and comma. Bounded by the read itself (SRANDMEMBER with a
+ * count), however many writes ran at once (Codex I2, #2316).
+ */
+export const INDEXED_WORDS_BYTES = (INDEXED_WORDS_READ + 1) * (MAX_WORD + 4);
+
+/**
+ * The words each of these things is found by now, one read each, of
+ * INDEXED_WORDS_READ words and one more at the most (SRANDMEMBER with a
+ * count), so no reply is ever larger than INDEXED_WORDS_BYTES, however many
+ * writes ran at once (Codex I2, #2316). A thing holding more than
+ * INDEXED_WORDS_READ is answered as "over": not read whole, so not to be
+ * rewritten from it. Null when any reply is not a list of words: an odd or
+ * partial reply is never read as none (Codex I, #2316). For the walk of a
+ * community's archive (lib/community-walk.ts), which pays for this read and
+ * then for the writes counted from it before it sends them.
+ */
+export async function indexedWords(id: string, kind: SearchKind, things: string[]): Promise<(string[] | "over")[] | null> {
+  if (!things.length) return [];
+  try {
+    const raw = await redisPipeline(things.map((thing) => ["SRANDMEMBER", indexKey(id, kind, thing), INDEXED_WORDS_READ + 1]));
+    if (!Array.isArray(raw) || raw.length !== things.length) return null;
+    const out: (string[] | "over")[] = [];
+    for (const reply of raw) {
+      if (!Array.isArray(reply) || !reply.every((word) => typeof word === "string")) return null;
+      out.push(reply.length > INDEXED_WORDS_READ ? "over" : (reply as string[]));
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The commands that make a thing findable by `parts`, from the words it is
+ * found by now (`before`): only the difference, or, when nothing changed,
+ * its place rewritten under every word, as the score can move on its own (an
+ * event put back an hour, a lesson dragged up its module). None when there is
+ * nothing to write. Counted from `before` alone, so a caller that read it
+ * pays for exactly what it then sends, whatever is written meanwhile.
+ */
+export function indexWrites(id: string, kind: SearchKind, thing: string, score: number, parts: string[], before: string[]): (string | number)[][] {
+  const next = distinct(parts);
+  const had = new Set(before);
+  const after = new Set(next);
+  const added = next.filter((word) => !had.has(word));
+  const gone = [...had].filter((word) => !after.has(word));
+  const rescore = added.length === 0 && gone.length === 0 ? [...after] : [];
+  return [
+    ...added.map((word) => ["ZADD", wordKey(id, kind, word), score, thing]),
+    ...rescore.map((word) => ["ZADD", wordKey(id, kind, word), score, thing]),
+    ...gone.map((word) => ["ZREM", wordKey(id, kind, word), thing]),
+    ...(added.length ? [["SADD", indexKey(id, kind, thing), ...added]] : []),
+    ...(gone.length ? [["SREM", indexKey(id, kind, thing), ...gone]] : []),
+  ];
+}
+
+/** The commands that take a thing out of the index entirely, from the words it is found by now. */
+export function unindexWrites(id: string, kind: SearchKind, thing: string, before: string[]): (string | number)[][] {
+  return [...before.map((word) => ["ZREM", wordKey(id, kind, word), thing]), ["DEL", indexKey(id, kind, thing)]];
+}
+
 /** The distinct words a post is found by, capped, in the order they appear. */
 function distinct(parts: string[]): string[] {
   const seen = new Set<string>();
@@ -178,34 +261,15 @@ export async function index(
   score: number,
   parts: string[],
 ): Promise<void> {
-  const next = distinct(parts);
   const [raw] = await redisPipeline([["SMEMBERS", indexKey(id, kind, thing)]]);
-  const before = new Set(Array.isArray(raw) ? raw.map(String) : []);
-  const after = new Set(next);
-  const added = next.filter((word) => !before.has(word));
-  const gone = [...before].filter((word) => !after.has(word));
-  // The score can move on its own — an event put back an hour, a lesson
-  // dragged up its module — so a thing whose words are unchanged still has to
-  // have its place rewritten.
-  const rescore = added.length === 0 && gone.length === 0 ? [...after] : [];
-  if (!added.length && !gone.length && !rescore.length) return;
-  await redisPipeline([
-    ...added.map((word) => ["ZADD", wordKey(id, kind, word), score, thing]),
-    ...rescore.map((word) => ["ZADD", wordKey(id, kind, word), score, thing]),
-    ...gone.map((word) => ["ZREM", wordKey(id, kind, word), thing]),
-    ...(added.length ? [["SADD", indexKey(id, kind, thing), ...added]] : []),
-    ...(gone.length ? [["SREM", indexKey(id, kind, thing), ...gone]] : []),
-  ]);
+  const writes = indexWrites(id, kind, thing, score, parts, Array.isArray(raw) ? raw.map(String) : []);
+  if (writes.length) await redisPipeline(writes);
 }
 
 /** Takes something that is gone out of the index entirely. */
 export async function unindex(id: string, kind: SearchKind, thing: string): Promise<void> {
   const [raw] = await redisPipeline([["SMEMBERS", indexKey(id, kind, thing)]]);
-  const held = Array.isArray(raw) ? raw.map(String) : [];
-  await redisPipeline([
-    ...held.map((word) => ["ZREM", wordKey(id, kind, word), thing]),
-    ["DEL", indexKey(id, kind, thing)],
-  ]);
+  await redisPipeline(unindexWrites(id, kind, thing, Array.isArray(raw) ? raw.map(String) : []));
 }
 
 /**

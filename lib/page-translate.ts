@@ -84,6 +84,9 @@ function rowElementWords(element: RowElement, one: <T>(value: T) => T): RowEleme
     }
     case "video":
       return { ...element, title: one(element.title) };
+    case "video-window":
+      // The button is read before the window it opens.
+      return { ...element, label: one(element.label), title: one(element.title) };
   }
 }
 

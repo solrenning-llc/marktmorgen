@@ -834,7 +834,8 @@ export default function PrivacyPage() {
           in as their name in the room, where the others in it see it. A
           replay is a YouTube, Vimeo or Loom video that loads from that
           service only when a member presses play, and so does a video on a
-          creator&apos;s sales page, when a visitor presses play.
+          creator&apos;s sales page, when a visitor presses play or the button
+          that opens it in a window, where it then starts playing.
         </p>
         <p id="imports">
           <strong className="text-black">
@@ -2130,7 +2131,7 @@ export default function PrivacyPage() {
           <p>
             What is deleted: your place on the store&apos;s list and every link
             in its emails to you; what its team noted about you (its fields,
-            notes and deals); your form answers with their quiz results and
+            notes, deals and tasks); your form answers with their quiz results and
             scores, inbox conversations, reviews
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;

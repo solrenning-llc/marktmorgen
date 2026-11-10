@@ -67,27 +67,26 @@ export function MarkShipped({
         <p className="mt-0.5 text-ink-soft">The address is on this payment in your Stripe dashboard.</p>
       )}
       {done ? (
-        <p className="mt-2 font-semibold text-ink" role="status">
-          {`Marked as shipped on ${day(done.at)}.`}
-          {!mail || mail.state === "not_recorded" ? (
-            <span className="mt-1 block font-normal">The email&apos;s acceptance was not recorded. No automatic resend is scheduled.</span>
+        <div className="mt-2">
+          <p className="font-semibold text-ink" role="status">{`Marked as shipped on ${day(done.at)}.`}</p>
+          {!mail ? (
+            <p className="mt-1">The email&apos;s status has not been confirmed here.</p>
+          ) : mail.state === "not_recorded" ? (
+            <p className="mt-1">The email&apos;s acceptance was not recorded. No automatic resend is scheduled.</p>
           ) : null}
           {mail && mail.state !== "accepted" && mail.state !== "not_recorded" ? (
-            <span className="mt-1 block font-normal">
+            <p className="mt-1">
               {mail.state === "acceptance_unknown" ? "The email's acceptance is unknown. It will not be sent again automatically."
-                : mail.state === "refused" ? "The email service refused this message. It has been kept; no new send is confirmed."
+                : mail.state === "refused" ? "The email service refused this message. No new send is confirmed."
                 : mail.state === "on_hold" ? "The email is saved. Automatic sending is on hold while its sending budget is checked."
                 : "The email is saved and waiting. Sending is not confirmed yet."}
               {mail.delayed ? " It has been waiting for more than 72 hours." : ""}
-            </span>
+            </p>
           ) : null}
           {done.tracking ? (
-            <>
-              {" "}
-              <a href={done.tracking} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">Tracking<NewTab /></a>
-            </>
+            <p className="mt-1"><a href={done.tracking} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">Tracking<NewTab /></a></p>
           ) : null}
-        </p>
+        </div>
       ) : (
         <form
           className="mt-2 flex flex-wrap items-end gap-2"
@@ -108,7 +107,7 @@ export function MarkShipped({
               const confirmed = readShipmentConfirmation(data, response.ok);
               if (confirmed) {
                 setDone(confirmed.shipped);
-                setMail(confirmed.mail ?? { state: "not_recorded", delayed: false });
+                setMail(confirmed.mail ?? null);
                 toast(confirmed.emailed ? "Marked as shipped. The email was accepted for sending." : confirmed.mail?.state === "queued" ? "Marked as shipped. The email is saved and waiting." : "Marked as shipped. No new email was confirmed.");
                 return;
               }

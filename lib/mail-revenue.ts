@@ -103,21 +103,32 @@ export async function readMailRevenue(store: Store): Promise<MailRevenue | null>
  * readMailRevenue, asking `beforeStripe` first when it is not kept and the
  * sales are about to be read, so a reading that pays for its size
  * (lib/mcp-tools.ts, emailsTool) takes it then: "refused" when it says no,
- * with nothing read. Never throws otherwise.
+ * with nothing read. Never throws otherwise. `sized` hears the bytes the kept
+ * copy was read at, or, when it was made again, the bytes of the copy kept,
+ * so that reading settles at them.
  */
-export async function readMailRevenuePaid(store: Store, beforeStripe: (() => Promise<boolean>) | null): Promise<MailRevenue | null | "refused"> {
+export async function readMailRevenuePaid(
+  store: Store,
+  beforeStripe: (() => Promise<boolean>) | null,
+  sized?: (bytes: { read: number } | { kept: number }) => void,
+): Promise<MailRevenue | null | "refused"> {
   if (!store.stripeAccountId || !store.statsId) return null;
   try {
     if (isRedisConfigured()) {
       const [cached] = await redisPipeline([["GET", cacheKey(store.statsId)]]);
-      if (typeof cached === "string") return JSON.parse(cached) as MailRevenue;
+      if (typeof cached === "string") {
+        sized?.({ read: Buffer.byteLength(cached) });
+        return JSON.parse(cached) as MailRevenue;
+      }
     }
     if (beforeStripe && !(await beforeStripe())) return "refused";
     const since = Math.floor(Date.now() / 1000) - STATS_DAYS * 86400;
     const { sales, partial } = await readPaidSales(store, since, PAGES);
     const out: MailRevenue = { by: moneyByCampaign(sales, store.currency), partial };
+    const text = JSON.stringify(out);
+    sized?.({ kept: Buffer.byteLength(text) });
     if (isRedisConfigured()) {
-      await redisPipeline([["SET", cacheKey(store.statsId), JSON.stringify(out), "EX", CACHE_SECONDS]]).catch(() => {});
+      await redisPipeline([["SET", cacheKey(store.statsId), text, "EX", CACHE_SECONDS]]).catch(() => {});
     }
     return out;
   } catch (error) {

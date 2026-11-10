@@ -578,8 +578,9 @@ async function main(): Promise<void> {
   const gate = page.indexOf("const admission = await admitAffiliatePage(store, affiliate);");
   is("the page asks before it reads listings or codes, never works the book out itself, and says when its figures are from", [gate > 0, gate < page.indexOf("await readListings("), gate < page.indexOf("await codeOwners("), page.includes("await readBook("), page.includes("a.figuresAsOf(asOf)"), page.includes("a.figuresSoon")], [true, true, true, false, true, true]);
 
-  part("Only the affiliate book is counted outside a connection's share");
-  is("a closed list: the one refresh done for everybody", sharedCallers(sourcesUnder("lib", "app")), ["lib/affiliate-page-admission.ts"]);
+  part("Only the affiliate book and the community archive's walk are counted outside a connection's share");
+  // The walk of a community's archive is done once for everybody who searches it (C3-83 (d), app/[handle]/community/search/page.tsx).
+  is("a closed list: the work done for everybody", sharedCallers(sourcesUnder("lib", "app")).sort(), ["app/[handle]/community/search/page.tsx", "lib/affiliate-page-admission.ts"]);
   const tricks = [
     { file: "multi-line.ts", text: "await takePublicRequest(\n  store,\n  \"buyer\",\n  now,\n  units,\n  { shared: true },\n);" },
     { file: "variable.ts", text: "const shared = true;\nawait takePublicRequest(store, \"buyer\", now, units, { shared });" },

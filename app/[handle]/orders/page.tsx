@@ -195,13 +195,16 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   const NOTICES = words.notices;
   const notice = token && !admitted ? NOTICES.busy : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
 
+  // An unchecked older purchase may be the one that gives a role. Keep the
+  // entry available; the Discord callback still checks what this buyer holds
+  // before granting any role (lib/discord-access.ts).
   const opensDiscord = Boolean(
-    discordProducts &&
-      purchases?.some(
+    discordProducts?.size &&
+      (older.cursor || purchases?.some(
         (p) =>
           !p.ended &&
           [p.productId, ...p.added.map((a) => a.id), ...(p.items?.ids ?? [])].some((id) => discordProducts!.has(id)),
-      ),
+      )),
   );
   const dw = discordWords(store.language);
 
@@ -477,7 +480,7 @@ async function OlderView({ store, token, asked }: { store: Store; token: string;
       <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{words.olderTitle}</h1>
       {answer.ok ? (
         <OrdersSharedProvider value={ordersShared(store, token)}>
-          <p className="st-muted mt-4 leading-relaxed">{answer.value.said}</p>
+          <p className="st-muted mt-4 leading-relaxed">{words.olderBatchShown(answer.value.cards.length)}</p>
           {answer.value.cards.length ? (
             <ul className="mt-7 space-y-4">
               {answer.value.cards.map((card) => (

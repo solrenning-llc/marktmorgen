@@ -182,3 +182,33 @@ test("rule 24: an unknown or malformed record, state or clock never allows the p
   const extra = parseApplication(JSON.stringify({ ...ok, note: "keep me" }));
   assert.deepEqual(extra, ok);
 });
+
+test("rule 24: a field named twice through an escape is unknown, never the last value (Codex C2 on #3526)", () => {
+  const ok = approved();
+  const good = JSON.stringify(ok);
+  const other = approved(7, tokenB);
+  // Each name spelled once plainly and once with a \u escape decodes to the same field: JSON.parse keeps the last.
+  const twice = (field: "state" | "tokenDigest" | "applicant" | "offer", first: string, last: string) =>
+    good.replace(`"${field}":${JSON.stringify((ok as Record<string, unknown>)[field])}`,
+      `"${field}":${JSON.stringify(first)},"\\u${field.charCodeAt(0).toString(16).padStart(4, "0")}${field.slice(1)}":${JSON.stringify(last)}`);
+  const vectors = [
+    twice("state", "declined", "approved"),
+    twice("tokenDigest", other.tokenDigest, ok.tokenDigest),
+    twice("applicant", applicantDigest("someone-else@example.invalid") as string, ok.applicant),
+    twice("offer", "prod_other", ok.offer),
+  ];
+  for (const raw of vectors) {
+    assert.notEqual(raw, good, "the vector changed the record");
+    assert.equal(JSON.parse(raw).state, "approved", "JSON.parse alone would read it as approved");
+    const parsed = parseApplication(raw);
+    assert.equal(parsed, null, raw.slice(0, 120));
+    assert.deepEqual(canPurchase(parsed, { token: tokenA, email, offer, now: now + DAY }), { ok: false, why: "unknown" });
+    assert.deepEqual(purchaseWith(parsed, { token: tokenA, email, offer, now: now + DAY }), { ok: false, why: "unknown" });
+  }
+  // A single escaped name, or an escape in a value, is not a record this file writes either: unknown.
+  assert.equal(parseApplication(good.replace('"state"', '"\\u0073tate"')), null);
+  assert.equal(parseApplication(good.replace('"approved"', '"\\u0061pproved"')), null);
+  // The record as written still reads, and an explicit duplicate stays unknown.
+  assert.deepEqual(parseApplication(good), ok);
+  assert.equal(parseApplication(good.replace('"state":"approved"', '"state":"approved","state":"approved"')), null);
+});

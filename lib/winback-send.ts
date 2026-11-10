@@ -26,6 +26,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
+import { readStripePage } from "@/lib/stripe-list";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -97,6 +98,11 @@ type Ended = {
 
 /** Pages of a customer's memberships read before "has not come back" is left unknown. */
 const CAME_BACK_PAGES = 5;
+/**
+ * Pages of memberships read for one offer, across every customer of the address (audit R43): past them, "has not
+ * come back" is left unknown and nothing is sent. The customers of one address are read on one page of a hundred.
+ */
+const CAME_BACK_OFFER_PAGES = 10;
 
 /**
  * Whether this address has a live membership to this product on the creator's account now: true, false, or null
@@ -104,9 +110,11 @@ const CAME_BACK_PAGES = 5;
  * list. A page that is not one, a membership without an id to go on from, or more pages than are read is unknown,
  * never "has not come back", so no offer goes to somebody who may already be back.
  */
-async function cameBack(account: string, customer: string, product: string): Promise<boolean | null> {
+async function cameBack(account: string, customer: string, product: string, budget: { pages: number }): Promise<boolean | null> {
   let after = "";
   for (let page = 0; page < CAME_BACK_PAGES; page += 1) {
+    if (budget.pages <= 0) return null;
+    budget.pages -= 1;
     const listed = await onAccount("GET", account, `/subscriptions?customer=${customer}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
     const subs: unknown = listed.data;
     if (!Array.isArray(subs) || (listed.has_more !== true && listed.has_more !== false)) return null;
@@ -126,12 +134,43 @@ async function cameBack(account: string, customer: string, product: string): Pro
   return null;
 }
 
+/**
+ * Whether this address is back on this product under any of its customers on the creator's account: true, false, or
+ * null when it cannot be said (audit R43; CX-123 rule 24). Each store checkout makes a new customer, so the one whose
+ * membership ended is read first, then every other customer listed under the address as Stripe holds it and in small
+ * letters (Stripe's email filter matches the text exactly). A customer list that is not one, read in part, with a row
+ * that cannot be read, or not read at all (a provider error), and more memberships than CAME_BACK_OFFER_PAGES, are
+ * unknown, never "has not come back".
+ */
+async function cameBackUnder(account: string, customer: string, email: string, product: string): Promise<boolean | null> {
+  const budget = { pages: CAME_BACK_OFFER_PAGES };
+  const own = await cameBack(account, customer, product, budget);
+  if (own !== false) return own;
+  try {
+    const others: string[] = [];
+    for (const address of new Set([email, normaliseEmail(email)])) {
+      const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+      if (page.hasMore || page.unreadable > 0) return null;
+      for (const row of page.rows) if (row.id !== customer && !others.includes(row.id)) others.push(row.id);
+    }
+    for (const other of others) {
+      const back = await cameBack(account, other, product, budget);
+      if (back !== false) return back;
+    }
+    return false;
+  } catch (error) {
+    console.error("reading whether a member came back failed", error);
+    return null;
+  }
+}
+
 /** Pages of a window's ended memberships read in one run (a hundred each). */
 const EVENT_PAGES = 10;
 /**
- * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to
- * CAME_BACK_PAGES pages of their memberships and an email. The window is read whole to decide, but no more than
- * this is spent on it in one run, as when only its first page was read; the rest wait for the next run.
+ * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to two
+ * pages of the address's customers, up to CAME_BACK_OFFER_PAGES pages of their memberships and an email. The window
+ * is read whole to decide, but no more than this is spent on it in one run, as when only its first page was read;
+ * the rest wait for the next run.
  */
 const OFFERS_PER_RUN = 100;
 
@@ -191,7 +230,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const found = await onAccount("GET", account, `/customers/${customer}`);
       const email = typeof found.email === "string" && EMAIL_PATTERN.test(found.email) ? normaliseEmail(found.email) : "";
       if (!email || found.deleted === true) continue;
-      const back = await cameBack(account, customer, product.id);
+      const back = await cameBackUnder(account, customer, found.email as string, product.id);
       if (back === null) {
         // Not known whether they came back: nothing is sent, and the mark (ours) is let go for a whole reading next run.
         await releaseMark(sentKey(account, subId), claim);

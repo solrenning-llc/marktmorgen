@@ -71,7 +71,7 @@ async function world(handle: string): Promise<World> {
   assert.ok((await setProductCourse(owner, productId, { id: course.id, lessons: 1 })).ok);
   const store = (await storeForEmail(owner))!;
   await saveCourse(course, store);
-  await recordEnrollment(store, BUYER, productId, Math.floor(Date.now() / 1000) - 60);
+  await recordEnrollment(store, BUYER, productId, Math.floor(Date.now() / 1000) - 60, "stripe");
   const token = await mintPass(store, BUYER, "all");
   return { store, productId, courseId: course.id, lessonId, cookie: `${passCookieName(store)}=${token}` };
 }

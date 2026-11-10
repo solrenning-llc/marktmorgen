@@ -60,7 +60,7 @@ type Session = Record<string, unknown> & { id: string; customer_details: { email
 
 const sessions: Session[] = [];
 const refunds: Refund[] = [];
-const disputes = new Map<string, { status: string }[]>();
+const disputes = new Map<string, { status: string; charge: string }[]>();
 const closings: Record<string, unknown>[] = [];
 /** When set for a kind of read, its answer in place of the healthy one. */
 const garble: Partial<Record<"byEmail" | "byPayment" | "byCharge", () => Response>> = {};
@@ -161,7 +161,7 @@ function closeDispute(session: Session, status: "lost" | "won"): void {
   n += 1;
   const charge = session.payment_intent.latest_charge;
   charge.disputed = true;
-  disputes.set(charge.id, [{ status }]);
+  disputes.set(charge.id, [{ status, charge: charge.id }]);
   closings.unshift({
     id: `evt_test${String(n).padStart(10, "0")}`,
     object: "event",

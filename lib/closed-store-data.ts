@@ -53,7 +53,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, scanPage } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -119,6 +119,11 @@ export type Batched = {
   marks: string[];
   endedAt: number;
   at: number;
+  /**
+   * Walked, but its last mark could not be written (ms; finishStores): it waits in the batch to be finished again and
+   * is never walked by its ids again, since by then another store may hold its address or key.
+   */
+  unfinished?: number;
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -273,6 +278,7 @@ type Owners = { byMark: Map<string, string>; byHandle: Map<string, string>; byRe
 function ownersOf(batch: Batched[]): Owners {
   const owners: Owners = { byMark: new Map(), byHandle: new Map(), byRef: new Map() };
   for (const entry of batch) {
+    if (entry.unfinished) continue;
     for (const mark of entry.marks) owners.byMark.set(mark, entry.ref);
     for (const handle of entry.handles) owners.byHandle.set(handle, entry.ref);
     owners.byRef.set(entry.ref, entry.ref);
@@ -318,6 +324,12 @@ const READ_BATCH = FOLLOW_BATCH;
 
 /** The most pages one walk of a key's members reads (a thousand asked for a page); a walk not at its end by then is unknown. */
 const MEMBER_PAGES = 10_000;
+/** The most members one key's walk reads, whatever its kind: a list not at its end by then is unknown too. */
+const MEMBERS_MAX = MEMBER_PAGES * 1_000;
+/** Members of a list one LRANGE reads, as the walk always read a list in one command. */
+const LIST_PAGE = 10_000;
+/** What TYPE answers (Redis's TYPE): any other reply is not a kind of key. */
+const KINDS: ReadonlySet<string> = new Set(["none", "string", "list", "set", "zset", "hash", "stream", "vectorset"]);
 
 /**
  * Every member of one key, a page at a time. A page that does not read, or a walk not at its end after
@@ -351,41 +363,65 @@ const fieldOf = (raw: string, name: string): string => {
   const value = json(raw)?.[name];
   return typeof value === "string" ? value : "";
 };
+/*
+ * The reads below are exact too (rule 30, Claude 2's review of #3134, M1): a reply in another shape, a pipeline with
+ * more or fewer replies than commands, or a list not at its end at MEMBERS_MAX throws UnknownReplyError, so the walk's
+ * page is not deleted, its cursor is not moved on and its stores are not finished. Until then each read an unknown
+ * reply as empty: a key of no kind, no members, no values, a list cut at 10,000, and the walk passed over what they
+ * lead to while a later run reported the store erased and emailed its owner.
+ */
 async function typeOf(key: string): Promise<string> {
-  const [raw] = await redisPipeline([["TYPE", key]]);
-  return typeof raw === "string" ? raw : String((raw as { ok?: string } | null)?.ok ?? "none");
+  const type = repliesFor(await redisPipeline([["TYPE", key]]), 1)?.[0];
+  if (typeof type !== "string" || !KINDS.has(type)) throw new UnknownReplyError("the closing walk's TYPE of a key");
+  return type;
+}
+/** Every member of a list, LIST_PAGE at a command, to its end. */
+async function listAll(key: string): Promise<string[]> {
+  const out: string[] = [];
+  for (let from = 0; from < MEMBERS_MAX; from += LIST_PAGE) {
+    const items = stringList(repliesFor(await redisPipeline([["LRANGE", key, from, from + LIST_PAGE - 1]]), 1)?.[0]);
+    if (!items || items.length > LIST_PAGE) throw new UnknownReplyError("the closing walk's LRANGE of a list");
+    out.push(...items);
+    if (items.length < LIST_PAGE) return out;
+  }
+  throw new UnknownReplyError(`the closing walk's LRANGE of a list, not at its end after ${MEMBERS_MAX} members,`);
 }
 async function membersOf(key: string): Promise<string[]> {
   const type = await typeOf(key);
   const out: string[] = [];
   if (type === "set") await scanAll("SSCAN", key, (flat) => void out.push(...flat));
   else if (type === "zset") await scanAll("ZSCAN", key, (flat) => void out.push(...flat.filter((_, i) => i % 2 === 0)));
-  else if (type === "list") {
-    const [items] = await redisPipeline([["LRANGE", key, 0, 9_999]]);
-    if (Array.isArray(items)) out.push(...items.map(String));
-  } else if (type === "hash") await scanAll("HSCAN", key, (flat) => void out.push(...flat.filter((_, i) => i % 2 === 0)));
+  else if (type === "list") out.push(...(await listAll(key)));
+  else if (type === "hash") await scanAll("HSCAN", key, (flat) => void out.push(...flat.filter((_, i) => i % 2 === 0)));
   return out;
 }
-/** String keys' values, READ_BATCH at a command; "" for a key that is gone or of another kind, which no follower reads as one. */
+/** String keys' values, READ_BATCH at a command; "" for a key that is gone or of another kind (MGET's null), which no follower reads as one. */
 async function stringsOf(keys: string[]): Promise<string[]> {
   const out: string[] = [];
   for (let i = 0; i < keys.length; i += READ_BATCH) {
-    const [values] = await redisPipeline([["MGET", ...keys.slice(i, i + READ_BATCH)]]);
-    for (const value of Array.isArray(values) ? values : []) out.push(typeof value === "string" ? value : "");
+    const some = keys.slice(i, i + READ_BATCH);
+    // One value for each key asked, each a string or null: anything else is not MGET's answer.
+    const values = repliesFor(repliesFor(await redisPipeline([["MGET", ...some]]), 1)?.[0], some.length);
+    if (!values || values.some((value) => value !== null && typeof value !== "string")) throw new UnknownReplyError("the closing walk's MGET of a family's keys");
+    for (const value of values) out.push(typeof value === "string" ? value : "");
   }
   return out;
 }
-/** Every member of these sets, READ_BATCH at a command; a key of another kind is read on its own, by its kind. */
+/** Every member of these sets, READ_BATCH at a command; when the command is refused (a key of another kind), each key is read on its own, by its kind. */
 async function unionOf(keys: string[]): Promise<string[]> {
   const out = new Set<string>();
   for (let i = 0; i < keys.length; i += READ_BATCH) {
     const some = keys.slice(i, i + READ_BATCH);
+    let replies: unknown;
     try {
-      const [members] = await redisPipeline([["SUNION", ...some]]);
-      for (const member of Array.isArray(members) ? members : []) out.add(String(member));
+      replies = await redisPipeline([["SUNION", ...some]]);
     } catch {
       for (const key of some) for (const member of await membersOf(key)) out.add(member);
+      continue;
     }
+    const members = stringList(repliesFor(replies, 1)?.[0]);
+    if (!members) throw new UnknownReplyError("the closing walk's SUNION of a family's keys");
+    for (const member of members) out.add(member);
   }
   return [...out];
 }
@@ -541,7 +577,8 @@ async function pruneIndex(key: string, owners: Owners): Promise<number> {
   return gone.length;
 }
 
-export type WalkReport = { started: boolean; stores: number; pages: number; deleted: number; pruned: number; finished: number; done: boolean };
+/** `unfinished`: the stores left in the batch whose records are gone but whose last mark could not be written yet. */
+export type WalkReport = { started: boolean; stores: number; pages: number; deleted: number; pruned: number; finished: number; unfinished: number; done: boolean };
 
 /**
  * One page of the walk: deletes what belongs to the closing stores, and
@@ -578,15 +615,24 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
   return { deleted: doomed.size, pruned };
 }
 
-async function readBatch(): Promise<Map<string, Batched>> {
-  const [flat] = await redisPipeline([["HGETALL", BATCH_KEY]]);
-  const list = Array.isArray(flat) ? (flat as string[]) : flat && typeof flat === "object" ? Object.entries(flat as Record<string, string>).flat() : [];
-  const out = new Map<string, Batched>();
+/**
+ * The stores of the walk. A batch that does not read is unknown, never an empty one (rule 30, M1 of the review of
+ * #3134): with no stores the run's pages deleted nothing and its cursor moved on, and a later run that read the batch
+ * finished every store and emailed its owner while those pages' keys remained. The idle pass wrote the count of
+ * stores left as 0 from it too (Claude 5's second money review of #3279). An entry that does not read is kept and
+ * counted in `unreadable`, so the count of stores left is never lowered past it.
+ */
+async function readBatch(): Promise<{ entries: Map<string, Batched>; unreadable: number }> {
+  const list = stringList(repliesFor(await redisPipeline([["HGETALL", BATCH_KEY]]), 1)?.[0]);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError("the closing walk's batch (HGETALL)");
+  const entries = new Map<string, Batched>();
+  let unreadable = 0;
   for (let i = 0; i + 1 < list.length; i += 2) {
-    const value = json(String(list[i + 1])) as Batched | null;
-    if (value && Array.isArray(value.marks)) out.set(String(list[i]), value);
+    const value = json(list[i + 1]) as Batched | null;
+    if (value && Array.isArray(value.marks)) entries.set(list[i], value);
+    else unreadable += 1;
   }
-  return out;
+  return { entries, unreadable };
 }
 
 /**
@@ -605,26 +651,69 @@ async function moveBack(ref: string, now: number): Promise<boolean> {
 export type Finisher = (entry: Batched, now: number) => Promise<void>;
 
 /**
+ * Finishes walked stores, each on its own: one finished leaves the batch. One whose last mark could not be written,
+ * such as a closing record that does not read (rule 24, Claude 2's review of #3279), is never taken as finished: it
+ * stays in the batch, set aside (`unfinished`) so it holds neither the other stores nor the walks after, and is
+ * finished again on the next runs. Answers how many are left so, or null when the run must stop where it is: its
+ * deadline passed, or a store's setting aside was not confirmed (it is then finished again where it was).
+ */
+async function finishStores(entries: Iterable<[string, Batched]>, finish: Finisher, now: number, deadline: number, report: WalkReport): Promise<number | null> {
+  let left = 0;
+  let confirmed = true;
+  for (const [ref, entry] of entries) {
+    if (Date.now() > deadline) return null;
+    try {
+      await finish(entry, now);
+    } catch (error) {
+      console.error("a closed store's records are gone but its last mark could not be written; it is finished again on the next run", error);
+      left += 1;
+      if (entry.unfinished) continue;
+      const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify({ ...entry, unfinished: now })]]), 1)?.[0];
+      if (set !== 0 && set !== 1) confirmed = false;
+      continue;
+    }
+    // Out of the batch only on Redis's own answer (Claude 5 on #3279, rule 30): one still in it, not set aside,
+    // would have its ids counted by the next walk. Not known to be out, the run stops here and finishes it again.
+    const gone = repliesFor(await redisPipeline([["HDEL", BATCH_KEY, ref]]), 1)?.[0];
+    if (gone !== 0 && gone !== 1) {
+      console.error("taking a finished store out of the walk's batch was not confirmed; it is finished again on the next run", gone);
+      confirmed = false;
+      continue;
+    }
+    report.finished += 1;
+  }
+  return confirmed ? left : null;
+}
+
+/**
  * One run: starts a walk when stores are due and none ran in the last
  * WALK_GAP_MS, carries one on to where it stops, and finishes its stores.
  * Bounded by `deadline` and WALK_PAGES_PER_RUN.
  */
 export async function eraseClosed(deadline: number, finish: Finisher, now = Date.now()): Promise<WalkReport> {
-  const report: WalkReport = { started: false, stores: 0, pages: 0, deleted: 0, pruned: 0, finished: 0, done: false };
+  const report: WalkReport = { started: false, stores: 0, pages: 0, deleted: 0, pruned: 0, finished: 0, unfinished: 0, done: false };
   if (!isRedisConfigured()) return report;
   // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
   let unsure = false;
-  const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase"]]);
-  const [cursorRaw, startedRaw, phaseRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", ""];
+  const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
+  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
   let phase = phaseRaw || "idle";
   let cursor = cursorRaw || "0";
 
   if (phase === "idle" || phase === "") {
+    // Walked stores left unfinished (finishStores) are finished again on every run until they are, never walked again.
+    if (unfinishedRaw !== "" && unfinishedRaw !== "0") {
+      const { entries, unreadable } = await readBatch();
+      const left = await finishStores([...entries].filter(([, entry]) => entry.unfinished), finish, now, deadline, report);
+      if (left === null) return report;
+      await redisPipeline([["HSET", WALK_KEY, "unfinished", left + unreadable]]);
+      report.unfinished = left + unreadable;
+    }
     const started = Number(startedRaw) || 0;
     if (now - started < WALK_GAP_MS) return { ...report, done: true };
     const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]);
     const refs = Array.isArray(due) ? (due as unknown[]).map(String) : [];
-    if (!refs.length) return { ...report, done: true };
+    // None due still reads the batch below: a store prepared by a run that stopped before its walk started is walked.
     for (const ref of refs) {
       if (Date.now() > deadline) break;
       let store: Store | null;
@@ -652,15 +741,15 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       }
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
-    const [count] = await redisPipeline([["HLEN", BATCH_KEY]]);
-    if (!Number(count)) return { ...report, done: !unsure };
+    // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again.
+    if (![...(await readBatch()).entries.values()].some((entry) => !entry.unfinished)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";
     report.started = true;
   }
 
-  const batch = await readBatch();
+  const { entries: batch, unreadable } = await readBatch();
   const owners = ownersOf([...batch.values()]);
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
     // A page that does not read is unknown, not a page with no keys nor the end of the database (rule 30): the run
@@ -678,14 +767,12 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   }
 
   if (phase === "finish") {
-    for (const [ref, entry] of batch) {
-      if (Date.now() > deadline) return report;
-      await finish(entry, now);
-      await redisPipeline([["HDEL", BATCH_KEY, ref]]);
-      report.finished += 1;
-    }
-    await redisPipeline([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "finished", now]]);
-    report.done = !unsure;
+    // Each store on its own (finishStores): one whose mark cannot be written never keeps the walk in this phase.
+    const left = await finishStores(batch, finish, now, deadline, report);
+    if (left === null) return report;
+    await redisPipeline([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "finished", now, "unfinished", left + unreadable]]);
+    report.unfinished = left + unreadable;
+    report.done = !unsure && !(left + unreadable);
   }
   return report;
 }

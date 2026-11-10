@@ -182,9 +182,36 @@ reading.
        buyer's email, send it again), never that it was sent.
    - **Does not:** refund, cancel or change anything in Stripe by itself. Whether
      to cancel the membership at once is a question for the owner (below).
-2. **Pre-contract information.** The checkout's box sentence and the confirmation
-   email say where the function is (Art. 6(1)(h), Annex I instruction 3), in every
-   buyer language, with the version bumped as `lib/digital-consent.ts` does.
+2. **Pre-contract information.** The checkout and the confirmation email say
+   where the function is (Art. 6(1)(h), Annex I instruction 3), in every buyer
+   language.
+   - Checkout (#2953): one plain line, outside the sentence the buyer checks, so
+     it is not in its length, version or fingerprint
+     (`lib/buyer-words/withdrawal.ts`, `checkoutWhere`; drawn by
+     `components/withdrawal-where.tsx`). In English: "You can withdraw online
+     with ‘Withdraw from contract here’ on your purchases page, while you have
+     that right." The condition keeps it true for a buyer whose digital "yes"
+     ends the right at supply. The consent box draws it for digital content and
+     memberships (so a pre-order, and a digital order whose confirmation is not
+     known to have gone, which keep the function open, are told before paying);
+     the buy box, gift, group, pre-order and cart draw it in the box's place
+     when there is no box (shipped items).
+   - The membership box's sentence also names the function (version
+     `2026-11-07.2`). The digital box's sentence keeps its published
+     `2026-10-30.2` words and does not name it (Claude 5 on #2827 and #2953).
+   - Not covered yet: a one-click button that goes straight to payment for a
+     shipped product with nothing to choose (sales-page blocks, embedded cards),
+     and the booking page of a call, which draw neither the box nor this line.
+   - The welcome offer's checkout draws the line in the box's place for a
+     shipped product, as the buy box does (Claude 1's focal return on #2953).
+   - Deferred, with its reason: `lib/course-confirmation-origin.ts` (no caller
+     with an effect today) accepts only the current consent version and
+     records today's words fingerprint. Its first funded caller must read an
+     order kept under an earlier version with that version's words
+     (`WORDS_BY_VERSION` in lib/digital-consent-email.ts) and fingerprint,
+     never refuse it or record another version's (Claude 5's second review of
+     #2953, Claude 1's focal return).
+   - Confirmation email: unit 2b (`tests/kb9-precontract-email.pending.ts`).
 3. **Creator plans.** The same function in the studio's billing page for a plan
    bought within its 14 days.
 4. **Costs (MR).**

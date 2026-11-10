@@ -58,12 +58,15 @@ function focusedThrough(node: Node | undefined): boolean {
   return focused;
 }
 
+/** Every character a regular expression gives a meaning, backslash included, taken literally. */
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 async function main(): Promise<void> {
   part("M1: an unread allowance is said to be unknown, never none left");
   const unknownControl = renderToStaticMarkup(createElement(FunnelIssueExplain, { funnelId: "abcdefghij", issue, left: loose(null), onLeft() {} }));
   is("the explain control says it could not check, with the button off", [unknownControl.includes(AI_ALLOWANCE_UNKNOWN), unknownControl.includes("No AI writing jobs are left"), /<button[^>]*disabled=""/.test(unknownControl)], [true, false, true]);
   const described = /aria-describedby="([^"]+)"/.exec(unknownControl)?.[1] ?? "";
-  is("the button is tied to that sentence", new RegExp(`id="${described}"[^>]*>${AI_ALLOWANCE_UNKNOWN.replace(/\./g, "\\.")}`).test(unknownControl), true);
+  is("the button is tied to that sentence", new RegExp(`id="${escapeRegExp(described)}"[^>]*>${escapeRegExp(AI_ALLOWANCE_UNKNOWN)}`).test(unknownControl), true);
   const review = renderToStaticMarkup(createElement(FunnelSharingReview, { issues: [issue], editors: [], locked: false, settingsDisabled: false, onSettings() {}, onNavigate() {}, explain: loose({ funnelId: "abcdefghij", left: null }) }));
   is("the funnel's review passes the unknown on", [review.includes(AI_ALLOWANCE_UNKNOWN), review.includes("No AI writing jobs are left")], [true, false]);
   const known = renderToStaticMarkup(createElement(FunnelIssueExplain, { funnelId: "abcdefghij", issue, left: 3, onLeft() {} }));

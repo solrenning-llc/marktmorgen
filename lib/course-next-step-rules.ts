@@ -83,22 +83,24 @@ export function readNextStep(
 }
 
 /**
- * Characters that draw nothing and only hide what a line says from the checks below, or change how it reads on the
- * screen: the soft hyphen, zero-width spaces, the word joiner and its kin, the byte-order mark, and the bidirectional
- * embeddings, overrides and isolates (U+202A to U+202E, U+2066 to U+2069). Refused, never removed: the words are the
- * creator's (review of #3523, MEDIUM). The joiners that build an emoji or spell a word (U+200C, U+200D) and the plain
- * direction marks (U+200E, U+200F, U+061C) are kept, as lib/preheader.ts keeps them, and are taken out for the checks.
+ * Every format character (\p{Cf}): they draw nothing and only hide what a line says from the checks below, or change
+ * how it reads on the screen (zero-width spaces, word joiners, the soft hyphen, the byte-order mark, bidirectional
+ * embeddings, overrides and isolates, the deprecated format controls U+206A to U+206F, the interlinear annotation
+ * marks U+FFF9 to U+FFFB, the tag characters U+E0020 to U+E007F, the musical format marks U+1D173 to U+1D17A).
+ * Refused, never removed: the words are the creator's (reviews of #3523, MEDIUM). Only the joiners that build an emoji
+ * or spell a word (ZWNJ U+200C, ZWJ U+200D) and the plain direction marks (LRM U+200E, RLM U+200F, ALM U+061C) are
+ * kept, as lib/preheader.ts keeps them, and are taken out for the checks.
  */
-const HIDDEN = /[­᠎​⁠-⁤﻿‪-‮⁦-⁩]/u;
+const HIDDEN = /(?![\u200c\u200d\u200e\u200f\u061c])\p{Cf}/u;
 
 /**
  * The line as the checks read it, twice: with compatibility forms folded (fullwidth letters, ligatures) and the joiners
- * and direction marks a word may carry taken out, so "n‍ow" and "ｎｏｗ" read as "now"; and the same with the
+ * and direction marks a word may carry taken out, so "n\u200dow" and "\uff4e\uff4f\uff57" read as "now"; and the same with the
  * accents taken off too, so "Última" reads as "Ultima" where a word list's \b does not see an accented first letter.
  * Only for the checks: what is kept and shown is the line as typed.
  */
 function forChecks(line: string): [string, string] {
-  const folded = line.normalize("NFKC").replace(/[‌‍‎‏؜]/gu, "");
+  const folded = line.normalize("NFKC").replace(/[\u200c\u200d\u200e\u200f\u061c]/gu, "");
   return [folded, folded.normalize("NFD").replace(/\p{M}/gu, "")];
 }
 

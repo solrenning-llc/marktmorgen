@@ -554,38 +554,24 @@ export async function closeSubmissionDoor(
   let replies: unknown[] | null;
   try {
     replies = repliesFor(
-      await redisPipeline([
-        ["ZADD", live, "XX", keepUntil, door.id],
-        ["ZSCORE", live, door.id],
-        ["EXPIRE", live, LIVE_SECONDS],
-        ["ZADD", who, "XX", until, entry],
-        ["ZSCORE", who, entry],
-        ["EXPIRE", who, LIVE_SECONDS],
-        ["ZADD", DUE_KEY, keepUntil, dueMember(door.folder, pathname)],
-        ["SET", key, json, "EX", until - nowSeconds, "NX"],
-        ["ZADD", listKey(door.folder, door.courseId), until, listMember(door.lessonId, door.id)],
-        ["EXPIRE", listKey(door.folder, door.courseId), LIVE_SECONDS],
-      ]),
-      10,
+      await redisPipeline([[
+        "EVAL", SUBMISSION_CLOSE_WRITE, 5, live, who, DUE_KEY, key, listKey(door.folder, door.courseId),
+        door.id, entry, keepUntil, until, LIVE_SECONDS, dueMember(door.folder, pathname), json, until - nowSeconds, listMember(door.lessonId, door.id),
+      ]]),
+      1,
     );
   } catch (error) {
     // Sent and never answered: the write may have landed, so its file is kept for the record that may name it.
     await readBack();
     throw error;
   }
-  if (
-    !replies ||
-    countOf(replies[0]) !== 0 ||
-    String(replies[1]) !== String(keepUntil) ||
-    replies[2] !== 1 ||
-    countOf(replies[3]) !== 0 ||
-    String(replies[4]) !== String(until) ||
-    replies[5] !== 1 ||
-    countOf(replies[6]) === null ||
-    replies[7] !== "OK" ||
-    countOf(replies[8]) === null ||
-    replies[9] !== 1
-  ) {
+  // The buyer's place or entry is gone (their erasure ran while the file was at the vault, or the upload was given
+  // up): nothing was written, and the completed file goes; the erasure already took it off the sweep's list.
+  if (replies && replies[0] === 0) {
+    await drop();
+    return { ok: false, reason: "unknown" };
+  }
+  if (!replies || replies[0] !== 1) {
     // Answered out of shape, or the record's place taken: a record may name this file, so it is read back exactly,
     // and the file deleted only when Redis confirms there is none. This close holds the door alone (taken above),
     // so no other close can write that record after the read. A record there keeps the file; a read-back that
@@ -607,6 +593,30 @@ export async function abortSubmissionDoor(where: DoorWhere, pathname: string, st
   if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a submission upload given up");
   return "done";
 }
+
+/**
+ * A close's record, written in one step on the Redis side only while the buyer's place (live) and entry (who) are
+ * still there (Claude 1 on #3570): an erasure that ran while the file was at the vault deletes both, and the close
+ * then writes nothing, so a record of an erased buyer never comes back after the erasure said done. 1: written, with
+ * the place and the entry held to the keeping time, the file on the sweep's list and, with a fifth key, on the
+ * course's "To review" list; 0: the place or the entry is
+ * gone, nothing written; -1: a record is already there, nothing written. The first line names it for the local
+ * stand-in (lib/redis-memory.ts).
+ */
+const SUBMISSION_CLOSE_WRITE = [
+  "-- marktmorgen:submission-close-write:v1",
+  'if not redis.call("ZSCORE", KEYS[1], ARGV[1]) or not redis.call("ZSCORE", KEYS[2], ARGV[2]) then return 0 end',
+  'if redis.call("EXISTS", KEYS[4]) == 1 then return -1 end',
+  'redis.call("ZADD", KEYS[1], "XX", ARGV[3], ARGV[1])',
+  'redis.call("EXPIRE", KEYS[1], ARGV[5])',
+  'redis.call("ZADD", KEYS[2], "XX", ARGV[4], ARGV[2])',
+  'redis.call("EXPIRE", KEYS[2], ARGV[5])',
+  'redis.call("ZADD", KEYS[3], ARGV[3], ARGV[6])',
+  'redis.call("SET", KEYS[4], ARGV[7], "EX", ARGV[8])',
+  // With the course's "To review" list (unit 4): the file is listed for the creator in the same step.
+  'if #KEYS == 5 then redis.call("ZADD", KEYS[5], ARGV[4], ARGV[9]) redis.call("EXPIRE", KEYS[5], ARGV[5]) end',
+  "return 1",
+].join("\n");
 
 /** A kept record, read exactly; null only when Redis confirms there is none. */
 export async function readSubmission(folder: string, id: string): Promise<KeptSubmission | null> {

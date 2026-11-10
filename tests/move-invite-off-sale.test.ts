@@ -149,7 +149,7 @@ async function main(): Promise<void> {
   const notices = (language: Parameters<typeof moveWords>[0]) => moveWords(language).notices as Record<string, { title: string; body: string } | undefined>;
   const html = (text: string) => text.replace(/'/g, "&#x27;");
   const unknownNotice = notices("en").unknown;
-  for (const query of [{ k: ben.t }, { k: ben.t, status: "unknown" }, { k: ben.t, status: "done" }]) {
+  for (const query of [{ k: ben.t }, { k: ben.t, status: "unknown" }, { k: ben.t, status: "done" }] as Record<string, string>[]) {
     const unreadPage = await movePage("inviteoffsale", id, query);
     is(
       `its page (${JSON.stringify(query.status ?? "")}) says the state could not be checked, never that it was moved, with no button`,

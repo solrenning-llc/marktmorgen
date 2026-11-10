@@ -12,8 +12,9 @@
  *   only up to that cap, never above it.
  * - Each payment of a membership earns it again, under that payment's own cap,
  *   as a percentage is credited on each payment.
- * - A full refund cancels it; a partial refund keeps it under the cap of what
- *   the creator kept, and never raises it.
+ * - A refund takes it back as a percentage's is taken back (lib/affiliates.ts,
+ *   settleLine): pro rata to the pre-tax base the creator kept, and capped on
+ *   that base; a full refund cancels it, and a refund never raises it.
  * - A value that cannot be read is unknown (null), never zero and never the
  *   full amount (rule 24).
  * Where the setting is stored, the studio field, the affiliate's page and the
@@ -48,33 +49,43 @@ function readOthers(raw: number): number | null {
 export function flatCommissionOn(baseCents: number, flatCents: number, othersPercent: number): number | null {
   const flat = readFlatCents(flatCents);
   const others = readOthers(othersPercent);
-  if (flat === null || others === null || !Number.isSafeInteger(baseCents)) return null;
-  if (baseCents <= 0) return 0;
+  // A negative amount paid can only be a bad read: unknown, never nothing (Claude 1 on #3595, rule 24).
+  if (flat === null || others === null || !Number.isSafeInteger(baseCents) || baseCents < 0) return null;
+  if (baseCents === 0) return 0;
   const room = MAX_COMMITTED_SHARE - others;
   if (room <= 0) return 0;
   return Math.min(flat, commissionOn(baseCents, room));
 }
 
 /**
- * What stays earned after a refund: nothing after a full one; after a partial
- * one, what was earned, cut to the cap on what the creator kept. Never more
- * than was earned. Null when anything cannot be read.
+ * What stays earned after a refund, as a percentage's is settled (lib/affiliates.ts, settleLine; Claude 1 on #3595):
+ * the pre-tax base kept is `baseCents` scaled by what was not refunded of `totalCents` (what was charged, tax
+ * included), rounded as settleLine rounds it; what was earned is kept pro rata to it, rounded down, and never above
+ * the cap on that base kept. Nothing after a full refund; never more than was earned. Null when anything cannot
+ * be read, a negative base or charge included.
  */
-export function flatAfterRefund(earnedCents: number, paidCents: number, refundedCents: number, othersPercent: number): number | null {
+export function flatAfterRefund(earnedCents: number, baseCents: number, totalCents: number, refundedCents: number, othersPercent: number): number | null {
   const others = readOthers(othersPercent);
   if (
     others === null ||
     !Number.isSafeInteger(earnedCents) || earnedCents < 0 ||
-    !Number.isSafeInteger(paidCents) ||
+    !Number.isSafeInteger(baseCents) || baseCents < 0 ||
+    !Number.isSafeInteger(totalCents) || totalCents < 0 ||
     !Number.isSafeInteger(refundedCents) || refundedCents < 0
   ) {
     return null;
   }
-  const kept = paidCents - refundedCents;
-  if (kept <= 0) return 0;
+  if (totalCents === 0 || baseCents === 0) return 0;
+  const back = Math.min(refundedCents, totalCents);
+  // In whole numbers, so amounts up to the safe range stay exact: round(base × (total − back) / total), half up.
+  const scaled = BigInt(baseCents) * BigInt(totalCents - back);
+  const two = BigInt(2);
+  const keptBase = Number((two * scaled + BigInt(totalCents)) / (two * BigInt(totalCents)));
+  if (keptBase <= 0) return 0;
   const room = MAX_COMMITTED_SHARE - others;
   if (room <= 0) return 0;
-  return Math.min(earnedCents, commissionOn(kept, room));
+  const prorated = Number((BigInt(earnedCents) * BigInt(keptBase)) / BigInt(baseCents));
+  return Math.min(prorated, earnedCents, commissionOn(keptBase, room));
 }
 
 /** The flat amount as the affiliate reads it, in the store's own currency: "$25", "CA$25", "€25". */

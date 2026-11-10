@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "@/components/toast";
 import { type AdSpend, typedOverlap } from "@/lib/ad-spend-rules";
 import { formatMoney } from "@/lib/money";
@@ -24,11 +24,24 @@ function toCents(raw: string, currency: string): number {
   return Math.round(value * 10 ** decimals);
 }
 
+/** A new operation id for one add (OP in lib/ad-spend.ts): 32 hex characters from the browser's random source. */
+function newOperation(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * The operation of an add (Codex Z on #2924): the one before while the add is tried again unchanged (`body`), so a
+ * try that did land is never counted twice (lib/ad-spend.ts), and a new one for a new add.
+ */
+export function addOperation(before: { op: string; body: string } | null, body: string): { op: string; body: string } {
+  return before?.body === body ? before : { op: newOperation(), body };
+}
+
 /** The same as META_SPEND_UNREAD in lib/ad-spend.ts, written here so this browser file stays free of server code. */
-const META_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend leave it out. Reload to try again.";
+const META_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend are not shown. Reload to try again.";
 
 const REASONS: Record<string, string> = {
-  unread: "The list could not be read back just now. Reload the page to see where it stands.",
+  unread: "That could not be confirmed just now. Try again without changing anything: nothing is ever added twice.",
   channel: "Choose where the ad ran.",
   amount: "Type what you spent, more than zero.",
   days: "Check the days: the first before the last, not in the future, and no more than 400 days apart.",
@@ -221,7 +234,8 @@ export function AdSpendEditor({
   spends: AdSpend[];
   /** Meta's lines could not be read when `spends` was: they are left out, and the editor says so. */
   spendsUnread?: boolean;
-  onChange: (spends: AdSpend[]) => void;
+  /** Every line as the server answered it, and whether Meta's were unread then (the panel leaves out the figures). */
+  onChange: (spends: AdSpend[], metaUnread: boolean) => void;
   /** The channels the numbers know, offered first. */
   channels: { value: string; label: string }[];
   currency: string;
@@ -233,6 +247,8 @@ export function AdSpendEditor({
 }) {
   const [meta, setMeta] = useState(metaGiven);
   const [metaUnread, setMetaUnread] = useState(spendsUnread);
+  /** The add being tried and its operation id: the same id while it is tried again unchanged, a new one for a new add. */
+  const adding = useRef<{ op: string; body: string } | null>(null);
   const typed = spends.filter((s) => s.source !== "meta");
   const fromMeta = spends.filter((s) => s.source === "meta");
   const overlap = typedOverlap(typed, fromMeta);
@@ -254,7 +270,7 @@ export function AdSpendEditor({
       const response = await fetch("/api/store/spend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; spends?: AdSpend[]; spendsUnread?: boolean; error?: string; unreadable?: unknown };
       if (answer.ok && answer.spends) {
-        onChange(answer.spends);
+        onChange(answer.spends, answer.spendsUnread === true);
         setMetaUnread(answer.spendsUnread === true);
         setUnreadable(0);
         toast(done);
@@ -264,7 +280,7 @@ export function AdSpendEditor({
       setUnreadable(count);
       toast(count ? "That did not save, because a saved entry could not be read. See the note in this section." : (REASONS[answer.error ?? ""] ?? "That did not save. Try again."));
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toast("That could not be confirmed. Check your connection and try again without changing anything.");
     } finally {
       setBusy(false);
     }
@@ -291,7 +307,7 @@ export function AdSpendEditor({
           money={money}
           onChosen={(next, all, unread) => {
             setMeta(next);
-            onChange(all);
+            onChange(all, unread);
             setMetaUnread(unread);
           }}
         />
@@ -341,8 +357,11 @@ export function AdSpendEditor({
         onSubmit={async (event) => {
           event.preventDefault();
           const where = channel === "~other" ? other : channel;
-          const ok = await send({ action: "add", channel: where, campaign, cents: toCents(amount, currency), from, to }, "Added.");
+          const fields = { action: "add", channel: where, campaign, cents: toCents(amount, currency), from, to };
+          adding.current = addOperation(adding.current, JSON.stringify(fields));
+          const ok = await send({ ...fields, op: adding.current.op }, "Added.");
           if (ok) {
+            adding.current = null;
             setAmount("");
             setCampaign("");
           }

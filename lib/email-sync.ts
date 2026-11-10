@@ -48,7 +48,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
@@ -174,6 +174,22 @@ function parseJob(raw: unknown): Job | null {
   } catch {
     return null;
   }
+}
+
+/** A Redis list or pipeline envelope is evidence only when every position is
+ * an own data property. Sparse or inherited cells are an unknown read, not an
+ * empty connection or a shorter activity log. */
+function exactOwnArray(value: unknown, length?: number): unknown[] | null {
+  if (!Array.isArray(value)) return null;
+  const size = Object.getOwnPropertyDescriptor(value, "length");
+  if (!size || !Object.hasOwn(size, "value") || (length !== undefined && size.value !== length)) return null;
+  const out: unknown[] = [];
+  for (let index = 0; index < size.value; index += 1) {
+    const item = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!item || !Object.hasOwn(item, "value")) return null;
+    out.push(item.value);
+  }
+  return out;
 }
 
 async function readConfig(statsId: string): Promise<Config | null> {
@@ -489,21 +505,61 @@ export type SyncView = {
     /** The last problem with the key or the audience, until a send works again. */
     problem: { message: string; at: number } | null;
   } | null;
-  log: JobView[];
+  /** Null means recent-send history could not be read exactly. */
+  log: JobView[] | null;
 };
+
+function connectedView(config: Config | null, problem: NonNullable<SyncView["connected"]>["problem"]): SyncView["connected"] {
+  return config ? {
+    provider: config.provider,
+    last4: config.last4,
+    target: config.target,
+    free: config.free,
+    buyers: config.buyers,
+    products: config.products,
+    tags: config.tags,
+    connectedAt: config.connectedAt,
+    problem,
+  } : null;
+}
 
 export async function syncView(store: Store): Promise<SyncView> {
   const available = canSeal() && isRedisConfigured();
   if (!store.statsId || !isRedisConfigured()) return { available, connected: null, log: [] };
   const statsId = store.statsId;
-  const [rawConfig, rawBad, rawLog] = await redisPipeline([
+  const view = exactOwnArray(await redisPipeline([
     ["GET", cfgKey(statsId)],
     ["GET", badKey(statsId)],
     ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1],
-  ]);
+  ]), 3);
+  if (!view) throw new Error("The email platform view is unavailable");
+  const [rawConfig, rawBad, rawLog] = view;
+  if (rawConfig !== null && typeof rawConfig !== "string") throw new Error("The email platform configuration is unavailable");
+  if (rawBad !== null && typeof rawBad !== "string") throw new Error("The email platform status is unavailable");
   const config = parseConfig(rawConfig);
-  const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => JOB_ID.test(id)) : [];
-  const jobs = ids.length ? await redisPipeline(ids.map((id) => ["GET", jobKey(id)])) : [];
+  const log = exactOwnArray(rawLog);
+  let parsedJobs: Job[] | null = null;
+  if (log && log.every((id) => typeof id === "string" && JOB_ID.test(id))) {
+    const ids = log as string[];
+    const jobs = ids.length ? exactOwnArray(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length) : [];
+    if (jobs) {
+      const parsed: Job[] = [];
+      let unread = false;
+      for (const raw of jobs) {
+        // Job records expire after seven days while their ids may remain in
+        // the bounded log. A missing GET is therefore known absence, not a
+        // broken batch; every present value must still be complete.
+        if (raw === null) continue;
+        const job = parseJob(raw);
+        if (!job) {
+          unread = true;
+          break;
+        }
+        parsed.push(job);
+      }
+      if (!unread) parsedJobs = parsed;
+    }
+  }
   let problem: { message: string; at: number } | null = null;
   try {
     const value = typeof rawBad === "string" ? (JSON.parse(rawBad) as { message?: unknown; at?: unknown }) : null;
@@ -518,23 +574,8 @@ export async function syncView(store: Store): Promise<SyncView> {
   }
   return {
     available,
-    connected: config
-      ? {
-          provider: config.provider,
-          last4: config.last4,
-          target: config.target,
-          free: config.free,
-          buyers: config.buyers,
-          products: config.products,
-          tags: config.tags,
-          connectedAt: config.connectedAt,
-          problem,
-        }
-      : null,
-    log: jobs
-      .map(parseJob)
-      .filter((job): job is Job => job !== null)
-      .map((job) => ({
+    connected: connectedView(config, problem),
+    log: parsedJobs?.map((job) => ({
         id: job.id,
         email: job.email,
         title: job.title,
@@ -546,8 +587,25 @@ export async function syncView(store: Store): Promise<SyncView> {
         note: job.note,
         lastAt: job.lastAt,
         createdAt: job.createdAt,
-      })),
+      })) ?? null,
   };
+}
+
+/** A display reread must not reverse a completed action or suppress its
+ * security notice. Use the configuration already saved by that action;
+ * history and any status not confirmed by the action remain unknown. */
+async function viewAfterWrite(
+  store: Store,
+  config: Config | null,
+  problem: NonNullable<SyncView["connected"]>["problem"] = {
+    message: "We could not read the connection status just now. Try again in a moment.", at: 0,
+  },
+): Promise<SyncView> {
+  try {
+    return await syncView(store);
+  } catch {
+    return { available: canSeal() && isRedisConfigured(), connected: connectedView(config, problem), log: null };
+  }
 }
 
 export type ConnectResult = { ok: true; view: SyncView; targets: Target[] } | { ok: false; message: string };
@@ -599,7 +657,7 @@ export async function connect(store: Store, rawProvider: unknown, rawKey: unknow
   };
   await redisPipeline([["DEL", tagsKey(store.statsId), badKey(store.statsId)]]);
   await writeConfig(store, config);
-  return { ok: true, view: await syncView(store), targets };
+  return { ok: true, view: await viewAfterWrite(store, config, null), targets };
 }
 
 /** The audiences the saved key reaches, read again. */
@@ -657,7 +715,7 @@ export async function saveSettings(store: Store, input: Settings): Promise<{ ok:
     tags,
   };
   await writeConfig(store, next);
-  return { ok: true, view: await syncView(store) };
+  return { ok: true, view: await viewAfterWrite(store, next) };
 }
 
 /** Checks the saved key and the chosen audience with the platform, now. */
@@ -671,16 +729,17 @@ export async function testConnection(store: Store): Promise<{ ok: boolean; messa
   try {
     await ping(config.provider, opened.key);
     const targets = await listTargets(config.provider, opened.key);
-    if (!config.target) return { ok: true, message: `${name} accepted the key. Now choose the ${TARGET_WORDS[config.provider]} to add people to.`, view: await syncView(store) };
+    if (!config.target) return { ok: true, message: `${name} accepted the key. Now choose the ${TARGET_WORDS[config.provider]} to add people to.`, view: await viewAfterWrite(store, config) };
     if (!targets.some((t) => t.id === config.target?.id)) {
       const message = `${name} accepted the key, but the ${TARGET_WORDS[config.provider]} “${config.target.name}” is not there anymore. Choose another.`;
-      await redisPipeline([["SET", badKey(store.statsId), JSON.stringify({ message, at: Date.now() }), "EX", 30 * 86400]]);
-      return { ok: false, message, view: await syncView(store) };
+      const problem = { message, at: Date.now() };
+      await redisPipeline([["SET", badKey(store.statsId), JSON.stringify(problem), "EX", 30 * 86400]]);
+      return { ok: false, message, view: await viewAfterWrite(store, config, problem) };
     }
     await redisPipeline([["DEL", badKey(store.statsId)]]);
-    return { ok: true, message: `Connected: ${name} accepted the key and “${config.target.name}” is there.`, view: await syncView(store) };
+    return { ok: true, message: `Connected: ${name} accepted the key and “${config.target.name}” is there.`, view: await viewAfterWrite(store, config, null) };
   } catch (error) {
-    return { ok: false, message: words(error, config.provider), view: await syncView(store) };
+    return { ok: false, message: words(error, config.provider), view: await viewAfterWrite(store, config) };
   }
 }
 
@@ -720,7 +779,7 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
 /** Forgets the platform and its key. Anything still waiting to be sent fails at its next try. */
 export async function disconnect(store: Store): Promise<SyncView> {
   if (store.statsId) await writeConfig(store, null);
-  return syncView(store);
+  return viewAfterWrite(store, null, null);
 }
 
 /**
@@ -731,21 +790,55 @@ export async function disconnect(store: Store): Promise<SyncView> {
 export async function forgetSyncPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
-  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
+  const { logged, ids } = await loggedJobIds(statsId);
   if (!ids.length) return 0;
-  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
+  const jobs = await loggedJobs(ids);
   const theirs = ids.filter((_, i) => {
-    try {
-      const job = JSON.parse(String(raws[i])) as Partial<Job>;
-      return typeof job.email === "string" && normaliseEmail(job.email) === address;
-    } catch {
-      return false;
-    }
+    const job = jobs[i];
+    return job !== null && normaliseEmail(job.email) === address;
   });
   if (!theirs.length) return 0;
-  await redisPipeline([["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]]);
+  // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
+  // Another shape throws, so the erasure is said as not finished and a retry finds what is left.
+  const commands = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const within = (reply: unknown, most: number) => {
+    const n = countOf(reply);
+    return n !== null && n <= most;
+  };
+  if (!replies || !within(replies[0], theirs.length) || !within(replies[replies.length - 1], theirs.length) || !replies.slice(1, -1).every((reply) => within(reply, logged))) {
+    throw new UnknownReplyError("deleting a person's email-platform jobs");
+  }
   return theirs.length;
+}
+
+/**
+ * A store's logged job ids, read exactly (CX-123 rule 24): only an exact list of
+ * strings is the log, and an empty one is "no jobs"; another shape throws
+ * UnknownReplyError. `logged` is the whole log's length.
+ */
+async function loggedJobIds(statsId: string): Promise<{ logged: number; ids: string[] }> {
+  const listed = repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1);
+  const all = listed ? stringList(listed[0]) : null;
+  if (!all) throw new UnknownReplyError("listing a store's email-platform jobs");
+  return { logged: all.length, ids: all.slice(0, LOG_SIZE * 2) };
+}
+
+/**
+ * The records of logged jobs, one for each id, read exactly: an expired record
+ * (null) is known absence; any other shape, or a record that cannot be read as a
+ * job with its address (empty for a person not sent), throws UnknownReplyError,
+ * never "not theirs".
+ */
+async function loggedJobs(ids: string[]): Promise<(Job | null)[]> {
+  const read = repliesFor(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length);
+  if (!read) throw new UnknownReplyError("reading a store's email-platform jobs");
+  return read.map((raw) => {
+    if (raw === null) return null;
+    const job = parseJob(raw);
+    if (!job || typeof job.email !== "string") throw new UnknownReplyError("an email-platform job record");
+    return job;
+  });
 }
 
 /**
@@ -756,18 +849,12 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
 export async function syncJobsOf(statsId: string | null, email: string): Promise<JobView[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
-  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
+  // Read as the erasure reads them (rule 30): another shape throws, so the copy fails whole rather than miss a part.
+  const { ids } = await loggedJobIds(statsId);
   if (!ids.length) return [];
-  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
-  return raws.flatMap((raw) => {
-    try {
-      const job = JSON.parse(String(raw)) as Job;
-      if (typeof job.email !== "string" || normaliseEmail(job.email) !== address) return [];
-      const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
-      return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
-    } catch {
-      return [];
-    }
+  return (await loggedJobs(ids)).flatMap((job) => {
+    if (job === null || normaliseEmail(job.email) !== address) return [];
+    const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
+    return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
   });
 }

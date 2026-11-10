@@ -5,13 +5,15 @@
  * people have them (agendaReadUnits); its rows by their measured size before
  * they are sent (lib/sent-bytes.ts); and the buyers by what their reading
  * weighs (lib/segments.ts, buyerLedger). At the most AGENDA_UNITS besides the
- * buyers (tests/plan-cost-registry.ts, AGENDA_READ). Server only.
+ * buyers (tests/plan-cost-registry.ts, AGENDA_READ). Every part draws on the
+ * page's one IncludedBytes (lib/sent-bytes.ts; C3-112 (2)), so the fifty
+ * kilobytes the page's own request moves are counted once. Server only.
  */
 import { readAllTasks } from "@/lib/crm";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { AGENDA_ROW_MARKUP_BYTES, type AgendaDayGroup, agendaForDays, agendaReadUnits, daysAround, personAddresses } from "@/lib/person-agenda";
-import { sentBytes, sentUnits } from "@/lib/sent-bytes";
+import { IncludedBytes, sentBytes, sentUnits } from "@/lib/sent-bytes";
 import type { DueTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
 import { countStudio, studioPath } from "@/lib/studio-route";
@@ -76,12 +78,16 @@ export type AgendaData =
   | { state: "failed" }
   | { state: "ok"; rows: AgendaRowShown[]; days: Record<string, AgendaDayGroup[]>; open: number; found: { partial: boolean } | null; ledgerMessage: string };
 
-/** The agenda for the buyers page on the server's day `today`, read and counted as above. */
-export async function agendaData(store: Store, today: string): Promise<AgendaData> {
+/**
+ * The agenda for the buyers page on the server's day `today`, read and counted
+ * as above, from the page's included bytes (`included`: the one the page made
+ * for its whole request, also spent by its other readings).
+ */
+export async function agendaData(store: Store, today: string, included: IncludedBytes = new IncludedBytes()): Promise<AgendaData> {
   const kept = await tasksKept(store.statsId).catch(() => null);
   if (kept === 0) return { state: "empty" };
   if (kept === null) return { state: "failed" };
-  const counted = await countUnits(store, agendaReadUnits(kept)).catch(() => null);
+  const counted = await countUnits(store, agendaReadUnits(kept, included)).catch(() => null);
   if (!counted?.ok) return { state: "refused", message: counted && !counted.ok ? counted.message : "" };
   const all = await readAllTasks(store.statsId).catch((error) => {
     console.error("reading the tasks agenda failed", error);
@@ -92,7 +98,7 @@ export async function agendaData(store: Store, today: string): Promise<AgendaDat
   // Only the people of the tasks shown, on any of those days, are looked up.
   const persons = new Set(agenda.rows.map((row) => row.person));
   const ledger = countLedger(store);
-  const found = await personAddresses(store, persons, ledger.count).catch((error) => {
+  const found = await personAddresses(store, persons, ledger.count, included).catch((error) => {
     console.error("reading the agenda's buyers failed", error);
     return null;
   });
@@ -102,7 +108,7 @@ export async function agendaData(store: Store, today: string): Promise<AgendaDat
   });
   // What is sent on, measured before it is drawn (round 5, M1).
   // Each row's own markup too (its line, date, teammate and link around the words; round 6, L3).
-  const sending = await countUnits(store, sentUnits(sentBytes(JSON.stringify({ rows, days: agenda.days })) + rows.length * AGENDA_ROW_MARKUP_BYTES)).catch(() => null);
+  const sending = await countUnits(store, sentUnits(sentBytes(JSON.stringify({ rows, days: agenda.days })) + rows.length * AGENDA_ROW_MARKUP_BYTES, included)).catch(() => null);
   if (!sending?.ok) return { state: "refused", message: sending && !sending.ok ? sending.message : "" };
   return { state: "ok", rows, days: agenda.days, open: all.filter((entry) => !entry.task.done).length, found: found ? { partial: found.partial } : null, ledgerMessage: ledger.said.message };
 }

@@ -37,6 +37,7 @@ import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
+import { MIGRATION_GUIDES, MIGRATION_GUIDE_PAGES } from "@/lib/migration-guides";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { crmBeginnerQuestions } from "@/lib/crm-faq";
 import { aiWritingBeginnerQuestions } from "@/lib/ai-writing-faq";
@@ -2454,6 +2455,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         ],
       },
       {
+        kind: "features",
+        title: "Guides for one platform",
+        items: MIGRATION_GUIDES.map((g) => ({ icon: "door" as const, title: `Move from ${g.platform}`, body: g.summary, href: `/platform/${g.slug}` })),
+      },
+      {
         kind: "faq",
         title: "Questions about moving",
         items: [
@@ -2541,6 +2547,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       ] },
     ],
   },
+  // 239 [CF2]: one guide per source platform, out of the menu (lib/migration-guides.ts).
+  ...MIGRATION_GUIDE_PAGES,
   {
     slug: "security",
     section: "platform",

@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   is("Ana's two certificates take room", (await used()) > withBen, true);
   is("both deleted", await forgetCertificatesPerson([course.id], "ana@example.com", ROOM), 2);
   is("exactly their room given back", await used(), withBen);
-  is("Ben's is kept", (await certificatesFor(course.id)).total, 1);
+  is("Ben's is kept", (await certificatesFor(course.id))?.total, 1);
   is("a second deletion gives back nothing", [await forgetCertificatesPerson([course.id], "ana@example.com", ROOM), await used()], [0, withBen]);
 
   part("Two deletions at once give the room back once");

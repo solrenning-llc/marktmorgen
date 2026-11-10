@@ -23,7 +23,8 @@ export async function POST(request: NextRequest) {
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     if (body.action === "add") {
-      const added = await addSpend(store.statsId, { channel: body.channel, campaign: body.campaign, cents: body.cents, from: body.from, to: body.to });
+      // `op`: the add's operation id from the studio (components/ad-spend-editor.tsx), so a retried add stays one line.
+      const added = await addSpend(store.statsId, { channel: body.channel, campaign: body.campaign, cents: body.cents, from: body.from, to: body.to, op: body.op });
       if (!added.ok) return Response.json({ ok: false, error: added.reason }, { status: added.reason === "unavailable" ? 503 : 400 });
       return Response.json({ ok: true, spends: added.spends, spendsUnread: added.metaUnread }, { headers: { "Cache-Control": "no-store" } });
     }

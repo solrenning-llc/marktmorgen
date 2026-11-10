@@ -1315,6 +1315,7 @@
     "components/buying-hours.tsx",
     "components/calendar-editor.tsx",
     "components/call-editor.tsx",
+    "components/campaign-qr.tsx",
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
     "components/cart-link-builder.tsx",

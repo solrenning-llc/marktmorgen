@@ -93,7 +93,9 @@ const DAY_MS = 86_400_000;
  * (never "too late" on a date nobody can read), and no end date is shown.
  */
 export function appealDeadline(informedAt: string): { last: Date; shown: Date } | null {
-  if (typeof informedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(informedAt)) return null;
+  // A time with its zone only (Z or an offset): one without would be read as local time, and the server and a browser
+  // could then show different dates for the same decision.
+  if (typeof informedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-]\d{2}:\d{2})$/.test(informedAt)) return null;
   const from = new Date(informedAt);
   if (Number.isNaN(from.getTime())) return null;
   const month = from.getUTCMonth() + APPEAL_WINDOW_MONTHS;
@@ -143,8 +145,20 @@ export type AppealProblem =
   | "attachment_type"
   | "attachment_size";
 
-const clean = (value: unknown, max: number) =>
-  typeof value === "string" ? value.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").trim().slice(0, max) : "";
+/**
+ * Text made safe to keep and to show: line breaks kept (unless `oneLine`), other control characters and every format
+ * character (a bidi override could disguise a file's name to the person who reads it) taken out, runs of spaces made
+ * one. Never cut here: `fits` says whether it is within `max` whole characters.
+ */
+function tidy(value: unknown, oneLine = false): string {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/\r\n?/g, "\n").replace(oneLine ? /[\p{Cc}\p{Cf}]/gu : /\p{Cf}|(?!\n)\p{Cc}/gu, oneLine ? " " : "");
+  return text.replace(/[^\S\n]+/g, " ").trim();
+}
+const fits = (text: string, max: number) => [...text].length <= max;
+/** At most `max` whole characters, never half of one. */
+const upTo = (text: string, max: number) => [...text].slice(0, max).join("");
+const clean = (value: unknown, max: number, oneLine = false) => upTo(tidy(value, oneLine), max);
 
 function readDecision(raw: unknown): Decision | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -175,8 +189,9 @@ export function readAppeal(raw: Record<string, unknown>, decisionRaw: unknown, e
   if (deadline && now.getTime() > deadline.last.getTime()) {
     return refuse("late", `The time to ask us to look again at this decision ended on ${appealDate(deadline.shown)}. ${COURT}`);
   }
-  if (typeof raw.explanation === "string" && raw.explanation.trim().length > MAX_APPEAL_TEXT) return refuse("explanation_long");
-  const explanation = clean(raw.explanation, MAX_APPEAL_TEXT);
+  // Measured once made safe, so spaces a paste added never refuse a text that fits.
+  const explanation = tidy(raw.explanation);
+  if (!fits(explanation, MAX_APPEAL_TEXT)) return refuse("explanation_long");
   if (!explanation) return refuse("explanation");
   const files = raw.attachments === undefined ? [] : raw.attachments;
   if (!Array.isArray(files) || files.length > MAX_APPEAL_ATTACHMENTS) return refuse("attachments");
@@ -186,7 +201,7 @@ export function readAppeal(raw: Record<string, unknown>, decisionRaw: unknown, e
     const type = APPEAL_ATTACHMENT_TYPES.find((t) => t === f?.type);
     if (!f || !type) return refuse("attachment_type");
     if (typeof f.bytes !== "number" || !Number.isSafeInteger(f.bytes) || f.bytes < 1 || f.bytes > MAX_APPEAL_ATTACHMENT_BYTES) return refuse("attachment_size");
-    attachments.push({ name: clean(f.name, MAX_APPEAL_ATTACHMENT_NAME) || "file", type, bytes: f.bytes });
+    attachments.push({ name: clean(f.name, MAX_APPEAL_ATTACHMENT_NAME, true) || "file", type, bytes: f.bytes });
   }
   return { ok: true, appeal: { decision: key, explanation, attachments, at: now.toISOString() } };
 }
@@ -216,13 +231,18 @@ export const APPEAL_NUMBER = /^LA-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
  */
 export function appealNumber(bytes: Uint8Array): string {
   if (bytes.length < 5) throw new Error("an appeal number needs at least 5 random bytes");
-  // 40 bits fit a Number exactly (below 2^53), so plain arithmetic, no BigInt (the build targets below ES2020).
-  let bits = 0;
-  for (let i = 0; i < 5; i++) bits = bits * 256 + bytes[i];
+  // Five bits at a time, by shifts and masks only: 40 random bits give exactly 8 symbols of 32, each equally likely,
+  // with no division or rounding of the random value.
+  let buffer = 0;
+  let held = 0;
   let out = "";
-  for (let i = 0; i < 8; i++) {
-    out = BASE32[bits % 32] + out;
-    bits = Math.floor(bits / 32);
+  for (let i = 0; i < 5; i++) {
+    buffer = ((buffer << 8) | bytes[i]) & 0xfff;
+    held += 8;
+    while (held >= 5) {
+      held -= 5;
+      out += BASE32[(buffer >> held) & 31];
+    }
   }
   return `LA-${out.slice(0, 4)}-${out.slice(4)}`;
 }
@@ -290,14 +310,20 @@ export function decisionNotice(decision: Decision, now: Date, can: StillPossible
   return lines.filter(Boolean);
 }
 
-/** The words of a request's state for the creator, with its number, and the reason of a final answer. */
-export function appealStateWords(appeal: Pick<Appeal, "number" | "state" | "moves" | "decision">): string[] {
+/**
+ * The words of a request's state for the creator, with its number, and the reason of a final answer. `restored` is
+ * whether the caller confirmed that what was taken down is back: a reversal is a decision, and putting the content
+ * back is a separate step that can fail or lag, so "back as it was" is said only once it is confirmed.
+ */
+export function appealStateWords(appeal: Pick<Appeal, "number" | "state" | "moves" | "decision">, restored = false): string[] {
   const kind = DECISION_KINDS.find((k) => appeal.decision.startsWith(`${k}-`));
   const last = appeal.moves[appeal.moves.length - 1];
   const lines = [`Request ${appeal.number}: ${APPEAL_STATE_WORDS[appeal.state]}.`, APPEAL_STATE_MEANING[appeal.state]];
   if (isFinal(appeal.state) && last?.reason) lines.push(`Why: ${last.reason}`);
   if (appeal.state === "reversed") {
-    lines.push(kind && restorable(kind) ? "What was taken down is back as it was." : "The link and its file were deleted, so they cannot be put back. You can add the link again.");
+    lines.push(kind && restorable(kind)
+      ? restored ? "What was taken down is back as it was." : "We are putting back what was taken down. This page will say when it is back."
+      : "The link and its file were deleted, so they cannot be put back. You can add the link again.");
   }
   if (appeal.state === "upheld") lines.push(COURT);
   return lines;

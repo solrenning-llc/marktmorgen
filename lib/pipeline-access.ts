@@ -10,12 +10,19 @@
  * back, room in the store's data room before it is written, and goes with
  * the store. A teammate's field is deleted when they leave the team
  * (forgetPipelineAccess).
+ *
+ * Each reply is read in its exact shape (lib/redis-reply.ts, CX-123 rule 24):
+ * HGET answers exactly null for a teammate never restricted, or the stored
+ * text. Any other reply (none, an empty or sparse list, another type) is
+ * unknown and throws UnknownReplyError, so the caller refuses and changes
+ * nothing; it is never taken for "no restriction" (sweep app1 finding 2).
  */
 import { randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DataRoomError, type DataStore, forceData, giveData, needData } from "@/lib/store-data";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const accessKey = (statsId: string) => `nl:crm:pacc:${statsId}`;
@@ -44,10 +51,23 @@ export function sameAccess(a: AccessMap | null, b: AccessMap | null): boolean {
   return keys.length === Object.keys(b).length && keys.every((id) => Object.hasOwn(b, id) && a[id] === b[id]);
 }
 
-/** A field as stored: none is no restriction; one that cannot be read is null, which opens nothing (accessOf). */
-function mapOf(raw: unknown): AccessMap | null {
-  if (raw === null || raw === undefined || raw === "") return {};
-  if (typeof raw !== "string" || raw.length > 4_000) return null;
+/**
+ * One teammate's field, exactly: null when it was never set, or the stored text. Any other reply throws
+ * UnknownReplyError; it is never read as "no restriction".
+ */
+async function fieldOf(statsId: string, who: string): Promise<string | null> {
+  const raw = repliesFor(await redisPipeline([["HGET", accessKey(statsId), who]]), 1)?.[0];
+  if (raw === null || typeof raw === "string") return raw;
+  throw new UnknownReplyError("a teammate's pipeline access");
+}
+
+/**
+ * A field as stored: only a field never set (exactly null) is no restriction; one that cannot be read is null,
+ * which opens nothing (accessOf).
+ */
+function mapOf(raw: string | null): AccessMap | null {
+  if (raw === null) return {};
+  if (raw.length > 4_000) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -62,39 +82,32 @@ function mapOf(raw: unknown): AccessMap | null {
 
 /**
  * One teammate's restrictions. A record that cannot be read is null, so it
- * opens nothing (accessOf), and a read that fails throws, so the caller
- * refuses: neither is ever taken for no restriction.
+ * opens nothing (accessOf), and a read that fails or answers in an unknown
+ * shape throws, so the caller refuses: neither is ever taken for no restriction.
  */
 export async function readPipelineAccess(statsId: string | null, email: string): Promise<AccessMap | null> {
   if (!statsId || !isRedisConfigured()) return {};
-  const reply: unknown = await redisPipeline([["HGET", accessKey(statsId), normaliseEmail(email)]]);
-  // Only the exact answer of the one HGET is read: its text, or null (nothing recorded). A partial or empty reply, or
-  // one of another kind, is not a record and never no restriction: it throws, so the caller refuses (Codex D, #2036).
-  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new Error("pipeline access could not be read");
-  return mapOf(reply[0]);
+  return mapOf(await fieldOf(statsId, normaliseEmail(email)));
 }
 
-/** Every teammate's restrictions, by address. */
+/** Every teammate's restrictions, by address. HGETALL's reply must be exactly a list of field/value pairs, or it throws. */
 export async function readAllPipelineAccess(statsId: string | null): Promise<Record<string, AccessMap | null>> {
   if (!statsId || !isRedisConfigured()) return {};
-  const reply: unknown = await redisPipeline([["HGETALL", accessKey(statsId)]]);
-  // Only the exact answer of the one HGETALL: a flat list of strings of even length, or an object of strings. Anything
-  // else is not "nobody is restricted": it throws, so the Team page says it could not read them (Claude 5 on #2036).
-  const raw = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
-  const flat = Array.isArray(raw) && raw.length % 2 === 0 && raw.every((v) => typeof v === "string");
-  const keyed = !Array.isArray(raw) && raw !== null && typeof raw === "object" && Object.values(raw as Record<string, unknown>).every((v) => typeof v === "string");
-  if (!flat && !keyed) throw new Error("pipeline access could not be read");
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", accessKey(statsId)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("every teammate's pipeline access");
   const out: Record<string, AccessMap | null> = {};
-  const pairs: [string, unknown][] = Array.isArray(raw) ? raw.flatMap((v, i) => (i % 2 === 0 ? [[String(v), raw[i + 1]] as [string, unknown]] : [])) : Object.entries(raw as Record<string, unknown>);
-  for (const [email, value] of pairs) out[email] = mapOf(value);
+  for (let i = 0; i < flat.length; i += 2) out[flat[i]] = mapOf(flat[i + 1]);
   return out;
 }
 
-/** Sets a teammate's restrictions; none deletes their field. Room is taken (or given back) first. */
+/**
+ * Sets a teammate's restrictions; none deletes their field. Room is taken (or given back) first. What was there is
+ * read exactly; an unknown reply throws before any room is taken or anything is written.
+ */
 export async function writePipelineAccess(statsId: string, email: string, map: AccessMap, room: DataStore): Promise<AccessMap> {
   const who = normaliseEmail(email);
   const clean = parseAccessMap(map);
-  const [before] = await redisPipeline([["HGET", accessKey(statsId), who]]);
+  const before = await fieldOf(statsId, who);
   const value = Object.keys(clean).length ? JSON.stringify(clean) : "";
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([who, v], 1) : 0);
   const grown = weight(value) - weight(before);
@@ -136,12 +149,12 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
   if (before === after) return UNCHANGED;
-  const reply: unknown = await redisPipeline([["HGET", accessKey(statsId), before], ["HGET", accessKey(statsId), after]]);
-  // Both answers exactly, before anything moves: a text or null each (nothing recorded). A partial or empty reply,
-  // or one of another kind, is not "no restriction": it throws, and the caller keeps the membership on the old
-  // address, its restrictions in place (Codex D, #2036: a missing answer moved a restricted teammate unrestricted).
-  if (!Array.isArray(reply) || reply.length !== 2 || reply.some((one) => one !== null && typeof one !== "string")) throw new Error("a teammate's pipeline access could not be read before their move");
-  const [raw, old] = reply as (string | null)[];
+  // Both answers exactly, before anything moves, each by the one exact reader (fieldOf, main's #2989): a text or null
+  // each (nothing recorded). A partial or empty reply, or one of another kind, is not "no restriction": it throws
+  // UnknownReplyError, and the caller keeps the membership on the old address, its restrictions in place (Codex D,
+  // #2036: a missing answer moved a restricted teammate unrestricted).
+  const raw = await fieldOf(statsId, before);
+  const old = await fieldOf(statsId, after);
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([after, v], 1) : 0);
   if (raw === null || raw === "") {
     // No restriction to carry: a field the new address had from before (someone else's, long gone) must not
@@ -249,7 +262,8 @@ export async function forgetPipelineAccess(store: DataStore, email: string): Pro
   const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return;
   const who = normaliseEmail(email);
-  const [raw, deleted] = await redisPipeline([["HGET", accessKey(statsId), who], ["HDEL", accessKey(statsId), who]]);
+  // Room is given back only on the exact replies; an unknown one keeps it counted, never giving back room still in use.
+  const [raw, deleted] = repliesFor(await redisPipeline([["HGET", accessKey(statsId), who], ["HDEL", accessKey(statsId), who]]), 2) ?? [];
   if (deleted === 1 && typeof raw === "string" && raw) await giveData(store, [{ slot: ACCESS_SLOT, bytes: dataBytes([who, raw], 1) }]);
 }
 

@@ -88,7 +88,7 @@ test("control: the real records answer as written", async () => {
   assert.deepEqual((await readTeam(store.sid)).members.map((m) => m.email), [ANA]);
   assert.equal((await readTeam(store.sid)).requireTwoStep, true);
   assert.deepEqual((await memberStores(ANA)).map((s) => s.store.sid), [store.sid]);
-  assert.deepEqual((await readLog(store.sid)).map((line) => line.what), ["Required two-step sign-in for the team"]);
+  assert.deepEqual((await readLog(store.sid))!.map((line) => line.what), ["Required two-step sign-in for the team"]);
 });
 
 test("control: a store with no team record yet is an empty team, and no log is an empty log", async () => {
@@ -184,14 +184,16 @@ test("parseTeam: only null is no team; any other shape is unknown, never an empt
 for (const [label, shape] of [["a number", 3], ["an object", { 0: "x" }], ["a string", "rows"], ["a list holding a number", [7]]] as [string, unknown][]) {
   test(`removal repeat: the activity log read as ${label} is unknown, never "nobody was removed"`, async () => {
     const store = await fixture();
-    await assert.rejects(() => withReply("LRANGE", `nl:team:log:${store.sid}`, shape, () => readLog(store.sid)), { name: "UnknownReplyError" });
+    // main's #3164 (readLogWhole): an unreadable log is null, never an empty list ("nobody was removed").
+    assert.equal(await withReply("LRANGE", `nl:team:log:${store.sid}`, shape, () => readLog(store.sid)), null);
   });
 
   test(`removal repeat: pressing Remove again while the log reads as ${label} answers 503, never "not on the team"`, async () => {
     const store = await fixture();
     assert.deepEqual(await team(store, { action: "remove", email: ANA }), { status: 200, body: { ok: true } });
     const answer = await withReply("LRANGE", `nl:team:log:${store.sid}`, shape, () => team(store, { action: "remove", email: ANA }));
-    assert.deepEqual(answer, { status: 503, body: { ok: false, error: "unread" } });
+    // main's #3164: "unsure" (503), with nothing swept, written or emailed.
+    assert.deepEqual(answer, { status: 503, body: { ok: false, error: "unsure" } });
   });
 
   test(`removal: a member still on the team is taken off, and swept, while the log reads as ${label}`, async () => {

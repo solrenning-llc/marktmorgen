@@ -106,9 +106,9 @@ async function main(): Promise<void> {
 
   part("Only pipeline ids are named");
   await writePipelineAccess(statsId, "sam@example.com", {}, store);
-  const linesBefore = (await readLog(store.sid)).length;
+  const linesBefore = (await readLog(store.sid))!.length;
   const proto = await pacc('{"email":"sam@example.com","choices":{"__proto__":"view"}}');
-  is("\"__proto__\" is not a pipeline: refused, nothing written, nothing logged", [proto.status, proto.body.error, await readPipelineAccess(statsId, "sam@example.com"), (await readLog(store.sid)).length - linesBefore], [400, "invalid", {}, 0]);
+  is("\"__proto__\" is not a pipeline: refused, nothing written, nothing logged", [proto.status, proto.body.error, await readPipelineAccess(statsId, "sam@example.com"), (await readLog(store.sid))!.length - linesBefore], [400, "invalid", {}, 0]);
   is("nor with a real one beside it, nor one at a time, nor constructor", [(await pacc('{"email":"sam@example.com","choices":{"__proto__":"view","wkshp1":"none"}}')).status, (await pacc({ email: "sam@example.com", pipeline: "__proto__", access: "view" })).status, (await pacc({ email: "sam@example.com", choices: { constructor: "view" } })).status], [400, 400, 400]);
 
   part("Who cannot be restricted is told why");
@@ -143,10 +143,10 @@ async function main(): Promise<void> {
 
   part("The activity log says what changed, pipeline by pipeline");
   await pacc({ email: "sam@example.com", choices: { wkshp1: "none", coach1: "none" } });
-  const line = (await readLog(store.sid))[0]?.what;
+  const line = (await readLog(store.sid))![0]?.what;
   is("only the pipeline that changed, with what it was", line, "Set sam@example.com's pipeline access. Workshops: no access (was can change)");
   await pacc({ email: "sam@example.com", choices: { wkshp1: "none", coach1: "none" } });
-  is("a Save that changes nothing says so", (await readLog(store.sid))[0]?.what, "Saved sam@example.com's pipeline access with no change");
+  is("a Save that changes nothing says so", (await readLog(store.sid))![0]?.what, "Saved sam@example.com's pipeline access with no change");
 
   part("Moving a sign-in");
   const roomOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
@@ -256,9 +256,9 @@ async function main(): Promise<void> {
   const stagesKept = await crm(owner, { action: "pipeline", pipeline: { ...kept, stages: [...kept.stages, { id: "cmid01", name: "Talking", kind: "open" }] }, moves: {} });
   is("the owner still changes either one's stages, its name kept", stagesKept.status, 200);
   await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "edit" } });
-  is("the team's log tells them apart", (await readLog(store.sid))[0]?.what, "Set sam@example.com's pipeline access. Coaching: can only see (was no access)");
+  is("the team's log tells them apart", (await readLog(store.sid))![0]?.what, "Set sam@example.com's pipeline access. Coaching: can only see (was no access)");
   await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "none" } });
-  const twinLine = (await readLog(store.sid))[0]!;
+  const twinLine = (await readLog(store.sid))![0]!;
   is("and, on the team page, names the later one with its number", accessLogWords(twinLine.access!, accessLogNamer(await readPipelines(statsId))), "Set sam@example.com's pipeline access. coaching (2): no access (was can change)");
 
   part("Round 5: an access record that cannot be read is a known refusal");
@@ -268,7 +268,8 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const unreadAccess = await crm("sam@example.com", { action: "deal", deal: { title: "T", email: "", cents: 1, stage: "wnew01", note: "" } });
   redis.pipeline = real;
-  is("nothing was written, and the board is told so, never that it may have happened", [unreadAccess.status, unreadAccess.body.error], [503, "crm_schema_read_unavailable"]);
+  // main's #2989 answers an unread access record 503 "unavailable", a known refusal (lib/crm-response.ts REFUSALS).
+  is("nothing was written, and the board is told so, never that it may have happened", [unreadAccess.status, unreadAccess.body.error], [503, "unavailable"]);
 
   part("Round 5: a removal checked against one deal never removes a changed one");
   await writePipelineAccess(statsId, "sam@example.com", { coach1: "none" }, store);
@@ -328,7 +329,7 @@ async function main(): Promise<void> {
 
   part("Round 6: the log names each pipeline as it is named when the log is read");
   is("kept by pipeline id, with the name it had", [twinLine.what, twinLine.access], ["Set sam@example.com's pipeline access. coaching: no access (was can change)", { email: "sam@example.com", one: false, changes: [{ id: "sams01", name: "coaching", now: "none", was: "edit" }] }]);
-  const firstLine = (await readLog(store.sid)).find((l) => l.access?.changes.some((c) => c.id === "coach1"))!;
+  const firstLine = (await readLog(store.sid))!.find((l) => l.access?.changes.some((c) => c.id === "coach1"))!;
   is("(the owner removes the first Coaching)", (await crm(owner, { action: "unpipeline", id: "coach1", moveTo: "wnew01" })).status, 200);
   const namer = accessLogNamer(await readPipelines(statsId));
   is("the one left is named as it is now, never by a number that pointed at it before; the one removed is said as removed", [accessLogWords(twinLine.access!, namer), accessLogWords(firstLine.access!, namer)], ["Set sam@example.com's pipeline access. coaching: no access (was can change)", "Set sam@example.com's pipeline access. Coaching (since removed): can only see (was no access)"]);
@@ -360,14 +361,14 @@ async function main(): Promise<void> {
   const worst: AccessLog = { email: longest, one: false, changes: Array.from({ length: PIPELINES_BY_TIER.scale }, (_, i) => ({ id: `pipe${String(i).padStart(2, "0")}`, name: bigName, now: "none", was: "edit" })) };
   await logTeam(store.sid, { who: longest, role: "owner", what: accessLogWords(worst, (c) => c.name), access: worst });
   const worstRaw = await rawNewest();
-  is("the largest line fits: its details are dropped first, then its words shortened", [Buffer.byteLength(worstRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(worstRaw), "access"), (await readLog(store.sid))[0].what.startsWith("Set ")], [true, false, true]);
+  is("the largest line fits: its details are dropped first, then its words shortened", [Buffer.byteLength(worstRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(worstRaw), "access"), (await readLog(store.sid))![0].what.startsWith("Set ")], [true, false, true]);
   const many: AccessLog = { ...worst, email: "sam@example.com", changes: worst.changes.map((c) => ({ ...c, name: "P".repeat(MAX_PIPELINE_NAME) })) };
   await logTeam(store.sid, { who: owner, role: "owner", what: accessLogWords(many, (c) => c.name), access: many });
   const manyRaw = await rawNewest();
-  is("with usual addresses and names, every pipeline at once: its details dropped, its words (which name the pipelines) kept whole", [Buffer.byteLength(manyRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(manyRaw), "access"), (await readLog(store.sid))[0].what === accessLogWords(many, (c) => c.name).slice(0, 200)], [true, false, true]);
+  is("with usual addresses and names, every pipeline at once: its details dropped, its words (which name the pipelines) kept whole", [Buffer.byteLength(manyRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(manyRaw), "access"), (await readLog(store.sid))![0].what === accessLogWords(many, (c) => c.name).slice(0, 200)], [true, false, true]);
   const small: AccessLog = { email: "sam@example.com", one: true, changes: [{ id: "wkshp1", name: "Workshops", now: "view", was: "edit" }] };
   await logTeam(store.sid, { who: owner, role: "owner", what: accessLogWords(small, (c) => c.name), access: small });
-  is("a usual one keeps its details, so the team page names its pipeline as it is when shown", [Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, (await readLog(store.sid))[0].access], [true, small]);
+  is("a usual one keeps its details, so the team page names its pipeline as it is when shown", [Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, (await readLog(store.sid))![0].access], [true, small]);
   await logTeam(store.sid, { who: longest, role: "owner", what: "\u20AC".repeat(200) });
   is("and any line at all, its words shortened when they must be", Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, true);
   is("the registry counts the log from the same bound", readFileSync("tests/store-data-registry.ts", "utf8").includes("capped(LOG_LINES * (LOG_LINE_BYTES + 64)") && LOG_LINE_BYTES + 64 <= 512, true);
@@ -455,7 +456,7 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   const dCount = await real([["HLEN",dealsKey]]);
   is("(the partial read was made)", dPartial > 0, true);
-  is("D partial read refuses and creates no deal", [dAfterPartial.status,dAfterPartial.body.error,dCount], [503,"crm_schema_read_unavailable",dBefore]);
+  is("D partial read refuses and creates no deal", [dAfterPartial.status,dAfterPartial.body.error,dCount], [503,"unavailable",dBefore]);
 
   part("Codex D (#2036): a restriction is said saved only on a confirmed write");
   await writePipelineAccess(statsId,"sam@example.com",{},store);
@@ -492,7 +493,8 @@ async function main(): Promise<void> {
   is("D migration control: source cannot write the hidden pipeline",(await crm(d9From,{action:"deal",deal:{title:"D blocked migration",email:"",cents:1,stage:"wnew01",note:""}})).status,403);
   let d9CopyRead=0;
   redis.pipeline=(async(commands:(string|number)[][])=>{
-    if(commands.length===2&&commands.every(c=>c[0]==="HGET"&&c[1]===`nl:crm:pacc:${statsId}`)&&commands[0][2]===d9From&&commands[1][2]===d9To) {d9CopyRead++;return [];}
+    // The copy reads the source's field by itself (fieldOf, main's #2989), so its partial answer is that one HGET's.
+    if(commands.length===1&&commands[0][0]==="HGET"&&commands[0][1]===`nl:crm:pacc:${statsId}`&&commands[0][2]===d9From) {d9CopyRead++;return [];}
     return real(commands);
   }) as typeof redis.pipeline;
   try{await moveMemberships(d9From,d9To);}catch{/* refused: the membership stays */}

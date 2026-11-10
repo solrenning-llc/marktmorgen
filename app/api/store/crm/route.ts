@@ -5,12 +5,12 @@ import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { ensureStatsId } from "@/lib/store";
 import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
-import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
+import { type AccessMap, PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
 import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CrmDealConflict, CrmFieldsKept, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
+import { CrmDealConflict, CrmFieldsKept, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -46,9 +46,15 @@ export async function POST(request: NextRequest) {
     const statsId = store.statsId;
     // Which pipelines this person may change (639 [GL7](7)): the owner and Admins every one, a teammate as the store set.
     const restricted = guarded.role !== "owner" && guarded.role !== "admin";
-    // A record that could not be read is a known refusal (crm_schema_read_unavailable): nothing was written, so
-    // the board is never told a change may already have happened.
-    const access = restricted ? await readPipelineAccess(statsId, guarded.email).catch(() => { throw new CrmSchemaReadUnavailable(); }) : {};
+    // A reply in an unknown shape is never taken for no restriction (lib/pipeline-access.ts), and any record that could
+    // not be read is a known refusal (503 unavailable, main's #2989): nothing was written, so the board is never told
+    // a change may already have happened (Codex D on #2036: a lost connection is refused the same way).
+    let access: AccessMap | null = {};
+    try {
+      if (restricted) access = await readPipelineAccess(statsId, guarded.email);
+    } catch {
+      return refuse("unavailable", 503);
+    }
     const mayEdit = (pipelineId: string | null) => pipelineId !== null && accessOf(guarded.role, access, pipelineId) === "edit";
     const noAccess = () => Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
 

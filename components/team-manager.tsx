@@ -24,6 +24,7 @@ const MESSAGES: Record<string, string> = {
   unknown: "That is not there anymore. Reload the page.",
   same: "They already have that role.",
   not_found: "That address is not on the team. Reload the page.",
+  unsure: "We could not check the team's activity just now, so nothing was changed. Try again in a moment.",
   repeat: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish.",
   unread: "We could not read your team just now. Reload the page and try again in a moment.",
   signed_out: "Your session ended. Log in again.",

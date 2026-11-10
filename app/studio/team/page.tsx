@@ -5,6 +5,7 @@ import { type AccessChange, accessLogNamer, accessLogWords } from "@/lib/pipelin
 import { readAllPipelineAccess } from "@/lib/pipeline-access";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { StudioEmptyState } from "@/components/empty-state";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { TeamManager } from "@/components/team-manager";
@@ -49,7 +50,8 @@ export default async function StudioTeamPage({
   const { store } = view;
   const [team, log, pipelines, access] = await Promise.all([
     readTeam(store.sid),
-    readLog(store.sid),
+    // The log is null when it could not be read (rule 24): the page says so instead of "No activity yet".
+    readLog(store.sid).catch(() => null),
     // A pipelines record that cannot be read shows the notice, never the default pipeline in its place.
     readPipelinesExact(store.statsId).catch(() => null),
     readAllPipelineAccess(store.statsId).catch(() => null),
@@ -159,8 +161,18 @@ export default async function StudioTeamPage({
               Every change a team member sends from the studio, every download of buyers&apos; data they make, and every
               change to the team, newest first. The last 500 are kept.
             </p>
-            {log.length === 0 ? (
-              <p className="mt-4 rounded-[12px] bg-paper px-4 py-3 text-sm text-ink-soft ring-1 ring-line">Nothing yet.</p>
+            {log === null ? (
+              <p role="status" className="notice notice-warn mt-4">
+                The activity could not be read just now. Reload this page in a moment; this does not mean nothing happened.
+              </p>
+            ) : log.length === 0 ? (
+              <StudioEmptyState
+                level={3}
+                compact
+                className="mt-4"
+                title="No activity yet"
+                body="Each change a teammate makes from the studio, each download of buyers' data, and each change to the team is listed here, newest first."
+              />
             ) : (
               <>
                 <LogList lines={log.slice(0, FIRST_LINES)} nameOf={nameOf} />
@@ -181,7 +193,7 @@ export default async function StudioTeamPage({
   );
 }
 
-function LogList({ lines, nameOf }: { lines: Awaited<ReturnType<typeof readLog>>; nameOf: (change: AccessChange) => string }) {
+function LogList({ lines, nameOf }: { lines: NonNullable<Awaited<ReturnType<typeof readLog>>>; nameOf: (change: AccessChange) => string }) {
   return (
     <ol className="mt-4 divide-y divide-line">
       {lines.map((line, i) => (

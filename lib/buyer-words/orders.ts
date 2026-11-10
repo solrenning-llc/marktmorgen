@@ -66,7 +66,7 @@ const en = {
   emailYouPaidWith: "The email you paid with",
   emailMe: "Email me my purchases",
   formNote: (store: string) =>
-    `If that address bought something from ${store}, a link to all of it usually arrives within a minute and works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
+    `If that address bought something from ${store}, we try to email a link to all of it. Any link sent works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
     `If that address bought something from ${store}, a link is normally on its way. It comes from ${store} via Marktmorgen and can take a few minutes. If it is not there, look in spam.`,
@@ -81,6 +81,8 @@ const en = {
   /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
   openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
   openToSign: (title: string): string => `Read and sign “${title}”`,
+  /** The heading over nothingToOpen (656 [WG16], components/empty-state.tsx). */
+  nothingToOpenTitle: "Nothing to open here",
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -161,6 +163,7 @@ const en = {
   checkingOlder: "Checking older purchases…",
   olderShown: (count: number) =>
     count === 0 ? "None of the purchases checked can be opened again." : count === 1 ? "1 more purchase is now on the list." : `${count} more purchases are now on the list.`,
+  olderBatchShown: (count: number) => count === 0 ? "No purchases in this batch can be opened again." : count === 1 ? "This page shows 1 purchase from this batch." : `This page shows ${count} purchases from this batch.`,
   olderFailed: "Older purchases could not be checked just now. Try again in a moment.",
   /** The pages drawn without JavaScript (app/[handle]/orders/page.tsx): a bundle's products, or a batch of older purchases, and the way back. */
   backToList: "Back to all your purchases",
@@ -215,13 +218,13 @@ const en = {
     `Type ${email} on that page and a link to your own private feed comes right away. It works in Apple Podcasts, Overcast, Pocket Casts and most other podcast apps, for as long as you have it.`,
   startCourseAt: (url: string) => `Start the course: ${url}`,
   courseNote: (email: string) =>
-    `If you pressed "Start the course" after paying, it opens right away on that device. Anywhere else, the course page asks for your email: type ${email}, and a link that lets that device in usually arrives within a minute. There is no password to make.`,
+    `If you pressed "Start the course" after paying, it opens right away on that device. Anywhere else, the course page asks for your email: type ${email} and request an email link that lets that device in. There is no password to make.`,
   openWhatYouBought: (url: string) => `Open what you bought: ${url}`,
   threeDays: (ordersUrl: string, email: string, store: string) =>
     `That page has your download or your link for the next 3 days. After that it is not lost: open ${ordersUrl}, type ${email}, and a link to everything you bought from ${store} is emailed to you, at any time.`,
   startTitleAt: (title: string, url: string) => `Start ${title}: ${url}`,
   bundleCourseNote: (email: string) =>
-    `A course you started after paying opens right away on that device. Anywhere else, its page asks for your email: type ${email}, and a link that lets that device in usually arrives within a minute.`,
+    `A course you started after paying opens right away on that device. Anywhere else, its page asks for your email: type ${email} and request an email link that lets that device in.`,
   /** `label` is yourKey or yourKeyFor. */
   keyIssued: (label: string, key: string) => `${label}: ${key}`,
   keyOnItsWay: (label: string, store: string) =>
@@ -339,7 +342,7 @@ const es: OrdersWords = {
   emailYouPaidWith: "El email con el que pagaste",
   emailMe: "Envíame mis compras por email",
   formNote: (store) =>
-    `Si esa dirección le compró algo a ${store}, normalmente en menos de un minuto llega un enlace a todo ello, que funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
+    `Si esa dirección le compró algo a ${store}, intentamos enviarle por email un enlace a todo ello. Cualquier enlace enviado funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
     `Si esa dirección le compró algo a ${store}, normalmente el enlace va en camino. Llega de ${store} vía Marktmorgen y puede tardar unos minutos. Si no está, mira en la carpeta de spam.`,
@@ -351,6 +354,7 @@ const es: OrdersWords = {
   waitingUnread: "No pudimos leer ahora lo que te espera. Vuelve a abrir esta página en un momento.",
   openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
   openToSign: (title) => `Leer y firmar «${title}»`,
+  nothingToOpenTitle: "Nada que abrir aquí",
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -418,6 +422,7 @@ const es: OrdersWords = {
   checkingOlder: "Comprobando compras anteriores…",
   olderShown: (count) =>
     count === 0 ? "Ninguna de las compras comprobadas se puede volver a abrir." : count === 1 ? "1 compra más está ahora en la lista." : `${count} compras más están ahora en la lista.`,
+  olderBatchShown: (count) => count === 0 ? "No se puede volver a abrir ninguna compra de este grupo." : count === 1 ? "Esta página muestra 1 compra de este grupo." : `Esta página muestra ${count} compras de este grupo.`,
   olderFailed: "No se han podido comprobar las compras anteriores ahora. Inténtalo de nuevo en un momento.",
   backToList: "Volver a todas tus compras",
   olderTitle: "Compras anteriores",
@@ -468,13 +473,13 @@ const es: OrdersWords = {
     `Escribe ${email} en esa página y al instante te llegará un enlace a tu propio feed privado. Funciona en Apple Podcasts, Overcast, Pocket Casts y la mayoría de las demás apps de pódcast, mientras lo tengas.`,
   startCourseAt: (url) => `Empieza el curso: ${url}`,
   courseNote: (email) =>
-    `Si pulsaste «${esStart}» después de pagar, se abre al instante en ese dispositivo. En cualquier otro, la página del curso te pide tu email: escribe ${email} y normalmente en menos de un minuto te llega un enlace que da acceso a ese dispositivo. No hay contraseña que crear.`,
+    `Si pulsaste «${esStart}» después de pagar, se abre al instante en ese dispositivo. En cualquier otro, la página del curso te pide tu email: escribe ${email} y pide por email un enlace que dé acceso a ese dispositivo. No hay contraseña que crear.`,
   openWhatYouBought: (url) => `Abre lo que compraste: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Esa página tiene tu descarga o tu enlace durante los próximos 3 días. Después no se pierde: abre ${ordersUrl}, escribe ${email} y te enviaremos por email un enlace a todo lo que le compraste a ${store}, en cualquier momento.`,
   startTitleAt: (title, url) => `Empieza ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Un curso que empezaste después de pagar se abre al instante en ese dispositivo. En cualquier otro, su página te pide tu email: escribe ${email} y normalmente en menos de un minuto te llega un enlace que da acceso a ese dispositivo.`,
+    `Un curso que empezaste después de pagar se abre al instante en ese dispositivo. En cualquier otro, su página te pide tu email: escribe ${email} y pide por email un enlace que dé acceso a ese dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: en camino. A ${store} se le acabaron las claves justo cuando pagaste; te llegará por email en cuanto añada más.`,
@@ -581,7 +586,7 @@ const fr: OrdersWords = {
   emailYouPaidWith: "L'e-mail avec lequel vous avez payé",
   emailMe: "M'envoyer mes achats par e-mail",
   formNote: (store) =>
-    `Si cette adresse a acheté quelque chose chez ${store}, un lien vers tous ses achats arrive généralement en moins d'une minute et reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
+    `Si cette adresse a acheté quelque chose chez ${store}, nous essayons de lui envoyer par e-mail un lien vers tous ses achats. Tout lien envoyé reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
     `Si cette adresse a acheté quelque chose chez ${store}, le lien est normalement en route. Il vient de ${store} via Marktmorgen et peut mettre quelques minutes. S'il n'y est pas, regardez dans les spams.`,
@@ -593,6 +598,7 @@ const fr: OrdersWords = {
   waitingUnread: "Ce qui vous attend n’a pas pu être lu pour le moment. Rouvrez cette page dans un instant.",
   openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
   openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
+  nothingToOpenTitle: "Rien à ouvrir ici",
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -659,6 +665,7 @@ const fr: OrdersWords = {
   checkingOlder: "Vérification des achats plus anciens…",
   olderShown: (count) =>
     count === 0 ? "Aucun des achats vérifiés ne peut être rouvert." : count < 2 ? "1 achat de plus figure maintenant dans la liste." : `${count}${S}achats de plus figurent maintenant dans la liste.`,
+  olderBatchShown: (count) => count === 0 ? "Aucun achat de ce groupe ne peut être rouvert." : count === 1 ? "Cette page présente 1 achat de ce groupe." : `Cette page présente ${count} achats de ce groupe.`,
   olderFailed: "Les achats plus anciens ne peuvent pas être vérifiés pour le moment. Réessayez dans un instant.",
   backToList: "Retour à tous vos achats",
   olderTitle: "Achats plus anciens",
@@ -708,13 +715,13 @@ const fr: OrdersWords = {
     `Saisissez ${email} sur cette page et un lien vers votre propre flux privé arrive aussitôt. Il fonctionne dans Apple Podcasts, Overcast, Pocket Casts et la plupart des autres applications de podcasts, aussi longtemps que vous l'avez.`,
   startCourseAt: (url) => `Commencez la formation${S}: ${url}`,
   courseNote: (email) =>
-    `Si vous avez cliqué sur «${S}${frStart}${S}» après le paiement, elle s'ouvre immédiatement sur cet appareil. Ailleurs, la page de la formation vous demande votre e-mail${S}: saisissez ${email}, et un lien qui donne accès à cet appareil arrive généralement en moins d'une minute. Aucun mot de passe à créer.`,
+    `Si vous avez cliqué sur «${S}${frStart}${S}» après le paiement, elle s'ouvre immédiatement sur cet appareil. Ailleurs, la page de la formation vous demande votre e-mail${S}: saisissez ${email} et demandez par e-mail un lien qui donne accès à cet appareil. Aucun mot de passe à créer.`,
   openWhatYouBought: (url) => `Ouvrez votre achat${S}: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Cette page contient votre téléchargement ou votre lien pendant les 3${S}prochains jours. Ensuite, rien n'est perdu${S}: ouvrez ${ordersUrl}, saisissez ${email}, et un lien vers tout ce que vous avez acheté chez ${store} vous est envoyé par e-mail, à tout moment.`,
   startTitleAt: (title, url) => `Commencez ${title}${S}: ${url}`,
   bundleCourseNote: (email) =>
-    `Une formation commencée après le paiement s'ouvre immédiatement sur cet appareil. Ailleurs, sa page vous demande votre e-mail${S}: saisissez ${email}, et un lien qui donne accès à cet appareil arrive généralement en moins d'une minute.`,
+    `Une formation commencée après le paiement s'ouvre immédiatement sur cet appareil. Ailleurs, sa page vous demande votre e-mail${S}: saisissez ${email} et demandez par e-mail un lien qui donne accès à cet appareil.`,
   keyIssued: (label, key) => `${label}${S}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}${S}: en route. ${store} n'avait plus de clés au moment de votre paiement${S}; elle vous sera envoyée par e-mail dès que de nouvelles clés seront ajoutées.`,
@@ -821,7 +828,7 @@ const de: OrdersWords = {
   emailYouPaidWith: "Die E-Mail-Adresse, mit der Sie bezahlt haben",
   emailMe: "Meine Käufe per E-Mail senden",
   formNote: (store) =>
-    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, kommt ein Link zu allem in der Regel innerhalb einer Minute an und gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
+    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, versuchen wir, per E-Mail einen Link zu allem zu senden. Jeder gesendete Link gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
   checkInbox: "Sehen Sie in Ihrem Posteingang nach",
   sentBody: (store) =>
     `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link normalerweise unterwegs. Er kommt von ${store} über Marktmorgen und kann ein paar Minuten dauern. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
@@ -833,6 +840,7 @@ const de: OrdersWords = {
   waitingUnread: "Was auf Sie wartet, konnte gerade nicht gelesen werden. Öffnen Sie diese Seite gleich noch einmal.",
   openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
   openToSign: (title) => `„${title}“ lesen und unterschreiben`,
+  nothingToOpenTitle: "Hier gibt es nichts zu öffnen",
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -900,6 +908,7 @@ const de: OrdersWords = {
   checkingOlder: "Ältere Käufe werden geprüft…",
   olderShown: (count) =>
     count === 0 ? "Keiner der geprüften Käufe kann erneut geöffnet werden." : count === 1 ? "1 weiterer Kauf steht jetzt in der Liste." : `${count} weitere Käufe stehen jetzt in der Liste.`,
+  olderBatchShown: (count) => count === 0 ? "Kein Kauf aus dieser Gruppe kann erneut geöffnet werden." : count === 1 ? "Diese Seite zeigt 1 Kauf aus dieser Gruppe." : `Diese Seite zeigt ${count} Käufe aus dieser Gruppe.`,
   olderFailed: "Ältere Käufe können gerade nicht geprüft werden. Versuchen Sie es gleich noch einmal.",
   backToList: "Zurück zu all Ihren Käufen",
   olderTitle: "Ältere Käufe",
@@ -949,13 +958,13 @@ const de: OrdersWords = {
     `Geben Sie auf dieser Seite ${email} ein, und ein Link zu Ihrem eigenen privaten Feed kommt sofort. Er funktioniert in Apple Podcasts, Overcast, Pocket Casts und den meisten anderen Podcast-Apps, solange Sie den Podcast haben.`,
   startCourseAt: (url) => `Kurs starten: ${url}`,
   courseNote: (email) =>
-    `Wenn Sie nach dem Bezahlen auf „${deStart}“ geklickt haben, öffnet sich der Kurs auf diesem Gerät sofort. Überall sonst fragt die Kursseite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein, und ein Link, der dieses Gerät freischaltet, kommt in der Regel innerhalb einer Minute. Sie müssen kein Passwort anlegen.`,
+    `Wenn Sie nach dem Bezahlen auf „${deStart}“ geklickt haben, öffnet sich der Kurs auf diesem Gerät sofort. Überall sonst fragt die Kursseite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein und fordern Sie per E-Mail einen Link an, der dieses Gerät freischaltet. Sie müssen kein Passwort anlegen.`,
   openWhatYouBought: (url) => `Ihren Kauf öffnen: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Auf dieser Seite finden Sie Ihren Download oder Ihren Link für die nächsten 3 Tage. Danach ist nichts verloren: Öffnen Sie ${ordersUrl}, geben Sie ${email} ein, und ein Link zu allem, was Sie bei ${store} gekauft haben, wird Ihnen jederzeit per E-Mail geschickt.`,
   startTitleAt: (title, url) => `${title} starten: ${url}`,
   bundleCourseNote: (email) =>
-    `Ein Kurs, den Sie nach dem Bezahlen gestartet haben, öffnet sich auf diesem Gerät sofort. Überall sonst fragt seine Seite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein, und ein Link, der dieses Gerät freischaltet, kommt in der Regel innerhalb einer Minute.`,
+    `Ein Kurs, den Sie nach dem Bezahlen gestartet haben, öffnet sich auf diesem Gerät sofort. Überall sonst fragt seine Seite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein und fordern Sie per E-Mail einen Link an, der dieses Gerät freischaltet.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: unterwegs. ${store} hatte genau bei Ihrer Zahlung keine Schlüssel mehr; Ihr Schlüssel wird Ihnen per E-Mail geschickt, sobald neue hinzugefügt werden.`,
@@ -1066,7 +1075,7 @@ const it: OrdersWords = {
   emailYouPaidWith: "L'email con cui hai pagato",
   emailMe: "Inviami i miei acquisti via email",
   formNote: (store) =>
-    `Se quell'indirizzo ha acquistato qualcosa da ${store}, di solito entro un minuto arriva un link a tutto, valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
+    `Se quell'indirizzo ha acquistato qualcosa da ${store}, proviamo a inviare via email un link a tutto. Ogni link inviato è valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
     `Se quell'indirizzo ha acquistato qualcosa da ${store}, di norma il link è in arrivo. Arriva da ${store} tramite Marktmorgen e può richiedere qualche minuto. Se non lo trovi, guarda nella cartella spam.`,
@@ -1078,6 +1087,7 @@ const it: OrdersWords = {
   waitingUnread: "Non è stato possibile leggere ora cosa ti aspetta. Riapri questa pagina tra un momento.",
   openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
   openToSign: (title) => `Leggi e firma «${title}»`,
+  nothingToOpenTitle: "Niente da aprire qui",
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1145,6 +1155,7 @@ const it: OrdersWords = {
   checkingOlder: "Verifica degli acquisti precedenti…",
   olderShown: (count) =>
     count === 0 ? "Nessuno degli acquisti verificati può essere riaperto." : count === 1 ? "1 acquisto in più è ora nell'elenco." : `${count} acquisti in più sono ora nell'elenco.`,
+  olderBatchShown: (count) => count === 0 ? "Nessun acquisto di questo gruppo può essere riaperto." : count === 1 ? "Questa pagina mostra 1 acquisto di questo gruppo." : `Questa pagina mostra ${count} acquisti di questo gruppo.`,
   olderFailed: "Non è stato possibile verificare gli acquisti precedenti ora. Riprova tra un momento.",
   backToList: "Torna a tutti i tuoi acquisti",
   olderTitle: "Acquisti precedenti",
@@ -1194,13 +1205,13 @@ const it: OrdersWords = {
     `Inserisci ${email} in quella pagina e ricevi subito un link al tuo feed privato. Funziona con Apple Podcasts, Overcast, Pocket Casts e la maggior parte delle altre app di podcast, per tutto il tempo in cui lo hai.`,
   startCourseAt: (url) => `Inizia il corso: ${url}`,
   courseNote: (email) =>
-    `Se dopo il pagamento hai premuto «${itStart}», si apre subito su quel dispositivo. Altrove, la pagina del corso ti chiede la tua email: inserisci ${email} e di solito entro un minuto arriva un link che dà accesso a quel dispositivo. Non c'è nessuna password da creare.`,
+    `Se dopo il pagamento hai premuto «${itStart}», si apre subito su quel dispositivo. Altrove, la pagina del corso ti chiede la tua email: inserisci ${email} e richiedi via email un link che dia accesso a quel dispositivo. Non c'è nessuna password da creare.`,
   openWhatYouBought: (url) => `Apri ciò che hai acquistato: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Quella pagina contiene il tuo download o il tuo link per i prossimi 3 giorni. Dopo non va perso: apri ${ordersUrl}, inserisci ${email} e ti verrà inviato via email un link a tutto ciò che hai acquistato da ${store}, in qualsiasi momento.`,
   startTitleAt: (title, url) => `Inizia ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Un corso che hai iniziato dopo il pagamento si apre subito su quel dispositivo. Altrove, la sua pagina ti chiede la tua email: inserisci ${email} e di solito entro un minuto arriva un link che dà accesso a quel dispositivo.`,
+    `Un corso che hai iniziato dopo il pagamento si apre subito su quel dispositivo. Altrove, la sua pagina ti chiede la tua email: inserisci ${email} e richiedi via email un link che dia accesso a quel dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: in arrivo. Le chiavi di ${store} si sono esaurite proprio mentre pagavi; ti verrà inviata via email appena ne verranno aggiunte altre.`,
@@ -1307,7 +1318,7 @@ const nl: OrdersWords = {
   emailYouPaidWith: "Het e-mailadres waarmee je hebt betaald",
   emailMe: "Mail me mijn aankopen",
   formNote: (store) =>
-    `Als met dat adres iets is gekocht bij ${store}, komt er meestal binnen een minuut een link naar alles, die 24 uur werkt. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
+    `Als met dat adres iets is gekocht bij ${store}, proberen we per e-mail een link naar alles te sturen. Elke verstuurde link werkt 24 uur. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
     `Als met dat adres iets is gekocht bij ${store}, is de link normaal gesproken onderweg. Hij komt van ${store} via Marktmorgen en kan een paar minuten duren. Staat hij er niet, kijk dan in je spam.`,
@@ -1319,6 +1330,7 @@ const nl: OrdersWords = {
   waitingUnread: "Wat op je wacht, kon nu niet worden gelezen. Open deze pagina zo meteen opnieuw.",
   openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
   openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
+  nothingToOpenTitle: "Hier is niets te openen",
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1385,6 +1397,7 @@ const nl: OrdersWords = {
   checkingOlder: "Oudere aankopen worden gecontroleerd…",
   olderShown: (count) =>
     count === 0 ? "Geen van de gecontroleerde aankopen kan opnieuw worden geopend." : count === 1 ? "1 aankoop extra staat nu in de lijst." : `${count} aankopen extra staan nu in de lijst.`,
+  olderBatchShown: (count) => count === 0 ? "Geen aankoop uit deze groep kan opnieuw worden geopend." : count === 1 ? "Deze pagina toont 1 aankoop uit deze groep." : `Deze pagina toont ${count} aankopen uit deze groep.`,
   olderFailed: "Oudere aankopen kunnen nu niet worden gecontroleerd. Probeer het zo opnieuw.",
   backToList: "Terug naar al je aankopen",
   olderTitle: "Oudere aankopen",
@@ -1434,13 +1447,13 @@ const nl: OrdersWords = {
     `Vul op die pagina ${email} in en je krijgt meteen een link naar je eigen privéfeed. Die werkt in Apple Podcasts, Overcast, Pocket Casts en de meeste andere podcastapps, zolang je de podcast hebt.`,
   startCourseAt: (url) => `Start de cursus: ${url}`,
   courseNote: (email) =>
-    `Als je na het betalen op ‘${nlStart}’ hebt gedrukt, opent de cursus meteen op dat apparaat. Op elk ander apparaat vraagt de cursuspagina om je e-mailadres: vul ${email} in, en meestal komt er binnen een minuut een link die dat apparaat toegang geeft. Je hoeft geen wachtwoord aan te maken.`,
+    `Als je na het betalen op ‘${nlStart}’ hebt gedrukt, opent de cursus meteen op dat apparaat. Op elk ander apparaat vraagt de cursuspagina om je e-mailadres: vul ${email} in en vraag per e-mail een link aan die dat apparaat toegang geeft. Je hoeft geen wachtwoord aan te maken.`,
   openWhatYouBought: (url) => `Open wat je hebt gekocht: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Op die pagina staat je download of je link de komende 3 dagen. Daarna is het niet kwijt: open ${ordersUrl}, vul ${email} in en je krijgt op elk moment een link gemaild naar alles wat je bij ${store} hebt gekocht.`,
   startTitleAt: (title, url) => `Start ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Een cursus die je na het betalen hebt gestart, opent meteen op dat apparaat. Op elk ander apparaat vraagt de pagina om je e-mailadres: vul ${email} in, en meestal komt er binnen een minuut een link die dat apparaat toegang geeft.`,
+    `Een cursus die je na het betalen hebt gestart, opent meteen op dat apparaat. Op elk ander apparaat vraagt de pagina om je e-mailadres: vul ${email} in en vraag per e-mail een link aan die dat apparaat toegang geeft.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: onderweg. De sleutels van ${store} waren op net toen je betaalde; je sleutel wordt je gemaild zodra er nieuwe zijn toegevoegd.`,
@@ -1547,7 +1560,7 @@ const pt: OrdersWords = {
   emailYouPaidWith: "O email com que pagou",
   emailMe: "Enviar-me as minhas compras por email",
   formNote: (store) =>
-    `Se esse endereço comprou algo a ${store}, uma ligação para tudo chega normalmente em menos de um minuto e funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
+    `Se esse endereço comprou algo a ${store}, tentamos enviar-lhe por email uma ligação para tudo. Qualquer ligação enviada funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
     `Se esse endereço comprou algo a ${store}, a ligação normalmente está a caminho. Chega de ${store} via Marktmorgen e pode demorar alguns minutos. Se não estiver lá, veja na pasta de spam.`,
@@ -1559,6 +1572,7 @@ const pt: OrdersWords = {
   waitingUnread: "Não foi possível ler agora o que está à sua espera. Volte a abrir esta página daqui a pouco.",
   openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
   openToSign: (title) => `Ler e assinar «${title}»`,
+  nothingToOpenTitle: "Nada para abrir aqui",
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>
@@ -1626,6 +1640,7 @@ const pt: OrdersWords = {
   checkingOlder: "A verificar compras anteriores…",
   olderShown: (count) =>
     count === 0 ? "Nenhuma das compras verificadas pode ser aberta novamente." : count === 1 ? "Mais 1 compra está agora na lista." : `Mais ${count} compras estão agora na lista.`,
+  olderBatchShown: (count) => count === 0 ? "Nenhuma compra deste grupo pode ser aberta novamente." : count === 1 ? "Esta página mostra 1 compra deste grupo." : `Esta página mostra ${count} compras deste grupo.`,
   olderFailed: "Não foi possível verificar as compras anteriores agora. Tente novamente daqui a pouco.",
   backToList: "Voltar a todas as suas compras",
   olderTitle: "Compras anteriores",
@@ -1675,13 +1690,13 @@ const pt: OrdersWords = {
     `Introduza ${email} nessa página e recebe de imediato uma ligação para o seu próprio feed privado. Funciona no Apple Podcasts, Overcast, Pocket Casts e na maioria das outras aplicações de podcasts, enquanto o tiver.`,
   startCourseAt: (url) => `Comece o curso: ${url}`,
   courseNote: (email) =>
-    `Se carregou em «${ptStart}» depois de pagar, o curso abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e uma ligação que dá acesso a esse dispositivo chega normalmente em menos de um minuto. Não há palavra-passe para criar.`,
+    `Se carregou em «${ptStart}» depois de pagar, o curso abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e peça por email uma ligação que dê acesso a esse dispositivo. Não há palavra-passe para criar.`,
   openWhatYouBought: (url) => `Abra o que comprou: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Essa página tem o seu ficheiro para descarregar ou a sua ligação durante os próximos 3 dias. Depois disso não se perde: abra ${ordersUrl}, introduza ${email} e é-lhe enviada por email uma ligação para tudo o que comprou a ${store}, a qualquer momento.`,
   startTitleAt: (title, url) => `Comece ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Um curso que começou depois de pagar abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e uma ligação que dá acesso a esse dispositivo chega normalmente em menos de um minuto.`,
+    `Um curso que começou depois de pagar abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e peça por email uma ligação que dê acesso a esse dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: a caminho. As chaves de ${store} esgotaram-se no momento em que pagou; a sua ser-lhe-á enviada por email assim que forem adicionadas mais.`,

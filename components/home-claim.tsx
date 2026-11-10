@@ -99,27 +99,29 @@ export function HeroClaim({ offer, items }: { offer: string; items: Item[] }) {
           </div>
         </div>
 
-        <div className="hm-float hm-rise1 hm-float-a">
-          <div className="hm-float-card hm-tilt-l">
-            <span aria-hidden="true" className="hm-float-icon hm-bg-green">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16" /></svg>
-            </span>
-            <span><strong>File delivered</strong><span>Once the payment clears</span></span>
+        <div className="hm-hero-cards">
+          <div className="hm-float hm-rise1 hm-float-a">
+            <div className="hm-float-card hm-tilt-l">
+              <span aria-hidden="true" className="hm-float-icon hm-bg-green">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16" /></svg>
+              </span>
+              <span><strong>File delivered</strong><span>Once the payment clears</span></span>
+            </div>
           </div>
-        </div>
-        <div className="hm-float hm-rise2 hm-float-b">
-          <div className="hm-float-card hm-tilt-r">
-            <span aria-hidden="true" className="hm-float-icon hm-bg-gold">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="17" rx="3" /><path d="M3 10h18M8 2v4M16 2v4" /></svg>
-            </span>
-            <span><strong>Call booked</strong><span>Invitation sent to you both</span></span>
+          <div className="hm-float hm-rise2 hm-float-b">
+            <div className="hm-float-card hm-tilt-r">
+              <span aria-hidden="true" className="hm-float-icon hm-bg-gold">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="17" rx="3" /><path d="M3 10h18M8 2v4M16 2v4" /></svg>
+              </span>
+              <span><strong>Call booked</strong><span>Invitation sent to you both</span></span>
+            </div>
           </div>
-        </div>
-        <div className="hm-float hm-rise3 hm-float-c">
-          <div className="hm-float-card hm-float-stack hm-tilt-s">
-            <span className="hm-float-label">Example course</span>
-            <strong>Lesson 3 of 8 done</strong>
-            <span aria-hidden="true" className="hm-bar"><span /></span>
+          <div className="hm-float hm-rise3 hm-float-c">
+            <div className="hm-float-card hm-float-stack hm-tilt-s">
+              <span className="hm-float-label">Example course</span>
+              <strong>Lesson 3 of 8 done</strong>
+              <span aria-hidden="true" className="hm-bar"><span /></span>
+            </div>
           </div>
         </div>
 

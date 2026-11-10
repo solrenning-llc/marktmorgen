@@ -1,3 +1,18 @@
+/** The actual guard must retain the typed profiles when navigation is declined. */
+export async function checkSocialDraftProtection({page,is,label}){
+ const before=page.url(),form=page.locator("form[data-socials-editor]");
+ const values=()=>form.locator("select,input").evaluateAll(nodes=>nodes.map(node=>node.value));
+ const draft=await values();
+ is("unsaved profiles protect unload "+label,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),true);
+ const notices=[];
+ const dismiss=async dialog=>{notices.push(dialog.message());await dialog.dismiss();};
+ page.on("dialog",dismiss);
+ try{const path=page.getByRole("link",{name:"Path",exact:true});await path.focus();await path.press("Enter");}finally{page.off("dialog",dismiss);}
+ is("unsaved profiles ask before leaving "+label,notices,["You have changes that are not saved. Leave without saving them?"]);
+ is("staying keeps profile document "+label,page.url(),before);
+ is("staying keeps exact profile draft "+label,await values(),draft);
+}
+
 /** All profile writes are intercepted. No account, message or external profile request. */
 export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource,is}){
  const profileCases=[
@@ -28,6 +43,26 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
   {name:"null snapshot",body:()=>({ok:true,socials:null})},
   {name:"matching empty profiles",body:value=>({ok:true,socials:value}),confirmed:true},
  ];
+ // The profile-panel button is server-rendered. Before React attaches its
+ // handler, it must say that it is unavailable and a real click must not claim
+ // to have opened anything. This no-script page has no timing assumption.
+ const beforeReady=await browser.newContext({viewport:{width:390,height:900},javaScriptEnabled:false});
+ try{
+  await beforeReady.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
+  const initial=await beforeReady.newPage();let writes=0;
+  await initial.route("**/api/**",async route=>{
+   if(route.request().method()!=="GET")writes++;
+   await route.abort("blockedbyclient");
+  });
+  await initial.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
+  const control=initial.getByRole("button",{name:"Loading…",exact:true});
+  await control.waitFor({state:"attached"});
+  is("profile control says its handler is unavailable before hydration",await control.getAttribute("aria-disabled"),"true");
+  is("profile control visibly reports preparation before hydration",(await control.innerText()).trim(),"Loading…");
+  await control.dispatchEvent("click");
+  is("profile panel stays closed before hydration",await initial.locator("form[data-socials-editor]").count(),0);
+  is("profile pre-hydration click starts no API write",writes,0);
+ }finally{await beforeReady.close();}
  for(const width of [390,1280])for(const mode of ["profiles","remove"]){
   const context=await browser.newContext({viewport:{width,height:900}});
   try{
@@ -41,6 +76,9 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     await route.fulfill({status:work.scenario.status??200,contentType:"application/json",body:work.scenario.raw??JSON.stringify(work.scenario.body(value))});
    });
    await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"networkidle",timeout:60000});
+   // At 390 the leave guard's cleanup is held back 300 ms, as WebKit can run it after the form is gone (#2808, job
+   // 128017854896): React removes the form first and runs useLeaveGuard's effect cleanup later. At 1280 it runs as is.
+   if(width===390)await page.evaluate(()=>{const remove=window.removeEventListener.bind(window);window.removeEventListener=(type,listener,options)=>{if(type!=="beforeunload")return remove(type,listener,options);setTimeout(()=>remove(type,listener,options),300);};});
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    await page.getByRole("button",{name:/^(Add|Edit) your profiles$/}).click();
    const form=page.locator("form[data-socials-editor]");await form.waitFor({state:"visible"});
@@ -50,6 +88,7 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     await form.getByRole("textbox",{name:"Handle or address",exact:true}).first().fill("  @harborkitchenpreview  ");
     await form.getByRole("button",{name:"Add a profile",exact:true}).click();
     await form.getByRole("textbox",{name:"Handle or address",exact:true}).last().fill("@harborrecipes");
+    await checkSocialDraftProtection({page,is,label:"local draft/"+width});
    }
    await page.addScriptTag({content:axeSource});
    const scenarios=mode==="profiles"?profileCases:removalCases;
@@ -64,10 +103,16 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
      if(mode==="profiles")is("profile input stays creator-authored "+name,sent[0].url,"  @harborkitchenpreview  ");
      for(const field of await form.locator("select,input,button").all())is("all profile editing locks "+name,await field.isDisabled(),true);
      is("profile form announces pending "+name,await form.getAttribute("aria-busy"),"true");
+     if(mode==="profiles")await checkSocialDraftProtection({page,is,label:"pending/"+name});
     }finally{release();}
     if(scenario.confirmed){
      await page.locator(".nb-toast-region [role=status]").getByText(success,{exact:true}).waitFor({state:"attached"});
      is("confirmed profile editor closes "+name,await form.count(),0);
+     // React removes the form before it runs useLeaveGuard's effect cleanup, so the protection is released a moment
+     // after the form is gone (WebKit, #2808 job 128017854896). Wait until a fresh beforeunload is no longer held back,
+     // within Playwright's usual timeout; a protection that is never released still fails here.
+     await page.waitForFunction(()=>window.dispatchEvent(new Event("beforeunload",{cancelable:true})));
+     is("confirmed profiles release unload protection "+name,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
     }else{
      const alert=form.getByRole("alert");await alert.waitFor();
      is("profile errors stay honest "+name,(await alert.innerText()).includes(scenario.specific?"It is marked below":"Reload this page to check before trying again"),true);
@@ -75,6 +120,7 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
      for(const field of await form.locator("select,input").all())is("profile fields unlock "+name,await field.isEnabled(),true);
      is("profile cancel unlocks "+name,await form.getByRole("button",{name:"Cancel",exact:true}).isEnabled(),true);
      if(mode==="profiles")is("profile input preserved after refusal "+name,await form.getByRole("textbox",{name:"Handle or address",exact:true}).first().inputValue(),"  @harborkitchenpreview  ");
+     if(mode==="profiles"&&["HTTP failure","malformed JSON","lost reply"].includes(scenario.name))await checkSocialDraftProtection({page,is,label:name});
      if(scenario.specific)is("known rejected row marked "+name,await form.locator('[aria-invalid="true"]').count(),1);
      if(scenario.badIndexes)is("invalid rejected indexes mark no rows "+name,await form.locator('[aria-invalid="true"]').count(),0);
      const contrast=await alert.evaluate(async node=>{const r=await window.axe.run(node,{runOnly:{type:"rule",values:["color-contrast-enhanced"]}});return{violations:r.violations.map(v=>v.id),incomplete:r.incomplete.map(v=>v.id),passed:r.passes.some(v=>v.id==="color-contrast-enhanced")};});

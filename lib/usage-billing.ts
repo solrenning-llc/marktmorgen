@@ -37,7 +37,10 @@
  */
 import { addToNextInvoice, billAddedLinesMonthly, findInvoiceLine, isBillingConfigured } from "@/lib/billing";
 import { monthKey, storeKeysOf } from "@/lib/delivery";
+import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { releaseLock } from "@/lib/redis-lock";
+import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { SMALLEST_LINE_CENTS, canBeCharged, monthBefore } from "@/lib/watch-rules";
 
@@ -126,7 +129,7 @@ async function carryOut(meter: Meter, folder: string, month: string, adding: Add
   try {
     const sign = mark(meter, folder, month, adding.from);
     // A request made before may have gone through without our hearing of it.
-    if (await findInvoiceLine(adding.customerId, sign, Math.floor(adding.at / 1000) - 60)) return true;
+    if (await findInvoiceLine(adding.customerId, sign, Math.floor(adding.at / 1000) - 60, { subscriptionId: adding.subscriptionId, cents: adding.to - adding.from })) return true;
     await addToNextInvoice({
       customerId: adding.customerId,
       subscriptionId: adding.subscriptionId,
@@ -139,6 +142,42 @@ async function carryOut(meter: Meter, folder: string, month: string, adding: Add
   } catch (error) {
     console.error(`adding ${meter.name} to an invoice failed`, error);
     return false;
+  }
+}
+
+/**
+ * A once-only mark (CX-123 rule 24), the same rule as lib/claim-mark.ts
+ * (#2714), kept here until that file is on this branch: SET NX with a value
+ * no other attempt writes. "OK", one reply for the one command, is ours and
+ * nil is taken. Any other answer, or none, is read back: our own value
+ * there means the write landed and the mark is ours; another value, taken;
+ * anything else is unknown, and nothing is written or sent on it. The
+ * common path is one command, as before.
+ */
+type Marked = "ours" | "taken" | "unknown";
+
+/** The time in milliseconds and a random part, so no two attempts write the same value. */
+function markValue(now = Date.now()): string {
+  return `${now}.${String(randomInt(1_000_000_000)).padStart(9, "0")}`;
+}
+
+async function takeMark(key: string, value: string): Promise<Marked> {
+  let reply: unknown[] | null;
+  try {
+    reply = repliesFor(await redisPipeline([["SET", key, value, "NX", "EX", KEEP_SECONDS]]), 1);
+  } catch {
+    reply = null;
+  }
+  if (reply?.[0] === "OK") return "ours";
+  if (reply && reply[0] === null) return "taken";
+  // Answered in another shape, or not at all: the write may have landed.
+  try {
+    const held = repliesFor(await redisPipeline([["GET", key]]), 1);
+    if (!held) return "unknown";
+    if (held[0] === value) return "ours";
+    return typeof held[0] === "string" ? "taken" : "unknown";
+  } catch {
+    return "unknown";
   }
 }
 
@@ -159,12 +198,15 @@ export async function storeOf(folder: string): Promise<Store | null> {
  */
 async function monthlyFor(store: Store | null, subscriptionId: string): Promise<void> {
   if (store?.cycle !== "year" || store.subscriptionId !== subscriptionId) return;
-  const [first] = await redisPipeline([["SET", monthlyKey(subscriptionId), "1", "NX", "EX", KEEP_SECONDS]]);
-  if (first === null) return;
+  const key = monthlyKey(subscriptionId);
+  const value = markValue();
+  // Only a mark known to be ours asks Stripe: taken or unknown, nothing is written this time.
+  if ((await takeMark(key, value)) !== "ours") return;
   await billAddedLinesMonthly(subscriptionId).catch(async (error) => {
     console.error("could not set a yearly plan to bill added lines monthly", error);
     // Tried again with the next line. Until then the line waits for the yearly invoice, and is still billed.
-    await redisPipeline([["DEL", monthlyKey(subscriptionId)]]).catch(() => {});
+    // Let go only while it still holds our value, so another run's mark is never deleted (lib/redis-lock.ts).
+    await releaseLock({ key, token: value, ttlSeconds: KEEP_SECONDS });
   });
 }
 
@@ -265,9 +307,11 @@ export async function settleAllUsage(meter: Meter, now = Date.now()): Promise<Se
   if (today.getUTCDate() <= SETTLE_DAYS) runs.unshift([monthBefore(month), true]);
   for (const [which, final] of runs) {
     for (const folder of await meter.folders(which)) {
-      // A store inside what every plan covers has nothing to settle, and is not asked about further.
-      if ((await meter.measured(folder, which)) <= meter.covered) continue;
       try {
+        // A store inside what every plan covers has nothing to settle, and is not asked about further.
+        // A figure that cannot be read (it throws: audit SG2, CX-123 rule 24) leaves only this store
+        // for the next run, logged below; the others go on.
+        if ((await meter.measured(folder, which)) <= meter.covered) continue;
         results.push(await settleUsage(meter, folder, which, final, now));
       } catch (error) {
         console.error(`settling a store's ${meter.name} failed`, error);
@@ -282,6 +326,6 @@ export async function settleAllUsage(meter: Meter, now = Date.now()): Promise<Se
  * first time it is asked for a store, a month and a meter, and never again.
  */
 export async function firstWordOf(meter: Meter, folder: string, month: string): Promise<boolean> {
-  const [first] = await redisPipeline([["SET", toldKey(meter, folder, month), "1", "NX", "EX", KEEP_SECONDS]]);
-  return first !== null;
+  // Taken or unknown, nobody is written to this run (CX-123 rule 24).
+  return (await takeMark(toldKey(meter, folder, month), markValue())) === "ours";
 }

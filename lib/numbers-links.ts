@@ -22,7 +22,7 @@
  *   nl:nlink:<id>              the store it belongs to, until it ends
  *   nl:nlink:opens:<id>:<day>  how many times it opened that day
  */
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { deriveKey } from "@/lib/secret-box";
 
@@ -88,7 +88,8 @@ export function makeLink(input: { label: unknown; password: unknown; days: unkno
   const days = Number(input.days);
   if (!(LINK_DAYS as readonly number[]).includes(days)) return { ok: false, reason: "days" };
   const salt = randomBytes(16).toString("hex");
-  const id = Array.from(randomBytes(20), (b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+  // randomInt draws each letter evenly; a byte taken modulo 36 would favour the first four.
+  const id = Array.from({ length: 20 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[randomInt(36)]).join("");
   const made = Math.floor(now / 1000);
   return { ok: true, link: { id, label, expires: made + days * 86_400, made, money: input.money === true, salt, hash: hashOf(password, salt) } };
 }

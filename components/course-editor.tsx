@@ -35,7 +35,7 @@ import { LINK_PROBLEMS, type LinkProblem } from "@/lib/product-link";
 import { useStudioHref } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { CourseTemplatePicker } from "@/components/course-template-picker";
-import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits } from "@/lib/course-templates";
+import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits, type CourseTemplate } from "@/lib/course-templates";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { CAPTION_LANGUAGES, type CaptionTrack, MAX_CAPTION_BYTES, MAX_CAPTION_TRACKS } from "@/lib/captions";
@@ -228,6 +228,7 @@ export function CourseEditor({
   captions = {},
   writing = {},
   auto = { can: false, spoken: "en" },
+  initialTemplate = null,
   openFirst = null,
   look = null,
   language = "en",
@@ -239,6 +240,8 @@ export function CourseEditor({
   language?: LanguageCode;
   /** A lesson to show open when the page is drawn: the one "Can everyone follow your lessons?" linked to. */
   openFirst?: string | null;
+  /** A structure previewed in the shared library, selected here but never saved automatically. */
+  initialTemplate?: CourseTemplate["id"] | null;
   initial: Course;
   folder: string;
   /** Where each lesson video kept by the video service stood when the page was drawn. */
@@ -304,6 +307,7 @@ export function CourseEditor({
       {!skipTemplates && templateFits(course).ok && templateFits(initial).ok ? (
         <CourseTemplatePicker
           course={course}
+          initialTemplate={initialTemplate}
           busy={busy}
           save={async (payload) => {
             const answer = await run(payload);
@@ -857,16 +861,21 @@ function LessonEditor({
   const streams = useContext(Streams);
 
   async function loadText() {
+    onError(null);
     setLoadingText(true);
     try {
       const response = await fetch(`/api/store/course?id=${productId}&lessonId=${lesson.id}`, { cache: "no-store" });
-      const data = (await response.json()) as { ok?: boolean; text?: string };
-      const read = data.ok ? data.text ?? "" : "";
-      setText(read);
-      setSavedText(read);
+      const data = (await response.json()) as { ok?: boolean; text?: unknown };
+      // Only a text that came back as text opens the box: a failed or unknown read
+      // is said, never shown as an empty lesson whose Save would replace the real one.
+      if (!response.ok || data.ok !== true || typeof data.text !== "string") {
+        onError("The lesson text could not be read just now. Try again in a moment.");
+        return;
+      }
+      setText(data.text);
+      setSavedText(data.text);
     } catch {
-      setText("");
-      setSavedText("");
+      onError("The lesson text could not be read just now. Try again in a moment.");
     } finally {
       setLoadingText(false);
     }
@@ -1046,7 +1055,7 @@ function LessonEditor({
                   onChange={(e) => setText(e.target.value)}
                 />
                 <p className="mt-1 text-sm text-ink-mute">
-                  {`Blank lines make paragraphs, lines starting with "- " make a list, and web addresses become links. Put code between two lines of three backticks (\`\`\`) to show it as typed. ${MAX_BODY_LENGTH - text.length} characters left.`}
+                  {`Blank lines make paragraphs, lines starting with "- " make a list, and web addresses become links. Put code between two lines of three backticks (\`\`\`) to show it as typed. Add html-preview after the opening backticks for a sanitized, sandboxed HTML preview. ${MAX_BODY_LENGTH - text.length} characters left.`}
                 </p>
               </div>
               {look ? (

@@ -27,7 +27,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
  * account, which is the only record of money that deserves the name.
  */
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
-import { DISPUTE_TAKES, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
+import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
 import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
@@ -35,6 +35,8 @@ import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, productIds, recordListings } from "@/lib/catalog";
@@ -44,6 +46,7 @@ import { type AttributionTable, attributionTable } from "@/lib/attribution-rules
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { reachRows } from "@/lib/page-read";
 import { PAGE_PARTS } from "@/lib/store-order";
+import { type TaxSummary, taxSummary } from "@/lib/tax-summary";
 import { type CappedCount, cappedCount, cappedCountCommand } from "@/lib/capped-count";
 
 /** Days kept, a little over a year, so a year-on-year look is possible. */
@@ -532,6 +535,22 @@ function pairs(reply: unknown): [string, number][] {
   return out;
 }
 
+/**
+ * A day's HGETALL read exactly, for the all-time fill: field and count strings, an even number of them ([] for a day
+ * with nothing kept), each count a whole number. Anything else throws (CX-123 rule 24).
+ */
+function exactPairs(reply: unknown): [string, number][] {
+  const flat = stringList(reply);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a kept day's counts");
+  const out: [string, number][] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    const count = /^-?\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(count)) throw new UnknownReplyError("a kept day's counts");
+    out.push([flat[i], count]);
+  }
+  return out;
+}
+
 /** The dates of the last `count` days, oldest first, ending today (UTC). */
 function lastDays(now: number, count: number): string[] {
   const dates: string[] = [];
@@ -644,6 +663,36 @@ const LIFE_MAX_FIELDS = 2000;
 const LIFE_KEEP_PER_KIND = 300;
 
 /**
+ * The all-time record's HGETALL read exactly (CX-123 rule 24): its field and value strings, an even number of them
+ * ([] for a record not there yet), or it throws. A loose read took any other answer for an empty record, so one
+ * already filled was filled again and every count it holds was doubled (review of #2905).
+ */
+async function readLifeFlat(life: string): Promise<string[]> {
+  const [raw] = repliesFor(await redisPipeline([["HGETALL", life]]), 1) ?? [undefined];
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the all-time record");
+  return flat;
+}
+
+/** Fields the all-time record keeps as dates, not counts. */
+const LIFE_DATES = new Set(["started", "since", "filled"]);
+
+/**
+ * The all-time record's fields as counts, read exactly (CX-123 rule 24): every count a whole number, or it throws.
+ * Its dates stay in the map as 0, as they did, so the record's size still counts them. A loose read took a count in
+ * any other shape for 0, so the studio lost those views and the path showed zeros where it keeps the last reading.
+ */
+function lifeCounts(flat: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const count = LIFE_DATES.has(flat[i]) ? 0 : /^\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(count)) throw new UnknownReplyError("the all-time record's counts");
+    out.set(flat[i], count);
+  }
+  return out;
+}
+
+/**
  * The store's all-time record. The first time it is read it is filled from
  * the days still kept from before it started counting — once, under a lock,
  * and marked so it never happens twice.
@@ -651,17 +700,24 @@ const LIFE_KEEP_PER_KIND = 300;
 async function readLife(store: Store, now: number): Promise<(WindowStats & { since: string }) | null> {
   const statsId = store.statsId as string;
   const life = lifeKey(statsId);
-  let [raw] = await redisPipeline([["HGETALL", life]]);
-  let fields = new Map(pairs(raw));
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  let flat = await readLifeFlat(life);
+  let fields = lifeCounts(flat);
   const text = (name: string) => {
     const at = flat.indexOf(name);
     return at >= 0 && at % 2 === 0 ? flat[at + 1] : "";
   };
 
   if (!text("filled")) {
-    const [mine] = await redisPipeline([["SET", lifeLockKey(statsId), "1", "NX", "EX", 60]]);
-    if (mine !== null) {
+    // The fill lock read exactly (lib/claim-mark.ts; CX-123 rule 24): another read's means that read fills it. An
+    // unknown one fills nothing and is let go only while it holds this read's value; the throw leaves the all-time
+    // record unread this time (readStats), never filled twice.
+    const mine = claimValue();
+    const claimed = await claimMark(lifeLockKey(statsId), 60, mine);
+    if (claimed === "unknown") {
+      await releaseMark(lifeLockKey(statsId), mine);
+      throw new UnknownReplyError("the all-time record's fill lock");
+    }
+    if (claimed === "ours") {
       const today = dayKey(now);
       const started = /^\d{4}-\d{2}-\d{2}$/.test(text("started")) ? text("started") : today;
       const created = /^\d{4}-\d{2}-\d{2}/.test(store.createdAt) ? store.createdAt.slice(0, 10) : "";
@@ -672,12 +728,27 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
       let visitors = 0;
       let first = "";
       if (dates.length) {
-        const replies = await redisPipeline([
-          ...dates.map((d) => ["HGETALL", countsKey(statsId, d)]),
-          ...dates.map((d) => ["PFCOUNT", visitorsKey(statsId, d)]),
-        ]);
+        // The kept days read exactly (CX-123 rule 24; review of #2905): the fill happens once, so a day read as empty
+        // from an answer in another shape would be gone from the all-time record for good. Any such answer marks
+        // nothing filled, lets this read's lock go and throws, so this view has no all-time record (readStats) and
+        // the next read fills it once.
+        let days: [string, number][][];
+        let counts: number[];
+        try {
+          const replies = repliesFor(await redisPipeline([
+            ...dates.map((d) => ["HGETALL", countsKey(statsId, d)]),
+            ...dates.map((d) => ["PFCOUNT", visitorsKey(statsId, d)]),
+          ]), 2 * dates.length);
+          if (!replies) throw new UnknownReplyError("the all-time record's kept days");
+          days = dates.map((_, i) => exactPairs(replies[i]));
+          counts = dates.map((_, i) => countOf(replies[dates.length + i]) ?? -1);
+          if (counts.some((n) => n < 0)) throw new UnknownReplyError("the all-time record's kept visitors");
+        } catch (error) {
+          await releaseMark(lifeLockKey(statsId), mine);
+          throw error;
+        }
         dates.forEach((date, i) => {
-          const day = pairs(replies[i]);
+          const day = days[i];
           if (day.length && !first) first = date;
           // Countries and devices are kept by the day only: copied into the
           // all-time record they would start it on whatever day it was filled.
@@ -685,7 +756,7 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
             if (field.startsWith("k:") || field.startsWith("d:") || field.startsWith("sr:") || field.startsWith("h:") || field.startsWith("hc:") || field.startsWith("q:")) continue;
             tally.set(field, (tally.get(field) ?? 0) + count);
           }
-          visitors += Number(replies[dates.length + i]) || 0;
+          visitors += counts[i];
         });
       }
       await redisPipeline([
@@ -693,12 +764,11 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
         ...(visitors ? [["HINCRBY", life, "u", visitors]] : []),
         ["HSET", life, "since", first || started, "filled", today],
         ["HSETNX", life, "started", started],
-        ["DEL", lifeLockKey(statsId)],
       ]);
-      [raw] = await redisPipeline([["HGETALL", life]]);
-      fields = new Map(pairs(raw));
-      flat.length = 0;
-      flat.push(...(Array.isArray(raw) ? (raw as unknown[]).map(String) : []));
+      // Let go only while it holds this read's value: a fill that outlasted its 60 seconds never frees another's.
+      await releaseMark(lifeLockKey(statsId), mine);
+      flat = await readLifeFlat(life);
+      fields = lifeCounts(flat);
     }
   }
 
@@ -791,6 +861,12 @@ export type SalesStats = {
   byContentIn?: Record<"d7" | "d30" | "d90", { content: string; source: string; campaign: string; cents: number; sales: number }[]>;
   /** Money by the buyer's country, for each window. */
   byCountryIn?: Record<"d7" | "d30" | "d90", { country: string; cents: number; sales: number }[]>;
+  /**
+   * The tax Stripe added at checkout, by the buyer's region, each currency on
+   * its own (lib/tax-summary.ts; 601 [KB22] U4, added 6 November 2026). From
+   * the sales above, with no read of its own. Absent on a reading from before.
+   */
+  taxIn?: TaxSummary;
   /** Refunds made in each window, by the channel of the sale refunded; "" is direct, UNRECORDED a payment not among the sales read. */
   refundsIn?: Record<"d7" | "d30" | "d90", { source: string; refunds: number; cents: number }[]>;
   /** Refunds by product over the 90 days. */
@@ -1036,8 +1112,14 @@ export function payPalSale(paid: Paid): Sale {
   };
 }
 
-/** The currency Stripe reports on a checkout or a payment; US dollars when it says none. */
-const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "usd");
+/**
+ * The currency Stripe reports on a checkout, a payment, an invoice, a refund
+ * or a dispute, as its three-letter code in lower case; "" when the answer
+ * names none or something that is not a code (rule 24). An unknown currency
+ * is never taken for US dollars nor for "another currency": a row with "" is
+ * left out of every amount and its reading is marked incomplete.
+ */
+const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "string" && /^[a-z]{3}$/i.test(row.currency) ? row.currency.toLowerCase() : "");
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -1104,11 +1186,14 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     if (row.status !== "complete" || row.payment_status !== "paid") return;
     const details = (raw.customer_details ?? {}) as { address?: { country?: unknown } | null };
     const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
+    const currency = currencyOf(row);
+    // A sale in a currency the answer does not name cannot be counted anywhere: the reading is incomplete.
+    if (!currency) partial = true;
     sales.push({
       created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
       product: meta.product ?? "",
       cents: typeof row.amount_total === "number" ? row.amount_total : 0,
-      currency: currencyOf(row),
+      currency,
       row: raw,
       upsell: false,
       ...saleChannel(meta),
@@ -1120,6 +1205,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   const extras = walk("/payment_intents?limit=100", (pi) => {
     const meta = (pi.metadata ?? {}) as Record<string, string>;
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return;
+    if (!currencyOf(pi)) partial = true;
     sales.push({
       created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
       product: meta.product ?? "",
@@ -1172,7 +1258,9 @@ export function renewalsFrom(
   const zero = (): Renewals => ({ payments: 0, cents: 0 });
   const out = { d7: zero(), d30: zero(), d90: zero() };
   const by = new Map<string, Renewals>();
-  const bySourceDay: ChannelDays = {};
+  // A channel is a visitor's utm_source, so it can be "__proto__": added up with no prototype (tests/proto-keys.test.ts),
+  // and handed on as an ordinary record of own keys, which a page can take.
+  const bySourceDay: ChannelDays = Object.create(null);
   for (const invoice of invoices) {
     if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
     const meta = invoiceMeta(invoice);
@@ -1199,7 +1287,7 @@ export function renewalsFrom(
     days[day] = (days[day] ?? 0) + cents;
   }
   const bySource = [...by.entries()].map(([source, r]) => ({ source, ...r })).sort((a, b) => b.cents - a.cents || a.source.localeCompare(b.source));
-  return { ...out, bySource, bySourceDay };
+  return { ...out, bySource, bySourceDay: { ...bySourceDay } };
 }
 
 /**
@@ -1242,7 +1330,10 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
     if (!after) break;
     if (page === pages - 1) partial = true;
   }
-  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries: renewalEntries(store, invoices) };
+  const entries = renewalEntries(store, invoices);
+  // A renewal in a currency the answer does not name is in no total: the reading is incomplete.
+  if (entries.some((entry) => !entry.currency)) partial = true;
+  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries };
 }
 
 /** One paid renewal of this store's memberships and payment plans, for the buyer ledger (lib/segments.ts, 270 [GR1] unit 2). */
@@ -1325,7 +1416,9 @@ export async function readRenewalPayments(store: Store, since: number, pages: nu
       const listedPayment = ((invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null | undefined)?.data ?? []).find((p) => p.status === "paid")?.payment?.payment_intent;
       const paymentIntent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : typeof listedPayment === "string" ? listedPayment : "";
       const channel = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
-      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency: currencyOf(invoice), paymentIntent, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
+      const currency = currencyOf(invoice);
+      if (!currency) partial = true;
+      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency, paymentIntent, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
     }
     if (!list.has_more) break;
     // Out of time: what was read is kept, and the reading says it is partial.
@@ -1343,7 +1436,7 @@ export function readStoreDisputes(store: Store, since: number, pages = DISPUTE_P
   return readDisputes(store, since, pages);
 }
 
-/** One dispute as Stripe lists it, only in a state that takes the money (DISPUTE_TAKES). */
+/** One dispute as Stripe lists it, only one that takes the money (disputeTakes). */
 export type DisputeRow = { created: number; cents: number; currency: string; paymentIntent: string };
 
 /** How many pages of a hundred disputes are read for the numbers; the affiliate book reads as many. */
@@ -1351,8 +1444,9 @@ const DISPUTE_PAGES = 3;
 
 /**
  * The disputes opened on the creator's account since `since` (seconds) that
- * the bank is holding or the buyer won. At most DISPUTE_PAGES pages of a
- * hundred; `partial` when there were more.
+ * the bank is holding or gave back to the buyer (disputeTakes). At most
+ * DISPUTE_PAGES pages of a hundred; `partial` when there were more, or when a
+ * prevented dispute's money could not be read.
  */
 async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
   const out: DisputeRow[] = [];
@@ -1367,12 +1461,18 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (typeof row.status !== "string" || !DISPUTE_TAKES.has(row.status)) continue;
+      // A prevented dispute whose own money movement cannot be read is not
+      // counted, and the reading says it is partial (CX-123 rule 24).
+      const takes = disputeTakes(row);
+      if (takes === null) partial = true;
+      if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
       const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
       if (!cents) continue;
-      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency: currencyOf(row), paymentIntent: pi });
+      const currency = currencyOf(row);
+      if (!currency) partial = true;
+      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency, paymentIntent: pi });
     }
     if (!list.has_more) break;
     const last = rows[rows.length - 1];
@@ -1401,10 +1501,12 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     const rows = financialPage(list, seen);
     for (const row of rows) {
       if (row.status !== "succeeded" && row.status !== "pending") continue;
+      const currency = currencyOf(row);
+      if (!currency) partial = true;
       out.push({
         created: typeof row.created === "number" ? row.created * 1000 : 0,
         cents: typeof row.amount === "number" ? row.amount : 0,
-        currency: currencyOf(row),
+        currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });
     }
@@ -1430,12 +1532,12 @@ export function readStoreRefunds(store: Store, since: number, pages: number): Pr
  * The store's all-time record as it is kept, in one command and without
  * filling it from the days (readLife does that, from the studio's numbers):
  * where visits came from (r:<source>), the addresses asked for (fs:<channel>)
- * and the visitors (u). Empty when there is none.
+ * and the visitors (u). Empty when there is none; an answer in any other
+ * shape throws (CX-123 rule 24), so readPathCounts keeps the last reading.
  */
 export async function readLifeRecord(statsId: string | null): Promise<Map<string, number>> {
   if (!statsId || !isRedisConfigured()) return new Map();
-  const [raw] = await redisPipeline([["HGETALL", lifeKey(statsId)]]);
-  return new Map(pairs(raw));
+  return lifeCounts(await readLifeFlat(lifeKey(statsId)));
 }
 
 /** Sales in the last STATS_DAYS days, by day, by product, and for each window. */
@@ -1505,10 +1607,11 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     return out;
   };
   const zero = () => ({ sales: 0, cents: 0 });
-  const out: SalesStats = { byDay: {}, byProduct: {}, totals: { d7: zero(), d30: zero(), d90: zero() }, partial, elsewhere: 0, bySource: [], ...(renewals ? { renewals } : {}) };
+  const out: SalesStats = { byDay: {}, byProduct: Object.create(null), totals: { d7: zero(), d30: zero(), d90: zero() }, partial, elsewhere: 0, bySource: [], ...(renewals ? { renewals } : {}) };
   for (const sale of sales) {
     if (sale.currency !== store.currency) {
-      out.elsewhere += 1;
+      // A currency not named is not "another currency": the reading is marked incomplete instead.
+      if (sale.currency) out.elsewhere += 1;
       continue;
     }
     const day = dayKey(sale.created);
@@ -1524,6 +1627,9 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       out.totals[w].cents += sale.cents;
     }
   }
+  // A product id is read from the sale's metadata, which the creator's own Stripe account can set to "__proto__":
+  // added up with no prototype above, handed on as an ordinary record of own keys.
+  out.byProduct = { ...out.byProduct };
   // What each link brought in, over the same ninety days. Only the store's
   // own currency: the sales in another one are counted in `elsewhere` and
   // left out of every total here, for the reason given on that field.
@@ -1584,6 +1690,8 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   };
   out.byContentIn = { d7: contentIn(cut7), d30: contentIn(cut30), d90: contentIn("") };
   out.byCountryIn = { d7: countryIn(cut7), d30: countryIn(cut30), d90: countryIn("") };
+  // The tax collected at checkout, every currency each on its own, from the same 90 days' sales (lib/tax-summary.ts).
+  out.taxIn = taxSummary(sales, { d7: cut7, d30: cut30, d90: cut90 }, store.currency, readPartial);
   if (refundRows) {
     // A refund is credited to the channel and product of the sale it gave back,
     // found by the payment it names among every sale read, the 180 days.
@@ -1608,19 +1716,20 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       if (refund.currency !== store.currency || day < cut90) continue;
       out.refundDays[day] = (out.refundDays[day] ?? 0) + refund.cents;
     }
-    out.takenBackElsewhere = { refunds: refundRows.filter((refund) => refund.currency !== store.currency && dayKey(refund.created) >= cut90).length, disputes: null };
-    out.refundsByProduct = {};
+    out.takenBackElsewhere = { refunds: refundRows.filter((refund) => refund.currency && refund.currency !== store.currency && dayKey(refund.created) >= cut90).length, disputes: null };
+    const refundsByProduct: NonNullable<SalesStats["refundsByProduct"]> = Object.create(null);
     for (const refund of refundRows) {
       if (refund.currency !== store.currency) continue;
       const sale = byPayment.get(refund.paymentIntent);
       if (!sale?.product) continue;
-      const row = (out.refundsByProduct[sale.product] ??= { refunds: 0, cents: 0 });
+      const row = (refundsByProduct[sale.product] ??= { refunds: 0, cents: 0 });
       row.refunds += 1;
       row.cents += refund.cents;
     }
+    out.refundsByProduct = { ...refundsByProduct };
   }
   // Each channel's money by the day, renewals included.
-  const channelDays: ChannelDays = {};
+  const channelDays: ChannelDays = Object.create(null);
   const addDay = (channel: string, day: string, cents: number) => {
     const days = (channelDays[channel] ??= {});
     days[day] = (days[day] ?? 0) + cents;
@@ -1629,7 +1738,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   for (const [channel, days] of Object.entries(renewals?.bySourceDay ?? {})) {
     for (const [day, cents] of Object.entries(days)) if (day >= cut90) addDay(channel, day, cents);
   }
-  out.channelDays = channelDays;
+  out.channelDays = { ...channelDays };
   out.buyers = buyersFrom(read, store.currency, now);
   out.buyerChannels = buyerChannelsFrom(read, store.currency, now, readPartial);
   if (disputeRead) {
@@ -1649,7 +1758,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       return [...by.values()].sort((a, b) => b.cents - a.cents || a.source.localeCompare(b.source));
     };
     out.disputesIn = { d7: disputesFrom(cut7), d30: disputesFrom(cut30), d90: disputesFrom(cut90) };
-    out.takenBackElsewhere = { refunds: out.takenBackElsewhere?.refunds ?? null, disputes: disputeRead.rows.filter((dispute) => dispute.currency !== store.currency && dayKey(dispute.created) >= cut90).length };
+    out.takenBackElsewhere = { refunds: out.takenBackElsewhere?.refunds ?? null, disputes: disputeRead.rows.filter((dispute) => dispute.currency && dispute.currency !== store.currency && dayKey(dispute.created) >= cut90).length };
   } else {
     out.disputesIn = null;
   }
@@ -1829,7 +1938,7 @@ export async function readRange(store: Store, from: string, to: string, now = Da
       for (const sale of sales) {
         if (sale.created >= end || sale.created < start) continue;
         if (sale.currency !== store.currency) {
-          if (sale.created >= Date.parse(`${from}T00:00:00Z`)) out.elsewhere += 1;
+          if (sale.currency && sale.created >= Date.parse(`${from}T00:00:00Z`)) out.elsewhere += 1;
           continue;
         }
         const day = byDay.get(dayKey(sale.created));
@@ -1892,18 +2001,19 @@ export async function readAllTimeSales(store: Store): Promise<AllTimeSales | nul
     if (typeof cached === "string" && cached) {
       try {
         const kept = JSON.parse(cached) as AllTimeSales;
-        // Read again when the store has changed its currency since.
-        if ((kept.currency ?? "usd") === store.currency) return { ...kept, currency: kept.currency ?? "usd", elsewhere: kept.elsewhere ?? 0, together: parseTogether(kept.together) };
+        // Read again when the store has changed its currency since, or when the kept reading does not say
+        // what it is in or how many sales it left out (rule 24): never taken for dollars nor for none.
+        if (kept.currency === store.currency && Number.isSafeInteger(kept.elsewhere) && kept.elsewhere >= 0) return { ...kept, together: parseTogether(kept.together) };
       } catch {
         // Read again below.
       }
     }
   }
   const { sales, partial } = await readPaidSales(store, 0, ALL_TIME_PAGES);
-  const out: AllTimeSales = { totals: { sales: 0, cents: 0 }, byProduct: {}, since: "", partial, currency: store.currency, elsewhere: 0 };
+  const out: AllTimeSales = { totals: { sales: 0, cents: 0 }, byProduct: Object.create(null), since: "", partial, currency: store.currency, elsewhere: 0 };
   for (const sale of sales) {
     if (sale.currency !== store.currency) {
-      out.elsewhere += 1;
+      if (sale.currency) out.elsewhere += 1;
       continue;
     }
     out.totals.sales += 1;
@@ -1912,6 +2022,7 @@ export async function readAllTimeSales(store: Store): Promise<AllTimeSales | nul
     p.sales += 1;
     p.cents += sale.cents;
   }
+  out.byProduct = { ...out.byProduct };
   if (sales.length) out.since = dayKey(sales[sales.length - 1].created);
   out.together = togetherFrom(sales);
   // What each product's buyers bought later, and how long after (lib/next-bought.ts), kept a week for the studio.
@@ -2008,6 +2119,8 @@ export type StatsData = {
   ads: Record<"d7" | "d30" | "d90", { content: string; source: string; campaign: string; sales: number; cents: number }[]>;
   /** Money by the buyer's country, for the window, as Stripe has the country. */
   salesCountries: Record<"d7" | "d30" | "d90", { country: string; sales: number; cents: number }[]>;
+  /** The tax collected at checkout (SalesStats.taxIn); null when it could not be read. */
+  taxCollected?: TaxSummary | null;
   /** Refunds made in the window, by the channel of the sale refunded; null when they could not be read. */
   refunds: Record<"d7" | "d30" | "d90", { source: string; refunds: number; cents: number }[]> | null;
   /** Refunds over the last 90 days, by product. */
@@ -2140,6 +2253,18 @@ export function postRows(
     rows.set(s.campaign, row);
   }
   return [...rows.values()].sort((a, b) => b.cents - a.cents || b.sales - a.sales || b.visits - a.visits || a.campaign.localeCompare(b.campaign));
+}
+
+/** The short links' results (components/short-links.tsx): each campaign tag's visits, sales and money over the 90 days, added up across channels. */
+export function resultsByCampaign(posts: { campaign: string; visits: number; sales: number; cents: number }[]): Record<string, { visits: number; sales: number; cents: number }> {
+  // A campaign tag is a visitor's utm_campaign, so it can be "__proto__" or "constructor": added up with no prototype,
+  // then handed to the page as an ordinary record, the only kind a Client Component takes (tests/proto-keys.test.ts).
+  const sums = posts.reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
+    const sum = all[row.campaign] ?? { visits: 0, sales: 0, cents: 0 };
+    all[row.campaign] = { visits: sum.visits + row.visits, sales: sum.sales + row.sales, cents: sum.cents + row.cents };
+    return all;
+  }, Object.create(null));
+  return { ...sums };
 }
 
 /**
@@ -2279,6 +2404,7 @@ export function studioStats(
     searchMisses: { d7: w.d7.searchMisses ?? [], d30: w.d30.searchMisses ?? [], d90: w.d90.searchMisses ?? [] },
     ads: sales?.byContentIn ?? { d7: [], d30: [], d90: [] },
     salesCountries: sales?.byCountryIn ?? { d7: [], d30: [], d90: [] },
+    taxCollected: sales?.taxIn ?? null,
     refunds: sales?.refundsIn ?? null,
     refundsByProduct: sales?.refundsByProduct ?? {},
     takenBackElsewhere: sales?.takenBackElsewhere ?? null,
@@ -2340,7 +2466,8 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
     const details = (row.customer_details ?? {}) as { email?: unknown; name?: unknown; address?: { country?: unknown } | null };
     const totals = (row.total_details ?? {}) as { amount_discount?: unknown; amount_tax?: unknown };
     const text = (v: unknown) => (typeof v === "string" ? v : "");
-    const cents = (v: unknown) => (typeof v === "number" ? v : 0);
+    // An amount Stripe's record does not give as whole cents is left blank, never written as 0.00 (601 [KB22] U4).
+    const amount = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? plainAmount(v, sale.currency) : "");
     const product = await find(sale.product);
     const option = product?.options.find((o) => o.id === meta.option)?.label ?? meta.option ?? "";
     const kind = sale.upsell
@@ -2364,8 +2491,9 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
         (await Promise.all(bumpsFromMeta(meta).map((added) => title(added.id, "")))).filter(Boolean).join(" + "),
         kind,
         plainAmount(sale.cents, sale.currency),
-        plainAmount(cents(totals.amount_discount), sale.currency),
-        plainAmount(cents(totals.amount_tax), sale.currency),
+        // A one-click extra is a bare payment: no coupon and no tax calculation (lib/upsell.ts), so both are a known zero.
+        sale.upsell ? plainAmount(0, sale.currency) : amount(totals.amount_discount),
+        sale.upsell ? plainAmount(0, sale.currency) : amount(totals.amount_tax),
         sale.currency.toUpperCase(),
         text(details.email) || text(row.customer_email) || text(row.receipt_email),
         text(details.name),

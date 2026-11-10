@@ -13,6 +13,8 @@ import { monogram } from "@/lib/store-app";
 import { readCourse } from "@/lib/course";
 import { takePublicRequest } from "@/lib/traffic";
 import { plain } from "@/lib/serve-file";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 
 /**
  * A certificate of completion as a PDF file (lib/certificate-pdf.ts): the
@@ -47,10 +49,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!(await takePublicRequest(store, "public", now, 1))) return resting();
   const w = coursesWords(store.language);
   let certificate = sample ? null : await readCertificate(id);
+  // A draft's sample: drawn only for the store's owner and team, signed in, and kept by no shared cache (MM-SA-30).
+  let draft = false;
   if (sample) {
     const found = await readCourseListing(store, request.nextUrl.searchParams.get("product") ?? undefined);
     const course = found?.course ? await readCourse(found.course.id) : null;
     if (!found || !course?.certificate) return new Response("Not found", { status: 404 });
+    draft = found.hidden;
+    if (draft && !(await seesDrafts(store, request.cookies.get(SESSION_COOKIE)?.value))) return new Response("Not found", { status: 404 });
     certificate = { id: "sample", store: storeKey(store), productId: found.id, courseId: course.id, name: w.sampleName, title: found.title, creator: store.name, email: "", issuedAt: Math.floor(now / 1000), withdrawnAt: 0 };
   }
   if (!certificate || certificate.store !== storeKey(store) || certificate.withdrawnAt > 0) return new Response("Not found", { status: 404 });
@@ -78,7 +84,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   };
   // Everything the file is drawn from, and the code that draws it: the same tag, the same file.
   const tag = `"${createHash("sha256").update(JSON.stringify([process.env.VERCEL_GIT_COMMIT_SHA ?? "", sheet])).digest("base64url").slice(0, 32)}"`;
-  const cache: Record<string, string> = sample
+  const cache: Record<string, string> = draft
+    ? // A draft's sample is the team's alone: no CDN keeps it for the next person at the same address.
+      { "Cache-Control": "private, no-store" }
+    : sample
     ? // Five minutes at the CDN: a sample switched off or redrawn in a new look is seen soon, each try past it paid as above.
       { "Cache-Control": "public, max-age=0, s-maxage=300" }
     : { "Cache-Control": "private, no-cache", ETag: tag };

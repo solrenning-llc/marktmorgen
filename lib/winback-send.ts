@@ -23,6 +23,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
@@ -93,12 +95,45 @@ type Ended = {
   items?: { data?: { price?: { recurring?: { interval?: unknown; interval_count?: unknown } | null } | null }[] } | null;
 };
 
-/** Whether this address has a live membership to this product on the creator's account now. */
-async function cameBack(account: string, customer: string, product: string): Promise<boolean> {
-  const listed = await onAccount("GET", account, `/subscriptions?customer=${customer}&status=all&limit=100`);
-  const subs = (Array.isArray(listed.data) ? listed.data : []) as { status?: unknown; metadata?: Record<string, string> | null }[];
-  return subs.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === product);
+/** Pages of a customer's memberships read before "has not come back" is left unknown. */
+const CAME_BACK_PAGES = 5;
+
+/**
+ * Whether this address has a live membership to this product on the creator's account now: true, false, or null
+ * when it cannot be said (CX-123 rule 24, L6). "No" needs the whole list: every page read to has_more false, each a
+ * list. A page that is not one, a membership without an id to go on from, or more pages than are read is unknown,
+ * never "has not come back", so no offer goes to somebody who may already be back.
+ */
+async function cameBack(account: string, customer: string, product: string): Promise<boolean | null> {
+  let after = "";
+  for (let page = 0; page < CAME_BACK_PAGES; page += 1) {
+    const listed = await onAccount("GET", account, `/subscriptions?customer=${customer}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    const subs: unknown = listed.data;
+    if (!Array.isArray(subs) || (listed.has_more !== true && listed.has_more !== false)) return null;
+    // Each membership read whole (Codex N on #2714): a status in words and its metadata as an object. A row missing
+    // either cannot show it is to another product, so the answer is unknown, never "has not come back".
+    for (const sub of subs as unknown[]) {
+      if (!sub || typeof sub !== "object") return null;
+      const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
+      if (typeof status !== "string" || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+      if (LIVE.has(status) && (metadata as Record<string, unknown>).product === product) return true;
+    }
+    if (listed.has_more === false) return false;
+    const last = (subs as { id?: unknown }[]).at(-1)?.id;
+    if (typeof last !== "string" || !SUB_PATTERN.test(last)) return null;
+    after = last;
+  }
+  return null;
 }
+
+/** Pages of a window's ended memberships read in one run (a hundred each). */
+const EVENT_PAGES = 10;
+/**
+ * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to
+ * CAME_BACK_PAGES pages of their memberships and an email. The window is read whole to decide, but no more than
+ * this is spent on it in one run, as when only its first page was read; the rest wait for the next run.
+ */
+const OFFERS_PER_RUN = 100;
 
 async function sweepStore(store: Store, deadline: number, now: number): Promise<number> {
   const account = store.stripeAccountId as string;
@@ -107,13 +142,28 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
   const nowSeconds = Math.floor(now / 1000);
   const upTo = nowSeconds - store.winback.days * 86_400;
   const from = upTo - 2 * 86_400;
-  const query = new URLSearchParams({ type: "customer.subscription.deleted", limit: "100", "created[gte]": String(from), "created[lte]": String(upTo) });
-  const listed = await onAccount("GET", account, `/events?${query}`);
-  const events = (Array.isArray(listed.data) ? listed.data : []) as { data?: { object?: Ended } }[];
+  // Every ended membership of the window, past the first page (CX-123 rule 24, L6): a page that is not a list stops
+  // the run for this store (nothing is sent on it), never reads as "no more ended memberships".
+  const events: { id?: unknown; data?: { object?: Ended } }[] = [];
+  let after = "";
+  for (let page = 0; page < EVENT_PAGES && Date.now() < deadline; page += 1) {
+    const query = new URLSearchParams({ type: "customer.subscription.deleted", limit: "100", "created[gte]": String(from), "created[lte]": String(upTo) });
+    if (after) query.set("starting_after", after);
+    const listed = await onAccount("GET", account, `/events?${query}`);
+    if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of ended memberships");
+    const rows = listed.data as { id?: unknown; data?: { object?: Ended } }[];
+    events.push(...rows);
+    const last = rows.at(-1)?.id;
+    if (listed.has_more === false || typeof last !== "string" || !last) break;
+    after = last;
+  }
   let sent = 0;
+  let lookedAt = 0;
 
-  for (const event of events) {
-    if (Date.now() >= deadline) break;
+  // Oldest first (Claude 4 on #2714): Stripe lists events newest first, and the window is two days wide with one run
+  // a day, so the offers a run can look at go to the ended memberships about to leave the window, not the newest.
+  for (const event of [...events].reverse()) {
+    if (Date.now() >= deadline || lookedAt >= OFFERS_PER_RUN) break;
     const sub = event.data?.object ?? {};
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
     const customer = typeof sub.customer === "string" && CUSTOMER_PATTERN.test(sub.customer) ? sub.customer : "";
@@ -132,13 +182,22 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     const count = typeof recurring?.interval_count === "number" ? recurring.interval_count : 1;
     if (!canWinBack(store.winback, interval, count)) continue;
 
-    const [claimed] = await redisPipeline([["SET", sentKey(account, subId), "1", "NX", "EX", 90 * 86_400]]);
-    if (claimed === null) continue;
+    // Ours only when Redis says OK or, answered in another shape, the key holds this claim's own value read back
+    // (CX-123 rule 24, L6; Claude 4 on #2714). Somebody else's mark, or unknown: nothing is sent and nothing let go.
+    const claim = claimValue();
+    if ((await claimMark(sentKey(account, subId), 90 * 86_400, claim)) !== "ours") continue;
+    lookedAt += 1;
     try {
       const found = await onAccount("GET", account, `/customers/${customer}`);
       const email = typeof found.email === "string" && EMAIL_PATTERN.test(found.email) ? normaliseEmail(found.email) : "";
       if (!email || found.deleted === true) continue;
-      if (await cameBack(account, customer, product.id)) continue;
+      const back = await cameBack(account, customer, product.id);
+      if (back === null) {
+        // Not known whether they came back: nothing is sent, and the mark (ours) is let go for a whole reading next run.
+        await releaseMark(sentKey(account, subId), claim);
+        continue;
+      }
+      if (back) continue;
       // Somebody who agreed to hear from the creator and has not left the
       // list: the list's own token is what the unsubscribe link carries, and
       // no token means no agreement to write under.
@@ -146,8 +205,14 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const tokens = await tokensFor(store.listId, [email], store.handle);
       const unsub = tokens.get(email);
       if (!unsub) continue;
-      const [fresh] = await redisPipeline([["SET", onceKey(statsId, email, product.id), "1", "NX", "EX", ONCE_PER_DAYS * 86_400]]);
-      if (fresh === null) continue;
+      const onceValue = claimValue();
+      const once = await claimMark(onceKey(statsId, email, product.id), ONCE_PER_DAYS * 86_400, onceValue);
+      if (once !== "ours") {
+        // Heard one lately, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the next
+        // run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
+        if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
+        continue;
+      }
 
       const token = randomBytes(20).toString("hex");
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
@@ -179,8 +244,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         sent += 1;
         await redisPipeline([["INCR", countKey(statsId)]]);
       } else {
-        // Not sent: tried again on the next run, inside the same window.
-        await redisPipeline([["DEL", sentKey(account, subId), onceKey(statsId, email, product.id), linkKey(token)]]);
+        // false is refused or unknown alike (Amazon SES or Resend may have taken it and the reply been lost), so the
+        // marks and the offer's link are kept, as lib/trial-nudges.ts keeps its mark: the person is written to at most
+        // once, and the link in an email that may have arrived keeps working (CX-123 rule 24).
+        console.error("a come-back offer may not have gone; kept as sent", store.handle);
       }
     } catch (error) {
       console.error("sending a come-back offer failed", store.handle, error);
@@ -301,6 +368,8 @@ export async function openWinBack(
 /** Forgets that one person heard a come-back offer about each product lately (lib/person-erasure.ts). */
 export async function forgetWinbackPerson(statsId: string | null, productIds: string[], email: string): Promise<number> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]);
-  return Number(gone) || 0;
+  // DEL's own count only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("the come-back marks forgotten");
+  return gone;
 }

@@ -17,6 +17,7 @@
  * id, for three days; never who bought.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
@@ -281,14 +282,16 @@ export async function nextOfferFor(input: {
   if (!nextOfferShown(store, now) || !SESSION.test(session) || !input.email || !bought.length) return null;
   const kept = await readKept(store, session);
   if (kept) return shownOf(store, kept);
-  // One choice per order: another opening while it is being made shows nothing yet.
-  const [claimed] = await redisPipeline([["SET", lockKey(session), "1", "NX", "EX", LOCK_SECONDS]]);
-  if (claimed === null) return null;
+  // One choice per order: another opening while it is being made shows nothing yet. Read exactly (CX-123 rule 24): a
+  // lock that cannot be read shows nothing now either, and the page opened again chooses.
+  const mine = claimValue();
+  if ((await claimMark(lockKey(session), LOCK_SECONDS, mine)) !== "ours") return null;
   // Its reads and calls are counted with the store's public requests, before any is made.
   if (!(await takeBuyerRead(store, NEXT_OFFER_REQUEST_UNITS))) return null;
   const owned = await ownedHere(store, input.email);
   if (!owned) {
-    await redisPipeline([["DEL", lockKey(session)]]).catch(() => null);
+    // Only while it is still ours: a lock that ran out and was taken by another opening is that one's.
+    await releaseMark(lockKey(session), mine);
     return null;
   }
   for (const id of [...bought.map((p) => p.id), ...input.alsoOwned]) owned.add(id);

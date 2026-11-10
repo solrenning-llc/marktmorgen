@@ -311,11 +311,26 @@ export async function keyCounts(store: Store, product: Listing): Promise<KeyCoun
   return { left: Number(left) || 0, issued: Number(issued) || 0, revoked: list.revoked, waiting: Number(waiting) || 0 };
 }
 
-/** Whether a product that hands out keys from a pool has none left to give. */
+/**
+ * Whether a product that hands out keys from a pool has none left to give.
+ * The count is read only in its exact shape, one whole number; any other
+ * answer, or no Redis to ask, throws, so a caller that sells on it never
+ * takes "unknown" for "some left" (CX-123, rule 24; SG2, findings 11 and 12).
+ */
 export async function outOfKeys(store: Store, product: Listing): Promise<boolean> {
-  if (activeKeys(product)?.source !== "pool" || !store.statsId || !isRedisConfigured()) return false;
-  const [left] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  return Number(left) === 0;
+  if (activeKeys(product)?.source !== "pool") return false;
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Key count unavailable");
+  const receipt: unknown = await redisPipeline([["LLEN", poolKey(store, product)]]);
+  // Read through the envelope's own data properties only, so an accessor is
+  // never run and never taken for a reply, and a value counts only when it is
+  // the descriptor's own, never one inherited from a polluted prototype
+  // (reviews of #2665).
+  const length = Array.isArray(receipt) ? Object.getOwnPropertyDescriptor(receipt, "length") : undefined;
+  const slot = Array.isArray(receipt) ? Object.getOwnPropertyDescriptor(receipt, "0") : undefined;
+  if (!length || !Object.hasOwn(length, "value") || length.value !== 1 || !slot || !Object.hasOwn(slot, "value")) throw new Error("Key count unavailable");
+  const left: unknown = slot.value;
+  if (typeof left !== "number" || !Number.isSafeInteger(left) || left < 0) throw new Error("Key count unavailable");
+  return left === 0;
 }
 
 export type UploadResult = {

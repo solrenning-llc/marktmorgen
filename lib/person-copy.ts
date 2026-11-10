@@ -33,14 +33,15 @@ import { readDeals, readFields, readPersonTasks, readStages, readValues } from "
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
-import { listAgreements, readVersion } from "@/lib/agreement-store";
+import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
-import { submissionsOf } from "@/lib/assignment";
+import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
+import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
-import { readLeads } from "@/lib/affiliate-leads";
+import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
 import { inviteField, readInvite } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
@@ -100,6 +101,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
+  "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
@@ -115,8 +117,11 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/discord-access.ts": { how: "copied", what: "Your Discord account's link to the store, and its roles" },
   "lib/email-sync.ts": { how: "copied", what: "The record of sending you to the store's connected email platform" },
   "lib/segments.ts": { how: "marks", what: "A ten-minute copy of the store's buyers, made from its Stripe account" },
+  "lib/store-readings.ts": { how: "marks", what: "A day's copy of the store's sales numbers, which may name its biggest buyers, made from its Stripe account" },
+  "lib/calendar-sync.ts": { how: "marks", what: "A copy of the store's private booking calendar, which may name you if you booked, made from its bookings" },
   "lib/member-health.ts": { how: "marks", what: "A ten-minute copy of the store's members' scores, made from its Stripe account" },
   "lib/reviews.ts": { how: "copied", what: "Your reviews, and the store's replies to them" },
+  "lib/customer-voice.ts": { how: "marks", what: "The store's monthly summary of what its customers said, which may quote your review words without your name; your reviews themselves are in this copy" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },
   "lib/erasure-index.ts": { how: "marks", what: "Links the store emailed you that still work (stop, waitlist, review, free-product and sign-up links)" },
   // What the erasure keeps on purpose (lib/person-data.ts, "kept"): still theirs to see.
@@ -223,7 +228,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const out: unknown[] = [];
     for (const a of list.filter((a) => same(a.email, s.email))) {
       const versions = [];
-      for (const mark of a.versions) versions.push({ ...mark, ...((await readVersion(a, mark.n)) ?? {}) });
+      for (const mark of a.versions) versions.push({ ...mark, ...((await readVersionExact(a, mark.n)) ?? {}) });
       out.push({ ...a, versions });
     }
     return out;
@@ -253,6 +258,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       const subs = await submissionsOf(c.courseId, c.lessonIds.map((lessonId) => ({ lessonId, who: s.learner })));
       subs.forEach((sub, i) => {
         if (!sub) return;
+        // A record that is there but does not read is said, never left out of the copy (CX-123 rule 24).
+        if (isUnreadSubmission(sub)) {
+          out.push({ course: c.productId, lesson: c.lessonIds[i], unread: "Work you handed in is kept for this lesson, but its record could not be read for this copy." });
+          return;
+        }
         out.push({ course: c.productId, lesson: c.lessonIds[i], text: sub.text, file: sub.file?.name ?? "", handedIn: iso(sub.at), state: sub.state, tries: sub.tries, feedback: sub.feedback, reviewed: iso(sub.reviewedAt) });
       });
     }
@@ -270,11 +280,20 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
+  "lib/lesson-notes.ts": async (s) => {
+    // Named by the course's product as the other course records are; a course since deleted by its own id.
+    const productOf = new Map(s.courses.map((c) => [c.courseId, c.productId]));
+    return (await notesOf(s.statsId, s.learner)).map((n) => ({ course: productOf.get(n.course) ?? n.course, lesson: n.lesson, text: n.text, at: iso(n.at) }));
+  },
   "lib/affiliate-bond.ts": async (s) => {
     const affiliate = await bondRecordOf(s.statsId, s.email);
     return affiliate ? [{ affiliate }] : [];
   },
-  "lib/affiliate-leads.ts": async (s) => (await readLeads(s.store)).filter((l) => l.email && same(l.email, s.email)),
+  // Only their own field (leadOf): another person's lead that does not read never blocks this copy; theirs throws.
+  "lib/affiliate-leads.ts": async (s) => {
+    const lead = await leadOf(s.store, s.email);
+    return lead && lead.email && same(lead.email, s.email) ? [lead] : [];
+  },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
   "lib/move-members.ts": async (s) => {

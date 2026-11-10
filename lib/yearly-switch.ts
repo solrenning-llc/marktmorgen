@@ -24,11 +24,13 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
+import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, validConsent } from "@/lib/digital-consent";
+import { consentEmailLines } from "@/lib/digital-consent-email";
 import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { previewBody, switchBody, PREVIEW_SECONDS } from "@/lib/tier-switch";
+import { chargedOf, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -36,6 +38,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
 
@@ -57,14 +60,19 @@ async function sha256Hex(value: string): Promise<string> {
 const linkKey = async (token: string) => `nl:yearly:link:${(await sha256Hex(`nimbus-yearly:${token}`)).slice(0, 40)}`;
 const priceKey = (account: string, product: Listing, cents: number, currency: string) => `nl:yearly:price:${account}:${product.id}:${cents}:${currency}`;
 
-/** A link to one membership's switch, for the email that offers it. Opens nothing else. */
+/**
+ * A link to one membership's switch, for the email that offers it. Opens nothing else. Handed out only when Redis
+ * answered its SET "OK": any other reply is unknown (CX-123 rule 24) and throws, so no email carries a link that may
+ * not open (lib/yearly-ask.ts then lets the membership's "sent" mark go).
+ */
 export async function mintYearlyLink(store: Store, customer: string, subscription: string): Promise<string> {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  await redisPipeline([["SET", await linkKey(token), JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]);
+  const [kept] = repliesFor(await redisPipeline([["SET", await linkKey(token), JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]), 1) ?? [];
+  if (kept !== "OK") throw new UnknownReplyError("the emailed link to a move to yearly");
   return token;
 }
 
@@ -133,6 +141,8 @@ export type YearlyPreview = {
   currency: string;
   trialing: boolean;
   at: number;
+  /** Whether the membership is handed over digitally at once: then the page asks the EU box again (91 [D2-EU-WITHDRAWAL]). */
+  digital: boolean;
 };
 
 export type YearlyProblemReason = "expired" | "gone" | "yearly" | "error";
@@ -168,6 +178,11 @@ export async function previewYearly(store: Store, token: string, subscription: s
     const price = await yearlyPrice(store, found.product, found.choice.cents);
     const at = Math.floor(Date.now() / 1000);
     const invoice = await onAccount("POST", found.grant.a, "/invoices/create_preview", previewBody(found.grant.c, subscription, found.itemId, price, at));
+    // Read exactly first, as a switch between tiers reads it (lib/tier-switch.ts, previewKnown; Codex J on #2764).
+    if (!previewKnown(invoice)) {
+      console.error("a move to yearly's preview was not one this code knows", subscription);
+      return { ok: false, reason: "error", emailed };
+    }
     const due = dueNow(invoice as Parameters<typeof dueNow>[0], at);
     return {
       ok: true,
@@ -182,6 +197,7 @@ export async function previewYearly(store: Store, token: string, subscription: s
         currency: typeof invoice.currency === "string" ? invoice.currency : store.currency,
         trialing: found.trialing,
         at,
+        digital: deliversDigitally(found.product),
       },
     };
   } catch (error) {
@@ -192,10 +208,14 @@ export async function previewYearly(store: Store, token: string, subscription: s
 
 export type YearlyResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "yearly" | "stale" | "declined" | "busy" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "yearly" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
 
-/** Moves the membership to yearly, at the second the preview was worked out for. */
-export async function switchYearly(store: Store, token: string, subscription: string, at: number): Promise<YearlyResult> {
+/**
+ * Moves the membership to yearly, at the second the preview was worked out
+ * for. It charges at once under new terms, so it asks the buyer's yes again,
+ * as a switch between tiers does (lib/tier-switch.ts; 91 [D2-EU-WITHDRAWAL]).
+ */
+export async function switchYearly(store: Store, token: string, subscription: string, at: number, consent: DigitalConsent | null): Promise<YearlyResult> {
   if (!isRedisConfigured() || !store.stripeAccountId) return { ok: false, reason: "error" };
   const now = Math.floor(Date.now() / 1000);
   if (!Number.isInteger(at) || at > now + 60 || now - at > PREVIEW_SECONDS) return { ok: false, reason: "stale" };
@@ -204,10 +224,31 @@ export async function switchYearly(store: Store, token: string, subscription: st
     return await withLock(`nl:tier:${subscription}:lock`, 60, 5_000, async (): Promise<YearlyResult> => {
       const found = await find(store, token, subscription);
       if ("reason" in found) return { ok: false, reason: found.reason };
+      const digital = deliversDigitally(found.product);
+      if (digital && !validConsent(consent)) return { ok: false, reason: "consent" };
       const account = found.grant.a;
       const price = await yearlyPrice(store, found.product, found.choice.cents);
-      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, switchBody(found.itemId, price, at));
-      if (updated.pending_update) {
+      const body = switchBody(found.itemId, price, at);
+      const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.product)) : "";
+      if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
+      let updated: Record<string, unknown>;
+      try {
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+      } catch (error) {
+        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, or Stripe's own
+        // failure, after the update was sent: it may have been applied, so it is "unconfirmed", never "nothing changed"
+        // (Codex CX1 on #2764). Nothing is sent again.
+        if (error instanceof StripeError && error.status < 500) throw error;
+        console.error("a move to yearly's charging update had no answer that can be read", error);
+        return { ok: false, reason: "unconfirmed" };
+      }
+      // Read exactly, as a switch between tiers reads it (lib/tier-switch.ts, switchReply; Codex CX1 on #2764).
+      const answered = switchReply(updated, subscription, price, kept);
+      if (answered === "unknown") {
+        console.error("a move to yearly's reply was not one this code knows", subscription);
+        return { ok: false, reason: "unconfirmed" };
+      }
+      if (answered === "pending") {
         const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;
         if (invoice && typeof invoice.id === "string" && invoice.status === "open") {
           await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id)}/void`, new URLSearchParams()).catch((error) =>
@@ -223,7 +264,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
         `/subscriptions/${encodeURIComponent(subscription)}`,
         new URLSearchParams({ "metadata[every]": "year", "metadata[yearly_from]": "month", "metadata[yearly_at]": String(now) }),
       ).catch((error) => console.error("recording a move to yearly failed", error));
-      await tell(store, account, found, updated);
+      await tell(store, account, found, updated, kept);
       return { ok: true, title: found.product.title };
     });
   } catch (error) {
@@ -234,7 +275,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
 }
 
 /** The member's receipt, in the store's language, and the creator's note, in English. */
-async function tell(store: Store, account: string, found: Found, updated: Record<string, unknown>): Promise<void> {
+async function tell(store: Store, account: string, found: Found, updated: Record<string, unknown>, kept: string): Promise<void> {
   let email = "";
   try {
     const customer = await onAccount("GET", account, `/customers/${encodeURIComponent(found.grant.c)}`);
@@ -244,13 +285,14 @@ async function tell(store: Store, account: string, found: Found, updated: Record
   }
   if (!email) return;
   await forgetPaid(store, email).catch(() => {});
-  const invoice = updated.latest_invoice as { total?: unknown; amount_paid?: unknown; currency?: unknown } | null;
-  const raw = typeof invoice?.total === "number" && !found.trialing ? invoice.total : 0;
-  const total = raw > 0 && typeof invoice?.amount_paid === "number" ? invoice.amount_paid : raw;
-  const currency = typeof invoice?.currency === "string" ? invoice.currency : store.currency;
+  // Read exactly, as a switch between tiers reads it (lib/tier-switch.ts, chargedOf): an invoice that cannot be read
+  // says nothing about the amount, never that nothing was charged (Codex CX1 on #2764).
+  const charged = found.trialing ? null : chargedOf(updated.latest_invoice);
+  const total = charged?.cents ?? 0;
+  const currency = charged?.currency ?? store.currency;
   const m = membershipWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
-  const paid = found.trialing ? m.yearlyPaidTrial : total > 0 ? m.yearlyPaidCharged(formatMoney(total, currency, locale)) : m.paidNothing;
+  const paid = found.trialing ? m.yearlyPaidTrial : !charged ? "" : total > 0 ? m.yearlyPaidCharged(formatMoney(total, currency, locale)) : m.paidNothing;
   const from = `"${m.fromName(store.name.replace(/["\\<>\r\n]/g, "").slice(0, 60))}" <${(NIMBUS_FROM.match(/<([^>]+)>/)?.[1] ?? NIMBUS_FROM).trim()}>`;
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from,
@@ -259,8 +301,10 @@ async function tell(store: Store, account: string, found: Found, updated: Record
     text: [
       m.yearlyNow(store.name, found.product.title),
       "",
-      paid,
+      ...(paid ? [paid] : []),
       m.fromNow(priceWords(store, found.choice.cents, "year", store.language)),
+      // The yes given for this move, quoted as a checkout's confirmation quotes it (the durable medium).
+      ...consentEmailLines(store, kept ? { [CONSENT_META]: kept } : null),
       "",
       m.switchedFooter(store.name),
     ].join("\n"),
@@ -275,9 +319,11 @@ async function tell(store: Store, account: string, found: Found, updated: Record
         `${email} moved their ${found.product.title} membership from ${priceWords(store, found.choice.monthly, "month")} to ${priceWords(store, found.choice.cents, "year")}.`,
         found.trialing
           ? "They are in their free trial; the yearly price is charged when it ends."
-          : total > 0
-            ? `Charged today: ${formatMoney(total, currency)}, the year less what was left of their last monthly payment.`
-            : "",
+          : !charged
+            ? "The amount charged could not be read here; Stripe has it."
+            : total > 0
+              ? `Charged today: ${formatMoney(total, currency)}, the year less what was left of their last monthly payment.`
+              : "",
         "",
         "It is all on your own Stripe account, under that customer.",
       ].filter(Boolean).join("\n"),

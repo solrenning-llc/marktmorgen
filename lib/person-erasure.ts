@@ -42,8 +42,8 @@
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
-import { readKind } from "@/lib/catalog";
-import { readCourses } from "@/lib/course";
+import { readKindExact } from "@/lib/catalog";
+import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
 import { suppressCommand } from "@/lib/suppression";
@@ -72,6 +72,7 @@ import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
@@ -87,8 +88,12 @@ import { forgetInboxPerson } from "@/lib/inbox";
 import { forgetDiscordPerson } from "@/lib/discord-access";
 import { forgetSyncPerson } from "@/lib/email-sync";
 import { forgetLedgerCopy } from "@/lib/segments";
+import { forgetReadingsPerson } from "@/lib/store-readings";
+import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
+import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
@@ -124,7 +129,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
-  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email) },
+  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {
     module: "lib/learn.ts",
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
@@ -143,15 +148,16 @@ export const ERASERS: Eraser[] = [
       return records;
     },
   },
-  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email) },
+  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email, s.store) },
   {
     module: "lib/lesson-comments.ts",
     run: async (s) => {
       let records = 0;
-      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner);
+      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
       return records;
     },
   },
+  { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
   { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds) : Promise.resolve(0)) },
   { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
@@ -180,16 +186,29 @@ export const ERASERS: Eraser[] = [
     },
   },
   { module: "lib/segments.ts", run: (s) => forgetLedgerCopy(s.statsId) },
+  // The studio's kept reading of the sales names the biggest buyers by address (inbox C4-48): it goes, and is read again.
+  { module: "lib/store-readings.ts", run: (s) => forgetReadingsPerson(s.statsId) },
+  // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
+  { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
   {
     module: "lib/reviews.ts",
     only: "person",
     run: async (s, files) => {
-      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store);
-      files.push(...done.photos);
+      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it. Their
+      // name and words leave the store page's quotes before the reviews go (lib/store-quotes.ts); when that fails, this
+      // part fails and the reviews are kept for the retry.
+      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files, (reviews) => dropReviewQuotes(s.store, reviews));
+      // Then the quotes are kept again from the reviews as they now stand, under the store's lock, even when this run
+      // found none: a review an earlier run deleted is not found again, a refresh that read one before its delete has
+      // written by now, and other buyers' quotes taken off above come back. When they cannot be kept, they are all
+      // taken off; this part fails only when that is not confirmed either.
+      await keepStoreQuotes(s.store);
       return done.records;
     },
   },
+  // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
+  { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },
@@ -207,9 +226,11 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
   if (!current.statsId) current = await ensureStatsId(ref);
   if (current && !current.listId) current = await ensureListId(ref);
   if (!current?.statsId || !current.listId) return null;
-  const listings = await readKind(current, "course");
+  const listings = await readKindExact(current, "course");
   const courseOf = new Map(listings.flatMap((l) => (l.course?.id ? [[l.course.id, l.id] as const] : [])));
-  const courses = await readCourses([...courseOf.keys()]);
+  // Read exactly (rule 24): an outline kept but unreadable throws, so the deletion answers "unavailable" and is
+  // pressed again, never done with the person's records in that course still kept; only a confirmed absent one is left out.
+  const courses = await readCoursesExact([...courseOf.keys()]);
   return {
     store: current,
     sid: current.sid,
@@ -280,7 +301,7 @@ export async function erasePerson(
     if (!more.ok) return { ok: false, reason: more.reason === "used" ? "limit" : "unavailable", message: more.message };
   }
 
-  // First, and on its own: whatever happens next, they are never written to again.
+  // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).
   await redisPipeline([suppressCommand(scope.listId as string, email)]);
 
   const parts: ErasedPart[] = [];

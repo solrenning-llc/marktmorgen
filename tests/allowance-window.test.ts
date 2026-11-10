@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { RENEW_GRACE_SECONDS, WINDOW_ID, addMonthsMs, allowanceWindow, calendarWindow, isPeriod, keepSecondsFor, ledgerMonthOf, opensAgainWords, resetWords, samePeriod, windowId } from "@/lib/allowance-window";
+import { LONGEST_WINDOW_DAYS, RENEW_GRACE_SECONDS, WINDOW_ID, addMonthsMs, allowanceWindow, calendarWindow, isPeriod, keepSecondsFor, ledgerMonthOf, opensAgainWords, resetWords, samePeriod, windowAt, windowId } from "@/lib/allowance-window";
 import { periodOf, stateOf } from "@/lib/billing";
 import { TRIAL_DAYS } from "@/lib/plan";
 
@@ -71,7 +71,7 @@ test("a free trial is one window from the day it began; no plan, an ended plan a
 });
 
 test("the period is read from Stripe's subscription, on the item first, and none while trialing", () => {
-  const sub = { status: "active", items: { data: [{ current_period_start: s(at(2026, 10, 19)), current_period_end: s(at(2026, 11, 19)), price: { unit_amount: 2200, recurring: { interval: "month" } } }] } };
+  const sub = { status: "active", cancel_at: null, cancel_at_period_end: false, items: { data: [{ current_period_start: s(at(2026, 10, 19)), current_period_end: s(at(2026, 11, 19)), price: { unit_amount: 2200, recurring: { interval: "month" } } }] } };
   const state = stateOf(sub);
   assert.equal(state.state, "active");
   assert.deepEqual(state.state === "active" ? state.period : null, { start: s(at(2026, 10, 19)), end: s(at(2026, 11, 19)), renews: true });
@@ -111,4 +111,45 @@ test('a funded annual period keeps twelve anchored months and no thirteenth wind
  }
  assert.equal(allowanceWindow(funded,at(2027,1,31,12)),null);
  assert.ok(allowanceWindow(store,at(2027,1,31,12)));
+});
+
+// Review of #2205 (C3-112): the grace window after a period whose end was cut to a short month's last day ends where
+// Stripe ends the next period, counted from the anchor; and a billing month's counter is kept at least its longest.
+test("the window right after a period cut to February's end ends on the anchor's day, as Stripe's next period does", () => {
+  // Anchor 31, a common year: 31 January to 28 February, then 28 February to 31 March (not 28 March).
+  const jan31 = paying(at(2027, 1, 31, 9), at(2027, 2, 28, 9));
+  const grace = allowanceWindow(jan31, at(2027, 3, 1, 9))!;
+  assert.deepEqual([grace.id, grace.start, grace.end, grace.billing], ["2027-02-28", at(2027, 2, 28, 9), at(2027, 3, 31, 9), true]);
+  // Worked out ahead, on 10 February, for an email scheduled for 1 March: the same window.
+  assert.deepEqual(windowAt(jan31, at(2027, 3, 1, 9)), grace);
+  // Its counter, made on 10 February, is still there on the last day of that window, and a day more.
+  const keep = keepSecondsFor(grace, at(2027, 2, 10));
+  assert.ok(at(2027, 2, 10) + keep * 1000 >= at(2027, 3, 31, 9) + DAY, String(keep));
+  // Anchor 30 in a common year: 30 January to 28 February, then to 30 March.
+  const jan30 = paying(at(2027, 1, 30, 9), at(2027, 2, 28, 9));
+  assert.equal(allowanceWindow(jan30, at(2027, 3, 1))!.end, at(2027, 3, 30, 9));
+  // Anchor 31 after a leap day: 31 January to 29 February 2028, then to 31 March.
+  const leap = paying(at(2028, 1, 31, 9), at(2028, 2, 29, 9));
+  assert.equal(allowanceWindow(leap, at(2028, 3, 1))!.end, at(2028, 3, 31, 9));
+  // A period not cut keeps a month from its own end: 15 February to 15 March, then to 15 April.
+  const mid = paying(at(2027, 2, 15, 9), at(2027, 3, 15, 9));
+  assert.equal(allowanceWindow(mid, at(2027, 3, 16))!.end, at(2027, 4, 15, 9));
+  // A partial first period (Codex H, #2269): 31 January to 15 February, before the first whole invoice. The next begins
+  // on its end, 15 February, and runs to 15 March; never 28 February to 31 March, which begins after now.
+  const partial = paying(at(2027, 1, 31, 9), at(2027, 2, 15, 9));
+  const afterPartial = allowanceWindow(partial, at(2027, 2, 16, 9))!;
+  assert.deepEqual([afterPartial.id, afterPartial.start, afterPartial.end], ["2027-02-15", at(2027, 2, 15, 9), at(2027, 3, 15, 9)]);
+  assert.deepEqual(windowAt(partial, at(2027, 3, 20, 9))?.start, at(2027, 3, 15, 9));
+  // A yearly plan whose period began on a leap day: the next year begins on its cut end and its first month runs to 28 March.
+  const yearly = paying(at(2024, 2, 29, 9), at(2025, 2, 28, 9), "year");
+  const first = allowanceWindow(yearly, at(2025, 3, 1))!;
+  assert.deepEqual([first.id, first.end], ["2025-02-28", at(2025, 3, 28, 9)]);
+});
+
+test("a billing month's counter is kept at least the longest month from its start, a calendar month's to its end", () => {
+  const short = { id: "2027-02-28", start: at(2027, 2, 28), end: at(2027, 3, 28), billing: true };
+  const now = at(2027, 2, 10);
+  assert.ok(now + keepSecondsFor(short, now) * 1000 >= short.start + (LONGEST_WINDOW_DAYS + 1) * DAY);
+  const calendar = calendarWindow(at(2027, 2, 10));
+  assert.equal(keepSecondsFor(calendar, now), Math.ceil((calendar.end - now) / 1000) + 86_400);
 });

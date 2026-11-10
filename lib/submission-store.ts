@@ -490,21 +490,37 @@ export async function closeSubmissionDoor(
   const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
   const who = whoKey(door.folder, door.who);
   const entry = entryOf(door.courseId, door.lessonId, door.id, pathname);
-  // A write sent and never answered may have landed: its file is kept for the record that may name it.
-  const replies = repliesFor(
-    await redisPipeline([
-      ["ZADD", live, "XX", keepUntil, door.id],
-      ["ZSCORE", live, door.id],
-      ["EXPIRE", live, LIVE_SECONDS],
-      ["ZADD", who, "XX", until, entry],
-      ["ZSCORE", who, entry],
-      ["EXPIRE", who, LIVE_SECONDS],
-      ["ZADD", DUE_KEY, keepUntil, dueMember(door.folder, pathname)],
-      ["SET", key, json, "EX", until - nowSeconds, "NX"],
-      ["DEL", doorKey(door.folder, door.id)],
-    ]),
-    9,
-  );
+  // When the write's answer is not known, the record is read back and the file put on the sweep's list (only if it
+  // is not there): whatever happens to the file next, the sweep deletes it at the end of its keeping time.
+  const readBack = () =>
+    redisPipeline([
+      ["GET", key],
+      ["ZADD", DUE_KEY, "NX", keepUntil, dueMember(door.folder, pathname)],
+    ]).then(
+      (answer) => repliesFor(answer, 2),
+      () => null,
+    );
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(
+      await redisPipeline([
+        ["ZADD", live, "XX", keepUntil, door.id],
+        ["ZSCORE", live, door.id],
+        ["EXPIRE", live, LIVE_SECONDS],
+        ["ZADD", who, "XX", until, entry],
+        ["ZSCORE", who, entry],
+        ["EXPIRE", who, LIVE_SECONDS],
+        ["ZADD", DUE_KEY, keepUntil, dueMember(door.folder, pathname)],
+        ["SET", key, json, "EX", until - nowSeconds, "NX"],
+        ["DEL", doorKey(door.folder, door.id)],
+      ]),
+      9,
+    );
+  } catch (error) {
+    // Sent and never answered: the write may have landed, so its file is kept for the record that may name it.
+    await readBack();
+    throw error;
+  }
   if (
     !replies ||
     countOf(replies[0]) !== 0 ||
@@ -521,7 +537,7 @@ export async function closeSubmissionDoor(
     // name this file, so it is read back exactly, and the file deleted only when Redis confirms there is none.
     // A record there (this close's, or the other close's, at the same path) keeps it; a read-back that does not
     // read keeps it too, never deleted on a guess.
-    const back = await redisPipeline([["GET", key]]).then((answer) => repliesFor(answer, 1), () => null);
+    const back = await readBack();
     if (back && back[0] === null) await drop();
     throw new UnknownReplyError("a submission record's write");
   }

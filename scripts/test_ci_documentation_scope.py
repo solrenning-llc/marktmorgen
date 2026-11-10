@@ -88,7 +88,12 @@ class DocumentationScopeTests(unittest.TestCase):
             chunks = [body for _, body in named[1:-1]]
             self.assertTrue(chunks, str(path))
             for chunk in chunks:
-                self.assertEqual(chunk.count("    needs: documentation-scope\n"), 1)
+                # A job may also wait for another gated job of the same workflow (CodeQL's merged
+                # upload waits for its parts), but documentation-scope always comes first.
+                needs = [line for line in chunk.splitlines() if line.startswith("    needs:")]
+                self.assertEqual(len(needs), 1, str(path))
+                self.assertTrue(needs[0] == "    needs: documentation-scope"
+                                or needs[0].startswith("    needs: [documentation-scope, "), str(path))
                 conditions = [line for line in chunk.splitlines() if line.startswith("    if:")]
                 self.assertEqual(len(conditions), 1, str(path))
                 self.assertIn("${{ !cancelled() && needs.documentation-scope.outputs.full != 'false'", conditions[0])

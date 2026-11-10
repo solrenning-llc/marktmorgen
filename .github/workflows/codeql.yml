@@ -87,14 +87,22 @@ jobs:
         with:
           category: /language:javascript-typescript
           upload: never
-          output: ../codeql-part
+          output: ${{ runner.temp }}/codeql-part
       - name: Name this part's results
-        run: mv ../codeql-part/javascript.sarif ../codeql-part/javascript-part-${{ matrix.part }}.sarif
+        run: mv "$RUNNER_TEMP/codeql-part/javascript.sarif" "$RUNNER_TEMP/codeql-part/javascript-part-${{ matrix.part }}.sarif"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: codeql-javascript-part-${{ matrix.part }}
-          path: ../codeql-part/javascript-part-${{ matrix.part }}.sarif
+          path: ${{ runner.temp }}/codeql-part/javascript-part-${{ matrix.part }}.sarif
           if-no-files-found: error
+          retention-days: 5
+      - name: Keep the query evaluator logs of the last part (where evaluation time goes)
+        if: matrix.part == 4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-javascript-evaluator-logs
+          path: ${{ runner.temp }}/codeql_databases/javascript/log
+          if-no-files-found: warn
           retention-days: 5
   analyze:
     # Same job and matrix as the single-job analysis before, so code scanning keeps the same
@@ -138,17 +146,17 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: codeql-javascript-part-*
-          path: ../codeql-parts
+          path: ${{ runner.temp }}/codeql-parts
           merge-multiple: true
       - name: Every query of the suite ran in exactly one part
         if: matrix.language == 'javascript-typescript'
         run: |
           python3 scripts/test_codeql_query_parts.py
-          python3 scripts/codeql_query_parts.py check ../codeql-parts
+          python3 scripts/codeql_query_parts.py check "$RUNNER_TEMP/codeql-parts"
       - if: matrix.language == 'javascript-typescript'
         uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
-          sarif_file: ../codeql-parts
+          sarif_file: ${{ runner.temp }}/codeql-parts
           category: /language:javascript-typescript
 
   all-checks:

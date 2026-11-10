@@ -172,7 +172,8 @@ class Workflow(unittest.TestCase):
         self.assertIn("        language: [javascript-typescript, actions]\n", self.text)
         self.assertEqual(self.text.count("github/codeql-action/upload-sarif@"), 1)
         self.assertIn("category: /language:javascript-typescript\n", self.text)
-        self.assertIn("python3 scripts/codeql_query_parts.py check ../codeql-parts", self.text)
+        self.assertIn('python3 scripts/codeql_query_parts.py check "$RUNNER_TEMP/codeql-parts"', self.text)
+        self.assertNotIn("../", self.text)
         self.assertIn("PARTS_RESULT: ${{ needs.analyze-part.result }}", self.text)
 
 

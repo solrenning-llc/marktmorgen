@@ -18,7 +18,7 @@ async function paid() {
   const session = f.sessions.get(checkout.id)!;
   Object.assign(session, { status: "complete", payment_status: "paid", amount_total: 4000, customer_details: { email: "buyer@example.test" },
     payment_intent: { object: "payment_intent", status: "succeeded", amount_received: 4000, currency: "usd",
-      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false } },
+      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false, disputed: false } },
     shipping_details: { name: "Original Buyer", address: { line1: "1 Original Street", city: "Test City", country: "US" } } });
   f.advance(61_000); // The bound source deliberately schedules its first payment check.
   return { ...f, id: originId(), session, checkout };
@@ -124,6 +124,42 @@ test("paid source refuses substituted or unpaid provider records without a POST"
     const f = await paid(); Object.assign(f.session, change); let posts = 0;
     await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
     assert.equal(posts, 0); assert.ok(await readConfirmationOrigin(f.id, f.runtime));
+  }
+});
+
+test("a disputed charge is deferred without dispatch or original accounting", async () => {
+  const f = await paid();
+  const payment = f.session.payment_intent as { latest_charge: Record<string, unknown> };
+  payment.latest_charge.disputed = true;
+  let posts = 0;
+  await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
+  assert.equal(posts, 0, "a disputed payment cannot dispatch its confirmation");
+  const retained = await readConfirmationOrigin(f.id, f.runtime);
+  assert.ok(retained);
+  assert.equal(retained.row.phase, "awaiting_payment");
+  assert.equal(f.commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION), false);
+  payment.latest_charge.disputed = false;
+  f.advance(180_000);
+  await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, barrier) => {
+    assert.equal(await barrier(), true); posts++; return "accepted";
+  }, f.runtime, f.id);
+  assert.equal(posts, 1, "fresh undisputed evidence allows the retained confirmation to resume");
+});
+
+test("only an explicit boolean false proves that a charge is undisputed", async t => {
+  for (const value of [undefined, null, "true", "false", 0, 1]) {
+    await t.test(String(value), async () => {
+      const f = await paid();
+      const payment = f.session.payment_intent as { latest_charge: Record<string, unknown> };
+      if (value === undefined) delete payment.latest_charge.disputed;
+      else payment.latest_charge.disputed = value;
+      let posts = 0;
+      await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
+      assert.equal(posts, 0);
+      const retained = await readConfirmationOrigin(f.id, f.runtime);assert.ok(retained);
+      assert.equal(retained.row.phase, "awaiting_payment");
+      assert.equal(f.commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION), false);
+    });
   }
 });
 

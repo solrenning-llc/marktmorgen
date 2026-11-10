@@ -20,6 +20,12 @@
  * Every measurement is a HEAD whose answer states no plain length, so the
  * one-byte ranged GET follows it.
  *
+ * Admission also reads the store's listing in the host's own file store
+ * (lib/file-store.ts filesHeld, Vercel Blob list) to its last allowed page.
+ * Vercel Blob counts every list as an Advanced Operation
+ * (https://vercel.com/docs/vercel-blob/usage-and-pricing, read 10 November
+ * 2026), priced per start as UPLOAD_OPEN_BLOB_ADVANCED_OPS.
+ *
  * Synthetic Redis, synthetic R2 stand-in, a stub for the host's file
  * listing; no real request.
  */
@@ -28,7 +34,9 @@ import assert from "node:assert/strict";
 import { store } from "./redis-stub";
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
 import { storageBrakeFor } from "@/lib/storage-quota";
+import * as costTable from "@/lib/spend-cost-table";
 import { UPLOAD_OPEN_CLASS_A_OPS, UPLOAD_OPEN_CLASS_B_OPS } from "@/lib/spend-cost-table";
+import { storageAnswers } from "./storage-provider-stub";
 import { UPLOAD_SECONDS, VAULT_LIST_PAGES } from "@/lib/vault-rules";
 
 // The atomic scripts of lib/storage-reservations.ts, as tests/storage-reservations.test.ts stands them in.
@@ -114,10 +122,18 @@ test("one upload start never costs more R2 operations than the cost table prices
   // An expired reservation of an earlier start, bound to a session the store already completed.
   original(["SET", "nl:storage:pending:" + FOLDER, JSON.stringify([{ id: "a".repeat(32), bytes: 1, at: Date.now() - UPLOAD_SECONDS * 1000 - 1, pathname: OLD_PATH, uploadId: "gone-session" }])]);
 
+  // The host's file store listing, at the most pages admission reads and still admits (lib/file-store.ts filesHeld).
+  const BLOB_PAGES = 19;
+  storageAnswers.pages = Array.from({ length: BLOB_PAGES }, (_, page) => ({ blobs: [], hasMore: true, cursor: `blob-${page}` }));
+  storageAnswers.pages.push({ blobs: [], hasMore: false });
   const opened = await openReservedVault({ folder: FOLDER, ownerId: "product01", name: "a.zip", bytes: 1, type: "application/zip", multipart: true }, storageBrakeFor("paid", "scale"));
   assert.equal(opened.ok, true, "the start is admitted after the whole listing is read");
   if (!opened.ok) return;
   assert.equal(billed.filter(row => row.what === "ListObjectsV2").length, LIST_PAGES, "admission read every page of the vault listing");
+  const blobLists = BLOB_PAGES + 1 - storageAnswers.pages.length;
+  const pricedBlob = (costTable as Record<string, unknown>).UPLOAD_OPEN_BLOB_ADVANCED_OPS;
+  assert.ok(typeof pricedBlob === "number" && blobLists <= pricedBlob,
+    `Vercel Blob list calls on the path: ${blobLists}; priced as Advanced Operations per start: ${String(pricedBlob)}`);
 
   measureFails = 1;
   const closed = await closeReservedVault(opened.upload.pathname, ["0".repeat(32)]);

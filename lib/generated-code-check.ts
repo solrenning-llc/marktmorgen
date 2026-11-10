@@ -140,7 +140,11 @@ export function tagsOf(html: string): Tag[] {
   const tags: Tag[] = [];
   for (const match of html.matchAll(TAG)) {
     const attrs = new Map<string, string>();
-    for (const a of match[2].matchAll(ATTR)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ""));
+    for (const a of match[2].matchAll(ATTR)) {
+      const name = a[1].toLowerCase();
+      // HTML keeps the first attribute: a harmless duplicate cannot hide the URL or field the browser uses.
+      if (!attrs.has(name)) attrs.set(name, decodeEntities(a[2] ?? a[3] ?? a[4] ?? ""));
+    }
     tags.push({ name: match[1].toLowerCase(), attrs, index: match.index ?? 0, raw: match[0] });
   }
   return tags;
@@ -148,12 +152,21 @@ export function tagsOf(html: string): Tag[] {
 
 /** Whether a URL in a loading place points away from the store: another host, or a scheme that is not a plain file. */
 export function outsideUrl(raw: string, allowedHosts: readonly string[]): boolean {
-  // Browsers ignore control characters and spaces inside a scheme ("java\tscript:").
-  const url = raw.trim().replace(/[\u0000-\u001f\u007f\s]+/g, "");
+  // WHATWG URL parser: trim C0 controls/space at the edges, then remove tabs and line breaks.
+  // Interior spaces or other controls must not be removed from an authority.
+  const url = raw.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "").replace(/[\t\r\n]/g, "");
   if (!url || url.startsWith("#")) return false;
   if (/^data:image\/(?:png|jpeg|gif|webp|avif);/i.test(url)) return false;
-  const host = url.match(/^(?:(?:https?|wss?):)?\/\/([^/?#:@]+)(?::\d+)?(?:[/?#]|$)/i);
-  if (host) return !allowedHosts.map((h) => h.toLowerCase()).includes(host[1].toLowerCase());
+  // A failed authority match must not turn //user@host, ///host or an invalid port into a relative file.
+  // URL parsing is local: it normalizes the destination without fetching it.
+  if (/^(?:https?|wss?):/i.test(url) || url.startsWith("//")) {
+    try {
+      const destination = new URL(url, "https://generated-code.invalid/");
+      return !allowedHosts.some((host) => host.toLowerCase() === destination.hostname.toLowerCase());
+    } catch {
+      return true;
+    }
+  }
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return true;
   // A relative address on the apps domain itself ("/files/a.png", "a.png", "./a.png"); "\\host" reads as "//host" to browsers.
   return url.startsWith("\\") || url.startsWith("/\\");

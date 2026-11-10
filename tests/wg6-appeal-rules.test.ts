@@ -185,7 +185,12 @@ part("Each state's words, with its number and the reason of a final answer");
   is("reversed link: says it cannot be put back, never 'back as it was'", appealStateWords({ number: "LA-0000-0002", decision: decisionKey(LINK), state: "reversed", moves: [{ state: "reversed", at: "x", by: "operator", reason: "Licence shown." }] }).slice(2), [
     "Why: Licence shown.", "The link and its file were deleted, so they cannot be put back. You can add the link again.",
   ]);
-  is("restorable kinds", [restorable("link"), restorable("product"), restorable("kit"), restorable("store")], [false, true, true, true]);
+  is("restorable kinds", [restorable("link"), restorable("product"), restorable("kit"), restorable("store"), restorable("other")], [false, true, true, true, false]);
+  is("reversed, kind not kept: neither 'back as it was' nor 'deleted', the reason says", appealStateWords({ number: "LA-0000-0003", decision: "other-@r1", state: "reversed", moves: [{ state: "reversed", at: "x", by: "operator", reason: "The notice was withdrawn." }] }).slice(2), [
+    "Why: The notice was withdrawn.", "The reason above says what changes.",
+  ]);
+  is("a decision of a kind not kept can be asked about, with or without an id", [readAppeal({ explanation: "Mine." }, { ...PRODUCT, kind: "other", id: "" }, [], at("2026-11-11T00:00:00Z")).ok, readAppeal({ explanation: "Mine." }, { ...PRODUCT, kind: "other" }, [], at("2026-11-11T00:00:00Z")).ok], [true, true]);
+  is("its notice promises neither way", decisionNotice({ ...PRODUCT, kind: "other" }, at("2026-11-11T00:00:00Z"), ALL).some((l) => l.includes("cannot be put back")), false);
 }
 
 done();

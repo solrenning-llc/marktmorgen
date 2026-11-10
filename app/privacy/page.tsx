@@ -963,7 +963,8 @@ export default function PrivacyPage() {
           Stripe account when the tool asks; we do not keep that list. When a
           tool sends an Idempotency-Key with a request that gives a product or
           puts somebody on the list, we keep our answer to that request, which
-          names the person, for 24 hours, so a repeat of it does not act twice.
+          names the person, for 24 hours, so a repeat of it does not act twice;
+          deleting the person deletes it at once.
         </p>
         <p id="code-links">
           <strong className="text-black">

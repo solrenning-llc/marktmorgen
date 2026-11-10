@@ -99,11 +99,22 @@ export async function forgetIdempotentPerson(sid: string, email: string): Promis
   const read = repliesFor(await redisPipeline([["SMEMBERS", pk]]), 1);
   const members = read && Array.isArray(read[0]) && read[0].every((m) => typeof m === "string") ? (read[0] as string[]) : null;
   if (!members) throw new Error("the kept API answers of a person could not be read");
-  const ours = members.filter((m) => /^nl:api:idem:[0-9a-f]{64}$/.test(m)).slice(0, MAX_PERSON_RECORDS);
-  const replies = repliesFor(await redisPipeline([...ours.map((m) => ["DEL", m]), ["DEL", pk]]), ours.length + 1);
-  if (!replies || replies.some((r) => typeof r !== "number")) throw new Error("the kept API answers of a person could not be deleted");
-  return (replies.slice(0, ours.length) as number[]).reduce((sum, n) => sum + n, 0);
+  const ours = members.filter((m) => /^nl:api:idem:[0-9a-f]{64}$/.test(m));
+  // More than the most a plan allows would mean a figure grew: refused out loud, never cut short in silence.
+  if (ours.length > MAX_PERSON_RECORDS) throw new Error("a person has more kept API answers than any plan allows");
+  let gone = 0;
+  // In batches, so no pipeline nears the database's request size; the index goes last, once every record is gone.
+  for (let i = 0; i < ours.length; i += DELETE_BATCH) {
+    const batch = ours.slice(i, i + DELETE_BATCH);
+    const replies = repliesFor(await redisPipeline(batch.map((m) => ["DEL", m])), batch.length);
+    if (!replies || replies.some((r) => typeof r !== "number")) throw new Error("the kept API answers of a person could not be deleted");
+    gone += (replies as number[]).reduce((sum, n) => sum + n, 0);
+  }
+  const last = repliesFor(await redisPipeline([["DEL", pk]]), 1);
+  if (!last || typeof last[0] !== "number") throw new Error("the kept API answers of a person could not be deleted");
+  return gone;
 }
+const DELETE_BATCH = 500;
 
 /** The record's exact reply: null when Redis says there is none, the string otherwise; any other shape is passed on as unknown. */
 async function getRecord(rk: string): Promise<unknown> {

@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
 import { ERASERS, erasureScope } from "@/lib/person-erasure";
 import { COPIERS, COPY_PLAN } from "@/lib/person-copy";
+import { stepCampaign } from "@/lib/mail-links";
 import { feedToken } from "@/lib/podcast-access";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
   const session = "cs_test_" + "m".repeat(20);
   // The records each module keeps, written as the module writes them.
   redis.run(["HSET", `nl:wl:${statsId}:prod000001`, PERSON, JSON.stringify({ at: 1_790_000_000, ok: 1_790_000_100, c: true, t: "secret-token" })]);
-  redis.run(["SADD", `nl:mail:clk:${listId}:${sha(`nimbus-clk:${PERSON}`).slice(0, 32)}`, "flow1:2"]);
+  redis.run(["SADD", `nl:mail:clk:${listId}:${sha(`nimbus-clk:${PERSON}`).slice(0, 32)}`, stepCampaign("0".repeat(16), "1".repeat(16))]);
   redis.run(["SADD", `nl:assist:remindwho:${statsId}:${sha(`nimbus-assist-remind:${statsId}:${PERSON}`).slice(0, 32)}`, session]);
   redis.run(["SET", `nl:assist:remind:${session}`, JSON.stringify({ s: statsId, e: PERSON, t: "Email me a reminder if I don't finish this order", v: "1", l: "en", at: 1_790_000_000_000 })]);
   redis.run(["RPUSH", `nl:esync:log:${statsId}`, "job1"]);

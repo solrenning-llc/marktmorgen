@@ -18,9 +18,11 @@
  *   - the two fields Stripe is sent, the count only when it is not 1;
  *   - what a count above 1 cannot go with yet: an introductory price (counted
  *     in months, lib/intro-price.ts), a yearly option (twelve monthly payments,
- *     lib/yearly-price.ts), a pause (whole months, lib/membership-pause-rules.ts)
- *     and plan switching (lib/tier-switch.ts). Each is refused with its reason
- *     rather than charged on a schedule the page did not say.
+ *     lib/yearly-price.ts), a pause (whole months, lib/membership-pause-rules.ts),
+ *     plan switching (lib/tier-switch.ts) and a set number of payments (ended by
+ *     lib/plans.ts after that many single intervals, so it would end early).
+ *     Each is refused with its reason rather than charged on a schedule the
+ *     page did not say.
  *
  * What a member pays a month, for the store's numbers, is already read from
  * Stripe's interval_count (monthly in lib/membership-numbers.ts, perMonth in

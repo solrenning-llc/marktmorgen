@@ -78,6 +78,9 @@ is("an introductory price, a yearly option, a pause, plan switching: each refuse
   everyProblem(2, { inTiers: true }),
   everyProblem(3, {}),
 ], ["intro", "yearly", "pause", "tiers", null]);
+// A membership that ends after N payments is ended by lib/plans.ts counting N single intervals: with a count above 1 it
+// would end before the last payment the page promised (independent review of 5818f21), so it is refused until the end counts too.
+is("a set number of payments with a count above 1 is refused, and allowed with a count of 1", [everyProblem(2, { payments: 4 }), everyProblem(3, { payments: 12 }), everyProblem(1, { payments: 4 }), everyProblem(3, { payments: 0 })], ["payments", "payments", null, null]);
 is("each refusal says what to do, in plain words", Object.values(EVERY_PROBLEM_WORDS).every((s) => s.length > 20 && s.length < 200 && /\.$/.test(s)), true);
 
 part("The store's numbers read the interval as Stripe bills it");

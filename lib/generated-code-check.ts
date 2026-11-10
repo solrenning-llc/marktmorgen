@@ -152,8 +152,9 @@ export function tagsOf(html: string): Tag[] {
 
 /** Whether a URL in a loading place points away from the store: another host, or a scheme that is not a plain file. */
 export function outsideUrl(raw: string, allowedHosts: readonly string[]): boolean {
-  // Browsers remove tabs and line breaks; spaces inside an authority are not removed.
-  const url = raw.trim().replace(/[\t\r\n]/g, "");
+  // WHATWG URL parser: trim C0 controls/space at the edges, then remove tabs and line breaks.
+  // Interior spaces or other controls must not be removed from an authority.
+  const url = raw.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "").replace(/[\t\r\n]/g, "");
   if (!url || url.startsWith("#")) return false;
   if (/^data:image\/(?:png|jpeg|gif|webp|avif);/i.test(url)) return false;
   // A failed authority match must not turn //user@host, ///host or an invalid port into a relative file.

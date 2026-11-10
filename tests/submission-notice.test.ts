@@ -211,7 +211,7 @@ async function main(): Promise<void> {
   is("none went: said so, with where they will see it", saved(false), "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson.");
   for (const [label, emailed] of [["unknown", "unknown"], ["missing", undefined], ["another shape", "yes"]] as const) {
     const words = saved(emailed);
-    is(`${label}: neither 'was emailed' nor 'no email went'`, /was emailed|No email went/.test(words), false);
+    is(`${label}: neither 'was emailed' nor 'no email went'`, /The buyer was emailed|No email went/.test(words), false);
     is(`${label}: says it could not be confirmed, and where they will see it`, words, "Reply saved with the file. We could not confirm whether the buyer was emailed, so they will see it when they open the lesson.");
   }
   is("the check before sending does not promise an email that may not go", studio.includes("and the buyer is emailed about it once."), false);

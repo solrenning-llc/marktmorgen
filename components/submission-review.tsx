@@ -41,6 +41,18 @@ export function size(bytes: number): string {
   return bytes >= 1024 * 1024 * 1024 ? `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
 }
 
+/**
+ * What the studio says once a reply is kept, as the route answered the email
+ * (lib/submission-notice.ts, emailedAnswer): "was emailed" only for true, "no
+ * email went" only for false; anything else, "unknown" or an answer in another
+ * shape, is said as not confirmed, never as either.
+ */
+export function replySavedNotice(emailed: unknown): string {
+  if (emailed === true) return "Reply saved with the file. The buyer was emailed.";
+  if (emailed === false) return "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson.";
+  return "Reply saved with the file. We could not confirm whether the buyer was emailed, so they will see it when they open the lesson.";
+}
+
 /** One kept file: what the buyer sent, and the reply, written and then checked before it is sent. */
 export function ReviewEntry({ productId, item }: { productId: string; item: Extract<ReviewItem, { unread?: undefined }> }) {
   const [state, setState] = useState(item.state);
@@ -76,7 +88,7 @@ export function ReviewEntry({ productId, item }: { productId: string; item: Extr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "reply", id: productId, submission: item.id, text }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; state?: SubmissionState; reply?: SubmissionReply & { at: number }; emailed?: boolean };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; state?: SubmissionState; reply?: SubmissionReply & { at: number }; emailed?: unknown };
       if (!data.ok || !data.reply) {
         setError(ERRORS[data.error ?? ""] ?? STUDIO_MESSAGES[data.error ?? ""] ?? ERRORS.unavailable);
         setChecking(false);
@@ -87,12 +99,7 @@ export function ReviewEntry({ productId, item }: { productId: string; item: Extr
       setReply(data.reply);
       setChecking(false);
       setFocusTo("reply");
-      // Said as it is: the email goes from the store's own emails, and a spent month or a bounced address sends none.
-      toast(
-        data.emailed === true
-          ? "Reply saved with the file. The buyer was emailed."
-          : "Reply saved with the file. No email went to the buyer this time, so they will see it when they open the lesson.",
-      );
+      toast(replySavedNotice(data.emailed));
     } catch {
       setError(ERRORS.unavailable);
       setChecking(false);
@@ -152,7 +159,7 @@ export function ReviewEntry({ productId, item }: { productId: string; item: Extr
           {checking ? (
             <div ref={confirm} tabIndex={-1} className="notice mt-3" role="group" aria-labelledby={`${prefix}-check`}>
               <p id={`${prefix}-check`} className="text-sm text-ink">
-                Send this reply? It cannot be changed once it is sent, and the buyer is emailed about it once.
+                Send this reply? It cannot be changed once it is sent. We also email the buyer about it once, unless your store&rsquo;s emails for this month are used up or their address cannot get email.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {/* Kept focusable while it sends (aria-disabled), so focus never leaves the check. */}

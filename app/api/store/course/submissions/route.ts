@@ -9,7 +9,7 @@ import { readSubmissionReply, readSubmissionSetup } from "@/lib/submission-rules
 import { SUBMISSION_LIST_UNITS, SUBMISSION_REPLY_UNITS, readReviewCursor, readSetupFor, replySubmission, reviewCursorText, reviewList, saveSetupFor } from "@/lib/submission-store";
 import { DataRoomError } from "@/lib/store-data";
 import { SUBMISSIONS_READY } from "@/lib/submission-switch";
-import { tellBuyerOfReply } from "@/lib/submission-notice";
+import { emailedAnswer, tellBuyerOfReply } from "@/lib/submission-notice";
 
 const json = (body: Record<string, unknown>, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const no = (error: string, status: number) => json({ ok: false, error }, status);
@@ -91,6 +91,7 @@ const SETUP_ERRORS = { instruction: "instruction", kinds: "kinds", size: "size",
  *   { action: "reply", id, submission, text }       the creator's reply to one kept file, once; the buyer
  *                                                   is emailed once (lib/submission-notice.ts), and
  *                                                   `emailed` says whether that email went
+ *                                                   (true, false, or "unknown" when not confirmed)
  *
  * Kept files are never deleted by a change here: stopping asking leaves what
  * buyers already sent, until its keeping time ends.
@@ -141,7 +142,7 @@ export async function POST(request: NextRequest) {
         console.error("a buyer could not be told of a reply", error);
         return "unknown" as const;
       });
-      return json({ ok: true, state: done.submission.state, reply: done.submission.reply, emailed: told === "sent" });
+      return json({ ok: true, state: done.submission.state, reply: done.submission.reply, emailed: emailedAnswer(told) });
     }
     return no("invalid", 400);
   } catch (error) {

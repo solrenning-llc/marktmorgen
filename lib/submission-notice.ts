@@ -109,6 +109,18 @@ ${postal ? `<p style="margin:0 0 8px">${escape(postal)}</p>\n` : ""}<p style="ma
 }
 
 /**
+ * What the studio is told about the email (750 [CD1] unit 6): true only when
+ * it went; false only when none was tried; "unknown" when a send was tried and
+ * not confirmed, or an earlier try holds the mark, since lib/email.ts answers
+ * false also for a send that may have gone. Never "none went" for an unknown.
+ */
+export function emailedAnswer(told: ReplyNotice): boolean | "unknown" {
+  if (told === "sent") return true;
+  if (told === "unsent" || told === "already") return "unknown";
+  return false;
+}
+
+/**
  * Whether this address may be told: "open", "stopped" (bounced, complained,
  * or deleted from the store) or "unknown" when a check did not read exactly.
  */
@@ -137,8 +149,10 @@ async function recipient(store: Store, email: string): Promise<"open" | "stopped
 /**
  * Tells the buyer of the creator's reply to one of their files, once. Called
  * by the studio's reply route only after the record moved to "reviewed".
- * Answers what happened: "sent"; "unsent" (the store's emails are spent, or
- * the sender refused; it is not tried again); "already" (told before);
+ * Answers what happened: "sent"; "unsent" (the sender did not confirm it
+ * went: the store's emails are spent, the sender refused, or its answer did
+ * not say, so it may have gone; it is not tried again); "already" (the mark
+ * was taken before, by a send that went or did not);
  * "stopped" (an address not to write to); "unknown" (a check or the mark did
  * not read, so nothing was sent); "none" (nothing to tell, or no address).
  */

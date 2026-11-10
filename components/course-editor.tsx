@@ -77,12 +77,14 @@ const MESSAGES: Record<string, string> = {
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
   auto_busy: "Captions for this video are already being written. They appear here when they are done.",
+  auto_checking: "Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, in about 15 minutes. If your card was charged and no captions are written, the charge is refunded on its own.",
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
   auto_declined: "Your card was declined, so nothing was charged and nothing is being written.",
   auto_owed: "A refund for an earlier request for this video's captions is not confirmed by Stripe yet, so new AI captions can't be bought for it until it is. Its state is shown at the top of this page.",
   auto_refund_pending: "The video service would not write these captions. The charge is being refunded, but Stripe has not confirmed the refund yet; its state is shown at the top of this page.",
   auto_refunded: "The video service would not write these captions, so the charge was refunded to your card. Nothing is being written; try again in a moment.",
+  auto_credited: "The video service would not write these captions, so the charge was returned to your account credit. Nothing is being written; try again in a moment.",
   auto_unavailable: "The video service could not take this just now. Nothing was charged; try again in a moment.",
   auto_unknown: "That video is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include charging the plan's card. Ask the owner to do this.",
@@ -861,16 +863,21 @@ function LessonEditor({
   const streams = useContext(Streams);
 
   async function loadText() {
+    onError(null);
     setLoadingText(true);
     try {
       const response = await fetch(`/api/store/course?id=${productId}&lessonId=${lesson.id}`, { cache: "no-store" });
-      const data = (await response.json()) as { ok?: boolean; text?: string };
-      const read = data.ok ? data.text ?? "" : "";
-      setText(read);
-      setSavedText(read);
+      const data = (await response.json()) as { ok?: boolean; text?: unknown };
+      // Only a text that came back as text opens the box: a failed or unknown read
+      // is said, never shown as an empty lesson whose Save would replace the real one.
+      if (!response.ok || data.ok !== true || typeof data.text !== "string") {
+        onError("The lesson text could not be read just now. Try again in a moment.");
+        return;
+      }
+      setText(data.text);
+      setSavedText(data.text);
     } catch {
-      setText("");
-      setSavedText("");
+      onError("The lesson text could not be read just now. Try again in a moment.");
     } finally {
       setLoadingText(false);
     }

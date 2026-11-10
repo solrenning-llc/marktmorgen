@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
       const taken = countFrom(await redisPipeline([["SET", key, "0", "EX", ENDED_EXPORT_SECONDS, "NX"], ["INCR", key]]).catch(unanswered));
       if (taken === null) return plain(503, "Your store's file could not be made just now. Try again in a minute.");
       if (taken > ENDED_STORE_EXPORTS) {
-        return plain(429, `You have downloaded your store's main data ${ENDED_STORE_EXPORTS} times since your plan ended, which is what a store whose plan has ended keeps for this. Your list, your sales and your numbers still download one by one below, and starting a plan again lets you download it again.`);
+        return plain(429, `You have downloaded your store's main data ${ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`} since your plan ended, which is what a store whose plan has ended keeps for this. Your list, your sales and your numbers still download one by one below, and starting a plan again lets you download it again.`);
       }
     } else {
       let shape;

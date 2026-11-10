@@ -9,6 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { newItemId } from "@/lib/course";
 import { cleanLine, cleanText } from "@/lib/community-text";
 import {
@@ -30,10 +31,33 @@ export function newPodcastId(): string {
   return randomUUID().replace(/-/g, "");
 }
 
+/** How many episodes the stored text lists; null when it lists none as a list (no `episodes`, or not an array). */
+function listedEpisodes(raw: string): number | null {
+  try {
+    const v = JSON.parse(raw) as { episodes?: unknown } | null;
+    return v && Array.isArray(v.episodes) ? v.episodes.length : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A podcast's record; null only when Redis says there is none. A reply in any other shape (none, several, not text,
+ * text that is not this podcast) throws UnknownReplyError (CX-123 rule 24): it is never an empty podcast, because the
+ * studio writes back what it read, and an empty one written back would take every episode off the feed. The same holds
+ * for this podcast's record with episodes that cannot all be read (no list, an entry that does not parse, more than
+ * MAX_EPISODES): parsePodcast would leave them out, and written back they would leave the feed.
+ */
 export async function readPodcast(id: string): Promise<Podcast | null> {
   if (!PODCAST_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", podKey(id)]]);
-  return parsePodcast(raw);
+  const reply = repliesFor(await redisPipeline([["GET", podKey(id)]]), 1);
+  const raw = reply?.[0];
+  if (raw === null) return null;
+  const podcast = typeof raw === "string" ? parsePodcast(raw) : null;
+  if (!podcast || podcast.id !== id) throw new UnknownReplyError("a podcast's record");
+  // Every listed entry parsed and none was cut at MAX_EPISODES: parsePodcast only filters and slices, so the counts match.
+  if (listedEpisodes(raw as string) !== podcast.episodes.length) throw new UnknownReplyError("a podcast's episodes");
+  return podcast;
 }
 
 /**

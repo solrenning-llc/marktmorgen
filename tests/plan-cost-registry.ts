@@ -1196,6 +1196,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // Many sales at once (767 [STN14] unit 4): one studio request for each order asked, taken before any counter or send (review of #3543).
+      { file: "app/api/store/sales-bulk/route.ts", names: ["countStudio(store, null, extra)", "asked.references.length - 1"] },
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },

@@ -2,6 +2,8 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { BULK_SALES_REFUSALS, MAX_BULK_SALES, readReferences } from "@/lib/sales-bulk-rules";
 import { bulkResend } from "@/lib/sales-bulk";
+import { studioRefusal } from "@/lib/person-tasks";
+import { countStudio } from "@/lib/studio-route";
 
 /** Seconds this route may run (route segment config): up to MAX_BULK_SALES sales read from Stripe and emailed, one at a time. */
 export const maxDuration = 60;
@@ -27,6 +29,17 @@ export async function POST(request: NextRequest) {
   if (text(body.action, 10) !== "resend") return Response.json({ ok: false, error: "unknown", message: BULK_SALES_REFUSALS.unknown }, { status: 400, headers });
   const asked = readReferences(body.references);
   if (!asked.ok) return Response.json({ ok: false, error: asked.error, message: BULK_SALES_REFUSALS[asked.error] }, { status: 400, headers });
+  // Many at once cost what one at a time costs (review of #3543, Claude 3): guardStoreWrite took one studio request,
+  // as the single resend does; one more is taken for each further order asked, before any counter or send, or the
+  // whole request is refused with the studio's own words.
+  const extra = asked.references.length - 1;
+  if (extra > 0) {
+    const counted = await countStudio(store, null, extra);
+    if (!counted.ok) {
+      const refused = studioRefusal(counted.reason, counted.message);
+      return Response.json(refused.body, { status: refused.status, headers });
+    }
+  }
   const result = await bulkResend(store, asked);
   if (!result.ok) {
     return Response.json({ ok: false, error: result.error, message: result.message, ...(result.left !== undefined ? { left: result.left } : {}) }, { status: result.error === "uncounted" ? 503 : 429, headers });

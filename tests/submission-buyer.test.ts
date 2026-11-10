@@ -283,12 +283,17 @@ async function main(): Promise<void> {
     is("Bob cannot withdraw Ana's", await withdrawSubmission({ ...lesson2, who: BOB, id: third.id }, NOW + 600, steps), { ok: false, reason: "gone" });
     is("nor on another lesson", await withdrawSubmission({ ...lesson2, lessonId: LESSON, id: third.id }, NOW + 600, steps), { ok: false, reason: "gone" });
     is("nothing was deleted for them", calls, []);
+    // The decision is kept before the vault is asked (review of #3574): a file the vault did not delete is withdrawn
+    // all the same, said as not deleted, and due on the sweep's list from now, so it goes with the next sweep.
+    const stuck = await sent(ANA, "Stuck.", "lesson0002ab", false, NOW + 550);
     const failing = vault({ deleteVault: async () => false });
-    is("a file the vault did not delete is not withdrawn", await withdrawSubmission({ ...lesson2, id: third.id }, NOW + 600, failing.steps), { ok: false, reason: "unavailable" });
-    is("it still waits", (await readSubmission(FOLDER, third.id))?.state, "submitted");
+    const notDeleted = await withdrawSubmission({ ...lesson2, id: stuck.id }, NOW + 600, failing.steps);
+    is("a file the vault did not delete is withdrawn, and said as not deleted", notDeleted.ok ? { state: notDeleted.submission.state, deleted: notDeleted.deleted } : notDeleted, { state: "withdrawn", deleted: false });
+    is("kept as withdrawn", (await readSubmission(FOLDER, stuck.id))?.state, "withdrawn");
+    is("and due on the sweep's list from now", Number((await redis.pipeline([["ZSCORE", "nl:sub:due", `${FOLDER}|${stuck.path}`]]))[0]), NOW + 600);
     const places = await liveCount(FOLDER, COURSE, "lesson0002ab", ANA, NOW + 600);
     const done1 = await commandsOf(() => withdrawSubmission({ ...lesson2, id: third.id }, NOW + 600, steps));
-    is("withdrawn", done1.value.ok ? { state: done1.value.submission.state, closedAt: done1.value.submission.closedAt } : done1.value, { state: "withdrawn", closedAt: NOW + 600 });
+    is("withdrawn", done1.value.ok ? { state: done1.value.submission.state, closedAt: done1.value.submission.closedAt, deleted: done1.value.deleted } : done1.value, { state: "withdrawn", closedAt: NOW + 600, deleted: true });
     is("its file deleted first", calls, [`vault:delete:${third.path}`]);
     is("kept as withdrawn", (await readSubmission(FOLDER, third.id))?.state, "withdrawn");
     is("its place on the lesson let go", await liveCount(FOLDER, COURSE, "lesson0002ab", ANA, NOW + 600), places - 1);
@@ -334,7 +339,7 @@ async function main(): Promise<void> {
     is("signed out, nothing withdrawn", (await call({ ...route, action: "withdraw", id: fourth.id })).status, 401);
     resetWorld();
     const withdrawn = await call({ ...route, action: "withdraw", id: fourth.id });
-    is("its buyer withdraws it", withdrawn.body, { ok: true, submission: { id: fourth.id, state: "withdrawn" } });
+    is("its buyer withdraws it", withdrawn.body, { ok: true, submission: { id: fourth.id, state: "withdrawn" }, deleted: true });
     is("after one buyer action, and its file deleted", state.events.filter((e) => e === "action" || e === "vault:delete"), ["action", "vault:delete"]);
     is("kept as withdrawn", (await readSubmission(FOLDER, fourth.id))?.state, "withdrawn");
     resetWorld();
@@ -358,7 +363,7 @@ async function main(): Promise<void> {
     is("a real file input, with its label", /<label[^>]*for="submission-file"/.test(html) && /<input[^>]*type="file"[^>]*id="submission-file"|<input[^>]*id="submission-file"[^>]*type="file"/.test(html), true);
     is("it takes only the kinds asked", /accept="\.mp4,\.mov,\.webm,\.pdf"/.test(html), true);
     is("the kinds and the largest file are said beside it", html.includes(w.largest("200 MB")) && html.includes(w.kinds.video) && html.includes(w.kinds.pdf), true);
-    is("and how long the file is kept", html.includes(w.keptFor("Ana's Gym".replace("'", "&#x27;"), 30)), true);
+    is("and how long the file is kept", html.includes(w.keptFor("Ana's Gym".replaceAll("'", "&#x27;"), 30)), true);
     is("the hint is tied to the input", /aria-describedby="submission-file-hint"/.test(html), true);
     is("the note has its own label", /<label[^>]*for="submission-note"/.test(html), true);
     is("its list says it is loading, politely", /role="status"[^>]*>[^<]*Loading your files/.test(html), true);

@@ -100,7 +100,9 @@ function putPiece(signal: AbortSignal | undefined): Put {
 /**
  * Sends `file` for review on the lesson at `place`, with the buyer's `note`.
  * Answers the kept record, or why not: the check's own reason ("type",
- * "size", "empty"), "stopped" after Stop, or the door's own word.
+ * "size", "empty"), "stopped" after Stop when nothing was opened or the door
+ * confirmed the upload was given up, "stopped_unconfirmed" after Stop when it
+ * did not, or the door's own word.
  */
 export async function sendSubmission(
   file: Blob & { name: string },
@@ -115,14 +117,25 @@ export async function sendSubmission(
   if (signal?.aborted) return { ok: false, reason: "stopped" };
   const post = options.post ?? postSubmissionDoor;
   let kept: SentSubmission | null = null;
+  // Whether an upload was opened at the door, and whether the door confirmed it was given up: a stop says that
+  // nothing was kept only when nothing was opened, or the door confirmed the give-up (review of #3574, Codex U).
+  let opened = false;
+  let givenUp = false;
+  const giveUp = async (body: Record<string, unknown>) => {
+    const answer = await post(body).catch((): DoorAnswer => ({ ok: false, error: "server_error" }));
+    if (answer.ok === true) givenUp = true;
+    return answer;
+  };
   const door = async (body: Record<string, unknown>) => {
     const asked = { ...body, ...place };
+    if (body.action === "abort") return giveUp(asked);
     // Once stopped, nothing more is opened or signed; the upload already open is only ever given up.
-    if (signal?.aborted && body.action !== "abort") {
-      if (body.action === "done") await post({ action: "abort", pathname: body.pathname, ...place }).catch(() => undefined);
+    if (signal?.aborted) {
+      if (body.action === "done") await giveUp({ action: "abort", pathname: body.pathname, ...place });
       return { ok: false, error: "stopped" };
     }
     const answer = await post(body.action === "done" ? { ...asked, note } : asked);
+    if (body.action === "open" && answer.ok) opened = true;
     if (body.action !== "done" || !answer.ok) return answer;
     const submission = answer.submission as SentSubmission | undefined;
     if (!submission || typeof submission.id !== "string") return { ok: false, error: "server_error" };
@@ -148,7 +161,7 @@ export async function sendSubmission(
     const record = kept as SentSubmission | null;
     return record ? { ok: true, submission: record } : { ok: false, reason: "server_error" };
   } catch (thrown) {
-    if (signal?.aborted) return { ok: false, reason: "stopped" };
+    if (signal?.aborted) return { ok: false, reason: !opened || givenUp ? "stopped" : "stopped_unconfirmed" };
     return { ok: false, reason: thrown instanceof VaultUploadError ? thrown.reason : "server_error" };
   }
 }

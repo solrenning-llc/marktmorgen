@@ -986,7 +986,8 @@ export async function buyerSubmissionsFor(
 }
 
 export type Withdrawn =
-  | { ok: true; submission: KeptSubmission }
+  /** `deleted`: whether the vault confirmed its file deleted; when not, the file is due on the sweep's list from now. */
+  | { ok: true; submission: KeptSubmission; deleted: boolean }
   | { ok: false; reason: "gone" | "state" | "expired" | "full" | "unavailable" };
 
 /**
@@ -994,11 +995,13 @@ export type Withdrawn =
  * [CD1] unit 5), once, under the same lock as the creator's reply, so the
  * two never cross: the record read exactly and moved submitted -> withdrawn
  * (applySubmissionEvent), its growth counted in the store's data room, then
- * its file deleted at the vault; only once the vault confirms it is the
- * record written back with the time it had left, the file taken off the
- * sweep's list and the buyer's place on the lesson let go. A file the vault
- * did not delete is left waiting, as it was ("unavailable"). Another buyer's,
- * another lesson's, a reviewed one and one past its keeping time are refused.
+ * written back with the time it had left, with its file due on the sweep's
+ * list from now and the buyer's place on the lesson let go, all before any
+ * outside call (so a reply after it reads "withdrawn" and is refused). Then
+ * its file is deleted at the vault and taken off the sweep's list once the
+ * vault confirms it; `deleted` says whether it did, and a file it did not
+ * delete goes with the next sweep. Another buyer's, another lesson's, a
+ * reviewed one and one past its keeping time are refused.
  */
 export async function withdrawSubmission(
   input: { data: DataStore; folder: string; who: string; courseId: string; lessonId: string; id: string },
@@ -1026,12 +1029,15 @@ export async function withdrawSubmission(
         throw new UnknownReplyError("the store's data room");
       }
     }
-    // The file goes first: a record says withdrawn only once nobody can open its file.
-    if (!(await steps.deleteVault([kept.path]).catch(() => false))) return { ok: false, reason: "unavailable" };
+    // The decision is kept first, inside the lock and with no outside call before it (review of #3574, Codex U): a
+    // reply that takes the lock after this reads "withdrawn" and is refused, so a reply the creator was told is kept
+    // is never overwritten, and its file never deleted from under it. The file is due on the sweep's list from now,
+    // so it goes even when the delete below does not.
+    const member = dueMember(input.folder, kept.path);
     const replies = repliesFor(
       await redisPipeline([
         ["SET", key, json, "XX", "EX", Math.max(1, until - nowSeconds)],
-        ["ZREM", DUE_KEY, dueMember(input.folder, kept.path)],
+        ["ZADD", DUE_KEY, nowSeconds, member],
         ["ZREM", liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who), kept.id],
       ]),
       3,
@@ -1040,6 +1046,12 @@ export async function withdrawSubmission(
     // Deleted since it was read (the buyer's erasure, or its time): nothing was written.
     if (replies[0] === null) return { ok: false, reason: "gone" };
     if (replies[0] !== "OK" || countOf(replies[1]) === null || countOf(replies[2]) === null) throw new UnknownReplyError("a submission withdrawn");
-    return { ok: true, submission: next };
+    // Then the file: said deleted only when the vault confirmed it, and off the sweep's list only then.
+    const deleted = await steps.deleteVault([kept.path]).catch(() => false);
+    if (deleted) {
+      const off = await redisPipeline([["ZREM", DUE_KEY, member]]).then((answer) => repliesFor(answer, 1), () => null);
+      if (!off || countOf(off[0]) === null) console.error("a withdrawn submission's file is deleted, and stays on the sweep's list until the sweep finds it gone");
+    }
+    return { ok: true, submission: next, deleted };
   });
 }

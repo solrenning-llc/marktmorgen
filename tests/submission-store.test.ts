@@ -347,6 +347,47 @@ async function main(): Promise<void> {
     is("which its record still names", (await readSubmission(FOLDER, idOf(path)))?.path, path);
   }
   {
+    // Review of #3568 (Codex C2, focal): close A's record write is answered out of shape and did not land; its
+    // read-back really reads "no record", but that answer reaches it only after close B of the same upload has
+    // written its own record. A's "no record" is then a snapshot from before B, and must never delete B's file.
+    redis.pipeline = PIPELINE;
+    const lesson = "lesson0012ab";
+    const at = { ...where(), lessonId: lesson };
+    const w = world();
+    const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
+    const path = opened.ok ? opened.upload.pathname : "";
+    const close = () =>
+      closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps).then(
+        (value) => (value.ok ? "ok" : value.reason),
+        (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : String(error)),
+      );
+    let second: Promise<string> = Promise.resolve("not started");
+    const original = redis.pipeline.bind(redis);
+    let wrote = false;
+    let readBack = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      if (!wrote && String(list[0]?.[0]) === "ZADD") {
+        wrote = true;
+        return [];
+      }
+      if (wrote && !readBack && String(list[0]?.[0]) === "GET" && String(list[0]?.[1]).startsWith("nl:sub:rec:")) {
+        readBack = true;
+        const answer = await original(list);
+        second = close();
+        await second;
+        return answer;
+      }
+      return original(list);
+    }) as typeof redis.pipeline;
+    const first = await close();
+    redis.pipeline = PIPELINE;
+    const kept = await readSubmission(FOLDER, idOf(path));
+    const deleted = w.calls.includes("vault:delete");
+    is("the first close, its write answered out of shape, is unknown", first, "unknown");
+    is("a file is never deleted while a record names it", Boolean(kept) && deleted, false);
+    is("and a close told it was kept still has its file", (await second) === "ok" && deleted, false);
+  }
+  {
     const lesson = "lesson0006ab";
     const at = { ...where(), lessonId: lesson };
     const w = world();

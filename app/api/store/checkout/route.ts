@@ -5,7 +5,8 @@ import { preorderDay, soonOne } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
-import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { canSellProduct } from "@/lib/store-checkout";
+import { HeldInSaleError, createCheckoutUnlessHeld } from "@/lib/held-checkout";
 import { heldInSale } from "@/lib/child-safety";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
@@ -274,7 +275,7 @@ export async function POST(request: NextRequest) {
     // Only where the box was offered, for a purchase of the buyer's own, with an address that is one.
     const reminding = remind && !gift && !group && !preorder && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderOffered(store, product);
     const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, linkOrigin(request, store), optionId, {
+      createCheckoutUnlessHeld(store, product, linkOrigin(request, store), optionId, {
         bumps,
         picked,
         held: holding,
@@ -346,6 +347,12 @@ export async function POST(request: NextRequest) {
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
+    // Held since the check above (lib/held-checkout.ts reads the holds again, right before the checkout is built):
+    // answered as that check answers, nothing charged.
+    if (error instanceof HeldInSaleError) {
+      if (error.why === "unavailable") return away(`/@${store.handle}?status=error`);
+      return away(error.why === "box" ? `/@${store.handle}/p/${product.id}#buy` : `/@${store.handle}`);
+    }
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));

@@ -1,0 +1,225 @@
+
+An unknown or external authority is never a relative file
+  ok    outside: "//files.store.example@collector.example/pixel.png"
+  ok    image refused: "//files.store.example@collector.example/pixel.png"
+  ok    image explains refusal: "//files.store.example@collector.example/pixel.png"
+  ok    outside: "//user:pass@collector.example/pixel.png"
+  ok    image refused: "//user:pass@collector.example/pixel.png"
+  ok    image explains refusal: "//user:pass@collector.example/pixel.png"
+  ok    outside: "///collector.example/pixel.png"
+  ok    image refused: "///collector.example/pixel.png"
+  ok    image explains refusal: "///collector.example/pixel.png"
+  ok    outside: "////collector.example/pixel.png"
+  ok    image refused: "////collector.example/pixel.png"
+  ok    image explains refusal: "////collector.example/pixel.png"
+  ok    outside: "//collector.example:bad/pixel.png"
+  ok    image refused: "//collector.example:bad/pixel.png"
+  ok    image explains refusal: "//collector.example:bad/pixel.png"
+  ok    outside: "//[not-an-ip]/pixel.png"
+  ok    image refused: "//[not-an-ip]/pixel.png"
+  ok    image explains refusal: "//[not-an-ip]/pixel.png"
+  ok    outside: "//files.store.example:99999/pixel.png"
+  ok    image refused: "//files.store.example:99999/pixel.png"
+  ok    image explains refusal: "//files.store.example:99999/pixel.png"
+  ok    outside: "//files.store.example .collector.example/pixel.png"
+  ok    image refused: "//files.store.example .collector.example/pixel.png"
+  ok    image explains refusal: "//files.store.example .collector.example/pixel.png"
+  ok    outside: "//files.store.example\u0000/pixel.png"
+  ok    image refused: "//files.store.example\u0000/pixel.png"
+  ok    image explains refusal: "//files.store.example\u0000/pixel.png"
+  ok    outside: "//%63ollector.example/pixel.png"
+  ok    image refused: "//%63ollector.example/pixel.png"
+  ok    image explains refusal: "//%63ollector.example/pixel.png"
+  ok    outside: "/\\collector.example/pixel.png"
+  ok    image refused: "/\\collector.example/pixel.png"
+  ok    image explains refusal: "/\\collector.example/pixel.png"
+  ok    outside: "\\\\collector.example/pixel.png"
+  ok    image refused: "\\\\collector.example/pixel.png"
+  ok    image explains refusal: "\\\\collector.example/pixel.png"
+  ok    outside: "https://collector.example/pixel.png"
+  ok    image refused: "https://collector.example/pixel.png"
+  ok    image explains refusal: "https://collector.example/pixel.png"
+  ok    outside: "javascript:alert(1)"
+  ok    image refused: "javascript:alert(1)"
+  ok    image explains refusal: "javascript:alert(1)"
+
+A browser URL parser confirms which successful attacks cross the boundary
+  ok    actual destination: //files.store.example@collector.example/pixel.png
+  ok    actual destination: //user:pass@collector.example/pixel.png
+  ok    actual destination: ///collector.example/pixel.png
+  ok    actual destination: ////collector.example/pixel.png
+
+The same guard covers form actions, CSS and fetch
+  ok    external destination refused
+  ok    external destination refused
+  ok    external destination refused
+
+Existing relative and permitted destinations remain available
+  ok    permitted: 
+  ok    permitted: #chart
+  ok    permitted: /files/chart.png
+  ok    permitted: files/chart.png
+  ok    permitted: ./chart.png
+  ok    permitted: ../chart.png
+  ok    permitted: /files/my chart.png
+  ok    permitted: //files.store.example/p.png
+  ok    permitted: https://files.store.example/p.png
+  ok    permitted: https://FILES.STORE.EXAMPLE:443/p.png
+  ok    permitted: http://files.store.example:8080/p.png
+  ok    permitted: wss://files.store.example/live
+  ok    permitted: data:image/png;base64,AAAA
+  ok    the caller must permit the host
+
+Leading URL controls cannot turn an external authority into a relative path
+  ok    URL parser sees an external host after C0 0
+  ok    outside guard sees the same host after C0 0
+  ok    permitted host survives C0 0
+  ok    relative path survives C0 0
+  ok    URL parser sees an external host after C0 1
+  ok    outside guard sees the same host after C0 1
+  ok    permitted host survives C0 1
+  ok    relative path survives C0 1
+  ok    URL parser sees an external host after C0 2
+  ok    outside guard sees the same host after C0 2
+  ok    permitted host survives C0 2
+  ok    relative path survives C0 2
+  ok    URL parser sees an external host after C0 3
+  ok    outside guard sees the same host after C0 3
+  ok    permitted host survives C0 3
+  ok    relative path survives C0 3
+  ok    URL parser sees an external host after C0 4
+  ok    outside guard sees the same host after C0 4
+  ok    permitted host survives C0 4
+  ok    relative path survives C0 4
+  ok    URL parser sees an external host after C0 5
+  ok    outside guard sees the same host after C0 5
+  ok    permitted host survives C0 5
+  ok    relative path survives C0 5
+  ok    URL parser sees an external host after C0 6
+  ok    outside guard sees the same host after C0 6
+  ok    permitted host survives C0 6
+  ok    relative path survives C0 6
+  ok    URL parser sees an external host after C0 7
+  ok    outside guard sees the same host after C0 7
+  ok    permitted host survives C0 7
+  ok    relative path survives C0 7
+  ok    URL parser sees an external host after C0 8
+  ok    outside guard sees the same host after C0 8
+  ok    permitted host survives C0 8
+  ok    relative path survives C0 8
+  ok    URL parser sees an external host after C0 9
+  ok    outside guard sees the same host after C0 9
+  ok    permitted host survives C0 9
+  ok    relative path survives C0 9
+  ok    URL parser sees an external host after C0 10
+  ok    outside guard sees the same host after C0 10
+  ok    permitted host survives C0 10
+  ok    relative path survives C0 10
+  ok    URL parser sees an external host after C0 11
+  ok    outside guard sees the same host after C0 11
+  ok    permitted host survives C0 11
+  ok    relative path survives C0 11
+  ok    URL parser sees an external host after C0 12
+  ok    outside guard sees the same host after C0 12
+  ok    permitted host survives C0 12
+  ok    relative path survives C0 12
+  ok    URL parser sees an external host after C0 13
+  ok    outside guard sees the same host after C0 13
+  ok    permitted host survives C0 13
+  ok    relative path survives C0 13
+  ok    URL parser sees an external host after C0 14
+  ok    outside guard sees the same host after C0 14
+  ok    permitted host survives C0 14
+  ok    relative path survives C0 14
+  ok    URL parser sees an external host after C0 15
+  ok    outside guard sees the same host after C0 15
+  ok    permitted host survives C0 15
+  ok    relative path survives C0 15
+  ok    URL parser sees an external host after C0 16
+  ok    outside guard sees the same host after C0 16
+  ok    permitted host survives C0 16
+  ok    relative path survives C0 16
+  ok    URL parser sees an external host after C0 17
+  ok    outside guard sees the same host after C0 17
+  ok    permitted host survives C0 17
+  ok    relative path survives C0 17
+  ok    URL parser sees an external host after C0 18
+  ok    outside guard sees the same host after C0 18
+  ok    permitted host survives C0 18
+  ok    relative path survives C0 18
+  ok    URL parser sees an external host after C0 19
+  ok    outside guard sees the same host after C0 19
+  ok    permitted host survives C0 19
+  ok    relative path survives C0 19
+  ok    URL parser sees an external host after C0 20
+  ok    outside guard sees the same host after C0 20
+  ok    permitted host survives C0 20
+  ok    relative path survives C0 20
+  ok    URL parser sees an external host after C0 21
+  ok    outside guard sees the same host after C0 21
+  ok    permitted host survives C0 21
+  ok    relative path survives C0 21
+  ok    URL parser sees an external host after C0 22
+  ok    outside guard sees the same host after C0 22
+  ok    permitted host survives C0 22
+  ok    relative path survives C0 22
+  ok    URL parser sees an external host after C0 23
+  ok    outside guard sees the same host after C0 23
+  ok    permitted host survives C0 23
+  ok    relative path survives C0 23
+  ok    URL parser sees an external host after C0 24
+  ok    outside guard sees the same host after C0 24
+  ok    permitted host survives C0 24
+  ok    relative path survives C0 24
+  ok    URL parser sees an external host after C0 25
+  ok    outside guard sees the same host after C0 25
+  ok    permitted host survives C0 25
+  ok    relative path survives C0 25
+  ok    URL parser sees an external host after C0 26
+  ok    outside guard sees the same host after C0 26
+  ok    permitted host survives C0 26
+  ok    relative path survives C0 26
+  ok    URL parser sees an external host after C0 27
+  ok    outside guard sees the same host after C0 27
+  ok    permitted host survives C0 27
+  ok    relative path survives C0 27
+  ok    URL parser sees an external host after C0 28
+  ok    outside guard sees the same host after C0 28
+  ok    permitted host survives C0 28
+  ok    relative path survives C0 28
+  ok    URL parser sees an external host after C0 29
+  ok    outside guard sees the same host after C0 29
+  ok    permitted host survives C0 29
+  ok    relative path survives C0 29
+  ok    URL parser sees an external host after C0 30
+  ok    outside guard sees the same host after C0 30
+  ok    permitted host survives C0 30
+  ok    relative path survives C0 30
+  ok    URL parser sees an external host after C0 31
+  ok    outside guard sees the same host after C0 31
+  ok    permitted host survives C0 31
+  ok    relative path survives C0 31
+  ok    URL parser sees an external host after C0 32
+  ok    outside guard sees the same host after C0 32
+  ok    permitted host survives C0 32
+  ok    relative path survives C0 32
+  ok    a leading C0 cannot hide a JavaScript scheme
+  ok    a leading C0 cannot hide an HTTP scheme
+  ok    a literal C0 in a script URL cannot hide its external load
+
+A second attribute never disguises the first destination the browser uses
+  ok    first external attribute refused: <img src="https://collector.example/p.png" src="/safe.png" alt="">
+  ok    first external attribute refused: <img SRC="https://collector.example/p.png" src="/safe.png" alt="">
+  ok    first external attribute refused: <img src="https://collector.example/p.png" src="/safe.png" SRC="/safe2.png" alt="">
+  ok    first external attribute refused: <img srcset="https://collector.example/p.png 2x" srcset="/safe.png 2x" alt="">
+  ok    first external attribute refused: <form action="https://collector.example/collect" action="/safe"><button>Send</button></form>
+  ok    first external attribute refused: <button formaction="https://collector.example/collect" formaction="/safe">Send</button>
+  ok    first external attribute refused: <div style="background:url(https://collector.example/p.png)" style="color:black">Chart</div>
+  ok    discarded attribute is not the destination: <img src="/safe.png" src="https://collector.example/p.png" alt="">
+  ok    discarded attribute is not the destination: <img SRC="/safe.png" src="https://collector.example/p.png" alt="">
+  ok    discarded attribute is not the destination: <form action="/safe" action="https://collector.example/collect"><button>Send</button></form>
+  ok    first empty value also wins
+  ok    three case variants keep the first
+  ok    a first password type cannot be disguised
+
+211 checks, all passing.

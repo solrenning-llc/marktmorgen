@@ -1,0 +1,8 @@
+{
+  "ref": "65fc2ec76538e69de1452026d6c7d04e1c8951c7",
+  "sourceFiles": [
+    "lib/generated-code-check.ts",
+    "tests/generated-code-url-boundary.test.ts"
+  ],
+  "method": "Runner onLoad uses the two exact git blobs; all other graph files identical between prior and head; original own proof unchanged."
+}

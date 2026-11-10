@@ -1,0 +1,41 @@
+diff --git a/lib/generated-code-check.ts b/lib/generated-code-check.ts
+index ce1023a01..6aa9cfc60 100644
+--- a/lib/generated-code-check.ts
++++ b/lib/generated-code-check.ts
+@@ -152,8 +152,9 @@ export function tagsOf(html: string): Tag[] {
+ 
+ /** Whether a URL in a loading place points away from the store: another host, or a scheme that is not a plain file. */
+ export function outsideUrl(raw: string, allowedHosts: readonly string[]): boolean {
+-  // Browsers remove tabs and line breaks; spaces inside an authority are not removed.
+-  const url = raw.trim().replace(/[\t\r\n]/g, "");
++  // WHATWG URL parser: trim C0 controls/space at the edges, then remove tabs and line breaks.
++  // Interior spaces or other controls must not be removed from an authority.
++  const url = raw.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "").replace(/[\t\r\n]/g, "");
+   if (!url || url.startsWith("#")) return false;
+   if (/^data:image\/(?:png|jpeg|gif|webp|avif);/i.test(url)) return false;
+   // A failed authority match must not turn //user@host, ///host or an invalid port into a relative file.
+diff --git a/tests/generated-code-url-boundary.test.ts b/tests/generated-code-url-boundary.test.ts
+index 4b68116fa..e2c39e7a5 100644
+--- a/tests/generated-code-url-boundary.test.ts
++++ b/tests/generated-code-url-boundary.test.ts
+@@ -48,6 +48,20 @@ for (const url of ["", "#chart", "/files/chart.png", "files/chart.png", "./chart
+ }
+ is("the caller must permit the host", outsideUrl("//files.store.example/p.png", []), true);
+ 
++// WHATWG URL basic parser removes leading/trailing C0 controls and space before parsing a URL.
++part("Leading URL controls cannot turn an external authority into a relative path");
++for (let value = 0; value <= 0x20; value += 1) {
++  const control = String.fromCharCode(value);
++  const external = `${control}//collector.example/p.png${control}`;
++  is(`URL parser sees an external host after C0 ${value}`, new URL(external, "https://apps.store.example/").hostname, "collector.example");
++  is(`outside guard sees the same host after C0 ${value}`, outsideUrl(external, allowed), true);
++  is(`permitted host survives C0 ${value}`, outsideUrl(`${control}//files.store.example/p.png${control}`, allowed), false);
++  is(`relative path survives C0 ${value}`, outsideUrl(`${control}/files/p.png${control}`, allowed), false);
++}
++is("a leading C0 cannot hide a JavaScript scheme", outsideUrl("\u0001javascript:alert(1)", allowed), true);
++is("a leading C0 cannot hide an HTTP scheme", outsideUrl("\u0001https://collector.example/p.png", allowed), true);
++is("a literal C0 in a script URL cannot hide its external load", checkGeneratedCode({ html: "", css: "", js: 'fetch("\u0001//collector.example/p.png")' }, { allowedHosts: allowed }).staticPass, false);
++
+ // WHATWG HTML, attribute-name state: a later duplicate is discarded, including case variants.
+ // https://html.spec.whatwg.org/multipage/parsing.html#attribute-name-state (read 2026-11-10).
+ part("A second attribute never disguises the first destination the browser uses");

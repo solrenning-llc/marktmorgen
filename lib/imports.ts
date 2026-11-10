@@ -92,6 +92,8 @@ import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
+import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
+import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, readRenewal } from "@/lib/move-rules";
@@ -1477,9 +1479,9 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
-/** An import's email as HTML: its text, a paragraph for each blank line, a line break for each line. */
-function letterHtml(text: string): string {
-  return `<div style="font-family:system-ui,sans-serif;line-height:1.5">${text
+/** A plain letter's HTML, a paragraph for each blank line of its text, marked with the store's language (WCAG 3.1.1). */
+function letterHtml(store: Pick<Store, "language">, text: string): string {
+  return `<div lang="${LANGUAGES[parseLanguage(store.language)].locale}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
     .split("\n\n")
     .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
     .join("")}</div>`;
@@ -1492,18 +1494,21 @@ export async function movedEmail(store: Store, job: ImportJob, email: string): P
   const products = await readListings(store, given.map((p) => p.productId));
   if (!products.length) return null;
   const base = storeBase(store);
-  const lines = products.map((p) => (p.course ? `- ${p.title}: ${base}/course/${p.id}` : `- ${p.title}`));
-  const subject = products.length === 1 ? `${products[0].title} has moved to ${store.name}` : `What you bought from ${store.name} has moved`;
+  // In the store's language, as the members' invitation is (lib/move-members.ts inviteEmail).
+  const m = movedPurchaseWords(store.language);
+  const one = products.length === 1;
+  const lines = products.map((p) => (p.course ? m.courseLine(p.title, `${base}/course/${p.id}`) : `- ${p.title}`));
+  const subject = one ? m.subjectOne(products[0].title, store.name) : m.subjectMany(store.name);
   const text = [
-    `${store.name} has moved to a new store, and what you bought before comes with you. Nothing was charged, and you do not need to buy it again.`,
+    m.moved(store.name),
     "",
-    products.length === 1 ? "Yours there:" : "Yours there:",
+    m.yours,
     ...lines,
     "",
-    `To open ${products.length === 1 ? "it" : "any of it"}, go to ${base}/orders and type ${email}. A link to everything you have there arrives within a minute. There is no password to make.`,
+    one ? m.openOne(`${base}/orders`, email) : m.openMany(`${base}/orders`, email),
     "",
-    `You are getting this one email because ${store.name} moved your purchases. Nothing more is sent because of it.`,
-    `Sent by Marktmorgen on behalf of ${store.name}.`,
+    m.why(store.name),
+    m.sentBy(store.name),
   ].join("\n");
   return { subject: subject.slice(0, 200), text };
 }
@@ -1680,7 +1685,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       return "retry";
     }
   }
-  for (const message of sending) message.html = letterHtml(message.text);
+  for (const message of sending) message.html = letterHtml(store, message.text);
   const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
   if (sent === "retry") {
     await giveBack();
@@ -1991,7 +1996,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             to: letter.to,
             subject: letter.subject,
             text,
-            html: letterHtml(text),
+            html: letterHtml(store, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
             tags: healthTags(store, false),

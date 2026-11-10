@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
   await setMailSettings(OWNER, { fromName: "Harbor Kitchen", address: POSTAL });
-  await setStripeAccount(OWNER, "acct_1TestMovedCount01", true);
+  await setStripeAccount(OWNER, "acct_MovedCount1", true);
   await setSubscription(OWNER, { customerId: "cus_MovedCount1", subscriptionId: "sub_MovedCount1", active: true, period: paidPeriod() });
   const club = await addProduct(OWNER, "The Inner Circle", "", "29", { interval: "month", trialDays: 0, payments: 0 });
   if (!club.ok) throw new Error("no product");

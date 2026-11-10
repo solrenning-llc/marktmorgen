@@ -59,6 +59,41 @@ async function main() {
   const uniqueGot = await readPaidInvoice({ get: counted([unique, next]), id: "in_1", until: Number.MAX_SAFE_INTEGER, maxCalls: 6 });
   is("two distinct lines are retained", "invoice" in uniqueGot ? (uniqueGot.invoice.lines as { data: unknown[] }).data.length : uniqueGot, 2);
   is("different periods are not a duplicate-charge finding", "invoice" in uniqueGot ? decideCharge(uniqueGot.invoice, context).kind : uniqueGot, "ok");
+
+  part("The exact requested list bound remains admissible");
+  const full = Array.from({ length: 100 }, (_, n) => ({ ...invoice(), id: `in_${n + 1}` }));
+  const fullGot = await readPaidInvoices({ get: counted([{ object: "list", data: full, has_more: false }]), now, until: Number.MAX_SAFE_INTEGER });
+  is("100 invoices are read", fullGot.invoices.length, 100);
+  is("the exact-bound page completes", fullGot.stopped, "done");
+  is("one list call", fullGot.calls, 1);
+
+  part("Line pages obey the same bound");
+  const big = invoice();
+  big.lines.data = Array.from({ length: 101 }, (_, n) => line(`il_${n}`));
+  const bigGot = await readPaidInvoice({ get: counted([big]), id: "in_1", until: Number.MAX_SAFE_INTEGER, maxCalls: 6 });
+  is("oversized embedded line page is unknown", "reason" in bigGot ? bigGot.reason : "invoice", "lines_unreadable");
+  is("oversized embedded page remains retryable", "reason" in bigGot ? bigGot.final : true, false);
+  const bigNext = invoice(); bigNext.lines.has_more = true;
+  const bigNextGot = await readPaidInvoice({ get: counted([bigNext, { object: "list", data: Array.from({ length: 101 }, (_, n) => line(`il_next${n}`)), has_more: false }]), id: "in_1", until: Number.MAX_SAFE_INTEGER, maxCalls: 6 });
+  is("oversized subsequent line page is unknown", "reason" in bigNextGot ? bigNextGot.reason : "invoice", "lines_unreadable");
+  const exactLines = invoice(); exactLines.lines.data = Array.from({ length: 100 }, (_, n) => line(`il_${n}`));
+  const exactGot = await readPaidInvoice({ get: counted([exactLines]), id: "in_1", until: Number.MAX_SAFE_INTEGER, maxCalls: 6 });
+  is("100 distinct lines are still complete", "invoice" in exactGot ? (exactGot.invoice.lines as { data: unknown[] }).data.length : exactGot, 100);
+
+  part("Malformed rows do not block another invoice or invent a charge");
+  const unnamed = invoice(); unnamed.lines.data = [line("")];
+  const unnamedGot = await readPaidInvoice({ get: counted([unnamed]), id: "in_1", until: Number.MAX_SAFE_INTEGER, maxCalls: 6 });
+  is("unnamed final-page line is unread", "invoice" in unnamedGot, false);
+  const badAndGood = await readPaidInvoices({ get: counted([{ object: "list", data: [first, { ...invoice(), id: "in_2" }], has_more: false }]), now, until: Number.MAX_SAFE_INTEGER });
+  is("bad invoice is set aside", badAndGood.unread, [{ id: "in_1", reason: "lines_unreadable" }]);
+  is("the other invoice is still read", badAndGood.invoices.map((v) => v.id), ["in_2"]);
+  is("window completes with the unread id reported", badAndGood.stopped, "done");
+
+  part("Different line ids charging the same period still expose a real error");
+  const realDouble = invoice(); realDouble.lines.data.push(line("il_2"));
+  const doubleGot = await readPaidInvoice({ get: counted([realDouble]), id: "in_1", until: Number.MAX_SAFE_INTEGER, maxCalls: 6 });
+  is("distinct lines are not hidden", "invoice" in doubleGot, true);
+  is("the real duplicate-period decision remains wrong", "invoice" in doubleGot ? decideCharge(doubleGot.invoice, context).kind : doubleGot, "wrong");
   done();
 }
 void main();

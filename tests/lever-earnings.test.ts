@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { leverEarnedWords, leverEarnings, LEVER_CURRENCIES_MAX, type LeverEarned } from "@/lib/lever-earnings";
+import { leverEarnedWords, leverEarnings, LEVER_CURRENCIES_MAX, type LeverEarned, type LeverKey } from "@/lib/lever-earnings";
 import { measureSalesLevers, type LeverReading } from "@/lib/sales-levers";
 import { SalesLevers } from "@/components/sales-levers";
 import { claimHandle, storeForEmail } from "@/lib/store";
@@ -34,7 +34,7 @@ function offer(o: { amount?: unknown; currency?: string; created?: number } = {}
   if (o.amount !== undefined) row.amount = o.amount;
   return { created: created * 1000, cents: typeof o.amount === "number" ? o.amount : 0, currency, upsell: true, row };
 }
-const measured = (row: LeverEarned | undefined) => {
+const measured = (row: LeverReading["rows"][LeverKey] | undefined) => {
   assert.ok(row && "measured" in row && row.measured, "measured lever");
   return row;
 };
@@ -150,6 +150,8 @@ test("the card says what is exact: zero only from a complete reading, 'at least'
   // No reading at all, or one kept before this count existed: not measured, never zero.
   assert.equal(leverEarnedWords(undefined, "bump", true).line, "Not measured yet.");
   assert.equal(leverEarnedWords({ records: 3, cents: 1200, scope: "Whole checkout payments" }, "bump", true).line, "Not measured yet.");
+  // A store whose currency is not a code never gets a dollar figure by default.
+  assert.equal(leverEarnedWords(leverEarnings([], "", false, now).rows.bump, "bump", true).line, "Not measured yet.");
 });
 
 test("measureSalesLevers is this count: the studio's kept reading carries it, with no provider call", () => {

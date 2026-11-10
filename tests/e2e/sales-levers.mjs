@@ -6,7 +6,7 @@ export async function checkSalesLevers({browser,LOCAL,fixture,axeSource,is}){
  await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
  const root=page.locator("[data-sales-levers]");is("HT9 six levers "+width,await root.locator(":scope > ul > li").count(),6);
  is("HT9 lever titles "+width,await root.locator("h3").allInnerTexts(),["Order bump","Upsell","Downsell","Bundle","Checkout recovery","Next offer"]);
- const text=await root.innerText();for(const phrase of ["before refunds, fees, taxes","must not be added together","Not separately measured","Not automatically enabled","Existing opt-outs and permissions are preserved"])is("HT9 honest scope "+phrase+" "+width,text.includes(phrase),true);
+ const text=await root.innerText();for(const phrase of ["before refunds, fees, taxes","must not be added together","Not measured yet","Not automatically enabled","Existing opt-outs and permissions are preserved"])is("HT9 honest scope "+phrase+" "+width,text.includes(phrase),true);
  is("HT9 no projected earnings "+width,/will earn|guaranteed|estimated revenue/i.test(text),false);
  is("HT9 no activation inputs "+width,await root.locator("input,button").count(),0);
  await root.getByRole("link",{name:"Review order bump settings",exact:true}).focus();

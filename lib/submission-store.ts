@@ -20,6 +20,8 @@
  *   nl:sub:who:<folder>:<who>                      everything of one buyer's in the store, for the copy of
  *                                                  their data and their erasure (unit 3): at most
  *                                                  MAX_SUBMISSIONS_PER_PERSON, each with its file's path
+ *   nl:sub:list:<folder>:<course>                  the course's kept files for the studio's "To review" list
+ *                                                  ("<lesson>|<id>"), by when each record goes (unit 4)
  *   nl:sub:due                                     every kept file ("<folder>|<path>"), by when its keeping
  *                                                  time ends, for the daily sweep (sweepSubmissions); the
  *                                                  folder first, so a closing store's walk takes its own out
@@ -36,13 +38,18 @@ import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
 import { deleteVault, signPieces, type OpenedUpload } from "@/lib/vault";
+import { withLock } from "@/lib/redis-lock";
+import { STUDIO_UNIT_SENT_BYTES } from "@/lib/sent-bytes";
 import {
   MAX_SUBMISSION_KEEP_DAYS,
   MAX_SUBMISSION_NOTE,
+  MAX_SUBMISSION_RECORD_BYTES,
   MAX_SUBMISSIONS_PER_PERSON,
   MAX_WAITING_PER_BUYER,
   type Submission,
+  type SubmissionReply,
   type SubmissionSetup,
+  applySubmissionEvent,
   readSubmissionSetup,
   submissionKeepUntil,
   submissionRecordJson,
@@ -62,7 +69,7 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  * tests/submission-store.test.ts. Each is far inside the hundred a buyer
  * action is priced at (tests/plan-cost-registry.ts, UNIT_COST.buyer).
  */
-export const SUBMISSION_STEP_COMMANDS = { open: 14, sign: 1, done: 11, abort: 5 } as const;
+export const SUBMISSION_STEP_COMMANDS = { open: 14, sign: 1, done: 13, abort: 5 } as const;
 /** Kept files the daily sweep deletes at most in one run; the rest wait for the next. */
 export const SUBMISSION_SWEEP_PER_RUN = 200;
 /** A file the sweep could not delete is tried again this much later, so it never holds back the files behind it. */
@@ -82,6 +89,10 @@ const liveKey = (folder: string, courseId: string, lessonId: string, who: string
 const doorKey = (folder: string, id: string) => `nl:sub:door:${part(folder)}:${part(id)}`;
 const whoKey = (folder: string, who: string) => `nl:sub:who:${part(folder)}:${part(who)}`;
 const DUE_KEY = "nl:sub:due";
+const listKey = (folder: string, courseId: string) => `nl:sub:list:${part(folder)}:${part(courseId)}`;
+const listMember = (lessonId: string, id: string) => `${part(lessonId)}|${part(id)}`;
+/** One submission being answered at a time (replySubmission): a lock beside its record, for thirty seconds at most. */
+const replyLockKey = (folder: string, id: string) => `${recordKey(folder, id)}:lock`;
 /** The longest path a submission's file can have in the vault (lib/vault-rules.ts: prefix, folder, owner id, token, a 120-character name). */
 const MAX_PATH_CHARS = "vault/".length + 32 + 1 + 36 + 1 + 16 + 1 + 120;
 /** A file's member on the sweep's list: its store's folder, then its path. */
@@ -130,7 +141,8 @@ export async function readSetupFor(courseId: string, lessonId: string): Promise<
  * bytes are taken in the store's data room before the write and given back
  * when it shrinks or goes. For the studio's settings route (a later unit).
  */
-export async function saveSetupFor(data: DataStore, courseId: string, lessonId: string, setup: SubmissionSetup | null): Promise<void> {
+/** Answers the setup it replaced (null when there was none), so the studio can undo a removal. */
+export async function saveSetupFor(data: DataStore, courseId: string, lessonId: string, setup: SubmissionSetup | null): Promise<SubmissionSetup | null> {
   const key = setupKey(courseId, lessonId);
   const before = repliesFor(await redisPipeline([["GET", key]]), 1);
   if (!before || (before[0] !== null && typeof before[0] !== "string")) throw new UnknownReplyError("a lesson's submission settings");
@@ -139,14 +151,21 @@ export async function saveSetupFor(data: DataStore, courseId: string, lessonId: 
     const read = readSubmissionSetup(setup);
     if (!read.ok || JSON.stringify(read.setup) !== json) throw new Error("submission_setup");
   }
-  const weight = (raw: unknown) => (typeof raw === "string" ? dataBytes([key, raw], 1) : 0);
-  const grown = weight(json) - weight(before[0]);
+  // The slot is set to the setup's whole weight, never moved by a difference: two saves at once leave it right.
   const slot = SETUP_SLOT(courseId, lessonId);
-  if (grown > 0) await needData(data, [{ slot, bytes: grown }]);
+  if (json !== null) await needData(data, [{ slot, bytes: dataBytes([key, json], 1), set: true }]);
   const written = repliesFor(await redisPipeline([json === null ? ["DEL", key] : ["SET", key, json]]), 1);
   const ok = json === null ? countOf(written?.[0]) !== null : written?.[0] === "OK";
   if (!ok) throw new UnknownReplyError("a lesson's submission settings' write");
-  if (grown < 0) await giveData(data, [{ slot, bytes: -grown }]);
+  if (json === null) await giveData(data, [{ slot, bytes: 0, set: true }]);
+  // What was there before, for an undo; one that did not read is not offered back.
+  if (before[0] === null) return null;
+  try {
+    const read = readSubmissionSetup(JSON.parse(before[0] as string));
+    return read.ok ? read.setup : null;
+  } catch {
+    return null;
+  }
 }
 
 
@@ -314,7 +333,8 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   // passes (it is not written past it).
   const kept =
     dataBytes([liveKey(place.folder, place.courseId, place.lessonId, place.who), place.id], 1) +
-    dataBytes([whoKey(place.folder, place.who), entryOf(place.courseId, place.lessonId, place.id, "v".repeat(MAX_PATH_CHARS))], 1);
+    dataBytes([whoKey(place.folder, place.who), entryOf(place.courseId, place.lessonId, place.id, "v".repeat(MAX_PATH_CHARS))], 1) +
+    dataBytes([listKey(place.folder, place.courseId), listMember(place.lessonId, place.id)], 1);
   const room = await takeData(
     ask.data,
     [
@@ -494,8 +514,10 @@ export async function closeSubmissionDoor(
         ["ZADD", DUE_KEY, keepUntil, dueMember(door.folder, pathname)],
         ["SET", key, json, "EX", until - nowSeconds, "NX"],
         ["DEL", doorKey(door.folder, door.id)],
+        ["ZADD", listKey(door.folder, door.courseId), until, listMember(door.lessonId, door.id)],
+        ["EXPIRE", listKey(door.folder, door.courseId), LIVE_SECONDS],
       ]),
-      9,
+      11,
     );
     if (
       !replies ||
@@ -507,7 +529,9 @@ export async function closeSubmissionDoor(
       replies[5] !== 1 ||
       countOf(replies[6]) === null ||
       replies[7] !== "OK" ||
-      countOf(replies[8]) === null
+      countOf(replies[8]) === null ||
+      countOf(replies[9]) === null ||
+      replies[10] !== 1
     ) {
       throw new UnknownReplyError("a submission record's write");
     }
@@ -582,9 +606,10 @@ export async function forgetSubmissionsPerson(folder: string, who: string, files
       await redisPipeline([
         ["DEL", recordKey(folder, entry.id)],
         ["DEL", doorKey(folder, entry.id)],
+        ["ZREM", listKey(folder, entry.courseId), listMember(entry.lessonId, entry.id)],
         ...(pathname ? [["ZREM", DUE_KEY, dueMember(folder, pathname)]] : []),
       ]),
-      pathname ? 3 : 2,
+      pathname ? 4 : 3,
     );
     if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission deleted");
     if (replies[0] === 1) gone += 1;
@@ -671,4 +696,117 @@ export async function sweepSubmissions(nowSeconds: number, steps: Pick<DoorSteps
     result.deleted += 1;
   }
   return result;
+}
+
+// --------------------------------------------------------------- the studio
+
+/** Kept files one page of the studio's "To review" list shows at most. */
+export const SUBMISSION_LIST_PAGE = 10;
+/**
+ * What one page of the "To review" list or one reply moves at its worst, in
+ * studio requests beyond the one the request itself took (lib/sent-bytes.ts):
+ * a page reads SUBMISSION_LIST_PAGE records at their largest; a reply reads
+ * one and writes it back. The studio route takes them before anything is read.
+ */
+export const SUBMISSION_LIST_UNITS = Math.ceil((SUBMISSION_LIST_PAGE * MAX_SUBMISSION_RECORD_BYTES) / STUDIO_UNIT_SENT_BYTES);
+export const SUBMISSION_REPLY_UNITS = Math.ceil((2 * MAX_SUBMISSION_RECORD_BYTES) / STUDIO_UNIT_SENT_BYTES);
+
+export type ReviewRow = { lessonId: string; id: string; submission: KeptSubmission | "unread" };
+
+/**
+ * One page of a course's kept files, newest first, for the studio's "To
+ * review" list: each record read exactly; one that does not read is said
+ * ("unread"), never left out; one confirmed gone (its keeping time ended, or
+ * its buyer deleted) is taken off the list. `before` is the last page's
+ * cursor. Answers the rows and the cursor of the next page, or null.
+ */
+export async function reviewList(folder: string, courseId: string, nowSeconds: number, before?: number): Promise<{ rows: ReviewRow[]; next: number | null }> {
+  const key = listKey(folder, courseId);
+  const top = before !== undefined && Number.isSafeInteger(before) ? `(${before}` : "+inf";
+  const replies = repliesFor(
+    await redisPipeline([
+      ["ZREMRANGEBYSCORE", key, "-inf", nowSeconds],
+      ["ZREVRANGEBYSCORE", key, top, `(${nowSeconds}`, "WITHSCORES", "LIMIT", 0, SUBMISSION_LIST_PAGE + 1],
+    ]),
+    2,
+  );
+  const flat = replies?.[1];
+  if (!replies || countOf(replies[0]) === null || !Array.isArray(flat) || flat.length % 2 !== 0 || flat.some((item) => typeof item !== "string")) {
+    throw new UnknownReplyError("a course's kept submissions");
+  }
+  const page: { member: string; score: number }[] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    const score = Number(flat[i + 1]);
+    if (!Number.isSafeInteger(score)) throw new UnknownReplyError("a course's kept submissions");
+    page.push({ member: flat[i] as string, score });
+  }
+  const shown = page.slice(0, SUBMISSION_LIST_PAGE);
+  const rows: ReviewRow[] = [];
+  const gone: string[] = [];
+  for (const { member } of shown) {
+    const [lessonId, id, ...rest] = member.split("|");
+    if (rest.length || !PART.test(lessonId ?? "") || !ID.test(id ?? "")) throw new UnknownReplyError("a course's kept submissions");
+    let submission: KeptSubmission | null;
+    try {
+      submission = await readSubmission(folder, id);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      rows.push({ lessonId, id, submission: "unread" });
+      continue;
+    }
+    if (submission === null) gone.push(member);
+    else rows.push({ lessonId, id, submission });
+  }
+  if (gone.length) await redisPipeline([["ZREM", key, ...gone]]).catch(() => undefined);
+  return { rows, next: page.length > SUBMISSION_LIST_PAGE ? shown[shown.length - 1].score : null };
+}
+
+export type Replied =
+  | { ok: true; submission: KeptSubmission }
+  | { ok: false; reason: "gone" | "state" | "expired" | "full" | "too_long" };
+
+/**
+ * The creator's reply to one kept file, in words (a file with it comes in a
+ * later unit): one reply at a time for each file (a lock), the record read
+ * exactly and moved submitted -> reviewed (applySubmissionEvent), its growth
+ * counted in the store's data room until the record goes, written back with
+ * the time it had left, and the buyer's waiting place on the lesson let go. A
+ * file already answered, or past its keeping time, is not answered again.
+ */
+export async function replySubmission(
+  input: { data: DataStore; folder: string; courseId: string; id: string; reply: SubmissionReply },
+  nowSeconds: number,
+): Promise<Replied> {
+  if (!ID.test(input.id)) return { ok: false, reason: "gone" };
+  return withLock(replyLockKey(input.folder, input.id), 30, 5_000, async () => {
+    const kept = await readSubmission(input.folder, input.id);
+    if (!kept || kept.target.kind !== "lesson" || kept.target.courseId !== input.courseId) return { ok: false as const, reason: "gone" as const };
+    const moved = applySubmissionEvent(kept, { event: "review", actor: "creator", reply: input.reply }, nowSeconds);
+    if (!moved.ok) return { ok: false as const, reason: moved.reason === "reply" ? ("state" as const) : moved.reason };
+    const next: KeptSubmission = { ...kept, ...moved.submission };
+    const json = submissionRecordJson(next);
+    if (json === null) return { ok: false as const, reason: "too_long" as const };
+    const key = recordKey(input.folder, input.id);
+    const until = kept.keepUntil + SUBMISSION_SWEEP_GRACE_SECONDS;
+    const grown = dataBytes([key, json], 1) - dataBytes([key, JSON.stringify(kept)], 1);
+    if (grown > 0) {
+      const room = await takeData(input.data, [{ until: until * 1000, bytes: grown }], nowSeconds * 1000);
+      if (!room.ok) {
+        if (room.reason === "full") return { ok: false as const, reason: "full" as const };
+        throw new UnknownReplyError("the store's data room");
+      }
+    }
+    const replies = repliesFor(
+      await redisPipeline([
+        ["SET", key, json, "XX", "EX", Math.max(1, until - nowSeconds)],
+        ["ZREM", liveKey(input.folder, kept.target.courseId, kept.target.lessonId, kept.who), kept.id],
+      ]),
+      2,
+    );
+    if (!replies) throw new UnknownReplyError("a submission's reply");
+    // Deleted since it was read (its buyer, or its time): nothing was written.
+    if (replies[0] === null) return { ok: false as const, reason: "gone" as const };
+    if (replies[0] !== "OK" || countOf(replies[1]) === null) throw new UnknownReplyError("a submission's reply");
+    return { ok: true as const, submission: next };
+  });
 }

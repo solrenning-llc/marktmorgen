@@ -36,6 +36,8 @@ import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
 import { parseLanguage } from "@/lib/store-language";
 import { CourseWorkStudio, type StudioWork } from "@/components/course-work-studio";
+import { SubmissionReview } from "@/components/submission-review";
+import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
 
 
@@ -224,6 +226,9 @@ export default async function StudioCoursePage({
             ai={aiState}
           />
         ) : null}
+
+        {/* Files buyers sent for review (750 [CD1]): shown only once the buyer's side works (lib/submission-switch.ts). */}
+        {SUBMISSIONS_READY ? <SubmissionReview productId={product.id} /> : null}
 
         <CourseCommentsStudio
           productId={product.id}

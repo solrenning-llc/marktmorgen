@@ -12,6 +12,8 @@ import { toast } from "@/components/toast";
 import { QuizEditor } from "@/components/quiz-editor";
 import { CourseDayPreview } from "@/components/course-day-preview";
 import { TaskEditor } from "@/components/task-editor";
+import { SubmissionSettings } from "@/components/submission-settings";
+import { SUBMISSIONS_READY } from "@/lib/submission-switch";
 import {
   type Course,
   type CourseModule,
@@ -1123,6 +1125,8 @@ function LessonEditor({
       {/* A lesson is finished by a quiz or by an assignment (lib/assignment-rules.ts), never by both. */}
       {lesson.task ? null : <QuizEditor productId={productId} lessonId={lesson.id} setup={lesson.quiz} onCourse={onCourse} />}
       <TaskEditor productId={productId} lessonId={lesson.id} setup={lesson.task ?? null} hasQuiz={Boolean(lesson.quiz)} onCourse={onCourse} />
+      {/* Files buyers send for review (750 [CD1]): shown only once the buyer's side works (lib/submission-switch.ts). */}
+      {SUBMISSIONS_READY ? <SubmissionSettings productId={productId} lessonId={lesson.id} /> : null}
 
       <div className="border-t border-line pt-4">
         {removing ? (

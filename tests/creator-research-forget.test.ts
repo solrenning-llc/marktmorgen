@@ -139,6 +139,40 @@ test("an answer another job removed first is not counted, and the deletion still
   });
 });
 
+test("an answer another job removes from the part already read never makes the walk pass over one of theirs", async () => {
+  // Theirs sit at both page boundaries (newest-first position RESEARCH_PAGE and its mirror from the oldest end), so a
+  // walk in either direction would pass over one if the removal shifted the list under it.
+  const seed: string[] = [];
+  for (let i = 0; i < RESEARCH_PAGE * 3; i += 1) seed.push(answer(`q${i}@example.com`));
+  const nearHead = answer("ana@example.com");
+  const nearTail = answer("ana@example.com");
+  seed[RESEARCH_PAGE] = nearHead;
+  seed[seed.length - 1 - RESEARCH_PAGE] = nearTail;
+  for (const run of ["copy", "forget"] as const) {
+    let firstPage: string[] = [];
+    let reads = 0;
+    await world(seed, async () => {
+      if (run === "copy") assert.deepEqual(await researchCopyPerson("ana@example.com"), [JSON.parse(nearHead), JSON.parse(nearTail)]);
+      else {
+        assert.equal(await forgetResearchPerson("ana@example.com"), 2);
+        assert.ok(!(await list()).some((entry) => entry === nearHead || entry === nearTail));
+      }
+    }, async (command) => {
+      if (command[0] === "LRANGE") {
+        reads += 1;
+        if (reads === 2) {
+          const gone = firstPage.find((entry) => entry !== nearHead && entry !== nearTail);
+          if (gone) await pipeline([["LREM", RESPONSES_KEY, 0, gone]]); // Another person's deletion, between two pages.
+        }
+        const reply = await pipeline([command]);
+        if (reads === 1) firstPage = (reply as string[][])[0];
+        return reply;
+      }
+      return pipeline([command]);
+    });
+  }
+});
+
 // ---------------------------------------------------------------- unknown is never absent or done
 
 const badPages: [string, unknown][] = [

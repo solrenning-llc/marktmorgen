@@ -371,6 +371,16 @@ async function main(): Promise<void> {
     is("every language says all English says", Object.entries(SUBMISSIONS_WORDS).filter(([, words]) => JSON.stringify(Object.keys(words)) !== keys).map(([code]) => code), []);
     const de = renderToStaticMarkup(createElement(LessonSubmission, { setup: SETUP, where: route, storeName: "Ana's Gym", language: "de" }));
     is("a German store's box is in German", de.includes(SUBMISSIONS_WORDS.de.heading) && !de.includes(w.heading), true);
+    // The store's Portuguese is Portugal's (lib/store-language.ts, pt-PT), as lib/buyer-words spells it elsewhere
+    // ("ficheiro", "ligação", "Tente novamente", "equipa", "a carregar"): never Brazilian words or number formats.
+    const pt = JSON.stringify(
+      Object.values(SUBMISSIONS_WORDS.pt).map((v) =>
+        typeof v === "function" ? (v as (...a: unknown[]) => string)("S", 3000, "L", "C") : typeof v === "string" ? v : JSON.stringify(v),
+      ),
+    );
+    const brazilian = ["você", "arquivo", "equipe", "Tente de novo", "tente de novo", "Tentar de novo", "Carregando", "Enviando", "Esperando", "conexão", "aceitos", "recado", "Confira", "3.000"];
+    is("Portuguese is Portugal's: no Brazilian word or number format", brazilian.filter((word) => pt.includes(word)), []);
+    is("and says ficheiro, as the store's other Portuguese does", pt.includes("ficheiro"), true);
   }
 
   done();

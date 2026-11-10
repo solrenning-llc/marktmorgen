@@ -16,8 +16,8 @@ const MESSAGES: Record<string, string> = {
   forbidden: "Your role on this store does not include its pages.",
   page_unread: "This page could not be read just now, so no copy was made. Try again in a moment.",
   copy_conflict: "Your pages changed while the copy was being made, so none was made. Reload the page and try again.",
-  copy_blocks: "The copy was added to your pages, but its blocks could not be saved. Open it, remove it and try again.",
-  copy_blocks_full: "The copy was added to your pages, but your store has no room left for its blocks. Remove something, then remove the copy and try again.",
+  copy_failed: "The page could not be saved just now. Reload to check your pages before trying again.",
+  copy_full: "Your store has no room left for this page's blocks, so none was added. Remove something you no longer need first.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

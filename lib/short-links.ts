@@ -59,12 +59,18 @@ async function one(command: (string | number)[]): Promise<unknown> {
   return replies[0];
 }
 
-function record(raw: unknown): Kept | null {
+/**
+ * One stored record, read exactly: null when the key is confirmed absent, "unreadable" when a record is there but
+ * this code cannot read it (a rule made stricter since it was written: a fact, not an unknown reply, and it never
+ * becomes readable by asking again), and a throw for any reply that is not a record at all (rule 24).
+ */
+function record(raw: unknown): Kept | null | "unreadable" {
   if (raw === null) return null;
-  const kept = parse(raw);
-  if (!kept) throw new Error("Short link record is unavailable");
-  return kept;
+  if (typeof raw !== "string" || !raw) throw new Error("Short link record is unavailable");
+  return parse(raw) ?? "unreadable";
 }
+
+const newestFirst = (list: Kept[]): ShortLink[] => [...list].sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
 
 const confirmedCount = (raw: unknown) => raw === 0 || raw === 1;
 
@@ -88,10 +94,13 @@ export async function readLinks(statsId: string | null): Promise<ShortLink[]> {
   const codes = new Set<string>();
   for (let i = 0; i < raw.length; i += 1) {
     const kept = record(raw[i]);
-    if (!kept || kept.statsId !== statsId || codes.has(kept.code)) throw new Error("Short link inventory is invalid");
+    if (kept === null) throw new Error("Short link inventory is invalid");
+    // A record this code cannot read, another store's or a second one for the same code is left out of the list,
+    // as the public link treats it as ended (Claude 5 on #2527): one old record never takes the list down.
+    if (kept === "unreadable" || kept.statsId !== statsId || codes.has(kept.code)) continue;
     codes.add(kept.code); list.push(kept);
   }
-  return list.sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
+  return newestFirst(list);
 }
 
 /** The link a code names, with its store, or null. */
@@ -99,8 +108,8 @@ export async function findLink(code: string): Promise<(ShortLink & { sid: string
   if (!CODE.test(code)) return null;
   if (!isRedisConfigured()) throw new Error("Short link is unavailable");
   const kept = record(await one(["GET", linkKey(code)]));
-  if (kept && kept.code !== code) throw new Error("Short link identity is unconfirmed");
-  return kept;
+  // A record there that cannot be read, or that names another code, opens nothing: the link has ended.
+  return kept === "unreadable" || kept?.code !== code ? null : kept;
 }
 
 export type AddResult = { ok: true; link: ShortLink; links: ShortLink[] } | { ok: false; reason: "name" | "taken" | "target" | "full" | "unavailable" };
@@ -129,7 +138,10 @@ export async function addLink(
     if (got === null) continue;
     if (got !== "OK") return { ok: false, reason: "unavailable" };
     if (!confirmedCount(await one(["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]))) throw new Error("Short link index write is unconfirmed");
-    return { ok: true, link: shown(kept), links: await readLinks(store.statsId) };
+    // Saved: a list that cannot be read again just after is the one read before with this link added, never a
+    // "did not save" that would make the next try answer "taken" (Claude 5 on #2527, P5).
+    const after = await readLinks(store.statsId).catch(() => null);
+    return { ok: true, link: shown(kept), links: after ?? newestFirst([kept, ...links.map((l) => ({ ...l, sid: store.sid, statsId: store.statsId }))]) };
   }
   return { ok: false, reason: "unavailable" };
 }
@@ -139,11 +151,18 @@ export async function retarget(statsId: string, code: unknown, target: unknown, 
   if (typeof code !== "string" || !CODE.test(code)) return null;
   const next = readTarget(target, isProduct);
   const kept = record(await one(["HGET", storeKey(statsId), code]));
-  if (kept && kept.code !== code) throw new Error("Short link identity is unconfirmed");
-  if (!next || !kept || kept.statsId !== statsId) return null;
+  // A record that cannot be read is not changed: the list leaves it out and the public link has ended.
+  if (!next || kept === null || kept === "unreadable" || kept.code !== code || kept.statsId !== statsId) return null;
   const changed = JSON.stringify({ ...kept, target: next });
-  const replies = await redisPipeline([["SET", linkKey(code), changed], ["HSET", storeKey(statsId), code, changed]]);
-  if (!Array.isArray(replies) || replies.length !== 2 || replies[0] !== "OK" || !confirmedCount(replies[1])) throw new Error("Short link change is unconfirmed");
+  // XX: a link ended since it was read stays ended (Claude 5 on #2527, P1); the index line the same trip wrote
+  // back is taken away again before saying so.
+  const replies = await redisPipeline([["SET", linkKey(code), changed, "XX"], ["HSET", storeKey(statsId), code, changed]]);
+  if (!Array.isArray(replies) || replies.length !== 2 || !confirmedCount(replies[1])) throw new Error("Short link change is unconfirmed");
+  if (replies[0] === null) {
+    if (!confirmedCount(await one(["HDEL", storeKey(statsId), code]))) throw new Error("Short link change is unconfirmed");
+    throw new Error("Short link was ended while it was being changed");
+  }
+  if (replies[0] !== "OK") throw new Error("Short link change is unconfirmed");
   return readLinks(statsId);
 }
 
@@ -151,10 +170,17 @@ export async function retarget(statsId: string, code: unknown, target: unknown, 
 export async function removeLink(statsId: string, code: unknown): Promise<ShortLink[]> {
   if (typeof code === "string" && CODE.test(code)) {
     const kept = record(await one(["HGET", storeKey(statsId), code]));
-    if (kept && kept.code !== code) throw new Error("Short link identity is unconfirmed");
-    if (kept?.statsId === statsId) {
-      const replies = await redisPipeline([["DEL", linkKey(code)], ["HDEL", storeKey(statsId), code]]);
-      if (!Array.isArray(replies) || replies.length !== 2 || !confirmedCount(replies[0]) || !confirmedCount(replies[1])) throw new Error("Short link removal is unconfirmed");
+    if (kept !== null) {
+      // A line in this store's own list is this store's to end, whether or not it can be read (Claude 5 on
+      // #2527, P2). Its public record goes with it unless that record is confirmed to be another store's.
+      let ours = kept !== "unreadable" && kept.code === code && kept.statsId === statsId;
+      if (!ours) {
+        const open = record(await one(["GET", linkKey(code)]));
+        ours = open === "unreadable" || (open !== null && open.statsId === statsId);
+      }
+      const commands: (string | number)[][] = [...(ours ? [["DEL", linkKey(code)]] : []), ["HDEL", storeKey(statsId), code]];
+      const replies = await redisPipeline(commands);
+      if (!Array.isArray(replies) || replies.length !== commands.length || !replies.every(confirmedCount)) throw new Error("Short link removal is unconfirmed");
     }
   }
   return readLinks(statsId);

@@ -18,8 +18,13 @@ function seed() { redis.run(["SET", linkKey(kept.code), JSON.stringify(kept)]); 
 for (const reply of [[], [undefined], [null], [false], [""], [-1], [1.5], [Number.MAX_SAFE_INTEGER + 1], [0, null]]) test(`HLEN ${JSON.stringify(reply)} is unknown, not zero links`, async () => {
   inject("HLEN", reply); await assert.rejects(countLinks(owner.statsId));
 });
-for (const reply of [[], [null], [undefined], [false], [[] , null], [["bad-json"]], [[JSON.stringify(kept), "bad-json"]], [[JSON.stringify({ ...kept, made: null })]]]) test(`HVALS ${JSON.stringify(reply)} cannot become empty or partial inventory`, async () => {
+for (const reply of [[], [null], [undefined], [false], [[] , null], [[null]], [[1]], [[""]], [[JSON.stringify(kept), false]]]) test(`HVALS ${JSON.stringify(reply)} cannot become empty or partial inventory`, async () => {
   inject("HVALS", reply); await assert.rejects(readLinks(owner.statsId));
+});
+// A record that is there but that this code cannot read is a fact, not an unknown reply (Claude 5 on #2527): it is left
+// out of the list, exactly as the public link treats it as ended, and the records that can be read stay listed.
+for (const [reply, codes] of [[[["bad-json"]], []], [[[JSON.stringify(kept), "bad-json"]], [kept.code]], [[[JSON.stringify({ ...kept, made: null })]], []]] as const) test(`HVALS ${JSON.stringify(reply)} leaves out only the record it cannot read`, async () => {
+  inject("HVALS", [...reply]); assert.deepEqual((await readLinks(owner.statsId)).map((l) => l.code), codes);
 });
 test("an unknown inventory cannot authorize creating a duplicate name", async () => {
   let writes = 0;
@@ -57,7 +62,16 @@ for (const action of ["add", "retarget", "remove"] as const) for (const receipt 
   });
 }
 
-for (const reply of [[], [undefined], [false], ["bad-json"], [JSON.stringify({ ...kept, code: "zzzzzz" })], [JSON.stringify({ ...kept, made: null })], [null, null]]) test(`GET ${JSON.stringify(reply)} cannot confirm an ended link`, async () => {
+// A record there that cannot be read, or that names another code, has ended: never opened, never a 503 for ever
+// (Claude 5 on #2527, P4); the CDN keeps the ended page as for any other ended link.
+for (const reply of [["bad-json"], [JSON.stringify({ ...kept, code: "zzzzzz" })], [JSON.stringify({ ...kept, made: null })]]) test(`GET ${JSON.stringify(reply)} is an ended link, never opened`, async () => {
+  inject("GET", reply); assert.equal(await findLink(kept.code), null);
+  const response = await GET(new Request(`https://example.test/l/${kept.code}`) as never, { params: Promise.resolve({ code: kept.code }) });
+  assert.equal(response.status, 302);
+  assert.match(response.headers.get("location")!, /\/l\/ended$/);
+  assert.match(response.headers.get("cache-control")!, /s-maxage=/);
+});
+for (const reply of [[], [undefined], [false], [""], [0], [null, null]]) test(`GET ${JSON.stringify(reply)} cannot confirm an ended link`, async () => {
   inject("GET", reply); await assert.rejects(findLink(kept.code));
   const response = await GET(new Request(`https://example.test/l/${kept.code}`) as never, { params: Promise.resolve({ code: kept.code }) });
   assert.equal(response.status, 503);

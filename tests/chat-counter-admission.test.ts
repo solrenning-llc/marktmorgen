@@ -13,12 +13,13 @@ const ask = (body: Record<string, unknown> = { url: CHAT_URL }) => POST(new Requ
 }) as NextRequest);
 const settings = () => state.commands.filter(c => ["SET", "DEL"].includes(String(c[0])) && String(c[1]).startsWith("nl:chatsum:"));
 const counters = () => state.commands.filter(c => String(c[1]).startsWith("nl:rl:chat-summary:"));
-async function refused() {
+async function refused(expected: 429 | 503 = 503) {
   const response = await ask();
   console.log(JSON.stringify({ status: response.status, counterCommands: counters().length, posts: state.posts,
     postBytes: state.postBytes, settingCommands: settings().length,
     settingBytes: settings().reduce((n, c) => n + Buffer.byteLength(JSON.stringify(c)), 0) }));
-  assert.equal(response.status, 429);
+  assert.equal(response.status, expected);
+  assert.deepEqual(await response.json(), { ok: false, error: expected === 429 ? "rate_limited" : "unavailable" });
   assert.equal(state.posts, 0);
   assert.equal(settings().length, 0);
 }
@@ -77,7 +78,7 @@ async function main() {
       assert.equal((await ask()).status, 429); assert.equal(state.posts, 10); assert.equal(settings().length, 10);
     });
     await check("confirmed exceeded counter keeps its refusal", async () => {
-      reset(); state.override = true; state.reply = [null, 11]; await refused();
+      reset(); state.override = true; state.reply = [null, 11]; await refused(429);
     });
     await check("sales toggle remains outside provider-test counter", async () => {
       reset(); state.throws = true; assert.equal((await ask({ sales: true })).status, 200);
@@ -94,7 +95,21 @@ async function main() {
     await check("confirmed removal deletes the sealed address without a provider POST", async () => {
       reset(); assert.equal((await ask({ url: "" })).status, 200);
       assert.equal(state.posts, 0); assert.equal(settings().length, 1); assert.equal(settings()[0][0], "DEL");
-      assert.equal(counters().length, 2);
+      assert.equal(counters().length, 0, "removal is admitted by the studio guard, not the provider-test counter");
+    });
+    // Claude 5 LOW1 (6701833468): stopping must remain available after refused saves.
+    for (const mode of ["unknown", "exceeded", "whitespace"] as const) await check(`removal bypasses only the provider-test counter: ${mode}`, async () => {
+      reset(); state.override = true; state.reply = mode === "unknown" ? ["OK", null] : [null, 11];
+      const response = await ask({ url: mode === "whitespace" ? "  " : "" });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true, result: "removed" });
+      assert.equal(counters().length, 0);
+      assert.equal(state.posts, 0);
+      assert.equal(settings().length, 1);
+      assert.equal(settings()[0][0], "DEL");
+      reset(); state.authorized = false;
+      assert.equal((await ask({ url: "" })).status, 403, "removal still requires the original guard");
+      assert.equal(state.commands.length, 0);
     });
   } finally { globalThis.fetch = original; }
   console.log(`${passed} passed; ${failed} failed`); process.exitCode = failed ? 1 : 0;

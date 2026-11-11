@@ -86,7 +86,7 @@ import { VIDEO_RECORD_BYTES } from "@/lib/stream-rules";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { STREAM_PEEK_TIMEOUT_MS, STREAM_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData } from "@/lib/store-data";
 import { type CaptionProblem, type CaptionTrack, MAX_CAPTION_TRACKS, captionLabel, toVtt } from "@/lib/captions";
 import {
@@ -811,11 +811,16 @@ export async function addCaption(pathname: string, lang: string, file: unknown):
   const read = toVtt(file);
   if (!read.ok) return { ok: false, reason: read.reason };
 
-  const [has, count] = await redisPipeline([
+  // Read exactly before anything is sent (rule 24): HEXISTS answers 0 or 1, HLEN a count. A reply cut short or in
+  // another shape is not "room for one more": nothing goes to the service, and the creator is told to try again.
+  const cap = repliesFor(await redisPipeline([
     ["HEXISTS", captionsKey(record.id), lang],
     ["HLEN", captionsKey(record.id)],
-  ]);
-  if (Number(has) !== 1 && Number(count) >= MAX_CAPTION_TRACKS) return { ok: false, reason: "many" };
+  ]), 2);
+  const has = cap?.[0];
+  const count = countOf(cap?.[1]);
+  if (!cap || (has !== 0 && has !== 1) || count === null) return { ok: false, reason: "unavailable" };
+  if (has !== 1 && count >= MAX_CAPTION_TRACKS) return { ok: false, reason: "many" };
 
   const answer = await ask(config, "POST", `/videos/${record.id}/captions/${lang}`, {
     srclang: lang,

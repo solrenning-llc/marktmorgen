@@ -12,7 +12,12 @@
  * a polite status line: "Moved <part> to place N of M."
  */
 import { readFileSync } from "node:fs";
-import { done, is } from "./check";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { PageOrderEditor } from "@/components/page-order-editor";
+import { USUAL_ORDER, type PagePart } from "@/lib/store-order";
+import { done, is, part } from "./check";
 
 const src = readFileSync("components/page-order-editor.tsx", "utf8");
 const up = src.slice(src.lastIndexOf("<button", src.indexOf("aria-label={`Move ${about?.label} up`}")), src.indexOf("</button>", src.indexOf("aria-label={`Move ${about?.label} up`}")));
@@ -26,5 +31,14 @@ is("a polite status line says what happened", /<p role="status" className="sr-on
 is("a move says where the part went", src.includes("`Moved ${name} to place ${to + 1} of ${list.length}.`"), true);
 is("a press at the end says it is already there", src.includes("`${name} is already ${by < 0 ? \"first\" : \"last\"}.`"), true);
 is("the same words said twice are said again", /setSaid\(""\);\s*requestAnimationFrame\(\(\) => setSaid\(words\)\);/.test(src), true);
+
+part("The component as drawn (Claude 3 cloud M's LOW: not only the source)");
+const order = [...USUAL_ORDER] as PagePart[];
+const on = Object.fromEntries(order.map((p) => [p, true])) as Record<PagePart, boolean>;
+const html = renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {} } as never }, createElement(PageOrderEditor, { order, on })));
+const moves = [...html.matchAll(/<button\b([^>]*aria-label="Move [^"]*"[^>]*)>/g)].map((m) => m[1]);
+is("an up and a down for each part", moves.length, order.length * 2);
+is("only the first up and the last down are marked unavailable", moves.map((a) => /aria-disabled="true"/.test(a)), moves.map((_, i) => i === 0 || i === moves.length - 1));
+is("the status line is drawn, empty until a move", /<p role="status" class="sr-only"><\/p>/.test(html), true);
 
 done();

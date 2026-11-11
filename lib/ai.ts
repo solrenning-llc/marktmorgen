@@ -1484,13 +1484,15 @@ export async function readPdfThenWrite<T>(
   const unrun: Unrun = { jobs: 0, asked: false };
   const flow = stepsOf(store, steps, unrun);
   return countedRun(store, now, async () => {
-    const read = await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf), 1);
+    const reading = { answered: false };
+    const read = await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf, reading), 1);
     const fileFacts = read.value;
     const request = fileFacts ? write.request(fileFacts) : null;
     if (!request) {
       flow.skip(1);
-      // The PDF, read, gave nothing to work from: a run told in steps says so, so the box does not ask for a retry that would read the same pages.
-      unrun.empty = !fileFacts && read.reached && steps !== undefined;
+      // The PDF, read, gave nothing to work from: a run told in steps says so, so the box does not ask for a retry that
+      // would read the same pages. A reading that failed (no readable answer) is said as failed, never as an empty PDF.
+      unrun.empty = !fileFacts && read.reached && reading.answered && steps !== undefined;
       return null;
     }
     if (!(await flow.goOn(1))) return null;

@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   }
   const away = (status: string) =>
     new Response(null, { status: 303, headers: { Location: handle ? `${origin}/@${handle}/back-in-stock?status=${status}` : `${origin}/`, "Cache-Control": "no-store" } });
-  if (!(await withinLimit("stock-alert-leave", clientAddress(request), 300, 600))) return oneClick ? new Response(null, { status: 429, headers: { "Retry-After": "600" } }) : away("limited");
+  if (!(await withinLimit("stock-alert-leave", clientAddress(request), 300, 600))) return oneClick ? new Response(null, { status: 429, headers: { "Retry-After": "600" } }) : away("busy");
   if (oneClick) {
     // The store by its own id: "unknown" is tried again, never taken as gone (rule 24).
     let status: number;

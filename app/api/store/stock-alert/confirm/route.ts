@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       status: 303,
       headers: { Location: `${origin}/@${store.handle}/back-in-stock?product=${encodeURIComponent(productId)}&status=${status}`, "Cache-Control": "no-store" },
     });
-  if (!(await withinStore("stock-alert-link", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return away("limited");
+  if (!(await withinStore("stock-alert-link", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return away("busy");
   if (!ALERT_TOKEN.test(token)) return away("expired");
   try {
     const result = await confirmStockAlert(token, store);

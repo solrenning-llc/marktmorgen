@@ -117,12 +117,38 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline;
   is("the other write kept", await lowStockOf(store, pid), { low: 5, seen: 7 });
 
-  part("Off gives the room back");
+  part("Off keeps the room counted, so a save racing it never leaves a record uncounted (Codex G on #3650)");
   const before = (await dataUsed(store))?.used ?? 0;
   is("off", await setLowStock(store, pid, 0, 7), "off");
   is("gone", redis.run(["HEXISTS", key, pid]), 0);
-  is("room given back", ((await dataUsed(store))?.used ?? 0) < before, true);
+  is("its room still counted: over, never under", ((await dataUsed(store))?.used ?? 0) >= before, true);
   is("off again is still off", await setLowStock(store, pid, "", 7), "off");
+  // A save whose room is taken, then an off that runs before the save's HSET: the record the save writes must stay counted.
+  const racing = await addProduct("owner@example.com", "Jug", "", "30", null);
+  if (!racing.ok) throw new Error("no product");
+  const rid = racing.product.id;
+  const slotKey = (await import("@/lib/store-data")).dataKey(store)!;
+  const roomOf = () => Number(redis.run(["HGET", slotKey, `ls:${rid}`]) ?? 0);
+  is("set first", await setLowStock(store, rid, 5, 9), "saved");
+  let offDuring = false;
+  const pipeline2 = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    if (!offDuring && commands.some((c) => c[0] === "HSET" && c[1] === key && c[2] === rid)) {
+      offDuring = true;
+      redis.pipeline = pipeline2;
+      await setLowStock(store, rid, 0, 9);
+    }
+    return pipeline2(commands);
+  };
+  is("the racing save", await setLowStock(store, rid, 6, 9), "saved");
+  redis.pipeline = pipeline2;
+  is("the record it wrote is there", typeof redis.run(["HGET", key, rid]), "string");
+  is("and its room is counted", roomOf() >= LOW_STOCK_BYTES, true);
+  // A save whose HSET is not confirmed: the room stays taken, and a later off does not under-count either.
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "HSET" && c[1] === key) ? [["ERR"]] : pipeline2(commands));
+  is("an unconfirmed save", await setLowStock(store, rid, 7, 9), "unknown");
+  redis.pipeline = pipeline2;
+  is("its room still counted", roomOf() >= LOW_STOCK_BYTES, true);
 
   part("A full data room writes nothing");
   await noteData(store, [{ slot: "filler", bytes: 10 ** 12, set: true }]);

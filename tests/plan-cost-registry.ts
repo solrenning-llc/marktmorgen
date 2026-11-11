@@ -73,12 +73,12 @@ import { MAX_PAGE_BYTES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
-import { MAX_TEAM } from "@/lib/team";
+import { MAX_TEAM, MEMBER_STORES_READ } from "@/lib/team";
 import { MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
-import { CLOSING_DAYS, DEL_BATCH, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
+import { CLAIM_PAGES, CLOSING_DAYS, DEL_BATCH, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
-import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
@@ -1475,12 +1475,14 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
-      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD", "fencedBy", "CLOSING_FENCED", "FENCED_KEYS"] },
+      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD", "fencedBy", "CLOSING_FENCED", "FENCED_KEYS", "ownsAnother", "CLAIM_PAGES"] },
+      { file: "lib/team.ts", names: ["memberStoresExact", "MEMBER_STORES_READ"] },
+      { file: "lib/store.ts", names: ["storeForIdExact", "MAX_STORES_PER_ACCOUNT"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_STORE_EXPORTS"] },
       { file: "app/api/store/export/route.ts", names: ["ENDED_STORE_EXPORTS", "storeExport(store)"] },
       { file: "lib/store-export.ts", names: ["EXPORT_STRIPE_PAGES", "EXPORT_PAGE_SECONDS", "EXPORT_COMMANDS"] },
       { file: "lib/joined-stores.ts", names: ["QUARTERS_KEPT", "PERSON_RECORD_MONTHS"] },
-      { file: "lib/plan-closing-rules.ts", names: ["DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
+      { file: "lib/plan-closing-rules.ts", names: ["DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "CLAIM_PAGES"] },
       { file: "tests/store-data-registry.ts", names: ["closingBytes", "followedBytes", "TRIAL_UNITS"] },
       { file: "lib/data-families.ts", names: ["FOLLOWED_FAMILIES", "CLOSING"] },
       { file: "lib/order-data.ts", names: ["ORDER_KEY_BYTES"] },
@@ -1517,7 +1519,16 @@ export const KEY_NAME_BYTES = 128;
  * line, record), each in one step at the sizes counted here (LOG_SIZE,
  * MAX_KEYS, MAX_TEAM: fewer than FENCED_KEYS keys).
  */
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5 + 3) + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * 50 + 10);
+/**
+ * What prepareStore reads, for its owner and each of its team as a host, of whether they serve another store before
+ * their own calendar goes, read exactly (Claude 6 on #3156): the stores they are on as one of a team
+ * (lib/team.ts, memberStoresExact: the index, then each store's team, id and record, MEMBER_STORES_READ of them at the
+ * most, past which it throws), and the stores they own (lib/closed-store-data.ts, ownsAnother: their first store, their
+ * account's set and each of its stores, MAX_STORES_PER_ACCOUNT at the most, past which it throws). Until then five were
+ * counted, though memberStores read up to fifty stores at three commands each.
+ */
+export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 2 + MAX_STORES_PER_ACCOUNT;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS + 3) + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * CLAIM_PAGES + 10);
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {

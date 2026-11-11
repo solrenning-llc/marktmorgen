@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1254,6 +1254,25 @@ export async function storeForId(sid: string): Promise<Store | null> {
   const [ref] = await redisPipeline([["GET", storeIdKey(sid)]]);
   if (typeof ref !== "string" || !ref) return null;
   const store = await storeForEmail(ref);
+  return store && store.sid === sid ? store : null;
+}
+
+/**
+ * storeForId read exactly (rules 24 and 30): null only when Redis says no store has this id (nil), or the record under
+ * it is gone (nil) or carries another id. A reply in another shape, an empty id key, or a record that is there but
+ * does not read as the store of that key throws UnknownReplyError: never "no store" for a caller that would delete
+ * something because there is none (lib/team.ts, memberStoresExact, Claude 6 on #3156).
+ */
+export async function storeForIdExact(sid: string): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", storeIdKey(sid)]]), 1);
+  const ref = replies?.[0];
+  if (!replies || (ref !== null && (typeof ref !== "string" || !ref))) throw new UnknownReplyError("a store's id (GET)");
+  if (ref === null) return null;
+  let reply: unknown;
+  const store = await storeForEmailSeen(ref, (_, answer) => void (reply = answer));
+  const read = repliesFor(reply, 1);
+  if (!read || (read[0] !== null && (typeof read[0] !== "string" || !store))) throw new UnknownReplyError("a store's record (GET)");
   return store && store.sid === sid ? store : null;
 }
 

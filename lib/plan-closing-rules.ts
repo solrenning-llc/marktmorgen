@@ -83,6 +83,8 @@ export const ERASE_WITHIN_DAYS = ERASE_EVERY_DAYS + 7;
  */
 export const DEL_BATCH = 4000;
 export const FOLLOW_BATCH = 1000;
+/** The most pages of a closing store's host's claims (HSCAN, 500 asked for a page) its preparation reads (lib/closed-store-data.ts, prepareStore); claims not at their end by then are unknown, never all of them. */
+export const CLAIM_PAGES = 50;
 export const RENEWALS_AT_ONCE = 25;
 
 /**

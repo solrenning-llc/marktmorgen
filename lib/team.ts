@@ -41,11 +41,13 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
 export const MAX_TEAM = 5;
+/** The most stores memberStores reads for one person: memberStoresExact throws past it (each is three reads). */
+export const MEMBER_STORES_READ = 50;
 /** How long an invitation works (kept in lib/team-roles.ts, so a page can say it). */
 export { INVITE_DAYS };
 /** How many lines of the activity log are kept. */
@@ -332,7 +334,7 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
   const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
   const found: { store: Store; role: TeamRole }[] = [];
   const stale: string[] = [];
-  for (const sid of list.slice(0, 50)) {
+  for (const sid of list.slice(0, MEMBER_STORES_READ)) {
     // A store whose team answers in an unknown shape is left out of this answer and kept in the index: it is
     // neither "on it" nor "gone", and one other store's unreadable record never stops the person's own studio.
     const team = await readTeam(sid).catch((error: unknown) => {
@@ -351,6 +353,32 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
     else stale.push(sid);
   }
   if (stale.length) await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
+  return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
+}
+
+/**
+ * memberStores read exactly, for a caller that deletes what a person keeps across the stores they serve when they
+ * serve no other (lib/closed-store-data.ts, prepareStore: a host's own calendar; Claude 6 on #3156). Nothing is left
+ * out: a store whose team or record does not read, or an index of more than MEMBER_STORES_READ stores, throws
+ * UnknownReplyError instead of being skipped, since a store skipped may be the live one they still serve. Only a team
+ * read exactly without them, an id with no store (nil) or a store they own is not one. Reads only: the index's stale
+ * entries are dropped by memberStores, never here. memberStores itself is unchanged for its other callers (the
+ * studio's store list, sign-in and alerts), where one unreadable store must not stop the person's own studio.
+ */
+export async function memberStoresExact(email: string): Promise<{ store: Store; role: TeamRole }[]> {
+  if (!isRedisConfigured()) return [];
+  const address = normaliseEmail(email);
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
+  if (list.length > MEMBER_STORES_READ) throw new UnknownReplyError(`a teammate's stores, more than the ${MEMBER_STORES_READ} read,`);
+  const found: { store: Store; role: TeamRole }[] = [];
+  for (const sid of list) {
+    const member = (await readTeam(sid)).members.find((m) => m.email === address);
+    if (!member) continue;
+    const store = await storeForIdExact(sid);
+    if (store && normaliseEmail(store.email) !== address) found.push({ store, role: member.role });
+  }
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
 }
 

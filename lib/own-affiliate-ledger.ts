@@ -5,22 +5,28 @@
  *
  * - "earned": the commission one plan payment owes (ownCommission), held until
  *   its due time (the payment's money-back days over), then payable;
- * - "reversed": that payment was refunded or disputed, so its commission is
- *   gone, whether it was read before or after the commission;
- * - "paid": what was sent to the affiliate.
+ * - "lowered": that payment was partly refunded, so its commission is now the
+ *   smaller amount ownCommission gives on what the customer kept; the lowest
+ *   recorded stands, and one above what was earned is unknown;
+ * - "reversed": that payment was wholly refunded or disputed, so its
+ *   commission is gone, whether it was read before or after the commission;
+ * - "paid": a payout sent to the affiliate, once by its id.
  *
- * One already paid and then reversed is a debt: never charged to the
- * affiliate, only taken from the next commissions as they fall due. A debt no
+ * Whatever was paid beyond what is due now is a debt (a commission paid and
+ * then lowered or reversed, or a payout sent before its commission was due):
+ * never charged to the affiliate, only taken from the next commissions as they
+ * fall due. A debt no
  * later commission pays is a cost of the programme; docs/marktmorgen-affiliates.md
- * names it as unknown, never zero. A payment recorded twice counts once; twice
- * with two amounts or two due times is unknown. Anything unreadable is unknown,
+ * names it as unknown, never zero. A commission or a payout recorded twice
+ * counts once; twice with two amounts (or two due times) is unknown. Anything unreadable is unknown,
  * never zero and never payable (rule 24). Client-safe.
  */
 
 export type LedgerEntry =
   | { kind: "earned"; paymentId: string; cents: number; dueAt: number }
+  | { kind: "lowered"; paymentId: string; cents: number }
   | { kind: "reversed"; paymentId: string }
-  | { kind: "paid"; cents: number };
+  | { kind: "paid"; payoutId: string; cents: number };
 
 export type AffiliateBalance = { payableCents: number; heldCents: number; debtCents: number } | "unknown";
 
@@ -32,7 +38,8 @@ export function affiliateBalance(entries: readonly LedgerEntry[] | "unknown", no
   if (entries === "unknown" || !Array.isArray(entries) || !Number.isFinite(now)) return "unknown";
   const earned = new Map<string, { cents: number; dueAt: number }>();
   const reversed = new Set<string>();
-  let paid = 0;
+  const lowered = new Map<string, number>();
+  const payouts = new Map<string, number>();
   for (const entry of entries as readonly unknown[]) {
     if (!entry || typeof entry !== "object") return "unknown";
     const e = entry as Record<string, unknown>;
@@ -41,20 +48,32 @@ export function affiliateBalance(entries: readonly LedgerEntry[] | "unknown", no
       const before = earned.get(e.paymentId);
       if (before && (before.cents !== e.cents || before.dueAt !== e.dueAt)) return "unknown";
       earned.set(e.paymentId, { cents: e.cents, dueAt: e.dueAt });
+    } else if (e.kind === "lowered") {
+      if (!paymentId(e.paymentId) || !wholeCents(e.cents)) return "unknown";
+      lowered.set(e.paymentId, Math.min(e.cents, lowered.get(e.paymentId) ?? e.cents));
     } else if (e.kind === "reversed") {
       if (!paymentId(e.paymentId)) return "unknown";
       reversed.add(e.paymentId);
     } else if (e.kind === "paid") {
-      if (!wholeCents(e.cents)) return "unknown";
-      paid += e.cents;
+      if (!paymentId(e.payoutId) || !wholeCents(e.cents)) return "unknown";
+      const before = payouts.get(e.payoutId);
+      if (before !== undefined && before !== e.cents) return "unknown";
+      payouts.set(e.payoutId, e.cents);
     } else {
       return "unknown";
     }
   }
   let due = 0;
   let held = 0;
-  for (const [id, { cents, dueAt }] of earned) {
+  let paid = 0;
+  for (const cents of payouts.values()) paid += cents;
+  for (const [id, low] of lowered) {
+    const was = earned.get(id);
+    if (was && low > was.cents) return "unknown";
+  }
+  for (const [id, { cents: earnedCents, dueAt }] of earned) {
     if (reversed.has(id)) continue;
+    const cents = lowered.get(id) ?? earnedCents;
     if (dueAt <= now) due += cents;
     else held += cents;
   }

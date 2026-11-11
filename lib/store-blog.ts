@@ -228,6 +228,16 @@ export async function readPosts(statsId: string | null, metas: PostMeta[]): Prom
   return out;
 }
 
+/**
+ * Sends a write pipeline once. A request that fails after it was sent (a timeout, a 5xx after the server
+ * ran it) may have been applied, so it is as unconfirmed as a malformed reply: null, never a retry.
+ */
+async function mutationReply(commands: (string | number)[][]): Promise<ReturnType<typeof confirmedMutation>> {
+  let reply: unknown;
+  try { reply = await redisPipeline(commands); } catch { return null; }
+  return confirmedMutation(reply);
+}
+
 export type SaveResult = { ok: true; post: Post; published: number | null } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "unconfirmed" | "off" };
 
 /**
@@ -265,12 +275,12 @@ export async function savePost(
   // Its room first: the post's two records and its place among the published, counted as it now is.
   const bodyJson = JSON.stringify({ body: input.body, product: input.product });
   await needData(room, [{ slot: `bl:${postId}`, bytes: dataBytes([JSON.stringify(meta), bodyJson], 3), set: true }]);
-  const changed = confirmedMutation(await redisPipeline([
+  const changed = await mutationReply([
     ["HSET", metaKey(statsId), postId, JSON.stringify(meta)],
     ["HSET", bodyKey(statsId), postId, bodyJson],
     input.draft ? ["ZREM", pubKey(statsId), postId] : ["ZADD", pubKey(statsId), publishedAt, postId],
     ["ZCARD", pubKey(statsId)],
-  ]));
+  ]);
   // The write may have happened: retain its room and report uncertainty, never a fabricated count.
   if (changed === null) return { ok: false, reason: "unconfirmed" };
   return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: changed.total };
@@ -279,12 +289,12 @@ export async function savePost(
 /** Removes a post for good. Says how many are published after it. */
 export async function deletePost(statsId: string | null, id: string, room: DataStore): Promise<number | null> {
   if (!statsId || !isRedisConfigured() || !POST_ID.test(id)) return null;
-  const changed = confirmedMutation(await redisPipeline([
+  const changed = await mutationReply([
     ["HDEL", metaKey(statsId), id],
     ["HDEL", bodyKey(statsId), id],
     ["ZREM", pubKey(statsId), id],
     ["ZCARD", pubKey(statsId)],
-  ]));
+  ]);
   if (changed === null) throw new BlogWriteUnconfirmed();
   await giveData(room, [{ slot: `bl:${id}`, bytes: 0, set: true }]);
   if (changed.total === null) throw new BlogCountUnavailable();

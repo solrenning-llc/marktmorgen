@@ -39,7 +39,8 @@ is("each button through its own number", [0, 1, 2].every((n) => html.includes(`h
 is("an address in the text goes to itself", html.includes('href="https://example.com/plan"') && html.includes('href="https://example.com/faq"'), true);
 is("the button's words unchanged", html.includes(">Book a seat</a>") && html.includes(">Gift a class</a>"), true);
 const tagged = bodyHtml(body, (href) => `${href}?utm_source=x`, undefined, undefined, to);
-is("a button's tag kept inside the address it was written to", tagged.includes(encodeURIComponent("https://example.com/book?utm_source=x")), true);
+// Review of #3715: the HTML, the text and the studio sign the same untagged original, so nothing of one reader (a tag with their key) is inside it.
+is("a changeable button signs the untagged address, as the text and the studio do", [tagged.includes(encodeURIComponent("https://example.com/book?utm_source=x")), tagged.includes(`href="${to("https://example.com/book", 0).replace(/&/g, "&amp;")}"`)], [false, true]);
 is("without buttonTo: exactly as before", bodyHtml(body), bodyHtml(body, undefined, undefined, undefined, undefined));
 
 part("In the text");
@@ -47,5 +48,12 @@ const text = bodyText(body, to);
 is("each button through its own number, the same as the HTML", text.includes(`Book a seat: ${to("https://example.com/book", 0)}`) && text.includes(`Gift a class: ${to("https://example.com/gift", 1)}`) && text.includes(`Book a seat: ${to("https://example.com/book", 2)}`), true);
 is("an address in the text unchanged", text.includes("https://example.com/plan.") && text.includes("https://example.com/faq"), true);
 is("without buttonTo: exactly as before", bodyText(body), "Spring classes\n\nRead the plan at https://example.com/plan.\n\nBook a seat: https://example.com/book\n\n- Or see https://example.com/faq\n\nGift a class: https://example.com/gift\n\nBook a seat: https://example.com/book");
+
+part("Only a button whose address can be changed is wrapped (review of #3715)");
+const mixed = ["[Ours](https://marktmorgen.com/r/S/E/0?u=x)", "[No dot](https://intranet/page)", "[Book a seat](https://example.com/book)"].join("\n\n");
+is("the studio's list holds only the buttons that can be changed", bodyButtons(mixed), ["https://example.com/book"]);
+const mixedHtml = bodyHtml(mixed, (href) => `${href}?utm_source=x`, undefined, undefined, to);
+is("a button that is already our redirect or has no public host goes to itself, tagged, never through a second redirect", [mixedHtml.includes('href="https://marktmorgen.com/r/S/E/0?u=x?utm_source=x"'), mixedHtml.includes('href="https://intranet/page?utm_source=x"')], [true, true]);
+is("the changeable button is number 0 in the HTML and the text, as in the studio's list", [mixedHtml.includes(`href="${to("https://example.com/book", 0).replace(/&/g, "&amp;")}"`), bodyText(mixed, to).includes(`Book a seat: ${to("https://example.com/book", 0)}`)], [true, true]);
 
 done();

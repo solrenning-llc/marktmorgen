@@ -267,7 +267,15 @@ export type BookResult =
 export async function prepareSession(store: Store, token: string, origin: string): Promise<BookResult & { checkout?: string }> {
   const found = await boughtByToken(token);
   if (!found || found.bought.s !== store.statsId || !store.stripeAccountId) return { ok: false, reason: "gone" };
-  const state = await packageState(found.bought);
+  // Sessions left that cannot be read (a confirmation mark in another shape) are an error, never a server error and
+  // never a session sold (rule 24; Revisor 1).
+  let state: PackageState;
+  try {
+    state = await packageState(found.bought);
+  } catch (error) {
+    console.error("reading a package's sessions left failed", error);
+    return { ok: false, reason: "error" };
+  }
   if (state.expired) return { ok: false, reason: "expired" };
   if (state.left <= 0) return { ok: false, reason: "used" };
   try {
@@ -297,7 +305,9 @@ export async function holdSession(store: DataOwner, checkout: string, session: s
   return withLock(`nl:pkg:${checkout}:lock`, 30, 10_000, async () => {
     const bought = await readBought(checkout);
     if (!bought) return false;
-    const state = await packageState(bought);
+    // Not read: no, and the caller lets the time go; never a session counted on an unknown (Revisor 1).
+    const state = await packageState(bought).catch(() => null);
+    if (!state) return false;
     if (state.left <= 0) return false;
     bought.holds.push({ session, until });
     // What the record grows by is counted in the store's room (lib/order-data.ts).

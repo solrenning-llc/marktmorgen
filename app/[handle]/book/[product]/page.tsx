@@ -86,13 +86,16 @@ export default async function BookPage({ params, searchParams }: Params) {
   // already bought for it (a booking already paid is moved above, read from
   // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
   if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
-  const pkgState = pkg ? await packageState(pkg.bought) : null;
+  // A package whose sessions left cannot be read is unknown (Revisor 1): no line about it, and the calendar books and
+  // sells nothing, saying the times could not be read, never the server's error page and never a paid booking.
+  const pkgRead = pkg ? await packageState(pkg.bought).catch(() => "unknown" as const) : null;
+  const pkgState = pkgRead === "unknown" ? null : pkgRead;
   // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
   // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
   const soon = await isSoon(store, product.id).catch(() => null);
   const sellable = canSellProduct(store, product);
-  const open = sellable && soon === false;
-  const unread = sellable && soon === null;
+  const open = sellable && soon === false && pkgRead !== "unknown";
+  const unread = sellable && (soon === null || pkgRead === "unknown");
   // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
   const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
   // One of a call's lengths, each with its price (lib/call-lengths.ts): asked for by its link; the times are read at it,
@@ -177,7 +180,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                   ? b.packageBookBy(new Date(pkgState.until * 1000).toLocaleDateString(lang.locale, { month: "long", day: "numeric", timeZone: "UTC" }))
                   : ""}
               </p>
-            ) : pkgToken ? (
+            ) : pkgToken && pkgRead !== "unknown" ? (
               <p className="st-note mt-5 text-sm" role="alert">{b.packageLinkWrong}</p>
             ) : open && product.callPackage ? (
               <div className="mt-5">

@@ -71,4 +71,7 @@ test("holding a session against it says no, never a throw, so the time is let go
 test("the booking page reads a package it cannot count as unknown, never a server error", () => {
   const page = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
   assert.match(page, /packageState\(pkg\.bought\)\.catch\(/);
+  // Not read is not a wrong link, and the calendar books nothing while it is unknown.
+  assert.match(page, /pkgToken && pkgRead !== "unknown"/);
+  assert.match(page, /const open = sellable && soon === false && pkgRead !== "unknown"/);
 });

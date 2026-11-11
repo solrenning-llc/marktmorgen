@@ -862,7 +862,7 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
  * SUPPORT_HELD_NOTICES_DAILY notice, each at PER_EMAIL (Resend's overage,
  * dearer than SES's $0.10 a thousand), the route's whole maxDuration (60 s)
  * of CPU and memory and SUPPORT_FORWARD_COMMANDS commands (the route's 3, the
- * announcement's 2, the counts and their marks 18, four for each of up to 100
+ * announcement's SUPPORT_ANNOUNCEMENT_COMMANDS, the counts and their marks 18, four for each of up to 100
  * files, the sender's own 64); files SUPPORT_FILE_BYTES_DAILY bytes (before
  * base64, sent as base64). Both command figures are held by
  * tests/support-forward-ceiling.test.ts against what the code sends.
@@ -875,8 +875,19 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
  * limit and Resend's receiving quota), transfer
  * out of the function to SES, and Resend's count of received mail.
  */
-export const SUPPORT_FORWARD_COMMANDS = 3 + 2 + 18 + 100 * 4 + 64;
-export const SUPPORT_HELD_READ_COMMANDS = 24;
+/**
+ * The announcement's worst path, a paying store owner's (cloud J's review of #3481, MEDIUM): the EXISTS of
+ * ownsAStore, the owner's own share of the reserve (SET and INCR), the reserve and then the public share (SET and
+ * INCR each): 1 + 2 + 2 + 2.
+ */
+export const SUPPORT_ANNOUNCEMENT_COMMANDS = 7;
+export const SUPPORT_FORWARD_COMMANDS = 3 + SUPPORT_ANNOUNCEMENT_COMMANDS + 18 + 100 * 4 + 64;
+/**
+ * A message held after its read, at its worst: a paying store owner's, the reserve spent, held by the company's day
+ * with the day's notice, measured at 32 by tests/support-forward-ceiling.test.ts (the route's 3 included; 24 before
+ * cloud J's review of #3481 counted only a sender with no store).
+ */
+export const SUPPORT_HELD_READ_COMMANDS = 32;
 export const SES_ATTACHMENT_PER_GB = 0.12;
 export function supportForwardMonthlyUsd(): { perForwardUsd: number; perReadUsd: number; modeledUsd: number; completeUsd: null } {
   const perForwardUsd = PER_EMAIL + SUPPORT_FORWARD_COMMANDS * COMMAND + CALL + 60 * (CPU_SECOND + MEMORY_SECOND);

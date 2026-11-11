@@ -7,7 +7,7 @@ import { COPIERS } from "@/lib/person-copy";
 import { importedKey } from "@/lib/imported-purchases";
 import { ownedHere } from "@/lib/next-offer";
 import type { Store } from "@/lib/store";
-import type { ErasureScope } from "@/lib/person-erasure";
+import type { ErasureScope } from "@/lib/erasure-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 

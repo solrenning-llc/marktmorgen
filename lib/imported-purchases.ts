@@ -151,8 +151,12 @@ export function importedRead(store: Store, email: string): (string | number)[] |
   return ["HGETALL", importedKey(store.statsId, email)];
 }
 
-/** What such a read answered, as purchases. */
-export function importedFrom(raw: unknown): ImportedPurchase[] {
+/**
+ * What such a read answered, as purchases. By default a legible row is enough (access); with
+ * `complete`, any illegible row refuses the whole read, for a reader that must list everything
+ * (a person's data copy) or must not guess what is not owned (the next offer).
+ */
+export function importedFrom(raw: unknown, options: { complete?: boolean } = {}): ImportedPurchase[] {
   const read = pairs(raw);
   const found: ImportedPurchase[] = [];
   let unknown = !read.complete;
@@ -163,18 +167,18 @@ export function importedFrom(raw: unknown): ImportedPurchase[] {
   }
   // A legible row is enough to establish access. Only a complete, legible
   // empty read may establish that there is none.
-  if (found.length) return found;
+  if (found.length && !(options.complete && unknown)) return found;
   if (unknown) throw new UnknownReplyError("imported purchases");
   return [];
 }
 
 /** Everything this address was given here by an import; [] for a store that never imported buyers. */
-export async function importedFor(store: Store, email: string): Promise<ImportedPurchase[]> {
+export async function importedFor(store: Store, email: string, options: { complete?: boolean } = {}): Promise<ImportedPurchase[]> {
   const read = importedRead(store, email);
   if (!read || !isRedisConfigured()) return [];
   const replies = repliesFor(await redisPipeline([read]), 1);
   if (!replies) throw new UnknownReplyError("imported purchases");
-  const found = importedFrom(replies[0]);
+  const found = importedFrom(replies[0], options);
   // Brought over before the list of who was brought existed: noted the first time they are read.
   const brought = found.filter((p) => IMPORT_JOB.test(p.job));
   if (brought.length && store.statsId) {

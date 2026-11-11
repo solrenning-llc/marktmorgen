@@ -151,7 +151,7 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
         bundleFromMeta(meta, "bundle").forEach(add);
       }
     }
-    for (const given of await importedFor(store, email)) {
+    for (const given of await importedFor(store, email, { complete: true })) {
       add(given.productId);
       (given.items ?? []).forEach(add);
     }

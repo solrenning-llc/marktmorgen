@@ -72,6 +72,11 @@ for (const label of [
   "Gmail password below",
   "Account email and password please",
   "What's the password for your Instagram?",
+  // Codex G, review 6797038853: a direct question for the secret, with no "your" and no "for".
+  "What is the password?",
+  "What is the Instagram password?",
+  "What's your Instagram password?",
+  "Do you mind entering your password?",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -103,6 +108,14 @@ for (const label of [
   "Your feedback on my password course",
   "How do you use email/password sign-in?",
   "Which password manager/email tool do you use?",
+  // Claude 3, review 6787874522, and Codex G, 6797038853: survey questions about passwords, refused at 66edd387.
+  "How do you remember your passwords?",
+  "What is your biggest frustration with password resets?",
+  "Tell us about your password habits",
+  "Which of your apps needs a new password most often?",
+  "How many of your accounts share a password?",
+  "Share your thoughts on passwords",
+  "What is the best password?",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");

@@ -16,7 +16,11 @@
  *     (grant.k) approves nobody, each kept for when the store is back; nor does
  *     the store's partnership offer accepted in a creator's studio; nothing is
  *     counted or written (the route asks linkOpens before its rate limit);
- *   - a link of an affiliate it already has still signs them in.
+ *   - a link of an affiliate it already has still signs them in;
+ *   - app/api/store/affiliates (the studio), action "invite": the creator's
+ *     invitation to a new partner is refused with its own plain words
+ *     ("suspended"), before the 90% cap is read or paid for; invitePartner
+ *     itself refuses too, and no email is sent.
  *
  * Each refusal sends the browser to the page with the existing "unavailable"
  * status, which, switched off, shows only the store's "not available" page: no
@@ -28,8 +32,10 @@ import { NextRequest } from "next/server";
 import { POST as applyRoute } from "@/app/api/store/affiliates/apply/route";
 import { POST as joinRoute } from "@/app/api/store/affiliates/join/route";
 import { POST as openRoute } from "@/app/api/store/affiliates/open/route";
+import { POST as studioRoute } from "@/app/api/store/affiliates/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { acceptPartnership, affiliateByEmail, affiliateCookieName, buyersJoin, canApply, openAffiliateLink } from "@/lib/affiliates";
+import { acceptPartnership, affiliateByEmail, affiliateCookieName, buyersJoin, canApply, invitePartner, openAffiliateLink } from "@/lib/affiliates";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -172,6 +178,29 @@ async function main(): Promise<void> {
   const signing = await measured(() => post(openRoute, "open", { handle: HANDLE, token: back }));
   is("an emailed link of an affiliate the store already has still signs them in, as they were", [signing.location, signing.signedIn, await status("partner@example.test")], [`${PAGE}?status=welcome`, true, "pending"]);
 
+  part("app/api/store/affiliates, action invite: the creator invites no new partner");
+  const studioCookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
+  const inviting = async () => {
+    writes = [];
+    const before = calls.email;
+    const response = await studioRoute(
+      new NextRequest("https://marktmorgen.com/api/store/affiliates", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: studioCookie },
+        body: JSON.stringify({ action: "invite", email: "outsider@example.test", percent: 10, products: [course.product.id] }),
+      }),
+    );
+    return { status: response.status, answer: (await response.json()) as { ok?: boolean; error?: string }, emails: calls.email - before, writes: [...writes] };
+  };
+  const refusedInvite = await inviting();
+  is("the studio is told the store is switched off", [refusedInvite.status, refusedInvite.answer], [400, { ok: false, error: "suspended" }]);
+  is("no email is sent and nothing of the program is written", [refusedInvite.emails, refusedInvite.writes.filter((w) => w.split(" ")[1]?.startsWith("nl:aff:"))], [0, []]);
+  const titles = new Map([[course.product.id, "Kiln Firing Course"]]);
+  const before = calls.email;
+  writes = [];
+  const direct = await invitePartner({ store: await load(), email: "outsider@example.test", share: { percent: 10, products: [course.product.id] }, titles, origin: "https://marktmorgen.com" });
+  is("invitePartner itself refuses, sending no email and writing nothing", [direct, calls.email - before, writes], ["unavailable", 0, []]);
+
   part("Switched back on, every route is as it was");
   await noteTakedown(owner, null, false);
   const again = await measured(() => post(applyRoute, "apply", { handle: HANDLE, email: "newcomer@example.test", note: "My pottery blog" }));
@@ -181,6 +210,8 @@ async function main(): Promise<void> {
   const acceptedAgain = await measured(() => post(openRoute, "open", { handle: HANDLE, token: invited }));
   is("the kept invitation approves the affiliate", [acceptedAgain.signedIn, await status("partner@example.test")], [true, "approved"]);
   const joinedAgain = await measured(() => post(joinRoute, "join", { handle: HANDLE, order: "cs_test_of1buyer000001" }));
+  const invitedAgain = await inviting();
+  is("the creator invites a partner again, by email", [invitedAgain.answer.ok, invitedAgain.emails], [true, 1]);
   is("a buyer joins after an order again, read from Stripe", [joinedAgain.location, joinedAgain.signedIn, joinedAgain.stripe > 0, await status("buyer@example.test")], [`${PAGE}?status=joined`, true, true, "approved"]);
 
   done();

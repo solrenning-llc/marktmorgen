@@ -2,7 +2,7 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, type Charge, affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, type Charge, affiliateCookieName, linkOpens, openAffiliateLink, takesNewAffiliates } from "@/lib/affiliates";
 import { forcePublicRequests, givePublicRequests, holdPublicRequests } from "@/lib/traffic";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -38,6 +38,18 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
 
   const page = `${origin}/@${store.handle}/affiliates`;
+  // Taking nobody new (lib/affiliates.ts takesNewAffiliates, as a store switched off after notices about its content):
+  // only a plain link of an affiliate the store already has goes on to sign them in (linkOpens, reads only); any
+  // other is refused before anything is counted or written, the link kept. A read that failed is said as an error.
+  if (!takesNewAffiliates(store)) {
+    const opens = await linkOpens(store, token).catch((error) => {
+      console.error("checking an affiliate link failed", error);
+      return null;
+    });
+    if (opens !== true) {
+      return new Response(null, { status: 303, headers: { Location: `${page}?status=${opens === null ? "error" : "unavailable"}`, "Cache-Control": "no-store" } });
+    }
+  }
   if (!(await withinStore("aff-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) {
     return new Response(null, { status: 303, headers: { Location: `${page}?status=limited`, "Cache-Control": "no-store" } });
   }

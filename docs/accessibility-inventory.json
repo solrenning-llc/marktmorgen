@@ -1313,6 +1313,7 @@
     "components/buyer-numbers.tsx",
     "components/buyer-path.tsx",
     "components/buyer-paths.tsx",
+    "components/buyer-provider-signin.tsx",
     "components/buying-hours.tsx",
     "components/calendar-editor.tsx",
     "components/call-editor.tsx",

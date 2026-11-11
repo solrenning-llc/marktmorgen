@@ -415,9 +415,15 @@ function parseDelivery(raw: unknown): Delivery | null {
   }
 }
 
+/**
+ * A store's webhook settings, read exactly (CX-123 rule 24): null only for an exact nil (none kept). A reply cut short
+ * or in another shape throws UnknownReplyError, never "no endpoints": an event is not dropped as heard by nobody, a
+ * delivery due again stays under its lease, and the Stripe pass keeps the store in its set.
+ */
 async function readConfig(statsId: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  return parseConfig(raw);
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a store's webhook settings");
+  return parseConfig(read[0]);
 }
 
 /** How many times a change is tried again from a fresh read when another one landed first. */
@@ -1983,7 +1989,8 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
       // said where the creator sees it as well as in the server's log. The
       // endpoints as they are now, so one added during this visit is told too.
       console.error(`WEBHOOK EVENT GIVEN UP: a Stripe event waited ${runs} visits since ${new Date(since * 1000).toISOString()} (${cause === "ours" ? "our code failed" : `a Stripe lookup kept failing, ${outcome}`}); it is passed over and not sent`, store.handle, id, event.type);
-      const fresh = (await readConfig(statsId)) ?? config;
+      // Unread just now, the settings this visit started from tell the creator (the line is only words).
+      const fresh = (await readConfig(statsId).catch(() => null)) ?? config;
       await markGivenUp(store, statsId, { ...fresh, endpoints: await liveEndpoints(store, fresh.endpoints) }, event, runs, cause, lookups.confirmed === id, now);
       last = id || last;
     }
@@ -2076,7 +2083,16 @@ export async function watchStripe(deadline: number, now = Date.now()): Promise<{
   for (let n = 0; n < ids.length && Date.now() < deadline; n += 1) {
     const statsId = ids[(start + n) % ids.length];
     await redisPipeline([["SET", POSITION_KEY, statsId]]);
-    const config = await readConfig(statsId);
+    // Unread just now: the store stays in the set and is read again next run (rule 24), never taken out of it.
+    const read = await readConfig(statsId).then(
+      (found) => ({ found }),
+      (error: unknown) => {
+        console.error("reading a store's webhook settings for the Stripe pass failed", statsId, error);
+        return null;
+      },
+    );
+    if (!read) continue;
+    const config = read.found;
     if (!config || !config.endpoints.length) {
       await redisPipeline([["SREM", STORES_KEY, statsId]]);
       continue;

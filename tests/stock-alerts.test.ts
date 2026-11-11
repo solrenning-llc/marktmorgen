@@ -155,6 +155,25 @@ async function main(): Promise<void> {
     COPY_PLAN["lib/stock-alerts.ts"]?.how,
     PERSON_DATA.filter((d) => d.file === "lib/stock-alerts.ts").map((d) => d.how),
   ], [true, "copied", ["erased"]]);
+
+  part("A leave is done only when its delete is known (Claude 1 on #3616)");
+  const aKey = `nl:sa:${s3.statsId}:${a.product.id}`;
+  const cy = await askStockAlert({ store: s3, productId: a.product.id, email: "cy@example.com", left: 0 });
+  if (!cy.ok) throw new Error("not asked");
+  await confirmStockAlert(cy.confirm, s3);
+  const cyRoom = (await dataUsed(s3))?.used ?? Number.NaN;
+  for (const bent of ["garbled", null, -1, 2, 1.5, "1"]) {
+    const back = answer("HDEL", aKey, bent);
+    is(`the place's delete answered ${JSON.stringify(bent)}: unknown, never "you left"`, await rejects(() => leaveStockAlert(cy.leave, s3)), "unknown");
+    back();
+  }
+  is("and the address is still on the restock list, its room still taken", [(await confirmedForRestock(s3, a.product.id)).includes("cy@example.com"), (await dataUsed(s3))?.used], [true, cyRoom]);
+  const del = redis.run.bind(redis);
+  redis.run = (c: (string | number)[]) => (String(c[0]).toUpperCase() === "DEL" && String(c[1]).startsWith("nl:sa:t:") ? "garbled" : del(c));
+  is("the link's delete answered in another shape: unknown", await rejects(() => leaveStockAlert(cy.leave, s3)), "unknown");
+  redis.run = del;
+  const cy2 = await askStockAlert({ store: s3, productId: a.product.id, email: "cy@example.com", left: 0 });
+  is("control: asked again, its leave link works and says done", [cy2.ok, cy2.ok && (await leaveStockAlert(cy2.leave, s3)), (await confirmedForRestock(s3, a.product.id)).includes("cy@example.com")], [true, true, false]);
   void pid2;
   done();
 }

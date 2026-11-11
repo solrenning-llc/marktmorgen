@@ -6,6 +6,9 @@
  * tests/stn13-studio-search-route.test.ts.
  */
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StudioSearch } from "@/components/studio-search";
 import {
   ANSWERS_KEPT,
   MAX_QUERY,
@@ -138,6 +141,17 @@ async function main(): Promise<void> {
   is("the box is the studio's search landmark", /role="search"\s+aria-label="Studio"/.test(box), true);
   is("Enter asks enterTarget which one to open", box.includes("enterTarget(active, options.length)"), true);
   is("the live region's words are drawn anew for every answer, so the same words are said again", /aria-live="polite"[^>]*>\s*<span key=\{said\}>\{sentence\}<\/span>/.test(box), true);
+  // The server's page, before any script: the box is already drawn in its place, so the studio below it does not
+  // move when the script starts (a click begun on the page then lands where it was aimed), but it is unseen and
+  // inert until then, since it could not search yet.
+  for (const buyers of [true, false]) {
+    const served = renderToStaticMarkup(createElement(StudioSearch, { sid: "s1", buyers }));
+    const root = /^<div([^>]*)>/.exec(served)?.[1] ?? "";
+    is(`the server draws the whole box in its place (buyers ${buyers})`, ["Search the studio", 'role="combobox"', 'role="listbox"', 'aria-live="polite"'].every((piece) => served.includes(piece)), true);
+    is(`the hint the server draws is the role's own (buyers ${buyers})`, served.includes("type their whole email address"), buyers);
+    is(`before the script the box is the search landmark, unseen and inert (buyers ${buyers})`, [/role="search"/.test(root), /\binert=""/.test(root), /class="[^"]*\binvisible\b/.test(root)], [true, true, true]);
+  }
+  is("once the script runs the box is shown and usable", /inert=\{!ready\}/.test(box) && box.includes('${ready ? "" : " invisible"}') && !box.includes("if (!ready) return null"), true);
   const header = readFileSync("components/studio-header.tsx", "utf8");
   is("the studio's top bar draws it, below the bar, with the role's buyers right", header.includes("<StudioSearch") && header.includes('buyers={can(role, "orders")}') && header.indexOf("</header>") < header.indexOf("<StudioSearch"), true);
   is("no video in the top bar", ["autoPlay", "<video", "<iframe"].some((piece) => header.includes(piece)), false);

@@ -530,7 +530,8 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
         }
         try {
           const value = JSON.parse(raw) as Record<string, unknown>;
-          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
+          // Back to its issue-time shape: not withdrawn, and without the refund's mark (withdrawnFor), which issue never wrote.
+          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0, withdrawnFor: undefined })], 3);
         } catch {
           // Unreadable: nothing is known of what it took, so nothing is given back for it.
         }

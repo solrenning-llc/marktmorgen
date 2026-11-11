@@ -320,6 +320,7 @@ export function CourseEditor({
           toast("Your outline is in the course.");
           router.refresh();
         }}
+        onUnsure={() => router.refresh()}
       />
 
       {/* Both the course as this page holds it and as the server last drew it: a certificate or a start date set further down changes only the second. */}

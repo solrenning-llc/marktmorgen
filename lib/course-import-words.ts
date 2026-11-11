@@ -25,8 +25,15 @@ export function placeWords(path: string): string {
 
 export type ImportAnswer = { error?: string; path?: string; reason?: string; message?: string };
 
-/** What to tell the creator about an answer that was not ok: always what happened and what to do. */
-export function importProblem(answer: ImportAnswer): string {
+const UNSURE = "We could not confirm the import. Reload the page to see the course as it is now.";
+
+/**
+ * What to tell the creator about an answer that was not ok: always what
+ * happened and what to do. `afterImport` is true for the answer to Import:
+ * a lost or failed answer then may follow a save, so it is never said to
+ * be "nothing imported" (only refusals made before any write are).
+ */
+export function importProblem(answer: ImportAnswer, afterImport = false): string {
   switch (answer.error) {
     case "invalid":
       return answer.path && answer.reason ? `${placeWords(answer.path)}: ${answer.reason}` : "This file can't be read as a course outline. Nothing was imported.";
@@ -37,8 +44,11 @@ export function importProblem(answer: ImportAnswer): string {
     case "busy":
       return "This course is being saved somewhere else. Try again in a moment. Nothing was imported.";
     case "too_large":
-      return `This file is larger than ${IMPORT_MAX_BYTES / 1_000_000} MB. Split the course into smaller outlines.`;
+      return `This file is larger than ${IMPORT_MAX_BYTES / 1_000_000} MB. Make it smaller, or split it across separate courses.`;
+    case "server_error":
+      return afterImport ? UNSURE : "Something went wrong, and nothing was imported. Try again.";
     default:
+      if (afterImport && !answer.message) return UNSURE;
       // The studio's own refusals (its requests used up, a session that needs signing in again) carry their own words.
       return answer.message ?? "Something went wrong, and nothing was imported. Try again.";
   }

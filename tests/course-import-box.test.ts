@@ -65,6 +65,6 @@ is("the limit is held on the body sent", box.includes("new TextEncoder().encode(
 is("after Import, an unsure answer reloads the course", box.includes("importProblem(answer, true)") && box.includes("onUnsure()"), true);
 is("the editor reloads on an unsure answer", /<CourseImportBox[\s\S]{0,600}onUnsure=\{\(\) => router\.refresh\(\)\}/.test(editor), true);
 // LEVE 2 (AX): a disabled control drops the focus to the page; aria-disabled keeps it.
-is("the file input is never disabled", /<input[\s\S]{0,400}type="file"[\s\S]{0,400}\bdisabled=/.test(box), false);
+is("the file input is never disabled", /<input[\s\S]{0,400}type="file"[\s\S]{0,400}(?<![-\w])disabled=/.test(box), false);
 is("it says it is busy instead", /type="file"[\s\S]{0,400}aria-disabled=\{blocked \|\| undefined\}/.test(box), true);
 done();

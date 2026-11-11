@@ -22,7 +22,7 @@ Item 120 [F2-IMPORTS] still needs real, non-personal export evidence.
   both; a preview writes nothing, and saving needs `confirm: true`, sent only
   by the box's Import button.
 - **Paid before the work.** The outline's size takes one studio request for
-  each 50,000 characters past the first before it is read; saving takes one
+  each 50,000 bytes (UTF-8) past the first before it is read; saving takes one
   more for each lesson (its text, one write) and one for the outline, before
   anything is written (`importUnits`, on the studio line of
   `tests/plan-cost-registry.ts`). The route reads at most 4,000,000 bytes.

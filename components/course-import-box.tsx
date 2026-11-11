@@ -36,6 +36,7 @@ export function CourseImportBox({
   show,
   busy,
   onImported,
+  onUnsure,
 }: {
   productId: string;
   /** Whether the course is exactly as it was made (lib/course-templates.ts, templateFits). */
@@ -43,6 +44,8 @@ export function CourseImportBox({
   /** The course editor saving something else: nothing is sent meanwhile. */
   busy: boolean;
   onImported: (kept: Course) => void;
+  /** An answer to Import that cannot say whether the course was saved: the page reads the course again. */
+  onUnsure: () => void;
 }) {
   const [outline, setOutline] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
@@ -81,6 +84,13 @@ export function CourseImportBox({
       setProblem("This file can't be opened. Choose it again. Nothing was imported.");
       return;
     }
+    // The body sent is the file escaped in JSON: its own size is what the route's limit holds.
+    const body = JSON.stringify({ id: productId, outline: text });
+    if (new TextEncoder().encode(body).byteLength > IMPORT_MAX_BYTES) {
+      setWorking(false);
+      setProblem(importProblem({ error: "too_large" }));
+      return;
+    }
     const answer = await send({ id: productId, outline: text });
     setWorking(false);
     if (answer.ok !== true || answer.state !== "preview") {
@@ -98,7 +108,9 @@ export function CourseImportBox({
     const answer = await send({ id: productId, outline, confirm: true });
     setWorking(false);
     if (answer.ok !== true || !answer.course) {
-      setProblem(importProblem(answer));
+      setProblem(importProblem(answer, true));
+      // Only a refusal made before any write is known to have saved nothing; anything else reads the course again.
+      if (!answer.error || answer.error === "server_error" || !["invalid", "not_new", "store_full", "busy", "too_large"].includes(answer.error)) onUnsure();
       return;
     }
     const kept = answer.course as Course;
@@ -155,7 +167,8 @@ export function CourseImportBox({
               type="file"
               accept="application/json,.json"
               className="mt-2 block min-h-11 text-ink"
-              disabled={blocked}
+              aria-disabled={blocked || undefined}
+              onClick={(event) => { if (blocked) event.preventDefault(); }}
               onChange={(event) => void choose(event.target.files?.[0])}
             />
           </div>

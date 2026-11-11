@@ -177,6 +177,30 @@ async function main(): Promise<void> {
     is("nothing named by its ids or the photo is left", leftNamedBy([store.sid, store.statsId ?? "-", put]), []);
   }
 
+  part("Codex G on #3643: another store at the same owner key by the time of the read again is never erased with this one");
+  redis.clear();
+  {
+    const email = "again@example.com";
+    const store = await makeStore(email, "againphoto");
+    let other = "";
+    const otherSid = "f".repeat(32);
+    ownerOf = String(redis.keys().find((key) => key.startsWith("nl:store:owner:") && String(redis.run(["GET", key])).includes(email)));
+    inWindow = async () => {
+      // As if this store's record went and a new store (another sid) was made at the same key, with its own photo.
+      other = await writePhoto(PNG, "image/png");
+      const record = JSON.parse(String(redis.run(["GET", ownerOf])));
+      redis.run(["SET", ownerOf, JSON.stringify({ ...record, sid: otherSid, photoId: other })]);
+    };
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    await erase(T);
+    const now = await storeForEmail(email);
+    is("the other store's record is not deleted", now?.sid ?? null, otherSid);
+    is("its photo is kept", photoKeys().some((key) => key.includes(other)), true);
+    const entry = redis.run(["HGET", BATCH_KEY, `${store.sid}`]) ?? Object.values(Object.fromEntries((redis.run(["HGETALL", BATCH_KEY]) as string[] | null ?? []).reduce<[string, string][]>((acc, v, i, all) => (i % 2 ? acc : [...acc, [v, all[i + 1]]]), []))).join("");
+    is("and the closing store's entry never names it", String(entry ?? "").includes(other) || String(entry ?? "").includes(otherSid), false);
+  }
+
   done();
 }
 

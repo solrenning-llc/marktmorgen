@@ -18,7 +18,9 @@
  *   6. one refund is asked of Stripe, under the action's key: Stripe answers
  *      a repeat of the same key with the first refund (two clicks of the same
  *      form, at once or later, give back once) and a key still being worked
- *      on with 409, said here as "in_progress";
+ *      on with 409, said here as "in_progress". The same key with other
+ *      figures, or any other refusal Stripe answers with a 4xx, made nothing
+ *      and writes no line ("invalid", "stripe_refused");
  *   7. the answer is read exactly (refundOutcome): "done" only for a refund
  *      of this charge, for this amount, that succeeded. One that cannot be
  *      read, or no answer at all, is "unknown" and never recorded as done:
@@ -75,6 +77,7 @@ export type RefundError =
   | "over_refundable"
   | "currency_not_listed"
   | "in_progress"
+  | "stripe_refused"
   | "unknown";
 
 export type RefundAnswer =
@@ -94,6 +97,7 @@ export function refundStatus(answer: RefundAnswer): number {
     case "disputed":
     case "fully_refunded":
     case "in_progress":
+    case "stripe_refused":
       return 409;
     case "unavailable":
     case "unreadable":
@@ -158,6 +162,10 @@ export async function giveRefund(
       if (error.code === "charge_disputed" || error.code === "refund_disputed_payment") return fail("disputed");
       if (error.code === "charge_already_refunded") return fail("fully_refunded");
       if (error.code === "amount_too_large") return fail("over_refundable");
+      // The same form's key sent with other figures: Stripe refuses it before doing anything (the first refund stands).
+      if (error.code === "idempotency_error") return fail("invalid");
+      // Any other refusal Stripe gives as a 4xx made nothing: said as refused, never as made or unknown.
+      if (error.status >= 400 && error.status < 500) return fail("stripe_refused");
     }
     // Sent, and no answer that says what happened: unknown, never done.
     console.error("a studio refund's answer could not be read", error);

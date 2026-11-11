@@ -363,7 +363,7 @@ export function EmailStudio(props: {
   /** Each product's own address, for an email about it. */
   links?: Record<string, string>;
   /** Whether the writing help is on, and what is left of the month (lib/ai.ts). */
-  ai?: { on: boolean; left: number };
+  ai?: { on: boolean; left: number; known?: false };
   /** The store's saved groups (lib/segments.ts). */
   segments?: Segment[];
   /** The products that are courses (lib/catalog.ts, "course"). */

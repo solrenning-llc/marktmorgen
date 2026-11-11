@@ -120,7 +120,10 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;
 
   // The writing help, read once for the Email Studio and the workflow drafted from a goal (20 [E3]).
-  const ai = aiAvailableFor(store) && can(role, "draft") ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  // An allowance that could not be read is said in words by the AI boxes, never shown as "0 left" (rule 24, VR item 2).
+  const ai = aiAvailableFor(store) && can(role, "draft")
+    ? await aiLeft(store).then((left) => ({ on: true, left }), () => ({ on: true, left: 0, known: false as const }))
+    : { on: false, left: 0 };
 
   return (
     <div className="min-h-screen bg-paper text-ink">

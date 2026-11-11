@@ -11,7 +11,7 @@ import { type NextRequest, after } from "next/server";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
 import { MetaError, beginMeta, disconnectMeta, finishMeta, isMetaConfigured, readMetaSpend, takeMeta } from "@/lib/meta-ads";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, essentialLimitState } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
 import { ensureStatsId, type Store } from "@/lib/store";
 import { integrationPauseWord } from "@/lib/integration-pause";
@@ -54,7 +54,9 @@ export async function startMeta(request: NextRequest): Promise<Response> {
 export async function finishMetaConnect(request: NextRequest): Promise<Response> {
   if (!isMetaConfigured()) return notFound();
   const origin = originFrom(request);
-  if (!(await withinLimit("metaads-return", clientAddress(request), 30, 600))) return away(origin, "/studio?metaads=limited");
+  const admission = await essentialLimitState("metaads-return", clientAddress(request), 30, 600);
+  if (admission === "unknown") return away(origin, "/studio?metaads=error#numbers");
+  if (admission === "exceeded") return away(origin, "/studio?metaads=limited");
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   const email = await emailForSession(cookie);
   if (!email) return away(origin, "/signin?status=expired");

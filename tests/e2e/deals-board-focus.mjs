@@ -97,7 +97,8 @@ try {
   const errors = [];
   const page = await boardPage(context, errors);
   const mount = async (w) => {
-    await page.evaluate((w) => window.harness.mount(w), w);
+    const epoch = await page.evaluate((w) => window.harness.mount(w), w);
+    await page.waitForFunction((epoch) => window.harness.mountedEpoch === epoch, epoch);
     await page.locator("#deals-title").waitFor();
   };
   const active = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
@@ -370,8 +371,47 @@ try {
   await page.waitForTimeout(200);
   is("a refused move of a deal now in another pipeline names it, and focus goes to the stage's heading", [await page.locator("#deal-board-alert").textContent(), await active()], ["This deal changed a moment ago and is now in Coaching, so it was not moved. Open Coaching to check it.", "deal-column-lead00"]);
 
+  // C3-118: a removal question left unanswered closes for good once its deal leaves the board (hidden by a search or a filter,
+  // the agenda shown, or the deal moved): it never comes back by itself on the card, and focus stays where the person put it.
+  await mount(world());
+  const question = async (id) => [await page.locator("#deal-confirm-" + id).count(), await attr("deal-remove-" + id, "aria-expanded"), await attr("deal-remove-" + id, "aria-controls")];
+  await press("deal-remove-dealaaaaa1");
+  is("Remove opens the question on the deal", await question("dealaaaaa1"), [1, "true", "deal-confirm-dealaaaaa1"]);
+  await page.locator("#deal-search").fill("Ben");
+  await page.waitForFunction(() => !document.getElementById("deal-remove-dealaaaaa1"));
+  await page.locator("#deal-search").fill("");
+  await page.waitForFunction(() => !!document.getElementById("deal-remove-dealaaaaa1"));
+  is("hidden by a search and shown again, the deal's question stays closed; focus stays in the search", [...await question("dealaaaaa1"), await active()], [0, "false", null, "deal-search"]);
+  await press("deal-remove-dealaaaaa1");
+  await page.locator("button", { hasText: "Agenda" }).click();
+  await page.locator("button", { hasText: "Board" }).click();
+  await page.waitForFunction(() => !!document.getElementById("deal-remove-dealaaaaa1"));
+  is("the agenda shown and the board again: the question stays closed", await question("dealaaaaa1"), [0, "false", null]);
+  await press("deal-remove-dealaaaaa1");
+  await page.locator("#deal-stage-dealaaaaa1").selectOption("talk00");
+  await press("deal-move-dealaaaaa1");
+  await page.waitForFunction(() => window.harness.world.deals.find((d) => d.id === "dealaaaaa1").stage === "talk00");
+  await settled();
+  await page.waitForFunction(() => document.activeElement?.id === "deal-stage-dealaaaaa1", null, { timeout: 5000 }).catch(() => {});
+  is("moved with the question open: the question is closed in its new stage, and focus is on its stage select", [...await question("dealaaaaa1"), await active(), await page.locator("section:has(#deal-column-talk00) #deal-stage-dealaaaaa1").count()], [0, "false", null, "deal-stage-dealaaaaa1", 1]);
+
+  // Codex review of #2295 (LOW): the right to change the pipeline taken away while the question is open closes it for good,
+  // so it does not come back by itself when the right is given back; focus goes to the board's notice, never to nothing.
+  await mount(world());
+  await press("deal-remove-dealaaaaa1");
+  await page.waitForFunction(() => document.activeElement?.id === "deal-confirm-dealaaaaa1" || !!document.activeElement?.closest("#deal-confirm-dealaaaaa1"));
+  await page.evaluate(() => { window.harness.world.viewOnly = ["sales0"]; window.harness.refresh(); });
+  await page.waitForFunction(() => !document.getElementById("deal-remove-dealaaaaa1"));
+  await settled();
+  is("the right to change taken away with the question open: the question is gone and focus is on the view-only notice", [await page.locator("#deal-confirm-dealaaaaa1").count(), await active()], [0, "deal-board-view-only"]);
+  await page.evaluate(() => { window.harness.world.viewOnly = []; window.harness.refresh(); });
+  await page.waitForFunction(() => !!document.getElementById("deal-remove-dealaaaaa1"));
+  await settled();
+  is("given back: the question stays closed", await question("dealaaaaa1"), [0, "false", null]);
+
   // 639 [GL7](7): a pipeline this person may only see says so once, at the top of the board.
   await mount(world({ viewOnly: ["sales0"] }));
+  await page.waitForFunction(() => document.body.innerText.includes("You can see this pipeline but not change it."));
   is("the view-only notice is shown once, at the top of the board, and no change control is drawn", [await page.evaluate(() => document.body.innerText.split("You can see this pipeline but not change it.").length - 1), await page.locator("#deal-board-view-only").count(), await page.locator('[id^="deal-remove-"], [id^="deal-edit-"], #deal-new').count()], [1, 1, 0]);
 
   is("no error in the page", errors, []);

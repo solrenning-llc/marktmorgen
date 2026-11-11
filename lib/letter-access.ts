@@ -4,13 +4,14 @@
  * 4 November 2026), asked again on every page.
  *
  * The answer is the one a community's door gives (lib/community-access.ts,
- * holdsProducts): the address holds one of the email's products now, read
+ * holdsProductsOrThrow): the address holds one of the email's products now, read
  * from the creator's Stripe account and the store's own records, never from
  * anything a visitor says: paid and not refunded in full (a dispute lost
  * counts as refunded), a membership still running, given for free, brought
  * over from another platform, or given as a gift. A refund, a lost dispute
  * or a membership that stops closes the email within the minutes the answer
- * is kept.
+ * is kept. When Stripe cannot be asked, the answer is unknown, said as such,
+ * and never kept.
  *
  * The address has to be proved, as a community's is (lib/learn.ts,
  * learnerFrom with the store's pass for every course): a link emailed to it,
@@ -31,9 +32,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { holdsProducts } from "@/lib/community-access";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { holdsProductsOrThrow } from "@/lib/community-access";
 import { TOKEN_PATTERN, learnerFrom, storeKey } from "@/lib/learn";
 import { LETTER_ID, type Letter, membersOnly } from "@/lib/letter-rules";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -64,13 +66,23 @@ export type LetterReader =
   /** Nobody we know: the page asks for an address. */
   | { state: "out" }
   /** A proved address that holds none of them. */
-  | { state: "closed"; email: string };
+  | { state: "closed"; email: string }
+  /**
+   * A proved address, but the creator's Stripe account could not be asked
+   * (it failed, or did not answer): nobody is let in on a guess, and nobody
+   * is told they hold nothing on one either. The page asks them to reload.
+   */
+  | { state: "unknown"; email: string };
 
-/** Whether this address holds one of the email's products now (cached for minutes). */
+/**
+ * Whether this address holds one of the email's products now (cached for
+ * minutes). Throws when it cannot be known (Stripe or the database could not
+ * be asked), so a failed ask is never read as "holds none of them".
+ */
 export async function holdsLetter(store: Store, letter: Letter, email: string): Promise<boolean> {
   if (!membersOnly(letter) || !store.sid) return false;
   const products = letter.products!;
-  return holdsProducts(store, products, email, okKey(store.sid, products, email), "1");
+  return holdsProductsOrThrow(store, products, email, okKey(store.sid, products, email), "1");
 }
 
 /** Who is looking at this email, and whether they may read its words, asked afresh. */
@@ -79,7 +91,14 @@ export async function letterReader(store: Store, letter: Letter, cookies: Cookie
   const learner = await learnerFrom(store, cookies).catch(() => null);
   if (learner?.owner) return { state: "owner" };
   if (!learner || learner.scope !== "all") return { state: "out" };
-  return (await holdsLetter(store, letter, learner.email)) ? { state: "in", email: learner.email } : { state: "closed", email: learner.email };
+  let holds: boolean;
+  try {
+    holds = await holdsLetter(store, letter, learner.email);
+  } catch (error) {
+    console.error("checking who may read an email kept for members failed", error);
+    return { state: "unknown", email: learner.email };
+  }
+  return holds ? { state: "in", email: learner.email } : { state: "closed", email: learner.email };
 }
 
 /**
@@ -89,15 +108,27 @@ export async function letterReader(store: Store, letter: Letter, cookies: Cookie
  * again by INCR with no end; its TTL, read in the same round, says so (-1),
  * and only then is it given one, so a counting key never stays without an
  * end and a running window is never pushed back.
+ *
+ * The round is read only in its exact shape (CX-123 rule 24): three
+ * replies, the SET's "OK" or null, a whole count from one up and a whole
+ * TTL. Anything else is not a count under the limit: it throws
+ * UnknownReplyError, so the form says the email could not be sent (the
+ * route's "error") and an emailed link opens nothing, and nothing after the
+ * count is done. A TTL of another shape leaves the key as it is: whether it
+ * has an end is not known, and giving it one could push a running window
+ * back.
  */
 async function count(key: string): Promise<number> {
-  const [, counted, ttl] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", key, "0", "EX", LETTER_LINK_SECONDS, "NX"],
     ["INCR", key],
     ["TTL", key],
-  ]);
-  if (Number(ttl) === -1) await redisPipeline([["EXPIRE", key, LETTER_LINK_SECONDS]]);
-  return Number(counted);
+  ]), 3);
+  const counted = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
+  const ttl = replies?.[2];
+  if (counted === null || counted < 1 || typeof ttl !== "number" || !Number.isSafeInteger(ttl)) throw new UnknownReplyError("a count of links asked for or opened");
+  if (ttl === -1) await redisPipeline([["EXPIRE", key, LETTER_LINK_SECONDS]]);
+  return counted;
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
@@ -124,7 +155,7 @@ export type LetterGrant = { e: string; k: string; h: string; l: string };
  * (afterAnswer), so neither the answer's words nor its time tell them apart,
  * and the form cannot be used to find out who bought what or to fill a
  * stranger's inbox. What fails after the answer is said only in the
- * server's log.
+ * server's log; email known not to go out is said, as "error", to everyone.
  */
 export async function requestLetterLink(input: { store: Store; letter: Letter; email: string; ip: string; origin: string }): Promise<LetterLinkRequest> {
   const { store, letter, ip, origin } = input;
@@ -133,16 +164,30 @@ export async function requestLetterLink(input: { store: Store; letter: Letter; e
   if (!membersOnly(letter) || !store.sid || !isRedisConfigured()) return "error";
   if (!(await within(`nl:letters:rl:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT))) return "limited";
   if (!(await within(`nl:letters:rl:addr:${addressKey(raw)}`, ADDRESS_LIMIT))) return "limited";
+  // Email that is known not to go out (lib/email.ts, the course link's same
+  // check): "error" for everyone, before anything is asked, so it never says
+  // a link is on its way and never tells a holder from anyone else.
+  if (serviceMailKnownUnavailable()) return "error";
   afterAnswer(() => sendLetterLink(store, letter, raw, origin));
   return "sent";
 }
 
-/** The link itself, for an address that holds one of the email's products; nothing for one that does not. */
+/**
+ * The link itself, for an address that holds one of the email's products; nothing for one that does not, or when
+ * that cannot be known (logged). The grant's SET is read only in its exact shape (CX-123 rule 24): one reply,
+ * "OK". Any other means the link may open nothing, so no email is sent and none of the store's transactional
+ * allowance is taken (the meter is taken inside sendEmail); it is said in the server's log, and asking again makes
+ * a new link.
+ */
 async function sendLetterLink(store: Store, letter: Letter, raw: string, origin: string): Promise<void> {
   if (!(await holdsLetter(store, letter, raw))) return;
   const token = randomBytes(32).toString("hex");
   const grant: LetterGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle, l: letter.id };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LETTER_LINK_SECONDS]]);
+  const kept = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LETTER_LINK_SECONDS]]), 1);
+  if (kept?.[0] !== "OK") {
+    console.error("a link to read an email kept for members was not sent: its grant was not confirmed kept", new UnknownReplyError("an emailed link's grant"));
+    return;
+  }
   const link = `${origin}/api/store/letters/open?token=${token}`;
   const w = letterWords(store.language);
   const sent = await sendEmail({
@@ -189,7 +234,7 @@ export async function readLetterGrant(token: string): Promise<LetterGrant | null
   }
 }
 
-/** Spends one open of a link already read; false past MAX_LINK_OPENS. */
+/** Spends one open of a link already read; false past MAX_LINK_OPENS; throws UnknownReplyError when the count could not be read. */
 export async function spendLetterOpen(token: string): Promise<boolean> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return false;
   return (await count(opensKey(token))) <= MAX_LINK_OPENS;

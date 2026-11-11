@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -859,6 +860,13 @@ const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
+/**
+ * Whether a handle's key, as read, still leads to a store: not free, not held
+ * back after a store was deleted or closed. For a reader that asks along with
+ * other keys, such as the private calendar feed (lib/calendar-sync.ts).
+ */
+export const storeHandleKey = handleKey;
+export const handleLeadsToStore = (raw: unknown): boolean => typeof raw === "string" && raw !== "" && !raw.startsWith(RELEASED_PREFIX);
 
 /** The ids of an account's other stores. Deliberately not under nl:store:owner:. */
 const accountKey = async (email: string) =>
@@ -1080,8 +1088,21 @@ function parseStore(raw: unknown): Store | null {
 export async function storeForEmail(
   email: string | null,
 ): Promise<Store | null> {
+  return storeForEmailSeen(email, null);
+}
+
+/**
+ * storeForEmail, handing the one read it makes (its commands and its reply) to `seen`, for a caller that pays for
+ * what that read moved (lib/affiliates.ts, the 90% cap's reads).
+ */
+export async function storeForEmailSeen(
+  email: string | null,
+  seen: ((commands: (string | number)[][], reply: unknown) => void) | null,
+): Promise<Store | null> {
   if (!email || !isRedisConfigured()) return null;
-  const reply = await redisPipeline([["GET", await ownerKey(email)]]);
+  const commands: (string | number)[][] = [["GET", await ownerKey(email)]];
+  const reply = await redisPipeline(commands);
+  seen?.(commands, reply);
   if (!Array.isArray(reply) || reply.length !== 1) return null;
   const store = parseStore(reply[0]);
   // A readable record must belong to this exact owner key. Preserve legacy
@@ -1201,6 +1222,16 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
  * the one answer. Only for pages; anything that writes reads afresh.
  */
 export const storeForPage = cache(storeForHandle);
+
+/**
+ * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of
+ * another shape is not "gone" (CX-123 rule 24), so what would be deleted because the store is gone is kept.
+ */
+export async function storeIdGone(sid: string): Promise<boolean> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
+  const reply = repliesFor(await redisPipeline([["EXISTS", storeIdKey(sid)]]), 1);
+  return reply !== null && countOf(reply[0]) === 0;
+}
 
 /**
  * Whether a store with this id still exists: one command, the id's own key,
@@ -1960,6 +1991,20 @@ export async function setStripeAccount(
     stripeCheckedAt: new Date().toISOString(),
   }));
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
+}
+
+/**
+ * Writes down what Stripe now says about card payments on the store's account,
+ * read without the creator asking (lib/stripe-charges.ts): only while the
+ * store still points at that account, so one connected meanwhile is never
+ * written over. The store as it now is; null with no store or another account.
+ */
+export async function noteStripeCharges(ref: string, accountId: string, chargesEnabled: boolean): Promise<Store | null> {
+  return withStore(ref, async (store, save) => {
+    if (store.stripeAccountId !== accountId) return null;
+    if (store.stripeChargesEnabled === chargesEnabled) return store;
+    return save({ ...store, stripeChargesEnabled: chargesEnabled, stripeCheckedAt: new Date().toISOString() });
+  });
 }
 
 /**
@@ -3179,10 +3224,14 @@ export async function editProduct(
 export async function removeProduct(
   email: string,
   id: string,
-): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" }> {
+  before?: (product: Product, store: Store) => Promise<boolean>,
+): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "unavailable" }> {
   const result = await withStore(email, async (store, save) => {
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    if (before && !(await before(product, store))) {
+      return { ok: false as const, reason: "unavailable" as const };
+    }
     // A bundle that held it holds it no more, in the same write, so no bundle
     // goes on promising a product the store no longer has. Whoever bought the
     // bundle before kept its list on their order (lib/bundle-rules.ts).
@@ -3435,9 +3484,9 @@ export async function editStoreLink(
     const at = store.links.findIndex((link) => link.id === id);
     if (at < 0) return { ok: false, reason: "unknown" };
     const links = [...store.links];
-    // Its picture stays through an edit; a link turned into a heading gives it up.
+    // Its picture stays through an edit; a link turned into a heading gives it up. An archived one stays archived (423 [LT1]).
     const image = extras.header ? undefined : links[at].image;
-    links[at] = { id: links[at].id, addedAt: links[at].addedAt, title, url, ...extras, ...(image ? { image } : {}) };
+    links[at] = { id: links[at].id, addedAt: links[at].addedAt, title, url, ...extras, ...(image ? { image } : {}), ...(links[at].archived ? { archived: true as const } : {}) };
     return { ok: true, store: await save({ ...store, links }), removed: extras.header ? (store.links[at].image ?? null) : null };
   });
   return result ?? { ok: false, reason: "none" };
@@ -3471,6 +3520,26 @@ export async function setLinkImage(email: string, id: string, image: LinkImage |
     const { image: was, ...rest } = links[at];
     links[at] = image ? { ...rest, image } : rest;
     return { ok: true, store: await save({ ...store, links }), removed: was ?? null };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Keeps a link (or a heading) back from the page, or shows it again (423
+ * [LT1]): nothing else about it changes, its times included, so showing it
+ * again never shows it outside them.
+ */
+export async function setLinkArchived(email: string, id: string, archived: boolean): Promise<LinkResult> {
+  const result = await withStore<LinkResult>(email, async (store, save) => {
+    const at = store.links.findIndex((link) => link.id === id);
+    if (at < 0) return { ok: false, reason: "unknown" };
+    if (Boolean(store.links[at].archived) === archived) return { ok: true, store };
+    const links = [...store.links];
+    const next: StoreLink = { ...links[at] };
+    if (archived) next.archived = true;
+    else delete next.archived;
+    links[at] = next;
+    return { ok: true, store: await save({ ...store, links }) };
   });
   return result ?? { ok: false, reason: "none" };
 }
@@ -3720,6 +3789,35 @@ export async function setProductImage(
   return { ok: true, store: done.store, removed: done.before.image };
 }
 
+/**
+ * Points a product's picture at the copies of its files under new names (lib/picture-withdraw.ts), only while the
+ * product still shows exactly the files the copies were made from: "changed" when the creator replaced or removed
+ * the picture since, and nothing is written. A smaller copy with no new name (`to.small` null) is dropped. Everything
+ * else about the picture is kept as it is now; it is no longer marked as copied to the pictures' own bucket, which
+ * holds the old names only, and it is marked `withdrawn`. A "changed" answer names the files the product shows now,
+ * which are never deleted.
+ */
+export async function moveProductImage(
+  email: string,
+  id: string,
+  from: { path: string; small: string | null },
+  to: { path: string; small: string | null },
+): Promise<{ ok: true } | { ok: false; reason: "none" | "unknown" } | { ok: false; reason: "changed"; shown: string[] }> {
+  let shown: string[] = [];
+  const done = await onProduct<"changed">(email, id, (product) => {
+    const image = product.image;
+    shown = image ? [image.path, ...(image.small ? [image.small.path] : [])] : [];
+    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small) {
+      return { ok: false, reason: "changed" } as const;
+    }
+    const { r2: _r2, ...rest } = image;
+    void _r2;
+    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, withdrawn: true as const } };
+  });
+  if (done.ok) return { ok: true };
+  return done.reason === "changed" ? { ok: false, reason: "changed", shown } : { ok: false, reason: done.reason };
+}
+
 /** Changes the words a screen reader says instead of the picture. */
 export async function setImageAlt(email: string, id: string, alt: string): Promise<ProductPartResult> {
   return changeProduct(email, id, (product) =>
@@ -3881,6 +3979,27 @@ export async function noteTakedown(email: string, strike: Strike | null, suspend
 export async function setQuotes(email: string, raw: unknown): Promise<Store | null> {
   const quotes = parseQuotes(raw);
   return patchStore(email, (store) => (JSON.stringify(store.quotes) === JSON.stringify(quotes) ? null : { quotes }));
+}
+
+/**
+ * Keeps the store page's quotes as `read` works them out with the store's lock held (lib/store-quotes.ts,
+ * refreshStoreQuotes). A change that takes a review's words off takes this lock after its own change (dropQuotes),
+ * so a list read before that change is written before it, never after. Writes nothing when the list is the same.
+ * Null when no store is read.
+ */
+export async function keepQuotes(email: string, read: (store: Store) => Promise<unknown>): Promise<Store | null> {
+  return withStore(email, async (store, save) => {
+    const quotes = parseQuotes(await read(store));
+    return JSON.stringify(store.quotes) === JSON.stringify(quotes) ? store : save({ ...store, quotes });
+  });
+}
+
+/**
+ * Takes the quotes `gone` picks off the store page's "What buyers say", from the list as it is under the store's
+ * lock (lib/store-quotes.ts, dropReviewQuote); writes nothing when it picks none. Null when no store is read.
+ */
+export async function dropQuotes(email: string, gone: (quote: StoreQuote) => boolean): Promise<Store | null> {
+  return patchStore(email, (store) => (store.quotes.some(gone) ? { quotes: store.quotes.filter((quote) => !gone(quote)) } : null));
 }
 
 /** Switches the store page's sign-up box and saves its words. */

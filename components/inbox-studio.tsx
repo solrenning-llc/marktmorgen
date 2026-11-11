@@ -3,6 +3,7 @@
 import { useHydrated } from "@/components/use-hydrated";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/toast";
+import { InboxBlock } from "@/components/inbox-block";
 import { FaqFromInbox } from "@/components/faq-from-inbox";
 import { randomLetters } from "@/lib/random-letters";
 import {
@@ -315,6 +316,8 @@ export function InboxStudio({
                   </button>
                 </div>
               </div>
+              {/* Block this person in the store's messages, with a note for the creator alone (567 [GD1] (f)). */}
+              <InboxBlock key={c.id} id={c.id} post={post} />
               <ol className="mt-5 max-h-[28rem] space-y-3 overflow-y-auto pr-1" aria-label="Messages">
                 {thread.messages.map((m, i) => (
                   <li key={`${m.at}-${i}`} className={m.from === "store" ? "ml-10 text-right" : "mr-10"}>

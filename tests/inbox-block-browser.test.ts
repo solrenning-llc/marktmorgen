@@ -10,7 +10,8 @@
  *   note (only they see it) and says what still reaches them; Block sends the
  *   conversation and the note, and the result is said in a live region.
  * - Blocked: it says so, shows the note, and "Let them write again" undoes it.
- * - Every button and the summary are at least 44 px tall (2.5.5).
+ * - Every button and the summary carry min-h-11 (44 px, 2.5.5); the page's
+ *   CSS is not loaded here, so the class is what is checked.
  */
 import { execFileSync } from "node:child_process";
 import { done, is } from "./check";
@@ -51,7 +52,7 @@ try {
  const until=(page,fn)=>page.waitForFunction(fn,null,{timeout:5000}).then(()=>true,()=>false);
  const press=(page,selector)=>page.click(selector,{timeout:5000}).then(()=>true,()=>false);
  const text=(page)=>page.evaluate(()=>document.querySelector('[data-inbox-block]')?.textContent??'');
- const tall=(page)=>page.evaluate(()=>[...document.querySelectorAll('[data-inbox-block] button, [data-inbox-block] summary')].map(x=>Math.round(x.getBoundingClientRect().height)));
+ const tall=(page)=>page.evaluate(()=>[...document.querySelectorAll('[data-inbox-block] button, [data-inbox-block] summary')].map(x=>x.className.split(/\s+/).includes('min-h-11')));
 
  // Not blocked, then blocked with a note, then let write again.
  {
@@ -102,9 +103,9 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
   errors: string[];
   outside: number;
   openText: string;
-  heights: number[];
+  heights: boolean[];
   blockedText: string;
-  blockedHeights: number[];
+  blockedHeights: boolean[];
   live: string;
   afterText: string;
   calls: Record<string, unknown>[];
@@ -118,9 +119,9 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
 is("no page error and nothing reached outside", [result.errors, result.outside], [[], 0]);
 is("not blocked: the summary offers to block", result.openText.includes("Block this person"), true);
 is("and says what still reaches the creator", /order they paid for/.test(result.openText), true);
-is("every control at least 44 px tall", result.heights.length > 0 && result.heights.every((h) => h >= 44), true);
+is("every control at least 44 px tall (min-h-11, as tests/tap-targets.test.ts reads it)", result.heights.length > 0 && result.heights.every(Boolean), true);
 is("blocked: said, with the creator's note", [result.blockedText.includes("You blocked this person"), result.blockedText.includes("Insults in every message")], [true, true]);
-is("blocked: its controls at least 44 px tall", result.blockedHeights.length > 0 && result.blockedHeights.every((h) => h >= 44), true);
+is("blocked: its controls at least 44 px tall", result.blockedHeights.length > 0 && result.blockedHeights.every(Boolean), true);
 is("the result said in the live region", result.live.length > 0, true);
 is("undone: offered again", result.afterText.includes("Block this person"), true);
 is("the route was asked: check, block with the note, unblock", result.calls, [

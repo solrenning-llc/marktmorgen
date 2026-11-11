@@ -32,6 +32,8 @@ type Sent = { to: string[] | string; subject: string; text: string; reply_to?: s
 const sent: { body: Sent; key: string | null }[] = [];
 /** Which sends fail, counted from the next one: "all", or the 1-based numbers of the calls that fail. */
 let failing: "none" | "all" | number[] = "none";
+/** The 1-based calls the provider accepts and then loses the reply of: taken, but the sender hears an error. */
+let lostReply: number[] = [];
 let calls = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -39,7 +41,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     calls += 1;
     if (failing === "all" || (Array.isArray(failing) && failing.includes(calls))) return new Response(JSON.stringify({ message: "down" }), { status: 500 });
     const headers = new Headers(init?.headers);
-    sent.push({ body: JSON.parse(String(init?.body)) as Sent, key: headers.get("Idempotency-Key") });
+    const key = headers.get("Idempotency-Key");
+    // A provider honoring its idempotency key: the same key again is the same email, not a second one.
+    if (key && sent.some((s) => s.key === key)) return new Response(JSON.stringify({ id: "email_again" }));
+    sent.push({ body: JSON.parse(String(init?.body)) as Sent, key });
+    if (lostReply.includes(calls)) throw new Error("synthetic lost reply");
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
   }
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
@@ -164,7 +170,7 @@ async function main() {
   calls = 0;
   failing = "all";
   const down = await send(otherCookie, { text: "A question while email is down." });
-  is("502, nothing said sent", [down.status, down.data.error, "value" in down.data], [502, "unsent", false]);
+  is("502, nothing said sent", [down.status, down.data.error, "value" in down.data], [502, "unconfirmed", false]);
   is("no email", sent.length, 0);
   calls = 0;
   failing = [2];
@@ -172,6 +178,26 @@ async function main() {
   failing = "none";
   is("sent, with the copy said missing", [noCopy.status, (noCopy.data.value as { copied: boolean }).copied], [200, false]);
   is("only the inbox got it", sent.map((s) => recipients(s.body)), ["support@marktmorgen.com"]);
+
+  part("An inbox email whose answer was lost is never said unsent, and sending again is the same request (Codex U, MEDIUM)");
+  sent.length = 0;
+  calls = 0;
+  lostReply = [1];
+  const number = "SR-7K3M-Q9TB";
+  const unsure = await send(otherCookie, { text: "A question whose answer is lost.", number });
+  lostReply = [];
+  is("taken by the provider", sent.map((s) => recipients(s.body)), ["support@marktmorgen.com"]);
+  is("so the words never say nothing was sent", String(unsure.data.words).includes("nothing was sent"), false);
+  is("they say it could not be confirmed, with the request's number", [unsure.status, unsure.data.error, String(unsure.data.words).includes("could not confirm"), String(unsure.data.words).includes(number)], [502, "unconfirmed", true, true]);
+  const again = await send(otherCookie, { text: "A question whose answer is lost.", number });
+  is("sending again: the same number", [again.status, (again.data.value as { number: string }).number], [200, number]);
+  is("and support has one request, under one key", [sent.filter((s) => recipients(s.body) === "support@marktmorgen.com").length, new Set(sent.filter((s) => recipients(s.body) === "support@marktmorgen.com").map((s) => s.key)).size], [1, 1]);
+  const bad = await send(otherCookie, { text: "A question with a made-up number.", number: "help-support-x" });
+  is("a number not in the shape is never used: a fresh one", [bad.status, SUPPORT_NUMBER.test((bad.data.value as { number: string }).number), (bad.data.value as { number: string }).number === "help-support-x"], [200, true, false]);
+  is("each key is scoped to the store, so a number never reaches another store's request", sent.every((s) => !s.key || s.key.includes(":")), true);
+  const form = (await import("node:fs")).readFileSync("components/studio-help.tsx", "utf8");
+  is("the form keeps one number for every try of the same request", [form.includes("const [number] = useState(() => supportNumberOf(crypto.getRandomValues(new Uint8Array(5))));"), form.includes("JSON.stringify({ text: draft, screen: window.location.pathname, number })")], [true, true]);
+  is("and a lost answer in the browser is never said unsent", form.includes("nothing was sent"), false);
 
   part("The form: nothing is sent before the creator reads, can change and sends the words");
   const help = renderToStaticMarkup(createElement(StudioHelp, { left: 10 }));

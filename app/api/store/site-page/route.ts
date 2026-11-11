@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { type Store, StoreFullError, appendSitePages, imageFolder, setSitePages, storeForEmail } from "@/lib/store";
+import { type Store, StoreFullError, appendSitePages, imageFolder, setSitePages, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -11,12 +11,37 @@ import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
 import { hasPlaceholder } from "@/lib/mail-body";
-import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
+import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, parseSitePages, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
 /** Thirty full blocks as JSON, with room to spare; a page is held to MAX_PAGE_BYTES. */
 const MAX_BODY_BYTES = 200_000;
 
 const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+
+/**
+ * Whether a page is on the store's list, read again after a lost answer: "listed" with the store as read, "absent"
+ * only when the list was read whole (an array, every entry kept by parseSitePages, none of them this page in any
+ * shape), and "unknown" otherwise. A list out of shape parses to fewer pages, or none, so it never confirms that a
+ * page is not there (Codex U on #3531): its blocks are then never taken back.
+ */
+async function listedAgain(ref: string, id: string): Promise<{ state: "listed"; store: Store } | { state: "absent" | "unknown" }> {
+  let raw: unknown;
+  const now = await storeForEmailSeen(ref, (_commands, reply) => {
+    raw = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  }).catch(() => null);
+  if (!now) return { state: "unknown" };
+  if (now.sitePages.some((held) => held.id === id)) return { state: "listed", store: now };
+  let pages: unknown;
+  try {
+    pages = typeof raw === "string" ? (JSON.parse(raw) as { sitePages?: unknown }).sitePages : undefined;
+  } catch {
+    return { state: "unknown" };
+  }
+  if (pages === undefined) return now.sitePages.length === 0 && raw !== undefined ? { state: "absent" } : { state: "unknown" };
+  if (!Array.isArray(pages) || parseSitePages(pages).length !== pages.length) return { state: "unknown" };
+  if (pages.some((entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === id)) return { state: "unknown" };
+  return { state: "absent" };
+}
 
 /**
  * A new page made whole, or not at all (582 [KB3], copy and import): its blocks are written first, under the new
@@ -50,9 +75,10 @@ async function placeNewPage(ref: string, store: Store, entry: SitePage, page: Sa
     // The write may have been applied with only its answer lost (Codex U on #3531): the list is read again before
     // anything is taken back. Listed: the page was made. Confirmed not listed: the blocks are taken back, never left
     // unlisted. Not known: nothing is taken back, so a listed page never loses its blocks, and the creator is told.
-    const now = await storeForEmail(ref).catch(() => null);
-    if (now && now.sitePages.some((held) => held.id === entry.id)) return { ok: true, store: now };
-    if (!now) return { ok: false, error: "copy_unknown", status: 503 };
+    // A list read again out of shape is not known either (listedAgain).
+    const again = await listedAgain(ref, entry.id);
+    if (again.state === "listed") return { ok: true, store: again.store };
+    if (again.state === "unknown") return { ok: false, error: "copy_unknown", status: 503 };
     await takeBack();
     return { ok: false, error: "copy_failed", status: 500 };
   }

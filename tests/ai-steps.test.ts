@@ -274,7 +274,10 @@ async function main(): Promise<void> {
   unknownFor = (c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:");
   is("an unknown reply to the mark is not a stop", await ai.markAiStop(store, "runsetunknown001"), false);
   unknownFor = null;
-  is("a confirmed mark is", await ai.markAiStop(store, "runsetknown00001"), true);
+  // A stop is written only over a live run's own mark (cloud I on #3435): the run is live here, as one being drafted.
+  redis.run(["SET", stopKey("runsetknown00001"), "0", "EX", 300]);
+  is("a confirmed mark is, on a live run", await ai.markAiStop(store, "runsetknown00001"), true);
+  is("and the mark says stop", redis.run(["GET", stopKey("runsetknown00001")]), "1");
 
   part("A stop for a run that is not running writes nothing (MEDIUM 1 of cloud I's review of #3435)");
   fresh();

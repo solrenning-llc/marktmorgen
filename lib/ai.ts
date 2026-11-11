@@ -454,10 +454,24 @@ async function countedRun<T>(store: Store, now: number, run: () => Promise<T | n
 
 const stopKey = (statsId: string, run: string) => `nl:ai:stop:${statsId}:${run}`;
 
-/** A stop asked for one run of named steps: a mark under the store's own name, gone by itself after AI_STOP_KEEP_SECONDS. True only once it is confirmed kept. */
+/**
+ * A run of named steps as it starts: its live mark ("0"), under the store's own name, gone by itself after
+ * AI_STOP_KEEP_SECONDS. Written only where there is none (NX), so a stop already written is kept. Best effort: a
+ * mark not written only means a stop for this run is not taken, which the page says.
+ */
+async function markAiRunLive(store: Store, run: string): Promise<void> {
+  if (!store.statsId) return;
+  await redisPipeline([["SET", stopKey(store.statsId, run), "0", "EX", AI_STOP_KEEP_SECONDS, "NX"]]).catch((error: unknown) => console.error("a run's live mark could not be written", error));
+}
+
+/**
+ * A stop asked for one run of named steps: its mark set to "1" only over the run's own live mark (XX), so a stop for
+ * a run that is not running writes nothing, and made-up run ids cost no write (cloud I on #3435, MEDIUM 1). True only
+ * once it is confirmed kept; a run not running, or a reply that cannot be read, is false.
+ */
 export async function markAiStop(store: Store, run: string): Promise<boolean> {
   if (!store.statsId || !AI_RUN_ID.test(run) || !isRedisConfigured()) return false;
-  const replies = repliesFor(await redisPipeline([["SET", stopKey(store.statsId, run), "1", "EX", AI_STOP_KEEP_SECONDS]]).catch(() => null), 1);
+  const replies = repliesFor(await redisPipeline([["SET", stopKey(store.statsId, run), "1", "EX", AI_STOP_KEEP_SECONDS, "XX"]]).catch(() => null), 1);
   return replies !== null && replies[0] === "OK";
 }
 
@@ -466,7 +480,8 @@ async function stopAsked(store: Store, run: string): Promise<boolean | null> {
   if (!store.statsId) return null;
   const replies = repliesFor(await redisPipeline([["GET", stopKey(store.statsId, run)]]).catch(() => null), 1);
   if (!replies) return null;
-  if (replies[0] === null) return false;
+  // No mark, or the run's own live mark ("0"): no stop was asked.
+  if (replies[0] === null || replies[0] === "0") return false;
   return replies[0] === "1" ? true : null;
 }
 
@@ -1397,6 +1412,9 @@ export async function writePage(
     }
   };
   const unrun: Unrun = { jobs: 0, asked: false };
+  // A stepped run marks itself live before its first step, so the page's Stop (offered only once a step is said)
+  // finds it; a stop is written over nothing else.
+  if (steps) await markAiRunLive(store, steps.run);
   return countedRun(store, now, async () => {
     // Whether a step's call reached the model is read from the job's own
     // budget (noteAiDispatch): a step whose call never did is not charged,

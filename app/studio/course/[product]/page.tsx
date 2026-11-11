@@ -202,6 +202,7 @@ export default async function StudioCoursePage({
           initialTemplate={initialTemplate?.id ?? null}
           openFirst={typeof query.lesson === "string" && lessonsInOrder(course).some(({ lesson }) => lesson.id === query.lesson) ? query.lesson : null}
           initial={course}
+          draft={product.hidden === true}
           folder={folder}
           streams={streams}
           captions={captions}

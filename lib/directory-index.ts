@@ -19,6 +19,7 @@
  *   nl:dir:page     the directory's rows, kept a few minutes; dropped on every save
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 
 const LISTED = "nl:dir:listed";
@@ -79,10 +80,12 @@ export async function listedCount(): Promise<number> {
  */
 export async function listedStores(cursor = "0", count = 100): Promise<{ sids: string[]; next: string }> {
   if (!isRedisConfigured()) return { sids: [], next: "0" };
-  const [reply] = await redisPipeline([["SSCAN", LISTED, cursor, "COUNT", String(count)]]);
-  const rows = Array.isArray(reply) ? reply : [];
-  return {
-    next: typeof rows[0] === "string" ? rows[0] : "0",
-    sids: Array.isArray(rows[1]) ? (rows[1] as unknown[]).map(String) : [],
-  };
+  // Read exactly (rule 24): a cursor of digits and a list of text ids; anything else throws, so no directory is built
+  // or cached from it, never "the last page" that ended the walk early.
+  const page = repliesFor(await redisPipeline([["SSCAN", LISTED, cursor, "COUNT", String(count)]]), 1)?.[0];
+  const pair = Array.isArray(page) && page.length === 2 ? page : null;
+  const next = pair && typeof pair[0] === "string" && /^\d+$/.test(pair[0]) ? pair[0] : null;
+  const sids = pair ? stringList(pair[1]) : null;
+  if (next === null || !sids) throw new UnknownReplyError("a page of the listed stores");
+  return { next, sids };
 }

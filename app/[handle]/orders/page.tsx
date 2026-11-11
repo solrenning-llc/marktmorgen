@@ -373,7 +373,7 @@ function Frame({ store, children }: { store: Store; children: React.ReactNode })
         </div>
 
         <div className="mt-8 text-center">
-          <p className="st-muted mx-auto mb-4 max-w-xl text-sm" data-while-open>
+          <p className="st-muted mx-auto mb-4 max-w-[50ch] text-sm" data-while-open>
             {words.whileOpen}
           </p>
           {/* Alone on their line, so at least 44 px high (WCAG 2.5.5), as "Back to your purchases" is. */}

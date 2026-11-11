@@ -201,6 +201,37 @@ async function main(): Promise<void> {
     is("and nobody new to email", (await confirmedForRestock(store, pid)).includes("rae@example.com"), false);
   }
 
+  part("Two new addresses at once for the last place: the list never goes past its ceiling (Codex G on #3616)");
+  {
+    const lastKey = `nl:sa:${sid}:${pid2}`;
+    redis.run(["DEL", lastKey]);
+    for (let i = 0; i < MAX_STOCK_ALERTS - 1; i += 1) redis.run(["HSET", lastKey, `held${i}@example.com`, JSON.stringify({ at: 1, ok: 1, t: "a".repeat(48) })]);
+    const real = redis.pipeline.bind(redis);
+    // Both read the list's size before either writes: a barrier on the read.
+    let waiting = 0;
+    let release: () => void = () => {};
+    const bothRead = new Promise<void>((resolve) => { release = resolve; });
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "HLEN" && c[1] === lastKey)) {
+        const reply = await real(commands);
+        waiting += 1;
+        if (waiting === 2) release();
+        await bothRead;
+        return reply;
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let results: Awaited<ReturnType<typeof askStockAlert>>[] = [];
+    try {
+      results = await Promise.all([ask("sam@example.com", 0, pid2), ask("tia@example.com", 0, pid2)]);
+    } finally {
+      redis.pipeline = real;
+    }
+    is("one gets the last place", results.filter((r) => r.ok).length, 1);
+    is("the other is told the list is full", results.filter((r) => !r.ok).map((r) => !r.ok && r.reason), ["full"]);
+    is("the list holds exactly its ceiling", redis.run(["HLEN", lastKey]), MAX_STOCK_ALERTS);
+  }
+
   done();
 }
 

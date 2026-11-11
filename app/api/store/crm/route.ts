@@ -5,8 +5,9 @@ import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { ensureStatsId } from "@/lib/store";
 import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
-import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
+import { type AccessMap, PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
 import { readPipelineAccess } from "@/lib/pipeline-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
@@ -50,7 +51,14 @@ export async function POST(request: NextRequest) {
     // Which pipelines this person may change (639 [GL7](7)): the owner and Admins every one, a teammate as the store set.
     const restricted = guarded.role !== "owner" && guarded.role !== "admin";
     // A field's value touches no pipeline: its save reads no access (one trip fewer, C3-125).
-    const access = restricted && body.action !== "value" ? await readPipelineAccess(statsId, guarded.email) : {};
+    // A reply in an unknown shape is never taken for no restriction: nothing is changed (lib/pipeline-access.ts).
+    let access: AccessMap | null = {};
+    try {
+      if (restricted && body.action !== "value") access = await readPipelineAccess(statsId, guarded.email);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return refuse("unavailable", 503);
+      throw error;
+    }
     const mayEdit = (pipelineId: string | null) => pipelineId !== null && accessOf(guarded.role, access, pipelineId) === "edit";
     const noAccess = () => Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
 

@@ -72,9 +72,9 @@ async function main(): Promise<void> {
   is("the result the most answers point at; the first on a tie", [outcomeOf(form, good.answers)?.id, outcomeOf(form, { bbbbbb: "opt002", cccccc: ["opt003"] })?.id, outcomeOf(form, {})], ["res001", "res002", null]);
 
   part("The file of answers");
-  is("a cell that would be a formula is not one", [safeCell("=SUM(A1)"), safeCell("+1"), safeCell("plain"), safeCell('says "hi", twice')], ["'=SUM(A1)", "'+1", "plain", '"says ""hi"", twice"']);
+  is("a cell that would be a formula is not one", [safeCell("=SUM(A1)"), safeCell("+1"), safeCell("plain"), safeCell('says "hi", twice')], ['"\'=SUM(A1)"', '"\'+1"', '"plain"', '"says ""hi"", twice"']);
   const csv = responsesCsv(form, [{ at: 0, page: "", answers: good.answers, outcome: "res001", joined: true }]);
-  is("a row with the options' words, the result and the list", csv.split("\r\n")[1], "1970-01-01T00:00:00.000Z,a@example.com,An hour,Bread; Soup,7,Quick meals,\"Yes, once they confirm by email\"");
+  is("a row with the options' words, the result and the list", csv.split("\r\n")[1], "\"1970-01-01T00:00:00.000Z\",\"a@example.com\",\"An hour\",\"Bread; Soup\",\"7\",\"Quick meals\",\"Yes, once they confirm by email\"");
 
   part("Sent from a store's page");
   const OWNER = "forms@example.com";

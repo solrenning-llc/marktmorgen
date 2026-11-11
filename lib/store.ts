@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -79,6 +79,7 @@ import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, with
 import { parseTiers } from "@/lib/tier-rules";
 import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
 import { ENDED_INDEX } from "@/lib/plan-standing";
+import { closesStore } from "@/lib/plan-closing-rules";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
 import { type Cycle, type Tier, parseCycle, parseTier } from "@/lib/plan";
@@ -2146,7 +2147,38 @@ export async function clearStripeAccount(
 
 export type MoveResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "same" | "taken" };
+  | { ok: false; reason: "none" | "same" | "taken" | "closing" };
+
+/**
+ * The closing's final line and the walk's line, by value: the same keys as FINAL_INDEX (lib/closing-holds.ts) and
+ * DUE_KEY (lib/closed-store-data.ts), which import this file; tests/closing-moved-owner.test.ts puts stores in them
+ * by those names and fails when these differ.
+ */
+const CLOSING_FINAL_LINE = "nl:closing:final";
+const CLOSING_WALK_LINE = "nl:closed:due";
+
+/** A sorted set's score as Redis answers ZSCORE: nil, or a number (a string of one over REST). */
+const isScore = (reply: unknown): boolean =>
+  reply === null || (typeof reply === "number" && Number.isFinite(reply)) || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
+
+/**
+ * Whether a home store is in its closing (lib/plan-closing.ts): its plan ended on or after KEEP_NOTHING_FROM and does
+ * not run, or it is in the final line (its closing day began, so it is seen through whatever the plan does since) or
+ * in line for the walk that erases its records (lib/closed-store-data.ts). Everything that sees it through is keyed
+ * by its ref, its owner's address: its place in those lines and in the line of ended plans, its closing state, and
+ * its folder's holds, paid periods, notices and credit. A move gives it another ref, so the walk read the old one as
+ * nil and dropped the store, the daily run took it out of every line as gone, and its record stayed at the new
+ * address, never erased (Claude 6's probes P6 and P7 on #3643). Read under the store's own lock, so its plan cannot
+ * change meanwhile, and a store whose plan runs enters neither line. A line that does not read is never "not in it"
+ * (rule 24): it throws, and nothing moves.
+ */
+export async function closingUnderway(store: Store): Promise<boolean> {
+  if (!store.subscriptionActive && closesStore(Date.parse(store.planEndedAt))) return true;
+  const ref = storeRef(store);
+  const scores = repliesFor(await redisPipeline([["ZSCORE", CLOSING_FINAL_LINE, ref], ["ZSCORE", CLOSING_WALK_LINE, ref]]), 2);
+  if (!scores || !scores.every(isScore)) throw new UnknownReplyError("a store's place in the closing lines (ZSCORE)");
+  return scores.some((score) => score !== null);
+}
 
 /**
  * Moves a store from one sign-in address to another.
@@ -2215,6 +2247,8 @@ export async function moveAccount(
   if (!isRedisConfigured()) return { ok: false, reason: "none" };
 
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
+    // A store in its closing keeps its address until its records are erased or its plan runs again (closingUnderway).
+    if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
     const [existing, theirs] = await redisPipeline([
       ["GET", await ownerKey(to)],

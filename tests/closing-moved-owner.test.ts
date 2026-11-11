@@ -18,6 +18,10 @@
  * Synthetic stores, in-memory Redis.
  */
 import { createHash } from "node:crypto";
+import { NextRequest } from "next/server";
+import { POST as addressRoute } from "@/app/api/store/address/route";
+import { POST as moveRoute } from "@/app/api/auth/move/route";
+import { POST as callback } from "@/app/api/auth/callback/route";
 import { BATCH_KEY, DUE_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { ENDED_INDEX } from "@/lib/plan-standing";
@@ -29,6 +33,19 @@ import { done, is, part } from "./check";
 const ownerKey = (email: string) => "nl:store:owner:" + createHash("sha256").update("nimbus-store:" + email).digest("hex").slice(0, 40);
 const idKey = (sid: string) => `nl:store:id:${sid}`;
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
+
+process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
+const ORIGIN = "https://marktmorgen.com";
+const hex = (value: string) => createHash("sha256").update(value).digest("hex");
+const form = (url: string, fields: Record<string, string>, cookie = "") =>
+  new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields) });
+/** A session opened by the emailed sign-in link, as tests/second-step-gate.test.ts opens one. */
+async function linkSession(email: string): Promise<string> {
+  const token = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${token}`).slice(0, 40)}`, email, "EX", 900]]);
+  const response = await callback(form(`${ORIGIN}/api/auth/callback`, { token }));
+  return (response.headers.get("set-cookie") ?? "").match(/nl_session=([^;]*)/)?.[1] ?? "";
+}
 
 /** Runs once, the moment the walk writes its entry for a store (prepareStore, after its first read of the record). */
 let onBatchWrite: ((ref: string) => Promise<void>) | null = null;
@@ -170,6 +187,26 @@ async function main(): Promise<void> {
   }
   is("the move throws an unknown reply", threw, "UnknownReplyError");
   is("nothing moved", [traces(H, "unread-h-new@example.com", h.sid, h.handle).atOld, traces(H, "unread-h-new@example.com", h.sid, h.handle).atNew, redis.run(["GET", idKey(h.sid)])], [true, false, H]);
+
+  part("The routes: asking for a move and tapping its link both say the store is closing");
+  redis.clear();
+  const R = "route-r@example.com";
+  const R2 = "route-r-new@example.com";
+  const r = await endedStore(R, "router");
+  const session = await linkSession(R);
+  const moveLinks = () => {
+    const page = redis.run(["SCAN", "0", "MATCH", "nl:auth:move:*", "COUNT", 10_000]) as [string, string[]];
+    return page[1].length;
+  };
+  const asked = await addressRoute(form(`${ORIGIN}/api/store/address`, { email: R2 }, `nl_session=${session}`));
+  is("asked from the studio: refused before any link is made", [asked.headers.get("location"), moveLinks()], [`${ORIGIN}/studio?address=closing`, 0]);
+  // A link asked for before the plan ended (written here as lib/auth.ts sendMoveLink writes one) is refused at the tap,
+  // under the store's lock.
+  const token = hex("closing-moved-owner-link");
+  await redis.pipeline([["SET", `nl:auth:move:${hex(`nimbus-auth-move:${token}`).slice(0, 40)}`, JSON.stringify({ from: R, to: R2, session }), "EX", 900]]);
+  const tapped = await moveRoute(form(`${ORIGIN}/api/auth/move`, { token }));
+  is("tapped: refused, and said so on the sign-in page", tapped.headers.get("location"), `${ORIGIN}/signin?status=move-closing`);
+  is("tapped: the store stays at its address", [traces(R, R2, r.sid, r.handle).atOld, traces(R, R2, r.sid, r.handle).atNew, redis.run(["GET", idKey(r.sid)])], [true, false, R]);
 
   part("Controls: a store that is not closing moves as before");
   redis.clear();

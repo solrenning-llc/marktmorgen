@@ -11,7 +11,7 @@ import {
   normaliseEmail,
   sendMoveLink,
 } from "@/lib/auth";
-import { storeForEmail } from "@/lib/store";
+import { closingUnderway, storeForEmail } from "@/lib/store";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
 import { hasSecondStep, holdsSecondStep, liveSecondStep } from "@/lib/second-step-gate";
@@ -71,6 +71,15 @@ export async function POST(request: NextRequest) {
   // creator simply signs in with the other address instead.
   const store = await storeForEmail(email);
   if (!store) return back("none");
+  // A store in its closing keeps its address until its records are erased (lib/store.ts closingUnderway): said here,
+  // before a link goes out, and refused again at the tap under the store's lock. A closing line that does not read is
+  // an error, never "not closing" (rule 24).
+  const closing = await closingUnderway(store).catch((error) => {
+    console.error("reading whether a store is closing failed", error);
+    return null;
+  });
+  if (closing === null) return back("error");
+  if (closing) return back("closing");
 
   // Refused here rather than at the tap, so that a store which could never
   // land there does not put an invitation in a stranger's inbox first.

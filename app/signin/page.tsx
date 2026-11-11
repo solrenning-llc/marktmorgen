@@ -66,6 +66,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one. Nothing was changed.",
   },
+  // A store in its closing keeps its address until its records are erased (lib/store.ts closingUnderway).
+  "move-closing": {
+    title: "A closing store keeps its address",
+    body: "Your store's plan has ended, so the store is closing, and its sign-in address cannot change while it closes. Nothing was changed. To keep the store and move it, start a plan again before its closing day.",
+  },
   "move-busy": {
     title: "Your account is in the middle of a move",
     body: "Its sign-in address is being changed, so logging in with only the emailed link waits until that is over. Log in with your passkey, or with the emailed link and the code from your authenticator app. Without either, try again in a few minutes; if it still says this, reply to any email from us and we finish the move for you.",

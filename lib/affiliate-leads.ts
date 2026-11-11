@@ -31,6 +31,7 @@ import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { DataRoomError, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -46,6 +47,7 @@ import {
   type LeadRecord,
   leadsKey,
   parseLead,
+  parseLeadExact,
   settleLeads,
 } from "@/lib/affiliate-lead-rules";
 
@@ -134,6 +136,8 @@ function isOwn(store: Store, affiliate: { email: string; paypal: string }, email
  * (forgetLeadPerson), and what is left is only there so they are not counted
  * as a lead again, never to tie a new purchase back to them. Whether the
  * affiliate is still approved is checked by the caller, as for a code or a bond.
+ * A lead that does not read exactly (parseLeadExact) credits nobody: a reversal
+ * whose state no longer reads is never taken for an open lead (rule 24).
  */
 export async function contactFor(store: Store, email: string, before: number, checkout = ""): Promise<string> {
   if (!affiliatesOn(store) || !creditsContacts(store.affiliates) || !store.statsId || !email || !isRedisConfigured()) return "";
@@ -141,7 +145,7 @@ export async function contactFor(store: Store, email: string, before: number, ch
   if (!EMAIL_PATTERN.test(address)) return "";
   try {
     const [raw] = await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, address)]]);
-    const lead = parseLead(raw);
+    const lead = parseLeadExact(raw);
     if (!lead || !lead.email || lead.state === "reversed") return "";
     if (!(lead.at > 0 && lead.at < before) || (checkout && lead.ref === checkout)) return "";
     // The fingerprint is of the address written any way; the address kept must be the same person's.
@@ -219,11 +223,15 @@ export async function recordLead(
       if (error instanceof DataRoomError) return "full";
       throw error;
     }
-    const [won] = await redisPipeline([["HSETNX", leadsKey(store.statsId), lead.id, json]]);
-    if (Number(won) !== 1) {
+    // Read exactly (CX-123 rule 24): 1 is written, 0 is the person's lead already there (its room given back). Any
+    // other reply may have written the lead, so its room is kept, never given back for a lead that may exist, and
+    // the answer is "unavailable" (thrown here, said by the catch below), never "duplicate".
+    const won = countOf(repliesFor(await redisPipeline([["HSETNX", leadsKey(store.statsId), lead.id, json]]), 1)?.[0]);
+    if (won === 0) {
       await giveData(store, [{ slot: LEADS_SLOT, bytes }]);
       return "duplicate";
     }
+    if (won !== 1) throw new UnknownReplyError("an affiliate lead's write");
     return "recorded";
   } catch (error) {
     console.error("recording an affiliate's lead failed", error);
@@ -231,17 +239,46 @@ export async function recordLead(
   }
 }
 
-/** Every lead of the program, as kept. */
+/**
+ * Every lead of the program, as kept, read exactly (CX-123 rule 24): one HGETALL answered with an even list of
+ * strings (an empty list is a program with no leads), and every lead in it read whole (parseLeadExact). Throws
+ * UnknownReplyError otherwise, never a shorter list: a lead left out would leave the month's budget, the day's cap
+ * and the hour's limit summed without it, so a decision could approve a lead over them (decideLeads).
+ * The caller already says "not done" on a throw: the studio's decision answers 503 "unavailable" and is tried
+ * again (app/api/store/affiliates/route.ts). A person's copy of their data reads only their own lead (leadOf), so
+ * another person's lead that does not read never blocks it. A lead that does not read cannot be
+ * counted conservatively instead: its affiliate, day, month, currency and amount are exactly what is not known.
+ */
 export async function readLeads(store: Pick<Store, "statsId">): Promise<LeadRecord[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [reply] = await redisPipeline([["HGETALL", leadsKey(store.statsId)]]);
-  const flat = Array.isArray(reply) ? reply.map(String) : [];
+  const list = stringList(repliesFor(await redisPipeline([["HGETALL", leadsKey(store.statsId)]]), 1)?.[0]);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError("an affiliate program's leads");
   const out: LeadRecord[] = [];
-  for (let i = 1; i < flat.length; i += 2) {
-    const lead = parseLead(flat[i]);
-    if (lead) out.push(lead);
+  for (let i = 0; i < list.length; i += 2) {
+    const lead = parseLeadExact(list[i + 1]);
+    if (!lead) throw new UnknownReplyError("an affiliate program's lead");
+    out.push(lead);
   }
   return out;
+}
+
+/**
+ * A person's own lead in the program, read exactly (CX-123 rule 24), for their copy of their data
+ * (lib/person-copy.ts): one HGET of their field, leadId(statsId, address), since a person is one lead, ever. Only an
+ * exact nil is no lead. A reply of another shape, or a kept lead that does not read whole (parseLeadExact), throws
+ * UnknownReplyError, and copyPerson fails the whole copy instead of handing one over without it. Only this one
+ * field is read, so another person's lead that does not read never blocks this person's copy (review of #3157);
+ * a decision still reads, and fails closed on, every lead (readLeads).
+ */
+export async function leadOf(store: Pick<Store, "statsId">, email: string): Promise<LeadRecord | null> {
+  if (!store.statsId || !isRedisConfigured() || !email) return null;
+  const replies = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, email)]]), 1);
+  if (!replies) throw new UnknownReplyError("a person's affiliate lead");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const lead = parseLeadExact(raw);
+  if (!lead) throw new UnknownReplyError("a person's affiliate lead");
+  return lead;
 }
 
 /** Where open bookings' calls end now, read from their moves, in seconds. */
@@ -269,7 +306,8 @@ export type DecisionResult = { ok: true; changed: number } | { ok: false; reason
  *   reopen   a reversal taken back.
  *
  * Asked for leads that are not in a state for it, nothing is changed and the
- * answer says why.
+ * answer says why. When the program's leads cannot be read exactly, it throws
+ * UnknownReplyError (readLeads) and nothing is written.
  */
 export async function decideLeads(store: Store, ids: string[], decision: LeadDecision, why: string = ""): Promise<DecisionResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "unknown" };
@@ -321,18 +359,26 @@ export async function forgetLeadPerson(store: Store, email: string): Promise<num
   // Under the leads' lock, so a decision being written at the same moment cannot write the address back (MM-SA-09).
   // A busy lock throws, and the erasure reports this part as not done and tries again (lib/person-erasure.ts).
   return withLock(leadsLockKey(statsId), LOCK_SECONDS, LOCK_WAIT_MS, async () => {
-    const [raw] = await redisPipeline([["HGET", leadsKey(statsId), id]]);
-    const lead = parseLead(raw);
-    if (!lead) return 0;
+    const replies = repliesFor(await redisPipeline([["HGET", leadsKey(statsId), id]]), 1);
+    if (!replies) throw new UnknownReplyError("a person's affiliate lead");
+    const [raw] = replies;
+    // Only an exact nil is "no lead". A kept lead that does not read, or whose address is of another type, may still
+    // hold the address, so it is never said to be forgotten: the deletion reports this part as not done and tries
+    // again (rule 24).
+    if (raw === null) return 0;
+    const kept = typeof raw === "string" && parseLead(raw) ? (JSON.parse(raw) as Record<string, unknown>) : null;
+    if (!kept || typeof kept.email !== "string") throw new UnknownReplyError("a person's affiliate lead");
     // The program's kept book shows the address masked (lib/affiliate-book-snapshot.ts): deleted whole, worked out again at the next load.
     // After the address comes off the lead, so a refresh that read the lead before is thrown away by the raised version and one that
     // reads it after never sees the address; and again when the address is already off, so a deletion tried again after this step
     // failed still deletes the book. A failure throws, and the deletion is tried again.
-    if (!lead.email) {
+    if (!kept.email) {
       await forgetBookSnapshot(statsId);
       return 0;
     }
-    const json = JSON.stringify({ ...lead, email: "" });
+    // Only the address changes: every other field is written back as it was kept, never filled in with parseLead's
+    // defaults, so a money field of another type stays unreadable to readLeads instead of becoming a readable 0.
+    const json = JSON.stringify({ ...kept, email: "" });
     await redisPipeline([["HSET", leadsKey(statsId), id, json]]);
     await forgetBookSnapshot(statsId);
     const freed = dataBytes([id, String(raw)], 1) - dataBytes([id, json], 1);

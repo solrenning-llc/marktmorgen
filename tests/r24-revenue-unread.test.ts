@@ -185,6 +185,136 @@ for (const [label, over, invoice] of unreadRefs) {
   is(`July's line, ${label}: refused, never skipped as no membership`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, over), invoice)), "refused");
 }
 
+// The objects the newer shape nests the subscription in (`parent`, then
+// `subscription_details` or `subscription_item_details`) are read exactly too:
+// absent or null is "none there"; any other shape is refused, never read as
+// "no membership" and the line skipped (Claude 5's review of #3018).
+is(
+  "healthy: the line's parent with no item details (null), the invoice's parent reads",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: { subscription_item_details: null } }), { parent: { subscription_details: { subscription: "sub_bea" } } })),
+  moved,
+);
+is(
+  "healthy: the invoice's parent with no subscription details (null), the line's own id reads",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000), { parent: { subscription_details: null } })),
+  moved,
+);
+is(
+  "healthy: the line's parent holding the item details with its id and no proration",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: { subscription_item_details: { subscription: "sub_bea", proration: false } } }))),
+  moved,
+);
+const notObjects: [string, unknown][] = [["a number", 5], ["text", "sub_bea"], ["true", true], ["a list", [{ subscription: "sub_bea" }]]];
+for (const [shape, v] of notObjects) {
+  is(`July's line, the line's parent ${shape}: refused, never skipped as no membership`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: v }))), "refused");
+  is(
+    `July's line, the line's subscription_item_details ${shape}: refused`,
+    beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: { subscription_item_details: v } }))),
+    "refused",
+  );
+  is(`July's invoice, its parent ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined }), { parent: v })), "refused");
+  is(
+    `July's invoice, its subscription_details ${shape}: refused`,
+    beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined }), { parent: { subscription_details: v } })),
+    "refused",
+  );
+  // The line's own id is read, but its parent is still read for proration.
+  is(`July's line with its own id, its parent ${shape}: refused, not read as "no proration"`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { parent: v }))), "refused");
+}
+
+// The same holds for the other objects a line nests what it is read by (rule
+// 30): its price, the price's recurring terms, its decimal pricing and its
+// period. Absent or null is "none there", read as before; any other shape is
+// refused, never read as "no price", "the membership's own terms" or "no time".
+is("healthy: the line's price null, read from its amount", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: null }))), moved);
+is("healthy: the line's recurring terms null, read by the membership's", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: { unit_amount: 3000, recurring: null } }))), moved);
+is("healthy: the line's decimal pricing null", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { pricing: null }))), moved);
+for (const [shape, v] of notObjects) {
+  is(`July's line, its price ${shape}: refused, never read as no price`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: v }))), "refused");
+  is(`July's line, its recurring terms ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: { unit_amount: 3000, recurring: v } }))), "refused");
+  is(`July's line, its decimal pricing ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: null, pricing: v }))), "refused");
+  is(`July's line, its period ${shape}: refused, never read as the invoice's date`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { period: v }))), "refused");
+}
+
+// The scalars the same loop reads (rule 30; Claude 5's review of #3048):
+// whether a line is a proration, the price's interval and the line's quantity.
+// Absent or null reads as before; any other shape is refused, never read as
+// "not a proration", "the membership's own terms" or "one".
+const proration = (over: Record<string, unknown>) => beaLine(at(2026, 7, 20), 500, { price: null, ...over });
+const withProration = (over: Record<string, unknown>): Invoice[] => [
+  ...beaInvoices(beaLine(at(2026, 7, 5), 3000)),
+  { created: at(2026, 7, 20), lines: { data: [proration(over)] } } as Invoice,
+];
+is("healthy: a proration line without its price (true) is skipped", beaMoves(withProration({ proration: true })), moved);
+is("healthy: a proration line given under its parent (true) is skipped", beaMoves(withProration({ parent: { subscription_item_details: { subscription: "sub_bea", proration: true } } })), moved);
+for (const [shape, v] of [["text", "true"], ["a number", 1], ["an object", { value: true }]] as [string, unknown][]) {
+  is(`a proration flag given as ${shape}: refused, never a full month`, beaMoves(withProration({ proration: v })), "refused");
+  is(`a proration flag under its parent given as ${shape}: refused`, beaMoves(withProration({ parent: { subscription_item_details: { subscription: "sub_bea", proration: v } } })), "refused");
+}
+for (const interval of ["day", "week", "month", "year"]) {
+  is(`healthy: the interval ${interval} reads`, typeof beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: { unit_amount: 3000, recurring: { interval, interval_count: 1 } } }))), "object");
+}
+is("healthy: no interval (null), read by the membership's terms", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: { unit_amount: 3000, recurring: { interval: null, interval_count: null } } }))), moved);
+for (const [shape, v] of [["a number", 12], ["an unknown word", "fortnight"], ["empty text", ""], ["true", true]] as [string, unknown][]) {
+  is(`the interval given as ${shape}: refused, never a month or the membership's terms`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: { unit_amount: 3000, recurring: { interval: v, interval_count: 1 } } }))), "refused");
+}
+{
+  const zero = pricesFrom(beaInvoices(beaLine(at(2026, 7, 5), 0, { quantity: 0, price: { unit_amount: 3000, recurring: { interval: "month", interval_count: 1 } } })), beaById).get("sub_bea");
+  is("a quantity of 0 is worth nothing that month, never one at the full price", zero?.find((e) => e.at === at(2026, 7, 5))?.value, 0);
+}
+is("healthy: no quantity (null) counts one", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { quantity: null }))), moved);
+for (const [shape, v] of [["negative", -1], ["fractional", 1.5]] as [string, unknown][]) {
+  is(`a quantity that is ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { quantity: v }))), "refused");
+}
+// Stripe embeds at most 10 lines in an invoice; more of them is a list cut short, not the whole invoice.
+{
+  const julyWith = (has_more: unknown): Invoice[] => {
+    const [june, , august] = beaInvoices(beaLine(at(2026, 7, 5), 3000));
+    return [june, { created: at(2026, 7, 5), lines: { data: [beaLine(at(2026, 7, 5), 3000)], has_more } } as Invoice, august];
+  };
+  is("healthy: an invoice whose lines say there are no more (false) reads", beaMoves(julyWith(false)), moved);
+  is("an invoice whose lines say there are more: refused, never read as all of them", beaMoves(julyWith(true)), "refused");
+  is("an invoice whose 'more lines' is not a yes or no: refused", beaMoves(julyWith("no")), "refused");
+}
+
+// The interval count is a whole number from 1 (Claude 5's focal return on #3048, LOW 1).
+const yearly = (count: unknown) => beaInvoices(beaLine(at(2026, 7, 5), 36000, { price: { unit_amount: 36000, recurring: { interval: "year", interval_count: count } } }));
+is("healthy: an interval count of 1 reads", typeof beaMoves(yearly(1)), "object");
+is("healthy: no interval count (null) reads as one", beaMoves(yearly(null)), beaMoves(yearly(1)));
+for (const [shape, v] of [["0", 0], ["negative", -2], ["fractional", 1.5], ["text", "one"]] as [string, unknown][]) {
+  is(`an interval count that is ${shape}: refused, never one or a made-up price`, beaMoves(yearly(v)), "refused");
+}
+// Another business's invoice on the same Stripe account with more than 10 lines
+// holds no member's line: it is passed over, never a reason to hide every movement
+// (LOW 2). One that may hold a member's line is still refused.
+{
+  const withOther = (other: Record<string, unknown>): Invoice[] => [...beaInvoices(beaLine(at(2026, 7, 5), 3000)), other as Invoice];
+  const others = { data: [{ ...line(at(2026, 7, 9)), subscription: "sub_someone_else", amount: 900 }, { ...line(at(2026, 7, 9)), subscription: null, amount: 100 }], has_more: true };
+  is("another business's invoice with more lines: passed over, July still moves", beaMoves(withOther({ created: at(2026, 7, 9), subscription: null, customer: "cus_other", lines: others })), moved);
+  is("an invoice of the member's own subscription with more lines: refused", beaMoves(withOther({ created: at(2026, 7, 9), subscription: "sub_bea", lines: others })), "refused");
+  is("an invoice of the member as customer with more lines: refused", beaMoves(withOther({ created: at(2026, 7, 9), subscription: null, customer: "cus_bea", lines: others })), "refused");
+  is(
+    "an invoice with a member's line among those given and more to come: refused",
+    beaMoves(withOther({ created: at(2026, 7, 9), subscription: null, customer: "cus_other", lines: { ...others, data: [...others.data, beaLine(at(2026, 7, 9), 3000)] } })),
+    "refused",
+  );
+}
+
+// Claude 5's focal return on #3048 (6704697572), LOW A: an invoice with more lines whose customer is absent or null
+// may be a member's (with Accounts v2 it can come with only customer_account): refused, never passed over.
+{
+  const longOther = (customer: unknown): Invoice[] => [
+    ...beaInvoices(beaLine(at(2026, 7, 5), 3000)),
+    { created: at(2026, 7, 9), subscription: null, ...(customer === undefined ? {} : { customer }), lines: { data: [{ ...line(at(2026, 7, 9)), subscription: "sub_someone_else", amount: 900 }], has_more: true } } as Invoice,
+  ];
+  is("an invoice with more lines and no customer: refused, never passed over", beaMoves(longOther(undefined)), "refused");
+  is("an invoice with more lines and a null customer: refused", beaMoves(longOther(null)), "refused");
+  is("healthy: another business's customer is still passed over", beaMoves(longOther("cus_other")), moved);
+}
+// LOW B: a count and a quantity are numbers, never text, even text that reads as one.
+is("an interval count given as the text \"2\": refused", beaMoves(yearly("2")), "refused");
+is("a quantity given as the text \"1\": refused", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { quantity: "1" }))), "refused");
+
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_revenue_stand_in";
 const NOW = Date.parse("2026-10-13T12:00:00Z");
 const S = NOW / 1000;

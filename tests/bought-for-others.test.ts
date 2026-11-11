@@ -61,7 +61,7 @@ async function main(): Promise<void> {
       status: "complete",
       payment_status: "paid",
       mode: "payment",
-      created: 1_900_000_000,
+      created: Math.floor(Date.now() / 1000) - 60,
       amount_total: 4900,
       currency: "usd",
       payment_intent: `pi_${id.slice(-12)}`,

@@ -7,3 +7,4 @@ Only Claude 3 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 3 | 632 [AA2] (q) campaign QR code ((o) next step and (p) weekly ads report are merged) | claude3/aa2-campaign-qr (#3194) | `lib/campaign-qr.ts`, `components/campaign-qr.tsx`, `tests/campaign-qr.test.ts` | 08/11/2026 02h49 |
+| Claude 3 | 532 [AF1] unit 1, the affiliate program summary in the studio | claude3/af1-program-summary | `lib/affiliate-summary.ts` (new), `components/affiliate-summary.tsx` (new), `app/studio/affiliates/page.tsx` (the summary only), `tests/affiliate-summary.test.ts` (new) | 10/11/2026 02h10 |

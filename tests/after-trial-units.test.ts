@@ -111,6 +111,13 @@ async function afterTrial(label: string, s: Store, standing: "ended" | "none"): 
 async function main(): Promise<void> {
   redis.clear();
 
+  part("The reviewed non-paying resource ceilings");
+  is("trial, no plan, and ended plan", NON_PAYING_ALLOWANCES, {
+    trial: { studio: 1_000, api: 100, inbox: 30, email: 30, transactional: 40, integration: 20, buyer: 50, webhook: 50 },
+    none: { studio: 300, api: 0, inbox: 20, email: 25, transactional: 20, integration: 5, buyer: 20, webhook: 0 },
+    ended: { studio: 100, api: 0, inbox: 0, email: 0, transactional: 20, integration: 0, buyer: 20, webhook: 0 },
+  });
+
   part("A delivery made during the trial and never tried, tried after it: not sent, and its message not kept");
   const trial = await store("trial");
   is("a trial's store", standingOf(await trial.read()), "trial");

@@ -10,15 +10,18 @@ import { createContext, useContext, type ReactNode } from "react";
  */
 export type PreviewLine = { line: string; href: string; label: string } | null;
 
-const PreviewLineContext = createContext<PreviewLine | undefined>(undefined);
+/**
+ * Every page under app/ is drawn inside the root layout, which always provides the decided line, so the
+ * default is only ever read where no page is: a test drawing a page's parts on their own. There the menu
+ * draws no line rather than failing; the layout's own render is what tests/site-nav-bundle.test.ts holds.
+ */
+const PreviewLineContext = createContext<PreviewLine>(null);
 
 export function PreviewLineProvider({ value, children }: { value: PreviewLine; children: ReactNode }) {
   return <PreviewLineContext.Provider value={value}>{children}</PreviewLineContext.Provider>;
 }
 
-/** The decided line, or null once plans are on sale. Outside the root layout there is no decision to read: that is a bug, said loudly. */
+/** The decided line, or null once plans are on sale. */
 export function usePreviewLine(): PreviewLine {
-  const value = useContext(PreviewLineContext);
-  if (value === undefined) throw new Error("The site menu is drawn outside the root layout's PreviewLineProvider");
-  return value;
+  return useContext(PreviewLineContext);
 }

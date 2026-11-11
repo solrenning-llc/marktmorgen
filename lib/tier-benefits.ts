@@ -32,7 +32,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, ensureListId, saleHandles } from "@/lib/store";
-import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { readListings } from "@/lib/catalog";
 import { productOfSub } from "@/lib/tier-rules";
 import { type PauseSub, pausedNow } from "@/lib/membership-pause-rules";
@@ -241,7 +241,7 @@ export type Waiting = { trial: number; unpaid: number; paused: number };
 
 export type DueView =
   | { state: "none" }
-  | { state: "unknown"; why: "benefits" | "stripe" }
+  | { state: "unknown"; why: "benefits" | "stripe" | "erased" }
   | {
       state: "ok";
       benefits: Benefit[];
@@ -262,11 +262,17 @@ export async function benefitsDue(store: Store, now = Date.now()): Promise<DueVi
   const nowSeconds = Math.floor(now / 1000);
   const read = await runningMemberships(store, store.statsId, nowSeconds);
   if (read === null) return { state: "unknown", why: "stripe" };
+  // A person deleted from the store keeps their membership on the creator's Stripe: never listed here by address
+  // again (Claude 1 on #3014), as lib/membership-numbers.ts leaves them out. A list of the deleted that cannot be read
+  // is unknown, never "nobody deleted".
+  const gone = await suppressedAmong(store.listId, [...new Set(read.members.map((m) => m.email))]).catch(() => null);
+  if (gone === null) return { state: "unknown", why: "erased" };
+  const members = read.members.filter((m) => !gone.has(m.email));
   const waiting: Record<string, Waiting> = {};
   const owed: Omit<DueRow, "given">[] = [];
   for (const benefit of benefits) {
     waiting[benefit.id] = { trial: 0, unpaid: 0, paused: 0 };
-    for (const member of read.members) {
+    for (const member of members) {
       const due = owedNow(benefit, member, nowSeconds);
       if (due.owed) owed.push({ benefit: benefit.id, sub: member.sub, email: member.email, person: member.person, period: due.period, from: due.from, until: due.until });
       else if (due.why === "trial" || due.why === "unpaid" || due.why === "paused") waiting[benefit.id][due.why] += 1;
@@ -285,7 +291,7 @@ export async function benefitsDue(store: Store, now = Date.now()): Promise<DueVi
 
 export type GiveResult =
   | { ok: true; given: number; already: number; notOwed: number; unknown: number }
-  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "full" | "room" | "unknown"; message?: string };
+  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "erased" | "full" | "room" | "unknown"; message?: string };
 
 
 /**
@@ -390,7 +396,7 @@ out[#out + 1] = redis.call("SADD", KEYS[2], ARGV[2])
 return out`;
 
 /** Takes one mark back, for a row owed right now; says whether there was one. */
-export async function undoGiven(store: Store, benefit: unknown, sub: unknown, period: unknown, now = Date.now()): Promise<{ ok: true; undone: boolean } | { ok: false; reason: "missing" | "not_owed" | "benefits" | "stripe" | "unknown" }> {
+export async function undoGiven(store: Store, benefit: unknown, sub: unknown, period: unknown, now = Date.now()): Promise<{ ok: true; undone: boolean } | { ok: false; reason: "missing" | "not_owed" | "benefits" | "stripe" | "erased" | "unknown" }> {
   if (typeof benefit !== "string" || !BENEFIT_ID.test(benefit) || !store.statsId) return { ok: false, reason: "missing" };
   if (typeof sub !== "string" || !SUB_ID.test(sub) || typeof period !== "string" || !PERIOD.test(period)) return { ok: false, reason: "not_owed" };
   const due = await benefitsDue(store, now);
@@ -406,6 +412,9 @@ export async function undoGiven(store: Store, benefit: unknown, sub: unknown, pe
 }
 
 // ------------------------------------------------------------------ the copy
+
+/** "once" as it is; a month as the date it began ("m<seconds>" is only the key it is kept under). */
+const periodCopy = (period: string) => (period === "once" ? period : new Date(Number(period.slice(1)) * 1000).toISOString());
 
 /**
  * What a person's copy holds of their marks (lib/person-copy.ts): which
@@ -425,8 +434,11 @@ export async function benefitMarksOf(store: Store, person: string): Promise<{ be
   const text = new Map(benefits.map((b) => [b.id, b.text]));
   const out: { benefit: string; period: string; at: number }[] = [];
   for (const [f, given] of marks) {
-    const [benefit, , period] = f.split(":");
-    out.push({ benefit: text.get(benefit) ?? benefit, period: period ?? "", at: given.at });
+    const parts = f.split(":");
+    const [benefit = "", sub = "", period = ""] = parts;
+    // Read in its exact shape or not at all: an odd key is never copied raw (Claude 1 on #3014; Claude 6, 2befe4b1f).
+    if (parts.length !== 3 || !BENEFIT_ID.test(benefit) || !SUB_ID.test(sub) || !PERIOD.test(period)) throw new UnknownReplyError("a person's benefit mark, for their copy");
+    out.push({ benefit: text.get(benefit) ?? benefit, period: periodCopy(period), at: given.at });
   }
   return out.sort((a, b) => a.at - b.at || a.benefit.localeCompare(b.benefit));
 }

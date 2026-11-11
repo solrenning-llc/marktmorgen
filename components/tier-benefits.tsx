@@ -17,7 +17,7 @@ export type BenefitRow = {
 
 export type BenefitsPanel =
   | { state: "none" }
-  | { state: "unknown"; why: "benefits" | "stripe" }
+  | { state: "unknown"; why: "benefits" | "stripe" | "erased" }
   | {
       state: "ok";
       benefits: Benefit[];
@@ -137,7 +137,9 @@ export function TierBenefits({
         <p className="notice notice-error mt-4" role="alert">
           {panel.why === "stripe"
             ? "Your memberships could not be read from Stripe just now, so who is waiting is not known. Nothing was changed. Reload the page in a minute."
-            : "Your benefits could not be read just now, so who is waiting is not known. Nothing was changed. Reload the page in a minute."}
+            : panel.why === "erased"
+              ? "We could not check which people you deleted from your store just now, so who is waiting is not shown. Nothing was changed. Reload the page in a minute."
+              : "Your benefits could not be read just now, so who is waiting is not known. Nothing was changed. Reload the page in a minute."}
         </p>
       ) : panel.state === "ok" ? (
         <>

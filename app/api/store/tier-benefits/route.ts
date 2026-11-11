@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
   const refuse = (error: string, message: string, status = 400) => Response.json({ ok: false, error, message }, { status });
   const unread = "Your Stripe account could not be read just now, so nothing was changed. Try again in a minute.";
   const benefitsUnread = "Your benefits could not be read just now, so nothing was changed. Try again in a minute.";
+  const erasedUnread = "We could not check which people you deleted from your store just now, so nothing was changed. Try again in a minute.";
 
   if (body.action === "add") {
     const done = await addBenefit(store, { product: body.product, text: body.text, cadence: body.cadence });
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
       missing: ["That benefit is not one of yours. Reload the page.", 409],
       benefits: [benefitsUnread, 502],
       stripe: [unread, 502],
+      erased: [erasedUnread, 502],
       full: [done.message ?? "Your store's data room is full, so nothing was marked.", 409],
       room: ["Your store's data room could not be counted just now, so nothing was marked. Try again in a minute.", 502],
       unknown: ["Nothing was marked just now. Try again in a minute.", 502],
@@ -66,6 +68,7 @@ export async function POST(request: NextRequest) {
       not_owed: ["That member is not owed this benefit right now, so there is nothing to take back here. Reload the page.", 409],
       benefits: [benefitsUnread, 502],
       stripe: [unread, 502],
+      erased: [erasedUnread, 502],
       unknown: ["The mark could not be taken back just now. Try again in a minute.", 502],
     };
     return refuse(done.reason, words[done.reason][0], words[done.reason][1]);

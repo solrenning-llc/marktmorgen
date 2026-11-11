@@ -126,6 +126,21 @@ async function main(): Promise<void> {
   await realPipeline([["DEL", `nl:depth:${store.statsId}:${product}`], ["HSET", `nl:depth:${store.statsId}:${product}`, "blok0001", "-1"]]);
   const negative = (await readPageReadingTool(store, product, charge)) as Reading;
   is("a depth count below zero is an error, never 0 visitors", [negative?.visitors_measured ?? "not given", typeof negative?.error], ["not given", "string"]);
+  // A field countDepth never writes (Codex R1 on #3225, LEVE): not a block, so never added to the visitors.
+  const depthKey = `nl:depth:${store.statsId}:${product}`;
+  await realPipeline([["DEL", depthKey], ["HSET", depthKey, "blok0001", "2", "junk", "1"]]);
+  const junk = (await readPageReadingTool(store, product, charge)) as Reading;
+  is("a depth field of another shape is an error, never counted as a visitor", [junk?.visitors_measured ?? "not given", typeof junk?.error], ["not given", "string"]);
+  for (const odd of ["blok0001?maybe", "blok0001!blok0002.33", "blok0001?price?fit", "Blok0001", "blok0001!blok0002.25!x"]) {
+    await realPipeline([["DEL", depthKey], ["HSET", depthKey, "blok0002", "1", odd, "1"]]);
+    const read = (await readPageReadingTool(store, product, charge)) as Reading;
+    is(`the depth field ${JSON.stringify(odd)} is an error, never counted`, [read?.visitors_measured ?? "not given", typeof read?.error], ["not given", "string"]);
+  }
+  // Every shape countDepth writes, and the old visitors field "_n", still read as counts.
+  await realPipeline([["DEL", depthKey], ["HSET", depthKey, "blok0001", "1", "blok0002?price", "1", "blok0002!blok0003.50", "1", "blok0004?later!blok0003.100", "1", "_n", "9"]]);
+  const shapes = (await readPageReadingTool(store, product, charge)) as Reading;
+  is("control: every field countDepth writes, and the old \"_n\", read as before", [shapes?.visitors_measured, shapes?.error], [4, undefined]);
+  await realPipeline([["DEL", depthKey]]);
 }
 
 main().then(done, (error) => {

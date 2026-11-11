@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "returnshop", "Return Shop", "Synthetic store.");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestReturn00001", true);
+  await setStripeAccount(OWNER, "acct_1TestReturn01", true);
   await setSubscription(OWNER, { customerId: "cus_Return000001", subscriptionId: "sub_Return000001", active: true, period: paidPeriod() });
   await setHasDiscounts(OWNER, true);
   const make = async (title: string, price: string) => {

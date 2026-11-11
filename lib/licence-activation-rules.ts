@@ -84,7 +84,7 @@ export function parseKeyActivations(raw: unknown): KeyActivations | null {
   if (!raw || typeof raw !== "object") return null;
   const { devices, releases } = raw as Record<string, unknown>;
   if (!Array.isArray(devices) || !Array.isArray(releases)) return null;
-  if (devices.length > MAX_ACTIVATIONS || !releases.every(isTime)) return null;
+  if (devices.length > MAX_ACTIVATIONS || releases.length > RELEASES_PER_WINDOW || !releases.every(isTime)) return null;
   const kept: Activation[] = [];
   for (const entry of devices) {
     if (!entry || typeof entry !== "object") return null;

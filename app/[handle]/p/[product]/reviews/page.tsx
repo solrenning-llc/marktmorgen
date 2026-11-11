@@ -5,6 +5,8 @@ import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { productIdFromAddress, readListing } from "@/lib/catalog";
 import { lookStyle } from "@/lib/store-look";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { canUseDomain } from "@/lib/domains";
 import { SITE_URL } from "@/lib/site-url";
 import { REVIEWS_PER_PAGE, summaryOf, visibleReviews } from "@/lib/reviews";
@@ -49,6 +51,10 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) {
     redirect(`${SITE_URL}${productPath(store, product)}/reviews`);
   }
+
+  // As the product page it belongs to (lib/traffic.ts, isResting): one of the store's counted public requests, and a
+  // store whose window's requests are used rests, before its reviews are read.
+  if (await isResting(store)) return <StoreResting store={store} />;
 
   const query = await searchParams;
   const asked = Number(typeof query.page === "string" ? query.page : "1");

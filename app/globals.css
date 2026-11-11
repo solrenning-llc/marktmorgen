@@ -2555,6 +2555,14 @@ select.st-field:not([multiple]),
   align-items: center;
   min-height: 2.75rem;
 }
+/* The same on every other page under a store (tip, waitlist, letters, blog, manage, renew, pay, ...): a way back drawn
+   directly inside a <div> or <nav> stands alone, so it is a 44 px target too (2.5.5 AAA,
+   tests/store-back-links-target.test.ts). A link in a sentence sits in a <p> or <span> and keeps its line. */
+.st-page :is(div, nav) > a.st-footer-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
 /* A summary drawn as such a link (the presale's "Or join the waitlist") opens from a 44 px row by its padding, so it
    stays a list item with its triangle. The first padding is for a browser without the lh unit. */
 [data-store-layout] summary.st-footer-link {

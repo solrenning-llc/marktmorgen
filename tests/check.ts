@@ -8,6 +8,17 @@
  */
 let failures = 0;
 let checks = 0;
+/** Whether the file reached done(): only that ends it with 0. */
+let reached = false;
+
+// A file that stops before done(), on a promise that never settles, ends when the event loop empties, with code 0:
+// it would pass in CI without a word (Claude 6, 9 November 2026). At its exit it fails instead, with a line that
+// says so. A file that reached done(), or that already fails (a check, an error thrown), is left as it is.
+process.once("exit", (code) => {
+  if (reached || code !== 0) return;
+  console.log(`\nThis test file ended without reaching done() (${checks} checks ran): counted as a failure.`);
+  process.exitCode = 1;
+});
 
 /** Compares by value, prints the line, and remembers a failure. */
 export function is(what: string, got: unknown, want: unknown): void {
@@ -30,6 +41,7 @@ export function part(name: string): void {
 
 /** Ends the process with the right code: what makes this usable in CI. */
 export function done(): void {
+  reached = true;
   console.log(
     failures === 0
       ? `\n${checks} checks, all passing.`

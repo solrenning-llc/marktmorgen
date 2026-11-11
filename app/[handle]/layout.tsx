@@ -13,6 +13,7 @@ import { MailClick } from "@/components/mail-click";
 import { StoreChat } from "@/components/store-chat";
 import { StoreAssistant } from "@/components/store-assistant";
 import { SkipLink } from "@/components/skip-link";
+import { skipWords } from "@/lib/buyer-words/skip";
 import { chatOpen } from "@/lib/inbox";
 import { assistantShown } from "@/lib/store-assistant";
 import { lookStyle } from "@/lib/store-look";
@@ -83,9 +84,11 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
       redirect(`${SITE_URL}${own.startsWith("/") ? own : `/@${store.handle}`}`);
     }
   }
+  // What this layout draws around the page is in the store's language and marked with it (the root <html> is en-US).
+  const skip = store ? skipWords(store.language) : null;
   return (
     <>
-      {store && !store.suspended ? <SkipLink /> : null}
+      {store && !store.suspended ? <SkipLink {...skip} /> : null}
       {store && isHouseStore(store) ? <DemoStrip /> : null}
       {children}
       <StoreApp />
@@ -93,11 +96,11 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
       {store ? <MailClick /> : null}
       {/* The Store assistant, where it is on and paid for (lib/store-assistant.ts), or else the chat, where the creator turned it on (lib/inbox.ts): drawn from the store already read, nothing more asked of the server. */}
       {store && assistantShown(store) ? (
-        <div className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
+        <div lang={skip?.lang} className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
           <StoreAssistant handle={store.handle} storeName={store.name} language={store.language} />
         </div>
       ) : store && chatOpen(store) ? (
-        <div className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
+        <div lang={skip?.lang} className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
           <StoreChat handle={store.handle} storeName={store.name} language={store.language} />
         </div>
       ) : null}

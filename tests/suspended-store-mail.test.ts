@@ -19,7 +19,7 @@
  */
 import { readFileSync } from "node:fs";
 import { LIST_RETRY_SECONDS, advanceBroadcast } from "@/lib/broadcasts";
-import { MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, WAIT_COMMANDS_PER_TRY } from "@/lib/flow-limits";
+import { MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, SWITCHED_OFF_LOOKS_PER_WAIT, SWITCHED_OFF_LOOK_COMMANDS, WAIT_COMMANDS_PER_TRY } from "@/lib/flow-limits";
 import { LONGEST_DELAY_SECONDS, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { stopRules } from "@/lib/flow-stop-rules";
 import { countWaits, personOf, readRun } from "@/lib/flow-runs";
@@ -193,7 +193,8 @@ async function main(): Promise<void> {
   is("nothing goes out, nothing counted as sent", [messages.length - sentBefore, first.sent], [0, 0]);
   is("the step waits, looked at again a day after it began to wait", [first.later, await queuedAt("kai@example.com")], [1, kaiFirst + FIRST_LOOK]);
   is("the run is not ended", (await readRun(flowId, personOf("kai@example.com")))?.run.status === "ended", false);
-  is(`that look costs at most ${WAIT_COMMANDS_PER_TRY / 2} commands, half of any other workflow wait, so it may count as half`, firstCost > 0 && firstCost <= WAIT_COMMANDS_PER_TRY / 2, true);
+  is(`that look costs at most SWITCHED_OFF_LOOK_COMMANDS (${SWITCHED_OFF_LOOK_COMMANDS}), the share of a wait it counts as`, firstCost > 0 && firstCost <= SWITCHED_OFF_LOOK_COMMANDS, true);
+  is("and the looks counted as one wait cost no more than one wait, so the run stays within its bound", SWITCHED_OFF_LOOK_COMMANDS * SWITCHED_OFF_LOOKS_PER_WAIT <= WAIT_COMMANDS_PER_TRY, true);
   is("the run counts it as a look, not as a whole wait", await redisPipeline([["HMGET", `nl:wf:run:${flowId}:${personOf("kai@example.com")}`, "waits", "offLooks"]]), [[null, "1"]]);
 
   part("Still switched off at its first look: it waits again, its looks left spread over what is left");
@@ -208,7 +209,7 @@ async function main(): Promise<void> {
   const tenth = await run();
   is("nothing goes out on day 3", [messages.length - sentBefore, tenth.sent], [0, 0]);
   is("the run is not ended and stays in line for its next look", [(await readRun(flowId, personOf("kai@example.com")))?.run.status === "ended", await queuedAt("kai@example.com"), (kaiNext ?? 0) > kaiFirst + 3 * DAY], [false, kaiNext, true]);
-  is("a run of the job before then counts no wait and costs no wait's commands", commands - c10 < WAIT_COMMANDS_PER_TRY / 2, true);
+  is("a run of the job before then counts no wait and costs no wait's commands", commands - c10 < SWITCHED_OFF_LOOK_COMMANDS, true);
 
   part("A switch-off value in no known shape: the step still waits (rule 24)");
   await noteTakedown(maker, null, false);

@@ -46,6 +46,13 @@ is("the payout cost abroad is unknown, never zero, and no percentage is certifie
 is("the commission is owed only after payment and the 30-day refund window, and taken back on refund or dispute", [/30 days/.test(doc), /refund/i.test(doc), /dispute/i.test(doc)], [true, true, true]);
 is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
 
+part("Paying an affiliate: what was read, with its date and source (unit 2)");
+is("Stripe's own pages are cited, with the day they were read", ["https://stripe.com/connect/pricing", "https://docs.stripe.com/connect/cross-border-payouts", "https://docs.stripe.com/global-payouts", "https://docs.stripe.com/global-payouts/recipient-requirements"].every((url) => doc.includes(url)) && doc.includes("read on 11 November 2026"), true);
+is("Connect's published payout fees are quoted as read", ["$2 per monthly active account", "0.25% + 25¢ per payout sent", "Starting at 0.25% of payout volume"].every((quote) => doc.includes(quote)), true);
+is("a fee that only says where it starts is no ceiling, so it stays unknown", /starting at[^.]*is not a ceiling/i.test(doc), true);
+is("Brazil is not among Global Payouts' recipient countries for a US sender, as read", doc.includes("Brazil is not in the list"), true);
+is("PayPal, Wise and the IRS forms could not be read here and stay unknown", ["PayPal", "Wise", "W-8BEN", "W-9"].every((name) => new RegExp(`${name}[^\n]*(could not be read|unknown)`).test(doc)), true);
+
 part("The record is what the renderer writes");
 const path = "docs/marktmorgen-affiliates.md";
 is("docs/marktmorgen-affiliates.md is current (node scripts/marktmorgen-affiliates.mjs)", existsSync(path) ? readFileSync(path, "utf8") : "", doc);

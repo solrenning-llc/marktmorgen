@@ -357,9 +357,9 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     ("lesson-remove", "module-remove", "media-remove"), an assignment taken
  *     off with the work handed in ("task-remove"), a quiz taken off
  *     ("quiz-remove"), a student's certificate withdrawn ("withdraw") and a
- *     lesson comment deleted ("cm-delete"); and "launch" (app/api/store/
- *     waitlist: the product goes on sale with one email, in the creator's
- *     own words, to everyone on its waitlist);
+ *     lesson comment deleted ("cm-delete"). A waitlist's "launch" (one email,
+ *     in the creator's own words, to everyone on it) needs "send" since the
+ *     audit of 11 November 2026, so it is held by LOCKED_NEEDS above;
  *   - page: "remove" (a form with its answers, a site page, a saved block, a
  *     link, a short link, the store photo), "delete" (a blog post), "clear"
  *     (the questions the answers and the assistant missed) and "replace";
@@ -387,7 +387,7 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  * tests/locked-deletes.test.ts holds every route that deletes to one of them.
  */
 export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
-  products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
+  products: ["remove", "clear", "detach", "replace", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
   community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],

@@ -18,9 +18,11 @@ import { hasContent } from "@/lib/preorder-rules";
  * Either way off "coming soon", its pre-orders still waiting are handed over
  * (lib/preorders.ts), so it is refused while the product has nothing in it.
  *
- * A session let in without its second step (lib/two-step.ts) may not
- * "launch": that email goes to everyone on the list once, in the creator's own
- * words, and the list is spent. "soon" stays open to it: taking the mark off
+ * "launch" needs "send": that email goes to everyone on the list once, in the
+ * creator's own words, and the list is spent. So an Editor, who has no sending
+ * to the list (lib/team-roles.ts), may not launch, and neither may a session
+ * let in without its second step ("send" is one of lib/two-step.ts
+ * LOCKED_NEEDS). "soon" stays "products", open to both: taking the mark off
  * emails nobody on the waitlist, and the pre-orders it hands over get the
  * fixed delivery email (lib/preorders.ts sendOut), only to buyers who paid
  * for the product, with nothing typed in this request.
@@ -29,7 +31,8 @@ import { hasContent } from "@/lib/preorder-rules";
  * `{ ok: true, viewsUnread: true }` (CX-123 rule 24): saved, numbers unread.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "products", 4_000);
+  // Launching emails the whole waitlist: "send", as app/api/store/product-update (audit of the API routes, 11 Nov 2026).
+  const guarded = await guardStoreWrite(request, (body) => (body.action === "launch" ? "send" : "products"), 4_000);
   if (!guarded.ok) return guarded.response;
   const { store, body } = guarded;
   const id = typeof body.id === "string" ? body.id.slice(0, 40) : "";

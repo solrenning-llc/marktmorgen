@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   part("An Editor may not launch: that emails the whole waitlist");
   const launched = await post(editor, { action: "launch", note: "Typed by an editor", address: "" });
   is("refused", launched.status, 403);
-  is("refused for the role, not for anything else", launched.body?.error, "forbidden");
+  is("refused for the role (\"role\", lib/studio-route.ts refusedJson), not for the second step", launched.body?.error, "role");
   is("the product is still coming soon: nothing was launched", await isSoon(store, product.id), true);
 
   part("Control: the owner, with the same kind of session, launches");

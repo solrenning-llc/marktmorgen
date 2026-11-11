@@ -15,6 +15,29 @@ export const SUPPORT_EMAILS_PER_REQUEST = 2;
 /** A request's number: "SR-" and two groups of four symbols, without I, L, O or U. */
 export const SUPPORT_NUMBER = /^SR-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
+const BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/**
+ * A request's number from 5 random bytes: 40 bits, five at a time by shifts and masks, so each symbol is as likely.
+ * Pure, so the studio's form makes one number per request in the browser and sends it with every try: a try whose
+ * answer was lost and the next one are then the same request, under the same idempotency key (Codex U on #3617).
+ */
+export function supportNumberOf(bytes: Uint8Array): string {
+  if (bytes.length < 5) throw new Error("a support request number needs 5 random bytes");
+  let buffer = 0;
+  let held = 0;
+  let out = "";
+  for (let i = 0; i < 5; i++) {
+    buffer = ((buffer << 8) | bytes[i]) & 0xfff;
+    held += 8;
+    while (held >= 5) {
+      held -= 5;
+      out += BASE32[(buffer >> held) & 31];
+    }
+  }
+  return `SR-${out.slice(0, 4)}-${out.slice(4, 8)}`;
+}
+
 /** Text as it can be sent: invisible and control characters taken out (new lines and tabs kept), then trimmed. */
 export function cleanSupportText(raw: unknown): string {
   if (typeof raw !== "string") return "";

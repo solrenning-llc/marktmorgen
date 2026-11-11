@@ -29,6 +29,7 @@ let odd: Record<string, unknown> = {};
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   for (const command of commands) sent.push(command.map(String).join(" "));
+  if (commands.length === 1 && odd[String(commands[0][0])] === "LOST") return [];
   const replies = await pipeline(commands);
   return replies.map((reply, i) => (String(commands[i][0]) in odd ? odd[String(commands[i][0])] : reply));
 }) as typeof redis.pipeline;
@@ -84,6 +85,20 @@ for (const reply of ["lots", null, {}, [1, 2]]) {
     await assert.rejects(findPurchase(store, token, importedReference(store.statsId!, BUYER, ids[1])), UnknownReplyError);
   });
 }
+
+for (const reply of [1, {}, ["x"], "LOST"]) {
+  test(`a download of what was brought over whose entry reads ${JSON.stringify(reply)} is unknown, never "no such purchase"`, async () => {
+    const { store, ids, token } = await shop();
+    odd = { HGET: reply };
+    await assert.rejects(findPurchase(store, token, importedReference(store.statsId!, BUYER, ids[1])), UnknownReplyError);
+  });
+}
+
+test("an entry deleted between its id and its read (HGET nil) is no such purchase", async () => {
+  const { store, ids, token } = await shop();
+  odd = { HGET: null };
+  assert.equal(await findPurchase(store, token, importedReference(store.statsId!, BUYER, ids[1])), null);
+});
 
 test("readable replies still find what was brought over", async () => {
   const { store, ids, token } = await shop();

@@ -654,6 +654,8 @@ export async function partnerShareProblem(store: Store, share: PartnerShare, sel
 
 /** partnerShareProblem against `people` and `terms` already read (a batch checks many against one read). */
 function shareProblemAmong(terms: CommissionTerms, people: readonly Affiliate[], share: PartnerShare, self: string | null): ShareProblem | null {
+  // TODO(#1924, 4 open points awaiting Claude 1, canal para-claude-1 11/11/2026): #1924 left shares already past their
+  // end out of the cap. Main counts every approved partner's share, ended or not (the safe side); kept until decided.
   const others: Record<string, number[]> = {};
   for (const other of people) {
     if (other.id === self || other.status !== "approved" || !other.share) continue;
@@ -2008,14 +2010,49 @@ export class StudioNotPaidError extends Error {
  * UnknownReplyError as listAffiliates. A caller that pays nothing (PAID) reads as listAffiliates does.
  */
 async function paidPeople(store: Store, charge: Charge): Promise<Affiliate[]> {
-  if (charge === PAID || !store.statsId || !isRedisConfigured()) return listAffiliates(store);
+  const sorted = (people: Map<string, Read>) => [...people.values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
+  if (charge === PAID || !store.statsId || !isRedisConfigured()) return sorted(await capPeople(store));
   const meter = meterOf();
   const count = await peopleCount(store, meter);
   const taken = await take(charge, 2, readBytes(count));
   if (!taken) throw new StudioNotPaidError();
-  const people = await peopleExact(store, meter);
+  const people = await capPeople(store, meter);
   await settle(taken, meter);
-  return [...people.values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
+  return sorted(people);
+}
+
+/**
+ * Whether the fields of a stored record that the cap counts read exactly (Codex G on #1924, 630 [HN6](39)): its share
+ * (lib/partner-share.ts shareReadsExactly) and, when it holds one, its status. parseAffiliate reads a share that does
+ * not read as none and an unknown status as "pending", and either would drop a running commitment from the cap as if
+ * it were known not to be there. A record from before shares existed has no share field and still reads.
+ */
+function commitmentReads(raw: string): boolean {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const { share, status } = value as { share?: unknown; status?: unknown };
+    if (!shareReadsExactly(share)) return false;
+    return share === undefined || share === null || status === "pending" || status === "approved" || status === "declined" || status === "removed";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The program's people as the 90% cap reads them (paidPeople, batchPeople): every record whole (peopleExact drops one
+ * that does not parse, which here would drop a partner's running share from the cap) and every commitment read
+ * exactly (commitmentReads). Anything else is unknown, UnknownReplyError, and nothing is promised on it.
+ */
+async function capPeople(store: Store, meter?: Meter): Promise<Map<string, Read>> {
+  const out = new Map<string, Read>();
+  if (!store.statsId || !isRedisConfigured()) return out;
+  for (const [field, raw] of hashPairsExact(await piped(meter, [["HGETALL", peopleKey(store.statsId)]]), "an affiliate program's people")) {
+    const affiliate = parseAffiliate(raw);
+    if (!affiliate || !commitmentReads(raw)) throw new UnknownReplyError("a partner's record, for the cap");
+    out.set(field, { raw, affiliate });
+  }
+  return out;
 }
 
 type BatchWrite = { id: string; raw: string; change: (now: Affiliate) => Affiliate | null };
@@ -2109,7 +2146,8 @@ async function batchPeople(now: Store, charge: Charge): Promise<Map<string, Read
   const count = await peopleCount(now, meter);
   const taken = await take(charge, 2, readBytes(count));
   if (!taken) return "used";
-  const people = await peopleExact(now, meter);
+  // Every record read exactly for the cap (capPeople): one that does not read is unknown, never dropped.
+  const people = await capPeople(now, meter);
   await settle(taken, meter);
   return people;
 }

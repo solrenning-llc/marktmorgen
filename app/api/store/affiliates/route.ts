@@ -332,6 +332,9 @@ export async function POST(request: NextRequest) {
       const id = text(body.id, 20);
       const affiliate = await readAffiliate(store, id);
       if (!affiliate) return fail("unknown");
+      // TODO(#1924, 4 open points awaiting Claude 1, canal para-claude-1 11/11/2026): #1924 refused a share for
+      // somebody not approved (share_not_approved). Main lets the creator give one (it counts, cap checked, once they
+      // are approved); kept until Claude 1 decides.
       const now = Math.floor(Date.now() / 1000);
       if (body.share === null || body.percent === "" || body.percent === null) {
         const ended = await proposePartnerShare(store, id, null, now, charge);

@@ -32,7 +32,9 @@ async function main(): Promise<void> {
   const outcome = (promise: Promise<unknown>) => promise.then((value) => JSON.stringify(value), (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : `threw ${String(error)}`));
 
   part("Control: an old record with no share field, and a readable partner, still read");
-  await redis.pipeline([["HSET", key, "bbbbbbbbbbbb", JSON.stringify((({ share: _s, ...rest }) => rest)(person("bbbbbbbbbbbb")))]]);
+  const old: Record<string, unknown> = person("bbbbbbbbbbbb");
+  delete old.share;
+  await redis.pipeline([["HSET", key, "bbbbbbbbbbbb", JSON.stringify(old)]]);
   await redis.pipeline([["HSET", key, "cccccccccccc", JSON.stringify(person("cccccccccccc", { share: { percent: 30, products: [A] } }))]]);
   is("a share that fits is checked and passes", await outcome(partnerShareProblem(await store(), { percent: 20, products: [A] }, me)), "null");
 

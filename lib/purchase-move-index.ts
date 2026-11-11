@@ -149,7 +149,8 @@ export async function movedAwayTo(sid: string, raw: string): Promise<string | nu
   const second = repliesFor(await redisPipeline([["HGET", intoKey(sid, mark.to), address]]), 1);
   if (!second) throw new UnknownReplyError(what);
   const back = second[0];
-  if (back !== null && typeof back !== "string") throw new UnknownReplyError(what);
+  // A line is a move's id, as readMovedIndex reads it: anything else is unknown, never "not moved" (Claude 1 on #3717).
+  if (back !== null && (typeof back !== "string" || !ID.test(back))) throw new UnknownReplyError(what);
   return back === mark.id ? mark.to : null;
 }
 

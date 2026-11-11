@@ -146,8 +146,8 @@ export async function readFeedToken(token: string): Promise<FeedGrant | null> {
  * old addresses (at most MAX_MOVED_INTO) holds, each asked as the address
  * itself is, after one more of the store's public requests is taken for it
  * (no room throws, so the feed answers an error its app asks again after,
- * never "ended"). When the index cannot be read, nothing changes: the
- * address listens to what it bought itself, as if nothing moved.
+ * never "ended"). Move evidence that cannot be read throws too: never
+ * listening given back to an address that moved away, never a definite no.
  */
 export async function mayListen(store: Store, productId: string, email: string): Promise<boolean> {
   if (!store.statsId) return false;
@@ -157,22 +157,17 @@ export async function mayListen(store: Store, productId: string, email: string):
   if (!store.sid) return holds(email);
   const sid = store.sid;
   // Asked every time a feed is put together, so only the mark first (one command): the whole index is read only for
-  // an address that does not hold the product itself (tests/traffic-cost.ts, COMMANDS.feed).
-  try {
-    if (await movedAwayTo(sid, email)) return false;
-  } catch (error) {
-    console.error("the moved addresses could not be read; who may listen is answered as if nothing moved", error);
-    return holds(email);
-  }
+  // an address that does not hold the product itself (tests/traffic-cost.ts, COMMANDS.feed). Move evidence that
+  // cannot be read is unknown and goes up to the feed's retry (Claude 1 on #3717): never listening given back to
+  // an address that moved away, never a definite "holds none".
+  if (await movedAwayTo(sid, email)) return false;
   if (await holds(email)) return true;
-  let movedFrom: string[];
-  try {
-    movedFrom = (await readMovedIndex(sid, email)).movedFrom;
-  } catch (error) {
-    console.error("the moved addresses could not be read; who may listen is answered as if nothing moved", error);
-    return false;
-  }
-  const olds = movedFrom.slice(0, MAX_MOVED_INTO);
+  // The index read for an address that does not hold the product is paid with one of the store's public requests
+  // first, as the old addresses' readings are (Claude 1 on #3717, cost note): no room is unknown.
+  if (!(await takePublicRequest(store, "buyer", Date.now(), 1))) throw new UnknownReplyError("the store's room to read moved purchases");
+  const moved = await readMovedIndex(sid, email);
+  if (moved.movedFrom.length > MAX_MOVED_INTO) throw new UnknownReplyError("too many moved addresses to read completely");
+  const olds = moved.movedFrom;
   if (!olds.length) return false;
   // Each old address is one more reading, paid before it is made: no room is unknown, never "holds none".
   if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length))) throw new UnknownReplyError("the store's room to read moved purchases");

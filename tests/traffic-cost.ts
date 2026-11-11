@@ -146,8 +146,8 @@ export const COMMANDS = {
    * [WP10] unit 4e, each time also asks whether the address moved its
    * purchases away (lib/purchase-move-index.ts, movedAwayTo: a GET), one
    * command more; the whole index is read only for an address that does not
-   * hold the product itself, and each old address it then reads is paid
-   * with one more of the store's public requests first.
+   * hold the product itself, paid with one of the store's public requests
+   * first, and each old address it then reads is paid with one more.
    */
   feedFirst: 14,
   feed: 11,

@@ -98,13 +98,16 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
  * Whether a checkout for this product would hand over a product kept for a
  * report, read by app/api/store/checkout/route.ts before the checkout is built
  * (lib/store-checkout.ts writes a bundle's list and the ticked boxes onto the
- * order as they stand): "bundle" when the product is a bundle holding one,
+ * order as they stand): "held" when the product itself carries the keep mark
+ * (its hidden write may not have landed: holdReported writes the mark first,
+ * Claude 6's MEDIUM on #3471), "bundle" when the product is a bundle holding one,
  * "box" when a ticked box's product is held or is a bundle holding one,
  * "unavailable" when a hold cannot be read, null to go on. `bumps` is what the
  * form sent: the ticked boxes' product ids, or "yes" for the first box shown.
- * One read of the boxes' products, only when one is ticked, and one of holds.
+ * One read of the boxes' products, only when one is ticked, and one of holds,
+ * always (the product's own mark at least).
  */
-export async function heldInSale(store: Store, product: Listing, bumps: readonly string[]): Promise<"bundle" | "box" | "unavailable" | null> {
+export async function heldInSale(store: Store, product: Listing, bumps: readonly string[]): Promise<"held" | "bundle" | "box" | "unavailable" | null> {
   try {
     const inBundle = product.bundle ?? [];
     let ticked: Listing[] = [];
@@ -112,9 +115,9 @@ export async function heldInSale(store: Store, product: Listing, bumps: readonly
       const shown = activeBumps(await readListings(store, bumpTargets(product)), product);
       ticked = shown.filter((offer, at) => bumps.includes(offer.target.id) || (at === 0 && bumps.includes("yes"))).map((offer) => offer.target);
     }
-    const asked = [...inBundle, ...ticked.flatMap((target) => [target.id, ...(target.bundle ?? [])])];
-    if (asked.length === 0) return null;
+    const asked = [...new Set([product.id, ...inBundle, ...ticked.flatMap((target) => [target.id, ...(target.bundle ?? [])])])];
     const held = await heldIdsAmong(store, asked);
+    if (held.has(product.id)) return "held";
     if (inBundle.some((id) => held.has(id))) return "bundle";
     if (ticked.some((target) => touchesHeld(target, held))) return "box";
     return null;

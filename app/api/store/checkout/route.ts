@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
   // ticked box's product or a product of that box's bundle (lib/child-safety.ts). A hold that cannot be read refuses.
   const kept = await heldInSale(store, product, bumps);
   if (kept === "unavailable") return away(`/@${store.handle}?status=error`);
-  if (kept === "bundle") return away(`/@${store.handle}`);
+  if (kept === "held" || kept === "bundle") return away(`/@${store.handle}`);
   if (kept === "box") return away(`/@${store.handle}/p/${product.id}#buy`);
   // A bundle that holds too little that can be handed over right now is not sold.
   if (product.bundle) {

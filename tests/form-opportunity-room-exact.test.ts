@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     const { statsId, ref, room, draft } = fresh();
     is("a new deal is created", await create(statsId, ref, draft, room), "created");
     taken = await used(room);
-    is("its room is taken", taken > 0, true);
+    is("the new opportunity takes its exact 480-byte room", taken, 480);
     is("asked again, it is the existing one", await create(statsId, ref, draft, room), "existing");
     is("and its room is unchanged", await used(room), taken);
     is("one deal kept", (await readDeals(statsId, DEFAULT_STAGES)).length, 1);

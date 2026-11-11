@@ -58,6 +58,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   inbox: ["Can visitors chat with me, and where do I answer them?", "Can an AI answer my buyers' questions at any hour?"],
   integrations: ["Can I send my list to Mailchimp, Kit, beehiiv or MailerLite?", "Can I connect Zapier, Make or my own server?"],
   invite: ["Are creator invitations available?"],
+  invoices: ["What will it cost?", "Can I switch between monthly and yearly, or between the plans?", "What about refunds on the Marktmorgen subscription itself?"],
   labels: ["Can I keep my own details about people, and track deals?"],
   meetings: ["Can I sell paid calls?", "Can I run a community or a webinar?"],
   memberships: ["Can I sell a membership?"],

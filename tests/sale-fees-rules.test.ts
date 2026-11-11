@@ -16,7 +16,7 @@
  *     makes the report unavailable, never a lower number or zero;
  *   - a refund of a sale outside the reading says the sale is unknown.
  */
-import { readFeeLine, saleFees, type SaleFees } from "@/lib/sale-fees-rules";
+import { readFeeLine, saleFees, type FeeLine, type SaleFees } from "@/lib/sale-fees-rules";
 import { done, is, part } from "./check";
 
 const T0 = Date.UTC(2026, 9, 5, 12) / 1000;
@@ -107,7 +107,7 @@ function main(): void {
     { amount: 25, type: "payment_method_passthrough_fee" },
     { amount: 7, type: "some_new_fee" },
   ]);
-  const read = readFeeLine(withAll) as Record<string, number>;
+  const read = readFeeLine(withAll) as FeeLine;
   is("Stripe's fee, with pass-through fees", read.stripeFee, 345);
   is("tax on Stripe's fee apart", read.feeTax, 64);
   is("an application fee (commission) apart, here zero", read.applicationFee, 0);

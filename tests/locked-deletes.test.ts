@@ -435,6 +435,7 @@ async function main(): Promise<void> {
     "community/rsvp": ["not:a member taking back their own place at an event"],
     "course": ["act:products:lesson-remove", "act:products:module-remove", "act:products:media-remove", "act:products:task-remove", "act:products:quiz-remove", "act:products:withdraw", "act:products:cm-delete", "lockedFor"],
     "course/comment": ["lockedFor"],
+    "course/import": ["not:only the lesson texts the same request just wrote, taken back when the outline could not be written; it saves only onto a new course"],
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
     "creator-card": ["act:page:remove"],

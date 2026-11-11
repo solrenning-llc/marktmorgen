@@ -33,10 +33,19 @@
  * at least one letter; and an unknown prefix sends nothing (rule 24: unknown
  * is never success). Reading the prefix from the creator's account and
  * sending the parameter from each checkout are later units.
+ *
+ * The prefix's own shape (Codex H2 on #3594, from
+ * docs.stripe.com/get-started/account/statement-descriptors, read 10 November
+ * 2026): 2 to 10 characters, at least one letter, none of < > \ ' " *. A
+ * prefix in any other shape is unknown here, so it never stands in for a
+ * verified one.
  */
 
 /** The longest statement descriptor a card statement shows, prefix and separator included. */
 export const STATEMENT_DESCRIPTOR_MAX = 22;
+/** The shortest and longest account prefix Stripe gives (docs.stripe.com/get-started/account/statement-descriptors, read by Codex H2 on 10 November 2026). */
+export const PREFIX_MIN = 2;
+export const PREFIX_MAX = 10;
 /** Room kept for what joins the prefix and the suffix ("* "). */
 export const SEPARATOR_ROOM = 2;
 /** A suffix shorter than this tells the buyer nothing; nothing is sent. */
@@ -65,6 +74,19 @@ export function descriptorText(raw: string): string {
     .trim();
 }
 
+/** An account prefix in the shape Stripe gives one; anything else is unknown. */
+function isPrefix(prefix: unknown): prefix is string {
+  return (
+    typeof prefix === "string" &&
+    prefix.length >= PREFIX_MIN &&
+    prefix.length <= PREFIX_MAX &&
+    prefix === prefix.trim() &&
+    /^[\x20-\x7e]+$/.test(prefix) &&
+    !/[<>\\'"*]/.test(prefix) &&
+    /[A-Za-z]/.test(prefix)
+  );
+}
+
 /** Cut to the room, at the last whole word when one fits, otherwise at the room itself. */
 function cut(text: string, room: number): string {
   if (text.length <= room) return text;
@@ -78,12 +100,12 @@ function cut(text: string, room: number): string {
  * What to send after the creator's account prefix for a store named
  * `storeName`, or why nothing is sent. `prefix` is the account's
  * `settings.card_payments.statement_descriptor_prefix` exactly as read; any
- * value that is not a non-empty string of at most 22 characters is unknown.
+ * value not in the shape Stripe gives a prefix (PREFIX_MIN to PREFIX_MAX
+ * characters, at least one letter, printable ASCII without < > \ ' " *, no
+ * space at either end) is unknown, never taken as verified (Codex H2 on #3594).
  */
 export function statementSuffix(storeName: unknown, prefix: unknown): SuffixDecision {
-  if (typeof prefix !== "string" || !prefix.trim() || prefix.length > STATEMENT_DESCRIPTOR_MAX) {
-    return { kind: "skip", reason: "prefix-unknown" };
-  }
+  if (!isPrefix(prefix)) return { kind: "skip", reason: "prefix-unknown" };
   const name = typeof storeName === "string" ? descriptorText(storeName) : "";
   if (!/[A-Za-z]/.test(name)) return { kind: "skip", reason: "no-letter" };
   if (name.length < MIN_SUFFIX_LENGTH) return { kind: "skip", reason: "too-short" };

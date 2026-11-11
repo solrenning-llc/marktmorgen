@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import {
   descriptorText,
   MIN_SUFFIX_LENGTH,
+  PREFIX_MAX,
   SEPARATOR_ROOM,
   STATEMENT_DESCRIPTOR_MAX,
   statementSuffix,
@@ -110,17 +111,21 @@ test("a prefix in a shape Stripe does not give is unknown, never a verified pref
 });
 
 test("a prefix that leaves no useful room sends nothing", () => {
-  assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(19)), { kind: "skip", reason: "no-room" });
-  assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(20)), { kind: "skip", reason: "no-room" });
-  assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(STATEMENT_DESCRIPTOR_MAX)), { kind: "skip", reason: "no-room" });
-  // 18 leaves exactly the minimum.
+  // Stripe gives no prefix longer than PREFIX_MAX (10): a longer one is unknown before any room is counted.
+  assert.equal(PREFIX_MAX, 10);
+  for (const length of [11, 18, 19, 20, STATEMENT_DESCRIPTOR_MAX]) {
+    assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(length)), { kind: "skip", reason: "prefix-unknown" }, String(length));
+  }
+  // The longest prefix leaves 10 characters, cut at a whole word.
   assert.equal(MIN_SUFFIX_LENGTH, 2);
-  assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(18)), { kind: "send", suffix: "Yo", full: `${"X".repeat(18)}* Yo` });
+  assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(PREFIX_MAX)), { kind: "send", suffix: "Yoga Flow", full: `${"X".repeat(PREFIX_MAX)}* Yoga Flow` });
+  // A cut that leaves less than the minimum still sends nothing.
+  assert.deepEqual(statementSuffix("A Bcdefghijklmnop", "X".repeat(PREFIX_MAX)), { kind: "skip", reason: "no-room" });
 });
 
 test("a name the prefix already shows is not repeated", () => {
   assert.deepEqual(statementSuffix("Yoga Flow", "YOGA FLOW"), { kind: "skip", reason: "in-prefix" });
-  assert.deepEqual(statementSuffix("yoga flow", "YOGA FLOW LLC"), { kind: "skip", reason: "in-prefix" });
+  assert.deepEqual(statementSuffix("flow", "YOGA FLOW"), { kind: "skip", reason: "in-prefix" });
   assert.equal(statementSuffix("Yoga Flow Studio", "YOGA").kind, "send");
   // Cut to the room first: "Yoga Flow Studio" after "YOGA FLOW" leaves "Yoga Flow", already shown.
   assert.deepEqual(statementSuffix("Yoga Flow Studio", "YOGA FLOW"), { kind: "skip", reason: "in-prefix" });

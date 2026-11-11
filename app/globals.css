@@ -1987,6 +1987,16 @@ a.chip {
   list-style: decimal;
   padding-left: 1.3em;
 }
+/* The page where a person signs a creator's agreement (app/[handle]/sign/[agreement]/page.tsx), drawn from its own
+   signing form (tests/sign-page-accessibility.test.ts): no paragraph wider than 80 characters (1.4.8 AAA), and the
+   "I agree" label a 44 px tall target (2.5.5 AAA). A notice box keeps its width. */
+main:has(form[action="/api/store/agreement-sign"]) :where(p, li, dd):not(.st-note) {
+  max-width: 46ch;
+}
+form[action="/api/store/agreement-sign"] label:has(> input[type="checkbox"]) {
+  min-height: 2.75rem;
+  align-items: center;
+}
 .legal-body li + li {
   margin-top: 0.4em;
 }

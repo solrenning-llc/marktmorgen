@@ -58,6 +58,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES } from "@/lib/store";
+import { MAIL_GAP_CHECKS_PER_EMAIL } from "@/lib/mail-frequency";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
@@ -656,6 +657,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },
   "nl:mail:drafts:@lib/mail-drafts.ts": { what: "Email drafts", parts: [capped(MAX_DRAFTS * (MAX_MAIL_BODY * 3 + 2 * KB), "MAX_DRAFTS drafts.", src("lib/mail-drafts.ts", "MAX_DRAFTS"), src("lib/mail.ts", "MAX_MAIL_BODY"))] },
+  // 374 [SU7] unit 2: the per-person email gap. Each person checked may be written once (a claim and its record), seven days at the most;
+  // checks are at most MAIL_GAP_CHECKS_PER_EMAIL a monthly email in a calendar month, and a billing month touches two.
+  "nl:mgap:last:@lib/mail-frequency.ts": short("When a person was last sent one of the store's emails, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
+  "nl:mgap:gate:@lib/mail-frequency.ts": short("The one claim on a person's next email from the store, seven days", "monthly", 7, 2 * MAIL_GAP_CHECKS_PER_EMAIL * MARK),
+  "nl:mgap:checks:@lib/mail-frequency.ts": { what: "The store's count of gap checks in a calendar month, forty days", parts: [capped(2 * MARK, "One count a calendar month, forty days: the current and the last alive at once.", src("lib/mail-frequency.ts", "MAIL_GAP_CHECK_WINDOW_SECONDS = 40 * 86_400"))] },
   "nl:mail:health:@lib/mail-health.ts": { what: "Sent, bounced and complained, by the day; addresses already counted", parts: [per("day", 33, 128, "A day's counts."), per("monthly", 33, MARK, "An address counted this week.", MAIL("list"))] },
   "nl:mail:paused:@lib/mail-health.ts": { what: "Why sending is paused", parts: [capped(KB, "One a store.")] },
   "nl:mail:ramp:@lib/mail-health.ts": { what: "The portion being sent", parts: [capped(KB, "One a store.")] },

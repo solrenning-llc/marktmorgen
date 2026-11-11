@@ -55,6 +55,9 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { MAIL_GAP_COMMANDS_PER_CHECK, MAIL_GAP_TRIAL_CHECKS, mailGapCheckLimit } from "@/lib/mail-frequency";
+/** A gap mark moved: its key (the gate's, the longest, is 92 characters with a 32-character store id: nl:mgap:gate:{32}:{32}:{13}) with a time or a claim value (23), rounded up (tests/store-data-registry.ts, MARK). */
+const MAIL_GAP_MARK_BYTES = 160;
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -965,6 +968,15 @@ export const COST_LINES: CostLine[] = [
     basis: "Every monthly email sent, at the most an email costs.",
   },
   {
+    id: "mail-gap",
+    feature: "Nobody gets too many emails (374 [SU7], 11 November 2026): each person checked against the store's gap before a list email or automation",
+    monthlyUsd: (tier) => 2 * mailGapCheckLimit(tier, false) * (MAIL_GAP_COMMANDS_PER_CHECK * COMMAND + 2 * MAIL_GAP_MARK_BYTES * DB_BYTE),
+    sources: [
+      { file: "lib/mail-frequency.ts", names: ["MAIL_GAP_CHECKS_PER_EMAIL", "MAIL_GAP_COMMANDS_PER_CHECK", "takeChecks", "mailGapCheckLimit", "MAIL_GAP_TRIAL_CHECKS", "if (count > limit) return false"] },
+    ],
+    basis: "Checks are taken from the store's calendar month before any read, at most MAIL_GAP_CHECKS_PER_EMAIL for each monthly email of the plan (none on Store); a billing month touches two calendar months. Each check costs at most MAIL_GAP_COMMANDS_PER_CHECK commands (the count, its give-back, the read, the claim, its read-back and the record) and moves two marks; what the marks keep for seven days is in the data room's families nl:mgap:*. A send past the checks reads nothing; a send refused there still costs its count's three commands (SET NX, INCRBY, DECRBY), bounded and counted by its caller's own attempts (the runs and studio requests that send) when the gap is wired into a send. A store in its free trial checks at MAIL_GAP_TRIAL_CHECKS, priced in the trial's own exposure (nonPayingWorst), not here.",
+  },
+  {
     id: "transactional-email",
     feature: "Buyers' access emails: links to their purchases, a course, a private podcast, a community, a membership to manage, a member's sign-in, an affiliate's link (17 October 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "transactional"),
@@ -1560,6 +1572,8 @@ export function nonPayingWorst(): number {
     + requests
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
+    // The email gap's checks at the trial's figure, over the two calendar months a billing month touches (line mail-gap).
+    + 2 * MAIL_GAP_TRIAL_CHECKS * (MAIL_GAP_COMMANDS_PER_CHECK * COMMAND + 2 * MAIL_GAP_MARK_BYTES * DB_BYTE)
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)

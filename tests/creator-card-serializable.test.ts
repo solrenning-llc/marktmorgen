@@ -32,6 +32,6 @@ const props = { initial: { on: true, name: "Ana Souza", title: "", email: "", ph
 is("the editor's props hold no function", hasFunction(props), false);
 const html = renderToStaticMarkup(createElement(CreatorCardEditor, props));
 is("the editor still says the store line in the store's language", html.includes("Visitar Ana&#x27;s Pottery"), true);
-is("and the card's other words", html.includes("Guardar contacto"), true);
+is("and the card's other words", html.includes("Guardar o contacto"), true);
 
 done();

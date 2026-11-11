@@ -49,6 +49,7 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   unknown: "That pitch is no longer here. Reload the page.",
   server_error: "Something went wrong on our side. Try again in a moment. If an email was being written, this try may have counted as one of this month's writing jobs.",
+  unavailable: "This could not be checked just now. Reload the page to see where it stands, then try again.",
 };
 
 const STATUS_WORDS: Record<PitchStatus, string> = {

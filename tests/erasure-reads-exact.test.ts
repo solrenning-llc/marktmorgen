@@ -46,7 +46,7 @@ async function outcome(pick: (b: Batch) => boolean, alter: (real: unknown[]) => 
 
 const COMMUNITY = "c0ffee00c0ffee00c0ffee00c0ffee00";
 const STATS = "0123456789abcdef0123456789abcd02";
-const store = { sid: "erasereadsstore01", listId: "0123456789abcdef0123456789abcd03" } as unknown as Store;
+const store = { sid: "0123456789abcdef0123456789abcd03", listId: "0123456789abcdef0123456789abcd04" } as unknown as Store;
 
 const steps: [string, (b: Batch) => boolean, () => Promise<unknown>][] = [
   ["forgetRsvpsPerson: the event index", (b) => b.length === 1 && b[0][0] === "ZRANGEBYSCORE", () => forgetRsvpsPerson(COMMUNITY, "member01", "a@example.com")],
@@ -70,6 +70,8 @@ async function seed(): Promise<void> {
 
 for (const [label, pick, run] of steps) {
   for (const [shape, alter] of SHAPES) {
+    // Text is HGET's own shape: another member's id is "not theirs", rightly.
+    if (label.startsWith("forgetHandle: who") && shape.startsWith("text")) continue;
     test(`${label} read as ${shape}: throws, never a count standing for "erased"`, async () => {
       await seed();
       assert.equal(await outcome(pick, alter, run), "threw");

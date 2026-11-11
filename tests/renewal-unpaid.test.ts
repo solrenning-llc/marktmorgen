@@ -19,6 +19,7 @@
  *     say the same words.
  */
 import { readFileSync } from "node:fs";
+import { mock } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { isPaidUp, renewalInvoicePage, stateOf } from "@/lib/billing";
@@ -74,7 +75,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 function subscription(status: string, over: Record<string, unknown> = {}, invoice: Record<string, unknown> = {}): Record<string, unknown> {
-  const period = paidPeriod();
+  const period = paidPeriod(NOW * 1_000);
   return {
     id: SUB,
     status,
@@ -82,6 +83,8 @@ function subscription(status: string, over: Record<string, unknown> = {}, invoic
     trial_end: NOW - 76 * DAY,
     metadata: { store: handle },
     customer: { email: owner },
+    cancel_at: null,
+    cancel_at_period_end: false,
     items: { data: [{ current_period_start: period.start, current_period_end: period.end, price: { lookup_key: "nimbus_labs_pro_month", unit_amount: 44900, recurring: { interval: "month" } } }] },
     latest_invoice: { id: "in_RenewalUnpaid01", status: "open", amount_due: 44900, hosted_invoice_url: "https://invoice.stripe.com/i/acct_x/test_unpaid", next_payment_attempt: NOW + 3 * DAY, ...invoice },
     ...over,
@@ -94,7 +97,7 @@ async function setup() {
   emails.length = 0;
   await claimHandle(owner, handle, "Renewal unpaid shop", "");
   await ensureStatsId(owner);
-  await setSubscription(owner, { customerId: "cus_RenewalUnpaid01", subscriptionId: SUB, active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+  await setSubscription(owner, { customerId: "cus_RenewalUnpaid01", subscriptionId: SUB, active: true, tier: "pro", cycle: "month", period: paidPeriod(NOW * 1_000) });
   return (await storeForEmail(owner))!;
 }
 
@@ -111,7 +114,7 @@ async function main() {
     is("an active plan is not unpaid", paid.state === "active" && paid.renewalUnpaid, false);
     const trial = stateOf(subscription("trialing", { trial_end: NOW + 5 * DAY }));
     is("a trial is not unpaid", trial.state === "active" && trial.renewalUnpaid, false);
-    const period = paidPeriod();
+    const period = paidPeriod(NOW * 1_000);
     const afterTrial = stateOf(subscription("past_due", { trial_end: period.start }));
     is("the first payment after a trial is still not a running plan", afterTrial.state, "inactive");
   }
@@ -129,8 +132,16 @@ async function main() {
     is("not in line for closing", await scored(ENDED_INDEX, storeRef(unpaid)), false);
     is("no longer in the list of stores that pay", (await members(PAYING_INDEX)).includes(storeRef(unpaid)), false);
     is("its billing month is kept", allowanceWindow(unpaid)?.billing, true);
-    is("a second reading writes nothing", await recordState(unpaid, stateOf(subscription("past_due"))), false);
-    await setSubscription(owner, { active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+    // Re-reading the same Stripe fixture must stay unchanged even when the
+    // wall clock crosses a second between the two reads.
+    const secondReadAt = Date.now() + 1_000;
+    const clock = mock.method(Date, "now", () => secondReadAt);
+    try {
+      is("a second reading writes nothing", await recordState(unpaid, stateOf(subscription("past_due"))), false);
+    } finally {
+      clock.mock.restore();
+    }
+    await setSubscription(owner, { active: true, tier: "pro", cycle: "month", period: paidPeriod(NOW * 1_000) });
     is("a write that does not say keeps the first day", (await storeForEmail(owner))!.renewalUnpaidSince, since);
     is("paid: written again", await recordState((await storeForEmail(owner))!, stateOf(subscription("active"))), true);
     const paid = (await storeForEmail(owner))!;
@@ -138,7 +149,7 @@ async function main() {
     is("paid: back in the list of stores that pay", (await members(PAYING_INDEX)).includes(storeRef(paid)), true);
 
     await recordState(paid, stateOf(subscription("past_due")));
-    await setSubscription(owner, { subscriptionId: "sub_AnotherPlan0001", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+    await setSubscription(owner, { subscriptionId: "sub_AnotherPlan0001", active: true, tier: "pro", cycle: "month", period: paidPeriod(NOW * 1_000) });
     is("another subscription starts paid up", (await storeForEmail(owner))!.renewalUnpaidSince, 0);
     await recordState((await storeForEmail(owner))!, { ...stateOf(subscription("past_due")) });
     await setSubscription(owner, { active: false });
@@ -198,6 +209,33 @@ async function main() {
     is("the email says what stopped and what did not", [emails[0]?.text.includes(RENEWAL_PAUSED_WORDS), emails[0]?.text.includes(RENEWAL_KEPT_WORDS), emails[0]?.text.includes(RENEWAL_RESUME_WORDS)], [true, true, true]);
     is("it no longer says the store keeps taking payments", emails[0]?.text.includes("keeps taking payments"), false);
 
+    // CX-123 rule 24: a renewal whose reply does not carry its stop fields
+    // exactly is "unknown", never "not unpaid". The email says what has
+    // stopped, so it waits: nothing is sent, the store is not touched, the
+    // claim is let go, and the next run with a full reply does both.
+    await setup();
+    const unknownRenewal = subscription("past_due");
+    delete unknownRenewal.cancel_at;
+    is("a renewal reply without cancel_at is unknown", stateOf(unknownRenewal), { state: "unknown" });
+    let refused = false;
+    try { await recordUnpaidRenewal(unknownRenewal); } catch { refused = true; }
+    is("recordUnpaidRenewal refuses an unknown plan rather than answering 'not unpaid'", refused, true);
+    list = [unknownRenewal];
+    emails.length = 0;
+    const held = await sendFailedPlanNotices();
+    is("no email goes while the plan is unknown", [held.sent, held.failed, emails.length], [0, 1, 0]);
+    is("the store is not recorded unpaid", (await storeForEmail(owner))!.renewalUnpaidSince ?? 0, 0);
+    is("the claim is let go, so the next run tries again", (await redis.pipeline([["GET", "nl:remind:failed:in_RenewalUnpaid01"]]))[0], null);
+    list = [subscription("past_due")];
+    const retried = await sendFailedPlanNotices();
+    is("the next run with a full reply writes it down and sends the one email",
+      [retried.sent, emails.length, ((await storeForEmail(owner))!.renewalUnpaidSince ?? 0) > 0], [1, 1, true]);
+    const recorded = (await storeForEmail(owner))!.renewalUnpaidSince;
+    refused = false;
+    try { await recordUnpaidRenewal(unknownRenewal); } catch { refused = true; }
+    is("an unknown reply is refused even once the renewal is written down", refused, true);
+    is("and the written day is kept", (await storeForEmail(owner))!.renewalUnpaidSince, recorded);
+
     // Another store's subscription: nothing of this store is touched.
     await setup();
     is("a subscription the store did not write down is not recorded", await recordUnpaidRenewal({ ...subscription("past_due"), id: "sub_NotThisStore01" }), null);
@@ -206,7 +244,7 @@ async function main() {
 
     // The first payment after a trial is not a renewal: left to the daily job.
     await setup();
-    const period = paidPeriod();
+    const period = paidPeriod(NOW * 1_000);
     list = [subscription("past_due", { trial_end: period.start })];
     await sendFailedPlanNotices();
     is("after a trial, nothing is recorded as an unpaid renewal", (await storeForEmail(owner))!.renewalUnpaidSince, 0);

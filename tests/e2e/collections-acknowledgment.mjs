@@ -1,4 +1,26 @@
 /** All collection saves/removals intercepted; generated ids are synthetic only. */
+/** Test actual geometry, including a disabled first-row move button. */
+export async function checkCollectionProductTargets({section,is}){
+ const controls=section.getByRole("button",{name:/^(?:Move .+ up|Take .+ out)$/});
+ is("collection has real product controls",await controls.count()>0,true);
+ for(const control of await controls.all()){
+  const box=await control.boundingBox();
+  is("collection target is at least 44px: "+await control.getAttribute("aria-label"),Boolean(box&&box.width>=44&&box.height>=44),true);
+ }
+}
+
+/** With no page scripts, SSR must not advertise an editing action it cannot run. */
+export async function checkCollectionsBeforeHydration({browser,LOCAL,fixture,is,width}){
+ const context=await browser.newContext({javaScriptEnabled:false,viewport:{width,height:900}});
+ try{
+  await context.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
+  const page=await context.newPage();
+  await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
+  const section=page.locator("[data-collections-editor]");await section.waitFor({state:"attached"});
+  is("collections editing waits for hydration "+width,await section.locator("input,textarea,select,button").evaluateAll(nodes=>nodes.length>0&&nodes.every(n=>n.disabled)),true);
+ }finally{await context.close();}
+}
+
 export async function checkCollectionsAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
  {name:"HTTP",status:500,reply:value=>value},{name:"truthy",reply:value=>({...value,ok:"true"})},
@@ -9,6 +31,7 @@ export async function checkCollectionsAcknowledgment({browser,LOCAL,fixture,is})
  {name:"confirmed",reply:value=>value,confirmed:true}
  ];
  for(const width of [390,1280]){
+  await checkCollectionsBeforeHydration({browser,LOCAL,fixture,is,width});
   const context=await browser.newContext({viewport:{width,height:900}});
   try{
    await context.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
@@ -27,6 +50,7 @@ export async function checkCollectionsAcknowledgment({browser,LOCAL,fixture,is})
    await section.getByLabel("Collection 1: name",{exact:false}).fill("Guides  pour vous");
    await section.getByLabel("A line about it (optional)",{exact:false}).fill("Pour  apprendre.");
    await section.getByRole("button",{name:"Add to this collection",exact:true}).click();
+   await checkCollectionProductTargets({section,is});
    for(const phase of ["create","edit","remove"]){
     if(phase==="edit")await section.getByLabel("Collection 1: name",{exact:false}).fill("Guides  suivants");
     if(phase==="remove")await section.getByRole("button",{name:"Remove collection 1",exact:true}).click();

@@ -13,6 +13,7 @@ const ERRORS: Record<string, string> = {
   too_many: "Up to 20 products can give roles. Take a product off before adding another.",
   server: "Discord could not be reached just now. Nothing was changed; try again in a moment.",
   not_connected: "No server is connected any more. Reload the page.",
+  unavailable: "We could not read your Discord connection just now. Nothing was changed; try again in a few minutes.",
   name: "Type a name for the role.",
   signed_out: "Your session ended. Log in again.",
 };

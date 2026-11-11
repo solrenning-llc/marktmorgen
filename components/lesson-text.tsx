@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { NewTab } from "@/components/new-tab";
 import { lessonBlocks } from "@/lib/lesson-blocks";
+import { lessonHtmlDocument } from "@/lib/lesson-html";
 
 /**
  * A lesson's text, the way the creator typed it: paragraphs separated by a
@@ -29,7 +30,7 @@ function Linked({ text }: { text: string }) {
 }
 
 /** `codeLabel` names each block of code for a screen reader, in the page's language (the lesson page passes its own word; the studio's preview is in English). */
-export function LessonText({ text, codeLabel = "Code" }: { text: string; codeLabel?: string }) {
+export function LessonText({ text, codeLabel = "Code", htmlPreviewLabel }: { text: string; codeLabel?: string; htmlPreviewLabel?: string }) {
   return (
     <div className="space-y-4 leading-relaxed">
       {lessonBlocks(text).map((block, i) =>
@@ -41,6 +42,16 @@ export function LessonText({ text, codeLabel = "Code" }: { text: string; codeLab
               </li>
             ))}
           </ul>
+        ) : block.kind === "html" ? (
+          <iframe
+            key={i}
+            title={htmlPreviewLabel ?? `${codeLabel}: HTML`}
+            sandbox=""
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            srcDoc={lessonHtmlDocument(block.source)}
+            className="min-h-64 w-full rounded-[var(--r-sm)] border border-[var(--st-line)] bg-white"
+          />
         ) : block.kind === "code" ? (
           // Code as saved, as text: scrolled sideways rather than wrapped, reachable by keyboard to scroll, in the store's own colors (lib/store-look.ts) with a focus ring like its buttons'. A named group, not a landmark, so the stop it makes has a name and a lesson with many blocks adds no regions; never translated by the browser.
           <pre

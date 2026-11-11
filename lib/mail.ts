@@ -14,10 +14,11 @@
  * has a published number of emails, counted before each batch goes out.
  */
 import { bodyHtml, bodyText } from "@/lib/mail-body";
-import { lookColours } from "@/lib/store-look";
+import { emailTheme } from "@/lib/email-theme";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -84,6 +85,20 @@ export function monthlyAllowance(store: Store, nowSeconds = Date.now() / 1000): 
 /** Whether the store is still in its free trial, when the smaller allowance applies. */
 export function inTrial(store: Store, nowSeconds = Date.now() / 1000): boolean {
   return store.trialEnds > nowSeconds;
+}
+
+/**
+ * The emails the month has used, read exactly, for what decides whether an email may go (lib/broadcasts.ts): GET
+ * answers the counter's text, which a give-back can take below zero, or nil before the first one is counted. Any
+ * other answer throws (CX-123 rule 24), never an untouched month.
+ */
+export async function usedThisMonthExact(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
+  if (!listId || !window || !isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["GET", usedKey(listId, window)]]), 1);
+  const raw = replies?.[0];
+  if (replies && raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|-?[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError("the month's emails used");
+  return Number(raw);
 }
 
 export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
@@ -336,29 +351,67 @@ export async function reserve(store: Store, n: number, listOnly = false): Promis
  * Zero when the store has no allowance or the count cannot be written.
  */
 export async function takeFromMonth(store: Store, n: number): Promise<number> {
-  if (!Number.isSafeInteger(n) || n <= 0 || !store.listId || !isRedisConfigured()) return 0;
-  const allowance = monthlyAllowance(store);
-  const window = windowOf(store);
-  if (!Number.isSafeInteger(allowance) || allowance <= 0 || !window) return 0;
-  if (!(await admitNonPaying(store))) return 0;
-  if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return 0;
+  const month = await monthToTake(store, n);
+  if (!month) return 0;
   try {
-    const key = usedKey(store.listId, window);
-    const results = await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 70 * 86400]]);
-    const total = confirmedCount(results[0], n);
-    if (results.length !== 2 || total === null) return 0;
-    const over = Math.min(n, Math.max(0, total - allowance));
-    if (over > 0) await redisPipeline([["DECRBY", key, over]]);
-    return n - over;
+    return await takeCounted(month.key, n, month.allowance);
   } catch {
     return 0;
   }
 }
 
-/** Gives back to the store's month what takeFromMonth took for emails that did not go. */
+/**
+ * takeFromMonth for a caller that refuses on an unknown answer (a members import's start, lib/imports.ts): the same
+ * rules and the same counter, but a count whose reply has another shape throws UnknownReplyError (CX-123 rule 24)
+ * instead of answering 0. What that reply may have taken is not given back, as in takeFromMonth.
+ */
+export async function takeFromMonthExact(store: Store, n: number): Promise<number> {
+  const month = await monthToTake(store, n);
+  return month ? takeCounted(month.key, n, month.allowance) : 0;
+}
+
+/** The month takeFromMonth takes from, or null when it can send none: no allowance, window, list or place, or a funded period not reserved. */
+async function monthToTake(store: Store, n: number): Promise<{ key: string; allowance: number } | null> {
+  if (!Number.isSafeInteger(n) || n <= 0 || !store.listId || !isRedisConfigured()) return null;
+  const allowance = monthlyAllowance(store);
+  const window = windowOf(store);
+  if (!Number.isSafeInteger(allowance) || allowance <= 0 || !window) return null;
+  if (!(await admitNonPaying(store))) return null;
+  if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return null;
+  return { key: usedKey(store.listId, window), allowance };
+}
+
+/** Takes up to `n` under `allowance` on the month's counter; a count in another shape throws UnknownReplyError. */
+async function takeCounted(key: string, n: number, allowance: number): Promise<number> {
+  const results = repliesFor(await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 70 * 86400]]), 2);
+  const total = results ? confirmedCount(results[0], n) : null;
+  if (total === null) throw new UnknownReplyError("the month's emails used");
+  const over = Math.min(n, Math.max(0, total - allowance));
+  if (over > 0) await redisPipeline([["DECRBY", key, over]]);
+  return n - over;
+}
+
+/**
+ * Gives back up to ARGV[1] of a count, never below zero (second review on #3384, HIGH): a give-back that comes twice,
+ * or for more than was taken, never leaves the month's count below what went, so nothing else can send past the plan
+ * on it. The count is read exactly (CX-123 rule 24): absent is nothing to give back; a whole number is taken down by
+ * at most itself; any other value is an error, and nothing is changed. Answers how many were given back.
+ */
+export const GIVE_BACK_FLOOR = `-- marktmorgen:give-back-floor:v1
+local held = redis.call('GET', KEYS[1])
+if not held then return 0 end
+if not string.match(held, '^-?%d+$') then return redis.error_reply('ERR give-back-floor: not a count') end
+local back = math.min(tonumber(ARGV[1]), tonumber(held))
+if back <= 0 then return 0 end
+redis.call('DECRBY', KEYS[1], back)
+return back`;
+/** What GIVE_BACK_FLOOR costs beside the DECRBY it replaces: the EVAL and its GET, which Upstash bills one by one beside the DECRBY. */
+export const GIVE_BACK_FLOOR_EXTRA_COMMANDS = 2;
+
+/** Gives back to the store's month what takeFromMonth took for emails that did not go, never below zero (GIVE_BACK_FLOOR). */
 export async function giveBackToMonth(store: Store, n: number): Promise<void> {
   const window = windowOf(store);
-  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["DECRBY", usedKey(store.listId, window), n]]);
+  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n]]);
 }
 
 /** Gives back what was taken for a batch that was not sent. */
@@ -426,13 +479,22 @@ export function render(
   // Said only in a sequence's email to somebody who allowed it, with the way to stop it.
   const counting = Boolean(readerKey && token && !door && tag?.medium === "sequence");
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
-  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><body style="margin:0;padding:0;background:#f7f5f0">
-<div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
-<div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined)}</div>
-<div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
+  // The store's own look, every color checked to read at 7:1 (lib/email-theme.ts, 369 [SU2]); the text version does not change.
+  // The store's name in words, never its photo: no picture of this site in the header (lib/email-theme.ts).
+  const t = emailTheme(store.look, { name: store.name ?? fromName });
+  const top = `<p style="margin:0;font-family:${t.headFont};font-size:18px;font-weight:700;line-height:1.3">${escape(t.name)}</p>`;
+  const header = t.band
+    ? `<div style="background:${t.band.fill};color:${t.band.ink};border-radius:16px;padding:16px 24px;margin:0 0 12px">${top}</div>`
+    : `<div style="color:${t.text};padding:0 4px 16px">${top}</div>`;
+  // The subject as the document's title and the character set said, for an app or browser that opens the HTML on its own.
+  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title><meta name="color-scheme" content="${t.scheme}"><meta name="supported-color-schemes" content="${t.scheme}"></head><body style="margin:0;padding:0;background:${t.page}">
+<div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:${t.bodyFont};font-size:16px;line-height:1.6;color:${t.text};background:${t.page}">
+${header}
+<div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, t.button.fill, t)}</div>
+<div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:${t.muted}">
 <p style="margin:0 0 8px">${escape(why)}</p>
-<p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:#57534e;text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
-${counting ? `<p style="margin:0 0 8px">${escape(a.clicksOn(fromName))} <a href="${escape(stopCounting)}" style="color:#57534e;text-decoration:underline">${escape(a.clicksStop)}</a></p>` : ""}
+<p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:${t.muted};text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
+${counting ? `<p style="margin:0 0 8px">${escape(a.clicksOn(fromName))} <a href="${escape(stopCounting)}" style="color:${t.muted};text-decoration:underline">${escape(a.clicksStop)}</a></p>` : ""}
 ${address ? `<p style="margin:0 0 8px">${escape(fromName)} · ${escape(address)}</p>` : ""}
 <p style="margin:0">${escape(sent)}</p>
 </div></div></body></html>`;
@@ -522,7 +584,7 @@ export async function sendTo(
   // A missing checkpoint is not evidence that this list is safe to send.
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
-  const tags = healthTags(store, true);
+  const tags = healthTags(store, true, tag?.campaign);
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
     if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };
@@ -538,7 +600,17 @@ export async function sendTo(
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
-    const tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    // Who may still be written to, and their links, read in their exact shape (lib/contacts.ts tokensFor): an
+    // unknown answer is not "they all left", so nobody in this batch is counted as gone. Nothing went to the
+    // provider, so what was taken for it is given back and the batch is tried again later.
+    let tokens: Map<string, string>;
+    try {
+      tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    } catch {
+      await release(store, chunk.length);
+      await rampBack(watched, chunk.length);
+      return { done, rest: emails.slice(i), stopped: "retry" };
+    }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))

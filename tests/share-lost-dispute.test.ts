@@ -10,7 +10,7 @@ function world(disputed=true) {
  globalThis.fetch=async(input,init)=>{
   const url=new URL(String(input));const method=init?.method??"GET",headers=new Headers(init?.headers),body=new URLSearchParams(String(init?.body??""));calls.push({url,method,headers,body});
   assert.equal(url.origin,"https://api.stripe.com");
-  if(url.pathname==="/v1/charges/"+fee.charge)return Response.json({id:fee.charge,currency:"usd",amount:10000,amount_refunded:0,disputed,payment_intent:{id:"pi_DisputeProof01",metadata:{share_bps:"625",share_base:"10000"}}});
+  if(url.pathname==="/v1/charges/"+fee.charge)return Response.json({object:"charge",id:fee.charge,currency:"usd",amount:10000,amount_refunded:0,disputed,invoice:null,payment_intent:{object:"payment_intent",id:"pi_DisputeProof01",currency:"usd",amount:10000,latest_charge:fee.charge,metadata:{share_bps:"625",share_base:"10000"}}});
   if(url.pathname==="/v1/disputes")return Response.json(answer,{status:code});
   if(url.pathname===`/v1/application_fees/${fee.id}/refunds`)return Response.json({object:"fee_refund",id:"fr_DisputeProof01",fee:fee.id,amount:Number(body.get("amount")),currency:"usd"});
   throw Error("Unexpected synthetic endpoint");

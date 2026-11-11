@@ -791,9 +791,14 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
     return 0;
   }
   try {
-    const written = await writeLines(ids.map((id, at) => ({ id, text: kept[at] })), true);
-    // Queued either way (runClaimed takes a line that is not there off the queue).
+    // Queued whatever the writes answer, even when their read back is unknown too, and before that unknown is thrown
+    // (Codex C2's M1 on #3446): a line that did land is then still found and tried by deliverDue, for a caller that
+    // emits only once (free/download, join/confirm, the PayPal hand-over), and runClaimed takes one that is not there
+    // off the queue. The unknown still throws below, and the mark goes.
+    const wrote = await writeLines(ids.map((id, at) => ({ id, text: kept[at] })), true).then((lines) => ({ lines }), (error: unknown) => ({ error }));
     await redisPipeline(ids.map((id) => ["ZADD", QUEUE_KEY, "NX", now, `${statsId}|${id}`]));
+    if ("error" in wrote) throw wrote.error;
+    const written = wrote.lines;
     // A line written now goes in the log; one there already, or found on the read back, only if the log lacks it, so
     // a caller that emits only once still has its delivery in the creator's log. A line not there was not written:
     // it throws, and the mark goes, so the event is written again when it is noticed again.

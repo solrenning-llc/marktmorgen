@@ -106,7 +106,7 @@ import { type Card, productIds, readCardsFor, readListings } from "@/lib/catalog
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
-import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
+import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem, shareReadsExactly } from "@/lib/partner-share";
 import { NO_TERMS, type PartnerTerms, type WaitingChange, changeNeeds, changeOpen, readTerms, settleTerms, shareRunning, stepOf, withStep } from "@/lib/partner-terms-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
@@ -587,9 +587,29 @@ function withTerms(affiliate: Affiliate, terms: PartnerTerms): Affiliate {
   return terms.change || terms.history.length ? { ...rest, terms } : rest;
 }
 
-/** Everybody in this programme who holds a standing share of something. */
+/**
+ * Everybody in this programme who holds a standing share of something, for the sales it earns on (notePartners). A
+ * record whose share does not read exactly (lib/partner-share.ts shareReadsExactly) is left out (Codex M on #1924,
+ * 630 [HN6](39)): parsePartnerShare keeps the rest of such a share and drops an end it cannot read, which would earn
+ * on sales after the agreement really ended. It earns nothing on this read. An absent or null end still means no end.
+ */
 export async function listPartners(store: Store): Promise<Affiliate[]> {
-  return (await listAffiliates(store)).filter((a) => a.share !== null);
+  const out: Affiliate[] = [];
+  for (const [id, { raw, affiliate }] of await peopleExact(store)) {
+    if (affiliate.share === null) continue;
+    let share: unknown;
+    try {
+      share = (JSON.parse(raw) as { share?: unknown }).share;
+    } catch {
+      share = undefined;
+    }
+    if (!shareReadsExactly(share)) {
+      console.error("a partner's share could not be read; nothing is earned on it here", id);
+      continue;
+    }
+    out.push(affiliate);
+  }
+  return out.sort((a, b) => b.appliedAt - a.appliedAt);
 }
 
 /** The program's partner lock: every write of a standing share takes it, so the cap is checked against what is there. */
@@ -2560,7 +2580,8 @@ export async function notePartners(
   partners?: Affiliate[],
 ): Promise<void> {
   if (!store.statsId || !isRedisConfigured() || !sale.ref || !sale.product) return;
-  const holders = (partners ?? (await listAffiliates(store))).filter(
+  // Read exactly by default: a share whose end does not read earns nothing here (listPartners, Codex M on #1924).
+  const holders = (partners ?? (await listPartners(store))).filter(
     (a) => a.status === "approved" && shareOn(a.share, sale.product, sale.at) > 0,
   );
   if (!holders.length) return;

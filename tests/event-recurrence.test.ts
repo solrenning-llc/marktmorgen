@@ -109,11 +109,19 @@ is("a series out of order or with a repeated date is refused", [checkEventSeries
 is("fewer than two or more than twelve dates is not a series", [checkEventSeries([FIRST], { now: NOW, upcoming: 0 }), checkEventSeries(Array.from({ length: 13 }, (_, i) => FIRST + i * 7 * DAY), { now: NOW, upcoming: 0 })], [{ ok: false, why: "count" }, { ok: false, why: "count" }]);
 
 part("Said in plain words");
-is("weekly", repeatWords(FIRST, NY, "weekly", 6), "Every week on Tuesday at 6:00 PM, 6 times");
-is("every two weeks", repeatWords(FIRST, NY, "biweekly", 3), "Every other week on Tuesday at 6:00 PM, 3 times");
-is("monthly, the fourth", repeatWords(FIRST, NY, "monthly", 4), "Every month on the fourth Tuesday at 6:00 PM, 4 times");
-is("monthly, the last", repeatWords(FIFTH, NY, "monthly", 2), "Every month on the last Thursday at 12:00 PM, 2 times");
+is("weekly", repeatWords(FIRST, NY, "weekly", 6), "Every week on Tuesday at 6:00 PM ET, 6 times");
+is("every two weeks", repeatWords(FIRST, NY, "biweekly", 3), "Every other week on Tuesday at 6:00 PM ET, 3 times");
+is("monthly, the fourth", repeatWords(FIRST, NY, "monthly", 4), "Every month on the fourth Tuesday at 6:00 PM ET, 4 times");
+is("monthly, the last", repeatWords(FIFTH, NY, "monthly", 2), "Every month on the last Thursday at 12:00 PM ET, 2 times");
 is("the problems a creator can meet all have words", Object.keys(REPEAT_PROBLEMS).sort(), ["count", "missing_time", "order", "past", "repeat", "too_far", "too_many", "unknown"]);
 is("no problem is left without a sentence", Object.values(REPEAT_PROBLEMS).every((w) => w.length > 10 && w.endsWith(".")), true);
+
+part("Inputs that cannot be read are refused, never a throw (Claude 3 and Codex G on #3657, LEVE)");
+is("a first time that is not one: no dates", eventSeriesStarts(Number.NaN, NY, "weekly", 3), []);
+is("a zone that is not one: no dates", eventSeriesStarts(FIRST, "Mars/Base", "monthly", 3), []);
+is("a count outside 2 to 12 is never expanded", [eventSeriesStarts(FIRST, NY, "monthly", 1_000_000), eventSeriesStarts(FIRST, NY, "weekly", 1.5)], [[], []]);
+is("and an empty list is not a series", checkEventSeries([], { now: NOW, upcoming: 0 }), { ok: false, why: "count" });
+is("a clock that is not a number: unknown, nothing made", checkEventSeries(starts, { now: Number.NaN, upcoming: 0 }), { ok: false, why: "unknown" });
+is("words for inputs that cannot be read: null", [repeatWords(Number.NaN, NY, "weekly", 3), repeatWords(FIRST, "Mars/Base", "weekly", 3)], [null, null]);
 
 done();

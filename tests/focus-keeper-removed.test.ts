@@ -15,6 +15,7 @@
  * page itself was replaced (a navigation). A focus somewhere else is never
  * taken, and a control left on purpose is never taken back.
  */
+import { readFileSync } from "node:fs";
 import { focusKeeper, type KeptElement } from "@/lib/focus-keeper";
 import { done, is, part } from "./check";
 
@@ -223,6 +224,11 @@ part("A click on the control itself");
   save.disabled = false;
   k.disabledChanged(save);
   is("a click on the focused control, or inside it, is not leaving it", save.focused, 1);
+}
+{
+  // Revisor 1's LOW: the click lands on the icon's <svg> or <path>, which the studio wiring must pass on as well.
+  const wiring = readFileSync("components/studio-app.tsx", "utf8");
+  is("the studio passes any element clicked, an icon's SVG included, not only HTML elements", /const onPointer = \(event: PointerEvent\) => keeper\.pointerDown\(event\.target instanceof Element \? \(event\.target as Element & KeptElement\) : null\);/.test(wiring), true);
 }
 
 part("It never takes the focus from anything else");

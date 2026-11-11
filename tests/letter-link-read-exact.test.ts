@@ -55,3 +55,41 @@ test("a link that is not one still writes nothing and is gone", async () => {
   const answer = await open();
   assert.equal(answer.status, 410);
 });
+
+// The store the link names is read exactly too (Claude 1 and H2 on #3779): the handle's reply lost or in another
+// shape is "try again" (503), never "expired" (410), and nothing is spent; nil (the handle gone) is still gone.
+import { createHash } from "node:crypto";
+async function grantFor(handle: string): Promise<void> {
+  const key = `nl:letters:link:${createHash("sha256").update(`nimbus-letter:${TOKEN}`).digest("hex").slice(0, 40)}`;
+  await real([["SET", key, JSON.stringify({ e: "reader@example.com", k: "anykey", h: handle, l: "0123456789abcdef0123" })]]);
+}
+let handleOdd: unknown = undefined;
+const plain = redis.pipeline;
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (handleOdd !== undefined && commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:store:handle:")) return handleOdd === "LOST" ? [] : [handleOdd];
+  return plain(commands);
+}) as typeof redis.pipeline;
+
+for (const reply of [{}, [], 1, "LOST"]) {
+  test(`the store's handle read as ${JSON.stringify(reply)}: try again, never expired`, async () => {
+    await grantFor("harbor");
+    handleOdd = reply;
+    try {
+      const answer = await open();
+      assert.equal(answer.status, 503);
+      assert.equal(await answer.text(), letterWords("en").linkBusy);
+    } finally {
+      handleOdd = undefined;
+    }
+  });
+}
+
+test("the store's handle gone (GET nil): still gone", async () => {
+  await grantFor("harbor");
+  handleOdd = null;
+  try {
+    assert.equal((await open()).status, 410);
+  } finally {
+    handleOdd = undefined;
+  }
+});

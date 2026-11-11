@@ -1,7 +1,7 @@
 import { MovedNotice } from "@/components/moved-notice";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
-import { exitAnswerForValue } from "@/lib/exit-redirect-rules";
+import { exitAnswerForStore, exitAnswerForValue } from "@/lib/exit-redirect-rules";
 import { VisitUsBlock } from "@/components/visit-us-block";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
@@ -51,7 +51,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
-import { type Listing, handleForPage, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Listing, type Store, handleForPage, normaliseHandle, storeForPage } from "@/lib/store";
 import { KIND, readPage, sellsAny, visibleCount } from "@/lib/catalog";
 import { groupBySection } from "@/lib/store-sections";
 import { offeredItems } from "@/lib/bundles";
@@ -107,6 +107,12 @@ async function load(raw: string) {
   const asked = normaliseHandle(decoded);
   const store = await storeForPage(asked);
   return store ? { store, asked } : null;
+}
+
+/** The moved notice of a store that has closed but whose record is not yet deleted, by the rule's own clock. */
+function closingNotice(store: Store) {
+  const answer = exitAnswerForStore(store, Date.now());
+  return answer.kind === "moved" ? answer : null;
 }
 
 /**
@@ -207,6 +213,20 @@ export default async function StorePage({ params, searchParams }: Params) {
   // On the store's own domain the address in the bar is the domain, so there
   // is nothing to correct.
   if (asked !== store.handle && !reachedOn) permanentRedirect(`/@${store.handle}`);
+
+  // A store whose closing day has come, while its record is not yet deleted:
+  // the moved notice its owner chose, from the record already read
+  // (97 [D2-OPEN-EXIT]). Before that day, or with none, the store as always.
+  const closedNotice = closingNotice(found.store);
+  if (closedNotice) {
+    return (
+      <div className="flex min-h-screen flex-col bg-paper text-ink">
+        <SiteNav />
+        <MovedNotice to={closedNotice.to} host={closedNotice.host} until={closedNotice.until} />
+        <SiteFooter />
+      </div>
+    );
+  }
 
   // A store rests until its window turns once the visits or the requests its
   // standing covers this window are used, or when they cannot be read

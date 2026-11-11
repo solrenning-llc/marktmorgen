@@ -224,3 +224,14 @@ export function exitAnswerForValue(raw: unknown, now: number): ExitAnswer {
   const released = typeof raw === "string" && raw.startsWith(RELEASED);
   return exitAnswer({ record: released ? exitFromReleased(raw) : null, holder: released ? "released" : "unknown", now });
 }
+
+/**
+ * The same notice from a store record that is still there: from the store's
+ * closing day until its record is deleted (lib/closed-store-data.ts, within
+ * ERASE_WITHIN_DAYS), its old address still finds it, and the notice its
+ * owner chose is shown instead of the store. Read from the record the page
+ * already has; a notice that does not read gives none.
+ */
+export function exitAnswerForStore(store: { exitNotice?: unknown }, now: number): ExitAnswer {
+  return exitAnswer({ record: store.exitNotice === undefined ? null : readExitNotice(store.exitNotice), holder: "released", now });
+}

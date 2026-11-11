@@ -24,4 +24,5 @@ const rows: [string, string][] = [
   ["team event types", `| ${TEAM_LIMITS.pro.eventTypes} | ${TEAM_LIMITS.scale.eventTypes} |`],
 ];
 for (const [what, cells] of rows) is(`its ${what} row has the code's figures`, doc.includes(cells), true);
+is("no claim about competitors without a dated source (VR item 7, review of #3726)", /competitors put/i.test(doc), false);
 done();

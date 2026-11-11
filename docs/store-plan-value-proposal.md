@@ -29,7 +29,7 @@ Per-plan limits that every plan has (visits, orders, storage, video hours, data 
 
 ## The one feature with no cost to run: removing the line at the foot
 
-**What Store would gain.** A creator could sell from a page with no Marktmorgen name at the foot. Competitors put this on paid plans too. Removing a platform's name is often a step that leads to a more expensive plan.
+**What Store would gain.** A creator could sell from a page with no Marktmorgen name at the foot. No claim is made here about how competitors price it: none was read with a dated official source for this proposal (VR, item 7).
 
 **What it would cost.** Nothing to run. What it gives up is not a cost but income:
 - **Acquisition.** The line at the foot is how a store brings Marktmorgen its next creator. That is why the code keeps it on Store (`lib/plan.ts`: "a store that would rather not carry it is buying back the thing it would otherwise have paid us in"). No figure says how many creators arrive through it today: nothing is on sale yet, so there is no data.

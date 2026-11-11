@@ -15,9 +15,16 @@
  *      mark (a membership's invoice, for now), is not found;
  *   5. what is left to refund is read off the charge, and the amount asked,
  *      all or a typed part, is checked against it;
- *   6. one refund is asked of Stripe, under the action's key: Stripe answers
- *      a repeat of the same key with the first refund (two clicks of the same
- *      form, at once or later, give back once) and a key still being worked
+ *   6. before anything is sent, the charge's refunds are read for one this
+ *      form already made (its mm_action mark, a hash of the key): found, its
+ *      answer is that refund's and nothing is sent; the same form with other
+ *      figures (its mm_form mark) is refused; a list not read whole is
+ *      "unavailable", never "none yet". Stripe keeps a key only about a day,
+ *      so this, not the key, is what stops a form sent again later from
+ *      refunding twice (Claude 3 and Codex G on #3678). Then one refund is
+ *      asked of Stripe, under the action's key, carrying both marks: Stripe
+ *      answers a repeat of the same key with the first refund (two clicks of
+ *      the same form at once give back once) and a key still being worked
  *      on with 409, said here as "in_progress". The same key with other
  *      figures, or any other refusal Stripe answers with a 4xx, made nothing
  *      and writes no line ("invalid", "stripe_refused");
@@ -25,7 +32,7 @@
  *      of this charge, for this amount, that succeeded. One that cannot be
  *      read, or no answer at all, is "unknown" and never recorded as done:
  *      the creator is told to check the payment in Stripe, and sending the
- *      same form again is safe under the same key;
+ *      same form again is safe: the refund's mark finds what it made;
  *   8. one line in the team's activity log (lib/team.ts logTeam): who, the
  *      amount, the payment and what Stripe said. Never the buyer's address.
  *      A mark per refund told (per idempotency key when the answer could not
@@ -123,6 +130,21 @@ function ofThisStore(store: Store, charge: Record<string, unknown>): boolean {
   return typeof handle === "string" && handle !== "" && saleHandles(store).has(handle);
 }
 
+/**
+ * The refund in a charge's refunds made by this action (its mm_action mark): null when none, undefined when the list
+ * is not one page read whole and exactly (more than 100, or another shape), never "none".
+ */
+function refundOfAction(listed: unknown, action: string): Record<string, unknown> | null | undefined {
+  const list = record(listed);
+  if (!list || list.object !== "list" || list.has_more !== false || !Array.isArray(list.data)) return undefined;
+  for (const item of list.data) {
+    const refund = record(item);
+    if (!refund || refund.object !== "refund") return undefined;
+    if (record(refund.metadata)?.mm_action === action) return refund;
+  }
+  return null;
+}
+
 export async function giveRefund(
   store: Store,
   who: { email: string; role: Role },
@@ -146,12 +168,34 @@ export async function giveRefund(
     return fail("unavailable");
   }
   if (!ofThisStore(store, charge)) return fail("not_found");
+
+  // A refund this same form already made, read off the charge's refunds by its mark, before anything is sent: Stripe
+  // keeps a key only about a day, so a form sent again later would otherwise refund twice (Claude 3 and Codex G on
+  // #3678). Its answer is that refund's; the same form with other figures is refused, as Stripe refuses a key reused.
+  // A list that cannot be read whole is unavailable, never "none yet".
+  const action = createHash("sha256").update(key).digest("hex").slice(0, 40);
+  const form = createHash("sha256").update(JSON.stringify([input.full === true, typeof input.amount === "string" ? input.amount.trim() : "", reason ?? ""])).digest("hex").slice(0, 40);
+  let earlier: Record<string, unknown> | null | undefined;
+  try {
+    earlier = refundOfAction(await onAccount("GET", account, `/refunds?charge=${encodeURIComponent(chargeId)}&limit=100`), action);
+  } catch (error) {
+    console.error("reading a charge's refunds before a refund failed", error);
+    return fail("unavailable");
+  }
+  if (earlier === undefined) return fail("unavailable");
+  if (earlier) {
+    if (record(earlier.metadata)?.mm_form !== form) return fail("invalid");
+    const currency = typeof charge.currency === "string" ? charge.currency : "";
+    const cents = typeof earlier.amount === "number" ? earlier.amount : Number.NaN;
+    return settle(store, who, chargeId, key, earlier, cents, currency);
+  }
+
   const left = refundableOf(charge);
   if (!left.ok) return fail(left.reason);
   const amount = refundAmount({ full: input.full === true, typed: typeof input.amount === "string" ? input.amount : "" }, left);
   if (!amount.ok) return fail(amount.reason);
 
-  const body = new URLSearchParams({ charge: chargeId, amount: String(amount.cents), "metadata[studio_refund]": "1", "metadata[by_role]": who.role });
+  const body = new URLSearchParams({ charge: chargeId, amount: String(amount.cents), "metadata[studio_refund]": "1", "metadata[by_role]": who.role, "metadata[mm_action]": action, "metadata[mm_form]": form });
   if (reason) body.set("reason", reason);
   let reply: unknown;
   try {
@@ -172,8 +216,16 @@ export async function giveRefund(
     reply = null;
   }
 
-  const state = refundOutcome(reply, { chargeId, cents: amount.cents, currency: left.currency });
-  const money = formatMoney(amount.cents, left.currency);
+  return settle(store, who, chargeId, key, reply, amount.cents, left.currency);
+}
+
+/**
+ * The refund's answer measured against what was asked, written once in the team's log (by the refund's id, or the
+ * action's key when unknown), and said back.
+ */
+async function settle(store: Store, who: { email: string; role: Role }, chargeId: string, key: string, reply: unknown, cents: number, currency: string): Promise<RefundAnswer> {
+  const state = Number.isSafeInteger(cents) && cents > 0 ? refundOutcome(reply, { chargeId, cents, currency }) : "unknown";
+  const money = Number.isSafeInteger(cents) && /^[a-z]{3}$/.test(currency) ? formatMoney(cents, currency) : "an amount not read";
   const what =
     state === "done"
       ? `Refunded ${money} on payment ${chargeId}`
@@ -187,5 +239,5 @@ export async function giveRefund(
     await logTeam(store.sid, { who: who.email, role: who.role, what });
   }
   if (state === "unknown") return fail("unknown");
-  return { ok: true, state, cents: amount.cents, currency: left.currency };
+  return { ok: true, state, cents, currency };
 }

@@ -32,7 +32,7 @@ const T1 = "1".repeat(32);
 const T2 = "2".repeat(32);
 const T3 = "3".repeat(32);
 
-type Made = { id: string; amount: number; status: string; action: string | null };
+type Made = { id: string; amount: number; status: string; action: string | null; form: string | null };
 const stripe = {
   charge: { amount: 5_000, refunded: 0, disputed: false, store: HANDLE, status: "succeeded" },
   keys: new Map<string, { busy: boolean; reply: Record<string, unknown> | null; params: string }>(),
@@ -79,7 +79,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path.startsWith("/charges/")) return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such charge" } }, { status: 404 });
   // The charge's refunds, newest first, each with the metadata it was made with (Stripe keeps them for good).
   if (path === "/refunds" && (init?.method ?? "GET") === "GET" && url.searchParams.get("charge") === CHARGE) {
-    const data = [...stripe.made].reverse().map((m) => ({ id: m.id, object: "refund", amount: m.amount, charge: CHARGE, currency: "usd", status: m.status, metadata: m.action ? { mm_action: m.action } : {} }));
+    const data = [...stripe.made].reverse().map((m) => ({ id: m.id, object: "refund", amount: m.amount, charge: CHARGE, currency: "usd", status: m.status, metadata: m.action ? { mm_action: m.action, mm_form: m.form } : {} }));
     return Response.json({ object: "list", data, has_more: false });
   }
   if (path === "/refunds" && init?.method === "POST") {
@@ -99,7 +99,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = Number(params.get("amount"));
     const status = stripe.next?.status ?? "succeeded";
     refundIds += 1;
-    const made = { id: `re_wg9_${refundIds}`, amount, status, action: params.get("metadata[mm_action]") };
+    const made = { id: `re_wg9_${refundIds}`, amount, status, action: params.get("metadata[mm_action]"), form: params.get("metadata[mm_form]") };
     stripe.made.push(made);
     if (status === "succeeded" || status === "pending") stripe.charge.refunded += amount;
     const reply = stripe.next?.body ?? { id: made.id, object: "refund", amount, charge: params.get("charge"), currency: "usd", status, reason: params.get("reason") };
@@ -158,6 +158,20 @@ async function main(): Promise<void> {
   is("no second refund made at Stripe, still 12.50 given back", [stripe.made.length, stripe.charge.refunded], [1, 1_250]);
   is("each refund carries this action's mark, never the key or the token itself", [stripe.made[0]?.action?.length, (stripe.made[0]?.action ?? "").includes(T1)], [40, false]);
   is("still one line in the log", (await logLines(store)).length, 1);
+  const otherFigures = await post({ charge: CHARGE, token: T1, amount: "5", reason: "requested_by_customer" });
+  is("the same form with other figures a day later: refused, nothing sent", [otherFigures.status, otherFigures.body.error, stripe.made.length], [400, "invalid", 1]);
+  const stripeFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    if (url.pathname.endsWith("/refunds") && (init?.method ?? "GET") === "GET") return Response.json({ object: "list", data: [], has_more: true });
+    return stripeFetch(input, init);
+  }) as typeof fetch;
+  try {
+    const unread = await post({ charge: CHARGE, token: "6".repeat(32), amount: "1" });
+    is("the charge's refunds not read whole: unavailable, never \"none yet\", nothing sent", [unread.body.error, stripe.made.length], ["unavailable", 1]);
+  } finally {
+    globalThis.fetch = stripeFetch;
+  }
 
   part("Two clicks at the same moment on a new form: one refund");
   const [a, b] = await Promise.all([post({ charge: CHARGE, token: T2, amount: "10" }), post({ charge: CHARGE, token: T2, amount: "10" })]);

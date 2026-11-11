@@ -73,7 +73,9 @@ async function main(): Promise<void> {
   is("one email only", emails.length - emailsBefore, 1);
   is("one grant only", (await importedFor((await storeForEmail("idem-owner-a@example.test"))!, "buyer-two@example.test")).filter((g) => g.productId === a.product).length, 1);
   is("the same JSON with other spacing is the same request", (await call(postAccess, a.key, null, KEY, ` { "email" : "buyer-two@example.test", "product": "${a.product}", "notify": true } `)).replayed, "true");
-  is("one record, its name saying neither the store nor the key", [records().length, records()[0].includes(KEY), records()[0].includes(String(a.store.sid))], [1, false, false]);
+  // The store's id is in the name as in every other store key (nl:api:keys:<sid>): no store value is hashed, and the
+  // key the client sent is only ever in it as a hash (CodeQL js/insufficient-password-hash on #3537).
+  is("one record, its name saying the store and never the key", [records().length, records()[0].includes(KEY), records()[0] === `nl:api:idem:${a.store.sid}:${createHash("sha256").update(KEY).digest("hex")}`], [1, false, true]);
 
   part("The same key for another request: 422, nothing given");
   const other = await call(postAccess, a.key, { ...give2, email: "buyer-three@example.test" }, KEY);
@@ -85,7 +87,7 @@ async function main(): Promise<void> {
   const held = "held-key-0001";
   await call(postAccess, a.key, { email: "buyer-four@example.test", product: a.product }, held);
   // The test makes the second key's record look as if its write were still under way.
-  const pendingKey = `nl:api:idem:${createHash("sha256").update(`${a.store.sid}\n${held}`).digest("hex")}`;
+  const pendingKey = `nl:api:idem:${a.store.sid}:${createHash("sha256").update(held).digest("hex")}`;
   is("its record is where the key says", records().includes(pendingKey), true);
   const raw = await redis.pipeline([["GET", pendingKey]]) as unknown[];
   const parsed = JSON.parse(String(raw[0])) as { fp: string; at: number };

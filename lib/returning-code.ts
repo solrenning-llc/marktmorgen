@@ -64,6 +64,8 @@ const linkKey = (token: string) => `nl:rcode:link:${createHash("sha256").update(
 const claimKey = (token: string) => `${linkKey(token)}:claim`;
 /** Long enough for the checkout to open at Stripe; a use that never ends lets the link work again after it. */
 export const RETURNING_CLAIM_SECONDS = 120;
+/** What a spent link's claim holds: later uses are told the link is spent ("link"), not to wait ("busy"). */
+const SPENT = "spent";
 
 /** What a link holds: the store, the product, the code and the address it was sent to. Exactly this shape. */
 type LinkRecord = { s: string; p: string; c: string; e: string };
@@ -99,7 +101,9 @@ export async function requestReturningLink(input: { store: Store; productId: str
  * A come-back offer (a winback coupon) is only known at the checkout, which
  * still refuses it there.
  */
-export function otherDiscountWins(store: Store, product: Listing, country: string, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+export function otherDiscountWins(store: Store, product: Listing, country: string, nowSeconds = Math.floor(Date.now() / 1000), how: { plan?: boolean } = {}): boolean {
+  // Paid in a plan, the checkout takes no sale, fair price or price named by the buyer (lib/store-checkout.ts, !plan).
+  if (how.plan) return false;
   if (activePwyw(product) || otherDiscountForAll(store, product, nowSeconds)) return true;
   const saleNow = saleOff(store.sale, product, nowSeconds);
   return !product.recurring && fairOff(store.fair, product, country) > saleNow;
@@ -161,7 +165,12 @@ export async function redeemReturningLink(store: Store, productId: string, rawTo
   } catch {
     return { ok: false, reason: "unknown" };
   }
-  if (claim === null) return { ok: false, reason: "busy" };
+  if (claim === null) {
+    // Held: by a use opening its checkout now ("busy"), or by a link already spent ("link"), whose claim outlives it.
+    const held = repliesFor(await redisPipeline([["GET", claimKey(token)]]).catch(() => null), 1);
+    if (!held) return { ok: false, reason: "unknown" };
+    return { ok: false, reason: held[0] === SPENT ? "link" : "busy" };
+  }
   if (claim !== "OK") return { ok: false, reason: "unknown" };
   const refused = async (reason: "link" | "code" | "unknown") => {
     await releaseReturningLink(token);
@@ -194,8 +203,10 @@ export async function releaseReturningLink(rawToken: string): Promise<void> {
 export async function spendReturningLink(rawToken: string): Promise<void> {
   const token = readLinkToken(rawToken);
   if (!token) return;
-  // The link first, then its claim, in this order: a later use finds no link ("link"), never a free claim on a live one.
-  await redisPipeline([["DEL", linkKey(token)], ["DEL", claimKey(token)]]).catch((error) => console.error("spending a returning-buyer code link failed; it runs out by itself", error));
+  // The claim first, marked spent for as long as the link could still work, then the link: if deleting the link
+  // fails, the claim still refuses every later use ("link"), never letting it open a second checkout (Claude 3 cloud K).
+  await redisPipeline([["SET", claimKey(token), SPENT, "EX", RETURNING_LINK_SECONDS]]).catch((error) => console.error("marking a returning-buyer code link spent failed", error));
+  await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("spending a returning-buyer code link failed; it runs out by itself", error));
 }
 
 function readRecord(raw: unknown): LinkRecord | null {

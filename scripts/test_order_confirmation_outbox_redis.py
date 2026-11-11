@@ -71,8 +71,29 @@ def main():
             match = re.match(r"cmdstat_([^:]+):calls=(\d+),", line)
             if match and match[1] != "info": out[match[1]] = int(match[2])
         return out
+    def counts(text):
+        out = {}
+        for line in text.splitlines():
+            match = re.match(r"cmdstat_([^:]+):calls=(\d+),", line)
+            if match and match[1] not in ("info", "multi", "exec"): out[match[1]] = int(match[2])
+        return out
     def measured(run):
-        before = stats(); result = run(); after = stats()
+        # The one measured command runs inside MULTI between two INFO snapshots, as in
+        # scripts/test_shipment_mail_outbox_redis.py, so no other client's command can fall
+        # between them and the count is only the measured script's own.
+        original, seen = db.command, []
+        def atomic(*parts):
+            assert not seen, "a measured run sends exactly one command"
+            seen.append(parts[0])
+            original("MULTI"); original("INFO", "COMMANDSTATS"); original(*parts); original("INFO", "COMMANDSTATS")
+            before, result, after = original("EXEC")
+            seen.append(counts(after)); seen.append(counts(before))
+            return result
+        db.command = atomic
+        try: result = run()
+        finally: del db.command
+        assert len(seen) == 3, "a measured run sends exactly one command"
+        after, before = seen[1], seen[2]
         return result, sum(after.get(k, 0) - before.get(k, 0) for k in set(before) | set(after))
     profiles = {}
     # Another client keeps talking to the same server (as the CI service's health check does):

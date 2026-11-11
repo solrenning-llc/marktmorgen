@@ -1306,7 +1306,7 @@ export default async function StudioPage({
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
         <StudioHeader
-          current={store}
+          current={current ?? store}
           role={role}
           stores={view.stores}
           owned={view.owned}

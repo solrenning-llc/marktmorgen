@@ -806,8 +806,11 @@ export async function dropTeam(store: Store): Promise<void> {
 export async function moveMemberships(from: string, to: string): Promise<void> {
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
-  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  // Read exactly (rule 24): a reply in any other shape is unknown and throws before anything is copied or deleted,
+  // never "on no team", which deleted the index below with nothing copied (Claude 4 nuvem R's MEDIUM).
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
+  if (ids === null) throw new UnknownReplyError("the teams of the address that moved");
+  const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
   // Stores whose membership stayed on the old address: their index entry is kept.
   const stayed: string[] = [];
   for (const sid of list) {

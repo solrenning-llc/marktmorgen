@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "kilnworks", "Kiln Works", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestCallStores0", true);
+  await setStripeAccount(OWNER, "acct_1TestCallStores", true);
   await setSubscription(OWNER, { customerId: "cus_Owner00020", subscriptionId: "sub_Owner00020", active: true, period: paidPeriod() });
   const base = (await storeForEmail(OWNER))!;
   const stores = new Map<string, Store>();

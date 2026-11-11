@@ -21,7 +21,7 @@ import { paidPeriod } from "./billing-period-fixture";
 process.env.STRIPE_SECRET_KEY = "sk_test_call_refund_confirmed_only";
 
 const OWNER = "weaver@example.com";
-const ACCOUNT = "acct_1TestCallRefnd01";
+const ACCOUNT = "acct_1TestCallRefnd0";
 const NOW = Math.floor(Date.now() / 1000);
 
 const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};

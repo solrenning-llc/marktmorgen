@@ -21,7 +21,7 @@ import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_call_refund_pass";
 const OWNER = "weaver@example.com";
-const ACCOUNT = "acct_1TestCallRfPass1";
+const ACCOUNT = "acct_1TestCallRfPass";
 const NOW = Math.floor(Date.now() / 1000);
 const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};
 /** How many times each payment's checkout was looked up. */

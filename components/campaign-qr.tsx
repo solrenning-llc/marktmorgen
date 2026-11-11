@@ -13,8 +13,13 @@ import { campaignQr, campaignQrTag } from "@/lib/campaign-qr";
  */
 export function CampaignQr({ url, title, campaign, content = "" }: { url: string; title: string; campaign: string; content?: string }) {
   const code = useMemo(() => campaignQr(url, campaign, title, content), [url, campaign, title, content]);
-  const personalName = "refused" in campaignQrTag(campaign);
-  const personalVariant = !personalName && content.trim() !== "" && "refused" in campaignQrTag(content);
+  // Each refusal said as what it is: "personal" (an address or phone number), or "empty" (no letters or numbers).
+  const nameTag = campaignQrTag(campaign);
+  const variantTag = content.trim() !== "" ? campaignQrTag(content) : null;
+  const personalName = "refused" in nameTag && nameTag.refused === "personal";
+  const nameOk = "tag" in nameTag;
+  const personalVariant = nameOk && variantTag !== null && "refused" in variantTag && variantTag.refused === "personal";
+  const emptyVariant = nameOk && variantTag !== null && "refused" in variantTag && variantTag.refused === "empty";
 
   if (!code) {
     return (
@@ -23,7 +28,9 @@ export function CampaignQr({ url, title, campaign, content = "" }: { url: string
           ? "No QR code for this name: it looks like an email address or phone number, and the code is printed for anyone to read. Use a campaign name instead, like spring-fair."
           : personalVariant
             ? "No QR code for this variant: it looks like an email address or phone number, and the code is printed for anyone to read. Change the variant, or leave it empty."
-            : "The QR code could not be drawn for this name. Use a campaign name with letters or numbers, like spring-fair."}
+            : emptyVariant
+              ? "No QR code for this variant: it has no letters or numbers. Change the variant, or leave it empty."
+              : "The QR code could not be drawn for this name. Use a campaign name with letters or numbers, like spring-fair."}
       </p>
     );
   }

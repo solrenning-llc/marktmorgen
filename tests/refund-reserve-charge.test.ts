@@ -136,6 +136,36 @@ part("What cannot be read is unknown, never zero");
   is("and one unknown charge makes the whole reserve unknown", whole.kind, "unknown");
 }
 
+part("What the policy cannot price yet is counted at its ceiling, never left unknown (Claude 3 on #3685, MEDIUM)");
+{
+  // The whole payment left is the most any refund can give back (lib/plan-refund-rules.ts: never more than was paid).
+  const later = NOW - 40 * DAY;
+  const switchYear = reserveChargeOf(
+    read({ cycle: "year", monthlyCents: 6_900, periodStartSeconds: later, periodEndSeconds: later + 365 * DAY, charge: charge({ billingReason: "subscription_update", amountCents: 60_000, invoiceTotalCents: 60_000, paidAtSeconds: later }) }),
+    NOW,
+  );
+  is("a switch to the yearly plan, after the guarantee's days: the whole payment", switchYear?.refund, { kind: "guarantee", cents: 60_000 });
+  const split = reserveChargeOf(read({ charge: charge({ billingReason: "subscription_cycle", amountCents: 60_000, invoiceTotalCents: 69_000 }) }), NOW);
+  is("a renewal paid partly by credit, inside the window: the whole payment", split?.refund, { kind: "guarantee", cents: 60_000 });
+  const oddReason = reserveChargeOf(read({ charge: charge({ billingReason: "manual", paidAtSeconds: later }), periodStartSeconds: later, periodEndSeconds: later + 30 * DAY }), NOW);
+  is("a billing reason the policy does not price: the whole payment", oddReason?.refund, { kind: "guarantee", cents: 6_900 });
+  const partRefunded = reserveChargeOf(
+    read({ cycle: "year", monthlyCents: 6_900, periodStartSeconds: later, periodEndSeconds: later + 365 * DAY, refunds: [{ status: "succeeded", amount: 10_000 }], charge: charge({ billingReason: "subscription_update", amountCents: 60_000, invoiceTotalCents: 60_000, refundedCents: 10_000, paidAtSeconds: later }) }),
+    NOW,
+  );
+  is("less what was already refunded", partRefunded?.refund, { kind: "guarantee", cents: 50_000 });
+  const reserve = refundReserve([switchYear!, split!], NOW);
+  is("and the reserve stays known, holding both", [reserve.kind, reserve.kind === "known" ? reserve.byCurrency.usd.refundCents : -1], ["known", 120_000]);
+  is("what is unreadable stays unknown", reserveChargeOf(read({ charge: charge({ amountCents: 1.5 }) }), NOW)?.refund.kind, "unknown");
+}
+
+part("The refund list must add up to what Stripe says was refunded (Claude 3 on #3685, LEVE)");
+{
+  is("a list short of amount_refunded is unknown, never a smaller pending sum", reserveChargeOf(read({ charge: charge({ refundedCents: 3_000 }), refunds: [{ status: "succeeded", amount: 1_500 }] }), NOW)?.refund.kind, "unknown");
+  is("a list that adds up is read", reserveChargeOf(read({ charge: charge({ refundedCents: 3_000 }), refunds: [{ status: "succeeded", amount: 1_500 }, { status: "pending", amount: 1_500 }] }), NOW)?.refund, { kind: "guarantee", cents: 3_900 });
+  is("failed and canceled refunds are not part of amount_refunded", reserveChargeOf(read({ charge: charge({ refundedCents: 0 }), refunds: [{ status: "failed", amount: 1_000 }, { status: "canceled", amount: 200 }] }), NOW)?.refund.kind, "guarantee");
+}
+
 part("A failed charge took nothing");
 {
   is("it is left out", reserveChargeOf(read({ status: "failed", charge: charge({ succeeded: false, amountCents: 0 }) }), NOW), null);

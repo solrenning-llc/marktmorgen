@@ -14,17 +14,18 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { commercialPlansMayOpen, CURRENT_COMMERCIAL_MARGIN_REVIEW } from "@/lib/commercial-margin";
+import { commercialMarginDataReady, commercialPlansMayOpen, commercialReviewData, CURRENT_COMMERCIAL_MARGIN_REVIEW, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, type CommercialMarginReview } from "@/lib/commercial-margin";
 import { taxGateValid } from "@/lib/tax-gate";
 import { deemedSupplierProblems, deemedSupplierReady } from "@/lib/deemed-supplier";
 import { stripePlatformEligibilityReady } from "@/lib/stripe-platform-eligibility";
-import { CONTRACT_ADMISSION_COVERAGE, CORE_CONTRACT_ADMISSION_KEYS, CURRENT_CONTRACT_FUNDING_POLICY, contractLifecycleReady } from "@/lib/contract-funding-rules";
-import { CURRENT_EXPOSURE_BUDGET_POLICY } from "@/lib/exposure-budget-policy";
+import { CONTRACT_ADMISSION_COVERAGE, CORE_CONTRACT_ADMISSION_KEYS, CURRENT_CONTRACT_FUNDING_POLICY, type ContractFundingPolicy, contractFundingConfiguration, contractLifecycleReady } from "@/lib/contract-funding-rules";
+import { CURRENT_EXPOSURE_BUDGET_POLICY, type ExposureBudgetPolicy, exposureBudgetConfiguration } from "@/lib/exposure-budget-policy";
 import { COMMISSION_LIVE, COMMISSION_PLANS_PUBLISHED } from "@/lib/plan";
 import { SHARE_PROVED_IN_TEST_MODE } from "@/lib/platform-share";
 import {
   OPENING_GATES,
   COMMERCIAL_REVIEW_PARTS,
+  commercialReviewParts,
   openingReadiness,
   openingReadinessDetails,
 } from "@/lib/opening-readiness";
@@ -73,19 +74,36 @@ const parts = Object.fromEntries(openingReadinessDetails().commercialReview.map(
 is("the parts are listed once each", openingReadinessDetails().commercialReview.map((row) => row.id), COMMERCIAL_REVIEW_PARTS.map((row) => row.id));
 is("commission", parts.commission?.ready, !COMMISSION_PLANS_PUBLISHED || (COMMISSION_LIVE && SHARE_PROVED_IN_TEST_MODE));
 is("contract lifecycle", parts.contractLifecycle?.ready, contractLifecycleReady());
-is("exposure budget policy recorded", parts.exposureBudget?.ready, CURRENT_EXPOSURE_BUDGET_POLICY !== null);
-is("contract funding policy recorded", parts.contractFunding?.ready, CURRENT_CONTRACT_FUNDING_POLICY !== null);
-is("commercial margin review recorded", parts.marginReview?.ready, CURRENT_COMMERCIAL_MARGIN_REVIEW !== null);
+// Each part is the gate's own check (commercialPlansMayOpen in lib/commercial-margin.ts), never only "recorded" (reviews of #3665).
+const reviewed = commercialReviewData(CURRENT_COMMERCIAL_MARGIN_REVIEW);
+is("exposure budget policy accepted against the current terms", parts.exposureBudget?.ready, reviewed !== null && exposureBudgetConfiguration(CURRENT_EXPOSURE_BUDGET_POLICY, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review: reviewed.fundedExposure }) !== null);
+is("contract funding policy accepted against the current terms", parts.contractFunding?.ready, reviewed !== null && contractFundingConfiguration(CURRENT_CONTRACT_FUNDING_POLICY, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review: reviewed }) !== null);
+is("commercial margin review accepted, with every worst case approved", parts.marginReview?.ready, reviewed !== null && commercialMarginDataReady(reviewed));
+is("each part also says whether its record exists at all", [parts.exposureBudget?.recorded, parts.contractFunding?.recorded, parts.marginReview?.recorded], [CURRENT_EXPOSURE_BUDGET_POLICY !== null, CURRENT_CONTRACT_FUNDING_POLICY !== null, CURRENT_COMMERCIAL_MARGIN_REVIEW !== null]);
 is(
   "the missing core coverages are the false ones in CONTRACT_ADMISSION_COVERAGE",
   openingReadinessDetails().missingCoreCoverage,
   CORE_CONTRACT_ADMISSION_KEYS.filter((key) => CONTRACT_ADMISSION_COVERAGE[key] !== true),
 );
 is(
-  "a ready commercial review never has a part that is not",
-  !commercialPlansMayOpen(true) || openingReadinessDetails().commercialReview.every((row) => row.ready === true),
-  true,
+  "the commercial review is ready exactly when every part is: a false gate always shows a false part",
+  commercialPlansMayOpen(true),
+  openingReadinessDetails().commercialReview.every((row) => row.ready === true),
 );
+
+part("A record that exists but fails its own check is never ready (Codex G and Claude 3 on #3665, MEDIUM)");
+{
+  // Synthetic records, recorded but stale or incomplete: present, so "recorded" is true, and refused by the gate's own checks.
+  const staleReview = { priceAndRightsSnapshot: "stale" } as unknown as CommercialMarginReview;
+  const staleExposure = { reviewId: "stale-review", termsSnapshot: "stale", review: {}, reservedFundsCents: 1, reserveEvidence: "synthetic" } as unknown as ExposureBudgetPolicy;
+  const staleContract = { reviewId: "stale-review", financialSnapshot: "stale", fundedGrants: {} } as unknown as ContractFundingPolicy;
+  const rows = commercialReviewParts({ review: staleReview, exposure: staleExposure, contract: staleContract });
+  const by = Object.fromEntries(rows.map((row) => [row.id, row]));
+  is("all three are recorded", [by.exposureBudget?.recorded, by.contractFunding?.recorded, by.marginReview?.recorded], [true, true, true]);
+  is("and none of them is ready, because the gate refuses each", [by.exposureBudget?.ready, by.contractFunding?.ready, by.marginReview?.ready], [false, false, false]);
+  is("the gate itself agrees: it would not open on that review", commercialPlansMayOpen(true, staleReview), false);
+  is("nothing recorded reads as not ready either", commercialReviewParts({ review: null, exposure: null, contract: null }).filter((row) => row.recorded !== undefined).map((row) => [row.recorded, row.ready]), [[false, false], [false, false], [false, false]]);
+}
 
 part("The owner's dated summary names every gate");
 const summaries = readdirSync(join(root, "docs")).filter((name) => /^opening-readiness-status-\d{4}-\d{2}-\d{2}\.md$/.test(name)).sort();

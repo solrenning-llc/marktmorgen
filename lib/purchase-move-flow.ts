@@ -57,7 +57,8 @@ export const MOVE_ASK_UNITS = 1;
 /** Public requests a link's page, or its Confirm, holds before it reads. */
 export const MOVE_LINK_UNITS = 1;
 /** Worst-case commands besides the hold and the two emails: purchases link, deleted people, daily count (3), retry index, request/token writes (4), or retry index/request/token reads. */
-export const MOVE_ASK_COMMANDS = 10;
+/** Worst case includes a lost retry-script reply followed by exact index/request/grant reconciliation. */
+export const MOVE_ASK_COMMANDS = 15;
 /** Commands a link's page reads: the link, the request with both confirmations and the claim (4), the deleted people. */
 export const MOVE_LINK_COMMANDS = 6;
 /** Commands a Confirm makes: the page's reads, then the link, the request, the mark (with its read-back) and the request again. */

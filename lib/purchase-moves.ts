@@ -70,6 +70,15 @@ const seconds = (ms: number) => Math.floor(ms / 1000);
 
 type Kept = Pick<MoveRequest, "from" | "to" | "scope" | "createdAt">;
 type Grant = { id: string; side: MoveSide };
+type RetryIndex = { id: string; claim: string };
+
+function parseRetryIndex(raw: unknown): RetryIndex | null {
+  const value = parseJson(raw) as { id?: unknown; claim?: unknown } | undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (Object.keys(value).sort().join(",") !== "claim,id") return null;
+  if (typeof value.id !== "string" || !ID.test(value.id) || typeof value.claim !== "string" || !ID.test(value.claim)) return null;
+  return { id: value.id, claim: value.claim };
+}
 
 function parseJson(raw: unknown): unknown {
   if (typeof raw !== "string" || raw.length > MAX_MOVE_RECORD_BYTES) return undefined;
@@ -107,6 +116,24 @@ local n = redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[1])
 return n`;
 
+/**
+ * Selects and writes one same-day retry identity atomically. The retry index is written first within
+ * the script: if a later write fails, every later ask sees that one identity and fails closed rather
+ * than creating another. The opaque claim nonce lets a caller reconcile a lost EVAL reply.
+ */
+export const MOVE_RETRY_CREATE = `-- marktmorgen:purchase-move-retry-create:v1
+local current = redis.call('GET', KEYS[1])
+if current then return {0, current} end
+local held = redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[5], 'NX')
+if held ~= 'OK' then return {-1, ''} end
+local request = redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[5], 'NX')
+if request ~= 'OK' then return {-1, ARGV[1]} end
+local from = redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[5], 'NX')
+if from ~= 'OK' then return {-1, ARGV[1]} end
+local to = redis.call('SET', KEYS[4], ARGV[4], 'EX', ARGV[5], 'NX')
+if to ~= 'OK' then return {-1, ARGV[1]} end
+return {1, ARGV[1]}`;
+
 export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string } | { ok: false; reason: "email" | "same" | "scope" | "over" | "unknown" };
 
 /**
@@ -130,36 +157,46 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
 
   const retry = retryKey(made.from, made.to, made.scope, now);
-  const indexed = repliesFor(await redisPipeline([["GET", retry]]), 1);
-  if (!indexed) return { ok: false, reason: "unknown" };
+  const id = randomBytes(16).toString("hex");
+  const claim = randomBytes(16).toString("hex");
+  const indexValue = JSON.stringify({ id, claim } satisfies RetryIndex);
+  const fromToken = retryToken(id, "from") ?? "";
+  const toToken = retryToken(id, "to") ?? "";
+  if (!fromToken || !toToken) return { ok: false, reason: "unknown" };
 
-  let id: string;
-  let fromToken: string;
-  let toToken: string;
-  if (indexed[0] === null) {
-    id = randomBytes(16).toString("hex");
-    fromToken = retryToken(id, "from") ?? "";
-    toToken = retryToken(id, "to") ?? "";
-    if (!fromToken || !toToken) return { ok: false, reason: "unknown" };
-    const wrote = repliesFor(
-      await redisPipeline([
-        ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
-        ["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-        ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-        ["SET", retry, id, "EX", MOVE_CONFIRM_SECONDS],
-      ]),
+  const result = repliesFor(
+    await redisPipeline([[
+      "EVAL",
+      MOVE_RETRY_CREATE,
       4,
-    );
-    // The retry index is last: its presence means all link records were written first.
-    if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
-  } else {
-    if (typeof indexed[0] !== "string" || !ID.test(indexed[0])) return { ok: false, reason: "unknown" };
-    id = indexed[0];
-    fromToken = retryToken(id, "from") ?? "";
-    toToken = retryToken(id, "to") ?? "";
-    if (!fromToken || !toToken) return { ok: false, reason: "unknown" };
+      retry,
+      requestKey(id),
+      tokenKey(fromToken),
+      tokenKey(toToken),
+      indexValue,
+      json,
+      JSON.stringify({ id, side: "from" } satisfies Grant),
+      JSON.stringify({ id, side: "to" } satisfies Grant),
+      MOVE_CONFIRM_SECONDS,
+    ]]),
+    1,
+  )?.[0];
+  const decision =
+    Array.isArray(result) &&
+    result.length === 2 &&
+    (result[0] === -1 || result[0] === 0 || result[0] === 1) &&
+    typeof result[1] === "string"
+      ? { status: result[0], index: result[1] }
+      : null;
+
+  const reuse = async (raw: unknown): Promise<MoveAsk> => {
+    const kept = parseRetryIndex(raw);
+    if (!kept) return { ok: false, reason: "unknown" };
+    const keptFromToken = retryToken(kept.id, "from") ?? "";
+    const keptToToken = retryToken(kept.id, "to") ?? "";
+    if (!keptFromToken || !keptToToken) return { ok: false, reason: "unknown" };
     const existing = repliesFor(
-      await redisPipeline([["GET", requestKey(id)], ["GET", tokenKey(fromToken)], ["GET", tokenKey(toToken)]]),
+      await redisPipeline([[ "GET", requestKey(kept.id) ], [ "GET", tokenKey(keptFromToken) ], [ "GET", tokenKey(keptToToken) ]]),
       3,
     );
     if (!existing || typeof existing[0] !== "string" || existing[1] === null || existing[2] === null) return { ok: false, reason: "unknown" };
@@ -173,11 +210,24 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
       parsed.to !== made.to ||
       JSON.stringify(parsed.scope) !== JSON.stringify(made.scope) ||
       seconds(now) >= parsed.createdAt + MOVE_CONFIRM_SECONDS ||
-      !fromGrant || fromGrant.id !== id || fromGrant.side !== "from" ||
-      !toGrant || toGrant.id !== id || toGrant.side !== "to"
+      !fromGrant || fromGrant.id !== kept.id || fromGrant.side !== "from" ||
+      !toGrant || toGrant.id !== kept.id || toGrant.side !== "to"
     ) return { ok: false, reason: "unknown" };
+    return { ok: true, id: kept.id, fromToken: keptFromToken, toToken: keptToToken };
+  };
+
+  if (decision?.status === 1) {
+    if (decision.index !== indexValue) return { ok: false, reason: "unknown" };
+    return { ok: true, id, fromToken, toToken };
   }
-  return { ok: true, id, fromToken, toToken };
+  if (decision?.status === 0) return reuse(decision.index);
+  if (decision?.status === -1) return { ok: false, reason: "unknown" };
+
+  // EVAL may have committed before its reply was lost or malformed. Read the exact index and grants;
+  // never make another identity on an uncertain result.
+  const reconciled = repliesFor(await redisPipeline([["GET", retry]]), 1);
+  if (!reconciled || typeof reconciled[0] !== "string") return { ok: false, reason: "unknown" };
+  return reuse(reconciled[0]);
 }
 
 /**

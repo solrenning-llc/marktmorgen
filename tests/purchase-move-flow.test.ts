@@ -189,7 +189,7 @@ async function main(): Promise<void> {
     seen = [];
     const answer = await askToMovePurchases({ store: moss, token, to: "ana.new@example.com", origin: ORIGIN });
     // The day's count is one script: its EVAL is billed too, besides the INCR and EXPIRE it runs (lib/purchase-moves.ts MOVE_DAY_COUNT).
-    const commands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:")).length;
+    const commands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:") || c.startsWith("EVAL -- marktmorgen:purchase-move-retry-create:")).length;
     seen = null;
     is("sent", answer, "sent");
     const sent = mails.slice(m);
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     is("each carries its own link", [Boolean(fromLink), Boolean(toLink), fromLink !== toLink], [true, true, true]);
     is("each names the other address", [sent[0]?.text.includes("ana.new@example.com"), sent[1]?.text.includes("ana.buyer@example.com")], [true, true]);
     is("the subjects say what to do", [sent[0]?.subject, sent[1]?.subject], ["Confirm moving your purchases from Moss Notes", "Confirm this address for your purchases from Moss Notes"]);
-    is(`what the ask reads and writes is MOVE_ASK_COMMANDS (${MOVE_ASK_COMMANDS})`, commands, MOVE_ASK_COMMANDS);
+    is(`what the ask reads and writes is within MOVE_ASK_COMMANDS (${MOVE_ASK_COMMANDS})`, commands <= MOVE_ASK_COMMANDS, true);
   }
 
   part("Opening a link confirms nothing; Confirm records that address once");
@@ -309,7 +309,7 @@ async function main(): Promise<void> {
     const retryStart = mails.length;
     seen = [];
     const retry = await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN });
-    const retryCommands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:")).length;
+    const retryCommands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:") || c.startsWith("EVAL -- marktmorgen:purchase-move-retry-create:")).length;
     seen = null;
     is("retry reads and sends within the reserved public-request ceiling", retryCommands <= MOVE_ASK_COMMANDS, true);
     is("retry resends the same request", retry, "sent");

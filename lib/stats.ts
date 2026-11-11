@@ -207,7 +207,7 @@ export async function recordHit(
     // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
     let opened: number | null = null;
     try {
-      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
     } catch (error) {
       console.error("counting a product page's view failed", error);
     }
@@ -224,7 +224,7 @@ export async function recordHit(
   ];
   let replies: unknown[];
   try {
-    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
   } catch (error) {
     // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
     await redisPipeline(unknownExpiries()).catch(() => null);
@@ -285,7 +285,7 @@ export async function countHeard(statsId: string, answer: string, cents: number,
   if (!isRedisConfigured()) return;
   const counts = countsKey(statsId, dayKey(now));
   await redisPipeline([
-    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [
+    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [
       { hash: 0, field: `h:${answer}`, by: 1 },
       ...(cents > 0 ? [{ hash: 0, field: `hc:${answer}`, by: Math.round(cents) }] : []),
       // A sale no link credited to any channel: what its buyer said is the only
@@ -314,7 +314,7 @@ export async function countSearchMiss(statsId: string, words: string[], now = Da
   const counts = countsKey(statsId, dayKey(now));
   try {
     await redisPipeline([
-      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
+      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
       ["EXPIRE", counts, TTL_SECONDS],
     ]);
   } catch (error) {

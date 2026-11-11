@@ -35,7 +35,7 @@ import { stockLeft } from "@/lib/stock";
 import { addProduct, addStoreLink, claimHandle, setAffiliateSetting, setProductFile, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, MAX_FUNNEL_SLUG } from "@/lib/page-funnel";
-import { readPageFunnel } from "@/lib/page-funnel-store";
+import { countFunnelStep, readPageFunnel } from "@/lib/page-funnel-store";
 import { countGap, countGapNote, isResting, recordVisit, takeSignal, visitedFolders, visitsIn } from "@/lib/traffic";
 import { sampleFrom } from "@/lib/benchmark-rules";
 import { visitsWhole } from "@/lib/benchmarks";
@@ -172,6 +172,10 @@ let replyBytes = 0;
 const sentPipelines: (string | number)[][][] = [];
 /** Run before a DECR is sent: what another request does meanwhile (fourth round, L3). */
 let decrHook: ((key: string) => void) | null = null;
+/** A write that fails as a Redis that does not answer would: the whole pipeline throws (Claude 5 on b2acc71c18, M2). */
+let failWhen: ((command: (string | number)[]) => boolean) | null = null;
+/** A write answered in another shape than Redis's own (CX-123 rule 24): the replies it returns instead, or null to send it. */
+let replyHook: ((list: (string | number)[][]) => unknown[] | null) | null = null;
 const sizeOf = (value: unknown): number => (typeof value === "string" ? Buffer.byteLength(value) : Array.isArray(value) ? value.reduce((n: number, v) => n + sizeOf(v), 0) : 0);
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
@@ -184,6 +188,9 @@ const real = redis.pipeline.bind(redis);
   }
   if (measuring) sentPipelines.push(list.map((command) => [...command]));
   if (decrHook) for (const command of list) if (command[0] === "DECR") decrHook(String(command[1]));
+  if (failWhen && list.some(failWhen)) throw new Error("Redis did not answer");
+  const shaped = replyHook ? replyHook(list) : null;
+  if (shaped) return shaped as never;
   const replies = await real(list);
   list.forEach((command, i) => {
     if (!(command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:")) && command[0] !== "EVAL") replyBytes += sizeOf((replies as unknown[])[i]);
@@ -676,6 +683,7 @@ async function main(): Promise<void> {
       answering(null);
     }
   };
+  redis.run(["DEL", "nl:traffic:gap:joy"]);
   for (let i = 0; i < SHARE_BATCH; i += 1) await signalAnswered(clicks.l, busyIp);
   const shareKeyNow = `nl:traffic:sc:${joy.folder}:${windowOf(joyNow)}`;
   const fields = (redis.run(["HKEYS", shareKeyNow]) as string[]).filter((f) => f.startsWith(`${shareDay}:`));
@@ -687,9 +695,11 @@ async function main(): Promise<void> {
   await signalAnswered(clicks.l, `192.0.2.${clickIp++}`);
   // Each click counts on the day's and the all-time record, two in counts().
   is("past its share of the day one connection is not counted, and another still is", [busyAfter - linkBefore < 2 * SHARE_BATCH, counts().l - busyAfter], [true, 2]);
-  // Every count not made is written down (fourth round, H1): the connection's share just refused one.
+  // A count refused for its connection's share is one connection's alone: it is left out as a repeat and
+  // never written down, or one machine could hide any store's rates (Claude 5 on b2acc71c18, M1; until then
+  // written down, fourth round, H1).
   const gapKeyOf = (handle: string) => `nl:traffic:gap:${handle}`;
-  is("a count refused for its connection's share is written down as not made", (await countGap(joyNow)) !== null, true);
+  is("M1: a count refused for its connection's share is not written down as not made", [await countGap(joyNow, "clicks"), await countGapNote(joyNow, "clicks", 0)], [null, ""]);
   redis.run(["DEL", gapKeyOf("joy")]);
   // Past the window's signals nothing is counted, the store's pages do not rest
   // for it, and its rates are said to be incomplete rather than shown too high.
@@ -756,7 +766,7 @@ async function main(): Promise<void> {
   // A count refused for its address, or for the store's ten minutes, reads nothing of the store (third round, M2), and is written down (fourth round, H1).
   for (let i = 0; i < 125; i += 1) await withinLimit("hit", `192.0.2.250|joy`, 120, 600);
   const refusedReads = await counted(() => signal(clicks.l, "192.0.2.250")).then(() => records);
-  is("a count refused for its address reads none of the store's record, and is written down", [refusedReads, (await countGap(joyNow)) !== null], [0, true]);
+  is("M1: a count refused for its address reads none of the store's record, and is not written down: one address alone hides no rate", [refusedReads, await countGap(joyNow, "clicks"), await countGap(joyNow, "steps"), await countGap(joyNow, "visits")], [0, null, null, null]);
   redis.run(["DEL", gapKeyOf("joy")]);
   await signal({ h: "nobodyhere", k: "l", id: "x" }, "192.0.2.250");
   is("a made-up address leaves nothing written down", redis.keys().some((k) => k === gapKeyOf("nobodyhere")), false);
@@ -766,17 +776,83 @@ async function main(): Promise<void> {
   await signal(clicks.l, "2001:db8:77:1::5");
   is("two addresses of one /48 share one allowance", counts().l - v6Before, 0);
   redis.run(["DEL", gapKeyOf("joy")]);
+  // Claude 5's review of b2acc71c18 (7 November 2026), M1: a refusal one address can cause alone never hides a rate,
+  // and a count not made hides only the rates made from its own kind.
+  for (let i = 0; i < 120; i += 1) await withinLimit("hit", `192.0.2.251|joy`, 120, 600);
+  await signal({ h: "joy", k: "v", r: "", u: "" }, "192.0.2.251");
+  is("M1: one address sending 121 page views is refused for its address and hides none of the store's rates", [await countGap(joyNow, "clicks"), await countGap(joyNow, "steps"), await countGap(joyNow, "visits"), await countGapNote(joyNow, "clicks", 0)], [null, null, null, ""]);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  {
+    const spentHere = redis.run(["GET", joySignals]);
+    redis.run(["SET", joySignals, String(signalLimitFor(joyNow))]);
+    await signal(clicks.l, `192.0.2.${clickIp++}`);
+    is("M1: a click not counted hides the rates made from clicks, never a funnel's steps or the visits", [(await countGap(joyNow, "clicks")) !== null, await countGapNote(joyNow, "steps", 0), await countGap(joyNow, "visits")], [true, "", null]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+    await signal(clicks.f, `192.0.2.${clickIp++}`);
+    is("M1: and a step not counted hides a funnel's steps, never the clicks' rates", [(await countGap(joyNow, "steps")) !== null, await countGapNote(joyNow, "clicks", 0)], [true, ""]);
+    redis.run(["SET", joySignals, String(spentHere)]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
+  {
+    // A mark left under this address before this store took it (a store that let it go; RELEASE_QUARANTINE_DAYS is
+    // shorter than the benchmark's 90 days) is not this store's: its visits are whole from when it was made.
+    const before = Date.parse(joyNow.createdAt) - 10 * DAY;
+    redis.run(["HSET", gapKeyOf("joy"), "first", String(before), "last", String(before), "visits:first", String(before), "visits:last", String(before)]);
+    is("M1: a mark older than the store itself leaves its visits whole", await visitsWhole(joyNow), true);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
+  // M2: every count not made is written down, a write that failed included.
+  {
+    const keptBefore2 = Number(redis.run(["GET", joySignals]) ?? 0);
+    await takeSignal(joyNow, async () => { throw new Error("unknown"); });
+    is("M2: a write whose outcome is not known keeps its place and is written down as a count not made", [Number(redis.run(["GET", joySignals]) ?? 0) - keptBefore2, (await countGap(joyNow, "clicks")) !== null], [1, true]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+    const keptF = Number(redis.run(["GET", joySignals]) ?? 0);
+    const stepsBefore = counts().f;
+    failWhen = (c) => c[0] === "PFADD";
+    await signal(clicks.f, `192.0.2.${clickIp++}`);
+    failWhen = null;
+    is("M2: a funnel step whose count failed keeps its place and is written down, never taken for a visitor already seen", [Number(redis.run(["GET", joySignals]) ?? 0) - keptF, counts().f - stepsBefore, (await countGap(joyNow, "steps")) !== null], [1, 0, true]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+    failWhen = (c) => c[0] === "PFADD";
+    const failed = await countFunnelStep(joyStats, (await readPageFunnel(joyStats, funnelId))!, 0, "v".repeat(24));
+    failWhen = null;
+    replyHook = (list) => (list[0]?.[0] === "PFADD" ? ["1", 1] : null);
+    const odd = await countFunnelStep(joyStats, (await readPageFunnel(joyStats, funnelId))!, 0, "w".repeat(24));
+    replyHook = null;
+    is("M2: a funnel step's count that failed or answered in another shape is unknown, never false", [failed, odd], [null, null]);
+    const keptA = Number(redis.run(["GET", joySignals]) ?? 0);
+    replyHook = (list) => (list[0]?.[0] === "SET" && String(list[0][1]).startsWith("nl:rl:aff:click:") ? ["OK", "many"] : null);
+    await signal(clicks.a, `192.0.2.${clickIp++}`);
+    replyHook = null;
+    is("M2: an affiliate's visit whose address count answered in another shape keeps its place and is written down", [Number(redis.run(["GET", joySignals]) ?? 0) - keptA, (await countGap(joyNow, "clicks")) !== null], [1, true]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
   // And past what one store's links, affiliates' visits and steps may send in ten minutes from every address together.
   for (let i = 0; i < HIT_STORE_LIMIT; i += 1) await withinLimit("hit-store", "joy", HIT_STORE_LIMIT, 600);
   const floodReads = await counted(() => signal(clicks.l, `192.0.2.${clickIp++}`)).then(() => records);
   const viewsBefore = await visitsIn(joy.folder, windowOf(joyNow));
   await signal({ h: "joy", k: "v", r: "", u: "" }, `192.0.2.${clickIp++}`);
-  is("a count past the store's ten minutes reads none of its record and is written down; a view is never under it", [floodReads, (await countGap(joyNow)) !== null, (await visitsIn(joy.folder, windowOf(joyNow))) - viewsBefore, /withinLimit\("hit-store", handle, HIT_STORE_LIMIT, 600\)[\s\S]*storeForHandle\(handle\)/.test(read("app/api/store/hit/route.ts"))], [0, true, 1, true]);
+  is("a count past the store's ten minutes reads none of its record and is written down, as a click; a view is never under it", [floodReads, (await countGap(joyNow, "clicks")) !== null, (await visitsIn(joy.folder, windowOf(joyNow))) - viewsBefore, /withinLimit\("hit-store", handle, HIT_STORE_LIMIT, 600\)[\s\S]*storeForHandle\(handle\)/.test(read("app/api/store/hit/route.ts"))], [0, true, 1, true]);
   is("the store's ten minutes are sized at the largest plan's busiest hour, a tenth of its month's signals", HIT_STORE_LIMIT, Math.ceil((SIGNALS_PER_VISIT * VISITS_INCLUDED.scale) / 60));
   redis.run(["DEL", gapKeyOf("joy")]);
+  // L1: past the store's ten minutes a flood writes the mark at most once a minute, not three commands a request.
+  {
+    for (let i = 0; i < HIT_STORE_LIMIT; i += 1) await withinLimit("hit-store", "joy", HIT_STORE_LIMIT, 600);
+    let marks = 0;
+    const markHook = (list: (string | number)[][]) => {
+      for (const c of list) if (String(c[1]).startsWith("nl:traffic:gap:") || (c[0] === "GET" && String(c[1]).startsWith("nl:store:handle:"))) marks += 1;
+      return null;
+    };
+    replyHook = markHook;
+    for (let i = 0; i < 20; i += 1) await signal(clicks.l, `192.0.2.${clickIp++}`);
+    replyHook = null;
+    is("L1: twenty refused past the store's ten minutes write the mark once at most", marks <= 3, true);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
   // The Terms say it, from the same words, dated when they changed.
   const termsPage = read("app/terms/page.tsx");
-  is("the Terms say how many are counted, one connection's share, the busiest moments and the rates not shown", [/id="counted-clicks"[\s\S]*\{signalsWords\(\)\}/.test(termsPage), /lastUpdated="November 4, 2026"/.test(termsPage), signalsWords().includes("at the busiest moments some of them may not be counted"), signalsWords().includes("say they are not complete")], [true, true, true, true]);
+  is("the Terms say how many are counted, one connection's share, the busiest moments and the rates not shown", [/id="counted-clicks"[\s\S]*\{signalsWords\(\)\}/.test(termsPage), /lastUpdated="November 11, 2026"/.test(termsPage), signalsWords().includes("at the busiest moments some of them may not be counted"), signalsWords().includes("say they are not complete"), signalsWords().includes("left out as a repeat, without a note")], [true, true, true, true, true]);
   // L6: the funded window's path is measured before the commercial margin can be ready.
   is("the commercial margin cannot be ready while a signal's funded-window path is unmeasured", !commercialMarginReady() || FUNDED_SIGNAL_PATH_MEASURED, true);
   // Billed, the count script with its one name inside (lib/capped-count.ts): never more than the model,

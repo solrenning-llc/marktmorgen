@@ -87,6 +87,17 @@ async function main(): Promise<void> {
   is("the ceiling is in UTF-8 bytes, not characters", [bytes(multibyte) > 1_024, wide], [true, "refused"]);
   redis.run(["SET", key, JSON.stringify(sized(1_025))]);
   is("a kept value over the ceiling is not read as a snapshot", await read(), null);
+  part("The window it was kept for is read with it (Claude 1's LOW on #3509)");
+  const kept = lib as unknown as { readPlatformProofKept?: () => Promise<{ snapshot: PlatformProofSnapshot; validDays: number } | null>; keptPlatformProof?: (now?: number) => Promise<{ count: number }[] | null> };
+  redis.clear();
+  const monthly = { ...fresh, asOf: new Date(now - 35 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z") };
+  await write(monthly, 40);
+  is("read back with the window it was written for", kept.readPlatformProofKept ? await kept.readPlatformProofKept() : "missing", { snapshot: monthly, validDays: 40 });
+  is("so on day 35 of a monthly count its counters still show, without the reader choosing a window", kept.keptPlatformProof ? (await kept.keptPlatformProof(now))?.map((r) => r.count) : "missing", [120, 1500, 60]);
+  redis.run(["SET", key, JSON.stringify(monthly)]);
+  is("a value kept without its window: unknown, never a window guessed", kept.readPlatformProofKept ? await kept.readPlatformProofKept() : "missing", null);
+  redis.run(["SET", key, JSON.stringify({ ...monthly, validDays: 365 })]);
+  is("a window other than 30 or 40: not a snapshot", [await read(), kept.readPlatformProofKept ? await kept.readPlatformProofKept() : "missing"], [null, null]);
   done();
 }
 

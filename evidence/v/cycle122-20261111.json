@@ -1,0 +1,143 @@
+{
+  "cycle": 122,
+  "agent": "Codex V",
+  "observed_at": "2026-11-11 10:08:48 UTC",
+  "inherited_checkpoint": {
+    "commit": "35a2b39ca0aaa365bae9ac44fe368925f1caa22e",
+    "path": "evidence/v/cycle121-20261111.json",
+    "blob": "3f5906c01e41b5b135edf6db017fb44c72750e85",
+    "full_read": true,
+    "chars": 120657,
+    "rule": "All historical proofs/budgets/holds inherited in full through this immutable checkpoint; none reset or discarded. Resolve applicable family before future runtime."
+  },
+  "main": "b4ba5ce2ecf6bbfe2c73fd52fef961f4bd5692b5",
+  "norms": "Main identical to prior runs; previous FULL CLAUDE/AGENTS/inbox own CX120122123/all reservations/AVMQ unchanged at exact same main. FreshROOT FULL2cc406eed76e09b6e060ca154306f093ae802758/427510chars. TODOS98C1exclusiveclaude5,106107108 andMV3677 retained. GitHubintegrationONLY/noPC/localtools/subagents.",
+  "channel": {
+    "commit": "e4430acdd0db6f4e0f92cfef433db2028aa58d22",
+    "exact_readback": true
+  },
+  "own": [
+    {
+      "pr": 2999,
+      "head": "a4d11e663a2799a4721eb627b39a40e16f720a4e",
+      "state": "open",
+      "merged": false,
+      "last_comment": [
+        6789153597
+      ],
+      "changed": false
+    },
+    {
+      "pr": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "state": "open",
+      "merged": false,
+      "last_comment": [
+        6787703741
+      ],
+      "changed": false
+    },
+    {
+      "pr": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "state": "open",
+      "merged": false,
+      "last_comment": [
+        6771004275
+      ],
+      "changed": false
+    },
+    {
+      "pr": 3500,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "state": "open",
+      "merged": false,
+      "last_comment": [
+        6772605781
+      ],
+      "changed": false
+    }
+  ],
+  "focals": [
+    {
+      "pr": 2843,
+      "head": "02dbc4624ebbddb55fef995320c65bc26f1533ea",
+      "state": "open",
+      "comments": [
+        6694709392,
+        6694965961,
+        6695803166,
+        6708245944,
+        6709432040,
+        6709476778,
+        6712000331,
+        6712268153,
+        6736921238,
+        6750890970,
+        6788878502,
+        6790783703
+      ],
+      "new_author_response": false,
+      "previous_findings": "OPEN/seeinheritedcheckpoint;notrerun/duplicatecomment"
+    },
+    {
+      "pr": 3659,
+      "head": "d12ef6f0d7486966b740d25c2e82414c2fa5e3ac",
+      "state": "open",
+      "comments": [
+        6786800040,
+        6787211142,
+        6787231744,
+        6787672799
+      ],
+      "new_author_response": false,
+      "previous_findings": "OPEN/seeinheritedcheckpoint;notrerun/duplicatecomment"
+    },
+    {
+      "pr": 3661,
+      "head": "de40123eb3a9320dcf56ac2667a0f06bb3fed97e",
+      "state": "open",
+      "comments": [
+        6787121945,
+        6787132169,
+        6787906841,
+        6787947160,
+        6788586117
+      ],
+      "new_author_response": false,
+      "previous_findings": "OPEN/seeinheritedcheckpoint;notrerun/duplicatecomment"
+    }
+  ],
+  "main_red": {
+    "issue": 3677,
+    "state": "open",
+    "fixPR": 3680,
+    "head": "9e8be260ecb862054f4ad57c0653a93991e86bfd",
+    "statePR": "open",
+    "merged": false,
+    "author_report": "ROOTC30655:queuefailurecycles/mainreddatebug;405mergeAPI becausequeued;requestedadminJumpqueue. This is authorreportnotnewVqueueaction. PRIOR9exactheadgreen+2reviews;notreplayednow."
+  },
+  "coordination": {
+    "C4F0608": "AcknowledgedVexistingreviews3649/3676;LOWalias/reservationandduplicateexpirycorrectedlocal. cappedcountv3 local438d782f reservedbyC4F/55files+nativechecksARETHEIRS. NoVclaim/source/runtime.",
+    "C4F0552": "affiliate-bookreadexactHIGH/MEDfixownedC4F,local1cc5f0a6;doNOTduplicate.",
+    "reviews": "C4D inventoryonly1496/3079decisionholds, newC4Afocals3487/3479/3485/3612alreadyassigned, G2574/2571/2287scopesowned;no newunclaimedworkdemonstratedfromcurrentROOT."
+  },
+  "holds": {
+    "2999": "C1onlypublishedheada4d11e;old8e2a candidate discarded/notpush. C4D6789153597focalcredited, CI8successproductFAILlastread.",
+    "3024": "C1claude5exclusiveTODOS98;local06a27f8e notpublished;MEDstaleaccountingremote;costconditional175+expiry terms,andlint512MiBexit134HOLD/NOretry/split/raise",
+    "3206": "C1dequeue awaited;lastrefupdate rejected mergequeue,NOretry/cancel/bypass;documentcandidate inherited",
+    "3500": "optionalwordingcandidate13dddb29notpush/queued/noheadchurn"
+  },
+  "runtime": {
+    "new_tests": 0,
+    "newRedis": 0,
+    "newHTTP": 0,
+    "product_push": 0,
+    "queue": 0,
+    "rerun": 0,
+    "merge": 0,
+    "subagents": 0,
+    "qualification": "Metadata/commentsonly. Existing runtime ledgers/C2/C4/C3testsNOTborrowed. No freshCI/failurecausecertificate; prior8/9notupgraded."
+  },
+  "next": "FIRSTfreshROOT,currentmainandCP122;forapplicableownreturnresolveCP121 immutable proof/ledger. AuthorC1confirmfix2843cap;C3fix3661requestedid;Nuvem4fix3659testcount/C7privacy. C1coords3024/3206;#3680admissionadminalreadyescalated,doNOTqueueorPC. MV3677onlyendsafterfixmerged+mainverify+issueclosed. No newautomation;ongoingconditionnotcomplete/transientcoordinationholdisnotpermanentcapabilityblock."
+}

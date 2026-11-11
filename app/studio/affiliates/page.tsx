@@ -61,13 +61,21 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
   ]);
   // Partnerships other creators here have offered this one, waiting to be
   // accepted or declined (lib/partner-invites.ts). Read for the person signed
-  // in, not for the store, because the offer was made to an address.
-  const offers = (await waitingFor(view.email ?? store.email).catch(() => [])).map((invite) => ({
-    id: invite.id,
-    words: offerWords(invite),
-    storeName: invite.storeName,
-    percent: invite.share.percent,
-  }));
+  // in, not for the store, because the offer was made to an address. A read
+  // that failed is null, said on the page, never shown as no offers (rule 24).
+  const offers = await waitingFor(view.email ?? store.email).then(
+    (waiting) =>
+      waiting.map((invite) => ({
+        id: invite.id,
+        words: offerWords(invite),
+        storeName: invite.storeName,
+        percent: invite.share.percent,
+      })),
+    (error: unknown) => {
+      console.error("reading the partnerships offered to this creator failed", error);
+      return null;
+    },
+  );
   const codes =
     codeList.state === "ok"
       ? codeList.codes
@@ -128,7 +136,12 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           </p>
         ) : null}
 
-        {offers.length ? (
+        {offers === null ? (
+          <p className="notice notice-warn mt-8" role="status">
+            Partnerships other creators offered you could not be loaded just now. Nothing was changed: any offer waiting
+            for you is still there. Reload the page in a moment to see it.
+          </p>
+        ) : offers.length ? (
           <div className="mt-8">
             <PartnerOffers offers={offers} />
           </div>

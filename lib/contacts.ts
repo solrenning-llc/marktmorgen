@@ -38,7 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, suppressionPrint, wasSuppressed } from "@/lib/suppression";
+import { liftCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -394,7 +394,7 @@ return out`;
 type ImportWrite = { email: string; value: string; was: string; added: boolean; left: boolean };
 async function writeImportedContacts(listId: string, writes: ImportWrite[]): Promise<number[]> {
   try {
-    const reply = await redisPipeline([["EVAL", IMPORT_CONTACTS_WRITE, 4, leadsKey(listId), `nl:erased:${listId}`, agreedKey(listId), unsubKey(listId),
+    const reply = await redisPipeline([["EVAL", IMPORT_CONTACTS_WRITE, 4, leadsKey(listId), suppressedKey(listId), agreedKey(listId), unsubKey(listId),
       ...writes.flatMap((w) => [w.email, suppressionPrint(listId, w.email), w.was, w.value, w.added ? 1 : 0, w.left ? 1 : 0])]]);
     exactImportReply(reply, 1);
     exactImportReply(reply[0], writes.length);
@@ -654,6 +654,20 @@ export async function previewContactRows(
  * in between must not be written back as agreeing. An address that changed
  * meanwhile is read again and left as it now is.
  */
+/**
+ * A file's rows whose write may have landed without the step finishing (the script's answer and its read-only
+ * recovery lost, or a later step failing). `possiblyAdded` is how many of its rows may now be on the list as added:
+ * the import keeps that count apart, never as added, and its ramp still covers them (lib/imports.ts contactsStep).
+ */
+export class ContactImportUnknownError extends Error {
+  readonly possiblyAdded: number;
+  constructor(possiblyAdded: number, cause: unknown) {
+    super(cause instanceof Error ? cause.message : CONTACT_IMPORT_UNKNOWN, { cause });
+    this.name = "ContactImportUnknownError";
+    this.possiblyAdded = possiblyAdded;
+  }
+}
+
 export async function importContactRows(listId: string, rows: ImportedContact[], data: DataStore): Promise<ContactOutcome[]> {
   if (!isRedisConfigured() || !listId || rows.length === 0) return rows.map(() => "full");
   const key = leadsKey(listId);
@@ -688,20 +702,31 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
   if (!writes.length) return outcomes;
   // What the rows grow the list by takes room first: past it, none of them is written.
   await needContacts(data, sizes);
-  const result = await writeImportedContacts(listId, writes);
-  const written = result.map((v) => v === 1);
-  await settleContacts(data, sizes, written);
-  writes.forEach((w, i) => { if (result[i] === -1) outcomes[w.row] = "left"; });
-  const lost = writes.filter((_, i) => result[i] === 0);
-  if (lost.length) {
-    // Changed in the moment between: whatever it is now stands.
-    const reply = await redisPipeline([["HMGET", key, ...lost.map((w) => w.email)]]);
-    exactImportReply(reply, 1);
-    const now = importValues(reply[0], lost.length);
-    lost.forEach((w, i) => {
-      const contact = parseContact(now[i]);
-      outcomes[w.row] = contact?.unsub ? "left" : "already";
-    });
+  let result: number[];
+  try {
+    result = await writeImportedContacts(listId, writes);
+  } catch (error) {
+    // The script may have landed: any row it would have added may be on the list now (rule 24).
+    throw new ContactImportUnknownError(writes.filter((w) => w.added).length, error);
+  }
+  try {
+    const written = result.map((v) => v === 1);
+    await settleContacts(data, sizes, written);
+    writes.forEach((w, i) => { if (result[i] === -1) outcomes[w.row] = "left"; });
+    const lost = writes.filter((_, i) => result[i] === 0);
+    if (lost.length) {
+      // Changed in the moment between: whatever it is now stands.
+      const reply = await redisPipeline([["HMGET", key, ...lost.map((w) => w.email)]]);
+      exactImportReply(reply, 1);
+      const now = importValues(reply[0], lost.length);
+      lost.forEach((w, i) => {
+        const contact = parseContact(now[i]);
+        outcomes[w.row] = contact?.unsub ? "left" : "already";
+      });
+    }
+  } catch (error) {
+    // Written for sure, but the rest of the step failed: the rows added here are on the list.
+    throw new ContactImportUnknownError(writes.filter((w, i) => w.added && result[i] === 1).length, error);
   }
   return outcomes;
 }

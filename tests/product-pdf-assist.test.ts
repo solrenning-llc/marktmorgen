@@ -274,6 +274,13 @@ async function main(): Promise<void> {
   const empty = await writeFromPdf(store, input, Date.now(), told("pdfassistempty01", []));
   is("a reading with nothing in it: the writing step never starts, its job comes back, and it says the PDF gave nothing", [calls, before - (await ai.aiLeft(store)), empty], [1, READ_PDF_JOBS, { ok: false, reason: "empty", returned: 1, left: before - READ_PDF_JOBS }]);
 
+  // A reading with no readable answer is not a PDF with nothing in it (#3435's LOW, the same rule here): said as failed.
+  fresh();
+  before = await ai.aiLeft(store);
+  readingSays = "Sorry, I cannot read that.";
+  const unread = await writeFromPdf(store, input, Date.now(), told("pdfassistunread1", []));
+  is("a reading answered with no JSON: failed, never \"the PDF gave nothing\"; the writing step's job comes back", [calls, before - (await ai.aiLeft(store)), unread], [1, READ_PDF_JOBS, { ok: false, reason: "failed", returned: 1, left: before - READ_PDF_JOBS }]);
+
   fresh();
   before = await ai.aiLeft(store);
   const bad = await writeFromPdf(store, input, Date.now(), told("not a run!", []));

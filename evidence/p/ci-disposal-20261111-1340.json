@@ -1,0 +1,1577 @@
+{
+  "actor": "Codex P",
+  "date": "2026-11-11",
+  "scope": "C1-1026 batch exact-head readiness and CI diagnosis",
+  "firstCheckpoint": "454b088763c54604b9c46e9e7d358aa8c3d69168",
+  "firstChannel": "f720b68f0062185013769895523a2f79d2c76ef7",
+  "pr3516": {
+    "head": "443016ff77b193a41fd5a42f62e030d577c83f09",
+    "receipt": {
+      "total": 44,
+      "checks": [
+        {
+          "id": 130651673065,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326086/job/130651673065"
+        },
+        {
+          "id": 130640317312,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326063/job/130640317312"
+        },
+        {
+          "id": 130630636371,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326018/job/130630636371"
+        },
+        {
+          "id": 130628884660,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326034/job/130628884660"
+        },
+        {
+          "id": 130627578988,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326125/job/130627578988"
+        },
+        {
+          "id": 130627226250,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325917/job/130627226250"
+        },
+        {
+          "id": 130626711466,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326037/job/130626711466"
+        },
+        {
+          "id": 130624405285,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325936/job/130624405285"
+        },
+        {
+          "id": 130621983032,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326373/job/130621983032"
+        },
+        {
+          "id": 130621914080,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "CodeQL",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/runs/130621914080",
+          "output": {
+            "title": "No new alerts in code changed by this pull request",
+            "summary": "[View all branch alerts](/solrenning-llc/marktmorgen/security/code-scanning?query=pr%3A3516+tool%3ACodeQL+is%3Aopen).",
+            "text": null,
+            "annotations_count": 0,
+            "annotations_url": "https://api.github.com/repos/solrenning-llc/marktmorgen/check-runs/130621914080/annotations"
+          }
+        },
+        {
+          "id": 130616327831,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Buyer action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326018/job/130616327831"
+        },
+        {
+          "id": 130616327455,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Buyer action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326018/job/130616327455"
+        },
+        {
+          "id": 130616327410,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Buyer action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326018/job/130616327410"
+        },
+        {
+          "id": 130615113136,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Public AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325917/job/130615113136"
+        },
+        {
+          "id": 130615113065,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Public AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325917/job/130615113065"
+        },
+        {
+          "id": 130615113008,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Public AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325917/job/130615113008"
+        },
+        {
+          "id": 130614784248,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Real reader entry (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325936/job/130614784248"
+        },
+        {
+          "id": 130614784167,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Real reader entry (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325936/job/130614784167"
+        },
+        {
+          "id": 130613705304,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "audit",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326373/job/130613705304"
+        },
+        {
+          "id": 130613475051,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Product action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326034/job/130613475051"
+        },
+        {
+          "id": 130613474960,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Product action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326034/job/130613474960"
+        },
+        {
+          "id": 130613474952,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Product action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326034/job/130613474952"
+        },
+        {
+          "id": 130613385667,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "verify",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326086/job/130613385667"
+        },
+        {
+          "id": 130613385095,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "form-opportunity-redis",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326086/job/130613385095"
+        },
+        {
+          "id": 130613384926,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Mobile render (candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326086/job/130613384926"
+        },
+        {
+          "id": 130613384889,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Cross-browser (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326086/job/130613384889"
+        },
+        {
+          "id": 130613384861,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Cross-browser (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326086/job/130613384861"
+        },
+        {
+          "id": 130613257409,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "CodeQL (javascript-typescript)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326063/job/130613257409"
+        },
+        {
+          "id": 130613257345,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "CodeQL (actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326063/job/130613257345"
+        },
+        {
+          "id": 130613163498,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Studio AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326125/job/130613163498"
+        },
+        {
+          "id": 130613163469,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Studio AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326125/job/130613163469"
+        },
+        {
+          "id": 130613163467,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Studio AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326125/job/130613163467"
+        },
+        {
+          "id": 130612870714,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Signup action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326037/job/130612870714"
+        },
+        {
+          "id": 130612870664,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Signup action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326037/job/130612870664"
+        },
+        {
+          "id": 130612870605,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Signup action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326037/job/130612870605"
+        },
+        {
+          "id": 130611124539,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326034/job/130611124539"
+        },
+        {
+          "id": 130611118902,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326373/job/130611118902"
+        },
+        {
+          "id": 130611118287,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325936/job/130611118287"
+        },
+        {
+          "id": 130611117617,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326125/job/130611117617"
+        },
+        {
+          "id": 130611116993,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326086/job/130611116993"
+        },
+        {
+          "id": 130611116498,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326037/job/130611116498"
+        },
+        {
+          "id": 130611116485,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326018/job/130611116485"
+        },
+        {
+          "id": 130611116137,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046326063/job/130611116137"
+        },
+        {
+          "id": 130611115229,
+          "head_sha": "443016ff77b193a41fd5a42f62e030d577c83f09",
+          "name": "Documentation scope (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43046325917/job/130611115229"
+        }
+      ]
+    },
+    "qualifiedReviews": [
+      6799683545,
+      6797317439,
+      6760056825
+    ],
+    "disposition": "Own prior security hold fully closed: current separateCodeQL130621914080 completed/success, no newalerts,annotations0, plusnine aggregates success; readyforcoordinatorqueue. No new globalreview."
+  },
+  "pr3020": {
+    "head": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+    "receipt": {
+      "total": 43,
+      "checks": [
+        {
+          "id": 130647218177,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (codeql)",
+          "status": "queued",
+          "conclusion": null,
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837242/job/130647218177"
+        },
+        {
+          "id": 130636136286,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837457/job/130636136286"
+        },
+        {
+          "id": 130635372857,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839228/job/130635372857"
+        },
+        {
+          "id": 130632913801,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837444/job/130632913801"
+        },
+        {
+          "id": 130632818905,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837754/job/130632818905"
+        },
+        {
+          "id": 130632082590,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837484/job/130632082590"
+        },
+        {
+          "id": 130631865828,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837452/job/130631865828"
+        },
+        {
+          "id": 130626835476,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "CodeQL",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/runs/130626835476",
+          "output": {
+            "title": "No new alerts in code changed by this pull request",
+            "summary": "[View all branch alerts](/solrenning-llc/marktmorgen/security/code-scanning?query=pr%3A3020+tool%3ACodeQL+is%3Aopen).",
+            "text": null,
+            "annotations_count": 0,
+            "annotations_url": "https://api.github.com/repos/solrenning-llc/marktmorgen/check-runs/130626835476/annotations"
+          }
+        },
+        {
+          "id": 130626016824,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837259/job/130626016824"
+        },
+        {
+          "id": 130625580072,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Studio AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839228/job/130625580072"
+        },
+        {
+          "id": 130625580050,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Studio AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839228/job/130625580050"
+        },
+        {
+          "id": 130625579866,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Studio AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839228/job/130625579866"
+        },
+        {
+          "id": 130624811092,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Real reader entry (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837444/job/130624811092"
+        },
+        {
+          "id": 130624808815,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Real reader entry (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837444/job/130624808815"
+        },
+        {
+          "id": 130624674679,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Cross-browser (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839390/job/130624674679"
+        },
+        {
+          "id": 130624674654,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Cross-browser (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839390/job/130624674654"
+        },
+        {
+          "id": 130624674590,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Mobile render (candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839390/job/130624674590"
+        },
+        {
+          "id": 130624674382,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "form-opportunity-redis",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839390/job/130624674382"
+        },
+        {
+          "id": 130624674379,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "verify",
+          "status": "in_progress",
+          "conclusion": null,
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839390/job/130624674379"
+        },
+        {
+          "id": 130623954404,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "audit",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837259/job/130623954404"
+        },
+        {
+          "id": 130623539973,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "CodeQL (actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837242/job/130623539973"
+        },
+        {
+          "id": 130623539957,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "CodeQL (javascript-typescript)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837242/job/130623539957"
+        },
+        {
+          "id": 130622913654,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Public AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837457/job/130622913654"
+        },
+        {
+          "id": 130622913481,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Public AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837457/job/130622913481"
+        },
+        {
+          "id": 130622913469,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Public AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837457/job/130622913469"
+        },
+        {
+          "id": 130622668783,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Buyer action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837754/job/130622668783"
+        },
+        {
+          "id": 130622668675,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Buyer action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837754/job/130622668675"
+        },
+        {
+          "id": 130622668597,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Buyer action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837754/job/130622668597"
+        },
+        {
+          "id": 130622468072,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Product action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837452/job/130622468072"
+        },
+        {
+          "id": 130622467965,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Product action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837452/job/130622467965"
+        },
+        {
+          "id": 130622467937,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Product action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837452/job/130622467937"
+        },
+        {
+          "id": 130622099467,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Signup action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837484/job/130622099467"
+        },
+        {
+          "id": 130622099421,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Signup action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837484/job/130622099421"
+        },
+        {
+          "id": 130622099327,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Signup action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837484/job/130622099327"
+        },
+        {
+          "id": 130616675766,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839390/job/130616675766"
+        },
+        {
+          "id": 130616479695,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047839228/job/130616479695"
+        },
+        {
+          "id": 130616477970,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837754/job/130616477970"
+        },
+        {
+          "id": 130616473012,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837457/job/130616473012"
+        },
+        {
+          "id": 130616472291,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837452/job/130616472291"
+        },
+        {
+          "id": 130616471948,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837444/job/130616471948"
+        },
+        {
+          "id": 130616471943,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837484/job/130616471943"
+        },
+        {
+          "id": 130616471752,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837242/job/130616471752"
+        },
+        {
+          "id": 130616471288,
+          "head_sha": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+          "name": "Documentation scope (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43047837259/job/130616471288"
+        }
+      ]
+    },
+    "review": 6800002501,
+    "scope": "C1 independentreviewexplicitlyclosesbothGandPmedium; retaintwoLOWs. Sevenaggregatessuccess,CodeQLaggregatorqueued,productaggregateabsent: notready."
+  },
+  "mobile": [
+    {
+      "pr": 3024,
+      "head": "6ff3a9127504d85effc2ef5e46bdad49d5f441bd",
+      "job": 130638584681,
+      "fullLogChars": 241379,
+      "badSamples": [
+        {
+          "label": "candidate",
+          "version": "39e0ef7c3f584598fed19dc33feefd4a60c86219",
+          "path": "/@harborkitchen/p/weekly-meal-planner-1530a26c97",
+          "sample": 1,
+          "viewport": 390,
+          "cpuSlowdown": 4,
+          "latencyMs": 150,
+          "downloadMbps": 1.6,
+          "cache": "cold",
+          "thirdPartyRequests": "blocked",
+          "apiWrites": 0,
+          "lcpMs": 640,
+          "lcpAttribution": {
+            "tag": "H1",
+            "id": "",
+            "text": "Dinner, decided before the week begins",
+            "url": "",
+            "size": 33376,
+            "loadTime": 0,
+            "renderTime": 640
+          },
+          "cls": 0,
+          "interactionToPaintMs": 205.70000000001164,
+          "eventTiming": [
+            {
+              "id": 8909,
+              "duration": 32,
+              "name": "pointerdown",
+              "startTime": 2961.1999999999825,
+              "processingStart": 2967.100000000006,
+              "processingEnd": 2968.7999999999884
+            },
+            {
+              "id": 8909,
+              "duration": 32,
+              "name": "pointerup",
+              "startTime": 2961.2999999999884,
+              "processingStart": 2972.600000000006,
+              "processingEnd": 2973.2999999999884
+            },
+            {
+              "id": 8909,
+              "duration": 32,
+              "name": "click",
+              "startTime": 2961.2999999999884,
+              "processingStart": 2973.399999999994,
+              "processingEnd": 2974.1999999999825
+            },
+            {
+              "id": 8916,
+              "duration": 64,
+              "name": "pointerdown",
+              "startTime": 3323.6999999999825,
+              "processingStart": 3325.100000000006,
+              "processingEnd": 3325.899999999994
+            },
+            {
+              "id": 8916,
+              "duration": 64,
+              "name": "pointerup",
+              "startTime": 3323.7999999999884,
+              "processingStart": 3326.7999999999884,
+              "processingEnd": 3327.100000000006
+            },
+            {
+              "id": 8916,
+              "duration": 64,
+              "name": "click",
+              "startTime": 3323.7999999999884,
+              "processingStart": 3327.1999999999825,
+              "processingEnd": 3327.1999999999825
+            },
+            {
+              "id": 8923,
+              "duration": 24,
+              "name": "pointerdown",
+              "startTime": 3506.899999999994,
+              "processingStart": 3507.600000000006,
+              "processingEnd": 3509.2999999999884
+            },
+            {
+              "id": 8923,
+              "duration": 24,
+              "name": "pointerup",
+              "startTime": 3507,
+              "processingStart": 3509.399999999994,
+              "processingEnd": 3509.399999999994
+            },
+            {
+              "id": 8923,
+              "duration": 24,
+              "name": "click",
+              "startTime": 3507,
+              "processingStart": 3510.1999999999825,
+              "processingEnd": 3510.2999999999884
+            }
+          ],
+          "longTasks": [
+            {
+              "startTime": 2342.6999999999825,
+              "duration": 190
+            },
+            {
+              "startTime": 2984.600000000006,
+              "duration": 179
+            }
+          ],
+          "longAnimationFrames": [
+            {
+              "startTime": 278.29999999998836,
+              "duration": 307.8999999999942,
+              "blockingDuration": 79.3,
+              "firstUIEventTimestamp": 0,
+              "renderStart": 498.8999999999942,
+              "styleAndLayoutStart": 499,
+              "scripts": [
+                {
+                  "sourceURL": "http://127.0.0.1:3177/@harborkitchen/p/weekly-meal-planner-1530a26c97",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 0,
+                  "invoker": "http://127.0.0.1:3177/@harborkitchen/p/weekly-meal-planner-1530a26c97",
+                  "invokerType": "classic-script",
+                  "duration": 5.300000000017462,
+                  "executionStart": 402.19999999998254,
+                  "forcedStyleAndLayoutDuration": 0
+                }
+              ]
+            },
+            {
+              "startTime": 2342.6999999999825,
+              "duration": 192.5,
+              "blockingDuration": 141.9,
+              "firstUIEventTimestamp": 0,
+              "renderStart": 2534.1999999999825,
+              "styleAndLayoutStart": 2534.1999999999825,
+              "scripts": [
+                {
+                  "sourceURL": "http://127.0.0.1:3177/_next/static/chunks/257mghfoz-7do.js",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 0,
+                  "invoker": "http://127.0.0.1:3177/_next/static/chunks/257mghfoz-7do.js",
+                  "invokerType": "classic-script",
+                  "duration": 187.40000000002328,
+                  "executionStart": 2342.7999999999884,
+                  "forcedStyleAndLayoutDuration": 0
+                }
+              ]
+            },
+            {
+              "startTime": 2983.600000000006,
+              "duration": 190.59999999997672,
+              "blockingDuration": 131.8,
+              "firstUIEventTimestamp": 0,
+              "renderStart": 3172,
+              "styleAndLayoutStart": 3174.100000000006,
+              "scripts": [
+                {
+                  "sourceURL": "http://127.0.0.1:3177/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0&v=3&h=127.0.0.1%3A3177",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 0,
+                  "invoker": "http://127.0.0.1:3177/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0&v=3&h=127.0.0.1%3A3177",
+                  "invokerType": "classic-script",
+                  "duration": 129.19999999998254,
+                  "executionStart": 2984.6999999999825,
+                  "forcedStyleAndLayoutDuration": 0
+                },
+                {
+                  "sourceURL": "http://127.0.0.1:3177/_next/static/chunks/385cmugaetj_h.js",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 3859,
+                  "invoker": "SCRIPT[src=\"/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0&v=3&h=127.0.0.1%3A3177\"].onload",
+                  "invokerType": "event-listener",
+                  "duration": 49.69999999998254,
+                  "executionStart": 3114.5,
+                  "forcedStyleAndLayoutDuration": 1.2
+                }
+              ]
+            }
+          ],
+          "inputTargets": [
+            {
+              "at": 2967.7999999999884,
+              "target": "<summary><span>Is anything charged?</span><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"sp-faq-chevron shrink-0\" aria-hidden=\"true\" focusable=\"false\"><path d=\"m6 9 6 6 6-6\"></path></svg></summary>",
+              "scrollY": 2144
+            },
+            {
+              "at": 3325.1999999999825,
+              "target": "<summary><span>Is anything charged?</span><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"sp-faq-chevron shrink-0\" aria-hidden=\"true\" focusable=\"false\"><path d=\"m6 9 6 6 6-6\"></path></svg></summary>",
+              "scrollY": 2144
+            },
+            {
+              "at": 3508.899999999994,
+              "target": "<summary><span>Is anything charged?</span><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"sp-faq-chevron shrink-0\" aria-hidden=\"true\" focusable=\"false\"><path d=\"m6 9 6 6 6-6\"></path></svg></summary>",
+              "scrollY": 2144
+            }
+          ],
+          "fieldINP": null,
+          "browserWork": [
+            {
+              "interaction": 1,
+              "delta": {
+                "TaskDuration": 0.25497600000000004,
+                "ScriptDuration": 0.138942,
+                "LayoutDuration": 0.00189,
+                "RecalcStyleDuration": 0.008583,
+                "LayoutCount": 2,
+                "RecalcStyleCount": 8,
+                "JSHeapUsedSize": 3089704
+              },
+              "heapBytes": 8382488
+            },
+            {
+              "interaction": 2,
+              "delta": {
+                "TaskDuration": 0.02195400000000003,
+                "ScriptDuration": 0.0012500000000000011,
+                "LayoutDuration": 0.00073,
+                "RecalcStyleDuration": 0.0016430000000000004,
+                "LayoutCount": 1,
+                "RecalcStyleCount": 3,
+                "JSHeapUsedSize": 78012
+              },
+              "heapBytes": 8582920
+            },
+            {
+              "interaction": 3,
+              "delta": {
+                "TaskDuration": 0.02836700000000003,
+                "ScriptDuration": 0.002669999999999978,
+                "LayoutDuration": 0.000745,
+                "RecalcStyleDuration": 0.0019109999999999995,
+                "LayoutCount": 1,
+                "RecalcStyleCount": 7,
+                "JSHeapUsedSize": 78900
+              },
+              "heapBytes": 8781324
+            }
+          ],
+          "layoutShiftSources": [],
+          "creatorPage": true,
+          "visitBeaconsAborted": 1,
+          "picturesShown": 1,
+          "picturesMissing": 4,
+          "targets": {
+            "lcp": true,
+            "cls": true,
+            "interaction": false
+          }
+        }
+      ],
+      "exitCode": 1,
+      "diagnosis": "Candidateinteractionproxy>200ms. BotIDc.js andonload share overlappinglongframe; same known sharedcause class#3642, not independentcausalrerunorproofthatthisistheonlycontributor. No newrepair/retry."
+    },
+    {
+      "pr": 3034,
+      "head": "e61297fb7ab3a97a7ade9d374b13fdd3b692effa",
+      "job": 130628268565,
+      "fullLogChars": 239348,
+      "badSamples": [
+        {
+          "label": "candidate",
+          "version": "86503363bb5039f270a04b1e20736e0e89b738eb",
+          "path": "/@harborkitchen",
+          "sample": 2,
+          "viewport": 390,
+          "cpuSlowdown": 4,
+          "latencyMs": 150,
+          "downloadMbps": 1.6,
+          "cache": "cold",
+          "thirdPartyRequests": "blocked",
+          "apiWrites": 0,
+          "lcpMs": 604,
+          "lcpAttribution": {
+            "tag": "P",
+            "id": "",
+            "text": "Simple family meals by Jenny, a fictional cook. This is Marktmorgen's demo store: you pay with Stripe's test card, and t",
+            "url": "",
+            "size": 35638,
+            "loadTime": 0,
+            "renderTime": 604
+          },
+          "cls": 0.028722400664854788,
+          "interactionToPaintMs": 207.29999999998836,
+          "eventTiming": [
+            {
+              "id": 6617,
+              "duration": 48,
+              "name": "pointerdown",
+              "startTime": 2951.6999999999825,
+              "processingStart": 2956.5,
+              "processingEnd": 2958.0999999999767
+            },
+            {
+              "id": 6617,
+              "duration": 48,
+              "name": "pointerup",
+              "startTime": 2951.7999999999884,
+              "processingStart": 2961.399999999994,
+              "processingEnd": 2962.0999999999767
+            },
+            {
+              "id": 6617,
+              "duration": 48,
+              "name": "click",
+              "startTime": 2951.7999999999884,
+              "processingStart": 2962.2999999999884,
+              "processingEnd": 2962.899999999994
+            },
+            {
+              "id": 6624,
+              "duration": 48,
+              "name": "pointerdown",
+              "startTime": 3317.1999999999825,
+              "processingStart": 3318.2999999999884,
+              "processingEnd": 3319.0999999999767
+            },
+            {
+              "id": 6624,
+              "duration": 48,
+              "name": "pointerup",
+              "startTime": 3317.1999999999825,
+              "processingStart": 3320,
+              "processingEnd": 3320.1999999999825
+            },
+            {
+              "id": 6624,
+              "duration": 48,
+              "name": "click",
+              "startTime": 3317.1999999999825,
+              "processingStart": 3320.1999999999825,
+              "processingEnd": 3320.6999999999825
+            }
+          ],
+          "longTasks": [
+            {
+              "startTime": 2310.399999999994,
+              "duration": 185
+            },
+            {
+              "startTime": 2972.5,
+              "duration": 191
+            }
+          ],
+          "longAnimationFrames": [
+            {
+              "startTime": 247.29999999998836,
+              "duration": 312.6000000000058,
+              "blockingDuration": 67.8,
+              "firstUIEventTimestamp": 0,
+              "renderStart": 482,
+              "styleAndLayoutStart": 482,
+              "scripts": []
+            },
+            {
+              "startTime": 2028.7999999999884,
+              "duration": 62.10000000000582,
+              "blockingDuration": 0,
+              "firstUIEventTimestamp": 0,
+              "renderStart": 2088.5999999999767,
+              "styleAndLayoutStart": 2088.899999999994,
+              "scripts": [
+                {
+                  "sourceURL": "http://127.0.0.1:3177/@harborkitchen",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 0,
+                  "invoker": "http://127.0.0.1:3177/@harborkitchen",
+                  "invokerType": "classic-script",
+                  "duration": 8.5,
+                  "executionStart": 2065.0999999999767,
+                  "forcedStyleAndLayoutDuration": 0
+                }
+              ]
+            },
+            {
+              "startTime": 2294.5,
+              "duration": 208.59999999997672,
+              "blockingDuration": 138.9,
+              "firstUIEventTimestamp": 0,
+              "renderStart": 2499.1999999999825,
+              "styleAndLayoutStart": 2499.1999999999825,
+              "scripts": [
+                {
+                  "sourceURL": "http://127.0.0.1:3177/_next/static/chunks/257mghfoz-7do.js",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 0,
+                  "invoker": "http://127.0.0.1:3177/_next/static/chunks/257mghfoz-7do.js",
+                  "invokerType": "classic-script",
+                  "duration": 182.29999999998836,
+                  "executionStart": 2310.399999999994,
+                  "forcedStyleAndLayoutDuration": 0
+                }
+              ]
+            },
+            {
+              "startTime": 2969.5999999999767,
+              "duration": 196.20000000001164,
+              "blockingDuration": 143.2,
+              "firstUIEventTimestamp": 0,
+              "renderStart": 3164,
+              "styleAndLayoutStart": 3164.6999999999825,
+              "scripts": [
+                {
+                  "sourceURL": "http://127.0.0.1:3177/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0&v=3&h=127.0.0.1%3A3177",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 0,
+                  "invoker": "http://127.0.0.1:3177/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0&v=3&h=127.0.0.1%3A3177",
+                  "invokerType": "classic-script",
+                  "duration": 145.29999999998836,
+                  "executionStart": 2972.5,
+                  "forcedStyleAndLayoutDuration": 0
+                },
+                {
+                  "sourceURL": "http://127.0.0.1:3177/_next/static/chunks/385cmugaetj_h.js",
+                  "sourceFunctionName": "",
+                  "sourceCharPosition": 3859,
+                  "invoker": "SCRIPT[src=\"/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js?i=0&v=3&h=127.0.0.1%3A3177\"].onload",
+                  "invokerType": "event-listener",
+                  "duration": 45.89999999999418,
+                  "executionStart": 3117.899999999994,
+                  "forcedStyleAndLayoutDuration": 1.4
+                }
+              ]
+            }
+          ],
+          "inputTargets": [
+            {
+              "at": 2957.399999999994,
+              "target": "<summary class=\"cursor-pointer font-bold\">Is anything charged in this store?</summary>",
+              "scrollY": 1793
+            },
+            {
+              "at": 3319,
+              "target": "<summary class=\"cursor-pointer font-bold\">Is anything charged in this store?</summary>",
+              "scrollY": 1793
+            },
+            {
+              "at": 3469.0999999999767,
+              "target": "<summary class=\"cursor-pointer font-bold\">Is anything charged in this store?</summary>",
+              "scrollY": 1793
+            }
+          ],
+          "fieldINP": null,
+          "browserWork": [
+            {
+              "interaction": 1,
+              "delta": {
+                "TaskDuration": 0.260737,
+                "ScriptDuration": 0.15856399999999998,
+                "LayoutDuration": 0.001339,
+                "RecalcStyleDuration": 0.006065999999999999,
+                "LayoutCount": 1,
+                "RecalcStyleCount": 10,
+                "JSHeapUsedSize": 4786760
+              },
+              "heapBytes": 10356980
+            },
+            {
+              "interaction": 2,
+              "delta": {
+                "TaskDuration": 0.025395,
+                "ScriptDuration": 0.0015949999999999853,
+                "LayoutDuration": 0.000882,
+                "RecalcStyleDuration": 0.0009449999999999997,
+                "LayoutCount": 1,
+                "RecalcStyleCount": 6,
+                "JSHeapUsedSize": 77828
+              },
+              "heapBytes": 10643072
+            },
+            {
+              "interaction": 3,
+              "delta": {
+                "TaskDuration": 0.022362999999999966,
+                "ScriptDuration": 0.0029649999999999954,
+                "LayoutDuration": 0.00016599999999999991,
+                "RecalcStyleDuration": 0.0014890000000000007,
+                "LayoutCount": 1,
+                "RecalcStyleCount": 6,
+                "JSHeapUsedSize": 81424
+              },
+              "heapBytes": 10872612
+            }
+          ],
+          "layoutShiftSources": [
+            {
+              "value": 0.028722400664854788,
+              "at": 2687,
+              "sources": [
+                {
+                  "node": "<div class=\"mx-auto max-w-xl px-4 pb-16 pt-5 lg:max-w-none lg:px-0 lg:pt-0\"><div data-part=\"products\" class=\"st-part st-part-first\"><section><ul class=\"space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-",
+                  "previous": {
+                    "x": 0,
+                    "y": 378.5,
+                    "width": 390,
+                    "height": 465.5,
+                    "top": 378.5,
+                    "right": 390,
+                    "bottom": 844,
+                    "left": 0
+                  },
+                  "current": {
+                    "x": 0,
+                    "y": 422.5,
+                    "width": 390,
+                    "height": 421.5,
+                    "top": 422.5,
+                    "right": 390,
+                    "bottom": 844,
+                    "left": 0
+                  }
+                }
+              ]
+            }
+          ],
+          "creatorPage": true,
+          "visitBeaconsAborted": 1,
+          "picturesShown": 1,
+          "picturesMissing": 4,
+          "targets": {
+            "lcp": true,
+            "cls": true,
+            "interaction": false
+          }
+        }
+      ],
+      "exitCode": 1,
+      "diagnosis": "Candidateinteractionproxy>200ms. BotIDc.js andonload share overlappinglongframe; same known sharedcause class#3642, not independentcausalrerunorproofthatthisistheonlycontributor. No newrepair/retry."
+    }
+  ],
+  "harness": {
+    "content": "import {createRequire} from \"node:module\";\nimport {spawn} from \"node:child_process\";\nimport {resolve,join} from \"node:path\";\nconst appRoot=resolve(process.argv[2]??\".\");\nconst require=createRequire(join(appRoot,\"package.json\"));\nconst {chromium}=require(\"playwright-core\");\nconst label=process.env.MOBILE_RENDER_LABEL??\"candidate\";\nconst version=process.env.MOBILE_RENDER_SHA??\"unknown\";\nconst port=3177,LOCAL=\"http://127.0.0.1:\"+port;\nasync function waitUntilControlSettles(page,control){\n // Playwright scrolls an off-screen locator as part of click(). That scroll is\n // preparation, not the disclosure interaction this lab measures. Finish it\n // first, then observe the same on-screen box for consecutive animation frames.\n await control.scrollIntoViewIfNeeded();\n const node=await control.elementHandle();if(!node)throw Error(\"Mobile render control disappeared\");\n try{\n  const ready=await page.waitForFunction(element=>{\n   const rect=element.getBoundingClientRect();\n   const box=[scrollX,scrollY,rect.top,rect.right,rect.bottom,rect.left].join(\":\");\n   const visible=rect.top>=0&&rect.left>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth;\n   const state=element.__mobileRenderReady??={box:\"\",same:0};\n   state.same=visible&&state.box===box?state.same+1:0;state.box=box;\n   if(state.same<2)return false;delete element.__mobileRenderReady;return true;\n  },node,{polling:\"raf\"}); // requestAnimationFrame polling: no sleep or widened timeout.\n  await ready.dispose();\n }finally{await node.dispose();}\n}\n// 281 [SF1]: creators' pages too. The demo store is seeded into the same stand-in services the end-to-end run\n// uses (tests/e2e/services.mjs: Redis, Stripe and the rest answered locally, nothing real), so its store page and a\n// product page are measured under the same phone, network and thresholds as the platform's own pages.\n// Loaded from the measured app, which has its own node_modules in CI (the stand-ins bundle lib/redis-memory.ts with esbuild).\nconst {pathToFileURL}=await import(\"node:url\");\nconst {startServices}=await import(pathToFileURL(join(appRoot,\"tests/e2e/services.mjs\")).href);\nconst SERVICES=4478,FAKE=\"http://127.0.0.1:\"+SERVICES;\nconst services=await startServices(SERVICES);\nconst storeEnv={\n DEMO_STUDIO_ADMIN:\"operator@example.test\",STRIPE_DEMO_ACCOUNT_ID:\"acct_fixtureDemo\",\n UPSTASH_REDIS_REST_URL:FAKE,UPSTASH_REDIS_REST_TOKEN:\"local\",\n STRIPE_SECRET_KEY:\"sk_test_local_only_a_stand_in_0000\",STRIPE_CONNECT_API_BASE:FAKE,\n VERCEL_BLOB_API_URL:FAKE+\"/blob-api\",BLOB_READ_WRITE_TOKEN:\"vercel_blob_rw_localstore_standinsecret0000\",\n};\nconst app=spawn(process.execPath,[join(appRoot,\"node_modules/next/dist/bin/next\"),\"start\",\"-p\",String(port)],{cwd:appRoot,env:{...process.env,...storeEnv,NEXT_TELEMETRY_DISABLED:\"1\"},stdio:[\"ignore\",\"pipe\",\"pipe\"]});\nlet output=\"\";app.stdout.on(\"data\",data=>{output=(output+data).slice(-6000);});app.stderr.on(\"data\",data=>{output=(output+data).slice(-6000);});\nlet browser;const results=[];let failed=false;\ntry{\n let ready=false;for(let attempt=0;attempt<120;attempt++){if(app.exitCode!==null)throw Error(\"Application exited: \"+output);try{const reply=await fetch(LOCAL);if(reply.ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,500));}if(!ready)throw Error(\"Application unavailable: \"+output);\n browser=await chromium.launch({channel:\"chrome\",headless:true});\n // The demo store is made on its first visit (lib/demo-seed.ts); asked here, outside any measurement.\n const demo=await fetch(LOCAL+\"/demo\",{redirect:\"follow\"});\n if(!demo.ok||!new URL(demo.url).pathname.startsWith(\"/@\"))throw Error(\"Demo store not seeded: \"+demo.status+\" \"+demo.url);\n const storePath=new URL(demo.url).pathname;\n // The demo's main product (DEMO_PRODUCT in lib/demo-seed.ts, \"Weekly Meal Planner\"), not whichever product link comes first.\n const productPath=(await demo.text()).match(new RegExp('href=\"('+storePath.replace(/[.*+?^${}()|[\\]\\\\]/g,\"\\\\$&\")+'/p/weekly-meal-planner-[a-z0-9]+)\"'))?.[1];\n if(!productPath)throw Error(\"No product link on the demo store page\");\n const STORE_PATHS=new Set([storePath,productPath]);\n for(const path of [\"/\",\"/pricing\",\"/platform/sales-pages\",storePath,productPath])for(let sample=1;sample<=3;sample++){\n  const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true});\n  try{\n   const page=await context.newPage();const cdp=await context.newCDPSession(page);\n   await cdp.send(\"Emulation.setCPUThrottlingRate\",{rate:4});await cdp.send(\"Network.enable\");await cdp.send(\"Network.setCacheDisabled\",{cacheDisabled:true});\n   await cdp.send(\"Network.emulateNetworkConditions\",{offline:false,latency:150,downloadThroughput:1600000/8,uploadThroughput:750000/8});\n   let writes=0,visitBeacons=0;await page.route(\"**/*\",route=>{const request=route.request(),url=new URL(request.url());if(![\"GET\",\"HEAD\"].includes(request.method())){/* A creator's page counts its visit (components/store-beacon.tsx): aborted like every write, and said, not failed. */if(STORE_PATHS.has(path)&&request.method()===\"POST\"&&url.pathname===\"/api/store/hit\"){visitBeacons++;return route.abort();}writes++;return route.abort();}/* A creator's pictures are read from the store's own API: reads, let through so they count in the page's time. */if(STORE_PATHS.has(path)&&url.origin===LOCAL&&(url.pathname.startsWith(\"/api/image/\")||url.pathname.startsWith(\"/api/photo/\")))return route.continue();if(url.pathname.startsWith(\"/api/\")||url.origin!==LOCAL)return route.abort();return route.continue();});\n   await page.addInitScript(()=>{\n    window.__renderLab={lcp:null,lcpAttribution:null,cls:0,lastShift:0,windowStart:0,windowScore:0,paint:[],events:[],shifts:[],longTasks:[],animationFrames:[],inputTargets:[]};\n    new PerformanceObserver(list=>{for(const entry of list.getEntries()){window.__renderLab.lcp=entry.startTime;window.__renderLab.lcpAttribution={tag:entry.element?.tagName,id:entry.element?.id,text:entry.element?.textContent?.trim().slice(0,120),url:entry.url,size:entry.size,loadTime:entry.loadTime,renderTime:entry.renderTime};}}).observe({type:\"largest-contentful-paint\",buffered:true});\n    new PerformanceObserver(list=>{const state=window.__renderLab;for(const entry of list.getEntries()){if(entry.hadRecentInput)continue;state.shifts.push({value:entry.value,at:entry.startTime,sources:(entry.sources??[]).map(source=>({node:source.node?.outerHTML?.slice(0,220),previous:source.previousRect,current:source.currentRect}))});if(!state.windowStart||entry.startTime-state.lastShift>1000||entry.startTime-state.windowStart>5000){state.windowStart=entry.startTime;state.windowScore=0;}state.lastShift=entry.startTime;state.windowScore+=entry.value;state.cls=Math.max(state.cls,state.windowScore);}}).observe({type:\"layout-shift\",buffered:true});\n    if(PerformanceObserver.supportedEntryTypes.includes(\"event\"))new PerformanceObserver(list=>{for(const entry of list.getEntries())if(entry.interactionId)window.__renderLab.events.push({id:entry.interactionId,duration:entry.duration,name:entry.name,startTime:entry.startTime,processingStart:entry.processingStart,processingEnd:entry.processingEnd});}).observe({type:\"event\",buffered:true,durationThreshold:16});\n    if(PerformanceObserver.supportedEntryTypes.includes(\"longtask\"))new PerformanceObserver(list=>{for(const entry of list.getEntries())window.__renderLab.longTasks.push({startTime:entry.startTime,duration:entry.duration});}).observe({type:\"longtask\",buffered:true});\n    if(PerformanceObserver.supportedEntryTypes.includes(\"long-animation-frame\"))new PerformanceObserver(list=>{\n     for(const frame of list.getEntries())window.__renderLab.animationFrames.push({\n      startTime:frame.startTime,duration:frame.duration,blockingDuration:frame.blockingDuration,\n      firstUIEventTimestamp:frame.firstUIEventTimestamp,renderStart:frame.renderStart,styleAndLayoutStart:frame.styleAndLayoutStart,\n      scripts:frame.scripts.map(script=>({sourceURL:script.sourceURL,sourceFunctionName:script.sourceFunctionName,sourceCharPosition:script.sourceCharPosition,invoker:script.invoker,invokerType:script.invokerType,duration:script.duration,executionStart:script.executionStart,forcedStyleAndLayoutDuration:script.forcedStyleAndLayoutDuration}))\n     });\n    }).observe({type:\"long-animation-frame\",buffered:true});\n    document.addEventListener(\"pointerdown\",event=>{if(!event.isTrusted)return;window.__renderLab.inputTargets.push({at:performance.now(),target:event.target?.closest?.(\"summary,button\")?.outerHTML?.slice(0,450),scrollY});const start=performance.now();requestAnimationFrame(()=>requestAnimationFrame(()=>window.__renderLab.paint.push(performance.now()-start)));},{capture:true});\n   });\n   const reply=await page.goto(LOCAL+path,{waitUntil:\"load\",timeout:60000});if(reply.status()!==200)throw Error(\"HTTP \"+reply.status()+\" \"+path);\n   await page.evaluate(()=>document.fonts.ready);\n   await page.evaluate(async()=>{await Promise.all(document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().iterations)).map(animation=>animation.finished.catch(()=>{})));});\n   // Two rendering frames, not a claim that this represents a real-user percentile.\n   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));\n   const before=await page.evaluate(()=>({lcp:window.__renderLab.lcp,lcpAttribution:window.__renderLab.lcpAttribution,cls:window.__renderLab.cls,shifts:window.__renderLab.shifts}));\n   // Browser counters identify whether a slow native disclosure spent its time\n   // in script, layout or style. Read outside the measured pointer-to-paint\n   // interval; preserve every cold sample and the existing strict thresholds.\n   await cdp.send(\"Performance.enable\");\n   const metricNames=[\"TaskDuration\",\"ScriptDuration\",\"LayoutDuration\",\"RecalcStyleDuration\",\"LayoutCount\",\"RecalcStyleCount\",\"JSHeapUsedSize\"];\n   const metrics=async()=>Object.fromEntries((await cdp.send(\"Performance.getMetrics\")).metrics.filter(metric=>metricNames.includes(metric.name)).map(metric=>[metric.name,metric.value]));\n   const browserWork=[];\n   const control=page.locator(\"main summary,main button[aria-expanded]\").first();\n   if(await control.count())for(let interaction=0;interaction<3;interaction++){\n    await waitUntilControlSettles(page,control);\n    const start=await metrics();\n    await control.click();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));\n    const end=await metrics();\n    browserWork.push({interaction:interaction+1,delta:Object.fromEntries(metricNames.map(name=>[name,(end[name]??0)-(start[name]??0)])),heapBytes:end.JSHeapUsedSize??null});\n   }\n   const interaction=await page.evaluate(()=>{const state=window.__renderLab;return {paint:state.paint,event:state.events,longTasks:state.longTasks,animationFrames:state.animationFrames,inputTargets:state.inputTargets};});\n   const interactionMs=interaction.paint.length?Math.max(...interaction.paint,...interaction.event.map(item=>item.duration)):null;\n   const result={label,version,path,sample,viewport:390,cpuSlowdown:4,latencyMs:150,downloadMbps:1.6,cache:\"cold\",thirdPartyRequests:\"blocked\",apiWrites:writes,lcpMs:before.lcp,lcpAttribution:before.lcpAttribution,cls:before.cls,interactionToPaintMs:interactionMs,eventTiming:interaction.event,longTasks:interaction.longTasks,longAnimationFrames:interaction.animationFrames,inputTargets:interaction.inputTargets,fieldINP:null,browserWork,layoutShiftSources:before.shifts};\n   result.creatorPage=STORE_PATHS.has(path);\n   if(result.creatorPage){\n    result.visitBeaconsAborted=visitBeacons;\n    // Pictures the page drew, and those that did not load: a page measured without its pictures is said so, never hidden.\n    Object.assign(result,await page.evaluate(()=>{const pictures=[...document.querySelectorAll(\"main img\")];return {picturesShown:pictures.filter(img=>img.complete&&img.naturalWidth>0).length,picturesMissing:pictures.filter(img=>!(img.complete&&img.naturalWidth>0)).length};}));\n   }\n   result.targets={lcp:typeof before.lcp===\"number\"&&before.lcp<2500,cls:before.cls<0.1,interaction:interactionMs!==null&&interactionMs<200};\n   console.log(\"MOBILE_RENDER_MEASUREMENT:\"+JSON.stringify(result));results.push(result);\n   if(writes||!Number.isFinite(before.lcp)||!Number.isFinite(before.cls)||interactionMs===null)failed=true;\n   if(label===\"candidate\"&&Object.values(result.targets).some(value=>!value))failed=true;\n   // After preserving every cold performance measurement, exercise the real\n   // cycle slots and native disclosure. No warm-up or threshold changes.\n   if(path===\"/\"&&sample===1){\n    // This check is after every cold measurement above; it neither warms\n    // the disclosure nor changes timing, thresholds, samples or input events.\n    if(!await control.evaluate(node=>node===document.activeElement))throw Error(\"Native pointer focus was not retained\");\n    if(await page.evaluate(()=>getComputedStyle(document.documentElement).scrollBehavior)!==\"auto\")throw Error(\"Native disclosure pointer focus still animates document scrolling\");\n    // VS1 (owner, 30/10/2026): the home page shows one plan, Store, read from\n    // lib/plan.ts, with a link to compare all plans. The three-card monthly/\n    // yearly switch it used to carry moved, unchanged, to the pricing page,\n    // where the link points and where it is checked below.\n    const plan=page.locator(\"[data-home-plan]\");\n    if(!(await plan.innerText()).includes(\"$69 a month\"))throw Error(\"Home plan price mismatch\");\n    if(await plan.getByRole(\"link\",{name:\"Start your store\",exact:true}).getAttribute(\"href\")!==\"/signin\")throw Error(\"Home plan start lost\");\n    if(await page.getByRole(\"link\",{name:\"Compare Store, Studio and Scale\",exact:true}).getAttribute(\"href\")!==\"/pricing#plans\")throw Error(\"Compare plans link lost\");\n   }\n   if(path===\"/pricing\"&&sample===1){\n    // The plan cards and their monthly/yearly switch, moved here from the old\n    // home page (VS1): the same regression that protected them there.\n    if(await page.locator(\"#plans[data-plan-prices]\").count()!==1)throw Error(\"Pricing plans anchor lost\");\n    const cards=page.locator(\"[data-plan-prices] [data-pricing-card]\");\n    if(await cards.count()!==3)throw Error(\"Expected three canonical plan cards\");\n    const summaries=cards.locator('details[class~=\"group/perks\"] > summary');\n    const disclosures=cards.locator('details[class~=\"group/perks\"]');\n    const nativeState=await disclosures.evaluateAll(nodes=>nodes.map(node=>node.open));\n    const cycle=page.getByRole(\"group\",{name:\"How often you pay\"});\n    const year=cycle.getByRole(\"button\",{name:/^Yearly/}),month=cycle.getByRole(\"button\",{name:\"Monthly\",exact:true});\n    await year.focus();await page.keyboard.press(\"Enter\");\n    if(await year.getAttribute(\"aria-pressed\")!==\"true\"||await month.getAttribute(\"aria-pressed\")!==\"false\")throw Error(\"Yearly keyboard selection not reflected\");\n    const annual=[\"$690\",\"$4,490\",\"$9,990\"],monthly=[\"$69\",\"$449\",\"$999\"],tiers=[\"creator\",\"pro\",\"scale\"];\n    for(let i=0;i<3;i++){\n     const card=cards.nth(i);\n     if((await card.locator(\"[data-cycle-text]\").first().innerText()).trim()!==annual[i])throw Error(\"Annual card price mismatch\");\n     // 243 [CF6]: the terms are said once, under the three cards, with each plan's first charge.\n     if(!await page.locator(\"[data-plan-terms] dl\").innerText().then(text=>text.includes(annual[i])&&text.includes(\"for the year\")))throw Error(\"Annual first-charge terms mismatch\");\n     if(await card.getByRole(\"link\",{name:/^Start on/}).getAttribute(\"href\")!==\"/signin?plan=\"+tiers[i]+\"&billing=year\")throw Error(\"Annual signup choice lost\");\n    }\n    await month.click();\n    for(let i=0;i<3;i++){\n     const card=cards.nth(i);\n     if((await card.locator(\"[data-cycle-text]\").first().innerText()).trim()!==monthly[i])throw Error(\"Monthly card price mismatch\");\n     if(!await page.locator(\"[data-plan-terms] dl\").innerText().then(text=>text.includes(monthly[i]+\",\")||text.includes(monthly[i]+\" for the month\")))throw Error(\"Monthly first-charge terms mismatch\");\n     if(await card.getByRole(\"link\",{name:/^Start on/}).getAttribute(\"href\")!==\"/signin?plan=\"+tiers[i]+\"&billing=month\")throw Error(\"Monthly signup choice lost\");\n     if(!(await card.innerText()).includes(annual[i]))throw Error(\"Pricing plan annual price missing \"+i);\n    }\n    if(JSON.stringify(await disclosures.evaluateAll(nodes=>nodes.map(node=>node.open)))!==JSON.stringify(nativeState))throw Error(\"Billing selection replaced native disclosure state\");\n    const before=await disclosures.first().evaluate(node=>node.open);\n    await summaries.first().focus();await page.keyboard.press(\"Enter\");\n    if(await disclosures.first().evaluate(node=>node.open)===before)throw Error(\"Native keyboard disclosure did not toggle\");\n    console.log(\"PRICING_CYCLE_REGRESSION: home Store price and start, compare link to #plans, and on pricing three monthly/yearly prices, first-charge terms, signup URLs, pressed state, native state retention and keyboard disclosure passed\");\n   }\n  }finally{await context.close();}\n }\n console.log(\"MOBILE_RENDER_SUMMARY:\"+JSON.stringify({label,version,samples:results.length,scope:\"Synthetic cold local Chromium lab. Interaction-to-paint is a lab proxy, not field INP; no p75 Core Web Vitals certification.\",results}));\n}catch(error){failed=true;console.error(error);console.error(output);}finally{\n // Each step on its own, so a browser that fails to close never leaves the app or the stand-ins running until the job's timeout.\n await browser?.close().catch(error=>console.error(\"browser close failed\",error));\n if(app.exitCode===null){const gone=new Promise(done=>app.once(\"exit\",done));app.kill(\"SIGTERM\");await Promise.race([gone,new Promise(done=>setTimeout(done,15000))]);if(app.exitCode===null)app.kill(\"SIGKILL\");}\n await services?.close?.().catch(error=>console.error(\"stand-ins close failed\",error));\n}\nprocess.exitCode=failed?1:0;\n",
+    "encoding": "utf-8",
+    "sha": "7a8bfca45447d0f175a24a50aa7c60d0b1fd4642",
+    "display_url": "https://github.com/solrenning-llc/marktmorgen/blob/86503363bb5039f270a04b1e20736e0e89b738eb/tests/e2e/mobile-render.mjs",
+    "display_title": "mobile-render.mjs"
+  },
+  "pr3079": {
+    "head": "f2fafd7cc63db6cdbc31b6edbe87af19b1f0194b",
+    "review": 6801203640,
+    "base": "claude2/calendar-feed-room",
+    "depends3545": true,
+    "scope": "ExistingC1focalclosespriorMEDIUMs;moneyneedssecondqualifiedfocalandnineaggregates. Eightaggregatessuccess/productabsent; notready, nofurtherlimitdecisionbyP."
+  },
+  "currentBatch": [
+    {
+      "n": 3017,
+      "head": "5cea23413b30bf7e7cd8a2681cfc53af39805bec",
+      "branch": "claude5/fix-discord-forget-server"
+    },
+    {
+      "n": 3020,
+      "head": "c3f0b1a43578ef4327a61f220f94615fb1ca3f79",
+      "branch": "claude5/cm2-post-approval"
+    },
+    {
+      "n": 3021,
+      "head": "cab993b0274d8ec808cbd4056ebe1c1f0ea72db0",
+      "branch": "claude5/sz4-u2-product-page"
+    },
+    {
+      "n": 3022,
+      "head": "df4a75e8368f52a3990e5f510d41e80536cb31f7",
+      "branch": "claude5/bx2-u2-year-read"
+    },
+    {
+      "n": 3023,
+      "head": "e008c6003b9324d60db70962ac4cf771e6ae2986",
+      "branch": "claude5/kb22-u3-receipt-batch"
+    },
+    {
+      "n": 3024,
+      "head": "6ff3a9127504d85effc2ef5e46bdad49d5f441bd",
+      "branch": "claude5/kb22-u12-directory-socials"
+    },
+    {
+      "n": 3026,
+      "head": "e5d60ff04648ce0c9c6c1e36354223d326c0b7a4",
+      "branch": "claude5/sz4-u3-studio"
+    },
+    {
+      "n": 3027,
+      "head": "5d2e9d9eba6e695615133fc7ed9abb99f7af899c",
+      "branch": "claude5/ck3-u2-failure-notice"
+    },
+    {
+      "n": 3029,
+      "head": "3c0a62845d3c50c70e097a3d0eb804492528e995",
+      "branch": "claude5/sz2-u3-display"
+    },
+    {
+      "n": 3033,
+      "head": "b9c0e9c7074b1dbc2805c07f045c0352aa3c2bf3",
+      "branch": "claude5/cm2-u2-daily-notice"
+    },
+    {
+      "n": 3034,
+      "head": "e61297fb7ab3a97a7ade9d374b13fdd3b692effa",
+      "branch": "claude5/f2-edit-sent-links"
+    },
+    {
+      "n": 3035,
+      "head": "479bd9d69e8e0198d9a6c6ef29d91d06e698c3f3",
+      "branch": "claude5/h3-4-bulk-students"
+    },
+    {
+      "n": 3036,
+      "head": "3496dde7a207e157bff578dd8befd32cddbad743",
+      "branch": "codex/q-file-admission-refusals"
+    },
+    {
+      "n": 3037,
+      "head": "585f5d333a8c5f951d1e013c6492cca55844dee0",
+      "branch": "claude4/ci-merge-group"
+    },
+    {
+      "n": 3051,
+      "head": "2c45b6b27d1df5cecf1d3ea291e143504d5e926e",
+      "branch": "claude5/affiliate-book-exact"
+    },
+    {
+      "n": 3062,
+      "head": "b2f741a62298c6b24ee31ad18c57297e280ea008",
+      "branch": "claude4/directory-assembly-ceiling"
+    },
+    {
+      "n": 3066,
+      "head": "745ce60a03b3819d6dca6f530f48faaf9940ef72",
+      "branch": "claude4/store-all-exact"
+    },
+    {
+      "n": 3067,
+      "head": "c631abe65f48939136faef03b49fe57139fdf765",
+      "branch": "claude4/within-limit-unknown"
+    },
+    {
+      "n": 3068,
+      "head": "801e021dd203bbf3006e097bb9528e6699bc9178",
+      "branch": "claude4/public-request-unknown"
+    },
+    {
+      "n": 3069,
+      "head": "7e98f9186bb0734fc0e8d081b011a7e6dac332c4",
+      "branch": "claude4/meta-view-exact"
+    },
+    {
+      "n": 3070,
+      "head": "92b02aa03f346da12fe8e08cfde835a8869f2aa2",
+      "branch": "claude4/meta-reads-exact"
+    },
+    {
+      "n": 3073,
+      "head": "e988e105b1528780310c1dd6a696500025645727",
+      "branch": "claude4/store-callers-exact"
+    },
+    {
+      "n": 3075,
+      "head": "e532048c4fb76d45d07bff171aeea227c7d8614d",
+      "branch": "claude3/card-contact-return"
+    },
+    {
+      "n": 3079,
+      "head": "f2fafd7cc63db6cdbc31b6edbe87af19b1f0194b",
+      "branch": "claude2/calendar-batch-reads"
+    },
+    {
+      "n": 3086,
+      "head": "e0ede3c13d76f5a64c1fee8e5c32a6e59667247b",
+      "branch": "claude3/plans-finish-identity"
+    },
+    {
+      "n": 3095,
+      "head": "6393e871046da3f7aa0dc37061b0d271faa6f2fb",
+      "branch": "claude6/r24-erasure-counts"
+    },
+    {
+      "n": 3101,
+      "head": "a3430542c7549c5a79adad3c77399ee669aa76ba",
+      "branch": "claude4/sales-file-cheaper"
+    },
+    {
+      "n": 3107,
+      "head": "a46dd30840a7f44dbddf9d3141fd56211f1bd3c4",
+      "branch": "claude3/sub-identity-posts"
+    },
+    {
+      "n": 3118,
+      "head": "1a8913d01f4b11d08310e9cf3a466de651c536c7",
+      "branch": "claude4/directory-every-15min"
+    },
+    {
+      "n": 3129,
+      "head": "365d627e6da31aef0ff4688ea90a11142a5abf69",
+      "branch": "claude4/sales-file-summary"
+    },
+    {
+      "n": 3156,
+      "head": "9ebc7b7de17b8fc731280cdd9db0ee6834525a6e",
+      "branch": "claude3/erase-reactivated-store"
+    },
+    {
+      "n": 3158,
+      "head": "db19fcb9252ce41e4c9d58f6a9ae660077d1f2e7",
+      "branch": "claude4/host-calendar-unknown"
+    },
+    {
+      "n": 3159,
+      "head": "d824cc0a413b5273d11388382dbc3e51d37ad9de",
+      "branch": "claude4/buyer-profile-partial"
+    },
+    {
+      "n": 3160,
+      "head": "26be932d6e6ffffdbe7afde926ce0ec438cf7868",
+      "branch": "claude4/payment-refunds-unverified"
+    },
+    {
+      "n": 3171,
+      "head": "90fb5f74fb4e20dccfeb3f9060673ee8188e8733",
+      "branch": "claude4/uploader-refusals"
+    },
+    {
+      "n": 3173,
+      "head": "adf09726af8a925b71f6bd040601b302454ec14f",
+      "branch": "claude4/meet-connect-unknown"
+    },
+    {
+      "n": 3189,
+      "head": "bd0e13d753de1b79311136394fc2ae02045f6253",
+      "branch": "claude4/affiliate-refunds-exact"
+    },
+    {
+      "n": 3190,
+      "head": "b7c4f15c2aba07c054a007f876ff680a7a9adc7c",
+      "branch": "claude4/plan-refund-amount-exact"
+    },
+    {
+      "n": 3193,
+      "head": "0df0c467c70533ba18e55fb19eb852e001117588",
+      "branch": "claude3/of1-suspended-visitor-pages"
+    },
+    {
+      "n": 3194,
+      "head": "bc3ddc1501464830cd93f8d3dde3a3c8738ecb2a",
+      "branch": "claude3/aa2-campaign-qr"
+    },
+    {
+      "n": 3203,
+      "head": "881caed76deeac4cd39e6bbbc87bb125d0d4a837",
+      "branch": "claude3/of1-suspended-buyer-pages"
+    },
+    {
+      "n": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "branch": "codex/v-scoped-leases-next"
+    },
+    {
+      "n": 3213,
+      "head": "208c078026bf16f22781a91be79bf03787b2fec3",
+      "branch": "claude4/community-member-page-exact"
+    },
+    {
+      "n": 3215,
+      "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+      "branch": "claude4/dunning-cursor-after-send"
+    },
+    {
+      "n": 3225,
+      "head": "e02db96854a1e15240670506ea66dddb4879058a",
+      "branch": "claude3/mcp-tools-unknown-sweep-2"
+    },
+    {
+      "n": 3226,
+      "head": "3c7c19af5b2a2da03a8421d15b10776e6e69cbb0",
+      "branch": "claude3/ledger-hour-asof"
+    },
+    {
+      "n": 3247,
+      "head": "453256f5a529329c7366d79c2bee2f0f51a6e4ed",
+      "branch": "claude6/r24-payment-recovery"
+    },
+    {
+      "n": 3252,
+      "head": "ba0727f2382849244fb0b497d4c11a069f0a91b2",
+      "branch": "claude6/r24-discount-list"
+    },
+    {
+      "n": 3261,
+      "head": "ed1ce6d5b55ee607f3613025ba41c97ca46a3ffa",
+      "branch": "claude6/r24-inbound-seen"
+    },
+    {
+      "n": 3267,
+      "head": "91aecfa183d72f9dd9499d4c26f2b6fb448f4e49",
+      "branch": "claude6/calendar-team-unknown"
+    },
+    {
+      "n": 3271,
+      "head": "aaee666db197a2738ed12b00bfedbb4738debf4c",
+      "branch": "claude4/bk1-cost-sources-runbook"
+    },
+    {
+      "n": 3272,
+      "head": "ef8922f9e64073a38808620dfff700b850b29de7",
+      "branch": "claude4/claim-exact-paypal-twostep"
+    },
+    {
+      "n": 3273,
+      "head": "f970f05fd9ec09a6cbaf7922c0c19f3710b9e4e5",
+      "branch": "claude4/bk1-cron-lock"
+    }
+  ],
+  "changed": [
+    {
+      "n": 3024,
+      "head": "6ff3a9127504d85effc2ef5e46bdad49d5f441bd",
+      "branch": "claude5/kb22-u12-directory-socials"
+    },
+    {
+      "n": 3034,
+      "head": "e61297fb7ab3a97a7ade9d374b13fdd3b692effa",
+      "branch": "claude5/f2-edit-sent-links"
+    },
+    {
+      "n": 3079,
+      "head": "f2fafd7cc63db6cdbc31b6edbe87af19b1f0194b",
+      "branch": "claude2/calendar-batch-reads"
+    }
+  ],
+  "limits": "GitHubonly, zero newruntime/tests/types/lint/scanner/providerIO; no productrefpush/merge/enqueue/rerun; queue162hold; preserveforeignbranches"
+}

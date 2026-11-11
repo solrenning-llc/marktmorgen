@@ -114,7 +114,9 @@ part("A control moved under the focus");
   const move = el("Move Contact form down", main);
   active = move;
   k.focusIn(move);
-  k.focusOut(move); // blurred while out of the page, being moved
+  move.isConnected = false; // out of the page while it is moved
+  k.focusOut(move); // a browser may blur it then
+  move.isConnected = true; // back in its new place
   active = body;
   k.treeChanged();
   is("it gets the focus back", [move.focused, active === move], [1, true]);

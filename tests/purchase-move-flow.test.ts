@@ -74,17 +74,26 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 let seen: string[] | null = null;
 /** Answers `reply` to `command` on keys starting with `prefix`, the next `times` times. */
 let odd: { command: string; prefix: string; reply: unknown; times: number; skip: number } | null = null;
+let insideMoveRetryCreate = false;
 const run = redis.run.bind(redis);
 redis.run = (c: (string | number)[]) => {
   seen?.push(`${String(c[0]).toUpperCase()} ${String(c[1] ?? "")}`);
-  if (odd && String(c[0]).toUpperCase() === odd.command && String(c[1]).startsWith(odd.prefix)) {
-    if (odd.skip > 0) odd.skip -= 1;
-    else if (odd.times > 0) {
-      odd.times -= 1;
-      return odd.reply;
+  const command = String(c[0]).toUpperCase();
+  const isRetryCreate = command === "EVAL" && String(c[1]).startsWith("-- marktmorgen:purchase-move-retry-create:");
+  if (isRetryCreate) insideMoveRetryCreate = true;
+  try {
+    // Force both pre-fix GETs to observe the same absence, but let the atomic Redis script see real state.
+    if (!insideMoveRetryCreate && odd && command === odd.command && String(c[1]).startsWith(odd.prefix)) {
+      if (odd.skip > 0) odd.skip -= 1;
+      else if (odd.times > 0) {
+        odd.times -= 1;
+        return odd.reply;
+      }
     }
+    return run(c);
+  } finally {
+    if (isRetryCreate) insideMoveRetryCreate = false;
   }
-  return run(c);
 };
 
 const post = (url: string, fields: Record<string, string>, headers: Record<string, string> = {}) =>

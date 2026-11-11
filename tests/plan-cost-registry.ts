@@ -1527,9 +1527,10 @@ export const KEY_NAME_BYTES = 128;
  * account's set and each of its stores, MAX_STORES_PER_ACCOUNT at the most, past which it throws). Until then five were
  * counted, though memberStores read up to fifty stores at three commands each. And, past MEMBER_STORES_READ, the one
  * SREM that takes the ids read that are no store they serve out of the index, so the next read goes past them (Codex G
- * on #3660, decideCalendarRuns).
+ * on #3660, decideCalendarRuns), then each id taken out read again (its team's GET, MEMBER_STORES_READ at the most) and
+ * one SADD that puts back those joined meanwhile or not known (Claude 1 C3 on #3660).
  */
-export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 1 + 2 + MAX_STORES_PER_ACCOUNT;
+export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 1 + 2 + MAX_STORES_PER_ACCOUNT + MEMBER_STORES_READ + 1;
 /**
  * Where a walk's preparation stopped in its hosts' claims (lib/closed-store-data.ts, clearClaims; Claude 4 on #3660):
  * read once (GET), and written when the claims are more than a walk reads (the lock made to last, then the SET in one

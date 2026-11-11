@@ -406,7 +406,18 @@ export async function memberStoresExact(email: string, other?: string): Promise<
   if (ids.length > MEMBER_STORES_READ) {
     // Read past (Codex G on #3660): the next read starts after these. One not confirmed is only no progress this
     // time; the answer is unknown either way, so this read never decides.
-    if (stale.length) await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
+    if (stale.length) {
+      await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
+      // A join that landed between its team's read and the SREM was taken out with it (its SADD was a no-op, the id
+      // was there): each id taken out is read again, and put back when the person is on its team now, or when that
+      // read is not known (Claude 1 C3 on #3660). A join saved after this read adds the id itself, after the SREM.
+      const back: string[] = [];
+      for (const sid of stale) {
+        const now = await readTeam(sid).catch(() => null);
+        if (!now || now.members.some((m) => m.email === address)) back.push(sid);
+      }
+      if (back.length) await redisPipeline([["SADD", indexKey(address), ...back]]).catch(() => {});
+    }
     throw over();
   }
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));

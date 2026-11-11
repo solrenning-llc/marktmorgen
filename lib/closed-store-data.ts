@@ -1369,8 +1369,11 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
         // Still not known (Claude 4 on #3660): the store stays in the batch, set aside and marked finished, with what
         // is left to decide, read again on every run until it is known; never taken as "no other store".
         left += 1;
-        if (entry.finished && entry.unfinished && undecided.length === entry.calendars.length) continue;
-        const kept = { ...entry, calendars: undecided, finished: entry.finished ?? now, unfinished: entry.unfinished ?? now };
+        // Kept only for that (Claude 1 C3 on #3660): nothing of the store but its ref, its id and its hosts to decide,
+        // never its owner's address, name, addresses, marks or stats id, which a walk no longer needs once it is told.
+        const slim = !entry.email && !entry.name && !entry.handle && !entry.handles.length && !entry.marks.length && entry.statsId === null;
+        if (entry.finished && entry.unfinished && slim && undecided.length === entry.calendars.length) continue;
+        const kept: Batched = { ...entry, email: "", name: "", handle: "", handles: [], marks: [], statsId: null, calendars: undecided, finished: entry.finished ?? now, unfinished: entry.unfinished ?? now };
         const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(kept)]]), 1)?.[0];
         if (set !== 0 && set !== 1) confirmed = false;
         continue;

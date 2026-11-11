@@ -61,7 +61,11 @@ export async function POST(request: NextRequest) {
 
   // Never onto an address with ways in of its own (a passkey, an app and its codes, a removal waiting):
   // two addresses' ways in are never merged (security review of da5191515).
-  if (await holdsSecondStep(moved.to).catch(() => true)) return away("/signin?status=move-has-login");
+  // A question that could not be answered refuses the move as one that could not be finished just now, never as an
+  // address with ways in of its own (CX-123 rule 24; audit of the API routes, 11 Nov 2026): nothing has moved yet.
+  const holds = await holdsSecondStep(moved.to).catch((error: unknown) => (console.error("reading the new address's ways in failed", error), null));
+  if (holds === null) return away("/signin?status=move-unread");
+  if (holds) return away("/signin?status=move-has-login");
 
   const { from, to } = moved;
   // A move left broken earlier is repaired first (lib/move-repair.ts); while it cannot be, nothing moves.

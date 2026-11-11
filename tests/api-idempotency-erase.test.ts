@@ -6,6 +6,7 @@
  * an erasure could not find it.
  */
 import { createHash } from "node:crypto";
+import { IDEMPOTENCY_COMMANDS } from "@/lib/api-idempotency-rules";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { makeKey } from "@/lib/api-keys";
 import { POST as postLead } from "@/app/api/v1/leads/route";
@@ -65,6 +66,22 @@ async function main(): Promise<void> {
   const index = (sid: string, email: string) => `nl:api:idem:p:${sid}:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
   is("Ada's index in store A is named by the store and her hashed address", has(index(a.sid, ADA)), true);
   is("no index name says an address", redis.keys().filter((k) => k.startsWith("nl:api:idem:p:") && /@/.test(k)), []);
+
+  part("One keyed write about a person stays inside the cost ceiling's commands");
+  // Every database command a keyed write sends on its own keys (the record and the person's index) is counted against
+  // IDEMPOTENCY_COMMANDS, the figure idempotencyWorstMicroUsd prices (rule MR: the ceiling is a true upper bound).
+  const sent: string[] = [];
+  const pipeline = redis.pipeline.bind(redis);
+  (redis as unknown as { pipeline: typeof pipeline }).pipeline = async (commands: (string | number)[][]) => {
+    for (const c of commands) if (String(c[1] ?? "").startsWith("nl:api:idem:")) sent.push(String(c[0]));
+    return pipeline(commands);
+  };
+  try {
+    is("taken", (await call(postAccess, a.key, { email: "dee-erase@example.test", product: a.product }, "a-dee-access")).status, 200);
+  } finally {
+    (redis as unknown as { pipeline: typeof pipeline }).pipeline = pipeline;
+  }
+  is("its commands on the record and the index fit the ceiling", [sent.length <= IDEMPOTENCY_COMMANDS, sent], [true, sent]);
 
   part("Deleting the person from store A deletes their answers there at once, and nothing else");
   const storeA = (await storeForEmail(a.owner))!;

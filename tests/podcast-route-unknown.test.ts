@@ -19,7 +19,7 @@ import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { MAX_EPISODES, type Podcast } from "@/lib/podcast-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { POST as podcastRoute } from "@/app/api/store/podcast/route";
-import { store as redis } from "./redis-stub";
+import { setRedisConfigured, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
@@ -136,11 +136,15 @@ async function main(): Promise<void> {
   {
     is("a podcast with no record reads as null", await readPodcast("0123456789abcdef0123456789abcdef"), null);
     const redisEnv = ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_URL", "KV_REST_API_TOKEN"] as const;
+    // @/lib/redis is tests/redis-stub.ts here, whose isRedisConfigured ignores the environment
+    // (Claude 4 D MEDIUM): its switch is what makes this the unconfigured branch.
     const savedRedisEnv = redisEnv.map((name) => process.env[name]);
     for (const name of redisEnv) delete process.env[name];
+    setRedisConfigured(false);
     try {
       is("unconfigured Redis is unknown, not a missing podcast", await thrown(() => readPodcast("0123456789abcdef0123456789abcdef")), "UnknownReplyError");
     } finally {
+      setRedisConfigured(true);
       redisEnv.forEach((name, index) => { const value = savedRedisEnv[index]; if (value === undefined) delete process.env[name]; else process.env[name] = value; });
     }
     const { podcastId } = await setUp("Show R");

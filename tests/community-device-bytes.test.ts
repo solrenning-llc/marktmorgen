@@ -41,10 +41,10 @@ require("node:dns/promises").lookup = async (host: string) => {
 type Command = (string | number)[];
 /** Every command sent, with what its answer weighs as the REST API sends it (JSON). */
 const seen: { command: Command; bytes: number }[] = [];
-let odd: { match: (commands: Command[]) => boolean; reply: unknown } | null = null;
+let odd: { when: (commands: Command[]) => boolean; reply: unknown } | null = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
-  if (odd && odd.match(commands)) return odd.reply;
+  if (odd && odd.when(commands)) return odd.reply;
   // lib/community.ts CAS_MEMBER, as Redis runs it (as in tests/community-patch-member-exact.test.ts).
   if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith('local cur = redis.call("HGET"')) {
     const [, , , members, dir, field, expected, next, listed, at] = commands[0];
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
   ];
   for (const [what, reply] of wrong) {
     looked.length = 0;
-    odd = { match: devicesRead, reply };
+    odd = { when: devicesRead, reply };
     try {
       await one(shaky);
     } finally {

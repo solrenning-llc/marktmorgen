@@ -583,8 +583,9 @@ export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LO
  * What one comment's push reads of the members' devices, at the most (lib/community-push.ts devicesOf): the twelve
  * people it can tell (the post's author, the comment it answers, MAX_MENTIONS named), each with MAX_MEMBER_DEVICES
  * devices, each sending at most DEVICE_SENT_BYTES (an endpoint over MAX_ENDPOINT_BYTES is refused when it is turned
- * on, and a row over it is left out inside Redis). Inside UNIT_COST.buyer's 60,000 bytes with the rest of the action
- * (tests/community-device-bytes.test.ts).
+ * on, and a row over it is left out inside Redis). Its reply bytes fit inside UNIT_COST.buyer's 60,000 bytes with the
+ * rest of the action (tests/community-device-bytes.test.ts); request and reply bytes together are still an open question
+ * with the coordinator (#3400 review thread), not settled here.
  */
 export const COMMUNITY_DEVICES_READ = {
   people: 2 + MAX_MENTIONS,

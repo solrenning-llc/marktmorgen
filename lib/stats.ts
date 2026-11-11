@@ -72,6 +72,23 @@ export const DAY_FIELDS_MAX = 100;
 export const LIFE_WRITE_MAX = 2_100;
 
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * The counts one capped-count EVAL answered (lib/capped-count.ts), read exactly: a list of `fields` whole numbers
+ * at or above zero, each a number or its decimal text. Anything else is not known (rule 24), never "not the first".
+ */
+function knownCounts(replies: unknown, fields: number): number[] | null {
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const reply: unknown = replies[0];
+  if (!Array.isArray(reply) || reply.length !== fields) return null;
+  const out: number[] = [];
+  for (const value of reply as unknown[]) {
+    const n = typeof value === "number" ? value : typeof value === "string" && /^(0|[1-9][0-9]{0,15})$/.test(value) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(n) || n < 0) return null;
+    out.push(n);
+  }
+  return out;
+}
 const countsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}`;
 const visitorsKey = (statsId: string, day: string) => `nl:stats:${statsId}:${day}:u`;
 const lifeKey = (statsId: string) => `nl:stats:${statsId}:life`;
@@ -186,14 +203,36 @@ export async function recordHit(
     // day, because every visit's cost is held to what a plan charges for it
     // (tests/traffic-cost.ts). The day's count only, not the all-time
     // record, so "all time" has no figure for it rather than a wrong one.
-    const [opened] = await cappedCount(counts, DAY_FIELDS_MAX, [{ field: `pv:${hit.id}`, by: 1 }]);
-    if (opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+    // An answer that is not known (lost after the write, or in another shape) may be the day's first write too:
+    // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
+    let opened: number | null = null;
+    try {
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+    } catch (error) {
+      console.error("counting a product page's view failed", error);
+    }
+    if (opened === null || opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]).catch(() => null);
     return null;
   } else {
     return null;
   }
-  const [counted, ...results] = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
-  const values = Array.isArray(counted) ? counted.map(Number) : [];
+  // The expiries an unknown answer still sends: what this hit may have written first today. Never the all-time
+  // record's start, which only a known first write may say (rule 24).
+  const unknownExpiries = (): (string | number)[][] => [
+    ["EXPIRE", counts, TTL_SECONDS],
+    ...(hit.kind === "view" ? [["EXPIRE", liveKey(store.statsId as string), 86400], ["EXPIRE", visitorsKey(store.statsId as string, day), TTL_SECONDS]] : []),
+  ];
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+  } catch (error) {
+    // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
+    await redisPipeline(unknownExpiries()).catch(() => null);
+    throw error;
+  }
+  const [counted, ...results] = Array.isArray(replies) ? replies : [];
+  const known = knownCounts([counted], tally.length);
+  const values = known ?? [];
   // Written once, not on every hit (11 October 2026: every visit's commands
   // are a cost held to what a plan charges, tests/traffic-cost.ts, and these
   // three were sent on every page view though they change nothing after the
@@ -201,15 +240,18 @@ export async function recordHit(
   // — so filling it from the kept days never counts that day or any after it
   // twice — with the day's first write of this kind; the visitors' expiry with
   // the visitor new to the day, who is a visitor for all time too.
-  const follow: (string | number)[][] = [];
+  const follow: (string | number)[][] = known ? [] : unknownExpiries();
   if (firstAt >= 0 && values[firstAt] === 1) {
     follow.push(["EXPIRE", counts, TTL_SECONDS], ["HSETNX", life, "started", day]);
     // Those who were on before today let go once a day, so a store viewed
     // every day and never looked at live keeps a day of them, not every one.
     if (hit.kind === "view") follow.push(["ZREMRANGEBYSCORE", liveKey(store.statsId), 0, now - 30 * 60_000], ["EXPIRE", liveKey(store.statsId), 86400]);
   }
-  if (pfAt >= 0 && Number(results[pfAt]) === 1) {
+  if (pfAt >= 0 && (results[pfAt] === 1 || results[pfAt] === "1")) {
     follow.push(["HINCRBY", life, "u", 1], ["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
+  } else if (pfAt >= 0 && results[pfAt] !== 0 && results[pfAt] !== "0") {
+    // Not known whether this visitor was new to the day: the day's visitors keep their expiry, and nobody is counted.
+    follow.push(["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
   }
   if (follow.length) await redisPipeline(follow);
   // The store page's views so far today, for the busy-day alert (lib/stats-report.ts).

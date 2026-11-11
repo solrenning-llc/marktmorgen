@@ -70,12 +70,16 @@ async function main(): Promise<void> {
   const after = scores();
   is("every product still queued: never dropped", after.length, WAITING);
   is("those tried wait an hour, those not reached stay due for the next run", [after.filter((score) => score > now).length, after.filter((score) => score === queuedAt).length], [busy.waiting, WAITING - busy.waiting]);
+  // The next hourly run may start a little before a full hour later (cron jitter, a faster claim): a product tried
+  // and not confirmed off is due for it, never left visible a second hour (Claude 3 on #3588, comment 6801516714).
+  const early = (redis.run(["ZRANGEBYSCORE", QUEUE, "-inf", String(now + 3_600_000 - 60_000)]) as string[]).length;
+  is("a run a minute short of the hour still finds every product tried and not confirmed off", early, WAITING);
   redis.run(["DEL", lock]);
   let at = now + 2 * 3_600_000;
 
   part("A deadline already past: nothing is tried, everything stays queued as it was");
-  const early = await hideHeldProducts(at, Date.now() - 1);
-  is("nothing tried", early, { hidden: 0, waiting: 0, gone: 0 });
+  const late = await hideHeldProducts(at, Date.now() - 1);
+  is("nothing tried", late, { hidden: 0, waiting: 0, gone: 0 });
   is("all still queued, each due when it was", scores(), after);
   is("nothing taken off", await hiddenCount(), 0);
 

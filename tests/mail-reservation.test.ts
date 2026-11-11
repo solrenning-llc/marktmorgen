@@ -79,10 +79,15 @@ test('a failed daily usage read is logged and still blocks list email',async()=>
  const previous=console.error, seen:unknown[][]=[];
  console.error=(...args:unknown[])=>{seen.push(args);};
  try {
+  // reserveDay never reads the day (INCRBY); dailyRoom is reached only from the list loop (Claude 4 J/B MEDIUM).
+  const made=await fullStore();
   dayRead={value:new Error('synthetic daily usage failure')};
-  assert.equal(await reserveDay(1),false);
+  const result=await sendTo(made,['reader@example.com'],'Synthetic','Test only','failed-day-read');
+  assert.equal(result.stopped,'day');assert.equal(dispatch.calls,0);
   assert.equal(seen.length,1);
   assert.equal(seen[0][0],'reading the daily email usage failed');
+  assert.equal(JSON.stringify(seen[0].map(String)).includes('reader@example.com'),false,'no address in the log');
+  assert.equal(JSON.stringify(seen[0].map(String)).includes(made.listId),false,'no list id in the log');
  } finally { console.error=previous; }
 });
 test('unknown daily usage stops the real list loop before reservations and dispatch',async()=>{

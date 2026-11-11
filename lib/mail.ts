@@ -129,18 +129,20 @@ const dayKey = (now = new Date()) => `nl:mail:day:${now.toISOString().slice(0, 1
 async function dailyRoom(): Promise<number> {
   const cap = dailyCap();
   if (cap === 0) return Number.POSITIVE_INFINITY;
+  // Any unknown reply is logged with a fixed label only (no value, no address), then grants no room.
+  const unknown = () => { console.error("reading the daily email usage failed"); return 0; };
   try {
     const reply: unknown = await redisPipeline([["GET", dayKey()]]);
-    if (!Array.isArray(reply)) return 0;
+    if (!Array.isArray(reply)) return unknown();
     const length = Object.getOwnPropertyDescriptor(reply, "length");
     const field = Object.getOwnPropertyDescriptor(reply, "0");
     if (!length || !("value" in length) || length.value !== 1 ||
-        !field || !("value" in field)) return 0;
+        !field || !("value" in field)) return unknown();
     // Only explicit absence means no emails used; unknown data grants no room.
     if (field.value === null) return cap;
-    if (typeof field.value !== "string") return 0;
+    if (typeof field.value !== "string") return unknown();
     const used = confirmedCount(field.value, 0);
-    return used === null ? 0 : Math.max(0, cap - used);
+    return used === null ? unknown() : Math.max(0, cap - used);
   } catch (error) {
     console.error("reading the daily email usage failed", error);
     return 0;

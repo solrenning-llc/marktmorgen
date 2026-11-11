@@ -19,19 +19,13 @@ import { done, is, part } from "./check";
 
 type Command = (string | number)[];
 const HOUR = 3_600_000;
-// Every paid-burst place taken (ZADD on a store's paid reads in flight), and how many were in flight with it (ZCARD).
-let paidPlaces: number[] = [];
 let pipelines = 0;
 let commands = 0;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
   pipelines += 1;
   commands += batch.length;
-  const values = await real(batch);
-  batch.forEach((c, i) => {
-    if (c[0] === "ZCARD" && /^nl:slink:rest:[0-9a-f]{32}:paidflight$/.test(String(c[1]))) paidPlaces.push(Number(values[i]));
-  });
-  return values;
+  return real(batch);
 }) as typeof redis.pipeline;
 const realNow = Date.now;
 let shift = 0;
@@ -64,21 +58,6 @@ async function payingStore(email: string, handle: string, id: string) {
   }
   return { s, codes };
 }
-/**
- * Every count of an hour the short links keep (a key that ends in its hour's number), their values summed, but the
- * shared hour: a burst of 200 at once holds 20 units there of opens refused before their code is looked up (past its
- * 180 units), which are not these.
- */
-async function counted(): Promise<number> {
-  const keys = redis.keys().filter((k) => k.startsWith("nl:slink:") && !k.startsWith("nl:slink:open:") && /:[0-9]{6,}$/.test(k));
-  let sum = 0;
-  for (const k of keys) {
-    const v = (await redis.pipeline([["GET", k]]))[0];
-    if (typeof v === "string" && /^-?[0-9]+$/.test(v)) sum += Number(v);
-  }
-  return sum;
-}
-
 async function main() {
   redis.clear();
   forgetShortLinkOpenMemory();

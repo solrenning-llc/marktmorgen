@@ -39,10 +39,13 @@ export const moveWords = {
   asked: {
     sent: { title: "Check both inboxes", body: "We sent a link to your current address and one to the new address. Open each one and press Confirm within 24 hours." },
     half: {
-      title: "Only one link was sent",
-      body: "We emailed your current address, but could not email the new address just now. Nothing will move. Try again later with a new request.",
+      title: "We could not confirm the second link",
+      body: "We emailed your current address. We could not confirm that the link to the new address went. Look in that inbox, and in spam, before you ask again. Nothing moves until both addresses confirm.",
     },
-    unsent: { title: "No links were sent", body: "We could not send the emails just now. Nothing was changed. Try again later." },
+    unconfirmed: {
+      title: "We could not confirm the email went",
+      body: "The link to your current address may not have been sent. Look in that inbox, and in spam, before you ask again: a new request sends new links. Nothing moves until both addresses confirm.",
+    },
     email: { title: "Check the new address", body: "That does not look like an email address. Check it and try again." },
     same: { title: "That is the same address", body: "Type a different email address from the one your purchases are on." },
     over: { title: "Too many requests today", body: "You can ask 3 times a day. Try again tomorrow." },
@@ -79,7 +82,7 @@ export const moveWords = {
       "",
       link,
       "",
-      `We also sent a link to ${to}. Nothing moves until both addresses confirm, within 24 hours. Refunds stay with the order you paid for.`,
+      `We are also sending a link to ${to}. Nothing moves until both addresses confirm, within 24 hours. Refunds stay with the order you paid for.`,
       "",
       "If you did not ask for this, ignore this email: nothing moves without your confirmation.",
     ].join("\n"),

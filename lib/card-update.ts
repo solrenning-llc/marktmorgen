@@ -93,10 +93,20 @@ type SubRow = {
 const customerOf = (sub: SubRow) =>
   typeof sub.customer === "string" ? sub.customer : sub.customer && typeof sub.customer === "object" ? String((sub.customer as { id?: unknown }).id ?? "") : "";
 
-/** The membership a grant names, when it is this customer's and this store's. */
+/**
+ * A Stripe reply decides only when it is the object asked for (rule 30): it holds its own id, equal to the one
+ * requested. Another membership of the same customer on the same store, or a reply with no id, says nothing about
+ * this one: its status, its card and its unpaid invoice are not this membership's. A reply that is not an object at all (an HTTP 200 whose JSON body is `null`) is not this object either: it never
+ * throws here.
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
+
+/** The membership a grant names, when Stripe's reply is that membership and it is this customer's and this store's. */
 async function subFor(store: Store, account: string, customer: string, subscription: string): Promise<SubRow | null> {
   if (!SUB_PATTERN.test(subscription)) return null;
   const sub = (await onAccount("GET", account, `/subscriptions/${subscription}?expand[]=latest_invoice`)) as SubRow;
+  if (!isOwnReply(sub, subscription)) return null;
   if (customerOf(sub) !== customer || !saleHandles(store).has(sub.metadata?.store ?? "")) return null;
   return sub;
 }
@@ -205,6 +215,9 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
       metadata?: Record<string, string> | null;
       setup_intent?: { status?: unknown; payment_method?: unknown; metadata?: Record<string, string> | null } | string | null;
     };
+    // Another page's reply, or one with no id, never sets a card: "error" keeps the page waiting (nl:card:open), so
+    // the daily job (lib/payment-recovery.ts) asks again.
+    if (!isOwnReply(session, sessionId)) return "error";
     if (session.mode !== "setup" || session.metadata?.kind !== "card" || !saleHandles(store).has(session.metadata?.store ?? "")) return "error";
     if (session.status !== "complete") return "canceled";
     const intent = session.setup_intent && typeof session.setup_intent === "object" ? session.setup_intent : null;

@@ -20,13 +20,13 @@ import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import {
   MAX_NOTE_LENGTH,
   affiliateCookieName,
-  affiliateByEmail,
   affiliateForSession,
   affiliateLink,
   affiliatesOn,
   buyersJoin,
   canApply,
   linkEmail,
+  linkOpens,
   recruitLink,
 } from "@/lib/affiliates";
 import { AFFILIATE_CODE_PATTERN } from "@/lib/affiliate-setting";
@@ -103,8 +103,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const order = typeof query.order === "string" && /^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(query.order) ? query.order : "";
   const emailed = token ? await linkEmail(store, token) : null;
   // A store switched off after notices about its content (lib/takedown.ts) takes no new affiliate: an emailed
-  // link counts only when it signs in one it already has, never when opening it would make an application.
-  const linkFor = emailed && store.suspended && !(await affiliateByEmail(store, emailed)) ? null : emailed;
+  // link counts only when it signs in one it already has, never when opening it would make an application or
+  // approve the creator's invitation (lib/affiliates.ts linkOpens, as the route that opens it).
+  const linkFor = emailed && store.suspended && !(await linkOpens(store, token)) ? null : emailed;
   const affiliate = await affiliateForSession(store, (await cookies()).get(affiliateCookieName(store.handle))?.value);
   // Switched off, as the store's own page, for a visitor: the program's terms, applying and joining after an
   // order close. An affiliate it already has keeps their own page (their link, figures and payouts).

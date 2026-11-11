@@ -30,7 +30,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
-import { TAKEN_DOWN_SECONDS, isTakenDown, markTakenDown, readDraftPreview } from "@/lib/draft-preview";
+import { TAKEN_DOWN_SECONDS, markTakenDown, previewState, readDraftPreview } from "@/lib/draft-preview";
 import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
@@ -277,9 +277,10 @@ async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "st
     if (product.hidden) {
       // A draft is not public, but its preview link is (lib/draft-preview.ts): a notice about that address takes the
       // link down, and none opens or is made for the draft until it is published (Claude 6's focal on #3597). Once
-      // marked, there is nothing more to take down. A store without a stats id never had a preview link. A mark that
-      // cannot be read throws to the caller, never "nothing to do".
-      if (!store.statsId || (await isTakenDown(store, action.id))) return null;
+      // marked, there is nothing more to take down, and a draft with no link (never made, revoked or ended) had nothing
+      // public to take down: no strike, count or statement of reasons for it (Revisor 2 on #3597). A store without a
+      // stats id never had a preview link. A reply that cannot be read throws to the caller, never "nothing to do".
+      if (!store.statsId || (await previewState(store, action.id)) !== "open") return null;
       return {
         what: `The preview link of the draft product "${product.title}", now closed`,
         howLong: `How long: until you publish the product, and at most ${Math.round(TAKEN_DOWN_SECONDS / 86_400)} days while it stays a draft. No preview link opens or can be made for it meanwhile. Publishing it while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,

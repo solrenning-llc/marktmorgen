@@ -103,6 +103,21 @@ export async function isTakenDown(store: Owner, productId: string): Promise<bool
   return mark !== null;
 }
 
+/**
+ * Whether a draft has a preview link that may open now, for a takedown (lib/takedown.ts, stillUp): "open" when its
+ * pointer names a link and it is not marked taken down, "down" when it is marked, "none" when it has no link (never
+ * made, revoked, ended, or replaced by nothing). A draft is not public; only its link is, so a draft with "none" has
+ * nothing to take down (Revisor 2 on #3597). Both read at once, exactly: a reply that cannot be read throws.
+ */
+export async function previewState(store: Owner, productId: string): Promise<"open" | "down" | "none"> {
+  const statsId = statsOf(store);
+  const [pointer, down] = await exactly([["GET", pointerKey(statsId, productId)], ["GET", downKey(statsId, productId)]]);
+  if (stringOrNull(down, "taken-down mark") !== null) return "down";
+  const hash = stringOrNull(pointer, "pointer");
+  // A pointer that is not one of our hashes opens nothing (readDraftPreview compares it to the code's hash).
+  return hash !== null && HASH.test(hash) ? "open" : "none";
+}
+
 /** The product is published again: previews may be made for it once it is a draft again. */
 export async function clearTakenDown(store: Owner, productId: string): Promise<void> {
   await exactly([["DEL", downKey(statsOf(store), productId)]]);

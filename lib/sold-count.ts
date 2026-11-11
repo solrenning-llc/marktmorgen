@@ -83,7 +83,7 @@ export function stale(counts: SoldCounts | null, now = Date.now()): boolean {
  */
 export async function refreshSoldCounts(
   store: Store,
-  read: (store: Store) => Promise<{ byProduct: Record<string, { sales: number }>; together?: Together } | null>,
+  read: (store: Store) => Promise<{ byProduct: Record<string, { sales: number }>; together?: Together; partial?: boolean } | null>,
   now = Date.now(),
 ): Promise<SoldCounts | null> {
   if (!store.look.sold || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return null;
@@ -91,7 +91,9 @@ export async function refreshSoldCounts(
   if (mine !== "OK") return null;
   try {
     const all = await read(store);
-    if (!all) return null;
+    // A reading that stopped before the end is an undercount, never "exactly what was counted": the last whole
+    // reading stays, or nothing is said.
+    if (!all || all.partial === true) return null;
     const p: Record<string, number> = {};
     for (const [id, row] of Object.entries(all.byProduct)) if (id && row.sales > 0) p[id] = row.sales;
     const t = parseTogether(all.together);

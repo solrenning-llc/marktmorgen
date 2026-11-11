@@ -54,7 +54,7 @@ const render = (numbers: Numbers) => renderToStaticMarkup(createElement(Membersh
 /** The cells of the row whose header is this price, as text. */
 const rowOf = (html: string, price: string) => {
   const row = html.split("<tr").find((tr) => tr.includes(`<th scope="row"`) && tr.includes(`>${price}<`));
-  return row ? [...row.matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/g)].map((m) => m[1].replace(/<[^>]+>/g, "")) : null;
+  return row ? [...row.matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/g)].map((m) => m[1].replace(/<[^>]*>/g, "").replace(/[<>]/g, "")) : null;
 };
 
 part("Each price of a membership, with how many members are on it");

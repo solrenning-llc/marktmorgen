@@ -888,6 +888,17 @@
       "parameters": []
     },
     {
+      "source": "app/report/handled/[token]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/report/handled/[token]",
+      "parameters": [
+        {
+          "name": "token",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/report/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/report",
@@ -1720,6 +1731,7 @@
     "app/api/outreach/stop/route.ts",
     "app/api/photo/[id]/route.ts",
     "app/api/privacy/erase/route.ts",
+    "app/api/report/handled/route.ts",
     "app/api/report/route.ts",
     "app/api/store/ab/route.ts",
     "app/api/store/address/route.ts",
@@ -2073,6 +2085,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

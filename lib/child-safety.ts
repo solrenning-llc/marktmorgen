@@ -63,6 +63,7 @@ import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { MAX_VAULT_PATH_BYTES } from "@/lib/vault-rules";
 import { holdFiles, isFileHeld } from "@/lib/held-files";
 import { productFilePaths } from "@/lib/held-product-files";
+import { withReminders } from "@/lib/child-safety-alerts";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
 import { heldIdsAmong, heldInCatalog, isHeldForReport, keepKey, touchesHeld } from "@/lib/child-safety-holds";
 import { imagePaths } from "@/lib/product-image";
@@ -495,16 +496,20 @@ export async function alertOwner(
           ? "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email."
           : `The steps are in docs/incident-response.md. ${NOTICE_NOT_KEPT}`,
       ];
-  return sendEmail({
-    meter: { by: "company" },
-    from: NIMBUS_FROM,
-    to: SUPPORT_EMAIL,
-    subject: subject.slice(0, 200),
-    text: lines.join("\n"),
-    // One urgent email per request a day: a retry of the same request (address, sender, words) does not send it twice,
-    // and a new request on the same address, by another person or about another image, still does.
-    idempotencyKey: `report-urgent-${report.kind}-${createHash("sha256").update(`${report.url}\n${report.email ?? ""}\n${report.work ?? ""}`).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`,
-  })
+  // One request a day: a retry of the same request (address, sender, words) neither sends the urgent email twice nor
+  // opens a second reminder; a new request on the same address, by another person or about another image, does both.
+  const request = `${report.kind}-${createHash("sha256").update(`${report.url}\n${report.email ?? ""}\n${report.work ?? ""}`).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`;
+  // Repeated every 24 hours until it is marked handled, with the link that does so (lib/child-safety-alerts.ts).
+  return withReminders({ kind: report.kind, url: report.url, handle: handle || "", outcome, request }, now, (more) =>
+    sendEmail({
+      meter: { by: "company" },
+      from: NIMBUS_FROM,
+      to: SUPPORT_EMAIL,
+      subject: subject.slice(0, 200),
+      text: [...lines, ...more].join("\n"),
+      idempotencyKey: `report-urgent-${request}`,
+    }),
+  )
     .catch(() => false)
     .then((sent) => {
       if (!sent) console.error("the urgent report email was not sent", report.kind);

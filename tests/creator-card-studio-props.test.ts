@@ -62,7 +62,7 @@ async function main() {
     const props = editorProps(await StudioCardPage({ searchParams: Promise.resolve({ store: store.sid }) }));
     is(`${language}: the page hands the card to the editor`, Boolean(props), true);
     // `children` is React's own; everything else crosses to the browser.
-    const { children: _children, ...sent } = props ?? {};
+    const sent = Object.fromEntries(Object.entries(props ?? {}).filter(([key]) => key !== "children"));
     is(`${language}: nothing the editor gets is a function or a class (it would answer 500)`, notSendable(sent), []);
     const words = sent.words as Record<string, unknown> | undefined;
     is(`${language}: the way back to the store is named in the store's language, as on the public card`, sent.visit, language === "pt" ? "Visitar Synthetic Pottery" : "Visit Synthetic Pottery");

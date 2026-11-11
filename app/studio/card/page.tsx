@@ -49,6 +49,8 @@ export default async function StudioCardPage({ searchParams }: Params) {
   const read = await readCreatorCardHeld(store.statsId).catch(() => null);
   const card = read ? read.card : null;
   const address = `${SITE_URL.replace(/^https:\/\//, "")}/@${store.handle}/contact`;
+  // Plain strings only: a function in the words cannot be handed to the client editor (it answered 500, VR 11/11/2026).
+  const { store: visitWords, ...cardWords } = contactWords(store.language).card;
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
@@ -80,7 +82,8 @@ export default async function StudioCardPage({ searchParams }: Params) {
                 held={read?.held}
                 handle={store.handle}
                 storeName={store.name}
-                words={contactWords(store.language).card}
+                words={cardWords}
+                visit={visitWords(store.name)}
                 address={address}
                 look={{ className: `st-page st-theme-${store.look.theme}`, style: lookStyle(store.look) as React.CSSProperties, lang: speech(store).lang.locale }}
               />

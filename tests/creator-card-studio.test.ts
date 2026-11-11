@@ -19,7 +19,7 @@ import { done, is, part } from "./check";
 const phone = "+" + "15550104477";
 const card: CreatorCard = { on: true, name: "Ana Souza", title: "Pottery teacher", email: "ana@example.com", phone, website: "https://ana.example.com/", note: "Classes online" };
 const draw = (initial: CreatorCard) =>
-  renderToStaticMarkup(createElement(CreatorCardEditor, { initial, handle: "anapottery", storeName: "Ana's Pottery", words: CONTACT_WORDS.pt.card, address: "marktmorgen.com/@anapottery/contact", look: { className: "st-page st-theme-warm", style: {}, lang: "pt-PT" } }));
+  renderToStaticMarkup(createElement(CreatorCardEditor, { initial, handle: "anapottery", storeName: "Ana's Pottery", words: CONTACT_WORDS.pt.card, visit: CONTACT_WORDS.pt.card.store("Ana's Pottery"), address: "marktmorgen.com/@anapottery/contact", look: { className: "st-page st-theme-warm", style: {}, lang: "pt-PT" } }));
 
 part("Filling it in");
 const empty = draw(NO_CARD);
@@ -38,7 +38,7 @@ const full = draw(card);
 is("drawn in the store's look and language", full.includes('class="mt-4 rounded-xl st-page st-theme-warm"') && full.includes('lang="pt-PT"'), true);
 is("under its own heading, the card's name a third-level one", full.includes('<h2 id="card-preview-title"') && full.includes('<h3 id="card-preview-name"') && !full.includes("<h1"), true);
 is("nothing in it leaves the studio or saves a card not yet kept", [full.includes("mailto:"), full.includes("tel:"), full.includes("/contact/vcard")], [false, false, false]);
-is("in the store's language", full.includes("Guardar o contacto"), true);
+is("in the store's language, the way back to the store too", [full.includes("Guardar o contacto"), full.includes("Visitar Ana&#x27;s Pottery")], [true, true]);
 is("a kept card can be deleted", full.includes("Delete the card"), true);
 const page = renderToStaticMarkup(createElement(CreatorCardView, { card, handle: "anapottery", storeName: "Ana's Pottery", words: CONTACT_WORDS.en.card }));
 is("the card itself, outside the studio, keeps its links and its heading", page.includes('<h1 id="card-name"') && page.includes("mailto:ana@example.com") && page.includes("/@anapottery/contact/vcard"), true);

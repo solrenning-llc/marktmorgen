@@ -33,7 +33,7 @@ function editorProps(node: unknown): { initial: unknown; held?: unknown } | unde
 }
 
 function deleteShown(initial: CreatorCard, held: boolean | undefined): boolean {
-  const html = renderToStaticMarkup(createElement(CreatorCardEditor, { initial, held, handle: "synthetic", storeName: "Synthetic", words: CONTACT_WORDS.en.card, address: "example.com/@synthetic/contact", look: { className: "st-page", style: {}, lang: "en" } }));
+  const html = renderToStaticMarkup(createElement(CreatorCardEditor, { initial, held, handle: "synthetic", storeName: "Synthetic", words: CONTACT_WORDS.en.card, visit: CONTACT_WORDS.en.card.store("Synthetic"), address: "example.com/@synthetic/contact", look: { className: "st-page", style: {}, lang: "en" } }));
   return html.includes(">Delete the card<");
 }
 

@@ -61,7 +61,14 @@ export function confirmedRemoval(answer: { card: CreatorCard; removed: unknown }
   return answer.removed !== false && !answer.card.on && TEXT_FIELDS.every((key) => answer.card[key] === "");
 }
 
-export function CreatorCardEditor({ initial, held, handle, storeName, words, address, look }: { initial: CreatorCard; held?: boolean; handle: string; storeName: string; words: ContactWords["card"]; address: string; look: { className: string; style: React.CSSProperties; lang: string } }) {
+/**
+ * The card's words as a server page can hand them to this client editor: plain strings only. The link back to the
+ * store is a function in ContactWords, and a function cannot cross to the browser (the studio page answered 500 for
+ * every creator whose card was read, VR 11/11/2026), so the page sends it already said, as `visit`.
+ */
+export type CardEditorWords = Omit<ContactWords["card"], "store">;
+
+export function CreatorCardEditor({ initial, held, handle, storeName, words, visit, address, look }: { initial: CreatorCard; held?: boolean; handle: string; storeName: string; words: CardEditorWords; visit: string; address: string; look: { className: string; style: React.CSSProperties; lang: string } }) {
   const [card, setCard] = useState(initial);
   // Delete is offered for every kept card, also one off with no name but an email or a note, and one empty in every
   // field: the page says whether a record is kept (`held`); without it, any word kept counts (Codex G on #1963).
@@ -225,7 +232,7 @@ export function CreatorCardEditor({ initial, held, handle, storeName, words, add
         <p className="mt-1 text-sm text-ink-soft">{card.on ? "As it is shown once you save." : "A preview only: it is not shown while Show my card is off."}</p>
         <div className={`mt-4 rounded-xl ${look.className}`} style={look.style} lang={look.lang}>
           {card.name.trim() ? (
-            <CreatorCardView card={{ ...card, name: card.name.trim() }} handle={handle} storeName={storeName} words={words} preview />
+            <CreatorCardView card={{ ...card, name: card.name.trim() }} handle={handle} storeName={storeName} words={{ ...words, store: () => visit }} preview />
           ) : (
             <p className="rounded-xl bg-paper p-4 text-sm text-ink-soft ring-1 ring-line">Type the name on the card, and the preview appears here.</p>
           )}

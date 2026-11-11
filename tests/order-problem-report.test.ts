@@ -15,6 +15,7 @@ import { ordersLinkFor } from "@/lib/buyer-orders";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { withinLimit } from "@/lib/request-guard";
+import { dataUsed } from "@/lib/store-data";
 import { NEW_PER_DAY } from "@/lib/inbox-rules";
 import { ORDER_PROBLEM_PENDING_SECONDS, orderProblemKey, reportOrderProblem } from "@/lib/order-problem";
 import { POST as problemRoute, ORDER_PROBLEM_PER_DAY } from "@/app/api/store/order-problem/route";
@@ -117,6 +118,26 @@ test("a second report of the same order while the case is open files nothing mor
   assert.ok(Number(ttl[0]) > 6 * DAY && Number(ttl[0]) <= 7 * DAY, `the mark lasts the seven days, ${ttl[0]}`);
 });
 
+test("the mark keeps which conversation holds the case, for the seven days' check", async () => {
+  const { store, product, token } = await shop();
+  sessions = [paid("whichconv", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, reason: "not_received" })), "filed");
+  const [conversation] = await readInbox(store.statsId!);
+  const [mark] = await redis.pipeline([["GET", orderProblemKey(store.sid!, ref)]]);
+  assert.equal(mark, `filed:${conversation.id}`);
+});
+
+test("asking again about an order with an open case takes no more room in the store's data room", async () => {
+  const { store, product, token } = await shop();
+  sessions = [paid("noroom", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, reason: "not_received" })), "filed");
+  const before = (await dataUsed(store))?.used;
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, reason: "not_received" })), "already");
+  assert.equal((await dataUsed(store))?.used, before);
+});
+
 test("an order the link's address did not pay for is refused, and nothing is filed", async () => {
   const { store, token } = await shop();
   const answer = await post({ handle: "mara", token, ref: "cs_test_nobodysorder00000000000", reason: "not_received" });
@@ -156,7 +177,7 @@ test("a report of an order being filed right now is 'busy', never 'already'", as
 test("a mark of another shape is not known: an error, never 'already'", async () => {
   const { store } = await shop();
   const ref = "cs_test_strangemark00000000000";
-  await redis.pipeline([["SET", orderProblemKey(store.sid!, ref), "something"]]);
+  await redis.pipeline([["SET", orderProblemKey(store.sid!, ref), "filed:not-a-conversation"]]);
   const outcome = await reportOrderProblem(store, { reference: ref, title: "The Butter Course", paidAt: 1_780_000_000 }, BUYER, { reason: "not_received", note: "", reference: ref });
   assert.equal(outcome, "error");
 });

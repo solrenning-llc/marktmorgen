@@ -172,7 +172,7 @@ export async function giveRefund(
     reply = null;
   }
 
-  const state = refundOutcome(reply, { chargeId, cents: amount.cents });
+  const state = refundOutcome(reply, { chargeId, cents: amount.cents, currency: left.currency });
   const money = formatMoney(amount.cents, left.currency);
   const what =
     state === "done"

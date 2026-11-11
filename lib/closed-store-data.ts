@@ -789,7 +789,17 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
       const toStop: string[] = [];
       for (const sub of listed.rows) {
         // Only the store's own sales of the handle searched (rule 30, as lib/closing-holds.ts): another's is never ended.
-        if ((ownField(sub, "metadata") as Record<string, unknown>).store !== handle) {
+        // Another's only when it names another store as text (Codex CX1 on #3332): a store that is not named, or not as
+        // text, is not known, so nothing is ended on a guess and the pass is not done, asked again on the next run.
+        const named = (ownField(sub, "metadata") as Record<string, unknown>).store;
+        if (typeof named !== "string" || !named) {
+          // Ended already (the search catches up within moments): whoever's it is, nothing to stop.
+          if (["canceled", "incomplete_expired"].includes(ownField(sub, "status") as string)) continue;
+          console.error("plan-closing: Stripe's search gave a running subscription whose store is not known; asked again");
+          out.done = false;
+          continue;
+        }
+        if (named !== handle) {
           console.error("plan-closing: Stripe's search gave a subscription of another store; left alone");
           continue;
         }

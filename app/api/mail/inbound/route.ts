@@ -111,14 +111,15 @@ export async function POST(request: NextRequest) {
 
   const seenKey = `nl:inbound:seen:${id}`;
   try {
-    const replies = repliesFor(await redisPipeline([["SET", seenKey, ACTING, "NX", "EX", ACTING_SECONDS], ["GET", seenKey]]), 2);
-    if (replies && replies[0] === null) {
-      // Acted on already: acknowledged and ignored. Anything else (still being
-      // acted on, or a value not read) is not taken as done: answered with a
-      // failure, so Resend offers it again.
-      if (replies[1] === SEEN) return Response.json({ ok: true });
-      return Response.json({ ok: false }, { status: 409 });
-    }
+    const [claim, held] = repliesFor(await redisPipeline([["SET", seenKey, ACTING, "NX", "EX", ACTING_SECONDS], ["GET", seenKey]]), 2) ?? [];
+    // Acted on already: acknowledged and ignored.
+    if (claim === null && held === SEEN) return Response.json({ ok: true });
+    // Only an exact "OK" with this request's hold read back proves the claim
+    // was won (rule 24). Anything else (still being acted on, or a reply not
+    // read in its exact shape) is neither done nor ours: answered with a
+    // failure and nothing acted on, so Resend offers it again; a hold this
+    // request may have taken runs out by itself.
+    if (claim !== "OK" || held !== ACTING) return Response.json({ ok: false }, { status: 409 });
   } catch {
     // Without Redis the sender's idempotency key still keeps a repeat from
     // being delivered twice; carry on.

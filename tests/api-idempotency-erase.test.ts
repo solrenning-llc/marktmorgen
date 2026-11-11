@@ -60,6 +60,11 @@ async function main(): Promise<void> {
   ], [200, 200, 200, 200]);
   const kept = [record(a.sid, "a-ada-access"), record(a.sid, "a-ada-lead"), record(a.sid, "a-bo-access"), record(b.sid, "b-ada-access")];
   is("four answers kept", kept.map(has), [true, true, true, true]);
+  // The person's index is named by the store in clear and the address only as a hash: no store value goes into a
+  // fast hash (CodeQL js/insufficient-password-hash on #3542), and the address is never in the name.
+  const index = (sid: string, email: string) => `nl:api:idem:p:${sid}:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
+  is("Ada's index in store A is named by the store and her hashed address", has(index(a.sid, ADA)), true);
+  is("no index name says an address", redis.keys().filter((k) => k.startsWith("nl:api:idem:p:") && /@/.test(k)), []);
 
   part("Deleting the person from store A deletes their answers there at once, and nothing else");
   const storeA = (await storeForEmail(a.owner))!;

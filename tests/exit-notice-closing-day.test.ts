@@ -33,7 +33,8 @@ is("closing given up (closingOf null): the store as always, the old day past", e
 is("the closing could not be read: the store as always", exitAnswerForStore({ exitNotice: notice }, "unknown", closedAt + DAY), { kind: "none" });
 is("the closing day moved later and not begun: the store as always, though the day chosen has passed", exitAnswerForStore({ exitNotice: notice }, { day: closedAt + 5 * DAY }, closedAt + DAY), { kind: "none" });
 is("the day it really began counts for the 90 days", exitAnswerForStore({ exitNotice: notice }, { day: closedAt + 5 * DAY, today: true }, closedAt + 6 * DAY), { kind: "moved", to: notice.to, host: notice.host, until: closedAt + 5 * DAY + EXIT_NOTICE_DAYS * DAY });
-is("a suspended store: never the notice", exitAnswerForStore({ exitNotice: notice, suspended: true }, today, closedAt + DAY), { kind: "none" });
+is("not suspended (\"\"): the notice", exitAnswerForStore({ exitNotice: notice, suspended: "" }, today, closedAt + DAY).kind, "moved");
+is("a suspended store: never the notice", exitAnswerForStore({ exitNotice: notice, suspended: "2026-11-01" }, today, closedAt + DAY), { kind: "none" });
 
 const page = readFileSync(join(process.cwd(), "app/[handle]/page.tsx"), "utf8");
 is("the page reads the closing only for a store with a notice that is not suspended", /if \(!store\.exitNotice \|\| store\.suspended\) return null;\s*const closing = await closingOf\(store\)/.test(page), true);

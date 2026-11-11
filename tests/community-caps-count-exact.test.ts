@@ -75,3 +75,16 @@ test("readable counts still post and comment", async () => {
   const said = await addComment(id, made.post.id, { parent: "", author: "c".repeat(32), text: "Nice" }, room);
   assert.ok(said.ok);
 });
+
+// The post's number (INCR of the community's sequence) feeds the feed's ZADD score: a reply in another shape read
+// as Number(...) gave NaN, the post was written with "n":null and its room taken, and the ZADD was refused, so it
+// sat outside the feed (Claude 3, cloud D, on #3716). A number below 1 is not one INCR can give either.
+for (const reply of ["3", "many", -1, 0, 2.5, null, "LOST"]) {
+  test(`a post whose number reads ${JSON.stringify(reply)} is refused as unknown and nothing is written`, async () => {
+    const { id, space, room } = await community();
+    odd = { command: "INCR", reply };
+    sent.length = 0;
+    await assert.rejects(createPost(id, post(space), room), UnknownReplyError);
+    assert.deepEqual(sent.filter((c) => c !== "ZCARD" && c !== "INCR"), []);
+  });
+}

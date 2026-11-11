@@ -156,3 +156,24 @@ test("the page is never indexed, and speaks the store's language", async () => {
   assert.ok(html.includes(es.title) && html.includes(es.reasons.not_received) && html.includes(es.send), "Spanish words");
   assert.ok(/lang="es/.test(html), "marked as Spanish");
 });
+
+test("review: the result after sending takes the focus when the page loads, since a status region already on the page is not read out", async () => {
+  const { product, token } = await shop();
+  sessions = [paid("focusme", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  const html = unescape(await render({ token, ref, problem: "filed" }));
+  assert.ok(/<div[^>]*data-problem-notice[^>]*tabindex="-1"|<div[^>]*tabindex="-1"[^>]*data-problem-notice/i.test(html), "a focus target for the result");
+  const quiet = unescape(await render({ token, ref }));
+  assert.ok(!/data-problem-notice/.test(quiet), "nothing to focus when there is no result");
+});
+
+test("review: an error from the server marks its field, as the browser's own check does", async () => {
+  const { product, token } = await shop();
+  sessions = [paid("marksfield", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  const note = unescape(await render({ token, ref, problem: "note" }));
+  assert.ok(/<textarea[^>]*aria-invalid="true"/.test(note), "the note is marked invalid");
+  assert.ok(/<textarea[^>]*aria-describedby="problem-note-hint problem-note-error"/.test(note) && note.includes('id="problem-note-error"'), "and described by its error");
+  const reason = unescape(await render({ token, ref, problem: "reason" }));
+  assert.ok(/<fieldset[^>]*aria-describedby="problem-reason-error"/.test(reason) && reason.includes('id="problem-reason-error"'), "the reasons are described by their error");
+});

@@ -25,10 +25,10 @@ import { NextRequest } from "next/server";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { BATCH_KEY, DUE_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
-import { FINAL_INDEX, HELD_INDEX, releaseRestarted } from "@/lib/closing-holds";
+import { FINAL_INDEX, HELD_INDEX, type Released, releaseRestarted } from "@/lib/closing-holds";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { KEEP_NOTHING_FROM } from "@/lib/plan-closing-rules";
-import { type MoveResult, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { type MoveResult, type Store, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -55,8 +55,11 @@ let onBatchWrite: ((ref: string) => Promise<void>) | null = null;
 let linesUnread = false;
 /** Only the read of the line of stores whose members are held answered in a shape Redis never gives. */
 let heldUnread = false;
+/** The owner key whose record read fails as a transient Redis error does (a timeout, a 5xx), once armed. */
+let recordReadFails: string | null = null;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
+  if (recordReadFails && commands.some((c) => c[0] === "GET" && c[1] === recordReadFails)) throw new Error("Redis request failed with status 503");
   if (onBatchWrite && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) {
     const hook = onBatchWrite;
     onBatchWrite = null;
@@ -198,6 +201,48 @@ async function main(): Promise<void> {
   is("the daily run then lets its members go and tells its buyers, at its address", [releasedM, told], [[{ key: M, state: "released" }], [M]]);
   is("it has left the line of held stores", redis.run(["ZSCORE", HELD_INDEX, M]), null);
   is("control: once its members are let go, it moves", (await moveAccount(M, M2)).ok, true);
+
+  part("Rule 24: restarted, members held, its record not read by the daily run: it stays held, and keeps its address (Codex G on #3672)");
+  // releaseRestarted took any record it could not read (a transient error, a record that does not parse, a record
+  // under that key for another owner) as "gone" and took the store out of the line of held stores without letting its
+  // members go; closingUnderway then saw three empty lines and let the address move, the members paused for good.
+  // Only Redis saying the record is not there (nil) may take it out of the line.
+  for (const [what, spoil, mend] of [
+    ["a transient read error", (key: string) => void (recordReadFails = key), () => void (recordReadFails = null)],
+    ["a record that does not parse", (key: string) => void redis.run(["SET", key, "{not a store"]), (key: string, kept: string) => void redis.run(["SET", key, kept])],
+    ["a record for another owner", (key: string, kept: string) => void redis.run(["SET", key, JSON.stringify({ ...JSON.parse(kept), email: "someone-else@example.com" })]), (key: string, kept: string) => void redis.run(["SET", key, kept])],
+  ] as const) {
+    redis.clear();
+    const T = "transient-t@example.com";
+    const T2 = "transient-t-new@example.com";
+    const t = await endedStore(T, "transientt");
+    const endedT = Date.parse(t.planEndedAt);
+    redis.run(["ZADD", HELD_INDEX, endedT, T]);
+    await setSubscription(T, { active: true });
+    const kept = String(redis.run(["GET", ownerKey(T)]));
+    const toldT: string[] = [];
+    const tell = async (store: Store) => (toldT.push(storeRef(store)), true);
+    spoil(ownerKey(T), kept);
+    let unread: Released[] | string;
+    try {
+      unread = await releaseRestarted(Date.now() + 30_000, tell);
+    } catch (error) {
+      unread = (error as Error).message;
+    } finally {
+      mend(ownerKey(T), kept);
+    }
+    is(`${what}: the daily run does not take the store for gone`, unread, [{ key: T, state: "held" }]);
+    is(`${what}: it stays in the line of held stores, its buyers not told`, [Number(redis.run(["ZSCORE", HELD_INDEX, T])), toldT], [endedT, []]);
+    is(`${what}: the move is then refused`, outcome(await moveAccount(T, T2)), refused);
+    const healthy = await releaseRestarted(Date.now() + 30_000, tell);
+    is(`${what}: the next healthy run lets its members go and tells its buyers`, [healthy, toldT], [[{ key: T, state: "released" }], [T]]);
+    is(`${what}: then it moves`, [(await moveAccount(T, T2)).ok, traces(T, T2, t.sid, t.handle).atNew], [true, true]);
+  }
+
+  part("Control: a held store Redis says is not there (nil) leaves the line as gone");
+  redis.clear();
+  redis.run(["ZADD", HELD_INDEX, Date.now() - 1000, "nobody-n@example.com"]);
+  is("nil record: gone, out of the line", [await releaseRestarted(Date.now() + 30_000, async () => true), redis.run(["ZSCORE", HELD_INDEX, "nobody-n@example.com"])], [[{ key: "nobody-n@example.com", state: "gone" }], null]);
 
   part("Rule 24: the line of held stores that does not read is never \"not held\"");
   redis.clear();

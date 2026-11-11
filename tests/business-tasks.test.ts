@@ -171,6 +171,8 @@ async function main(): Promise<void> {
   is("a polite live region for what happened", /role="status" aria-live="polite"/.test(html), true);
   const route = readFileSync("app/api/store/business-tasks/route.ts", "utf8");
   is("the route needs settings both ways", /jsonAccess\(request, "settings"\)/.test(route) && /guardStoreWrite\(request, "settings"/.test(route), true);
+  // CodeQL js/biased-cryptographic-random on #3562: a byte taken modulo 36 picks some letters more often.
+  is("a new task's id draws each character evenly (randomInt), never a byte modulo the alphabet", /randomInt\(/.test(route) && !/% alphabet\.length/.test(route), true);
   is("an unreadable list is 503 in plain words", /status: 503/.test(route) && /BUSINESS_TASKS_NOT_READ/.test(route), true);
   const page = readFileSync("app/studio/page.tsx", "utf8");
   is("on the studio's home for whoever runs the settings", /\{may\("settings"\) \? <BusinessTasks \/> : null\}/.test(page), true);

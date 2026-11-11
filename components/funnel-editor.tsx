@@ -228,10 +228,10 @@ export function FunnelEditor({
         <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">The path</p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           {/* A badge, not a button: the 44px floor is for things a thumb presses. */}
-          <span className="inline-flex min-h-8 items-center gap-2 rounded-full bg-white px-3 font-semibold text-ink ring-1 ring-line">
+          <span className="inline-flex min-h-8 max-w-full items-center gap-2 rounded-full bg-white px-3 font-semibold text-ink ring-1 ring-line">
             <Icon name="card" size={16} />
-            <span className="max-w-[12rem] truncate">{owner.title}</span>
-            <span className="text-ink-mute">{ownerPrice}</span>
+            <span className="min-w-0 max-w-[12rem] truncate">{owner.title}</span>
+            <span className="shrink-0 text-ink-mute">{ownerPrice}</span>
           </span>
           <span className="text-ink-mute">paid</span>
         </div>

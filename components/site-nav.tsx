@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
-import { moveFocus } from "@/lib/menu-keys";
+import { moveFocus, shouldEnterMenuOnTab } from "@/lib/menu-keys";
 
 type MenuItem = {
   label: string;
@@ -213,9 +213,17 @@ export function SiteNav() {
     const at = items.indexOf(event.target as HTMLElement);
     if (at < 0) return;
     const control = (event.target as HTMLElement).getAttribute("aria-controls");
+    const id = control?.startsWith("menu-") ? control.slice("menu-".length) : "";
+    if (control && shouldEnterMenuOnTab(event.key, openMenu === id)) {
+      const firstLink = document.getElementById(control)?.querySelector<HTMLElement>("a[href]");
+      if (firstLink) {
+        event.preventDefault();
+        firstLink.focus();
+        return;
+      }
+    }
     if (control && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
-      const id = control.slice("menu-".length);
       const end = event.key === "ArrowDown" ? "first" : "last";
       // Already open (by hover or a click): its links are there now, so the focus goes at once.
       const links = [...(document.getElementById(control)?.querySelectorAll<HTMLElement>("a[href]") ?? [])];

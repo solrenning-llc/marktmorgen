@@ -2939,6 +2939,14 @@ export default async function StudioPage({
                 <p className="mt-2 text-ink-soft">
                   {feeWords(COMMISSION_LIVE && store.shared).studioPay} Visits and lesson video have finite monthly thresholds, shown above. Public pages and new video playback pause at their respective thresholds.
                 </p>
+                {/* 601 [KB22] U5: only a store with a plan subscription has invoices to read (lib/plan-invoices.ts). */}
+                {store.subscriptionId && store.stripeCustomerId ? (
+                  <p className="mt-3">
+                    <Link href={studioPath(store, "", "invoices")} prefetch={false} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                      Your plan&apos;s invoices
+                    </Link>
+                  </p>
+                ) : null}
 
                 {!PLAN_BREAKS_ENABLED && (pauseSet || onBreakNow) ? (
                   <form action={`/api/billing/cancel${pin}`} method="post" className="mt-4">

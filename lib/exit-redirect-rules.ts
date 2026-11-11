@@ -208,6 +208,8 @@ export function exitFromReleased(raw: unknown): ExitNotice | null {
   const split = raw.indexOf(EXIT_PART);
   if (split < 0) return null;
   const at = raw.slice(RELEASED.length, split);
-  if (!at || !Number.isFinite(Date.parse(at))) return null;
+  // Only a time as releasedValue writes it: toISOString of itself (no bare number, no day that does not exist).
+  const ms = Date.parse(at);
+  if (!at || !Number.isFinite(ms) || new Date(ms).toISOString() !== at) return null;
   return readExitNotice(raw.slice(split + EXIT_PART.length));
 }

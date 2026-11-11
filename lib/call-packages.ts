@@ -226,14 +226,17 @@ type Session = {
  * its sessions. Returns the package, or null when this checkout is not one.
  */
 export async function recordPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }): Promise<Bought | null> {
-  const { store, product, base } = input;
+  const { store, product } = input;
   const session = ownPackageFields(input.session, ["id", "status", "payment_status", "created", "amount_total", "currency", "metadata", "customer_details"]) as Session;
   const meta = ownPackageFields(session.metadata, ["kind", "days", "sessions"]);
   const emailValue = ownPackageValue(session.customer_details, "email");
   const checkout = typeof session.id === "string" ? session.id : "";
   if (meta.kind !== "package" || !SESSION_ID.test(checkout) || !isSettled(session) || !store.statsId) return null;
   const existing = await readBought(checkout);
-  if (existing) return existing;
+  // The token's key is written last, after the email: a record without it
+  // is a purchase whose writes stopped half way (a lost reply, a failed
+  // write), finished here, on the thanks page's reload or the sweep.
+  if (existing) return (await tokenWritten(existing.token, checkout)) ? existing : finishPackage(store, product, input, session, checkout, existing);
   const email = typeof emailValue === "string" ? normaliseEmail(emailValue) : "";
   if (!email) return null;
   const integer = (value: unknown): number | null => {
@@ -254,9 +257,36 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   const bought: Bought = { s: store.statsId, h: store.handle, p: product.id, e: email, total, at, until, token, holds: [] };
   // Counted in the store's room at what they really add (lib/order-data.ts).
   const [fresh] = await orderWrite(store, [["SET", pkgKey(checkout), JSON.stringify(bought), "NX", ...keep(bought)]]);
-  if (fresh === null) return readBought(checkout);
-  await orderWrite(store, [["SADD", packagesKey(store.statsId), checkout]]);
-  await orderWrite(store, [["SET", tokenKey(token), checkout, ...keep(bought)]]);
+  // Only "OK" is a new record; null is one written before; anything else is unknown.
+  if (fresh === null) {
+    const written = await readBought(checkout);
+    if (!written) throw unconfirmedPackage();
+    return (await tokenWritten(written.token, checkout)) ? written : finishPackage(store, product, input, session, checkout, written);
+  }
+  if (fresh !== "OK") throw unconfirmedPackage();
+  return finishPackage(store, product, input, session, checkout, bought);
+}
+
+/** Is the booking link's token written, for this checkout? Unknown throws. */
+async function tokenWritten(token: string, checkout: string): Promise<boolean> {
+  const value = packageReply(await redisPipeline([["GET", tokenKey(token)]]));
+  if (value === null) return false;
+  if (value !== checkout) throw unconfirmedPackage();
+  return true;
+}
+
+/**
+ * The rest of a package's writes, safe to run again: its place in the
+ * store's list, the email (the same idempotency key, so a retry within the
+ * provider's window is not sent twice) and, last, the token's key, which
+ * marks the purchase finished.
+ */
+async function finishPackage(store: Store, product: Listing, input: { base: string; from: string }, session: Session, checkout: string, bought: Bought): Promise<Bought> {
+  const { base } = input;
+  const { token, total, e: email } = bought;
+  if (typeof session.amount_total !== "number" || !Number.isSafeInteger(session.amount_total) || session.amount_total < 0 ||
+    typeof session.currency !== "string" || !/^[a-zA-Z]{3}$/.test(session.currency)) throw unconfirmedPackage();
+  await orderWrite(store, [["SADD", packagesKey(bought.s), checkout]]);
   const amount = session.amount_total;
   const currency = session.currency;
   // In the store's language (lib/buyer-words/booking.ts), with the amount and
@@ -286,6 +316,7 @@ export async function recordPackage(input: { store: Store; session: Session; pro
     replyTo: store.email,
     idempotencyKey: `nimbus-package:${checkout}`,
   }).catch((error) => console.error("a package confirmation failed", error));
+  await orderWrite(store, [["SET", tokenKey(token), checkout, ...keep(bought)]]);
   return bought;
 }
 

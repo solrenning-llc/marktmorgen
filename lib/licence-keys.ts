@@ -55,6 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -541,7 +542,13 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   if (!storeHasKeys(store) || !isRedisConfigured()) return 0;
   const account = store.stripeAccountId as string;
   const now = Math.floor(Date.now() / 1000);
-  const [anchorRaw] = await redisPipeline([["GET", refundAnchorKey(store)]]);
+  // The walk's place, read exactly (rule 24): only GET's exact null is "no place yet"; another shape stops the run with
+  // the place as it was, never a newer start that would then be written over the real, older place.
+  const anchorRead = repliesFor(await redisPipeline([["GET", refundAnchorKey(store)]]), 1);
+  const anchorRaw = anchorRead?.[0];
+  if (!anchorRead || (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw)))) {
+    throw new UnknownReplyError("the license keys' refund place");
+  }
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
   // A little overlap, so a refund created in the second the last run read is
   // not missed; the set of refunds already read keeps it from counting twice.
@@ -630,15 +637,27 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         continue;
       }
 
+      // The key each sale was given, read exactly (rule 24): another shape leaves this refund unread, so the next run
+      // revokes the key, never a refund taken as read with its key still valid.
+      let unread = false;
       for (const sale of sales) {
         for (const productId of sale.products) {
           const product = await readListing(store, productId);
           if (!product) continue;
-          const [key] = await redisPipeline([["HGET", saleKey(store, product), sale.reference]]);
+          const read = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1);
+          const key = read?.[0];
+          if (!read || (key !== null && typeof key !== "string")) {
+            unread = true;
+            continue;
+          }
           if (typeof key === "string" && key && (await setRevoked(store, product, key, true, "refund"))) revoked += 1;
           // A buyer still waiting for a key from an empty pool is not given one.
           await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]);
         }
+      }
+      if (unread) {
+        unsure = true;
+        continue;
       }
       await redisPipeline([
         ["SADD", refundSeenKey(store), id],

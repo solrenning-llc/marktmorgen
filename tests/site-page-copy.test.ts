@@ -113,6 +113,28 @@ async function main(): Promise<void> {
     redis.pipeline = pipeline;
   }
   is("the list write failing leaves no page and no blocks behind", [listRefused !== 200, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBeforeFull, [...redis.keys()].filter((k) => k.startsWith(`nl:product:page:${statsId}:site-`)).length], [true, true, keysBefore]);
+  // The list written but its answer lost (Codex U on #3531, MEDIUM): the page is listed, so its blocks stay and it is made.
+  const listedBefore = (await storeForEmail(OWNER))!.sitePages.length;
+  let lost = false;
+  redis.pipeline = async (commands) => {
+    const fenced = commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:fenced-set:v1") && commands.some((d) => d.some((part) => String(part).startsWith("nl:store:owner:"))));
+    const reply = await pipeline.call(redis, commands);
+    if (fenced && !lost) {
+      lost = true;
+      throw new Error("synthetic: the answer to an applied list write is lost");
+    }
+    return reply;
+  };
+  let lostStatus = 0;
+  try {
+    lostStatus = (await post({ action: "copy", id: SITE })).status;
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  const afterLost = (await storeForEmail(OWNER))!.sitePages;
+  const made = afterLost[afterLost.length - 1];
+  is("an applied list write whose answer was lost: the copy is made, its blocks kept", [lost, lostStatus, afterLost.length, afterLost.length > listedBefore && (await readPageExact(statsId, siteKey(made.id))).page !== null], [true, 200, listedBefore + 1, true]);
+  await setSitePages(OWNER, afterLost.slice(0, listedBefore));
   const now = (await storeForEmail(OWNER))!.sitePages;
   await setSitePages(OWNER, [...now, ...Array.from({ length: MAX_SITE_PAGES - now.length }, (_, n) => ({ id: `f${String(n).padStart(9, "0")}`, slug: `filler-${n}`, title: `Filler ${n}`, nav: false, target: "", from: -1 }))]);
   const full = await post({ action: "copy", id: SITE });

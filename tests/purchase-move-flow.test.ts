@@ -22,6 +22,7 @@ import { suppressCommand } from "@/lib/suppression";
 import { readPurchaseMove } from "@/lib/purchase-moves";
 import { MAX_MOVES_PER_ADDRESS_DAY } from "@/lib/purchase-move-rules";
 import { PURCHASE_MOVE_DELIVERED } from "@/lib/purchase-move-open";
+import { moveWords } from "@/lib/purchase-move-words";
 import {
   MOVE_ASK_COMMANDS,
   MOVE_ASK_UNITS,
@@ -52,11 +53,18 @@ const ORIGIN = "https://marktmorgen.com";
 
 /** Every email handed to the sender. */
 const mails: { to: string; subject: string; text: string }[] = [];
+/** The next `ackLost` emails are taken by the sender, then its answer is lost on the way back. */
+let ackLost: { skip: number; times: number } = { skip: 0, times: 0 };
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname.includes("resend")) {
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
     mails.push({ to: [body.to ?? ""].flat()[0] ?? "", subject: String(body.subject ?? ""), text: String(body.text ?? "") });
+    if (ackLost.skip > 0) ackLost.skip -= 1;
+    else if (ackLost.times > 0) {
+      ackLost.times -= 1;
+      throw new TypeError("fetch failed: the connection closed after the request was sent");
+    }
     return new Response(JSON.stringify({ id: "00000000-0000-4000-8000-000000000000" }), { status: 200 });
   }
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
@@ -278,6 +286,23 @@ async function main(): Promise<void> {
     odd = null;
     is("only the current address was emailed", mails.slice(m2).map((s) => s.to), ["half.buyer@example.com"]);
     is("the store's figure counts only what it took", (await used()) - q >= 1, true);
+  }
+
+  part("An email whose answer was lost is unknown, never said as not sent (Codex V on #3621)");
+  {
+    const one = await signIn("lost.buyer@example.com");
+    const m = mails.length;
+    ackLost = { skip: 0, times: 1 };
+    const first = await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN });
+    ackLost = { skip: 0, times: 0 };
+    is("the current address's email taken, its answer lost: the page does not say no link was sent", [mails.length - m, first, moveWords.asked[first].title], [1, "unconfirmed", "We could not confirm the email went"]);
+    const two = await signIn("lost2.buyer@example.com");
+    const m2 = mails.length;
+    ackLost = { skip: 1, times: 1 };
+    const second = await askToMovePurchases({ store: moss, token: two, to: "lost2.new@example.com", origin: ORIGIN });
+    ackLost = { skip: 0, times: 0 };
+    is("both taken, the second's answer lost: never \"only one link was sent\"", [mails.length - m2, second, /only one link was sent/i.test(moveWords.asked[second].title + moveWords.asked[second].body)], [2, "half", false]);
+    is("and the current address's email never says the other link already went", mails.slice(m2, m2 + 1).map((x) => /we also sent/i.test(x.text)), [false]);
   }
 
   part("Through the route");

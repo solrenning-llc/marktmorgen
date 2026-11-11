@@ -1,15 +1,20 @@
 /**
  * The most one counted page reading is billed, every command counted as Upstash bills it: one for each pipeline
  * entry, and, for a script, one more for every redis.call it runs (lib/capped-count.ts, the capped count's own note).
- * COMMANDS.readBeacon (tests/traffic-cost.ts) prices every reading of the page-readings line at that worst.
+ * COMMANDS.readBeacon (tests/traffic-cost.ts) prices every reading of the page-readings line at that worst, apart
+ * from the window's ceiling mark, which the line prices once for every ceiling a window's tokens can carry.
  *
  * The worst path, through the real route (app/api/store/read/route.ts), on a sales page with a time:
- *   the token's mark (SET NX, 1); the window's count and its expiry (INCR, EXPIRE, 2); the reading that reaches the
- *   window's ceiling marks it (SET, 1); the capped count of both records in one script (EVAL 1, HLEN 2, HMGET 2 for
- *   two records at their most, HINCRBY 2, so 7); and an answer to that script that does not read, after which both
- *   records are given their expiry again (EXPIRE 2). 1 + 2 + 1 + 7 + 2 = 13.
+ *   the token's mark (SET NX, 1); the window's count and its expiry (INCR, EXPIRE, 2); the capped count of the blocks'
+ *   record at its most (EVAL 1, HLEN 1, HMGET 1, HINCRBY 1, so 4) with the time's range counted beside it (HINCRBY 1:
+ *   its record only ever holds the TIME_RANGES names, so it needs no cap); and an answer to that pipeline that does not
+ *   read, after which both records are given their expiry again (EXPIRE 2). 1 + 2 + 5 + 2 = 10.
+ * The reading that reaches the window's ceiling also marks it (SET, 1): 11. That happens once for each value n of the
+ * window's count (INCR gives each n once), only where n is the token's ceiling, so at most once a window for each
+ * ceiling its tokens can carry (a store's standing, setup or trial, or one of its tiers): priced once a window each
+ * (#2571, the review at 5d245b24, MEDIUM 1), not on every reading.
  * With an answer that reads, a record either is at its most (HMGET) or gets its first count's expiry, never both, so
- * the same reading is billed 11.
+ * the reading that marks the window is billed 9.
  *
  * Synthetic only: the Redis stand-in, no network.
  */
@@ -19,7 +24,10 @@ import { DEPTH_FIELDS_MAX } from "@/lib/page-depth-rules";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { POST as readRoute } from "@/app/api/store/read/route";
-import { COMMANDS } from "./traffic-cost";
+import { COMMANDS, readBeaconCost } from "./traffic-cost";
+import { COMMAND, COST_LINES, readingsAtCeiling } from "./plan-cost-registry";
+import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit, visitsIncluded } from "@/lib/traffic-rules";
+import { TIERS } from "@/lib/plan";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -87,7 +95,11 @@ async function main(): Promise<void> {
   let keys: string[] = [];
   const spy = redis.pipeline;
   (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: Command[]) => {
-    for (const c of list) if (c[0] === "EVAL" && c[1] === CAPPED_COUNT) keys = c.slice(3, 5).map(String);
+    // The blocks' record is the capped count's first; the time's is the record beside it, ending in ":t".
+    for (const c of list) {
+      const named = c[0] === "EVAL" && c[1] === CAPPED_COUNT ? c.slice(3, 3 + Number(c[2])).map(String) : c[0] === "HINCRBY" ? [String(c[1])] : [];
+      for (const k of named) if (/^nl:depth:/.test(k) && !keys.includes(k)) keys.push(k);
+    }
     return spy(list);
   }) as typeof redis.pipeline;
   await sale(slotted(statsId, store));
@@ -108,22 +120,58 @@ async function main(): Promise<void> {
   };
 
   part("the most a reading counted is billed");
-  const lost = slotted(statsId, store);
-  atTheMost(lost);
-  loseCount = true;
-  billed = 0;
-  await sale(lost);
-  loseCount = false;
-  const worst = billed;
-  const normal = slotted(statsId, store);
-  atTheMost(normal);
-  billed = 0;
-  await sale(normal);
-  const answered = billed;
-  console.log(`  billed: worst ${worst}, with the count's answer read ${answered}`);
-  is("the worst path (ceiling reached, both records at their most, the count's answer lost) is billed 13", worst, 13);
-  is("the same reading with the count's answer read is billed 11", answered, 11);
-  is("COMMANDS.readBeacon prices every reading at that worst", worst <= COMMANDS.readBeacon, true);
+  /** A reading at its worst, both records at their most, the window `short` readings short of its ceiling. */
+  const measure = async (short: number, lose: boolean) => {
+    const token = slotted(statsId, store);
+    atTheMost(token);
+    const pass = readTokenPass(token, PRODUCT)!;
+    redis.run(["SET", `nl:traffic:read:${statsId}:${pass.window}`, String(pass.cap - short)]);
+    loseCount = lose;
+    billed = 0;
+    await sale(token);
+    loseCount = false;
+    return billed;
+  };
+  const worst = await measure(1, true);
+  const unmarked = await measure(2, true);
+  const answered = await measure(1, false);
+  console.log(`  billed: worst ${worst} (${unmarked} apart from the ceiling mark), with the count's answer read ${answered}`);
+  is("the worst path apart from the window's ceiling mark (both records at their most, the count's answer lost) is billed 10", unmarked, 10);
+  is("the reading that reaches the ceiling marks the window: one more, 11", worst, unmarked + 1);
+  is("the same reading with the count's answer read is billed 9", answered, 9);
+  is("COMMANDS.readBeacon prices every reading at that worst apart from the mark", unmarked <= COMMANDS.readBeacon, true);
+
+  part("the window's ceiling mark, once a window for each ceiling its tokens can carry");
+  {
+    // Past the ceiling, readings from servers that had not seen it write no mark again: only n == the token's ceiling does.
+    const token = slotted(statsId, store);
+    const pass = readTokenPass(token, PRODUCT)!;
+    const window = `nl:traffic:read:${statsId}:${pass.window}`;
+    redis.run(["SET", window, String(pass.cap - 1)]);
+    redis.run(["DEL", `${window}:over`]);
+    let marks = 0;
+    const counting = redis.pipeline;
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: Command[]) => {
+      for (const c of list) if (c[0] === "SET" && String(c[1]) === `${window}:over`) marks += 1;
+      return counting(list);
+    }) as typeof redis.pipeline;
+    forgetReadingsSeen();
+    await sale(token);
+    for (let i = 0; i < 3; i += 1) {
+      forgetReadingsSeen();
+      await sale(slotted(statsId, store));
+    }
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = counting;
+    is("the reading that reaches the ceiling marks the window once, and none past it does", marks, 1);
+    // Every ceiling a store's tokens can carry: its setup, its trial and each tier's (lib/traffic-rules.ts, requestLimitFor).
+    const ceiling = (visits: number, extra: number) => Math.ceil(publicVisitLimit(REQUESTS_PER_VISIT * visits + extra) / READ_SAMPLE);
+    const ceilings = new Set([ceiling(SETUP_VISITS, SETUP_EXTRA_REQUESTS), ceiling(TRIAL_VISITS, TRIAL_EXTRA_REQUESTS), ...TIERS.map((t) => ceiling(visitsIncluded(t), EXTRA_REQUESTS[t]))]);
+    const line = COST_LINES.find((l) => l.id === "page-readings")!;
+    for (const tier of TIERS) {
+      const readings = readingsAtCeiling(REQUESTS_PER_VISIT * visitsIncluded(tier) + EXTRA_REQUESTS[tier]);
+      is(`${tier}: the line prices every reading at COMMANDS.readBeacon and a mark for each of the ${ceilings.size} ceilings`, line.monthlyUsd(tier) + 1e-12 >= readings * readBeaconCost() + ceilings.size * COMMAND, true);
+    }
+  }
   done();
 }
 

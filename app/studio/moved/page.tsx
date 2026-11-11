@@ -16,6 +16,11 @@ type Params = { searchParams: Promise<{ store?: string | string[] }> };
 
 const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
+/** Whether the address can be given now: the rule's own clock, so the page stays pure. */
+function choosableNow(closing: { endedAt: number; day: number }): boolean {
+  return mayChooseExit({ endedAt: closing.endedAt, closingDay: closing.day, now: Date.now() });
+}
+
 /**
  * Where a closing store's owner gives its new address (97 [D2-OPEN-EXIT]):
  * for EXIT_NOTICE_DAYS after the store closes, anyone who opens its old
@@ -39,7 +44,7 @@ export default async function MovedPage({ searchParams }: Params) {
     return { ok: false as const };
   });
   const closing = closingRead.ok ? closingRead.value : null;
-  const open = closing ? mayChooseExit({ endedAt: closing.endedAt, closingDay: closing.day, now: Date.now() }) : false;
+  const open = closing ? choosableNow(closing) : false;
   const until = closing ? exitNoticeUntil(closing.day) : null;
   return <div className="min-h-screen bg-paper text-ink">
     <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: back, label: "Back to the studio", short: "Studio" }} />

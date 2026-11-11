@@ -381,6 +381,8 @@ export function EmailStudio(props: {
   workflowLimits?: WorkflowLimits;
   /** Who may be made responsible for a deal: the owner and teammates who can see orders. */
   assignees?: string[];
+  /** The store is switched off after notices (lib/takedown.ts): an email sent now waits until it is back on. */
+  switchedOff?: boolean;
   /** Who a new email goes to, when opened from "Worth knowing" (lib/insights.ts). */
   preset?: { who: Who };
   /** The store's colour for a button in its emails (lib/store-look.ts), so the designer's preview is what is sent. */
@@ -487,6 +489,7 @@ export function EmailStudio(props: {
                 currency={props.currency}
                 segments={props.segments ?? []}
                 preset={open ? undefined : props.preset}
+                switchedOff={props.switchedOff ?? false}
               />
             </AiOn>
             <Drafts currency={props.currency} readFailed={props.draftsReadFailed ?? false} drafts={props.drafts} products={props.products} open={open} onOpen={openDraft} />
@@ -711,6 +714,8 @@ function Compose(props: {
   currency: string;
   segments: Segment[];
   preset?: { who: Who };
+  /** The store is switched off after notices: what is sent now waits until it is back on, and the toast says so. */
+  switchedOff: boolean;
 }) {
   const router = useRouter();
   const [refreshingDrafts, startDraftRefresh] = useTransition();
@@ -1359,7 +1364,7 @@ function Compose(props: {
                       draftSavedAt: draftId ? draftSavedAt : undefined,
                       test: testing ? { subjectB, share, hours, by } : undefined,
                     },
-                    later ? "Your email is scheduled." : "Your email is on its way.",
+                    props.switchedOff ? (later ? "Your email is scheduled. It goes out once your store is back on." : "Your email is saved. It goes out once your store is back on.") : later ? "Your email is scheduled." : "Your email is on its way.",
                   );
                   if (ok) {
                     setSubject("");

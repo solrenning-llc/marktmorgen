@@ -254,6 +254,15 @@ const en = {
   discountCovered: (zero: string) => `${zero}. A discount code covered the whole price.`,
   /** "$9 a month, 12 payments in all". */
   paymentsInAll: (every: string, payments: number) => `${every}, ${payments} payments in all`,
+  /**
+   * A membership whose discount came off the first charge: what was paid today and what each charge after it is,
+   * from the checkout (lib/purchase-email.ts). `then` is null when that price does not read; `isOpenEnded` when how long
+   * the discount keeps coming off could not be read, so it is never said to end or to go on.
+   */
+  discountToday: (now: string, then: string | null, hasTax: boolean, isOpenEnded: boolean) =>
+    `${now} today, with your discount. ${then ? `Each charge after this one: ${then}` : "Each charge after this one is at the membership's regular price"}${hasTax ? " plus any sales tax" : ""}${isOpenEnded ? ", less your discount for as long as it lasts" : ""}.`,
+  /** An introductory price with sales tax added on top: what was charged today, then the schedule. */
+  introTaxed: (now: string, schedule: string) => `${now} today. The price: ${schedule}, plus any sales tax.`,
 
   // ---- The confirmation of an offer taken after paying -------------------------------------
   offerSubject: (store: string, title: string) => `Added to your order from ${store}: ${title}`,
@@ -503,6 +512,9 @@ const es: OrdersWords = {
   trialStarted: (zero, days) => `${zero} hoy. Tu prueba gratuita de ${days} ${plural(days, "día", "días")} ha empezado.`,
   discountCovered: (zero) => `${zero}. Un código de descuento cubrió el precio completo.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pago", "pagos")} en total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} hoy, con tu descuento. ${then ? `Cada cobro después de este: ${then}` : "Cada cobro después de este es al precio habitual de la membresía"}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""}${isOpenEnded ? ", menos tu descuento mientras dure" : ""}.`,
+  introTaxed: (now, schedule) => `${now} hoy. El precio: ${schedule}, más los impuestos sobre las ventas que correspondan.`,
 
   offerSubject: (store, title) => `Añadido a tu pedido de ${store}: ${title}`,
   offerIntro: (store) => `Añadiste algo a tu pedido de ${store}. Esta es tu confirmación.`,
@@ -745,6 +757,9 @@ const fr: OrdersWords = {
   trialStarted: (zero, days) => `${zero} aujourd'hui. Votre essai gratuit de ${days}${S}${pluralFr(days, "jour", "jours")} a commencé.`,
   discountCovered: (zero) => `${zero}. Un code de réduction a couvert la totalité du prix.`,
   paymentsInAll: (every, payments) => `${every}, ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} aujourd'hui, avec votre réduction. ${then ? `Chaque paiement suivant${S}: ${then}` : "Chaque paiement suivant est au prix habituel de l'abonnement"}${hasTax ? ", plus les éventuelles taxes de vente" : ""}${isOpenEnded ? ", moins votre réduction tant qu'elle s'applique" : ""}.`,
+  introTaxed: (now, schedule) => `${now} aujourd'hui. Le prix${S}: ${schedule}, plus les éventuelles taxes de vente.`,
 
   offerSubject: (store, title) => `Ajouté à votre commande chez ${store}${S}: ${title}`,
   offerIntro: (store) => `Vous avez ajouté quelque chose à votre commande chez ${store}. Voici votre confirmation.`,
@@ -988,6 +1003,9 @@ const de: OrdersWords = {
   trialStarted: (zero, days) => `${zero} heute. Ihr ${days}-tägiger kostenloser Testzeitraum hat begonnen.`,
   discountCovered: (zero) => `${zero}. Ein Rabattcode hat den gesamten Preis abgedeckt.`,
   paymentsInAll: (every, payments) => `${every}, insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")}`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} heute, mit Ihrem Rabatt. ${then ? `Jede weitere Zahlung: ${then}` : "Jede weitere Zahlung erfolgt zum regulären Preis der Mitgliedschaft"}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""}${isOpenEnded ? ", abzüglich Ihres Rabatts, solange er gilt" : ""}.`,
+  introTaxed: (now, schedule) => `${now} heute. Der Preis: ${schedule}, zuzüglich eventuell anfallender Umsatzsteuer.`,
 
   offerSubject: (store, title) => `Zu Ihrer Bestellung bei ${store} hinzugefügt: ${title}`,
   offerIntro: (store) => `Sie haben Ihrer Bestellung bei ${store} etwas hinzugefügt. Dies ist Ihre Bestätigung.`,
@@ -1235,6 +1253,9 @@ const it: OrdersWords = {
   trialStarted: (zero, days) => `${zero} oggi. La tua prova gratuita di ${days} ${plural(days, "giorno", "giorni")} è iniziata.`,
   discountCovered: (zero) => `${zero}. Un codice sconto ha coperto l'intero prezzo.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} oggi, con il tuo sconto. ${then ? `Ogni addebito successivo: ${then}` : "Ogni addebito successivo è al prezzo normale dell'abbonamento"}${hasTax ? " più le eventuali imposte sulle vendite" : ""}${isOpenEnded ? ", meno il tuo sconto finché vale" : ""}.`,
+  introTaxed: (now, schedule) => `${now} oggi. Il prezzo: ${schedule}, più le eventuali imposte sulle vendite.`,
 
   offerSubject: (store, title) => `Aggiunto al tuo ordine da ${store}: ${title}`,
   offerIntro: (store) => `Hai aggiunto qualcosa al tuo ordine da ${store}. Questa è la tua conferma.`,
@@ -1477,6 +1498,9 @@ const nl: OrdersWords = {
   trialStarted: (zero, days) => `${zero} vandaag. Je gratis proefperiode van ${days} ${plural(days, "dag", "dagen")} is begonnen.`,
   discountCovered: (zero) => `${zero}. Een kortingscode dekte de volledige prijs.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "betaling", "betalingen")} in totaal`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} vandaag, met je korting. ${then ? `Elke volgende betaling: ${then}` : "Elke volgende betaling is tegen de normale prijs van het lidmaatschap"}${hasTax ? " plus eventuele omzetbelasting" : ""}${isOpenEnded ? ", min je korting zolang die geldt" : ""}.`,
+  introTaxed: (now, schedule) => `${now} vandaag. De prijs: ${schedule}, plus eventuele omzetbelasting.`,
 
   offerSubject: (store, title) => `Toegevoegd aan je bestelling bij ${store}: ${title}`,
   offerIntro: (store) => `Je hebt iets toegevoegd aan je bestelling bij ${store}. Dit is je bevestiging.`,
@@ -1720,6 +1744,9 @@ const pt: OrdersWords = {
   trialStarted: (zero, days) => `${zero} hoje. O seu período de teste grátis de ${days} ${plural(days, "dia", "dias")} começou.`,
   discountCovered: (zero) => `${zero}. Um código de desconto cobriu o preço total.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pagamento", "pagamentos")} no total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} hoje, com o seu desconto. ${then ? `Cada pagamento seguinte: ${then}` : "Cada pagamento seguinte é ao preço normal da subscrição"}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""}${isOpenEnded ? ", menos o seu desconto enquanto se aplicar" : ""}.`,
+  introTaxed: (now, schedule) => `${now} hoje. O preço: ${schedule}, mais os impostos sobre vendas aplicáveis.`,
 
   offerSubject: (store, title) => `Adicionado à sua encomenda de ${store}: ${title}`,
   offerIntro: (store) => `Adicionou algo à sua encomenda de ${store}. Esta é a sua confirmação.`,

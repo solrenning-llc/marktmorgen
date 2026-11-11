@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey } from "@/lib/learn";
-import { heldBack, passedQuizzes } from "@/lib/quiz";
+import { heldBack, passedForGate } from "@/lib/quiz";
 import { plain, serveFile } from "@/lib/serve-file";
 import { readCourseListing } from "@/lib/catalog";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
       return plain(403, w.notOpenForYou);
     }
     if (!access.learner.owner && course) {
-      const passed = await passedQuizzes(course.id, emailKey(access.learner.email));
+      const passed = await passedForGate(course.id, emailKey(access.learner.email));
       const blocker = heldBack(course, passed).get(found.lesson.id);
       if (blocker) {
         // Held by a quiz to pass, or by work to hand in (lib/assignment-rules.ts).

@@ -14,7 +14,8 @@
  *     (the proxy sets it, proxy.ts), so it still applies when the buyer comes
  *     back from another page. Remembering what the visitor clicked to get is
  *     the service they asked for, so it does not wait for consent.
- *   - It decides nothing. At the checkout the code is looked up on the
+ *   - It decides nothing. At the checkout (one product's, lib/store-checkout.ts,
+ *     or a cart's, lib/cart-checkout.ts, since 624 [SZ8](23)) the code is looked up on the
  *     creator's own Stripe account; only a live promotion code of theirs is
  *     applied, by Stripe, with Stripe's own rules (its end date, its limits,
  *     a first order only). A code that is unknown, used up or not for this

@@ -32,7 +32,7 @@
  * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, stringList } from "@/lib/redis-reply";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { MAX_KEYS, revokeAllKeys } from "@/lib/api-keys";
@@ -44,6 +44,8 @@ export const FORGET_TRIES = 8;
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
 export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + 4;
+/** Redis commands one monthly owner-report read sends; company cost, not a store allowance. */
+export const STORE_FORGET_MONTH_READ_COMMANDS = 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
 const MONTH_SECONDS = 400 * 86_400;
 
@@ -153,16 +155,28 @@ export type StoreForgetMonth = { month: string; queued: number; done: number; ga
 
 export async function storeForgetMonth(month: string): Promise<StoreForgetMonth | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
-  const [counts, waiting, given] = await redisPipeline([["HGETALL", monthKey(month)], ["HLEN", QUEUE], ["HLEN", KEPT]]);
+  const commands = [["HGETALL", monthKey(month)], ["HLEN", monthKey(month)], ["HLEN", QUEUE], ["HLEN", KEPT]];
+  let raw: unknown;
+  try {
+    raw = await redisPipeline(commands);
+  } catch {
+    return null;
+  }
+  const replies = repliesFor(raw, STORE_FORGET_MONTH_READ_COMMANDS);
+  if (!replies) return null;
+  const [counts, countFields, waiting, given] = replies;
   const flat = stringList(counts);
+  const fields = countOf(countFields);
   const waitingNow = countOf(waiting);
   const keptNow = countOf(given);
-  if (!flat || flat.length % 2 !== 0 || waitingNow === null || keptNow === null) return null;
+  if (!flat || fields === null || flat.length !== fields * 2 || waitingNow === null || keptNow === null) return null;
   const read: Record<string, number> = { queued: 0, done: 0, gaveUp: 0 };
+  const seen = new Set<string>();
   for (let i = 0; i < flat.length; i += 2) {
-    if (!Object.hasOwn(read, flat[i])) continue;
+    if (!Object.hasOwn(read, flat[i]) || seen.has(flat[i])) return null;
     const n = /^(0|[1-9][0-9]*)$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
     if (!Number.isSafeInteger(n)) return null;
+    seen.add(flat[i]);
     read[flat[i]] = n;
   }
   return { month, queued: read.queued, done: read.done, gaveUp: read.gaveUp, waitingNow, keptNow };

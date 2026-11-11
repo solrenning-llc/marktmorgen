@@ -32,7 +32,7 @@
  * as it is; tests/order-data.test.ts holds them to the constants below.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, dataKey, giveData } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 
@@ -199,15 +199,76 @@ function scriptOf(room: string, commands: Command[]): (string | number)[] {
   return ["EVAL", ORDER_WRITE, keys.length, ...keys, ...argv];
 }
 
-/** What one script answered: what it charged, and each command's reply. Throws for a malformed call or a refused command, as redisPipeline does. */
-function readScript(reply: unknown, count: number): { charged: number; replies: unknown[] } {
+/** Whether a reply is a whole count from `low` to `high` (inclusive). */
+const between = (reply: unknown, low: number, high: number): boolean => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= low && reply <= high;
+
+/**
+ * Whether one command's reply is in the exact shape and range that command answers when it ran (Codex G on #2719,
+ * twice): "OK" for SET (or nothing only when it was asked NX or XX); a number for ZINCRBY and ZADD INCR; any whole
+ * number for the counters, whose negatives are real; and for the rest, a whole count no larger than what the command
+ * could have changed: a one-field HSET answers 0 or 1, never -1 or 2. Anything else, a null or a missing reply
+ * included, is not a write that landed.
+ */
+function replyFits(command: Command, reply: unknown): boolean {
+  const name = String(command[0]).toUpperCase();
+  const args = command.slice(2).map((a) => String(a).toUpperCase());
+  const count = typeof reply === "number" && Number.isSafeInteger(reply);
+  const numeric = count || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
+  switch (name) {
+    case "SET":
+      return reply === "OK" || (args.slice(1).some((a) => a === "NX" || a === "XX") && (reply === null || reply === false));
+    case "ZINCRBY":
+      return numeric;
+    case "ZADD": {
+      if (args.includes("INCR")) return numeric || reply === null;
+      const flags = args.filter((a) => ["NX", "XX", "GT", "LT", "CH"].includes(a)).length;
+      return between(reply, 0, Math.floor((args.length - flags) / 2));
+    }
+    case "INCR":
+    case "INCRBY":
+    case "DECR":
+    case "DECRBY":
+    case "HINCRBY":
+      return count;
+    case "HSET":
+      return between(reply, 0, Math.floor(args.length / 2));
+    case "HSETNX":
+    case "EXPIRE":
+    case "PEXPIRE":
+    case "EXPIREAT":
+    case "PEXPIREAT":
+      return between(reply, 0, 1);
+    case "SADD":
+    case "SREM":
+    case "HDEL":
+    case "ZREM":
+      return between(reply, 0, args.length);
+    case "DEL":
+      return between(reply, 0, args.length + 1);
+    case "RPUSH":
+    case "LPUSH":
+      return between(reply, Math.max(1, args.length), Number.MAX_SAFE_INTEGER);
+    default:
+      return false;
+  }
+}
+
+/**
+ * What one script answered: what it charged, and each command's reply. Throws for a malformed call, a refused
+ * command, or a reply not in its exact shape (Codex G on #2719: a charge that is not a whole count, or a command
+ * answered null, is not a write that landed, so no caller may take it as done). An HSETNX answers exactly 0 or 1 (Codex G on #2809;
+ * CX-123 rule 24), which replyFits holds with every other command.
+ */
+function readScript(reply: unknown, commands: Command[]): { charged: number; replies: unknown[] } {
   // What was charged is the script's Lua integer, which Redis and Upstash's REST API answer as a number: a whole
   // number from zero up, and nothing else (CX-123 rule 24). Null, text or a fraction is not "charged 0".
-  const charged = Array.isArray(reply) && reply.length === count + 1 ? countOf(reply[0]) : null;
+  const charged = Array.isArray(reply) && reply.length === commands.length + 1 ? countOf(reply[0]) : null;
   if (charged === null) throw new Error("an order's records could not be written");
   const replies = (reply as unknown[]).slice(1);
   const failed = replies.find((r) => typeof r === "string" && r.startsWith(ORDER_WRITE_ERROR));
   if (failed) throw new Error(`Redis error: ${String(failed).slice(ORDER_WRITE_ERROR.length)}`);
+  // Every place, a hole included (Array.prototype.some skips holes): a reply that is not there is not a write that landed.
+  for (let i = 0; i < commands.length; i++) if (!replyFits(commands[i], replies[i])) throw new UnknownReplyError("an order's write: a command's reply");
   return { charged, replies: replies.map((r) => (r === false ? null : r)) };
 }
 
@@ -227,8 +288,9 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
   const replies: unknown[] = [];
   for (let at = 0; at < commands.length; at += ORDER_WRITE_MAX) {
     const some = commands.slice(at, at + ORDER_WRITE_MAX);
+    // Exactly one reply for the one script sent (Codex G on #2809): an answer of another length is unknown, never its first item.
     const reply = repliesFor(await redisPipeline([scriptOf(room, some)]), 1)?.[0];
-    const read = readScript(reply, some.length);
+    const read = readScript(reply, some);
     charged += read.charged;
     replies.push(...read.replies);
   }

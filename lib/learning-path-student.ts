@@ -68,14 +68,20 @@ export async function pathStudent(store: Store, path: LearningPath, learner: Lea
     const owned = [...has];
     const outlines = await readCoursesExact(owned.map((id) => courseOf.get(id)!), "the courses of a learning path");
     const who = emailKey(learner.email);
-    for (const id of owned) {
-      const courseId = courseOf.get(id)!;
-      const course = outlines.get(courseId);
-      // A course record Redis confirms is not there is not finished; any reply that does not read threw above.
-      if (!course) continue;
-      const [done, passed] = await Promise.all([doneLessons(courseId, learner.email), passedQuizzes(courseId, who)]);
-      if (hasFinished(course, done, passed)) finished.add(id);
-    }
+    // Each course's lessons done and passes, all courses at once; any one that does not read throws.
+    const each = await Promise.all(
+      owned.map(async (id) => {
+        const courseId = courseOf.get(id)!;
+        const course = outlines.get(courseId);
+        // A course record Redis confirms is not there is not finished; any reply that does not read threw above.
+        if (!course) return false;
+        const [done, passed] = await Promise.all([doneLessons(courseId, learner.email), passedQuizzes(courseId, who)]);
+        return hasFinished(course, done, passed);
+      }),
+    );
+    owned.forEach((id, i) => {
+      if (each[i]) finished.add(id);
+    });
   } catch {
     return { has, finished: null, titles };
   }

@@ -50,13 +50,23 @@ export const REPORT_TITLES: Record<ReportKind, string> = {
 };
 
 /**
+ * The two statements a request to remove an intimate image is confirmed with on the form (components/report-form.tsx),
+ * in the sender's words. The person shown may send it, or someone authorized to act for them, so both statements cover
+ * either (Revisor 2 on #3695); statedBySender says the same in the third person.
+ */
+export const INTIMATE_IMAGE_STATEMENTS = {
+  goodFaith: "I believe in good faith that this intimate image, of me or of the person I represent, was published without the consent of the person shown.",
+  accurate: "The information in this request is accurate, and I am the person shown or authorized to act for them.",
+} as const;
+
+/**
  * What the sender confirmed on the form (components/report-form.tsx), in the third person, for the inbox and the
  * notice page; null for a child-safety report, which asks for no signature or statement at all (Revisor 2 on #3587:
  * nobody stated "under penalty of perjury" there, and an intimate-image request's statements are its own).
  */
 export function statedBySender(kind: ReportKind): string | null {
   if (kind === "copyright") return "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.";
-  if (kind === "intimate_image") return "They stated, in good faith, that this intimate image of them was published without their consent, and that the request is accurate and that they are the person shown or authorized to act for them.";
+  if (kind === "intimate_image") return "They stated, in good faith, that this intimate image, of them or of the person they represent, was published without the consent of the person shown, and that the request is accurate and that they are the person shown or authorized to act for them.";
   if (kind === "other") return "They stated, in good faith, that the content described is illegal for the reasons they gave, and that the notice is accurate and complete to the best of their knowledge.";
   return null;
 }
@@ -67,15 +77,37 @@ export function statedBySender(kind: ReportKind): string | null {
  */
 export const privateReport = (kind: ReportKind): boolean => kind === "child_safety" || kind === "intimate_image";
 
-/** A Marktmorgen address as its page alone, https://marktmorgen.com/<path>, without a query or a fragment; null for any other address. */
-export function canonicalAddress(url: string): string | null {
+/** The product part of a store address (/@handle/p/<segment>), decoded, or "" when it has none. */
+export function productSegmentIn(url: string): string {
   try {
-    const at = new URL(url);
-    const host = at.hostname.toLowerCase();
-    return host === "marktmorgen.com" || host === "www.marktmorgen.com" ? `https://marktmorgen.com${at.pathname}` : null;
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    const at = parts.indexOf("p");
+    return at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * A Marktmorgen address rebuilt from what it names, never from what was typed into it: the product's own address,
+ * https://marktmorgen.com/@handle/p/<id>, when `productOf` finds one of the store's products in it; else the store's,
+ * https://marktmorgen.com/@handle; else the site's. Words in the path (the title words before a product's id, anything
+ * after it), the query and the fragment are dropped, since whoever typed the address may have put anything there
+ * (Revisor 2 on #3587 and #3695). Null for an address outside Marktmorgen.
+ */
+export function canonicalAddress(url: string, productOf?: (segment: string) => string | null): string | null {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
   } catch {
     return null;
   }
+  if (host !== "marktmorgen.com" && host !== "www.marktmorgen.com") return null;
+  const handle = handleIn(url);
+  if (!handle) return "https://marktmorgen.com";
+  const segment = productSegmentIn(url);
+  const id = segment && productOf ? productOf(segment) : null;
+  return id ? `https://marktmorgen.com/@${handle}/p/${encodeURIComponent(id)}` : `https://marktmorgen.com/@${handle}`;
 }
 
 export type ReportProblem = "kind" | "url" | "work" | "name" | "email" | "contact" | "signature" | "statements";

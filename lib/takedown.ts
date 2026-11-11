@@ -29,7 +29,7 @@ import { del } from "@/lib/blob";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
-import { REPORT_TITLES, type ReportInput, type ReportKind, canonicalAddress, handleIn, privateReport, statedBySender } from "@/lib/takedown-rules";
+import { REPORT_TITLES, type ReportInput, type ReportKind, canonicalAddress, handleIn, privateReport, productSegmentIn, statedBySender } from "@/lib/takedown-rules";
 import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
@@ -109,18 +109,17 @@ const WORK_HEADINGS: Record<ReportKind, string> = {
 
 /**
  * The address a notice names, as the creator is told it: a report about a child or an intimate image gives only the
- * page, never a query or a fragment the reporter added to it (Revisor 2 on #3587).
+ * product's own address (or the store's), never words the reporter typed into its path, query or fragment
+ * (Revisor 2 on #3587 and #3695).
  */
-function addressForCreator(report: Report): string {
-  return privateReport(report.kind) ? (canonicalAddress(report.url) ?? "the address in the report") : report.url;
+function addressForCreator(report: Report, store: Store): string {
+  return privateReport(report.kind) ? (canonicalAddress(report.url, (segment) => productIdFromAddress(store, segment)) ?? "the address in the report") : report.url;
 }
 
 /** The product a notice's address points at (/@handle/p/<product>), when it points at one of this store's. */
 export async function reportedProduct(report: Report, store: Store): Promise<Listing | null> {
   try {
-    const parts = new URL(report.url).pathname.split("/").filter(Boolean);
-    const at = parts.indexOf("p");
-    const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
+    const segment = productSegmentIn(report.url);
     const id = segment ? productIdFromAddress(store, segment) : null;
     return id ? await readListing(store, id) : null;
   } catch {
@@ -354,7 +353,7 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
       to: store.email,
       replyTo: SUPPORT_EMAIL,
       subject: `Your store @${store.handle} is back on`,
-      text: [`Your store's pages and sales are switched back on, after the notice about ${addressForCreator(report)}.`, "", `Our policy: ${origin}/copyright.`].join("\n"),
+      text: [`Your store's pages and sales are switched back on, after the notice about ${addressForCreator(report, store)}.`, "", `Our policy: ${origin}/copyright.`].join("\n"),
       idempotencyKey: `takedown-${report.id}-restore-${Date.now()}`,
     }).catch(() => false);
     return "The store's pages and sales are back on.";
@@ -514,7 +513,7 @@ async function complete(report: Report, store: Store, action: Exclude<TakedownAc
     replyTo: SUPPORT_EMAIL,
     subject: `Content taken down from your store @${store.handle}`,
     text: [
-      `We received ${CREATOR_NOTICE[report.kind].received} about ${addressForCreator(report)} and took this down:`,
+      `We received ${CREATOR_NOTICE[report.kind].received} about ${addressForCreator(report, store)} and took this down:`,
       "",
       what,
       "",

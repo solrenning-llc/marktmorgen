@@ -24,9 +24,9 @@ import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { type Store, setProductHidden, storeRef } from "@/lib/store";
+import { type Store, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
-import { canonicalAddress, handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { canonicalAddress, handleIn, productSegmentIn, type ReportKind } from "@/lib/takedown-rules";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
 export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
@@ -92,22 +92,17 @@ const NOTICE_NOT_KEPT = "The notice itself could not be confirmed as kept, and t
 
 /** The product id a store address names (/@handle/p/<product>), or null. */
 function productIdIn(url: string, store: Store): string | null {
-  try {
-    const parts = new URL(url).pathname.split("/").filter(Boolean);
-    const at = parts.indexOf("p");
-    const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
-    return segment ? productIdFromAddress(store, segment) : null;
-  } catch {
-    return null;
-  }
+  const segment = productSegmentIn(url);
+  return segment ? productIdFromAddress(store, segment) : null;
 }
 
 /**
- * Only a Marktmorgen address is shown in the urgent email, as its page alone: a query or a fragment the reporter added
- * may carry words, so it is never quoted (Revisor 2 on #3587). Anything else is named, not quoted.
+ * Only a Marktmorgen address is shown in the urgent email, rebuilt from the product or store it names: words the
+ * reporter typed into its path, query or fragment are never quoted (Revisor 2 on #3587 and #3695). Without the store,
+ * the store's address alone. Anything else is named, not quoted.
  */
-function where(url: string): string {
-  return canonicalAddress(url) ?? "an address outside Marktmorgen (see the notice email)";
+function where(url: string, store: Store | null): string {
+  return canonicalAddress(url, store ? (segment) => productIdFromAddress(store, segment) : undefined) ?? "an address outside Marktmorgen (see the notice email)";
 }
 
 function deadline(ms: number): string {
@@ -127,16 +122,20 @@ export async function alertOwner(
   outcome: HoldOutcome,
   now = Date.now(),
   noticeKept = true,
+  known?: Store | null,
 ): Promise<boolean> {
   if (report.kind !== "child_safety" && report.kind !== "intimate_image") return false;
   const handle = handleIn(report.url);
+  // The store names the product by its id alone; one that was not read here is read now, and one that cannot be read
+  // leaves the store's address alone, so the urgent email still goes.
+  const store = known !== undefined ? known : handle ? await storeForHandle(handle).catch(() => null) : null;
   const child = report.kind === "child_safety";
   const subject = `${child ? "URGENT: child safety report" : "URGENT: request to remove an intimate image"}${handle ? ` about @${handle}` : ""}`;
   const lines = child
     ? [
         "A report of child sexual exploitation was sent from /report.",
         "",
-        `Where: ${where(report.url)}`,
+        `Where: ${where(report.url, store)}`,
         WHAT_HAPPENED[outcome],
         "",
         "Do not open, download, forward or describe the reported content, and do not ask any AI agent to look at it.",
@@ -147,7 +146,7 @@ export async function alertOwner(
     : [
         "A request to remove an intimate image shared without consent was sent from /report (TAKE IT DOWN Act).",
         "",
-        `Where: ${where(report.url)}`,
+        `Where: ${where(report.url, store)}`,
         `Remove it within ${TAKE_IT_DOWN_HOURS} hours: by ${deadline(now + TAKE_IT_DOWN_HOURS * 3_600_000)}, and make reasonable efforts to remove any identical copies on the site.`,
         "",
         "Do not forward or describe the image, and do not ask any AI agent to look at it.",

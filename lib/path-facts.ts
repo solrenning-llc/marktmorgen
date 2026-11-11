@@ -36,7 +36,7 @@ import { KIND } from "@/lib/catalog";
 import {saleHandles,type Store} from "@/lib/store";
 import {pathGrowthMoney,type PathGrowthMoney} from "@/lib/path-growth-money";
 import { readLifeRecord, readPaidSales, readStoreRefunds, readsSales } from "@/lib/stats";
-import { paypalPaymentId, paypalRefundWatch, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
+import { paypalPaymentId, paypalRefundWatch, readPayPalRefundsDetail } from "@/lib/paypal-sales";
 import { countLinks } from "@/lib/short-links";
 import { sellsInTestMode } from "@/lib/stripe-connect";
 import { type PathFacts, SOCIAL_SOURCES } from "@/lib/path-rules";
@@ -127,9 +127,9 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
   // Neither Stripe nor PayPal connected: nothing can have been sold. A store that sells through PayPal alone is read.
   if (!readsSales(store)) return { at: now, test: false, real: 0, cents: 0, currency: store.currency };
   const watched = paypalRefundWatch(store);
-  let sales;let partial=false;
+  let sales;let partial=false;let gaps: string[] = [];
   try {
-    ({ sales,partial } = await readPaidSales(store, 0, PATH_SALE_PAGES));
+    ({ sales,partial,gaps } = await readPaidSales(store, 0, PATH_SALE_PAGES));
   } catch (error) {
     console.error("reading a store's sales for its path failed", store.handle, error);
     return null;
@@ -143,7 +143,9 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
   const liveSales = orders.filter((s) => soldOf(s, watched).live === true);
   const liveStripe = liveSales.filter((s) => s.row.object !== "paypal.order");
   const livePayPal = liveSales.filter((s) => s.row.object === "paypal.order");
-  let refunds: { cents: number; currency: string; paymentIntent: string }[] | null = [];
+  // PayPal's sales not all read while PayPal is watched: the money leaves them out, so it is not known, and no level
+  // moves on it (cloud I's MEDIUM 2 on #3443; rule 24). Never Stripe's money alone said as the store's.
+  let refunds: { cents: number; currency: string; paymentIntent: string }[] | null = gaps.includes("paypal") && watched ? null : [];
   const since = (list: typeof sales) => Math.floor(Math.min(...list.map((s) => s.created)) / 1000);
   if (liveStripe.length && store.stripeAccountId) {
     try {
@@ -158,12 +160,17 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
   if (refunds !== null && livePayPal.length) {
     try {
       // PayPal's refunds in full, as its refund watch wrote them down; any it could not all read leaves the money unknown.
-      const read = await readPayPalRefundsWithCoverage(store.statsId, since(livePayPal));
+      const read = await readPayPalRefundsDetail(store.statsId, since(livePayPal));
       // A PayPal refund names its own payment, so one whose sale the path did not count gives nothing back of a sale it
       // did: it is left out, never taken off a Stripe sale that names no payment (Claude 6's L2 on #3443).
       const counted = new Set(livePayPal.map((s) => s.paymentIntent));
       const own = read.rows.map((r) => ({ cents: r.cents, currency: r.currency, paymentIntent: paypalPaymentId(r.capture) })).filter((r) => counted.has(r.paymentIntent));
-      refunds = read.partial ? null : [...refunds, ...own];
+      // A refund whose sale's record has expired (400 days after the sale) is of a sale the path does not count: it
+      // leaves the money known. One of a sale it counts, or a reading cut short, leaves it unknown (cloud I's
+      // MEDIUM 1 on #3443).
+      const countedOrders = new Set(livePayPal.map((s) => String(s.row.id ?? "").replace(/^paypal:/, "")));
+      const unknown = read.cut || read.gone.some((order) => countedOrders.has(order));
+      refunds = unknown ? null : [...refunds, ...own];
     } catch (error) {
       console.error("reading a store's PayPal refunds for its path failed", store.handle, error);
       refunds = null;

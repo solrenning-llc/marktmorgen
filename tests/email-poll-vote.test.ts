@@ -95,8 +95,14 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   put({ poll: undefined });
   is("a broadcast with no poll", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "invalid");
   for (const status of ["scheduled", "waiting", "cancelled", "failed"]) {
-    put({ status });
-    is(`a broadcast ${status}: its poll was never sent`, await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "invalid");
+    put({ status, sent: 0 });
+    is(`a broadcast ${status} with nothing sent: its poll reached nobody`, await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "invalid");
+  }
+  // Daily portions, a month's emails spent, a subject test's wait: it waits with part of the list sent (review, ALTO).
+  for (const status of ["waiting", "cancelled", "failed"]) {
+    put({ status, sent: 4 });
+    is(`a broadcast ${status} after 4 went out: a reader among them is kept`, await votePoll({ broadcastId: ID, link: link(3), option: 0, now }, deps()), "recorded");
+    is(`…one it has not reached yet is not`, await votePoll({ broadcastId: ID, link: link(4), option: 0, now }, deps()), "invalid");
   }
   put({ status: "sending" });
   is("while it is going out: kept", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "recorded");

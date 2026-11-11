@@ -36,6 +36,7 @@
  *     gone, and its row goes with it.
  */
 import { redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -104,12 +105,16 @@ export async function rememberDevice(id: string, who: string, raw: unknown, room
   const subscription = readSubscription(raw);
   if (!subscription) return "invalid";
   const key = pushKey(id, who);
-  const [size, held] = await redisPipeline([
+  // Read exactly (rule 24): a count or a kept device in another shape is "unavailable", never NaN that passed the cap.
+  const read = repliesFor(await redisPipeline([
     ["HLEN", key],
     ["HGET", key, subscription.endpoint],
-  ]);
+  ]), 2);
+  const size = countOf(read?.[0]);
+  const held = read?.[1];
+  if (!read || size === null || (held !== null && typeof held !== "string")) return "unavailable";
   const already = typeof held === "string" && held.length > 0;
-  if (!already && Number(size) >= MAX_MEMBER_DEVICES) return "full";
+  if (!already && size >= MAX_MEMBER_DEVICES) return "full";
   const device: MemberDevice = { ...subscription, kid: keys.kid, addedAt: Date.now() };
   const value = JSON.stringify(device);
   // A new device takes room in the store's data room first; one known already is rewritten in its place.

@@ -25,6 +25,7 @@ const device = (n: number) => {
   return { endpoint: `https://fcm.googleapis.com/fcm/send/caps-${n}`, keys: { p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") } };
 };
 
+let members = 0;
 for (const [label, alter] of [
   ["no reply", () => []],
   ["the count as text", (r: unknown[]) => ["99", r[1]]],
@@ -32,7 +33,8 @@ for (const [label, alter] of [
   ["the kept device as a number", (r: unknown[]) => [r[0], 7]],
 ] as [string, (r: unknown[]) => unknown[]][]) {
   test(`rememberDevice: read as ${label} at the cap: never a device past it`, async () => {
-    const member = `member${label.replace(/\W/g, "").slice(0, 6)}`;
+    members += 1;
+    const member = `member${String(members).padStart(6, "0")}`;
     for (let n = 1; n <= MAX_MEMBER_DEVICES; n += 1) assert.equal(await rememberDevice("cmcaps", member, device(n), ROOM), "added");
     redis.pipeline = (async (b: Batch) => {
       const real = await pipeline(b);

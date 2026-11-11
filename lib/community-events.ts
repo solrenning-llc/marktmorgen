@@ -714,15 +714,25 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
   if (Number(already) === 1) return "already";
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
-  const [added, length] = await redisPipeline([
+  // Read exactly (rule 24): HSETNX answers 0 or 1 and HLEN a count. A place whose answer is unknown throws (its room
+  // stays counted, more never less); a new place whose count is unknown is given back, never kept past the cap.
+  const read = repliesFor(await redisPipeline([
     ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
     ["HLEN", rsvpKey(id, event.id)],
-  ]);
-  if (Number(added) !== 1) {
+  ]), 2);
+  const added = countOf(read?.[0]);
+  const length = countOf(read?.[1]);
+  if (added !== 0 && added !== 1) throw new UnknownReplyError("an event's place");
+  if (added === 0) {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";
   }
-  if (event.cap > 0 && Number(length) > event.cap) {
+  if (length === null) {
+    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    throw new UnknownReplyError("the places taken at an event");
+  }
+  if (event.cap > 0 && length > event.cap) {
     await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";

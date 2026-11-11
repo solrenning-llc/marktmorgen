@@ -743,11 +743,12 @@ export async function savedBlocksTool(store: Store, hold: Hold) {
 }
 
 /**
- * The products a bundle can be made of (631 [AA1] (a)): the same rule, order
- * and reasons as the creator's own picker in /studio/bundles
+ * The products a bundle can be made of (631 [AA1] (a)): the same rule and
+ * reasons as the creator's own picker in /studio/bundles
  * (lib/bundle-choices.ts), so an agent preparing a bundle never offers what
- * the store would refuse, a page at a time. Prices in the smallest unit of
- * the store's currency.
+ * the store would refuse, a page at a time. Unlike the picker, which lists
+ * what can go in first, each page keeps the creator's order
+ * (bundleChoicesPage). Prices in the smallest unit of the store's currency.
  */
 export async function bundleChoicesTool(store: Store, args: Record<string, unknown>, hold: Hold): Promise<Response | { found: true; value: unknown } | { found: false; error: string }> {
   // Set aside at its most before anything is read: a whole stretch of cached names and a whole page of listings (Codex G2

@@ -6,13 +6,14 @@
  * In an email whose creator chose to be able to change its links later, each
  * link of the creator's own words is written as our address,
  *
- *   /r/<email id>/<n>?u=<the address as written>&s=<signature>
+ *   /r/<store id>/<email id>/<n>?u=<the address as written>&s=<signature>
  *
  * the same for every reader: nothing in it names who got it, and nothing is
  * kept about who used it (opens are never counted; which links somebody uses
  * is seen only with their own consent, lib/mail-clicks.ts, and not here).
- * The signature is of the email, the link's number and the address as
- * written, so the redirect can never be used to send someone to an address
+ * The store's fixed id lets a click find the store (lib/store.ts storeForId)
+ * to count it, without reading the email. The signature is of the store, the
+ * email, the link's number and the address as written, so the redirect can never be used to send someone to an address
  * the creator did not write (no open redirect). With no change kept it goes
  * where it was written to go, so a link never dies because a record expired;
  * only a change is kept, with a short history: each address and when it was
@@ -30,6 +31,8 @@ export const MAX_SENT_LINK_URL = 2048;
 export const MAX_LINK_CHANGES = 10;
 
 const EMAIL_ID = /^[0-9a-f]{24}$/;
+/** A store's fixed id, as lib/store.ts STORE_ID_PATTERN (not imported, so these rules stay pure). */
+const STORE_ID = /^[0-9a-f]{32}$/;
 const SIGNATURE = /^[0-9a-f]{32}$/;
 const NUMBER = /^(0|[1-9]\d?)$/;
 
@@ -59,28 +62,29 @@ export function readSentLinkTarget(raw: unknown): { ok: true; to: string } | { o
   return { ok: true, to: text };
 }
 
-const signed = (emailId: string, n: number, original: string) => `${emailId}|${n}|${original}`;
+const signed = (storeId: string, emailId: string, n: number, original: string) => `${storeId}|${emailId}|${n}|${original}`;
 
 /** The path a link is written as in the email: null without a signature, or past the most links of one email. */
-export function sentLinkPath(emailId: string, n: number, original: string, sign: (text: string) => string | null): string | null {
-  if (!EMAIL_ID.test(emailId) || !Number.isInteger(n) || n < 0 || n >= MAX_SENT_LINKS) return null;
-  const s = sign(signed(emailId, n, original));
+export function sentLinkPath(storeId: string, emailId: string, n: number, original: string, sign: (text: string) => string | null): string | null {
+  if (!STORE_ID.test(storeId) || !EMAIL_ID.test(emailId) || !Number.isInteger(n) || n < 0 || n >= MAX_SENT_LINKS) return null;
+  const s = sign(signed(storeId, emailId, n, original));
   if (!s || !SIGNATURE.test(s)) return null;
-  return `/r/${emailId}/${n}?u=${encodeURIComponent(original)}&s=${s}`;
+  return `/r/${storeId}/${emailId}/${n}?u=${encodeURIComponent(original)}&s=${s}`;
 }
 
-/** A link as it comes back: its number and the address it was written to, only when the signature is the email's own. */
+/** A link as it comes back: its number and the address it was written to, only when the signature is that store's and email's own. */
 export function readSentLinkPath(
+  storeId: string,
   emailId: string,
   n: string,
   query: { u?: unknown; s?: unknown },
   verify: (text: string, signature: string) => boolean,
 ): { ok: true; n: number; original: string } | { ok: false } {
-  if (!EMAIL_ID.test(emailId) || !NUMBER.test(n)) return { ok: false };
+  if (!STORE_ID.test(storeId) || !EMAIL_ID.test(emailId) || !NUMBER.test(n)) return { ok: false };
   const number = Number(n);
   if (number >= MAX_SENT_LINKS) return { ok: false };
   if (typeof query.u !== "string" || typeof query.s !== "string" || !SIGNATURE.test(query.s)) return { ok: false };
-  if (!verify(signed(emailId, number, query.u), query.s)) return { ok: false };
+  if (!verify(signed(storeId, emailId, number, query.u), query.s)) return { ok: false };
   return { ok: true, n: number, original: query.u };
 }
 

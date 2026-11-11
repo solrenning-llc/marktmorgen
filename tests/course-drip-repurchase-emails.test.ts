@@ -3,7 +3,8 @@
 // that stands, a purchase refunded in full and not bought again is not emailed, and a start that cannot be read
 // sends nothing that run and is tried again on the next, never early and never skipped. The page re-dates the
 // student's row when it reads a different start, so the studio and the next run follow it. The job's reads are its
-// own, bounded per store and run, never taken from the store's public requests (what its buyers' pages use).
+// own, bounded per store and allowance window (lib/drip-start.ts), never taken from the store's public requests (what
+// its buyers' pages use).
 import type { Course } from "@/lib/course";
 import { emailKey, paidCourses, recordEnrollment, registerDrip, sendDripEmails, studentDates, touchStudent } from "@/lib/learn";
 import type { DataStore } from "@/lib/store-data";
@@ -155,9 +156,10 @@ async function main() {
   is("and none of them is asked for", counted.asked, []);
   is("a run with nothing to announce reads nothing at Stripe", (stripe.asked = [], await run(first + 45 * DAY), stripe.asked), []);
 
-  part("One run reads at most the job's own figure for a store, and the rest go on the next run");
+  part("One window reads at most the store's monthly figure for these reads, and the rest go in its next window");
   await fresh([session("cs_test_once", first, false)]);
-  // A one-course store's run reads as many students as the store may email in its month (its "email" figure).
+  // A one-course store's window reads as many students as the store may email in it (its "email" figure); this store
+  // pays nothing, so its window is the calendar month: January 31, then February 1.
   const reads = allowanceFor(store, "email", first + 30 * DAY);
   const students = Array.from({ length: reads + 1 }, (_, n) => `student-${n}@example.test`);
   for (const who of students) {
@@ -168,7 +170,7 @@ async function main() {
   const day30 = await run(first + 30 * DAY);
   is(`the first run announces Month 1 to ${reads} students`, day30.length, reads);
   is("and reads no more students at Stripe", stripe.asked.filter((p) => p.startsWith("/checkout/sessions?")).length, reads);
-  is("the next run announces it to the last one", await run(first + 31 * DAY), [subject("Month 1")]);
+  is("the next run, in the store's next window, announces it to the last one", await run(first + 31 * DAY), [subject("Month 1")]);
   is("and then to nobody again", await run(first + 32 * DAY), []);
 
   part("One purchase, written down on its thanks page (unchanged)");

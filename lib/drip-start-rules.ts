@@ -1,8 +1,9 @@
 /**
  * What a drip run spends before it reads one student's start (lib/learn.ts, sendDripEmails): the read the course
- * page makes (courseLedger), taken from the job's own figure for the store in that run (dripRunUnits), never from
- * the store's public requests, which its buyers' pages use. The daily job's own cost, bounded by its schedule and
- * this figure (tests/plan-cost-registry.ts, NOT_A_COST.DRIP_RUN_UNITS_PER_STORE_EMAIL); each read's worst is held
+ * page makes (courseLedger), taken from the store's own monthly figure for these reads (dripMonthUnits, counted in
+ * the store's allowance window by lib/drip-start.ts) before it is made, never from the store's public requests,
+ * which its buyers' pages use. Priced in every plan's worst month (tests/plan-cost-registry.ts, COST_LINES
+ * "drip-start-read"), with the share of the stores that pay nothing in nonPayingWorst; each read's worst is held
  * under its units at every size in tests/plan-cost-registry.test.ts (dripStartRead).
  */
 import type { PlanFields } from "@/lib/plan-standing";
@@ -27,16 +28,18 @@ export function dripStartUnits(courses: number): number {
 }
 
 /**
- * Units of the job's own figure each of the store's monthly "email" figure gives one run: a one-course store's
- * read (dripStartUnits(1)), so one run reads at most as many students of such a store as it may email in its month.
+ * Units of the store's monthly start-read figure each of its monthly "email" figure gives: a one-course store's
+ * read (dripStartUnits(1)), so in one window the job reads at most as many students of such a store as the store
+ * may email in it, the figure its drip emails are themselves taken from (lib/email.ts, meter "email").
  */
-export const DRIP_RUN_UNITS_PER_STORE_EMAIL = 5;
+export const DRIP_MONTH_UNITS_PER_STORE_EMAIL = 5;
 
 /**
- * What one run of the daily job may spend on one store's start reads, in units: its "email" figure where it stands
- * (lib/store-allowance-rules.ts; none once its plan has ended, when no drip email can go). Past it, the student's
- * mark is let go and the next run reads them.
+ * What the daily job may spend on one store's start reads in the store's allowance window (lib/allowance-window.ts:
+ * its billing period, its trial, or the calendar month), in units: its "email" figure where it stands
+ * (lib/store-allowance-rules.ts; none once its plan has ended, when no drip email can go). It does not come back
+ * with each run: past it, the student's mark is let go, and the store's next window reads them.
  */
-export function dripRunUnits(store: PlanFields & { tier?: Tier }, nowSeconds: number): number {
-  return allowanceFor(store, "email", nowSeconds) * DRIP_RUN_UNITS_PER_STORE_EMAIL;
+export function dripMonthUnits(store: PlanFields & { tier?: Tier }, nowSeconds: number): number {
+  return allowanceFor(store, "email", nowSeconds) * DRIP_MONTH_UNITS_PER_STORE_EMAIL;
 }

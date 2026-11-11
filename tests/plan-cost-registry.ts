@@ -114,7 +114,7 @@ import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
-import { DRIP_START_COMMANDS } from "@/lib/drip-start-rules";
+import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, DRIP_START_COMMANDS } from "@/lib/drip-start-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
@@ -455,9 +455,9 @@ export function publicListingsRead(listings: number): number {
  * counting (DRIP_START_COMMANDS, and for each course its listing read twice, whether the student was taken off it,
  * and its entries in what is kept and written down, half a kilobyte each), every listing at the most a public
  * listing weighs, and two calls to the creator's Stripe account, each with a whole page worked through. Taken
- * as dripStartUnits(courses) units of the daily job's own figure for the store before it is made, never from the
- * store's public requests (lib/drip-start-rules.ts, NOT_A_COST.DRIP_RUN_UNITS_PER_STORE_EMAIL), each unit at most
- * a later page's cost, held in tests/plan-cost-registry.test.ts.
+ * as dripStartUnits(courses) units of the store's monthly figure for these reads before it is made, never from the
+ * store's public requests (lib/drip-start.ts, lib/drip-start-rules.ts; COST_LINES "drip-start-read"), each unit at
+ * most a later page's cost, held in tests/plan-cost-registry.test.ts.
  */
 export function dripStartRead(courses: number): number {
   return request("wait", DRIP_START_COMMANDS + 3 * courses + TAKE_COMMANDS, 16_384 + courses * 512) + publicListingsRead(2 * courses) + 2 * stripePage();
@@ -1001,6 +1001,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
     ],
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+  },
+  {
+    id: "drip-start-read",
+    feature: "The daily course job's read of a drip student's start before a \"now open\" email: the course page's own read (courseLedger), so the email goes on the day the page opens the module (PR #3369; Claude 2's MEDIUM on it, 10 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].email * DRIP_MONTH_UNITS_PER_STORE_EMAIL * laterPageCost(),
+    sources: [
+      { file: "lib/drip-start-rules.ts", names: ["DRIP_MONTH_UNITS_PER_STORE_EMAIL", "dripMonthUnits", "DRIP_START_UNITS", "DRIP_START_COURSES_PER_UNIT", "DRIP_START_COMMANDS"] },
+      { file: "lib/drip-start.ts", names: ["takeDripStartUnits", "poolPlace"] },
+      { file: "lib/learn.ts", names: ["takeDripStartUnits(store, units"] },
+    ],
+    basis: "The store's monthly figure for these reads (its email figure times DRIP_MONTH_UNITS_PER_STORE_EMAIL units), counted in its allowance window before each read and refused past it, each unit at most a later page's cost (dripStartRead, held in tests/plan-cost-registry.test.ts); it does not come back with each daily run.",
   },
   {
     id: "ai",
@@ -1581,6 +1592,9 @@ export function nonPayingWorst(): number {
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
     + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
+    // The drip job's reads of its students' starts, at Store's figure, which is more than a trial's (lib/drip-start.ts:
+    // a store that pays nothing reads only with one of the month's places).
+    + creator("drip-start-read")
     // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).
     + ((TRIAL_TASK_ROOM_BYTES + TRIAL_COMMUNITY_PICTURES * PICTURE_BYTES) / GB) * STORAGE_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30)
     // Its data room, and what it keeps outside it at Store's figures, which are more than a trial's, for the trial and to its closing day
@@ -1685,7 +1699,6 @@ export const NOT_A_COST: Record<string, string> = {
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones on a store with reminders or a list, never the open ones. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
-  DRIP_RUN_UNITS_PER_STORE_EMAIL: "Units of the daily course job's own figure a store's monthly email figure gives one run, for reading its drip students' starts before a \"now open\" email (lib/drip-start-rules.ts, dripRunUnits; lib/learn.ts, sendDripEmails; PR #3369, 9 November 2026): the course page's own read (courseLedger), taken before it is made as dripStartUnits(courses) units (DRIP_START_UNITS, DRIP_START_COURSES_PER_UNIT, DRIP_START_COMMANDS), never from the store's public requests, which its buyers' pages use. A scheduled job, bounded by its schedule (one run a day, one at a time, vercel.json /api/cron/courses and its lock) and by this figure (none once a plan has ended): a company fixed cost like STRIPE_LOOKUPS_PER_STORE, not a plan's allowance. Each unit costs at least the read it stands for at every size (dripStartRead, tests/plan-cost-registry.test.ts), so a store's month is at most DAY_WINDOWS runs of its figure at a later page's cost (about $0.76 Store, $3.04 Studio, $8.10 Scale), printed by that test. Priced as a plan line it would put the Store year given back past the owner's US$ 65 ceiling (tests/plan-margin.test.ts), so its dollar figure is not yet a line of lib/llc-fixed-costs.ts: not certified, never zero.",
   STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
   DEMO_SESSIONS_PER_DAY: "Sessions the whole site may open in a day, the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_COMMANDS_PER_DAY: "Database commands the demo's accepted openings and actions together may send in a day (refusals are priced apart, DEMO_REFUSALS_PER_DAY), reserved at the worst before a session opens: the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",

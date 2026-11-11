@@ -56,7 +56,8 @@ import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } f
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
-import { dripRunUnits, dripStartUnits } from "@/lib/drip-start-rules";
+import { dripStartUnits } from "@/lib/drip-start-rules";
+import { takeDripStartUnits } from "@/lib/drip-start";
 
 /** The secret a course checkout leaves in the buyer's browser. */
 export const BUYER_COOKIE = "nl_buyer";
@@ -1001,8 +1002,6 @@ export async function sendDripEmails(
   if (!isRedisConfigured()) return counts;
   const [raw] = await redisPipeline([["SMEMBERS", DRIP_SET]]);
   const members = Array.isArray(raw) ? (raw as string[]) : [];
-  // What each store's start reads took in this run, in units of its own figure (dripRunUnits).
-  const spent = new Map<string, number>();
   for (const member of members) {
     const [courseId, handle, productId] = member.split("|");
     const store = await load(handle);
@@ -1046,13 +1045,13 @@ export async function sendDripEmails(
         if (claimed !== "ours") continue;
         if (!read) {
           read = true;
-          // Taken from the job's own figure for this store and run (lib/drip-start-rules.ts), never from its public
-          // requests: past it, nothing is read and nothing is sent this run, and the next run reads this student.
+          // Taken from the store's monthly figure for these reads (lib/drip-start.ts, dripMonthUnits in its allowance
+          // window), before the read, never from its public requests: past it, or uncounted, nothing is read and
+          // nothing is sent, and the mark is let go for a later run.
           const units = dripStartUnits(idsOfKind(store, "course").length);
-          const used = spent.get(store.handle) ?? 0;
-          const counted = used + units <= dripRunUnits(store, nowSeconds);
-          if (counted) spent.set(store.handle, used + units);
-          stands = counted
+          const taken = await takeDripStartUnits(store, units, nowSeconds * 1000);
+          if (taken === "unknown") console.error("a drip run's start read could not be counted; not read this run", course.id);
+          stands = taken === "taken"
             ? await courseLedger(store, student.email, true).then(
                 (ledger) => ledger.paid.get(product.id),
                 (error: unknown) => (console.error("reading a student's course start for its drip emails failed", error), null),

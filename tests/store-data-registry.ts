@@ -930,6 +930,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
   "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped((8 * 2 + 13) * KEY, "Eight figures, the window and the one before; and the studio requests held for scheduled emails in each month ahead, at most 13 (a year ahead, lib/store-allowance.ts holdAllowanceAt).")] },
+  // Claude 2's MEDIUM on #3369: the drip job's start reads, taken from the store's monthly figure in its window.
+  "nl:dripstart:@lib/drip-start.ts": { what: "The drip job's start reads taken in the window", parts: [capped(2 * KEY, "One count, the window and the one before (each kept to its window's end and a day, lib/drip-start.ts keepSecondsFor).")] },
   "nl:blog:body:@lib/store-blog.ts": { what: "Blog posts' words", room: ["lib/store-blog.ts"] },
   "nl:blog:meta:@lib/store-blog.ts": { what: "Blog posts", room: ["lib/store-blog.ts"] },
   "nl:blog:pub:@lib/store-blog.ts": { what: "Published blog posts", room: ["lib/store-blog.ts"] },

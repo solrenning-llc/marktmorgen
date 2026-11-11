@@ -49,7 +49,7 @@ import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_P
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
-import { DRIP_RUN_UNITS_PER_STORE_EMAIL, dripStartUnits } from "@/lib/drip-start-rules";
+import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits } from "@/lib/drip-start-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
@@ -63,7 +63,7 @@ import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
 import { LIBRARY_WAITING_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
-import { DAY_WINDOWS, affiliateLoadRead, affiliatePageRead, dripStartRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
+import { affiliateLoadRead, affiliatePageRead, dripStartRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
 import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -268,22 +268,24 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
-  // A drip run's read of a student's start takes units of the daily job's own figure sized by the store's courses
+  // A drip run's read of a student's start takes units of the store's monthly figure sized by the store's courses
   // (lib/drip-start-rules.ts), never the store's public requests: at every size, from a store with no course to one
   // whose every product is a course, the units, each at a later page's cost, cost more than the read.
   for (const courses of [0, 1, 5, 6, 7, 12, 13, 100, 1_000, MAX_PRODUCTS]) {
     assert.ok(dripStartUnits(courses) * laterPageCost() >= dripStartRead(courses), `drip start, ${courses} courses: ${dripStartUnits(courses)} x ${laterPageCost()} < ${dripStartRead(courses)}`);
   }
-  // One read of a one-course store for each email of the store's month, in one run (dripRunUnits).
-  assert.equal(DRIP_RUN_UNITS_PER_STORE_EMAIL, dripStartUnits(1));
-  assert.ok(read("lib/learn.ts").includes("used + units <= dripRunUnits(store, nowSeconds)"), "the drip job takes its reads from its own figure");
+  // One read of a one-course store for each email of the store's window, across all its runs (dripMonthUnits).
+  assert.equal(DRIP_MONTH_UNITS_PER_STORE_EMAIL, dripStartUnits(1));
+  assert.ok(read("lib/learn.ts").includes("await takeDripStartUnits(store, units, nowSeconds * 1000)"), "the drip job takes its reads from the store's monthly figure, before each read");
+  assert.ok(read("lib/drip-start.ts").includes("dripMonthUnits(store, now / 1000)") && read("lib/drip-start.ts").includes("allowanceWindow(store, now)"), "counted in the store's allowance window");
   assert.ok(!read("lib/learn.ts").includes("takeBuyerRead"), "the drip job takes nothing from the store's public requests");
   assert.ok(read("vercel.json").includes("\"path\": \"/api/cron/courses\",\n      \"schedule\": \"0 11 * * *\""), "the course job runs once a day");
-  console.log(`a drip run's read of one student's start: $${dripStartRead(1).toFixed(6)} at most for a store of one course, taken as ${dripStartUnits(1)} units of the job's own figure at $${laterPageCost().toFixed(6)}`);
+  console.log(`a drip run's read of one student's start: $${dripStartRead(1).toFixed(6)} at most for a store of one course, taken as ${dripStartUnits(1)} units of the store's monthly figure at $${laterPageCost().toFixed(6)}`);
   for (const tier of ["creator", "pro", "scale"] as const) {
-    const month = DAY_WINDOWS * STORE_ALLOWANCES[tier].email * DRIP_RUN_UNITS_PER_STORE_EMAIL * laterPageCost();
+    const month = STORE_ALLOWANCES[tier].email * DRIP_MONTH_UNITS_PER_STORE_EMAIL * laterPageCost();
     assert.ok(month > 0, `the drip job's month for ${tier} is never zero`);
-    console.log(`the drip job's start reads for one ${tier} store: $${month.toFixed(2)} a month at most (a company cost, NOT_A_COST.DRIP_RUN_UNITS_PER_STORE_EMAIL)`);
+    assert.equal(COST_LINES.find((line) => line.id === "drip-start-read")?.monthlyUsd(tier), month, `the drip job's start reads are a ${tier} plan line`);
+    console.log(`the drip job's start reads for one ${tier} store: $${month.toFixed(4)} a month at most (plan line drip-start-read)`);
   }
   // An affiliate's own page and the store's map take requests sized by what they read (lib/public-read-rules.ts, 4 November 2026):
   // at every size, from an empty program or store to the largest, the requests cost more than the reads.

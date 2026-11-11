@@ -18,7 +18,7 @@
  * the store waits a walk. Synthetic stores and photos, in-memory Redis.
  */
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
-import { claimHandle, ensureStatsId, ensureStoreId, setPhotoId, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, createStore, ensureStatsId, ensureStoreId, moveAccount, setPhotoId, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { deletePhoto, writePhoto } from "@/lib/store-photo";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -33,6 +33,8 @@ let rereadUnknown = false;
 // The entry's rewrite with the new marks answered with what HSET never says (armed by the window).
 let rewriteUnconfirmed = false;
 let ownerOf = "";
+// The addresses' hold and the id's release before the record goes answered [] with nothing done (Claude 6's P8 on #3643).
+let releaseLost = false;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (inWindow && commands.some((c) => c[0] === "HSET" && c[1] === BATCH_KEY)) {
@@ -42,6 +44,10 @@ redis.pipeline = async (commands: (string | number)[][]) => {
   } else if (rewriteUnconfirmed && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) {
     rewriteUnconfirmed = false;
     return [null];
+  }
+  if (releaseLost && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:"))) {
+    releaseLost = false;
+    return [];
   }
   if (rereadUnknown && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === ownerOf) {
     rereadUnknown = false;
@@ -189,7 +195,7 @@ async function main(): Promise<void> {
       // As if this store's record went and a new store (another sid) was made at the same key, with its own photo.
       other = await writePhoto(PNG, "image/png");
       const record = JSON.parse(String(redis.run(["GET", ownerOf])));
-      redis.run(["SET", ownerOf, JSON.stringify({ ...record, sid: otherSid, photoId: other })]);
+      redis.run(["SET", ownerOf, JSON.stringify({ ...record, sid: otherSid, photoId: other, planEndedAt: "" })]);
     };
     const T = Date.now();
     await markDue(email, T - 1000);
@@ -199,6 +205,57 @@ async function main(): Promise<void> {
     is("its photo is kept", photoKeys().some((key) => key.includes(other)), true);
     const entry = redis.run(["HGET", BATCH_KEY, `${store.sid}`]) ?? Object.values(Object.fromEntries((redis.run(["HGETALL", BATCH_KEY]) as string[] | null ?? []).reduce<[string, string][]>((acc, v, i, all) => (i % 2 ? acc : [...acc, [v, all[i + 1]]]), []))).join("");
     is("and the closing store's entry never names it", String(entry ?? "").includes(other) || String(entry ?? "").includes(otherSid), false);
+    // The closing store's ref is out of line (its record is gone, the other is not its own), so no later walk reads the
+    // other store under it and erases it (Claude 6's new LOW on #3643, probe D1).
+    is("the closing store's ref is out of line", redis.run(["ZSCORE", DUE_KEY, email]), null);
+    const next = await erase(T + WALK_GAP_MS + 1);
+    is("a second walk prepares nothing", next.stores, 0);
+    is("the other store's record is still not deleted after it", (await storeForEmail(email))?.sid ?? null, otherSid);
+    is("nor its photo", photoKeys().some((key) => key.includes(other)), true);
+  }
+
+  part("Rule 24 (Claude 6's P8 on #3643): an addresses' hold and id release that Redis did not confirm keep the record, and the store waits a walk");
+  redis.clear();
+  {
+    const email = "lost@example.com";
+    const store = await makeStore(email, "lostrelease");
+    releaseLost = true;
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    await erase(T);
+    const score = redis.run(["ZSCORE", DUE_KEY, email]);
+    is("the hold was answered with nothing", releaseLost, false);
+    is("the record is not deleted while its release is unknown", (await storeForEmail(email))?.sid ?? null, store.sid);
+    is("the store is still in line, moved back a walk", score !== null && Number(score) >= T + WALK_GAP_MS, true);
+    const next = await erase(T + WALK_GAP_MS + 1);
+    is("the next walk prepares it and finishes", [next.stores, next.finished], [1, 1]);
+    is("the record is gone then", await storeForEmail(email), null);
+    const held = redis.run(["GET", "nl:store:handle:lostrelease"]);
+    const ttl = Number(redis.run(["PTTL", "nl:store:handle:lostrelease"]));
+    is("its address is held back with an expiry, never left naming its owner", [String(held).startsWith("released:"), ttl > 0], [true, true]);
+  }
+
+  part("Claude 6's P4 on #3643: an account moved while an extra store's erasure runs keeps the erased store's id at neither address");
+  redis.clear();
+  {
+    const from = "movefrom@example.com";
+    const to = "moveto@example.com";
+    await makeStore(from, "movehome");
+    const made = await createStore(from, "moveextra", "Extra", "");
+    if (!made.ok) throw new Error("setup: the extra store");
+    const ref = storeRef(made.store);
+    let moved = false;
+    inWindow = async () => {
+      moved = (await moveAccount(from, to)).ok;
+    };
+    const T = Date.now();
+    await markDue(ref, T - 1000);
+    const report = await erase(T);
+    const lists = redis.keys().filter((key) => key.startsWith("nl:account:stores:"));
+    is("the account moved in the window", moved, true);
+    is("the extra store is prepared and its walk finishes", [report.stores, report.finished], [1, 1]);
+    is("its record is gone", await storeForEmail(ref), null);
+    is("its id is in no account's list of stores", lists.filter((key) => (redis.run(["SMEMBERS", key]) as string[]).includes(made.store.sid)), []);
   }
 
   done();

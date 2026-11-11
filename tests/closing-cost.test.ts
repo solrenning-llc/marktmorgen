@@ -115,7 +115,10 @@ test("a closing's last steps pay for the record's going under the store's lock, 
   assert.match(close, /\["GET", owner\]/);
   assert.match(close, /deleteIfHeldOnly\(held,/);
   assert.match(close, /releaseLock\(held\)/);
+  // Its id leaves the account's list at both addresses read: one more SREM than the first read's (Claude 6 on #3643).
+  assert.match(close, /\["SREM", account, store\.sid\]/);
   const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
-  // The lock's tries, the GET, the entry's HSET again, the fenced delete's script (EVAL, GET, DEL) and the release's (EVAL, GET, DEL).
-  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 3 + 3, `last steps priced at ${PREPARE_COMMANDS} commands`);
+  // The lock's tries, the GET, the entry's HSET again, the second account's SREM, the fenced delete's script (EVAL, GET,
+  // DEL) and the release's (EVAL, GET, DEL).
+  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3, `last steps priced at ${PREPARE_COMMANDS} commands`);
 });

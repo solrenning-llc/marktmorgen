@@ -1891,6 +1891,32 @@ export function ProductEditor({
     else if (was !== null && !adding) requestAnimationFrame(() => document.getElementById(`product-edit-${was}`)?.focus());
   }, [editingId, adding]);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  // A card's Remove gives way to its question (WCAG 2.4.3, 4.1.3), as the options editor's does: the focus goes onto
+  // the question, read at once; back to that product's Remove on Keep it; once the product is removed, to Add
+  // something to sell when it can take it, else to the next product's Edit.
+  const productRemoveAsked = useRef<HTMLParagraphElement>(null);
+  const productRemovedLast = useRef<string | null>(null);
+  const productRemoveKept = useRef(false);
+  useEffect(() => {
+    const was = productRemovedLast.current;
+    productRemovedLast.current = removingId;
+    if (was === removingId) return;
+    if (removingId !== null) {
+      productRemoveAsked.current?.focus();
+      return;
+    }
+    if (was === null) return;
+    if (productRemoveKept.current) {
+      productRemoveKept.current = false;
+      requestAnimationFrame(() => document.getElementById(`product-remove-${was}`)?.focus());
+      return;
+    }
+    requestAnimationFrame(() => {
+      const add = document.getElementById("product-add") as HTMLButtonElement | null;
+      if (add && !add.disabled) add.focus();
+      else document.querySelector<HTMLElement>(`[id^="product-edit-"]:not(#product-edit-${was})`)?.focus();
+    });
+  }, [removingId]);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   // The form as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
   const [opened, setOpened] = useState<Draft>(EMPTY);
@@ -2166,6 +2192,7 @@ export function ProductEditor({
         </div>
       ) : (
         <button
+          id="product-add"
           type="button"
           disabled={full || !editorReady}
           onClick={startAdding}
@@ -2468,6 +2495,7 @@ export function ProductEditor({
                   ) : null}
                   {removingId === product.id ? null : (
                     <button
+                      id={`product-remove-${product.id}`}
                       type="button"
                       onClick={() => {
                         setRemovingId(product.id);
@@ -2482,7 +2510,7 @@ export function ProductEditor({
 
                 {removingId === product.id ? (
                   <div className="mt-3 rounded-2xl border-2 border-pink-brand/30 bg-white p-4">
-                    <p className="text-sm text-ink-soft">
+                    <p ref={productRemoveAsked} tabIndex={-1} className="text-sm text-ink-soft">
                       Remove{" "}
                       <strong className="text-ink">{product.title}</strong> from
                       your store. Its files, picture, description, page, reviews
@@ -2507,7 +2535,10 @@ export function ProductEditor({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRemovingId(null)}
+                        onClick={() => {
+                          productRemoveKept.current = true;
+                          setRemovingId(null);
+                        }}
                         className="btn btn-ghost btn-sm"
                       >
                         Keep it

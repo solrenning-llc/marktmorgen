@@ -1476,7 +1476,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
       { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "decideCalendars", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD", "fencedBy", "CLOSING_FENCED", "FENCED_KEYS", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft"] },
-      { file: "lib/team.ts", names: ["memberStoresExact", "MEMBER_STORES_READ"] },
+      { file: "lib/team.ts", names: ["memberStoresExact", "MEMBER_STORES_READ", "dropTeam", "KeysNotSwept"] },
       { file: "lib/store.ts", names: ["storeForIdExact", "MAX_STORES_PER_ACCOUNT"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_STORE_EXPORTS"] },
       { file: "app/api/store/export/route.ts", names: ["ENDED_STORE_EXPORTS", "storeExport(store)"] },
@@ -1525,9 +1525,11 @@ export const KEY_NAME_BYTES = 128;
  * (lib/team.ts, memberStoresExact: the index, then each store's team, id and record, MEMBER_STORES_READ of them at the
  * most, past which it throws), and the stores they own (lib/closed-store-data.ts, ownsAnother: their first store, their
  * account's set and each of its stores, MAX_STORES_PER_ACCOUNT at the most, past which it throws). Until then five were
- * counted, though memberStores read up to fifty stores at three commands each.
+ * counted, though memberStores read up to fifty stores at three commands each. And, past MEMBER_STORES_READ, the one
+ * SREM that takes the ids read that are no store they serve out of the index, so the next read goes past them (Codex G
+ * on #3660, decideCalendarRuns).
  */
-export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 2 + MAX_STORES_PER_ACCOUNT;
+export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 1 + 2 + MAX_STORES_PER_ACCOUNT;
 /**
  * Where a walk's preparation stopped in its hosts' claims (lib/closed-store-data.ts, clearClaims; Claude 4 on #3660):
  * read once (GET), and written when the claims are more than a walk reads (the lock made to last, then the SET in one
@@ -1543,10 +1545,32 @@ export const CLAIMS_LEFT_COMMANDS = 3;
  * the same read of the stores it serves (SERVED_COMMANDS) and one DEL of its calendar, and the entry written once
  * (HSET). Fewer commands than one preparation (PREPARE_COMMANDS, tests/closed-store.test.ts), and, as a walk that
  * stopped in its hosts' claims, each run it takes again is one more preparation at that count; it lasts only while a
- * reply does not read (rule 24), never as a plan's allowance.
+ * reply does not read (rule 24), never as a plan's allowance, or while a longer index than is read is read past, at
+ * most decideCalendarRuns reads, each stale id's share carried by STALE_ID_COMMANDS (Codex G on #3660).
  */
 export const DECIDE_CALENDARS_COMMANDS = (1 + MAX_TEAM) * (SERVED_COMMANDS + 1) + 1;
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS + 3) + CLAIMS_LEFT_COMMANDS + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * CLAIM_PAGES + 10);
+/**
+ * How many reads of a host's team index (a preparation, then each run's decideCalendars) decide whether they serve
+ * another store at the most, for an index of `ids` ids, every reply reading (Codex G's MEDIUM on #3660): an index of
+ * MEMBER_STORES_READ or fewer is decided by its first read; a longer one is read past, each read taking out of it the
+ * ids it read that are no store the person serves (lib/team.ts, memberStoresExact), every one but the closing store
+ * itself, so at least MEMBER_STORES_READ - 1 a read, until what is left is read in one go. Its lifetime bound: a host
+ * is never read again once decided, and a reply that does not read (rule 24) is the only thing that takes it longer.
+ */
+export function decideCalendarRuns(ids: number): number {
+  return ids <= MEMBER_STORES_READ ? 1 : 1 + Math.ceil((ids - MEMBER_STORES_READ) / (MEMBER_STORES_READ - 1));
+}
+/**
+ * What one stale id in a host's team index costs to read past, at the most (decideCalendarRuns): its share of a read
+ * of the stores they serve, with its DEL and the entry's HSET, over the MEMBER_STORES_READ - 1 ids each read takes
+ * out. An id is stale in a person's index only where the SREM taking it out did not land: at a store's closing
+ * (lib/team.ts, dropTeam: its team at the end, MAX_TEAM at the most, one in each teammate's index), carried here by
+ * the closing store for each of its team places (PREPARE_COMMANDS); or at a removal from a live store's team, which is
+ * then said not finished and repeated (KeysNotSwept), a reply that did not read (rule 24), never a plan's allowance.
+ * Each id is read past once: it is out of the index after.
+ */
+export const STALE_ID_COMMANDS = Math.ceil((SERVED_COMMANDS + 2) / (MEMBER_STORES_READ - 1));
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS + 3) + CLAIMS_LEFT_COMMANDS + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * CLAIM_PAGES + 10) + MAX_TEAM * STALE_ID_COMMANDS;
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {

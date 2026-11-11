@@ -28,11 +28,8 @@ import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
-import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS } from "./plan-cost-registry";
-import { MEMBER_STORES_READ } from "@/lib/team";
-
-/** How many reads of a host's index decide them at the most, for an index of `ids` (tests/plan-cost-registry.ts has it once its cost is counted). */
-const decideCalendarRuns = (ids: number) => (ids <= MEMBER_STORES_READ ? 1 : 1 + Math.ceil((ids - MEMBER_STORES_READ) / (MEMBER_STORES_READ - 1)));
+import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS, STALE_ID_COMMANDS, decideCalendarRuns } from "./plan-cost-registry";
+import { MAX_TEAM, MEMBER_STORES_READ } from "@/lib/team";
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
 
@@ -116,7 +113,7 @@ async function main(): Promise<void> {
     fresh();
     const at = await closing(OWNER, "closing", extraStore);
     // The extra store's record answers in a shape that is not a store.
-    const extra = `#${redis.run(["SMEMBERS", accountStoresKey(OWNER)])[0]}`;
+    const extra = `#${(redis.run(["SMEMBERS", accountStoresKey(OWNER)]) as string[])[0]}`;
     replaced = [{ word: "GET", key: ownerKey(extra), reply: 42 }];
     const stores = await walkAt(at);
     replaced = [];
@@ -172,7 +169,9 @@ async function main(): Promise<void> {
     for (let i = 0; i < 51; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`junk${i}`).digest("hex")]);
     const at = await closing(X, "hostxa");
     const stores = await walkAt(at);
-    is("fifty-one ids, none a live store: erased, the calendar kept (more than are read is unknown, never \"none\")", [stores, line(X, at), calendarKept(X)], [1, "out", [1, 1, 1, 1]]);
+    // More than are read is unknown, never "none", at the preparation; the ids read are read past, and the rest is
+    // decided by a later read (below, Codex G on #3660).
+    is("fifty-one ids, none a live store: erased at the first walk", [stores, line(X, at), (await storeForEmail(X)) === null], [1, "out", true]);
   }
   {
     const { at } = await teammate(49);
@@ -410,6 +409,8 @@ async function main(): Promise<void> {
   }
   part("Its cost: each run that reads an undecided host again is counted (tests/plan-cost-registry.ts)");
   is("a run deciding the hosts again costs less than one preparation", DECIDE_CALENDARS_COMMANDS > 0 && DECIDE_CALENDARS_COMMANDS < PREPARE_COMMANDS, true);
+  is("each read past drops at least all it read but the closing store, so an index is decided in a bounded number of reads", [decideCalendarRuns(MEMBER_STORES_READ), decideCalendarRuns(MEMBER_STORES_READ + 1), decideCalendarRuns(2 * MEMBER_STORES_READ - 1), decideCalendarRuns(2 * MEMBER_STORES_READ)], [1, 2, 2, 3]);
+  is("a stale id's share of a read past is counted, for each of a closing store's team places", STALE_ID_COMMANDS > 0 && STALE_ID_COMMANDS * (MEMBER_STORES_READ - 1) >= DECIDE_CALENDARS_COMMANDS / (1 + MAX_TEAM), true);
 
   done();
 }

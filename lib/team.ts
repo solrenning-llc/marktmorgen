@@ -368,8 +368,13 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
  * read exactly without them, an id with no store (nil) or a store they own is not one. Its one caller takes a throw as
  * not known (servesAnother): the person's calendar is kept and decided again on a later run, and the closing store is
  * still erased, never held back a walk for it (Claude 4 on #3660). With `other`, it stops at the first store other
- * than `other` the person serves, so a longer index than is read is unknown only when none was found. Reads only: the index's stale
- * entries are dropped by memberStores, never here. memberStores itself is unchanged for its other callers (the
+ * than `other` the person serves, so a longer index than is read is unknown only when none was found. An id in the
+ * index that is not a store's id makes the whole index unknown (Codex G on #3660): it is not proof of no other store.
+ * A longer index than is read is read past, run after run (Codex G on #3660): the ids read exactly that are no store
+ * the person serves (a team without them or none, no store by that id, a store they own) leave the index, so the
+ * next read reaches the ones after them, until the whole index is read in one go and decides. Only those: an id not
+ * read, or read as a store they are on (`other` among them), stays. Each read past drops all it read but `other`
+ * (tests/plan-cost-registry.ts, decideCalendarRuns). memberStores itself is unchanged for its other callers (the
  * studio's store list, sign-in and alerts), where one unreadable store must not stop the person's own studio.
  */
 export async function memberStoresExact(email: string, other?: string): Promise<{ store: Store; role: TeamRole }[]> {
@@ -377,22 +382,33 @@ export async function memberStoresExact(email: string, other?: string): Promise<
   const address = normaliseEmail(email);
   const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
   if (!ids) throw new UnknownReplyError("a teammate's stores");
-  const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
+  // An id that is not a store's is not proof of no membership: the whole index is unknown (Codex G on #3660).
+  if (ids.some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("a teammate's stores (an id that is not a store's)");
   const over = () => new UnknownReplyError(`a teammate's stores, more than the ${MEMBER_STORES_READ} read,`);
   // Without `other`, the whole list or nothing. With it, the first store found other than `other` is enough, so an
   // index longer than is read is unknown only when none was found among those read (Claude 4 on #3660).
-  if (other === undefined && list.length > MEMBER_STORES_READ) throw over();
+  if (other === undefined && ids.length > MEMBER_STORES_READ) throw over();
   const found: { store: Store; role: TeamRole }[] = [];
-  for (const sid of list.slice(0, MEMBER_STORES_READ)) {
+  // The ids read exactly that are no store this person serves: out of the index when it is longer than is read.
+  const stale: string[] = [];
+  for (const sid of ids.slice(0, MEMBER_STORES_READ)) {
     const member = (await readTeam(sid)).members.find((m) => m.email === address);
-    if (!member) continue;
+    if (!member) {
+      stale.push(sid);
+      continue;
+    }
     const store = await storeForIdExact(sid);
     if (store && normaliseEmail(store.email) !== address) {
       found.push({ store, role: member.role });
       if (other !== undefined && store.sid !== other) return found;
-    }
+    } else stale.push(sid);
   }
-  if (list.length > MEMBER_STORES_READ) throw over();
+  if (ids.length > MEMBER_STORES_READ) {
+    // Read past (Codex G on #3660): the next read starts after these. One not confirmed is only no progress this
+    // time; the answer is unknown either way, so this read never decides.
+    if (stale.length) await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
+    throw over();
+  }
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
 }
 

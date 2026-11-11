@@ -767,6 +767,18 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/stock-alerts.ts ADD_PLACE: a new place only while absent and under the ceiling; else only over the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-add:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, list, field, expected, next, max, seconds] = args;
+          const current = this.run(["HGET", list, field]);
+          if (expected === "") {
+            if (current !== null) return 0;
+            if ((this.run(["HLEN", list]) as number) >= Number(max)) return -1;
+          } else if (current !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
+        }
         // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
         if (key.startsWith("-- marktmorgen:stock-alert-confirm:v1\n") && args[0] === "1" && args.length === 6) {
           const [, list, field, expected, next, seconds] = args;

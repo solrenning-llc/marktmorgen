@@ -24,7 +24,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { noteForErasure } from "@/lib/erasure-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { stockAlertSignup } from "@/lib/stock-alert-rules";
+import { MAX_STOCK_ALERTS, stockAlertSignup } from "@/lib/stock-alert-rules";
 import { type DataChange, type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { CONFIRM_SECONDS, WAIT_SECONDS } from "@/lib/waitlist-rules";
@@ -122,19 +122,44 @@ export async function askStockAlert(input: { store: DataStore; productId: string
   const taken = await takeData(store, changes, now);
   if (!taken.ok) return { ok: false, reason: taken.reason === "full" ? "full" : "unknown" };
 
+  // The place, written in one step only over what was read: a new address only while it is still absent and the list
+  // has room, an address asking again only over its own entry as read (Codex G on #3616: two new addresses at once for
+  // the last place). 1 written, 0 changed since it was read, -1 full.
+  const placed = repliesFor(await redisPipeline([["EVAL", ADD_PLACE, 1, key, email, read[0] === null ? "" : String(read[0]), JSON.stringify(entry), MAX_STOCK_ALERTS, WAIT_SECONDS]]), 1);
+  const outcome = placed ? placed[0] : null;
+  if (outcome === -1 || outcome === 0) {
+    // Nothing written: the room taken for it comes back, and no link goes out.
+    await giveData(store, changes, now).catch((error) => console.error("giving back a back-in-stock place's room failed", error));
+    return { ok: false, reason: outcome === -1 ? "full" : "unknown" };
+  }
+  // Not exactly written: no link goes out. The room stays taken, the safe way to be wrong.
+  if (outcome !== 1) return { ok: false, reason: "unknown" };
   const commands: (string | number)[][] = [
-    ["HSET", key, email, JSON.stringify(entry)],
-    ["EXPIRE", key, WAIT_SECONDS],
     ["SET", tokenKey(confirm), JSON.stringify(grant("confirm")), "EX", CONFIRM_SECONDS],
     ["SET", tokenKey(leave), JSON.stringify(grant("leave")), "EX", WAIT_SECONDS],
     ...noteForErasure(sid, email, tokenKey(confirm), now),
     ...noteForErasure(sid, email, tokenKey(leave), now),
   ];
   const wrote = repliesFor(await redisPipeline(commands), commands.length);
-  // Not exactly written: no link goes out. The room stays taken, the safe way to be wrong.
-  if (!wrote || countOf(wrote[0]) === null || wrote[1] !== 1 || wrote[2] !== "OK" || wrote[3] !== "OK") return { ok: false, reason: "unknown" };
+  if (!wrote || wrote[0] !== "OK" || wrote[1] !== "OK") return { ok: false, reason: "unknown" };
   return { ok: true, confirm, leave, again: Boolean(before) };
 }
+
+/**
+ * A place written in one step: ARGV[2] empty for a new address, written only while the field is absent and the list
+ * holds fewer than ARGV[4]; otherwise only over exactly the entry read. 1 written, 0 changed since read, -1 full.
+ */
+export const ADD_PLACE = `-- marktmorgen:stock-alert-add:v1
+local current = redis.call('HGET', KEYS[1], ARGV[1])
+if ARGV[2] == '' then
+  if current then return 0 end
+  if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[4]) then return -1 end
+elseif current ~= ARGV[2] then
+  return 0
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[5])
+return 1`;
 
 /**
  * A place confirmed only over exactly the entry the confirmation read, in one step: a leave pressed in between (its

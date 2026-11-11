@@ -20,7 +20,7 @@ import { PAGE_TEST_PAID_WORDS, PAGE_TEST_RUNNING_WORDS } from "@/lib/headline-te
  *
  * Pure, so the studio's editor and the server ask the same function.
  */
-import { type BlockKind, type PageBlock, type RowElement, type SalesPage, picturesOf } from "@/lib/sales-page";
+import { type BlockKind, type FactKey, type PageBlock, type RowElement, type SalesPage, picturesOf } from "@/lib/sales-page";
 import type { PageFacts } from "@/lib/page-facts";
 import { vagueLinkTitle } from "@/lib/link-purpose";
 
@@ -47,6 +47,8 @@ export type CoachInput = {
   pictureAlt: string;
   /** The numbers the store has counted for it (lib/page-facts.ts). */
   facts: PageFacts;
+  /** The numbers whose read did not come back (lib/page-facts-read.ts): not known to be there, nor to be missing. */
+  factsUnread?: readonly FactKey[];
 };
 
 const filled = (block: PageBlock): boolean => {
@@ -262,13 +264,17 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
     weight: 1,
     add: "bio",
   });
-  // Only asked for when the store has a number to show: never a reason to type one.
-  if (Object.keys(input.facts).length > 0) {
+  // Only asked for when the store has a number to show, or one that could not be read just now: never a reason to type one.
+  const unread = input.factsUnread ?? [];
+  if (Object.keys(input.facts).length > 0 || unread.length > 0) {
     checks.push({
       id: "facts",
       label: "Your numbers, shown",
-      why: "Your store has counted numbers for this product. Shown big, they say in a second what a paragraph says in a minute.",
-      done: blocks.some((b) => b.kind === "facts" && b.show.some((key) => input.facts[key])),
+      why: unread.length
+        ? "Some of your store's numbers for this product could not be read just now, so this check may be off. Reload the page to read them again."
+        : "Your store has counted numbers for this product. Shown big, they say in a second what a paragraph says in a minute.",
+      // Only a counted number shown is done: an unread one keeps the check open, so its "may be off" reason is seen (Claude 5 on #3025).
+      done: blocks.some((b) => b.kind === "facts" && b.show.some((key) => Boolean(input.facts[key]))),
       weight: 1,
       add: "facts",
     });

@@ -11,7 +11,8 @@ import {setContractFinancialReview} from './contract-commercial-context';
 import {reset,seed,ledger} from './contract-funding-redis';
 import {setRouteStore} from './contract-route-studio';
 import {observations,resetBilling} from './contract-route-billing';
-function start(fund=true){reset();resetBilling();setRouteStore({});const f=contractFixture();setContractFinancialReview(f.review);setContractFundingPolicy(fund?f.policy:null);if(fund)seed(contractFundingConfiguration(f.policy,f.context)!);return f;}
+import {resetStoreAnswers,savedSubscriptions,storeAnswers} from './contract-route-store';
+function start(fund=true){reset();resetBilling();resetStoreAnswers();setRouteStore({});const f=contractFixture();setContractFinancialReview(f.review);setContractFundingPolicy(fund?f.policy:null);if(fund)seed(contractFundingConfiguration(f.policy,f.context)!);return f;}
 const request=(path:string,cycle='year')=>new Request('https://marktmorgen.test/api/billing/'+path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({tier:'creator',cycle})}) as unknown as NextRequest;
 const result=(r:Response)=>new URL(r.headers.get('Location')!).searchParams.get('billing');
 test('no actual reserve cannot create a checkout even with a mocked open sales gate',async()=>{start(false);assert.equal(result(await checkout(request('checkout'))),'not-open');assert.equal(observations.checkout.length,0);assert.equal(ledger.size,0);});
@@ -60,4 +61,43 @@ test('an already active plan remains accessible while subscription search is una
  assert.equal(observations.find,0);
  assert.equal(observations.checkout.length,0);
  assert.equal(JSON.stringify([...ledger]),before);
+});
+
+// Rule 24 (CX-123): one person is one customer at Stripe, so an extra store
+// pays as the customer its owner already is. An unreadable list of the
+// account's stores cannot establish that the owner is no customer yet.
+const snapshot=()=>JSON.stringify([...ledger].map(([key,value])=>[key,[...value]]));
+test('an unreadable list of the account stores opens no checkout, takes no reservation and makes no second customer',async()=>{
+ for(const cycle of ['month','year']){
+  start();setRouteStore({extra:true});storeAnswers.ownedFail=true;
+  const before=snapshot();
+  assert.equal(result(await checkout(request('checkout',cycle))),'error');
+  assert.equal(observations.checkout.length,0,'no provider checkout, so no new Stripe customer');
+  assert.equal(snapshot(),before,'no cash reservation or pending obligation');
+  storeAnswers.ownedFail=false;
+  storeAnswers.owned=[{extra:false,stripeCustomerId:null},{extra:true,stripeCustomerId:'cus_Owner0000001'}];
+  const recovered=await checkout(request('checkout',cycle));
+  assert.equal(recovered.headers.get('Location'),'https://checkout.stripe.test/session','recovers once the list reads');
+  assert.deepEqual(observations.customers,['cus_Owner0000001'],'pays as the customer the owner already is');
+  assert.equal(observations.checkout[0].key,'creator_'+cycle);
+ }
+});
+test('an account confirmed to have no customer yet still opens its checkout as a new customer',async()=>{
+ start();setRouteStore({extra:true});storeAnswers.owned=[];
+ assert.equal((await checkout(request('checkout'))).headers.get('Location'),'https://checkout.stripe.test/session');
+ assert.deepEqual(observations.customers,[null]);
+ start();setRouteStore({extra:false});storeAnswers.ownedFail=true;
+ assert.equal((await checkout(request('checkout'))).headers.get('Location'),'https://checkout.stripe.test/session','a first store never reads the list');
+ assert.deepEqual(observations.customers,[null]);
+});
+test('a live subscription that could not be written down is an error, never already',async()=>{
+ start();observations.live={subscriptionId:'sub_Live00000001',customerId:'cus_Live0000001',active:true,tier:'creator',cycle:'month'};storeAnswers.saved=null;
+ const before=snapshot();
+ assert.equal(result(await checkout(request('checkout'))),'error');
+ assert.equal(savedSubscriptions.length,1,'the write was tried once');
+ assert.equal(observations.checkout.length,0,'no second checkout over a live subscription');
+ assert.equal(snapshot(),before);
+ start();observations.live={subscriptionId:'sub_Live00000001',customerId:'cus_Live0000001',active:true,tier:'creator',cycle:'month'};storeAnswers.saved={subscriptionActive:true,subscriptionId:'sub_Live00000001'};
+ assert.equal(result(await checkout(request('checkout'))),'already','written down: already');
+ assert.equal(observations.checkout.length,0);
 });

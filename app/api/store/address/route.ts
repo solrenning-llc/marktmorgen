@@ -4,12 +4,12 @@ import {
   EMAIL_PATTERN,
   MAX_EMAIL_LENGTH,
   SESSION_COOKIE,
+  addressLimitAnswer,
   emailForSession,
   isAuthConfigured,
   isFreshSession,
   normaliseEmail,
   sendMoveLink,
-  withinAddressLimit,
 } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
 import { fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
@@ -82,7 +82,11 @@ export async function POST(request: NextRequest) {
   if (!(await isFreshSession(session))) return back("reauth");
 
   try {
-    if (!(await withinAddressLimit(wanted))) return back("limited");
+    // Past the address's hourly count is "limited"; a count that could not be read is an error, said as one
+    // (CX-123 rules 24 and 27): nothing is sent either way.
+    const inbox = await addressLimitAnswer(wanted);
+    if (inbox === "unknown") return back("error");
+    if (inbox === "over") return back("limited");
     // Never onto an address with ways in of its own: they would join this account's (checked again at the
     // tap). Asked only after the store, a recent login, the address's hourly count and the account's own
     // (five addresses an hour), so finding out which addresses have passkeys this way stays slow and limited.

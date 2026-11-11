@@ -39,7 +39,7 @@ export const pt: BuyerWords = {
 
   fairHead: (country, percent) => `Preço justo para o seu país (${country}): ${percent}${S}% de desconto`,
   fairNote: (store, plan) =>
-    `${store} baixa os preços onde o dinheiro vale menos. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
+    `${store} baixa os preços onde o dinheiro vale menos. Este preço foi definido automaticamente para si, a partir do país da sua ligação à internet. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% de desconto · ${ends}`,
   saleNote: (until, plan) =>
     `Até ${until}. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço promocional é para pagamento integral" : ""}.`,
@@ -135,7 +135,8 @@ export const pt: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog de ${store}`,
-  blogEmpty: "Ainda não há nada aqui.",
+  blogPastEnd: "Não há publicações nesta página",
+  blogPastEndBody: "Esta página fica depois da última publicação.",
   blogMinutes: (n) => `${n} min de leitura`,
   blogNewer: "Publicações mais recentes",
   blogOlder: "Publicações anteriores",
@@ -148,6 +149,7 @@ export const pt: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
+  chooseOne: "Escolha uma",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -184,6 +186,8 @@ export const pt: BuyerWords = {
     `Quando estiver ativo, o pagamento será cobrado pela Stripe na própria conta de ${store}: a Marktmorgen nunca detém o dinheiro nem fica com nada.`,
   paidBy: (takers, store) =>
     `O pagamento é cobrado por ${takers} na própria conta de ${store}. A Marktmorgen nunca detém o dinheiro nem fica com nada.`,
+  whoAnswers: (store) =>
+    `${store} é o vendedor e responde pelo que compra, pelos reembolsos e por qualquer direito de livre resolução que tenha. A Marktmorgen aloja as páginas da loja e não é parte na venda.`,
   noPaymentsTitle: "Esta loja ainda não pode receber pagamentos.",
   noPaymentsBody: (store) => `Os preços acima são reais, mas nada aqui pode cobrar um cartão. Para comprar, escreva diretamente a ${store}.`,
   noPaymentsBodyOne: (store) => `O preço acima é real, mas nada aqui pode cobrar um cartão. Para comprar, escreva diretamente a ${store}.`,
@@ -193,6 +197,7 @@ export const pt: BuyerWords = {
     busy: { title: "Outra pessoa está a comprá-lo neste momento", body: "Nada foi cobrado. Carregue novamente em comprar daqui a pouco." },
     slow: { title: "Demasiadas tentativas em poucos minutos", body: "Nada foi cobrado. Aguarde alguns minutos e carregue novamente em comprar." },
     error: { title: "Não foi possível abrir a página de pagamento", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
+    nocharges: { title: "Esta loja não pode receber pagamentos com cartão neste momento", body: "Nada foi cobrado. Voltar a tentar não resulta enquanto a loja não resolver a situação." },
     paused: { title: "Esta loja não está a aceitar novas encomendas neste momento", body: "Nada foi cobrado. As novas encomendas reabrem no início do próximo mês, ou antes." },
     "paypal-declined": {
       title: "O PayPal não aceitou o pagamento",
@@ -299,11 +304,15 @@ export const pt: BuyerWords = {
   newer: "Mais recentes",
   older: "Mais antigas",
   askUnknown: (store) => `Esta página não o indica. Pergunte a ${store} antes de comprar.`,
+  askTermsCut: () => "Não tenho aqui as condições completas. Pergunte ao criador antes de comprar.",
 
   noLongerOnSale: "Este produto já não está à venda.",
+  cardUnread: "Não foi possível carregar este produto agora. Tente novamente daqui a pouco.",
+  cardBuyUnread: "Não é possível comprar agora. Tente novamente daqui a pouco.",
   seeStore: (store) => `Ver ${store}`,
   cardTestMode: "Modo de teste: nenhum cartão real é cobrado.",
   cardCheckout: "Pagamento seguro pela Stripe, num novo separador.",
+  cardSoldBy: (store) => `Vendido por ${store}, que responde pelo que compra.`,
   cardOpens: (store) => `Abre na loja de ${store}, num novo separador.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

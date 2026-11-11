@@ -20,7 +20,7 @@ is("every one is caught", caught(["discounts", "discounted", "coupons", "promos"
 
 part("Each language a store speaks, singular and plural");
 is("Spanish", caught(["descuento", "descuentos", "cupón", "cupones", "código promocional", "códigos promocionales", "rebajas", "oferta limitada", "última oportunidad", "testimonios", "cinco estrellas", "más vendidos"]), []);
-is("French", caught(["réduction", "réductions", "remises", "code promo", "codes promo", "offre limitée", "dernière chance", "dépêchez-vous", "témoignages", "cinq étoiles", "meilleures ventes"]), []);
+is("French", caught(["réduction", "réductions", "des remises", "code promo", "codes promo", "offre limitée", "dernière chance", "dépêchez-vous", "témoignages", "cinq étoiles", "meilleures ventes"]), []);
 is("German", caught(["Rabatt", "Rabatte", "Gutschein", "Gutscheine", "Rabattcode", "Sonderangebote", "letzte Chance", "nur heute", "Kundenstimmen", "fünf Sterne"]), []);
 is("Italian", caught(["sconto", "sconti", "codice promozionale", "codici promozionali", "offerta limitata", "ultima occasione", "affrettati", "testimonianze", "cinque stelle", "più venduti"]), []);
 is("Dutch", caught(["korting", "kortingen", "kortingscode", "kortingscodes", "tijdelijke aanbieding", "laatste kans", "alleen vandaag", "vijf sterren"]), []);
@@ -146,8 +146,9 @@ is("each is refused, though the facts have the word in Latin letters", [
 ].filter((reply) => heldToFacts(reply, deals)), []);
 is("honest Lisu, Coptic and Tifinagh text passes", [heldToFacts("\uA4E1\uA4F2-\uA4E2\uA4F4 \uA4DF\uA4EC \uA4D2\uA4F5.", "Lisu."), heldToFacts("\u2CA0\u2C93\u2C9B\u2C9F\u2CA9\u03EF.", "Coptic."), heldToFacts("\u2D5C\u2D30\u2D4E\u2D30\u2D63\u2D49\u2D56\u2D5C.", "Tifinagh.")], [true, true, true]);
 const copy = readFileSync("tooling/unicode/confusables-18.0.0.txt", "utf8");
-is("the table is made from the committed copy of confusables.txt, version 18.0.0", [versionOf(copy).version, readFileSync("lib/confusables-latin.ts", "utf8") === renderTable(copy)], ["18.0.0", true]);
-const table = new Map(latinLookalikes(copy));
+const names = readFileSync("tooling/unicode/UnicodeData-18.0.0.txt", "utf8");
+is("the table is made from the committed copy of confusables.txt, version 18.0.0", [versionOf(copy).version, readFileSync("lib/confusables-latin.ts", "utf8") === renderTable(copy, names)], ["18.0.0", true]);
+const table = new Map(latinLookalikes(copy, names));
 is("it keeps letters of other scripts and leaves accented letters, digits, Arabic, Hebrew and Han out", [
   table.get(0xa4d3), table.get(0x2ca5), table.get(0x10302), table.get(0x2d54), table.get(0x0441), table.get(0x0406),
   table.has(0x00e9), table.has(0x0660), table.has(0x0627), table.has(0x05d5), table.has(0x4e00), table.has(0x2282),
@@ -186,4 +187,52 @@ is("while a site in any case is still refused", [
   heldToFacts("Visit Evil.Com today", probe), heldToFacts("Visit EVIL.COM today", probe), heldToFacts("See //evil.com/x", probe), heldToFacts("See /evil.com", probe),
   heldToFacts("See _evil.com", probe), heldToFacts("Visit evil.eu today", probe), heldToFacts("Visit Evil.Eu/now", probe), heldToFacts("Visit EVIL.EU now", probe),
 ], [false, false, false, false, false, false, false, false]);
+// Letters with a stroke have no decomposition, so accent folding leaves them; the look-alike table reads them as their base
+// letter (lib/confusables-latin.ts), so "cup\u00F8n", "\u0111iscount" or "\u0142ots" hide no deal word, while honest words pass.
+is("letters with a stroke read as their base letter, so they hide no deal word", [heldToFacts("Use the cup\u00F8n.", "Pottery course."), heldToFacts("A \u0111iscount.", "Pottery course."), heldToFacts("A discount for \u0142ots.", "A discount for lots."), heldToFacts("Kr\u00F8ner and \u0142\u00F3d\u017A.", "Pottery course.")], [false, false, true, true]);
+// Their capitals, read before the text is lowercased (Codex T on #2579), and the capital eth that looks like them.
+is("capital letters with a stroke hide no deal word either", [heldToFacts("Use the cup\u00D8n.", "Pottery course."), heldToFacts("A \u0110iscount.", "Pottery course."), heldToFacts("A \u00D0iscount.", "Pottery course."), heldToFacts("Use the COUP\u00D8N.", "Pottery course."), heldToFacts("\u0141ODZ and K\u00D8BENHAVN.", "Pottery course.")], [false, false, false, false, true]);
+part("Review of #2084: honest words that only share letters with a deal word pass");
+const course = "Pottery course. Lessons online.";
+is("the Portuguese and Spanish verb promover", ["Nós promovemos o acesso aos cursos.", "O curso promove a criatividade.", "Ela promoveu o evento.", "Vamos promover o curso.", "El curso promueve la creatividad."].filter((reply) => !heldToFacts(reply, course)), []);
+is("a verb to guarantee that only says how access works", [
+  "Inicia sesión para garantizar el acceso.", "Garantizamos el acceso al curso.", "El curso garantiza el acceso de por vida.",
+  "Entre na sua conta para garantir o acesso.", "Garantimos o acesso ao curso.", "O curso garante o acesso.",
+  "Connectez-vous pour garantir l'accès.", "Le cours garantit l'accès.", "Accedi per garantire l'accesso.", "Il corso garantisce l'accesso.",
+  "Wir garantieren den Zugang.", "Melden Sie sich an, um den Zugang zu garantieren.", "Wij garanderen de toegang tot de cursus.",
+].filter((reply) => !heldToFacts(reply, course)), []);
+is("but a verb that promises is refused, in every language (C3-107)", [
+  "Garantizamos que vas a duplicar tus ventas.", "Garantimos resultados.", "Nous garantissons des résultats.", "Wir garantieren Ergebnisse.", "Garantiamo risultati.", "Wij garanderen resultaten.",
+].filter((reply) => heldToFacts(reply, course)), []);
+is("access followed by anything but the end of the clause is refused: a conjunction (C3-109) or a comma (C3-111)", [
+  "Garantizamos el acceso y que vas a duplicar tus ventas.", "Nous garantissons l'accès et des résultats.", "Wir garantieren den Zugang und Ergebnisse.", "Garantimos o acesso e o seu sucesso.",
+  "Garantizamos el acceso al curso y resultados.", "Garantimos o acesso, e o seu sucesso.", "Wij garanderen de toegang en resultaten.", "Garantiamo l'accesso e risultati.", "Um den Zugang und Ergebnisse zu garantieren.", "Um den Zugang zu garantieren und Ergebnisse.", "Garantizamos el acceso, resultados y éxito.", "Nous garantissons l'accès, des résultats rapides.", "Para garantizar el acceso, inicia sesión.",
+].filter((reply) => heldToFacts(reply, course)), []);
+is("while access at the end of the clause or with an access complement passes", [
+  "Garantizamos el acceso de por vida.", "Garantimos o acesso vitalício.", "Nous garantissons l'accès à vie.", "Wir garantieren den Zugang zum Kurs.", "Garantiamo l'accesso al corso!",
+  "Garantizamos el acceso", "Wij garanderen de toegang tot de cursussen; meer niet.",
+].filter((reply) => !heldToFacts(reply, course)), []);
+is("unless the store wrote the same word", heldToFacts("Garantizamos resultados.", "Curso de cerámica. Garantizamos resultados o te devolvemos el dinero."), true);
+is("Dutch words for an abbreviation or a shortening", ["Een afkorting staat in de lijst.", "De afkortingen worden uitgelegd.", "Een verkorting van de les.", "De inkorting van het programma."].filter((reply) => !heldToFacts(reply, course)), []);
+is("French remise as handing over", ["La remise en main propre est possible.", "La remise du certificat a lieu en juin.", "La date de remise est sur la page.", "La remise des diplômes est en juin.", "La remise de votre certificat se fait en ligne.", "Un cours de remise en forme."].filter((reply) => !heldToFacts(reply, course)), []);
+is("any other remise is a discount and is refused (C3-107)", ["Profitez de la remise exclusive pour les abonnés.", "La remise réservée aux membres.", "La remise des frais d'inscription."].filter((reply) => heldToFacts(reply, course)), []);
+// Codex H on #2220: a determiner alone is not a handing over; "remise" of the shop, the price, a subscription or rights
+// is a discount or a waiver, refused whatever follows, by both the facts' check and the reminder's line.
+const monetary = ["Profitez de la remise de la boutique.", "La remise de la totalité du prix est disponible.", "Profitez de la remise de votre abonnement.", "Profitez de la remise du prix.", "La remise des droits est disponible."];
+const pottery = "Cours de poterie. Le prix est affiché sur la page.";
+is("a remise of the shop, the price, a subscription or rights is refused (Codex H)", monetary.filter((reply) => heldToFacts(reply, pottery) || !DEAL_WORDS.test(reply) || neutralLine(reply, pottery) === reply), []);
+// Codex H2 on #2220: only a written elision (an apostrophe, straight or curly) brings in the thing handed over;
+// "de lcertificat" or "de l certificat" with a lower price is a discount, refused by all three gates.
+const malformed = ["La remise de lcertificat réduit le prix.", "La remise de l certificat réduit le prix."];
+is("a remise before a malformed elision is refused by the facts, the deal words and the reminder (Codex H2)", malformed.filter((reply) => heldToFacts(reply, pottery) || !DEAL_WORDS.test(reply) || neutralLine(reply, pottery) === reply), []);
+is("while a written elision, straight or curly, still passes", ["La remise de l'attestation suit le cours.", "La remise de l’attestation suit le cours."].filter((reply) => !heldToFacts(reply, pottery)), []);
+is("while handing over a certificate, diplomas, a key or an order still passes", ["La remise de votre certificat se fait en ligne.", "La remise des diplômes est en juin.", "La remise en main propre est possible.", "La remise de l'attestation suit le cours.", "La remise des clés se fait sur place.", "La remise de votre commande est rapide."].filter((reply) => !heldToFacts(reply, course)), []);
+is("while the deal words are still caught", caught([
+  "promoção", "promo", "promocional", "promoción", "código promocional", "promo code",
+  "garantía", "garantías", "garantia", "garantias", "garantizado", "garantido", "garantie", "Garantie", "Garantiezeit", "garantiert", "garantito", "garanzia", "gegarandeerd",
+  "guarantee", "guaranteed", "guarantees",
+  "zomerkorting", "kortingscode", "extra korting", "prijskorting",
+  "une remise", "des remises", "remise de 20 %", "remises exceptionnelles", "une remise spéciale", "20 % de remise", "remise sur tout", "remise", "remises", "Wij garanderen",
+]), []);
+is("and in English, where the noun and the verb are one word, a reply that guarantees is still refused", heldToFacts("We guarantee access.", course), false);
 done();

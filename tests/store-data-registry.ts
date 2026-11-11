@@ -963,6 +963,7 @@ export const FAMILIES: Record<string, Family> = {
 
   // ---------------------------------------------------------------- lib/ t–z
   "nl:csa:keep:@lib/child-safety-holds.ts": short("A product kept for a child-safety report: not removed, changed or published again, nor its files, options, picture, page, episodes or lessons replaced or deleted, for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 64),
+  "nl:csa:hide@lib/child-safety.ts": company("Held products whose taking off the store is not confirmed yet, by when each is next tried", "One sorted set for the company: one member per held product whose hide did not go through (at most CHILD_SAFETY_HOLDS_PER_DAY a store a day), let go once the hourly job confirms it off or its hold is over; the key expires KEEP_SECONDS (400 days) after the last one added (lib/child-safety.ts, hideHeldProducts)."),
   "nl:csa:held:@lib/child-safety.ts": short("Which products child-safety reports took off a store that day (a set of at most the cap's product ids), two days: the cap on the automatic step", "studio", 2, 128),
   "nl:report:@lib/takedown.ts": company("A takedown report", "Reports to the company."),
   "nl:report:t:@lib/takedown.ts": company("A takedown report's token", "Reports to the company."),

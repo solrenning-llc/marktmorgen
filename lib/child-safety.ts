@@ -19,6 +19,9 @@
  *
  *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
  *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
+ *   nl:csa:hide                        zset     held products whose taking off the store is not confirmed yet, by
+ *                                               when each is next tried (hideHeldProducts); KEEP_SECONDS from the
+ *                                               last one added
  *
  * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
  * taken off, and while the mark is there no studio route removes, edits,
@@ -40,11 +43,12 @@
  * picture and the pictures on its sales page whichever product or page the
  * request names, heldPictureRefusal), nor the MCP server's product tools
  * (lib/mcp-tools.ts, heldForAgent), for the same reason. The studio's course
- * and podcast pages are the owner's only. And should taking it off the store
- * not go through after its mark was written, its public page, the store's
- * front page and search, and the other products a product page shows leave
- * it out (lib/child-safety-holds.ts, heldAmongShown). A mark that cannot be
- * read refuses the same way (holdState, contentOpenTo).
+ * and podcast pages are the owner's only. A mark that cannot be read refuses
+ * the same way (holdState, contentOpenTo). Should taking it off the store not
+ * go through after its mark was written, its own page shows it to nobody at
+ * once, and the hourly job (app/api/cron/quiet) takes it off, again and again
+ * until it is confirmed off (hideHeldProducts), so the store's lists, which
+ * read no mark on a visit, drop it too.
  */
 import { createHash } from "node:crypto";
 import { emailForSession, normaliseEmail } from "@/lib/auth";
@@ -52,7 +56,7 @@ import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { type Store, setProductHidden, storeRef } from "@/lib/store";
+import { type Store, setProductHidden, storeForEmail, storeRef } from "@/lib/store";
 import { productIdFromAddress, productIds, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
@@ -250,12 +254,93 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
     const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
+    // Waiting to be taken off before it is: should the hide below not go through, the hourly job takes it off
+    // (hideHeldProducts). A queue write not confirmed does not stop the hide; the owner's email says what happened.
+    const member = hideMember(store, product.id);
+    await redisPipeline([["ZADD", HIDE_DUE, now, member], ["EXPIRE", HIDE_DUE, KEEP_SECONDS]]).catch(() => console.error("a held product could not be queued to be taken off"));
     const done = await setProductHidden(storeRef(store), product.id, true);
-    return done.ok ? "held" : done.reason === "unknown" ? "unknown" : "failed";
+    if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
+    // Confirmed off: it waits no more. If this is lost, the job confirms it off and lets it go.
+    await redisPipeline([["ZREM", HIDE_DUE, member]]).catch(() => console.error("a held product taken off could not leave the queue"));
+    return "held";
   } catch (error) {
     console.error("a child-safety hold could not be confirmed", error instanceof Error ? error.message : "unknown");
     return "unknown";
   }
+}
+
+/** The held products whose taking off the store is not confirmed yet, by when each is next tried. */
+export const HIDE_DUE = "nl:csa:hide";
+/** How long a held product whose taking off did not go through waits before the next try: the job's own hour. */
+export const HIDE_RETRY_MS = 3_600_000;
+/** The most held products one run tries to take off; the rest wait for the next run, by when each is due. */
+export const HIDES_PER_RUN = 25;
+
+/** One waiting product: the store's ref (lib/store.ts storeRef), the tag its mark is kept under, and the product. */
+const hideMember = (store: Store, productId: string) => JSON.stringify([storeRef(store), storeTag(store), productId]);
+
+/**
+ * Takes one waiting product off its store, if it still has to be: "hidden" once it is confirmed off (it was, or the
+ * write said so), "gone" when there is nothing left to take off (the hold is over, or the store has no such product),
+ * "waiting" for anything not confirmed, an unknown reply included, so it is tried again and never dropped for it.
+ */
+async function hideOne(member: string): Promise<"hidden" | "gone" | "waiting"> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(member);
+  } catch {
+    parsed = null;
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 3 || !parsed.every((part) => typeof part === "string" && part)) {
+    console.error("a waiting child-safety hide is not one of ours; let go");
+    return "gone";
+  }
+  const [ref, tag, productId] = parsed as [string, string, string];
+  // The hold first, read exactly under the tag it was kept under: over is "gone", unknown is "waiting".
+  const held = await heldIdsAmong({ statsId: tag, handle: "" }, [productId]).then((ids) => ids.has(productId), () => null);
+  if (held === null) return "waiting";
+  if (!held) return "gone";
+  const store = await storeForEmail(ref).catch(() => null);
+  // A store that cannot be read now, or under another tag (its record was written again under the same ref), is tried again.
+  if (!store || storeTag(store) !== tag) return "waiting";
+  const listing = await readListingExactly(store, productId);
+  if (listing === "unknown") return "waiting";
+  if (!listing) return "gone";
+  if (listing.hidden) return "hidden";
+  const done = await setProductHidden(storeRef(store), productId, true);
+  return done.ok && done.product.hidden ? "hidden" : "waiting";
+}
+
+/**
+ * The hourly job's step (app/api/cron/quiet): tries to take off the store each held product whose taking off did not
+ * go through (holdReported), up to HIDES_PER_RUN of those due, and lets each go only once it is confirmed off or has
+ * nothing left to take off; anything else is tried again an hour later. Never throws: a queue that cannot be read is
+ * left for the next run.
+ */
+export async function hideHeldProducts(now = Date.now()): Promise<{ hidden: number; waiting: number; gone: number }> {
+  const out = { hidden: 0, waiting: 0, gone: 0 };
+  let due: string[];
+  try {
+    const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", HIDE_DUE, "-inf", String(now), "LIMIT", 0, HIDES_PER_RUN]]), 1);
+    const list = replies?.[0];
+    if (!Array.isArray(list) || list.some((member) => typeof member !== "string")) throw new Error("the queue answered off its shape");
+    due = list as string[];
+  } catch (error) {
+    console.error("the held products waiting to be taken off could not be read", error instanceof Error ? error.message : "unknown");
+    return out;
+  }
+  for (const member of due) {
+    const done = await hideOne(member).catch((error) => {
+      console.error("a held product could not be taken off", error instanceof Error ? error.message : "unknown");
+      return "waiting" as const;
+    });
+    out[done] += 1;
+    // Tried again in an hour (only while it is still there: XX); if this write is lost it is simply due again sooner.
+    const next: (string | number)[] = done === "waiting" ? ["ZADD", HIDE_DUE, "XX", now + HIDE_RETRY_MS, member] : ["ZREM", HIDE_DUE, member];
+    await redisPipeline([next]).catch(() => console.error("a waiting child-safety hide could not be moved on"));
+  }
+  if (out.waiting) console.error(`child safety: ${out.waiting} held product(s) still waiting to be taken off the store`);
+  return out;
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {

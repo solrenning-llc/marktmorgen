@@ -85,7 +85,11 @@ export function stockAlertsOpen(store: Store): boolean {
   return !store.suspended && Boolean(store.sid && store.statsId && store.mail?.address);
 }
 
-const pagePath = (store: Store) => `/@${store.handle}/back-in-stock`;
+/**
+ * The list's page with `query`, as an email links it: its store named by its own id too, which a change of handle or
+ * a handle let go never changes, so the page finds the store (app/[handle]/back-in-stock) for as long as the link works.
+ */
+const pageLink = (store: Store, query: string) => `/@${store.handle}/back-in-stock?${query}&i=${encodeURIComponent(store.sid ?? "")}`;
 
 /**
  * The way out at the foot of both emails: the page with its button, and the
@@ -94,7 +98,7 @@ const pagePath = (store: Store) => `/@${store.handle}/back-in-stock`;
  * handle let go never changes, so it works for as long as the link does.
  */
 function door(store: Store, w: StockAlertWords, origin: string, leave: string, why: string): Door {
-  const page = `${origin}${pagePath(store)}?leave=${leave}`;
+  const page = `${origin}${pageLink(store, `leave=${leave}`)}`;
   return {
     page,
     oneClick: `${SITE_URL}/api/store/stock-alert/leave?i=${encodeURIComponent(store.sid)}&t=${leave}`,
@@ -109,7 +113,7 @@ function door(store: Store, w: StockAlertWords, origin: string, leave: string, w
 /** The confirmation email: HTML and text, the creator's postal address, a way out; no tracked link, no picture. */
 export function confirmEmail(store: Store, product: Listing, links: { confirm: string; leave: string }, origin: string) {
   const w = stockAlertWords(store.language);
-  const body = [w.askLead(store.name, product.title), "", w.askOpen, `${origin}${pagePath(store)}?token=${links.confirm}`, "", w.askWorks, "", w.askIgnore].join("\n");
+  const body = [w.askLead(store.name, product.title), "", w.askOpen, `${origin}${pageLink(store, `token=${links.confirm}`)}`, "", w.askWorks, "", w.askIgnore].join("\n");
   return render(store, w.askSubject(product.title), body, null, door(store, w, origin, links.leave, w.askWhy(store.name, product.title)));
 }
 

@@ -170,7 +170,7 @@ async function main(): Promise<void> {
   is("Redis answering the claim in an unknown shape: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
   redis.pipeline = realPipeline;
   is("and Stripe was not asked then", posted.length, before);
-  is("no log line and no email for any of them", [(await readLog(store.sid)).length, emails.length], [0, 0]);
+  is("no log line and no email for any of them", [(await readLog(store.sid))?.length, emails.length], [0, 0]);
   mode = "refuse";
   is("Stripe saying no: refused, nothing changed", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "refused" });
   is("the membership still has its date", byId("sub_live000001").trial_end, undefined);
@@ -187,7 +187,8 @@ async function main(): Promise<void> {
     ["/subscriptions/sub_live000001", "acct_1Freedaysxxxxxx", String(PERIOD_END + 14 * DAY), "none", `member-free-days:sub_live000001:${PERIOD_END}:14`],
   );
   is("the membership's next charge on Stripe moved exactly 14 days", byId("sub_live000001").trial_end, PERIOD_END + 14 * DAY);
-  const log = await readLog(store.sid);
+  // An unreadable log (null, main's readLog) reads as no line here, so the check below fails on it.
+  const log = (await readLog(store.sid)) ?? [];
   is("who gave it, when and how many days is in the activity log", [log.length, log[0]?.who, log[0]?.what.includes("14 free days"), typeof log[0]?.at === "string"], [1, owner, true, true]);
   is("the member is emailed once", [emails.length, emails[0]?.to], [1, "member@example.com"]);
   is("and the email was taken from the store's own emails first", (await allowanceUsed(store, "email")) - emailsUsed, 1);

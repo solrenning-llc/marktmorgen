@@ -69,6 +69,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return answer({ error: { message: "no such" } }, 404);
 }) as typeof fetch;
 
+/** The ids of a whole list; "unreadable" or null as they are. */
+const ids = (subs: Awaited<ReturnType<typeof memberSubs>>) => (Array.isArray(subs) ? subs.map((s) => s.id) : subs);
+
 async function main(): Promise<void> {
   part("Member discount: a whole list decides as before (controls)");
   const owner = "cut-short-member@example.com";
@@ -80,7 +83,7 @@ async function main(): Promise<void> {
   try {
     customersPage = { object: "list", data: [{ id: "cus_member0001" }], has_more: false };
     subscriptionPages = { "": { object: "list", data: [membership("sub_live000001")], has_more: false } };
-    is("a whole list: the membership is found", (await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_live000001"]);
+    is("a whole list: the membership is found", ids(await memberSubs(store, "member@example.com")), ["sub_live000001"]);
     is("and the code goes on", await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), { ok: true });
     customersPage = { object: "list", data: [], has_more: false };
     is("nobody under that address, said so whole: none", await memberSubs(store, "nobody@example.com"), []);
@@ -97,7 +100,7 @@ async function main(): Promise<void> {
       "": { object: "list", data: Array.from({ length: 100 }, (_, i) => membership(`sub_other${String(i).padStart(5, "0")}`, { status: "canceled" })), has_more: true },
       sub_other00099: { object: "list", data: [membership("sub_later000001")], has_more: false },
     };
-    is("a membership past the first page is found, not 'not a member'", (await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_later000001"]);
+    is("a membership past the first page is found, not 'not a member'", ids(await memberSubs(store, "member@example.com")), ["sub_later000001"]);
     is("and the code goes on it", await applyMemberDiscount(store, "member@example.com", "sub_later000001", "promo_active0001"), { ok: true });
     posted.length = 0;
     subscriptionPages = {};

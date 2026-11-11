@@ -134,6 +134,33 @@ async function main(): Promise<void> {
   const afterLost = (await storeForEmail(OWNER))!.sitePages;
   const made = afterLost[afterLost.length - 1];
   is("an applied list write whose answer was lost: the copy is made, its blocks kept", [lost, lostStatus, afterLost.length, afterLost.length > listedBefore && (await readPageExact(statsId, siteKey(made.id))).page !== null], [true, 200, listedBefore + 1, true]);
+  // The list written, its answer lost, and the list read again out of shape (Codex U on #3531, residual MEDIUM): an
+  // unreadable list never confirms the page is absent, so its blocks are never taken back; the creator is told.
+  await setSitePages(OWNER, afterLost.slice(0, listedBefore));
+  const pageKeys = () => [...redis.keys()].filter((k) => k.startsWith(`nl:product:page:${statsId}:site-`)).length;
+  const keysBeforeGarbled = pageKeys();
+  let garbled = false;
+  redis.pipeline = async (commands) => {
+    const fenced = commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:fenced-set:v1") && commands.some((d) => d.some((part) => String(part).startsWith("nl:store:owner:"))));
+    const reply = await pipeline.call(redis, commands);
+    if (fenced && !garbled) {
+      garbled = true;
+      const key = String(commands.flat().find((part) => String(part).startsWith("nl:store:owner:")));
+      const [raw] = (await pipeline.call(redis, [["GET", key]])) as [string];
+      const record = JSON.parse(raw) as Record<string, unknown>;
+      await pipeline.call(redis, [["SET", key, JSON.stringify({ ...record, sitePages: { broken: record.sitePages } })]]);
+      throw new Error("synthetic: the answer to an applied list write is lost, and the list reads out of shape");
+    }
+    return reply;
+  };
+  let garbledAnswer: [number, string] = [0, ""];
+  try {
+    const r = await post({ action: "copy", id: SITE });
+    garbledAnswer = [r.status, ((await r.json()) as { error?: string }).error ?? ""];
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("a list read out of shape after a lost answer: not known, the blocks kept, the creator told", [garbled, garbledAnswer, pageKeys()], [true, [503, "copy_unknown"], keysBeforeGarbled + 1]);
   await setSitePages(OWNER, afterLost.slice(0, listedBefore));
   const now = (await storeForEmail(OWNER))!.sitePages;
   await setSitePages(OWNER, [...now, ...Array.from({ length: MAX_SITE_PAGES - now.length }, (_, n) => ({ id: `f${String(n).padStart(9, "0")}`, slug: `filler-${n}`, title: `Filler ${n}`, nav: false, target: "", from: -1 }))]);

@@ -5,9 +5,15 @@
  * What must hold:
  *   - the store keeps such codes only in their exact shape: anything else is
  *     dropped, never applied;
- *   - typed on the buy form with an email that bought here before, read in
- *     full from the creator's Stripe account, the checkout opens with the
- *     creator's coupon, for that email only, and no code box beside it;
+ *   - the email is proved, never typed: only the link we emailed to the
+ *     buyer's library (lib/buyer-library.ts, libraryOwner) says whose it is,
+ *     so nobody learns whether someone else bought here, and nobody gets
+ *     the price with someone else's email (review of #3666, HIGH and MEDIUM);
+ *     without that link the answer is the same whether or not the email
+ *     bought, and nothing is read from Stripe;
+ *   - with the link of an email that bought here before, read in full from
+ *     the creator's Stripe account, the checkout opens with the creator's
+ *     coupon, for that proved email only, and no code box beside it;
  *   - an email with no earlier purchase, a purchase history that cannot be
  *     read in full, a code the store does not have or that has ended, an
  *     address that is not one, or too many tries: no checkout opens, nothing
@@ -21,6 +27,7 @@
  *
  * Stripe is played by a stand-in for `fetch`; synthetic data only.
  */
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setHasDiscounts, setProductLink, setReturningCodes, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
@@ -74,6 +81,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const VIP: ReturningCode = { code: "THANKYOU", coupon: "cpn_ReturnThanks01", off: { kind: "percent", percent: 20 }, endsAt: null, createdAt: 1_790_000_000 };
 const ENDED: ReturningCode = { code: "OLDTHANKS", coupon: "cpn_ReturnOld0001", off: { kind: "amount", cents: 500, currency: "usd" }, endsAt: 1_790_000_100, createdAt: 1_790_000_000 };
+
+/** A buyer's library link, as requestLibraryLink keeps it (lib/buyer-library.ts): the proof that an email is theirs. */
+const proofFor = async (email: string, token: string) => {
+  const key = `nl:lib:link:${createHash("sha256").update(`nimbus-lib-link:${token}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([["SET", key, email, "EX", 600]]);
+  return token;
+};
 
 async function main(): Promise<void> {
   part("The store keeps a code only in its exact shape");
@@ -145,51 +159,72 @@ async function main(): Promise<void> {
   };
   const back = (reason: string) => `https://marktmorgen.com/@returnshop/p/${productId}?returning=${reason}#returning`;
 
-  part("Typed on the buy form by someone who bought here before");
-  let r = await post({ rcode: "thankyou", remail: " Past.Buyer@Example.com " });
-  is("on to Stripe", r.location, "https://checkout.stripe.com/c/pay/test");
-  is("with the coupon and that email", [r.session?.get("discounts[0][coupon]"), r.session?.get("customer_email"), r.session?.get("allow_promotion_codes")], [VIP.coupon, PAST, null]);
+  const PAST_PROOF = await proofFor(PAST, "a".repeat(64));
+  const NEW_PROOF = await proofFor(NEW, "b".repeat(64));
 
-  part("Typed by someone who never bought here");
-  r = await post({ rcode: "THANKYOU", remail: NEW }, "198.51.100.8");
-  is("back to the form, with the reason", r.location, back("bought"));
-  is("no checkout opens", r.session, null);
+  part("An email typed without the link we sent it: the same answer whether or not it bought, nothing read (review of #3666, HIGH)");
+  {
+    const past = await post({ rcode: "THANKYOU", remail: PAST }, "198.51.100.20");
+    const never = await post({ rcode: "THANKYOU", remail: NEW }, "198.51.100.21");
+    is("a past buyer's typed email: back to the form for the link, no checkout, nothing read", [past.location, past.session, past.reads], [back("proof"), null, 0]);
+    is("an email that never bought: the very same answer", [never.location, never.session, never.reads], [back("proof"), null, 0]);
+    const fake = await post({ rcode: "THANKYOU", rproof: "c".repeat(64) }, "198.51.100.22");
+    is("a link we never sent, or one that ended: the same, nothing read", [fake.location, fake.session, fake.reads], [back("proof"), null, 0]);
+    const garbled = await post({ rcode: "THANKYOU", rproof: "not-a-link" }, "198.51.100.23");
+    is("something that is not a link at all: the same", [garbled.location, garbled.reads], [back("proof"), 0]);
+  }
+
+  part("Someone else's email beside your own link: only the link's email counts (review of #3666, MEDIUM)");
+  let r = await post({ rcode: "THANKYOU", remail: PAST, rproof: NEW_PROOF }, "198.51.100.24");
+  is("the link is for an email that never bought: no price, whatever email is typed beside it", [r.location, r.session], [back("bought"), null]);
+  is("and only the link's own email is read, never the typed one", reads.slice(-1), [NEW]);
+
+  part("The link of someone who bought here before");
+  r = await post({ rcode: "thankyou", rproof: PAST_PROOF });
+  is("on to Stripe", r.location, "https://checkout.stripe.com/c/pay/test");
+  is("with the coupon and the proved email", [r.session?.get("discounts[0][coupon]"), r.session?.get("customer_email"), r.session?.get("allow_promotion_codes")], [VIP.coupon, PAST, null]);
 
   part("What the email bought cannot be read in full");
   for (const as of ["more", "garbled"] as const) {
     sessionsAnswer = as;
-    r = await post({ rcode: "THANKYOU", remail: PAST }, `198.51.100.${as === "more" ? 9 : 10}`);
+    r = await post({ rcode: "THANKYOU", rproof: PAST_PROOF }, `198.51.100.${as === "more" ? 9 : 10}`);
     is(`a list ${as === "more" ? "with more pages than are read" : "with a garbled row"}: unknown, back to the form`, [r.location, r.session], [back("unknown"), null]);
   }
   sessionsAnswer = "documented";
 
   part("A code the store does not have, or one that ended: nothing is read from Stripe");
-  r = await post({ rcode: "NOPE", remail: PAST }, "198.51.100.11");
+  r = await post({ rcode: "NOPE", rproof: PAST_PROOF }, "198.51.100.11");
   is("refused as a code, with no purchases read", [r.location, r.session, r.reads], [back("code"), null, 0]);
   store = (await storeForEmail(OWNER))!;
-  const ended = await checkReturningCode(store, "OLDTHANKS", PAST, 1_790_000_100_000);
+  const ended = await checkReturningCode(store, "OLDTHANKS", PAST_PROOF, 1_790_000_100_000);
   is("an ended code is a code that is not one", ended, { ok: false, reason: "code" });
 
-  part("An address that is not one");
-  r = await post({ rcode: "THANKYOU", remail: "not-an-address" }, "198.51.100.12");
-  is("refused as an email, with no purchases read", [r.location, r.session, r.reads], [back("email"), null, 0]);
+  part("A link whose answer cannot be read: unknown, never a discount");
+  const realPipeline = redis.pipeline;
+  redis.pipeline = async (commands) => (commands.some((c) => String(c[1]).startsWith("nl:lib:link:")) ? [{ garbled: true }] : realPipeline.call(redis, commands));
+  try {
+    r = await post({ rcode: "THANKYOU", rproof: PAST_PROOF }, "198.51.100.12");
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  is("back to the form as unknown, no checkout, nothing read", [r.location, r.session, r.reads], [back("unknown"), null, 0]);
 
   part("Too many tries from one connection");
   let last = "";
-  for (let i = 0; i <= RETURNING_TRIES; i += 1) last = (await post({ rcode: "NOPE", remail: PAST }, "198.51.100.13")).location;
+  for (let i = 0; i <= RETURNING_TRIES; i += 1) last = (await post({ rcode: "NOPE", rproof: PAST_PROOF }, "198.51.100.13")).location;
   is("the try after the limit is told to wait", last, back("busy"));
 
   part("A coupon Stripe will not take any more");
   refuseCoupon = true;
-  r = await post({ rcode: "THANKYOU", remail: PAST }, "198.51.100.14");
+  r = await post({ rcode: "THANKYOU", rproof: PAST_PROOF }, "198.51.100.14");
   is("back to the form as a code, never a checkout at the full price", [r.location, r.session], [back("code"), null]);
   refuseCoupon = false;
 
   part("A buy form with no code works as before");
   r = await post({}, "198.51.100.15");
   is("on to Stripe, with the box and no coupon, nothing read", [r.location, r.session?.get("allow_promotion_codes"), r.session?.get("discounts[0][coupon]"), r.reads], ["https://checkout.stripe.com/c/pay/test", "true", null, 0]);
-  r = await post({ rcode: "", remail: PAST }, "198.51.100.16");
-  is("an email with no code is not a code", [r.location, r.session?.get("customer_email"), r.reads], ["https://checkout.stripe.com/c/pay/test", null, 0]);
+  r = await post({ rcode: "", remail: PAST, rproof: PAST_PROOF }, "198.51.100.16");
+  is("an email or a link with no code is not a code", [r.location, r.session?.get("customer_email"), r.reads], ["https://checkout.stripe.com/c/pay/test", null, 0]);
 
   done();
 }

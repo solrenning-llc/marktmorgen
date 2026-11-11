@@ -2,9 +2,10 @@
  * The Idempotency-Key header on the API's writes, kept (complement WG (a) of 616 [WP15], unit 2, 10 November 2026).
  * The rules are lib/api-idempotency-rules.ts; this file reads and keeps the record and wraps a write.
  *
- *   nl:api:idem:<sha(store id, key)>  JSON  the write under way, or its answer, for 24 hours from when it began
+ *   nl:api:idem:<store id>:<sha(key)>  JSON  the write under way, or its answer, for 24 hours from when it began
  *
- * The key's name says neither the store nor the key: both are hashed. The record may hold the write's answer (an
+ * The key the client sent is never in the name, only its hash. The store's id is, in clear, as in every other store
+ * key (nl:api:keys:<store id>): it is no secret, and no store value goes into a fast hash. The record may hold the write's answer (an
  * address it gave a product to, say) for those 24 hours, then it is gone by itself. One record per keyed write; every
  * write is one of the plan's API requests, already counted and refused at the plan's figure before it gets here
  * (lib/api-guard.ts), so a store keeps at most its month's API figure of them, and fewer in any 24 hours.
@@ -20,7 +21,7 @@ import {
   readIdempotencyKey, requestFingerprint, takesKey,
 } from "@/lib/api-idempotency-rules";
 
-const recordKey = (sid: string, key: string) => `nl:api:idem:${createHash("sha256").update(`${sid}\n${key}`).digest("hex")}`;
+const recordKey = (sid: string, key: string) => `nl:api:idem:${sid}:${createHash("sha256").update(key).digest("hex")}`;
 /**
  *   nl:api:idem:p:<sha(store id, address)>  set  the records whose answer is about that address, 24 hours
  *
@@ -99,7 +100,9 @@ export async function forgetIdempotentPerson(sid: string, email: string): Promis
   const read = repliesFor(await redisPipeline([["SMEMBERS", pk]]), 1);
   const members = read && Array.isArray(read[0]) && read[0].every((m) => typeof m === "string") ? (read[0] as string[]) : null;
   if (!members) throw new Error("the kept API answers of a person could not be read");
-  const ours = members.filter((m) => /^nl:api:idem:[0-9a-f]{64}$/.test(m));
+  // Only this store's records (nl:api:idem:<sid>:<sha(key)>): an index can never delete another store's or anything else.
+  const mine = `nl:api:idem:${sid}:`;
+  const ours = members.filter((m) => m.startsWith(mine) && /^[0-9a-f]{64}$/.test(m.slice(mine.length)));
   // More than the most a plan allows would mean a figure grew: refused out loud, never cut short in silence.
   if (ours.length > MAX_PERSON_RECORDS) throw new Error("a person has more kept API answers than any plan allows");
   let gone = 0;

@@ -271,7 +271,7 @@ async function main(): Promise<void> {
   chatAnswers = 200;
   is("one that took a first message is kept", [await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK), await chatSetup(store.statsId), await chatAddress(store.statsId)], ["saved", "slack", SLACK]);
   const [kept] = await redisPipeline([["GET", `nl:chatsum:${store.statsId}`]]);
-  is("sealed, never as given", [typeof kept, String(kept).includes("hooks.slack.com")], ["string", false]);
+  is("sealed, never as given", [typeof kept, String(kept).includes("services/T0000/B0000/abcdefghijklmnop")], ["string", false]);
   is("Slack's marks escaped, so a name cannot ping a channel", chatBody("slack", "<!channel> & co"), { text: "&lt;!channel&gt; &amp; co" });
   is("Discord pings nobody and stays under its length", [chatBody("discord", "@everyone").allowed_mentions, String(chatBody("discord", "x".repeat(3000)).content).length], [{ parse: [] }, 1986]);
   is("the email's lines about stopping it are not posted", forChat("Sales: 3\n\nYou get this every Monday while your store has visitors. To stop it: https://x"), "Sales: 3");

@@ -26,7 +26,7 @@ const call = async (handler: (r: Request) => Promise<Response>, key: string, bod
   const response = await handler(new Request("https://marktmorgen.com/api/v1/x", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": idem }, body: JSON.stringify(body) }));
   return { status: response.status, replayed: response.headers.get("Idempotent-Replayed") };
 };
-const record = (sid: string, key: string) => `nl:api:idem:${createHash("sha256").update(`${sid}\n${key}`).digest("hex")}`;
+const record = (sid: string, key: string) => `nl:api:idem:${sid}:${createHash("sha256").update(key).digest("hex")}`;
 const has = (key: string) => redis.keys().includes(key);
 
 async function shop(owner: string, handle: string) {

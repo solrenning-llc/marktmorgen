@@ -123,6 +123,8 @@ function main(): void {
   part("A fee on a payout, a transfer or a top-up is never dropped (Claude 6 on #3632)");
   const instant = txn({ type: "payout", reporting_category: "payout", amount: -4800, details: [{ amount: 72, type: "stripe_fee" }] });
   is("the payout's fee is a Stripe fee on the account", saleFees([sale("ch_p", 10000, 320), instant], { complete: true }).available ? (saleFees([sale("ch_p", 10000, 320), instant], { complete: true }) as { accountFees: unknown }).accountFees : null, [{ currency: "usd", taxFees: 0, stripeFees: -72 }]);
+  const taxed = txn({ type: "payout", reporting_category: "payout", amount: -4800, details: [{ amount: 60, type: "stripe_fee" }, { amount: 12, type: "tax" }] });
+  is("the tax inside a payout's fee is a tax fee, the rest a Stripe fee (Claude 1 on #3632, LEVE)", (saleFees([taxed], { complete: true }) as { accountFees: unknown }).accountFees, [{ currency: "usd", taxFees: -12, stripeFees: -60 }]);
   is("a payout with no fee is still left out", saleFees([txn({ type: "payout", reporting_category: "payout", amount: -4800 })], { complete: true }), { available: true, rows: [], accountFees: [] });
 
   part("Sums past what a number holds exactly are unavailable, never rounded (Codex Cloud 1 on #3637)");

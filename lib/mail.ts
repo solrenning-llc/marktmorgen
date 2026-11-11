@@ -14,7 +14,7 @@
  * has a published number of emails, counted before each batch goes out.
  */
 import { bodyHtml, bodyText } from "@/lib/mail-body";
-import { lookColours } from "@/lib/store-look";
+import { emailTheme } from "@/lib/email-theme";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -479,14 +479,22 @@ export function render(
   // Said only in a sequence's email to somebody who allowed it, with the way to stop it.
   const counting = Boolean(readerKey && token && !door && tag?.medium === "sequence");
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
+  // The store's own look, every color checked to read at 7:1 (lib/email-theme.ts, 369 [SU2]); the text version does not change.
+  // The store's name in words, never its photo: no picture of this site in the header (lib/email-theme.ts).
+  const t = emailTheme(store.look, { name: store.name ?? fromName });
+  const top = `<p style="margin:0;font-family:${t.headFont};font-size:18px;font-weight:700;line-height:1.3">${escape(t.name)}</p>`;
+  const header = t.band
+    ? `<div style="background:${t.band.fill};color:${t.band.ink};border-radius:16px;padding:16px 24px;margin:0 0 12px">${top}</div>`
+    : `<div style="color:${t.text};padding:0 4px 16px">${top}</div>`;
   // The subject as the document's title and the character set said, for an app or browser that opens the HTML on its own.
-  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title></head><body style="margin:0;padding:0;background:#f7f5f0">
-<div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
-<div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined)}</div>
-<div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
+  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title><meta name="color-scheme" content="${t.scheme}"><meta name="supported-color-schemes" content="${t.scheme}"></head><body style="margin:0;padding:0;background:${t.page}">
+<div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:${t.bodyFont};font-size:16px;line-height:1.6;color:${t.text};background:${t.page}">
+${header}
+<div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, t.button.fill, t)}</div>
+<div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:${t.muted}">
 <p style="margin:0 0 8px">${escape(why)}</p>
-<p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:#57534e;text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
-${counting ? `<p style="margin:0 0 8px">${escape(a.clicksOn(fromName))} <a href="${escape(stopCounting)}" style="color:#57534e;text-decoration:underline">${escape(a.clicksStop)}</a></p>` : ""}
+<p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:${t.muted};text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
+${counting ? `<p style="margin:0 0 8px">${escape(a.clicksOn(fromName))} <a href="${escape(stopCounting)}" style="color:${t.muted};text-decoration:underline">${escape(a.clicksStop)}</a></p>` : ""}
 ${address ? `<p style="margin:0 0 8px">${escape(fromName)} · ${escape(address)}</p>` : ""}
 <p style="margin:0">${escape(sent)}</p>
 </div></div></body></html>`;

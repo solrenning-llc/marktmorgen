@@ -35,7 +35,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { type BatchMessage, sendBatch } from "@/lib/email";
+import { type BatchMessage, type BatchReceipt, sendBatchNoting } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -446,9 +446,11 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           });
           messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
+        const receipt: BatchReceipt = { maybeSent: false };
+        const outcome = await sendBatchNoting(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" }, receipt);
         if (outcome !== "sent") {
-          await release(store, recipients.length);
+          // Given back only when no provider can have taken any of it (lib/email.ts sendBatchNoting).
+          if (!receipt.maybeSent) await release(store, recipients.length);
           const failures = job.failures + 1;
           job =
             failures >= 5 || outcome === "refused"

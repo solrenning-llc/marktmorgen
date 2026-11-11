@@ -547,6 +547,31 @@ export async function sendBatch(
   return result === "waiting" ? "retry" : result;
 }
 
+/**
+ * Whether any provider may have taken any of a batch: Amazon SES took some of it or lost a reply, or Resend took
+ * it or its answer was lost (a timeout, a 5xx). False only when no provider can have taken any of it: nothing
+ * reached a provider, or the one reached refused it all in so many words.
+ */
+export type BatchReceipt = { maybeSent: boolean };
+
+/**
+ * sendBatch, with its receipt written into `receipt`, for a caller that reserved the store's emails (or the
+ * company's day) before sending and gives back what it took for a batch that did not go. "retry" and "refused"
+ * do not say that nothing went: a reply lost after the provider took the batch is "retry", and Resend refusing
+ * what Amazon left can follow Amazon taking part of it. Give back only while `receipt.maybeSent` is false; what
+ * a provider may have taken stays counted (owner rule MR; lib/mail.ts sendTo keeps it the same way).
+ */
+export async function sendBatchNoting(
+  messages: BatchMessage[],
+  batchKey: string,
+  meter: EmailMeter,
+  receipt: BatchReceipt,
+  runtime: ResendTransportRuntime = {},
+): Promise<"sent" | "retry" | "refused"> {
+  const result = await dispatchBatch(messages, batchKey, meter, undefined, false, runtime, receipt);
+  return result === "waiting" ? "retry" : result;
+}
+
 /** List mail waits for SES; a known no-send result is distinct from unknown acceptance. */
 export async function sendListBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
@@ -558,6 +583,7 @@ export async function sendListBatch(
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
+  receipt: BatchReceipt = { maybeSent: false },
 ): Promise<"sent" | "waiting" | "retry" | "refused"> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
@@ -639,6 +665,8 @@ async function dispatchBatch(
         batchKey,
       );
       await countSesSent(result.taken.length);
+      // Taken by Amazon, or a reply lost after it may have taken one: whatever this batch answers now, it may have gone.
+      if (result.taken.length > 0 || result.uncertain === true) receipt.maybeSent = true;
       if (result.down) {
         await sesDown(result.down);
         await tellAmazonIsDown(result.down);
@@ -703,6 +731,9 @@ async function dispatchBatch(
         };
       })),
     }, runtime);
+    // Only a refusal Resend answered and the guard settled as not accepted, or no POST at all ("blocked"), is known
+    // not to have gone; an accepted answer, or an unknown one, may have.
+    if (result.kind === "unknown" || result.kind === "accepted_receipt" || (result.kind === "response" && result.response.ok)) receipt.maybeSent = true;
     return result.kind === "accepted_receipt" ? "accepted_receipt" : result.kind === "response" ? result.response : null;
   };
   try {
@@ -737,6 +768,8 @@ async function dispatchBatch(
     console.error("batch rejected", response.status);
     return response.status === 429 || response.status >= 500 ? "retry" : "refused";
   } catch (error) {
+    // Thrown on the way to or back from Resend: it may have taken the batch.
+    receipt.maybeSent = true;
     console.error("batch failed", error);
     return "retry";
   }

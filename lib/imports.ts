@@ -84,7 +84,7 @@ import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
-import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
+import { type BatchReceipt, NIMBUS_FROM, isSenderConfigured, sendBatchNoting } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
@@ -1597,12 +1597,17 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "more";
   }
-  const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
+  const receipt: BatchReceipt = { maybeSent: false };
+  const sent = await sendBatchNoting(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" }, receipt);
   if (sent === "retry") {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
-    if (held) held.n += sending.length;
-    else await releaseMoved(store, sending.length);
-    await releaseDay(sending.length);
+    // Given back only when no provider can have taken any of it (lib/email.ts sendBatchNoting): a batch it may
+    // have taken stays counted, and the next try takes its own.
+    if (!receipt.maybeSent) {
+      if (held) held.n += sending.length;
+      else await releaseMoved(store, sending.length);
+      await releaseDay(sending.length);
+    }
     await unsent(portion);
     return "retry";
   }
@@ -1882,7 +1887,8 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         if (opens && opens < invite.r * 1000) await remindLater(sid, field, opens - 3_600_000);
         continue;
       }
-      const sent = await sendBatch(
+      const receipt: BatchReceipt = { maybeSent: false };
+      const sent = await sendBatchNoting(
         [
           {
             from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
@@ -1894,14 +1900,17 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             tags: healthTags(store, false),
           },
         ],
-        `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" },
+        `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" }, receipt,
       );
       if (sent === "sent") {
         await noteSent(sid, 1);
         counts.sent += 1;
       } else if (sent === "retry") {
-        await releaseMoved(store, 1);
-        await releaseDay(1);
+        // Given back only when no provider can have taken it (lib/email.ts sendBatchNoting).
+        if (!receipt.maybeSent) {
+          await releaseMoved(store, 1);
+          await releaseDay(1);
+        }
         await remindLater(sid, field, now);
       }
     } catch (error) {

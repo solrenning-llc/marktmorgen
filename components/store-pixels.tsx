@@ -493,7 +493,15 @@ export function StorePixels({
     // first, and the form goes on its way a moment later, exactly as pressed.
     const onSubmit = (e: SubmitEvent) => {
       const form = e.target instanceof HTMLFormElement ? e.target : null;
-      if (!form || !form.hasAttribute("data-checkout") || form.dataset.sent === "1") return;
+      if (!form || !form.hasAttribute("data-checkout")) return;
+      // Our own delayed submit, below: it goes.
+      if (form.dataset.going === "1") return;
+      // Pressed again while the first press is on its way: held, so one press is one checkout, never two Stripe
+      // sessions or a second hold on a limited product or a booked time.
+      if (form.dataset.sent === "1") {
+        e.preventDefault();
+        return;
+      }
       if (typeof form.requestSubmit !== "function") {
         track(w, pixels, { type: "checkout" }, restricted);
         return;
@@ -503,7 +511,12 @@ export function StorePixels({
       track(w, pixels, { type: "checkout" }, restricted);
       const submitter = e.submitter instanceof HTMLElement ? e.submitter : undefined;
       window.setTimeout(() => {
-        form.requestSubmit(submitter as HTMLButtonElement | undefined);
+        form.dataset.going = "1";
+        try {
+          form.requestSubmit(submitter as HTMLButtonElement | undefined);
+        } finally {
+          delete form.dataset.going;
+        }
         // Coming back to this page, the button works again.
         window.setTimeout(() => delete form.dataset.sent, 1000);
       }, 300);

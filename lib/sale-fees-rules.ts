@@ -146,7 +146,8 @@ export function readFeeLine(raw: unknown): FeeLine | "other" | null {
   } else if (NO_SALE_TYPES.has(type)) {
     // No sale money; a fee Stripe charged on it (an Instant Payout's) is a Stripe fee on the account, never dropped.
     if (fee === 0) return "other";
-    return { id, kind: "stripe_fee", sale: null, at: created, currency, amount: -fee, stripeFee: 0, feeTax: 0, applicationFee: 0, otherFee: 0, net: -fee };
+    // The tax inside that fee is kept with it (feeTax), so the account's fees book it as a tax fee (Claude 1 on #3632).
+    return { id, kind: "stripe_fee", sale: null, at: created, currency, amount: -fee, stripeFee: 0, feeTax, applicationFee: 0, otherFee: 0, net: -fee };
   } else {
     return null;
   }
@@ -211,7 +212,11 @@ export function saleFees(raws: readonly unknown[], reading: { complete: boolean 
     if (line.sale === null) {
       const fees = account.get(line.currency) ?? { currency: line.currency, taxFees: 0, stripeFees: 0 };
       if (line.kind === "tax_fee") fees.taxFees = add(fees.taxFees, line.net);
-      else fees.stripeFees = add(fees.stripeFees, line.net);
+      else {
+        // A Stripe fee on the account with tax inside it (a payout's): the tax part is a tax fee, the rest a Stripe fee.
+        fees.taxFees = add(fees.taxFees, -line.feeTax);
+        fees.stripeFees = add(fees.stripeFees, line.net + line.feeTax);
+      }
       account.set(line.currency, fees);
       continue;
     }

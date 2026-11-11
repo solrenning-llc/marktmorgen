@@ -213,6 +213,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/paypal/disconnect": row("money", never(MONEY)),
   "GET store/paypal/onboarded": row("money", never(BROWSER)),
   "POST store/person": row("buyers", execute, "Erasing a person cannot be undone: confirmed one person at a time, never in a batch."),
+  "POST store/person-refund": row("money", never(MONEY)),
   "POST store/phone": row("settings", never(BROWSER)),
   "POST store/photo": row("pages", draft),
   "POST store/pixels": row("settings", draft),
@@ -275,7 +276,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
 };
 
 /** Route prefixes where every action is money, so every row under them must be "never". */
-export const MONEY_PREFIXES = ["billing/", "stripe/", "store/paypal/", "store/closing-refunds", "store/affiliates/paypal", "store/affiliates/payout-batch"] as const;
+export const MONEY_PREFIXES = ["billing/", "stripe/", "store/paypal/", "store/closing-refunds", "store/affiliates/paypal", "store/affiliates/payout-batch", "store/person-refund"] as const;
 
 /** How many studio actions each kind of reach has: the measure of 631 (a). */
 export function coverageCounts(table: Readonly<Record<string, AgentAction>> = AGENT_COVERAGE): Record<AgentReach["kind"], number> {

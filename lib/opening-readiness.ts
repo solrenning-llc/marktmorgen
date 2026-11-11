@@ -15,12 +15,12 @@
  * never a certification of margin, tax or legal compliance.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { commercialPlansMayOpen, CURRENT_COMMERCIAL_MARGIN_REVIEW } from "@/lib/commercial-margin";
+import { commercialMarginDataReady, commercialPlansMayOpen, commercialReviewData, CURRENT_COMMERCIAL_MARGIN_REVIEW, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, type CommercialMarginReview } from "@/lib/commercial-margin";
 import { taxGateValid } from "@/lib/tax-gate";
 import { deemedSupplierProblems, deemedSupplierReady } from "@/lib/deemed-supplier";
 import { stripePlatformEligibilityReady } from "@/lib/stripe-platform-eligibility";
-import { CONTRACT_ADMISSION_COVERAGE, CORE_CONTRACT_ADMISSION_KEYS, CURRENT_CONTRACT_FUNDING_POLICY, contractLifecycleReady } from "@/lib/contract-funding-rules";
-import { CURRENT_EXPOSURE_BUDGET_POLICY } from "@/lib/exposure-budget-policy";
+import { CONTRACT_ADMISSION_COVERAGE, CORE_CONTRACT_ADMISSION_KEYS, CURRENT_CONTRACT_FUNDING_POLICY, type ContractFundingPolicy, contractFundingConfiguration, contractLifecycleReady } from "@/lib/contract-funding-rules";
+import { CURRENT_EXPOSURE_BUDGET_POLICY, type ExposureBudgetPolicy, exposureBudgetConfiguration } from "@/lib/exposure-budget-policy";
 import { COMMISSION_LIVE, COMMISSION_PLANS_PUBLISHED } from "@/lib/plan";
 import { SHARE_PROVED_IN_TEST_MODE } from "@/lib/platform-share";
 
@@ -79,14 +79,57 @@ export const OPENING_GATES = Object.freeze([
   ready: () => boolean;
 }[]);
 
-/** The parts commercialPlansMayOpen needs together. "Recorded" is necessary, not sufficient. */
+/** The records the commercial review reads; the current ones unless a test passes synthetic ones. */
+export type CommercialRecords = Readonly<{ review: CommercialMarginReview | null; exposure: ExposureBudgetPolicy | null; contract: ContractFundingPolicy | null }>;
+const CURRENT_RECORDS: CommercialRecords = { review: CURRENT_COMMERCIAL_MARGIN_REVIEW, exposure: CURRENT_EXPOSURE_BUDGET_POLICY, contract: CURRENT_CONTRACT_FUNDING_POLICY };
+
+/**
+ * The parts commercialPlansMayOpen needs together, each ready only by the
+ * gate's own check, in the same expressions (lib/commercial-margin.ts): a
+ * record that exists but is stale, unfunded or incomplete is "recorded" and
+ * not ready, never reported as satisfied (reviews of #3665). So the review is
+ * ready exactly when every part is, and a false gate always shows a false part.
+ */
 export const COMMERCIAL_REVIEW_PARTS = Object.freeze([
-  { id: "commission", needs: "No commission plan published, or the platform share live and proved in test mode.", ready: () => !COMMISSION_PLANS_PUBLISHED || (COMMISSION_LIVE && SHARE_PROVED_IN_TEST_MODE) },
-  { id: "contractLifecycle", needs: "Every core key of CONTRACT_ADMISSION_COVERAGE true (lib/contract-funding-rules.ts).", ready: () => contractLifecycleReady() },
-  { id: "exposureBudget", needs: "CURRENT_EXPOSURE_BUDGET_POLICY recorded from a reviewed, dated budget (lib/exposure-budget-policy.ts).", ready: () => CURRENT_EXPOSURE_BUDGET_POLICY !== null },
-  { id: "contractFunding", needs: "CURRENT_CONTRACT_FUNDING_POLICY recorded from reviewed reserves and funded grants (lib/contract-funding-rules.ts).", ready: () => CURRENT_CONTRACT_FUNDING_POLICY !== null },
-  { id: "marginReview", needs: "CURRENT_COMMERCIAL_MARGIN_REVIEW recorded from proven per-customer worst cases (lib/commercial-margin.ts).", ready: () => CURRENT_COMMERCIAL_MARGIN_REVIEW !== null },
+  { id: "commission", needs: "No commission plan published, or the platform share live and proved in test mode.", recorded: undefined, ready: () => !COMMISSION_PLANS_PUBLISHED || (COMMISSION_LIVE && SHARE_PROVED_IN_TEST_MODE) },
+  { id: "contractLifecycle", needs: "Every core key of CONTRACT_ADMISSION_COVERAGE true (lib/contract-funding-rules.ts).", recorded: undefined, ready: () => contractLifecycleReady() },
+  {
+    id: "exposureBudget",
+    needs: "CURRENT_EXPOSURE_BUDGET_POLICY recorded from a reviewed, dated budget and accepted by exposureBudgetConfiguration against the current price and rights snapshot (lib/exposure-budget-policy.ts).",
+    recorded: (r: CommercialRecords) => r.exposure !== null,
+    ready: (r: CommercialRecords) => {
+      const review = commercialReviewData(r.review);
+      return review !== null && exposureBudgetConfiguration(r.exposure, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review: review.fundedExposure }) !== null;
+    },
+  },
+  {
+    id: "contractFunding",
+    needs: "CURRENT_CONTRACT_FUNDING_POLICY recorded from reviewed reserves and funded grants and accepted by contractFundingConfiguration against the current price and rights snapshot (lib/contract-funding-rules.ts).",
+    recorded: (r: CommercialRecords) => r.contract !== null,
+    ready: (r: CommercialRecords) => {
+      const review = commercialReviewData(r.review);
+      return review !== null && contractFundingConfiguration(r.contract, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review }) !== null;
+    },
+  },
+  {
+    id: "marginReview",
+    needs: "CURRENT_COMMERCIAL_MARGIN_REVIEW recorded from proven per-customer worst cases, on the current price and rights snapshot, with every required scenario approved (lib/commercial-margin.ts).",
+    recorded: (r: CommercialRecords) => r.review !== null,
+    ready: (r: CommercialRecords) => {
+      const review = commercialReviewData(r.review);
+      return review !== null && commercialMarginDataReady(review);
+    },
+  },
 ] as const);
+
+/** Each part of the commercial review with its state; `recorded` only for the three parts that are records. */
+export function commercialReviewParts(records: CommercialRecords = CURRENT_RECORDS): readonly Readonly<{ id: (typeof COMMERCIAL_REVIEW_PARTS)[number]["id"]; ready: boolean; recorded?: boolean; needs: string }>[] {
+  return Object.freeze(
+    COMMERCIAL_REVIEW_PARTS.map((row) =>
+      Object.freeze({ id: row.id, ready: row.ready(records), ...(row.recorded === undefined ? {} : { recorded: row.recorded(records) }), needs: row.needs }),
+    ),
+  );
+}
 
 /**
  * Every condition of opening with its state today. The owner's request is
@@ -109,12 +152,12 @@ export function openingReadiness(): readonly OpeningCondition[] {
 
 /** The reasons behind the two gates with more than one part. */
 export function openingReadinessDetails(): Readonly<{
-  commercialReview: readonly Readonly<{ id: (typeof COMMERCIAL_REVIEW_PARTS)[number]["id"]; ready: boolean; needs: string }>[];
+  commercialReview: ReturnType<typeof commercialReviewParts>;
   missingCoreCoverage: readonly string[];
   deemedSupplierProblems: readonly string[];
 }> {
   return Object.freeze({
-    commercialReview: Object.freeze(COMMERCIAL_REVIEW_PARTS.map((row) => Object.freeze({ id: row.id, ready: row.ready(), needs: row.needs }))),
+    commercialReview: commercialReviewParts(),
     missingCoreCoverage: Object.freeze(CORE_CONTRACT_ADMISSION_KEYS.filter((key) => CONTRACT_ADMISSION_COVERAGE[key] !== true)),
     deemedSupplierProblems: Object.freeze(deemedSupplierProblems()),
   });

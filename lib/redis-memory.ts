@@ -1515,7 +1515,11 @@ export class MemoryRedis {
         // passes for the wrong reason.
         const at = flags.indexOf("EX");
         const seconds = at >= 0 ? Number(flags[at + 1]) : NaN;
+        // PX gives the time in milliseconds, as Redis takes it (lib/store.ts carries a mark with the time it had left).
+        const atMs = flags.indexOf("PX");
+        const ms = atMs >= 0 ? Number(flags[atMs + 1]) : NaN;
         if (Number.isFinite(seconds)) this.until.set(key, this.now() + seconds * 1000);
+        else if (Number.isFinite(ms)) this.until.set(key, this.now() + ms);
         else this.until.delete(key);
         return "OK";
       }

@@ -2181,6 +2181,11 @@ const CLOSING_HELD_LINE = "nl:closing:held";
  */
 const breakKey = (ref: string) => `nl:pause:${ref}`;
 const BREAK_LINE = "nl:pause:due";
+/**
+ * The once-a-year mark of a break taken, by value: lastKey in lib/plan-pause.ts. pausePlan refuses another break while
+ * it lasts; it is kept under the store's ref, its owner's address, so a move carries it (tests/closing-moved-owner.test.ts).
+ */
+const breakYearKey = (ref: string) => `nl:pause:last:${ref}`;
 
 /** EXISTS as Redis answers it for one key: 0 or 1 (a string of one over REST). */
 const existsReply = (reply: unknown): 0 | 1 | null =>
@@ -2218,6 +2223,21 @@ async function closingUnderway(store: Store): Promise<boolean> {
   const record = kept ? existsReply(kept[0]) : null;
   if (!kept || record === null || !isScore(kept[1])) throw new UnknownReplyError("a store's break (EXISTS, ZSCORE)");
   return record === 1 || kept[1] !== null;
+}
+
+/**
+ * A store's once-a-year break mark and the milliseconds it has left, read exactly (rule 24): null when there is none
+ * (GET nil and PTTL -2), the time stored with its milliseconds left (null for a mark with no end), or UnknownReplyError
+ * for any other answer, so a mark that does not read is never "no break taken" and the move does not go through.
+ */
+async function breakYearAt(ref: string): Promise<{ value: string; leftMs: number | null } | null> {
+  const replies = repliesFor(await redisPipeline([["GET", breakYearKey(ref)], ["PTTL", breakYearKey(ref)]]), 2);
+  const value = replies?.[0];
+  const ttl = replies?.[1];
+  const ms = typeof ttl === "number" && Number.isSafeInteger(ttl) ? ttl : typeof ttl === "string" && /^-?\d{1,15}$/.test(ttl) ? Number(ttl) : NaN;
+  if (value === null && ms === -2) return null;
+  if (typeof value === "string" && /^\d{1,12}$/.test(value) && (ms > 0 || ms === -1)) return { value, leftMs: ms === -1 ? null : ms };
+  throw new UnknownReplyError("a store's once-a-year break mark (GET, PTTL)");
 }
 
 /**
@@ -2289,6 +2309,8 @@ export async function moveAccount(
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
     // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
+    // Its once-a-year break mark goes with it (breakYearAt): left behind, the store had a fresh year at the new address.
+    const breakYear = await breakYearAt(from);
     // The address it is moving to must not already own a store of its own.
     const [existing, theirs] = await redisPipeline([
       ["GET", await ownerKey(to)],
@@ -2339,6 +2361,8 @@ export async function moveAccount(
         ...handles.map((handle) => ["SET", handleKey(handle), to]),
         ...(store.sid ? [["SET", storeIdKey(store.sid), to]] : []),
         ...(moved.length ? [["SADD", await accountKey(to), ...moved.map((one) => one.before.sid)]] : []),
+        // The mark keeps its own end: written at the new address with the time it had left, then taken off the old one.
+        ...(breakYear ? [["SET", breakYearKey(to), breakYear.value, ...(breakYear.leftMs === null ? [] : ["PX", breakYear.leftMs])], ["DEL", breakYearKey(from)]] : []),
         ["DEL", await accountKey(from)],
         ["DEL", await ownerKey(from)],
       ]);

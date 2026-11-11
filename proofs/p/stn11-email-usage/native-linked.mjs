@@ -1,5 +1,5 @@
 import { registerHooks, stripTypeScriptTypes, syncBuiltinESMExports, createRequire, isBuiltin } from 'node:module';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import net from 'node:net';
@@ -34,7 +34,8 @@ registerHooks({
  },
  load(url,context,next){
   if(!url.endsWith('.ts'))return next(url,context);
-  const path=fileURLToPath(url);cap('sourceBytes',statSync(path).size,16777216);let source=readFileSync(path,'utf8');
+  // One descriptor for both the size ceiling and the read: the checked file is the file read.
+  const path=fileURLToPath(url);const fd=openSync(path,'r');let source;try{cap('sourceBytes',fstatSync(fd).size,16777216);source=readFileSync(fd,'utf8');}finally{closeSync(fd);}
   if(path===resolve(root,'lib/redis-memory.ts'))source+=`\nconst __pRun=MemoryRedis.prototype.run;MemoryRedis.prototype.run=function(...a){const m=globalThis.__P_STN_METRICS;if(++m.run>20000){m.capped=true;throw Error('P nested Redis ceiling');}return __pRun.apply(this,a);};const __pPipe=MemoryRedis.prototype.pipeline;MemoryRedis.prototype.pipeline=function(c){const m=globalThis.__P_STN_METRICS;m.pipeline+=c.length;if(m.pipeline>20000){m.capped=true;throw Error('P pipeline ceiling');}return __pPipe.call(this,c);};`;
   return {format:'module',source:stripTypeScriptTypes(source,{mode:'transform',sourceMap:false}),shortCircuit:true};
  }

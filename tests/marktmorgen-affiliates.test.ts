@@ -38,6 +38,15 @@ for (const row of rows) {
 }
 is("a plan whose net is not positive without a commission gets none", rows.every((row) => (row.netWithoutCommissionCents >= POSITIVE_NET_CENTS) === (row.maxCommissionBps !== null)), true);
 
+part("What the record shows is what the net takes (review of #3756)");
+const shown = renderMarktmorgenAffiliates();
+const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+for (const row of rows) {
+  if (row.maxCommissionBps === null) continue;
+  is(`${row.id}: the commission shown is the one rounded up that the net pays`, shown.includes(`${usd(Math.ceil((row.priceCents * row.maxCommissionBps) / 10_000))} |`), true);
+}
+is("a dispute after the commission was paid is named as a cost not yet covered (review of #3756)", /dispute[^.]*after[^.]*paid[^.]*unknown|unknown[^.]*dispute[^.]*after[^.]*paid/i.test(shown), true);
+
 part("Nothing is in force");
 is("plans are not on sale", PLANS_ON_SALE, false);
 const doc = renderMarktmorgenAffiliates();

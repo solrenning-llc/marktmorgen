@@ -14,6 +14,8 @@
  * and is dropped once none can be); a record not read leaves the entry waiting. Synthetic data, in-memory Redis.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { BATCH_KEY, WALK_KEY, eraseClosed } from "@/lib/closed-store-data";
 import { CLOSING, closingFamilyOf } from "@/lib/data-families";
@@ -36,7 +38,14 @@ let garble: ((command: (string | number)[]) => unknown[] | undefined) | undefine
 let after: { when: (command: (string | number)[]) => boolean; run: () => Promise<void> } | undefined;
 // The same for a whole pipeline of several commands.
 let garbleMany: ((commands: (string | number)[][]) => unknown[] | undefined) | undefined;
+// The command runs and lands, but its reply is replaced: a write that happened, answered in an unknown shape.
+let landGarbled: ((command: (string | number)[]) => unknown[] | undefined) | undefined;
 redis.pipeline = async (commands: (string | number)[][]) => {
+  const landed = commands.length === 1 && landGarbled ? landGarbled(commands[0]) : undefined;
+  if (landed) {
+    await pipe(commands);
+    return landed;
+  }
   const swapped = commands.length === 1 && garble ? garble(commands[0]) : commands.length > 1 && garbleMany ? garbleMany(commands) : undefined;
   const reply = swapped ?? (await pipe(commands));
   const hook = after;
@@ -91,6 +100,19 @@ async function deleteFromStudio(owner: string, store: Store): Promise<string> {
 }
 
 const inBatch = async (ref: string) => (await pipe([["HGET", BATCH_KEY, ref]]))[0];
+/** An address's key as it stands: what it holds and how long it has left (ms; -1 for no expiry, -2 for no key). */
+const handleHold = async (handle: string) => {
+  const [value, ttl] = await pipe([["GET", `nl:store:handle:${handle}`], ["PTTL", `nl:store:handle:${handle}`]]);
+  return { released: typeof value === "string" && value.startsWith("released:"), expires: typeof ttl === "number" && ttl > 0 };
+};
+/** Whether a store's id is still counted among any account's stores (MAX_STORES_PER_ACCOUNT reads that set). */
+const stillCounted = async (sid: string) => {
+  for (const key of (await allKeys()).filter((name) => name.startsWith("nl:account:stores:"))) {
+    const [members] = await pipe([["SMEMBERS", key]]);
+    if (Array.isArray(members) && members.includes(sid)) return true;
+  }
+  return false;
+};
 const deadline = () => Date.now() + 20_000;
 
 async function main(): Promise<void> {
@@ -214,6 +236,45 @@ async function main(): Promise<void> {
   is("its API key no longer answers, its lookup gone", [await resolveKey(apiKey.key), (await allKeys()).filter((key) => key.startsWith("nl:api:k:"))], [null, []]);
   await eraseClosed(deadline(), finishClosed, Date.now());
   is("after the walk, every key named by its ids is gone and no API key lookup is left", [await erasableBy(idsOf(halfStore)), (await allKeys()).filter((key) => key.startsWith("nl:api:")), await inBatch(halfRef)], [[], [], null]);
+  // Claude 6's LOW 1 on #3670 at 11f13525e5: the holds and removals not confirmed at the delete were never tried again.
+  is("after the walk, its address is held back for its 30 days, never held for good", await handleHold("keepshalf"), { released: true, expires: true });
+  is("after the walk, it no longer counts among its owner's stores", await stillCounted(halfStore.sid), false);
+
+  part("the record's delete landed but answered in an unknown shape, and the read after it failed too: the walk still forgets what reaches the store (Claude 6's Q6 and reviewer C3 on #3670)");
+  redis.clear();
+  await claimHandle(OWNER, "keepshome", "Keeps Home", "");
+  const twice = await createStore(OWNER, "keepstwice", "Keeps Twice", "");
+  if (!twice.ok) throw new Error("no twice store");
+  const twiceStore = await furnished(storeRef(twice.store));
+  const twiceRef = storeRef(twiceStore);
+  const twiceKey = await makeKey(twiceStore.sid, "Synthetic key");
+  if (!twiceKey.ok) throw new Error("no key");
+  is("before: its API key answers for it", (await resolveKey(twiceKey.key))?.sid, twiceStore.sid);
+  // The fenced delete of its record lands, but its reply is garbled; the exact read of the record right after answers
+  // a shape no GET answers.
+  landGarbled = (command) => {
+    if (!(command[0] === "EVAL" && /DEL/.test(String(command[1])) && String(command[3] ?? "").startsWith("nl:store:lock:") && String(command[4] ?? "").startsWith("nl:store:owner:"))) return undefined;
+    landGarbled = undefined;
+    garble = (read) => (read[0] === "GET" && String(read[1]).startsWith("nl:store:owner:") ? ["QUEUED"] : undefined);
+    return ["garbled"];
+  };
+  const twiceAnswer = await deleteFromStudio(OWNER, twiceStore);
+  landGarbled = undefined;
+  garble = undefined;
+  is("the studio says it went wrong, and its record is in fact gone", [twiceAnswer, await storeForEmail(twiceRef)], ["error", null]);
+  is("no forgetting ran at the delete: its API key still answers", (await resolveKey(twiceKey.key))?.sid, twiceStore.sid);
+  await eraseClosed(deadline(), finishClosed, Date.now());
+  is("after the walk, its API key no longer answers and no API key lookup is left", [await resolveKey(twiceKey.key), (await allKeys()).filter((key) => key.startsWith("nl:api:"))], [null, []]);
+  is("after the walk, every key named by its ids is gone and it left the line", [await erasableBy(idsOf(twiceStore)), await inBatch(twiceRef)], [[], null]);
+  is("after the walk, its address is held back for its 30 days and it no longer counts among its owner's stores", [await handleHold("keepstwice"), await stillCounted(twiceStore.sid)], [{ released: true, expires: true }, false]);
+
+  part("the studio's notice for a delete with a last step not confirmed claims only what is known (reviewer C3 on #3670, VR item 2)");
+  const studioPage = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
+  const partly = /\n  partly: \{\n    title: "([^"]*)",\n    body: "([^"]*)",/.exec(studioPage);
+  is("the notice is found", Boolean(partly), true);
+  // At that moment only the record is known gone: its other keys go with the next walk, and its addresses may not be held.
+  is("it never says the store's content is gone or erased", /content|gone|erased/i.test(partly?.[2] ?? "gone"), false);
+  is("it says the store was deleted and a last step was not confirmed", [/deleted/.test(partly?.[1] ?? ""), /not confirm/.test(`${partly?.[1]} ${partly?.[2]}`)], [true, true]);
 
   part("rule 24: a record not read at the walk leaves the entry waiting, never walked nor dropped");
   redis.clear();

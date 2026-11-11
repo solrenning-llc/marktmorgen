@@ -50,6 +50,18 @@ is(
   [["Email", "First name", "Tags"], ["Correo", "Nombre completo", "Opt-in status"], ["e_mail", "firstName", "opt_in"], ["Courriel", "Prénom"], ["E-Mail-Adresse", "Vorname"], ["Nome", "Telefone", "Cidade"], ["Email", ""]].map(clearHeader),
   [true, true, true, true, true, true, true],
 );
+// A cell is a label only when every word in it is one (Claude 3, cloud K, on #3555): one label word in a person's
+// name, or in a title, never lets a row of data go to the model.
+is(
+  "a row of data whose cells hold one label word each is not a header: nothing sent",
+  [["Grace Price", "Mary Page"], ["John Mobile", "Paid"], ["Ana Data", "Nome Sobrenome"], ["Email Marketing Course", "Status Report"]].map((row) => [clearHeader(row), mapRequest("contacts", row)]),
+  [[false, null], [false, null], [false, null], [false, null]],
+);
+is(
+  "labels joined by small words still read as labels",
+  ["Date of purchase", "Signed up at", "E-mail address", "Phone number", "Fecha de compra", "Data da compra", "Nom de famille"].map(labelLike),
+  [true, true, true, true, true, true, true],
+);
 is("nothing named at all: not a header", [clearHeader([]), clearHeader(["", " "])], [false, false]);
 is("label-like, one by one", ["Subscriber", "Opt-in status", "Order date", "Ana", "Fortaleza", "Column 2", "Address 2"].map(labelLike), [true, true, true, false, false, true, true]);
 is("what looks like data", ["a@b", "www.x.test", "12345678", "Order 123456", "Email", "Phone", "Zip 60"].map(looksLikeData), [true, true, true, true, false, false, false]);

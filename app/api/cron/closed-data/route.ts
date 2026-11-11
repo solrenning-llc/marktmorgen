@@ -23,8 +23,9 @@ async function run(request: NextRequest): Promise<Response> {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const [got] = await redisPipeline([["SET", "nl:closed:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  const lockReceipt = await redisPipeline([["SET", "nl:closed:lock", "1", "NX", "EX", 120]]);
+  if (Array.isArray(lockReceipt) && lockReceipt.length === 1 && lockReceipt[0] === null) return Response.json({ ok: true, busy: true });
+  if (!Array.isArray(lockReceipt) || lockReceipt.length !== 1 || lockReceipt[0] !== "OK") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   try {
     const report = await eraseClosed(Date.now() + 45_000, finishClosed);
     if (report.stores || report.finished || !report.done) console.log(`closed-data: ${report.stores} stores begun, ${report.pages} pages read, ${report.deleted} keys deleted, ${report.pruned} list members taken out, ${report.finished} stores done`);

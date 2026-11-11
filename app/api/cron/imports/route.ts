@@ -39,8 +39,9 @@ async function run(request: NextRequest): Promise<Response> {
   if (!isRedisConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:imports:lock", "1", "NX", "EX", 90]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  const lockReceipt = await redisPipeline([["SET", "nl:imports:lock", "1", "NX", "EX", 90]]);
+  if (Array.isArray(lockReceipt) && lockReceipt.length === 1 && lockReceipt[0] === null) return Response.json({ ok: true, busy: true });
+  if (!Array.isArray(lockReceipt) || lockReceipt.length !== 1 || lockReceipt[0] !== "OK") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   const started = Date.now();
   try {
     const counts = await advanceImports(started + 40_000);

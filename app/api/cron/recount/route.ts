@@ -23,8 +23,9 @@ async function run(request: NextRequest): Promise<Response> {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const [got] = await redisPipeline([["SET", "nl:recount:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  const lockReceipt = await redisPipeline([["SET", "nl:recount:lock", "1", "NX", "EX", 120]]);
+  if (Array.isArray(lockReceipt) && lockReceipt.length === 1 && lockReceipt[0] === null) return Response.json({ ok: true, busy: true });
+  if (!Array.isArray(lockReceipt) || lockReceipt.length !== 1 || lockReceipt[0] !== "OK") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   try {
     const report = await recountStep(Date.now() + 45_000);
     if (!report.done) console.log(`data-recount: ${report.phase}; ${report.stores} stores read, ${report.pages} pages, ${report.measured} keys measured, ${report.applied} rooms set`);

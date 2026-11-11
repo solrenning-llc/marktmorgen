@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 import TrustAndSafetyPage, { metadata } from "../app/help/trust-and-safety/page";
+import sitemap from "../app/sitemap";
 
 const pagePath = "app/help/trust-and-safety/page.tsx";
 const source = existsSync(pagePath) ? readFileSync(pagePath, "utf8") : "";
@@ -34,4 +35,10 @@ const destinations = links(page);
 for (const path of ["/report", "/copyright", "/terms", "/help/buyers"]) {
   is(`the actual page includes ${path}`, destinations.includes(path), true);
 }
+part("The public guide is discoverable");
+is(
+  "the sitemap includes the trust and safety guide",
+  sitemap().some((entry) => entry.url.endsWith("/help/trust-and-safety")),
+  true,
+);
 done();

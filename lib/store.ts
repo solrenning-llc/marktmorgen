@@ -3754,6 +3754,33 @@ export async function setReturningCodes(email: string, codes: ReturningCode[]): 
   return patchStore(email, () => ({ returningCodes: kept }));
 }
 
+/**
+ * Adds one code for people who already bought here, under the store's lock,
+ * so two adds can never pass the word check or the twenty at once. "ok" only
+ * once the record with it is saved; "unknown" when the store could not be read.
+ */
+export async function addReturningCode(email: string, entry: ReturningCode): Promise<"ok" | "taken" | "full" | "unknown"> {
+  const answer = await withStore(email, async (store, save) => {
+    if (store.returningCodes.some((kept) => kept.code === entry.code)) return "taken" as const;
+    if (store.returningCodes.length >= MAX_RETURNING_CODES) return "full" as const;
+    const next = parseReturningCodes([...store.returningCodes, entry]);
+    if (!next.some((kept) => kept.code === entry.code && kept.coupon === entry.coupon)) return "unknown" as const;
+    await save({ ...store, returningCodes: next });
+    return "ok" as const;
+  }).catch(() => null);
+  return answer ?? "unknown";
+}
+
+/** Takes one such code off the store, under its lock: true once the saved record no longer has it. */
+export async function removeReturningCode(email: string, word: string): Promise<boolean> {
+  const answer = await withStore(email, async (store, save) => {
+    if (!store.returningCodes.some((kept) => kept.code === word)) return false;
+    const saved = await save({ ...store, returningCodes: store.returningCodes.filter((kept) => kept.code !== word) });
+    return !saved.returningCodes.some((kept) => kept.code === word);
+  }).catch(() => null);
+  return answer === true;
+}
+
 export type ProductPartResult =
   | { ok: true; store: Store; product: Product }
   | { ok: false; reason: "none" | "unknown" };

@@ -1,14 +1,15 @@
 import type { NextRequest } from "next/server";
 import { setHasDiscounts, storeForEmail } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
-import { createCode, listCodes, stopCode } from "@/lib/discount";
+import { createCode, listCodes, readCode, stopCode } from "@/lib/discount";
+import { makeReturningCode, stopReturningCode } from "@/lib/returning-code-make";
 import { readCodeAsked } from "@/lib/discount-input";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio } from "@/lib/studio-route";
 import { SCHEDULE_UNITS, readWindow } from "@/lib/discount-schedule-rules";
 import { cancelSchedule, dropSchedule, readSchedules, scheduleCode } from "@/lib/discount-schedule";
 
-const ACTIONS = new Set(["list", "add", "stop", "schedule", "unschedule"]);
+const ACTIONS = new Set(["list", "add", "stop", "schedule", "unschedule", "addreturn", "stopreturn"]);
 
 /**
  * The creator's discount codes, which live on their own Stripe account.
@@ -52,6 +53,10 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      // One word, one code: never a word a code for returning buyers already has.
+      if (store.returningCodes.some((entry) => entry.code === read.asked.code)) {
+        return Response.json({ ok: false, error: "taken" }, { status: 409 });
+      }
       const { code, off, maxRedemptions, minimum } = read.asked;
 
       const made = await createCode(account, code, off, maxRedemptions, minimum);
@@ -67,6 +72,9 @@ export async function POST(request: NextRequest) {
       const read = readCodeAsked(body, store.currency);
       if (!read.ok) {
         return Response.json({ ok: false, error: "code", reason: read.reason }, { status: 400 });
+      }
+      if (store.returningCodes.some((entry) => entry.code === read.asked.code)) {
+        return Response.json({ ok: false, error: "taken" }, { status: 409 });
       }
       const now = Math.floor(Date.now() / 1000);
       const window = readWindow(body, now);
@@ -88,6 +96,23 @@ export async function POST(request: NextRequest) {
         }
         // "live": Stripe made it live at once and did not confirm it off; it is kept for the studio to list.
         return Response.json({ ok: false, error: made.reason }, { status: made.reason === "taken" ? 409 : 502 });
+      }
+    } else if (action === "addreturn") {
+      // A code only for people who already bought here (554 [DS1], unit 2;
+      // lib/returning-code-make.ts): the creator's coupon, never a promotion code.
+      const read = readCodeAsked(body, store.currency);
+      if (!read.ok) {
+        return Response.json({ ok: false, error: "code", reason: read.reason }, { status: 400 });
+      }
+      const made = await makeReturningCode(ref, store, read.asked);
+      if (!made.ok) {
+        return Response.json({ ok: false, error: made.reason }, { status: made.reason === "taken" ? 409 : made.reason === "stripe" ? 502 : 400 });
+      }
+    } else if (action === "stopreturn") {
+      const word = readCode(text(body.code, 40));
+      // Already gone is already stopped: the list below says so.
+      if (store.returningCodes.some((entry) => entry.code === word) && !(await stopReturningCode(ref, store, word))) {
+        return Response.json({ ok: false, error: "server_error" }, { status: 500 });
       }
     } else if (action === "unschedule") {
       const id = text(body.id, 80);
@@ -134,7 +159,14 @@ export async function POST(request: NextRequest) {
       list.codes.some((entry) => entry.active),
     );
 
-    return Response.json({ ok: true, codes: list.codes, schedules: kept.schedules, ...(cancelState ? { canceled: cancelState } : {}) });
+    return Response.json({
+      ok: true,
+      codes: list.codes,
+      schedules: kept.schedules,
+      // The codes for returning buyers, read again after any change; never their coupon ids.
+      returning: (await storeForEmail(ref))?.returningCodes.map(({ code, off, createdAt }) => ({ code, off, createdAt })),
+      ...(cancelState ? { canceled: cancelState } : {}),
+    });
   } catch (error) {
     console.error("changing a discount code failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

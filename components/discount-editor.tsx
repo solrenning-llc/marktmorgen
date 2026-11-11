@@ -13,7 +13,7 @@ import {
 import { type Currency, fieldPrefix } from "@/lib/money";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { readDiscountConfirmation } from "@/lib/discount-confirmation";
+import { type ReturningListed, readDiscountConfirmation, readReturningConfirmation } from "@/lib/discount-confirmation";
 import {
   SCHEDULE_PROBLEMS,
   STATE_LABELS,
@@ -30,6 +30,8 @@ const MESSAGES: Record<string, string> = {
   not_selling:
     "Codes come off a charge, so they need your Stripe account connected and your subscription running.",
   taken: "You already have a live code with that word. Pick another.",
+  full: "You have twenty codes for returning buyers, the most a store keeps. Switch one off to make another.",
+  minimum: "A code for returning buyers cannot have a minimum order. Leave the minimum empty.",
   stripe: "Stripe did not answer just now. Try again in a moment.",
   live: "Stripe made this code live right away, and we could not switch it off. Reload this page, then switch it off in your list of live codes.",
   signed_out: "Your session ended. Log in again.",
@@ -40,7 +42,7 @@ const MESSAGES: Record<string, string> = {
 /** What a cancel did, as the route says it: "done" (it never started) or "stopped" (it may have started; it is off now). */
 type Canceled = "done" | "stopped";
 
-type Answer = { codes?: DiscountCode[]; schedules?: ScheduleEntry[]; at?: number; canceled?: Canceled; problem?: string };
+type Answer = { codes?: DiscountCode[]; schedules?: ScheduleEntry[]; returning?: ReturningListed[]; at?: number; canceled?: Canceled; problem?: string };
 
 /** The cancel's own answer, read exactly; anything else is no answer. */
 const canceledOf = (data: unknown): Canceled | undefined => {
@@ -71,8 +73,10 @@ async function send(payload: Record<string, unknown>, currency: Currency): Promi
     if (codes !== null) {
       // The codes waiting for their start (511 [CK3]): read exactly, or the list is not confirmed.
       const schedules = readScheduleConfirmation(data);
+      // The codes for returning buyers (554 [DS1], unit 2): read exactly, or the list is not confirmed.
+      const returning = readReturningConfirmation(data);
       // The moment it was read, for the states it shows.
-      return schedules === null ? { problem: UNCONFIRMED } : { codes, schedules, at: Math.floor(Date.now() / 1000), canceled: canceledOf(data) };
+      return schedules === null || returning === null ? { problem: UNCONFIRMED } : { codes, schedules, returning, at: Math.floor(Date.now() / 1000), canceled: canceledOf(data) };
     }
     if (data && typeof data === "object" && Object.hasOwn(data,"ok") && (data as {ok?: unknown}).ok === false && Object.hasOwn(data,"error")) {
       const refusal = data as {error?: unknown;reason?: unknown};
@@ -152,6 +156,9 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
 
   const [codes, setCodes] = useState<DiscountCode[] | null>(null);
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
+  const [returning, setReturning] = useState<ReturningListed[]>([]);
+  // Unchecked: a code works for every buyer unless the creator chooses otherwise.
+  const [returningOnly, setReturningOnly] = useState(false);
   // The moment the list was read, for its states: read when Stripe answers, not while drawing.
   const [now, setNow] = useState(0);
   const [later, setLater] = useState(false);
@@ -180,6 +187,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     if (answer.codes) {
       setCodes(answer.codes);
       setSchedules(answer.schedules ?? []);
+      setReturning(answer.returning ?? []);
       setNow(answer.at ?? 0);
     } else setError(answer.problem ?? MESSAGES.server_error);
   }
@@ -195,6 +203,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     }
     setCodes(answer.codes);
     setSchedules(answer.schedules ?? []);
+    setReturning(answer.returning ?? []);
     setNow(answer.at ?? 0);
     done();
     toast(typeof confirmation === "string" ? confirmation : confirmation(answer));
@@ -364,6 +373,34 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
             </>
           ) : null}
 
+          {returning.length > 0 ? (
+            <>
+              <h3 className="mt-6 text-base font-semibold text-ink">For returning buyers only</h3>
+              <p className="mt-1 text-sm text-ink-soft">
+                A buyer types the code with the email of an earlier order from your store, on the product&apos;s page. We check that email has bought from you before, then the checkout opens with the code. Stripe&apos;s own code box does not take these codes.
+              </p>
+              <ul className="mt-3 space-y-3">
+                {returning.map((entry) => (
+                  <li key={entry.code} className="rounded-2xl border border-line bg-paper p-4">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <p className="font-mono text-lg font-semibold text-ink">{entry.code}</p>
+                      <p className="font-bold text-violet-deep">{offLabel(entry.off)}</p>
+                    </div>
+                    <p className="mt-1 text-sm text-ink-soft">{`Made ${momentLabel(entry.createdAt)}. Its uses are counted by Stripe on the coupon of the same name.`}</p>
+                    <button
+                      type="button"
+                      aria-busy={busy} disabled={busy}
+                      onClick={() => run({ action: "stopreturn", code: entry.code }, () => {}, `${entry.code} switched off.`)}
+                      className="mt-2 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:no-underline disabled:opacity-40"
+                    >
+                      Switch it off
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
           {adding ? (
             <form
               noValidate
@@ -372,14 +409,14 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                 if (busy) return;
                 run(
                   {
-                    action: later ? "schedule" : "add",
+                    action: returningOnly ? "addreturn" : later ? "schedule" : "add",
                     code,
                     kind,
                     percent,
                     amount,
                     uses,
-                    minimum,
-                    ...(later ? { start: secondsOf(startAt), end: secondsOf(endAt) } : {}),
+                    ...(returningOnly ? {} : { minimum }),
+                    ...(later && !returningOnly ? { start: secondsOf(startAt), end: secondsOf(endAt) } : {}),
                   },
                   () => {
                     setAdding(false);
@@ -389,8 +426,9 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                     setLater(false);
                     setStartAt("");
                     setEndAt("");
+                    setReturningOnly(false);
                   },
-                  later ? `${code} is scheduled. It stays off until its start.` : `${code} is live.`,
+                  returningOnly ? `${code} is live, for returning buyers only.` : later ? `${code} is scheduled. It stays off until its start.` : `${code} is live.`,
                 );
               }}
               className="mt-5 space-y-4 rounded-2xl border-2 border-violet-brand/30 bg-white p-4"
@@ -418,6 +456,25 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                   Letters, numbers and dashes. A buyer can type it in any case.
                 </p>
               </div>
+
+              <fieldset className="space-y-2">
+                <legend className="field-label">Who can use it</legend>
+                <label className="flex min-h-11 items-center gap-3 text-ink">
+                  <input
+                    type="checkbox"
+                    checked={returningOnly}
+                    onChange={(event) => setReturningOnly(event.target.checked)}
+                    aria-describedby="discount-returning-help"
+                    className="h-6 w-6"
+                  />
+                  Only for people who already bought from this store
+                </label>
+                <p id="discount-returning-help" className="text-sm text-ink-soft">
+                  {returningOnly
+                    ? "A buyer types it with the email of an earlier order from your store, in a box on the product's page. We check that email has bought from you before; if not, the code is refused with a plain sentence. It works as soon as you make it, with no minimum and no set times, until you switch it off."
+                    : "Unchecked, anyone can use the code."}
+                </p>
+              </fieldset>
 
               <div className="flex flex-wrap items-end gap-3">
                 <div>
@@ -477,7 +534,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                     className="field mt-1"
                   />
                 </div>
-                <div className="w-44">
+                {returningOnly ? null : <div className="w-44">
                   <label
                     htmlFor="discount-minimum"
                     className="field-label"
@@ -494,13 +551,13 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                     aria-describedby="discount-minimum-help"
                     className="field mt-1"
                   />
-                </div>
+                </div>}
               </div>
-              <p id="discount-minimum-help" className="text-sm text-ink-soft">
+              {returningOnly ? null : <p id="discount-minimum-help" className="text-sm text-ink-soft">
                 Optional. With a minimum, Stripe takes the code only when the first payment comes to that much or more. On a membership with a free trial the first payment is zero, so the code does not come off; on a payment plan it is the first installment.
-              </p>
+              </p>}
 
-              <fieldset className="space-y-3">
+              {returningOnly ? null : <fieldset className="space-y-3">
                 <legend className="field-label">When it works</legend>
                 <label className="flex min-h-11 items-center gap-3 text-ink">
                   <input
@@ -543,7 +600,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                     </div>
                   </div>
                 ) : null}
-              </fieldset>
+              </fieldset>}
 
               <p className="text-sm text-ink-soft">
                 It comes off the payment it is typed into. On a membership that
@@ -567,7 +624,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                   aria-busy={busy} disabled={busy}
                   className="btn btn-primary"
                 >
-                  {busy ? "Making it…" : later ? "Schedule the code" : "Make the code"}
+                  {busy ? "Making it…" : later && !returningOnly ? "Schedule the code" : "Make the code"}
                 </button>
                 <button
                   type="button"

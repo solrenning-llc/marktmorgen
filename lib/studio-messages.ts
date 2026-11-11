@@ -35,6 +35,10 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
   // A product kept on hold (lib/child-safety.ts heldRefusal): said without naming why.
   on_hold: "This product is on hold, so it cannot be removed, changed or published for now. To ask about it, write to support@marktmorgen.com.",
+  // The studio's picture door, capped before it signs (lib/picture-door.ts).
+  pictures_waiting: "Your store has many pictures uploaded in the last day that are not on a product, link or page yet, so this upload did not start. Add those pictures where you want them, or try again later.",
+  pictures_hourly: "Your store has started many picture uploads in the last hour, so this upload did not start. Try again in an hour.",
+  pictures_unavailable: "We could not check your store's picture uploads just now, so this upload did not start. Try again in a moment.",
   // A page whose read did not come back in a known shape (lib/sales-page-store.ts readPage): nothing is decided from it.
   page_unread: "A page could not be read just now, so nothing was changed. Reload, then try again.",
   // The same, once a section update had already been counted toward the month (app/api/store/saved-blocks, apply).

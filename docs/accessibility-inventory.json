@@ -1533,6 +1533,7 @@
     "components/pricing-cycle.tsx",
     "components/pricing-value.tsx",
     "components/print-button.tsx",
+    "components/problem-notice.tsx",
     "components/product-about-view.tsx",
     "components/product-editor.tsx",
     "components/product-image-editor.tsx",

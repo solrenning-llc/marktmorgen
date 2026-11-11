@@ -12,10 +12,23 @@ import { ORDER_PROBLEM_NOTE_MAX, ORDER_PROBLEM_REASONS, readOrderProblem } from 
  * too short for "Something else" fixes it on the spot and never types it
  * again.
  */
-export function OrderProblemForm({ handle, token, reference, language }: { handle: string; token: string; reference: string; language: string }) {
+export function OrderProblemForm({
+  handle,
+  token,
+  reference,
+  language,
+  problem: fromServer = "",
+}: {
+  handle: string;
+  token: string;
+  reference: string;
+  language: string;
+  /** The field the server refused (no JavaScript, or a check the browser missed): marked as the browser's own check marks it. */
+  problem?: "" | "reason" | "note";
+}) {
   const words = orderProblemWords(language);
   const [reason, setReason] = useState("");
-  const [problem, setProblem] = useState<"" | "reason" | "note">("");
+  const [problem, setProblem] = useState<"" | "reason" | "note">(fromServer);
   const note = useRef<HTMLTextAreaElement>(null);
   const first = useRef<HTMLInputElement>(null);
 

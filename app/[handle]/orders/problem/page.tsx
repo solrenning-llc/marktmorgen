@@ -7,6 +7,7 @@ import { speech } from "@/lib/buyer-words";
 import { orderProblemWords } from "@/lib/buyer-words/order-problem";
 import { type Purchase, OrdersBusy, OrdersLate, findPurchase, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import { OrderProblemForm } from "@/components/order-problem-form";
+import { ProblemNotice } from "@/components/problem-notice";
 
 // The longest one opening may run: findPurchase is bounded by DOWNLOAD_LOOKUP_MS.
 export const maxDuration = 30;
@@ -102,9 +103,7 @@ export default async function ProblemPage({ params, searchParams }: Params) {
         <p className="st-muted text-center text-sm font-semibold">{store.name}</p>
         <div className="st-card mt-6 p-6 sm:p-9">
           <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{w.title}</h1>
-          <div role="status" className={notice ? "st-note mt-5" : undefined}>
-            {notice ? <p className="font-bold" style={{ color: "var(--st-text)" }}>{notice}</p> : null}
-          </div>
+          {notice ? <ProblemNotice text={notice} /> : <div role="status" />}
           {choices ? (
             choices.length ? (
               <>
@@ -138,7 +137,7 @@ export default async function ProblemPage({ params, searchParams }: Params) {
               </dl>
             </>
           ) : null}
-          {showForm && found ? <OrderProblemForm handle={store.handle} token={token} reference={found.purchase.reference} language={store.language} /> : null}
+          {showForm && found ? <OrderProblemForm handle={store.handle} token={token} reference={found.purchase.reference} language={store.language} problem={state === "reason" || state === "note" ? state : ""} /> : null}
           <p className="mt-8">
             <Link href={back} className="st-footer-link inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
               {w.backToList}

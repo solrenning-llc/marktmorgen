@@ -163,6 +163,35 @@ async function main(): Promise<void> {
     is("and the hand-over still says the partners failed, so it is logged", threw, true);
   }
 
+  part("Cloud G's MEDIUM (6804628564): the sweep's list not written is no reason to drop the partners' shares");
+  {
+    const pend = await pendingAt();
+    const paid = { store: "oven", order: "PPORDERREV60002", capture: "CAPREV60002", email: "pp2@example.com", product: "prod01", cents: 4_000, currency: "USD", at: NOW - 60, handle: "oven", meta: { [VIA_PENDING_META]: pend } };
+    await redis.pipeline([["SET", `nl:ppsell:paid:${paid.order}`, JSON.stringify(paid)]]);
+    const real = redis.pipeline.bind(redis);
+    let zaddLost = false;
+    let peopleRead = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!zaddLost && commands.some((c) => c[0] === "ZADD" && String(c[1]).startsWith("nl:aff:pend:pp:"))) {
+        zaddLost = true;
+        return commands.map(() => ({ unknown: "shape" }));
+      }
+      if (commands.some((c) => c[0] === "HGETALL" && c[1] === people)) peopleRead = true;
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let threw = false;
+    try {
+      await creditPayPalSale(store, paid, "Sourdough course", send);
+    } catch {
+      threw = true;
+    } finally {
+      redis.pipeline = real;
+    }
+    is("control: the sweep's list answered out of shape at the hand-over", zaddLost, true);
+    is("the partners' shares are still read and written", peopleRead, true);
+    is("and the hand-over still says it failed, so it is logged", threw, true);
+  }
+
   part("MEDIUM 2: a membership already carrying the affiliate is never told it is not credited");
   {
     const memberPend = await pendingAt();

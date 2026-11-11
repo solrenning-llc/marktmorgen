@@ -6,7 +6,6 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Codex F | 309 [EM1], CX-85: campaign prototype regression; lib/mail-revenue.ts shared with #2192 by explicit inbox exception | codex/f-mail-revenue-proto | `tests/mail-revenue-proto.test.ts` | 04/11/2026 |
 | Codex A3 | CX-101(3) / CX-102(c): confirm a mail route before creating course tokens and retain recoverable fallback refusals; stacked on own #2338, email.ts shared only between these own units | codex/a3-c97b-mail-readiness | `lib/email.ts`, `tests/course-link-mail-unavailable.test.ts`, `tests/course-link-mail-world.ts`, `tests/durable-mail-refusal.test.ts`; lib/learn.ts liberado em série para o #2791 e depois o #2794 até ambos entrarem (C4-1845) | 04/11/2026 |
 | Codex H | 310 [AX2]: copied answer links preserve native modified navigation | codex/h-copy-link-native | `components/copy-link.tsx`, `tests/copy-link-native.test.ts` | 04/11/2026 |
 | Codex F | 476 [TX6]: residual tax risks, aggravating facts and design mitigations; historical research preserved | codex/f-tax-residual-risks | `docs/tax-uncertainty.md`, `tests/tax-residual-risks.test.ts` | 04/11/2026 |
@@ -100,4 +99,3 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex T | #2799 causal generated inventory repair | codex/t-feature-captures | `docs/accessibility-inventory.json` apenas regeneração oficial para componente próprio; demais seis caminhos próprios preservados | 06/11/2026 |
 | Codex T | C4-0930 blog r24 evidence extension, same assigned unit | codex/t-blog-count-unknown-red | `tests/t-store-blog-reader-unknown.proof.ts` apenas novos casos readPosts/export; fontes intactas nesta etapa | 06/11/2026 |
 | Codex U | regra 30/VR, prova de promessa de entrega dos e-mails de chamada | codex/u-call-faq-delivery-copy-red | `tests/u-call-faq-delivery-copy.proof.ts`, `tests/u-call-faq-delivery-copy-run.mjs` (novos; `lib/call-faq.ts` e `lib/calls.ts` intocados) | 06/11/2026 |
-| Codex F | 309 [EM1]: email attribution only on the store's served origins | codex/f-mail-link-origins | `lib/mail-links.ts`, `tests/mail-link-origins.test.ts` | 04/11/2026 |

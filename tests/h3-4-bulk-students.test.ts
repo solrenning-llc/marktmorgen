@@ -25,6 +25,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import {
   ACCESS_REFUSALS,
   MAX_STUDENT_ACTION,
+  STORE_FULL_WORDS,
   STUDENTS_PER_PAGE,
   accessSummary,
   accessUnits,
@@ -34,6 +35,7 @@ import {
   oppositeAccess,
   progressOf,
   readFilters,
+  sentOutcome,
   studentsCsv,
   type StudentLine,
 } from "@/lib/student-bulk-rules";
@@ -390,6 +392,17 @@ async function main(): Promise<void> {
   is("targets of at least 44 pixels", (html.match(/min-h-11/g) ?? []).length >= 4, true);
   const narrow = renderToStaticMarkup(createElement(StudentsBulk, { productId: id, courseTitle: "Bread Course", lessons: 2, lines: lines.slice(0, 1), canTag: false, canExport: false }));
   is("labels and the file only for a role that may use them", [narrow.includes("Add a label"), narrow.includes("Download"), narrow.includes("Remove access")], [false, false, true]);
+
+  part("What the screen does with each answer");
+  is("a label change refused for a full store (409 data_full) is said, never silent", sentOutcome(409, { ok: false, error: "data_full" }), { kind: "refused", words: STORE_FULL_WORDS });
+  is("the full-store words are the labels page's own", STORE_FULL_WORDS, "Your store has no room left for more records. Delete some you no longer need first.");
+  is("a count that moved since the review (409 changed, with its new review) is shown to confirm again", sentOutcome(409, { ok: false, error: "changed", message: "Something changed", review: { changes: 1 } }), { kind: "moved" });
+  is("a 409 changed without its new review is a refusal, never a review read by guess", sentOutcome(409, { ok: false, error: "changed", message: "Something changed" }), { kind: "refused", words: "Something changed" });
+  is("a 409 of any other kind is a refusal", sentOutcome(409, { ok: false, error: "other" }), { kind: "refused", words: "That did not work. Nothing was changed. Try again in a moment." });
+  is("a refusal says the server's own words", sentOutcome(400, { ok: false, error: "expect", message: ACCESS_REFUSALS.expect }), { kind: "refused", words: ACCESS_REFUSALS.expect });
+  is("only ok: true is a done change", [sentOutcome(200, { ok: true }), sentOutcome(200, { ok: "yes" })], [{ kind: "ok" }, { kind: "refused", words: "That did not work. Nothing was changed. Try again in a moment." }]);
+  const screen = readFileSync("components/students-bulk.tsx", "utf8");
+  is("the screen reads every answer through sentOutcome, and no 409 is taken as an answer by itself", [screen.includes("sentOutcome(response.status, answer)"), /answer\.ok \|\| response\.status === 409/.test(screen)], [true, false]);
 
   const page = readFileSync("app/studio/students/page.tsx", "utf8");
   is("the page is the products role's, and reads one bounded page", [page.includes('"products"'), page.includes("studentList("), page.includes("STUDENTS_PER_PAGE")], [true, true, true]);

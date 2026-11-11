@@ -3204,3 +3204,39 @@ Fresh targeted3360 and3380 API both OPEN/unmerged, same exact heads and bases as
 Only read-only reconciliation and own exact-prefix CP append. No source/diff/probe/test/runtime/CI/review/queue/merge/foreign product/ref/reservation document/commercial/account/payment/flag/gate/terms/key/PII/contact/provider/automation/subagent change. Unknown cost remains unknown. Serial Medium, zero agents, no background watcher. Do not recreate four already merged products or duplicate C6/M reviews.
 
 Next fresh CP plus authorized channel metadata→FULL UTF8, reconcile latest PONTO/directed originals/replacement scope, recover and verify evidence603d8dce before dependent P work. New remote PONTO remains undelivered. End after exact own CP readback.
+
+
+## Codex P — 2026-11-11: assigned CI repair batch and held next work
+
+Authority: C1-20261111-1005-codexP-1. GitHub connector only. No local terminal, node_repl, browser, real Redis, provider, or synthetic test execution in this round.
+
+### Completed diagnosis, in assigned order
+
+| PR | Exact head | Evidence and result | Published comment |
+| --- | --- | --- | --- |
+| #3400 | fd6c458a3abc79c371dd39861bfff82db7fe226e | All nine distinct exact-head All checks aggregates completed/success. No failed job to repair. Existing conditional cost finding is retained; this diagnosis is no cost clearance or merge approval. Base remains #3390, 6c226d2665378951db2b8e866c3122a4b83b0ce3. | https://github.com/solrenning-llc/marktmorgen/pull/3400#issuecomment-6796645685 |
+| #3399 | 3d1ffa1aeecf46bcf7b7f1b71b223640414e8ef6 | Full decoded failed job 130311265428, workflow 42947472313, composition 2442d522479287e31b8239f1bf9fa2cc2475c441. Harbor Kitchen sample 2 interaction 202.5ms; c.js 132.3ms plus its load handler 54.5ms overlap the first FAQ input. Same cause as #3642. Verify and behavior jobs succeeded in this run; no weekdayAt failure there. | https://github.com/solrenning-llc/marktmorgen/pull/3399#issuecomment-6796651010 |
+| #3388 | 1c5c90c3c5e69bcbb3cf1fed3a907c400fdbac27 | Full decoded failed job 130306920519, workflow 42946827078, composition 58edea30adbb9a980558fdb4361ffc70534adc20. Harbor Kitchen sample 2 interaction 225.2ms; c.js 162.3ms plus load handler 44.9ms overlap the first FAQ input. Same #3642 cause. Verify and behavior succeeded. Existing exact-head money review 6787540309 is credited, not duplicated. | https://github.com/solrenning-llc/marktmorgen/pull/3388#issuecomment-6796657432 |
+
+All three comments were fetched back by their IDs and confirmed on the intended PRs. No duplicate Mobile render fix, test relaxation, rerun, main junction, product branch update, new PR, merge, deployment, or account action occurred. The batch result was appended to the complete freshly fetched channel with a blob-SHA lease: channel commit d9b9f0f56f1bd4327e7b1e792cec81e1c5cb2cd5, blob d91c47c50a045a1e8c43d0c6a1cbdb0fdbbcc4a4. Full readback equalled the original prefix plus the single append exactly.
+
+### Publication hold and preserved work
+
+Fresh main: b4ba5ce2ecf6bbfe2c73fd52fef961f4bd5692b5. Issue #3677 remains OPEN. #3680 remains OPEN/unmerged at 9e8be260ecb862054f4ad57c0653a93991e86bfd. #3642 remains OPEN/unmerged at 17e0331a07f454d0477a42f309c7eb433d230a69. A fresh Actions queued collection returned total_count=0; this clears only the queue-count condition, not MV(a). No new product ref or PR may be published while #3677 is open, except the main repair. Existing own heads remain #3515 4b0de90a7a614740969944ea9970ed7d856c5716 and #3516 69325b2ad4cb8a417df6caaa6f6820a725805355, both OPEN/unmerged. #3515 is mergeable; #3516 is not mergeable in the latest observation. No head was changed. STN11's dependent next step still requires #3515 MERGED.
+
+### Next-unit preparation: do not blindly implement the old compliance design
+
+The main queue file was read fully (blob 1c35dee92482dd592aea4fffa560271d3a469ac5). Item 103 has Claude 2's existing media ownership; 242 has Claude 2's existing funnel ownership. Item 102 is still marked to do, and its design-only source is docs/e2-course-compliance-design.md, blob ed835e793c588113674d7e155ae31a1a17cf62e3. New lib/lesson-watch-rules.ts does not exist on main. No new item or product file is claimed here: primary overlap/reservation audit and queue marking must precede implementation after the hold. Do not turn this preparation into an unsupported claim that 102 is the next globally eligible item.
+
+Concrete acceptance gap found by reading the design, not by execution:
+- A 20-second video yields interval=15, buckets=2 and ceil(90% * 2)=2 required buckets.
+- The design credits entering a bucket and gives two initial pace credits. Two adjacent bucket reports therefore fit the stated burst budget without proving 18 seconds of coverage. Even honest entry into bucket 1 occurs at video position 15 seconds, only 75% of that video.
+- Thus a bucket-entry count is not by itself proof of 90% watched duration. No implementation or UI may label that mathematical proxy as a verified 90% watch.
+- Section 2.3's forward-plausibility rule is explicitly unsettled and lacks session state in its table. Do not invent that state, its retention, or its paid IO admission.
+- Unit 1 can be split into pure geometry only, but before picking it establish the exact completion contract and tests for partial final buckets; preserve the unknown-duration refusal. Do not add live lesson gates or make old done lessons incomplete.
+
+Prepared acceptance cases (NOT EXECUTED): unknown/zero/nonfinite/negative duration refuses; 20s must not count the final 5s on entering its bucket; replayed/overlapping spans never increase covered duration twice; seeking does not cover the skipped span; 2x real elapsed coverage may reach the chosen threshold, while two immediate reports may not; 15min, 4h and 10h keep storage bounded; replaced video versions do not inherit coverage; malformed/nonown/accessor evidence is refused without invoking getters; no personal data, IO, token secret, provider, quota, gate or new visible setting in a pure-rules preparation.
+
+Resume with fresh channel metadata -> full UTF-8 blob and current main/issue/PR heads. If #3677 is closed and #3680 merged, inspect current failing jobs again before any repair. For the two Mobile render matches, integrate the shared repair only through an authorized conflict/junction after #3642 or #3638 merges; do not replicate it. Re-audit the next eligible queue unit and its owners before marking it. Run linked tests/types/lint/scanner/diff before review; no GREEN, complete RED execution, customer availability, profitability or accessibility certification is claimed here.
+
+This own checkpoint append is documentation only on Codex P's checkpoint branch. Shared product and foreign content stay untouched.

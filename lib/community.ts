@@ -875,10 +875,12 @@ export async function createPost(id: string, input: NewPost, room: DataStore): P
   const count = countOf(repliesFor(await redisPipeline([["ZCARD", feedKey(id)]]), 1)?.[0]);
   if (count === null) throw new UnknownReplyError("ZCARD of a community's feed");
   if (count >= MAX_POSTS) return { ok: false, reason: "full" };
-  const [n] = await redisPipeline([["INCR", seqKey(id)]]);
+  // The post's number is the feeds' score: an unreadable one, or one INCR cannot give, writes nothing (rule 24).
+  const n = countOf(repliesFor(await redisPipeline([["INCR", seqKey(id)]]), 1)?.[0]);
+  if (n === null || n < 1) throw new UnknownReplyError("INCR of a community's post sequence");
   const post: Post = {
     id: newItemId(),
-    n: Number(n),
+    n,
     sp: input.space,
     a: input.author,
     title: input.title,

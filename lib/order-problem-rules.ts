@@ -8,6 +8,9 @@
  * What happens when the seven days pass, and how unanswered cases count
  * against a store, are later units with their own rules.
  *
+ * The case says when the answer is due and nothing more: what happens after
+ * the seven days is a later unit, and nothing is promised before it exists.
+ *
  * Nothing here reads, writes, sends or calls anything. A note that is too
  * long is refused, never cut, so the creator always reads the buyer's whole
  * words. An unknown time is unknown: it gives no due date and is never taken
@@ -57,8 +60,9 @@ export function readOrderProblem(raw: unknown): ReadProblem {
   if (typeof reason !== "string" || !REASON_SET.has(reason)) return { ok: false, field: "reason" };
   const rawNote = own(value, "note") ? value.note : undefined;
   if (rawNote !== undefined && rawNote !== null && typeof rawNote !== "string") return { ok: false, field: "note" };
-  // Measured before cleaning, so a long note is refused rather than cut short.
-  if (typeof rawNote === "string" && rawNote.length > ORDER_PROBLEM_NOTE_MAX) return { ok: false, field: "note" };
+  // Measured before cleaning, so a long note is refused rather than cut short; a CRLF counts as one character,
+  // as the browser's own check (FormData) and the textarea's maxlength count it.
+  if (typeof rawNote === "string" && rawNote.replace(/\r\n?/g, "\n").length > ORDER_PROBLEM_NOTE_MAX) return { ok: false, field: "note" };
   const note = messageText(rawNote ?? "", ORDER_PROBLEM_NOTE_MAX);
   if (reason === "other" && note.length < ORDER_PROBLEM_NOTE_MIN_OTHER) return { ok: false, field: "note" };
   const order = own(value, "order") ? value.order : undefined;
@@ -95,14 +99,15 @@ export function caseText(problem: OrderProblem, purchase: { title: string; paidA
   if (due === null) return "";
   const title = oneLine(typeof purchase.title === "string" ? purchase.title : "");
   const paidMs = Number.isFinite(purchase.paidAt) && purchase.paidAt > 0 ? purchase.paidAt * 1000 : NaN;
+  // The due date second, so a notice that shows only the start of a case (lib/inbox.ts, tellTeam) still carries it.
+  // Nothing is said of what follows the seven days until that is built (VR 2).
   const lines = [
     `Problem with an order: ${REASON_FOR_CREATOR[problem.reason]}.`,
+    `Please answer by ${day(due)} (UTC).`,
     `Product: ${title || "unknown"}`,
     `Paid on: ${knownMs(paidMs) ? day(paidMs) : "unknown"}`,
     `Order: ${problem.reference}`,
-    "",
   ];
-  if (problem.note) lines.push(problem.note, "");
-  lines.push(`Please answer by ${day(due)} (UTC). If you do not, the buyer is shown your contact details and your refund policy.`);
+  if (problem.note) lines.push("", problem.note);
   return lines.join("\n");
 }

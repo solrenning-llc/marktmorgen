@@ -26,8 +26,11 @@
  * podcast at a price option with its key taken back, in French, 6,076,927
  * bytes as sent, with the shell measured on a local production build (at
  * most 401,498, taken as 410,000), held under ORDERS_PAGE_BYTES (6,100,000).
- * An opening then costs $0.000964 at most before its metered reads; 17 units
- * at $0.0000633 are $0.001076, 11.6% to spare (16 would be 5.0%). 12 until the page was measured as it is sent: #2060 measured its
+ * An opening then costs $0.000964 at most before its metered reads; 9 units
+ * at $0.000129 a request are $0.001164, 20.8% over it and 9.8% over it with
+ * its tenth to spare (8 would be under). 17 at $0.0000633 a request until a
+ * request was priced with the store's record it reads (313 [CV1] unit 3,
+ * #1496); 12 until the page was measured as it is sent: #2060 measured its
  * HTML alone, 2.5 MB, and so did not cover the payload or the shell.
  *
  * Taken from the public requests, never from the buyers' actions figure
@@ -38,7 +41,7 @@
  */
 import { moveReads } from "@/lib/call-moves-read";
 
-export const ORDERS_OPEN_UNITS = 17;
+export const ORDERS_OPEN_UNITS = 9;
 /** How long one opening may run at the most: the page's maxDuration (app/[handle]/orders/page.tsx). */
 export const ORDERS_OPEN_SECONDS = 30;
 /** Commands every opening may make besides its metered reads: the grant, what waits (four, and one for each of WAITING_SHOWN agreements, lib/buyer-waiting.ts), the Discord server and its roles (tests/orders-open.test.ts holds it). */
@@ -92,9 +95,11 @@ export const ORDERS_LINK_READ_MS = 12_000;
  * the page. Never the whole list: a bundle's twenty files cost twenty lookups,
  * not twenty readings of every purchase. tests/plan-cost-registry.ts prices it
  * (DOWNLOAD_LOOKUP_READ) and tests/plan-cost-registry.test.ts holds the units
- * above it.
+ * above it: 1 since a request was priced with the store's record it reads
+ * (313 [CV1] unit 3, #1496: $0.000129 a request, the lookup $0.000074 at the
+ * most); 2 until then.
  */
-export const DOWNLOAD_LOOKUP_UNITS = 2;
+export const DOWNLOAD_LOOKUP_UNITS = 1;
 /** The longest a download waits on finding its purchase; past it the buyer is told the purchase could not be checked. */
 export const DOWNLOAD_LOOKUP_MS = 10_000;
 /** Commands a download's lookup makes besides its metered reads: the grant; for one brought over, how many ids there are, the ids and the one entry. */
@@ -202,11 +207,13 @@ export const HOST_SHOWN = 63;
  * read. tests/plan-cost-registry.ts prices it (ORDERS_BUNDLE_READ) and
  * tests/plan-cost-registry.test.ts holds the units above it, with a tenth to
  * spare (2 until C3-83, when the page without JavaScript had to fit too):
- * $0.000135 at most, 3 units $0.000190, 40.4% to spare (measured 4 November
- * 2026; the page without JavaScript at most 1,014,727 bytes, its keys from
- * the creator's list taken back, in French).
+ * $0.000135 at most (measured 4 November 2026; the page without JavaScript at
+ * most 1,014,727 bytes, its keys from the creator's list taken back, in
+ * French). 2 units at $0.000129 a request are $0.000259, 91% to spare; 3 at
+ * $0.0000633 until a request was priced with the store's record it reads
+ * (313 [CV1] unit 3, #1496).
  */
-export const ORDERS_BUNDLE_UNITS = 3;
+export const ORDERS_BUNDLE_UNITS = 2;
 /**
  * The most bytes showing a bundle's products sends: twenty products, each with
  * its title, its address (2,000 characters), its download and course addresses
@@ -233,12 +240,14 @@ export const ORDERS_BUNDLE_PER_HOUR = 240;
  * reads past them goes through its meter. tests/plan-cost-registry.ts prices
  * it (ORDERS_OLDER_READ) and tests/plan-cost-registry.test.ts holds the units
  * above it, with a tenth to spare (8 until C3-83, when the page without
- * JavaScript had to fit too): $0.000534 at most, 10 units $0.000633, 18.5% to
- * spare, 9 only 6.6% (measured 4 November 2026; the page without JavaScript
- * at most 1,467,384 bytes: private podcasts at a price option, their keys
- * taken back, in French).
+ * JavaScript had to fit too): $0.000534 at most (measured 4 November 2026;
+ * the page without JavaScript at most 1,467,384 bytes: private podcasts at a
+ * price option, their keys taken back, in French). 5 units at $0.000129 a
+ * request are $0.000647, 21.1% to spare, 4 under it; 10 at $0.0000633 until a
+ * request was priced with the store's record it reads (313 [CV1] unit 3,
+ * #1496).
  */
-export const ORDERS_OLDER_UNITS = 10;
+export const ORDERS_OLDER_UNITS = 5;
 /** Commands a batch makes besides its metered reads: the link's grant. */
 export const ORDERS_OLDER_COMMANDS = 1;
 /**

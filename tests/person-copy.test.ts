@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   is("their conversation, both sides, said as you and the store", (section("lib/inbox.ts")[0] as { messages: { from: string; text: string }[] }).messages.map((m) => [m.from, m.text]), [["you", "Is the course still open?"], ["the store", "Yes, until Friday."]]);
   is("a teammate's address is nowhere in it", text.includes(TEAMMATE), false);
   is("nor anybody else's", text.includes("someone@example.com"), false);
-  is("the benefit marked given: its words, the period and when, without who marked it", section("lib/tier-benefits.ts"), [{ benefit: "A monthly group call", period: "m179000000", markedGiven: new Date(1_790_000_300 * 1000).toISOString() }]);
+  is("the benefit marked given: its words, the period and when, without who marked it", section("lib/tier-benefits.ts"), [{ benefit: "A monthly group call", period: new Date(179_000_000 * 1000).toISOString(), markedGiven: new Date(1_790_000_300 * 1000).toISOString() }]);
   is("what is held only as marks is said in words", copy.marks.length > 0 && copy.marks.every((m) => typeof m === "string"), true);
 
   part("Nobody's copy for an address the store does not know");

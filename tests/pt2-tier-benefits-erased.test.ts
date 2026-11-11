@@ -8,7 +8,7 @@
  * erasure gives it one before it writes the print.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { addBenefit, forgetBenefitPerson, giveBenefit } from "@/lib/tier-benefits";
+import { addBenefit, benefitsDue, forgetBenefitPerson, giveBenefit } from "@/lib/tier-benefits";
 import { personKey } from "@/lib/person-key";
 import { suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
@@ -85,6 +85,26 @@ async function main(): Promise<void> {
     const [marks, listed] = await redis.pipeline([["HLEN", `nl:tben:given:${store.statsId}:${annKey}`], ["SISMEMBER", `nl:tben:who:${store.statsId}`, annKey]]);
     is("nothing is written again about the deleted person after their erasure finished", [marks, listed], [0, 0]);
   }
+
+  // Claude 1 on #3014 (review of ed0b3ce9): the deleted person's membership stays on the creator's Stripe, so the
+  // list of who is waiting named them by address after their erasure. They are left out, as lib/membership-numbers.ts
+  // leaves them out, and a list of the deleted that cannot be read is unknown, never "nobody deleted".
+  part("A person deleted from the store is not listed by address");
+  const benefit = await setUp(true);
+  await erase(ANN);
+  const store = (await storeForEmail(owner))!;
+  const due = await benefitsDue(store, NOW * 1000);
+  is("the list is read", due.state, "ok");
+  is("the deleted person is not in it; the other member is", due.state === "ok" ? [...new Set(due.rows.map((r) => r.email))] : null, ["bo@example.com"]);
+  is("marking them is not owed", await giveBenefit(store, "team@example.com", benefit, [{ sub: "sub_active00001", period: "once" }], NOW * 1000), { ok: true, given: 0, already: 0, notOwed: 1, unknown: 0 });
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    return commands.map((c, i) => (c[0] === "HMGET" && String(c[1]).startsWith("nl:erased:") ? "garbled" : replies[i]));
+  }) as typeof redis.pipeline;
+  const blind = await benefitsDue(store, NOW * 1000);
+  redis.pipeline = real;
+  is("the list of the deleted unreadable: unknown, never a list that may name them", blind, { state: "unknown", why: "erased" });
   done();
 }
 

@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   const error = await setProfile(cid, (await readMember(cid, key))!, { name: "Dana", dir: true, mail: false }, club).then(() => "", (e: unknown) => String(e));
   is("the save goes through", error, "");
   const saved = await readMember(cid, key);
-  is("the record carries the name and the handle", [saved?.n, saved?.h, saved?.dir], ["Dana", "Dana", true]);
+  is("the record carries the name, a handle and the listing", [saved?.n, Boolean(saved?.h), saved?.dir], ["Dana", true, true]);
   is("and the directory lists them", redis.run(["ZSCORE", `nl:cm:${cid}:dir`, key]) !== null, true);
 
   part("Asking not to be listed takes them out of the directory");

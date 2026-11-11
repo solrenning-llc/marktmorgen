@@ -239,9 +239,14 @@ export async function startServices(port) {
       }
       if (req.method === "POST" && path === "/pipeline") {
         const results = [];
+        // Asked with "Upstash-Encoding: base64" (lib/redis.ts redisPipelineBase64), every string in a reply is
+        // answered in base64, "OK" as it is, numbers and nulls as they are: the same shape as tests/redis-stub.ts.
+        const base64 = String(req.headers["upstash-encoding"] ?? "").toLowerCase() === "base64";
+        const encode = (value) => (typeof value === "string" ? (value === "OK" ? value : Buffer.from(value, "utf8").toString("base64")) : Array.isArray(value) ? value.map(encode) : value);
         for (const command of JSON.parse(await read(req))) {
           try {
-            results.push({ result: (await redis.pipeline([command]))[0] });
+            const result = (await redis.pipeline([command]))[0];
+            results.push({ result: base64 ? encode(result) : result });
           } catch (error) {
             results.push({ error: String(error?.message ?? error) });
           }

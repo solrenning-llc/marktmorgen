@@ -3,6 +3,14 @@ import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/pat
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
 const NOTES_TOTAL_FIELD = "ln#";
+/** lib/community.ts CAS_MEMBER, word for word: tests/redis-memory-community-cas.test.ts fails when the two differ. */
+const COMMUNITY_CAS_MEMBER = [
+  'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
+  "if cur ~= ARGV[2] then return 0 end",
+  'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
+  'if ARGV[4] == "1" then redis.call("ZADD", KEYS[2], ARGV[5], ARGV[1]) else redis.call("ZREM", KEYS[2], ARGV[1]) end',
+  "return 1",
+].join("\n");
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
  * behaviour only shows up across several commands.
@@ -154,6 +162,15 @@ export class MemoryRedis {
             }
           }
           return null;
+        }
+        // lib/community.ts CAS_MEMBER: a member's record written only if it is still exactly what was read, and the
+        // directory kept to those who asked to be listed (a community profile, a mute, a removal).
+        if (key === COMMUNITY_CAS_MEMBER && args[0] === "2" && args.length === 8) {
+          const [, members, dir, field, expected, next, listed, at] = args;
+          if (this.run(["HGET", members, field]) !== expected) return 0;
+          this.run(["HSET", members, field, next]);
+          this.run(listed === "1" ? ["ZADD", dir, at, field] : ["ZREM", dir, field]);
+          return 1;
         }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {

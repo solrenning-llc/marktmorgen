@@ -11,7 +11,8 @@ const now = 1_800_000_000;
 const DAY = 86_400;
 const earned = (paymentId: string, cents: number, dueAt = now - DAY) => ({ kind: "earned" as const, paymentId, cents, dueAt });
 const reversed = (paymentId: string) => ({ kind: "reversed" as const, paymentId });
-const paid = (cents: number) => ({ kind: "paid" as const, cents });
+const paid = (cents: number, payoutId = `po${cents}`) => ({ kind: "paid" as const, payoutId, cents });
+const lowered = (paymentId: string, cents: number) => ({ kind: "lowered" as const, paymentId, cents });
 
 part("Held, then payable");
 is("nothing yet: nothing", affiliateBalance([], now), { payableCents: 0, heldCents: 0, debtCents: 0 });
@@ -31,6 +32,20 @@ part("Each payment once");
 is("a commission recorded twice counts once", affiliateBalance([earned("p1", 1_000), earned("p1", 1_000)], now), { payableCents: 1_000, heldCents: 0, debtCents: 0 });
 is("the same payment with two amounts is unknown", affiliateBalance([earned("p1", 1_000), earned("p1", 900)], now), "unknown");
 
+part("A partial refund lowers the commission (independent review, MÉDIO)");
+is("lowered before it was paid: only what the customer kept earns", affiliateBalance([earned("p1", 1_000), lowered("p1", 600)], now), { payableCents: 600, heldCents: 0, debtCents: 0 });
+is("lowered after it was paid: only the refunded part is a debt", affiliateBalance([earned("p1", 1_000), paid(1_000), lowered("p1", 600)], now), { payableCents: 0, heldCents: 0, debtCents: 400 });
+is("lowered twice: the lowest stands, whatever the order", [affiliateBalance([earned("p1", 1_000), lowered("p1", 300), lowered("p1", 600)], now), affiliateBalance([lowered("p1", 600), lowered("p1", 300), earned("p1", 1_000)], now)], [{ payableCents: 300, heldCents: 0, debtCents: 0 }, { payableCents: 300, heldCents: 0, debtCents: 0 }]);
+is("lowered above what was earned: unknown", affiliateBalance([earned("p1", 1_000), lowered("p1", 1_200)], now), "unknown");
+is("lowered and then wholly reversed: gone", affiliateBalance([earned("p1", 1_000), lowered("p1", 600), reversed("p1")], now), { payableCents: 0, heldCents: 0, debtCents: 0 });
+
+part("Each payout once (independent review)");
+is("a payout recorded twice counts once", affiliateBalance([earned("p1", 1_000), paid(1_000, "po1"), paid(1_000, "po1")], now), { payableCents: 0, heldCents: 0, debtCents: 0 });
+is("the same payout with two amounts is unknown", affiliateBalance([earned("p1", 1_000), paid(1_000, "po1"), paid(900, "po1")], now), "unknown");
+is("the same commission with two due times is unknown", affiliateBalance([earned("p1", 1_000), earned("p1", 1_000, now - 2 * DAY)], now), "unknown");
+is("a reversal of a commission never recorded changes nothing", affiliateBalance([reversed("p9"), earned("p1", 500)], now), { payableCents: 500, heldCents: 0, debtCents: 0 });
+is("paid more than was due (or before it was due): the excess is a debt, held stays held", affiliateBalance([earned("p1", 1_000, now + DAY), paid(1_000)], now), { payableCents: 0, heldCents: 1_000, debtCents: 1_000 });
+
 part("Unreadable is unknown, never zero (rule 24)");
 for (const [what, entry] of [
   ["cents not whole", earned("p1", 10.5)],
@@ -38,6 +53,8 @@ for (const [what, entry] of [
   ["no payment id", earned("", 1_000)],
   ["a due time that is not a number", earned("p1", 1_000, Number.NaN)],
   ["a payout not whole", paid(1.5)],
+  ["a payout with no id", { kind: "paid", cents: 1 }],
+  ["a lowered amount not whole", lowered("p1", 1.5)],
   ["a kind not known", { kind: "bonus", cents: 1 }],
   ["no entry at all", null],
 ] as const) {

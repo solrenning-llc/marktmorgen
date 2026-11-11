@@ -14,7 +14,7 @@ import { autoQuote, requestAutoCaptions } from "@/lib/auto-captions";
 const CHANGES_PER_HOUR = 600;
 
 /** What a refusal is answered with. */
-const STATUS: Record<string, number> = { off: 404, unknown: 404, unavailable: 503, auto_writing: 409, auto_held: 409 };
+const STATUS: Record<string, number> = { off: 404, unknown: 404, unavailable: 503, auto_writing: 409, auto_held: 409, changing: 409 };
 
 /**
  * Captions for a lesson's video (lib/captions.ts, lib/stream.ts).

@@ -75,6 +75,7 @@ const MESSAGES: Record<string, string> = {
   caption_language: "Choose a language from the list.",
   caption_unknown: "That video is not there anymore. Reload the page.",
   caption_auto_writing: `AI captions in this language are still on their way for this video. Until they arrive, or the charge for them is given back (no sooner than ${GIVE_UP_HOURS} hours after the order), captions in this language can't be uploaded or removed.`,
+  caption_changing: "Captions in this language are still being changed for this video. Try again in a few minutes.",
   caption_auto_held: "We could not confirm earlier AI captions in this language with our video provider, so captions in this language can't be changed here yet. Write to " + SUPPORT_EMAIL + " about it.",
   auto_not_ready: "The video has to finish uploading and being prepared before captions can be written.",
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",

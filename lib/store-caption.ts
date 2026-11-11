@@ -5,8 +5,8 @@ import { addCaption, dropCaption, type CaptionAnswer } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { withOwnCaptions } from "@/lib/auto-captions";
 
-/** A change by hand to captions, or why not: AI captions hold the language (lib/auto-captions.ts, withOwnCaptions). */
-export type StoreCaptionAnswer = CaptionAnswer | { ok: false; reason: "auto_writing" | "auto_held" };
+/** A change by hand to captions, or why not: AI captions or another change by hand hold the language (lib/auto-captions.ts, withOwnCaptions). */
+export type StoreCaptionAnswer = CaptionAnswer | { ok: false; reason: "auto_writing" | "auto_held" | "changing" };
 
 /** Its outcome is known: the service answered, or nothing was asked of it. Only "unavailable" may hide a landed change. */
 const known = (answer: CaptionAnswer) => answer.ok || answer.reason !== "unavailable";

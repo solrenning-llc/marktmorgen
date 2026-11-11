@@ -336,14 +336,29 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
 
 /**
  * Whether the asked languages are still free once the order holds the video: no change by hand to one of them in
- * flight (its hold, ownKey) and none listed since. Read exactly (rule 24): anything else is "unknown", never free.
+ * flight (its hold, ownKey), none listed here since, and none the service itself lists. The service's own list is
+ * read (its free GET /videos/<id>, read as the sweep reads it, deliveredIn), because a change by hand whose answer was
+ * lost is not written down here and its hold runs out after OWN_HOLD_SECONDS, while the sweep counts every asked
+ * language the service lists as the AI's (Claude 2's MEDIUM on #3427). A language it lists that is not written down
+ * here is written down, so the studio lists what the player offers. Read exactly (rule 24): anything else, a 404
+ * included, is "unknown", never free, and nothing is charged.
  */
 async function askedFree(id: string, pathname: string, langs: string[]): Promise<"free" | "language" | "unknown"> {
   try {
     const holds = repliesFor(await redisPipeline(langs.map((lang) => ["GET", ownKey(id, lang)])), langs.length);
     if (!holds || holds.some((hold) => hold !== null)) return "unknown";
     const listed = ((await streamCaptions([pathname]))[pathname] ?? []).map((t) => t.lang);
-    return langs.some((lang) => listed.includes(lang)) ? "language" : "free";
+    if (langs.some((lang) => listed.includes(lang))) return "language";
+    const answer = await askStream("GET", `/videos/${id}`);
+    const there = answer.status === 200 ? deliveredIn(answer.data) : null;
+    if (!there) {
+      console.error("the video service's list of a video's captions could not be read exactly; nothing charged", id, answer.status);
+      return "unknown";
+    }
+    const landed = langs.filter((lang) => there.includes(lang));
+    if (!landed.length) return "free";
+    await noteCaptionLanguages(id, landed);
+    return "language";
   } catch (error) {
     console.error("whether captions by hand are being changed for a video could not be read; nothing charged", id, error);
     return "unknown";
@@ -354,18 +369,23 @@ async function askedFree(id: string, pathname: string, langs: string[]): Promise
  * A change by hand to a video's captions in one language (`change`: added or removed), run only while no AI captions
  * request holds that language, so a caption by hand is never counted as delivered by the AI (Claude 5 on #3427).
  * Refused with "auto_writing" while a request holds it (its order, or captions not yet delivered in it), "auto_held"
- * while a request kept for a person holds it, and "unavailable" when that cannot be read exactly (rule 24). A
+ * while a request kept for a person holds it, "changing" while another change by hand in it holds it, and
+ * "unavailable" when that cannot be read exactly (rule 24). A
  * request settled, owed a refund, or holding other languages lets it run. The language is held (ownKey) for the
  * change, so no request for it starts meanwhile (askedFree); the hold is let go when the change's outcome is known
  * (`known`), and otherwise kept until it runs out, since the service may still take it.
  */
-export async function withOwnCaptions<T>(pathname: string, lang: string, change: () => Promise<T>, known: (result: T) => boolean): Promise<{ ok: true; result: T } | { ok: false; reason: "auto_writing" | "auto_held" | "unavailable" }> {
+export async function withOwnCaptions<T>(pathname: string, lang: string, change: () => Promise<T>, known: (result: T) => boolean): Promise<{ ok: true; result: T } | { ok: false; reason: "auto_writing" | "auto_held" | "changing" | "unavailable" }> {
   const parts = readStreamPath(pathname);
   // No request can hold a video that is not one, a language there is none of, or anything without the database.
   if (!parts || !STREAM_ID_PATTERN.test(parts.id) || !captionLabel(lang) || !isRedisConfigured()) return { ok: true, result: await change() };
   const own = ownKey(parts.id, lang);
   const value = claimValue();
-  if ((await claimMark(own, OWN_HOLD_SECONDS, value)) !== "ours") return { ok: false, reason: "unavailable" };
+  const claimed = await claimMark(own, OWN_HOLD_SECONDS, value);
+  // Held by another change by hand in this language (in flight, or its answer lost): said so (Claude 2's LOW on
+  // #3427). A claim that cannot be read is not known to be anyone's (rule 24).
+  if (claimed === "taken") return { ok: false, reason: "changing" };
+  if (claimed !== "ours") return { ok: false, reason: "unavailable" };
   let letGo = true;
   try {
     const read = repliesFor(await redisPipeline([["GET", pendingKey(parts.id)]]), 1);

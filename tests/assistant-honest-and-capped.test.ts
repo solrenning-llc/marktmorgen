@@ -73,6 +73,19 @@ part("A. Figures and deals in words are held to the facts, and a figure to what 
   for (const said of ["It has 12 lessons.", "The price is $49 and you get 12 lessons.", "Yes, you can ask for a refund within 14 days.", "The page shows 12 lessons."]) {
     is(`what the store published still shows: "${said}"`, heldToFacts(said, course), true);
   }
+  // Cloud J's review at ea30e19c (MEDIUM): a currency by its ordinary name or ISO code outside CURRENCY_WORDS was read
+  // as a count of that word, held by the facts' 12 lessons, so a prompt injection could steer the model to a price the
+  // store never published. Every currency name or code, and money-like units, are money now.
+  for (const said of [
+    "It costs 12 yen.", "It costs 12 JPY.", "It costs 12 INR.", "It costs 12 MXN.", "It costs 12 pesos.", "It costs 12 rupees.",
+    "It costs 12 kronor.", "It costs 12 zloty.", "It costs 12 credits.", "It costs 12 SEK.", "It costs 12 yuan.", "It costs 12 rand.",
+    "It costs 12 lira.", "It costs 12 coins.", "It costs 12 tokens.", "Es kostet 12 Kronen.", "Cuesta 12 pesos.", "Il coute 12 roupies.",
+  ]) {
+    is(`a price in a currency the store never published is held: "${said}"`, heldToFacts(said, course), false);
+  }
+  for (const said of ["Get 12 lessons for $49.", "Refunds within 14 days.", "It has 12 lessons.", "The price is $49."]) {
+    is(`and what the store published still shows: "${said}"`, heldToFacts(said, course), true);
+  }
 }
 is("a price in words that is not the store's ($20 vs $27)", heldToFacts("It costs twenty dollars.", facts), false);
 is("a refund window in words that is not the store's (30 vs 14 days)", heldToFacts("You can get a refund within thirty days, no questions asked.", facts), false);

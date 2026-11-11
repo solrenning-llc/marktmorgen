@@ -340,6 +340,7 @@ async function main(): Promise<void> {
     {
       const raceToken = await signIn("race.buyer@example.com");
       const raceStart = mails.length;
+      const requestsBefore = moveKeys().filter((key) => key.startsWith("nl:pm:r:")).length;
       odd = { command: "GET", prefix: "nl:pm:retry:", reply: null, times: 2, skip: 0 };
       const answers = await Promise.all([
         askToMovePurchases({ store: moss, token: raceToken, to: "race.new@example.com", origin: ORIGIN }),
@@ -357,7 +358,7 @@ async function main(): Promise<void> {
         newLinks[0] === newLinks[1],
         oldLinks[0] !== newLinks[0],
       ], [2, 2, true, true, true]);
-      is("only one live request record was created", moveKeys().filter((key) => key.startsWith("nl:pm:r:")).length, 1);
+      is("only one live request record was created", moveKeys().filter((key) => key.startsWith("nl:pm:r:")).length - requestsBefore, 1);
     }
     const two = await signIn("lost2.buyer@example.com");
     const m2 = mails.length;

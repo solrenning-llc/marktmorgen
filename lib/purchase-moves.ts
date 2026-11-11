@@ -120,18 +120,20 @@ return n`;
  * Selects and writes one same-day retry identity atomically. The retry index is written first within
  * the script: if a later write fails, every later ask sees that one identity and fails closed rather
  * than creating another. The opaque claim nonce lets a caller reconcile a lost EVAL reply.
+ * A SET ... NX answers Lua a status table on success and false when the key exists, never the
+ * string 'OK', so each write is tested for truth (scripts/test_purchase_move_retry_redis.py).
  */
 export const MOVE_RETRY_CREATE = `-- marktmorgen:purchase-move-retry-create:v1
 local current = redis.call('GET', KEYS[1])
 if current then return {0, current} end
 local held = redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[5], 'NX')
-if held ~= 'OK' then return {-1, ''} end
+if not held then return {-1, ''} end
 local request = redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[5], 'NX')
-if request ~= 'OK' then return {-1, ARGV[1]} end
+if not request then return {-1, ARGV[1]} end
 local from = redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[5], 'NX')
-if from ~= 'OK' then return {-1, ARGV[1]} end
+if not from then return {-1, ARGV[1]} end
 local to = redis.call('SET', KEYS[4], ARGV[4], 'EX', ARGV[5], 'NX')
-if to ~= 'OK' then return {-1, ARGV[1]} end
+if not to then return {-1, ARGV[1]} end
 return {1, ARGV[1]}`;
 
 export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string } | { ok: false; reason: "email" | "same" | "scope" | "over" | "unknown" };

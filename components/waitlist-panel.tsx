@@ -65,6 +65,7 @@ export function WaitlistPanel({
   preorderBlocked = null,
   hasContent = true,
   price,
+  canLaunch = true,
 }: {
   productId: string;
   initial: WaitlistView | null;
@@ -77,6 +78,8 @@ export function WaitlistPanel({
   hasContent?: boolean;
   /** Its price, in the store's currency, as the waitlist's email carries it. */
   price: string;
+  /** Whether this role may put it on sale: that emails the waitlist, so it needs "send" (lib/team-roles.ts). */
+  canLaunch?: boolean;
 }) {
   const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null });
   const [pre, setPre] = useState<PreorderView>(preorders ?? { day: null, waiting: 0, given: 0, refunded: 0 });
@@ -230,7 +233,7 @@ export function WaitlistPanel({
               ? `It goes on sale at once, and ${view.confirmed === 1 ? "the confirmed address gets" : `each of the ${view.confirmed.toLocaleString("en-US")} confirmed addresses gets`} one email with its link and price. Then the waitlist's addresses are deleted; whoever also asked to hear from you is on your list already.`
               : "Nobody has confirmed yet, so no email goes out: it just goes on sale."}
           </p>
-          {view.confirmed ? (
+          {canLaunch && view.confirmed ? (
             <>
               <label className="block">
                 <span className="field-label">A note in the email (optional)</span>
@@ -259,7 +262,7 @@ export function WaitlistPanel({
               </label>
             </>
           ) : null}
-          {confirming && view.confirmed ? (
+          {canLaunch && confirming && view.confirmed ? (
             <div id={`waitlist-${productId}-review`} className="rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
               <h3 id={`waitlist-${productId}-review-title`} tabIndex={-1} className="font-semibold">Check before it goes out</h3>
               {/* A summary list, one answer a row (GOV.UK "Check answers"). */}
@@ -289,6 +292,7 @@ export function WaitlistPanel({
               </dl>
             </div>
           ) : null}
+          {canLaunch ? (
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -313,6 +317,12 @@ export function WaitlistPanel({
                 ? "Put it on sale and tell the waitlist"
                 : "Put it on sale"}
           </button>
+          ) : (
+            // An Editor has no sending to the list (lib/team-roles.ts): the server refuses the launch, so it is not offered.
+            <p className="text-sm text-ink-soft">
+              Putting it on sale emails its waitlist, so it is done by someone on your team who can send to your list: the owner or an Admin.
+            </p>
+          )}
         </div>
       ) : null}
 

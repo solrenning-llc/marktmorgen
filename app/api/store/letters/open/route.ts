@@ -24,7 +24,19 @@ function browserLanguage(request: NextRequest): string {
 export async function GET(request: NextRequest) {
   const origin = originFrom(request);
   const token = request.nextUrl.searchParams.get("token") ?? "";
-  const grant = await readLetterGrant(token);
+  const busy = (language: unknown) =>
+    new Response(letterWords(language).linkBusy, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
+    });
+  // The link's grant read only in its exact shape (rule 24): an unknown reply is "try again", never "expired".
+  let grant: Awaited<ReturnType<typeof readLetterGrant>>;
+  try {
+    grant = await readLetterGrant(token);
+  } catch (error) {
+    console.error("reading an emailed link's grant failed", error);
+    return busy(browserLanguage(request));
+  }
   const store = grant ? await storeForHandle(grant.h) : null;
   const gone = (language: unknown) =>
     new Response(letterWords(language).linkGone, {
@@ -41,10 +53,7 @@ export async function GET(request: NextRequest) {
     spent = await spendLetterOpen(token);
   } catch (error) {
     console.error("counting an emailed link's opens failed", error);
-    return new Response(letterWords(store.language).linkBusy, {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
-    });
+    return busy(store.language);
   }
   if (!spent) return gone(store.language);
   const pass = await mintPass(store, grant.e, "all");

@@ -298,7 +298,11 @@ async function main(): Promise<void> {
     ackLost = { skip: 0, times: 0 };
     is("the current address's email taken, its answer lost: the page does not say no link was sent", [mails.length - m, first, moveWords.asked[first].title], [1, "unconfirmed", "We could not confirm the email went"]);
     const retryStart = mails.length;
+    seen = [];
     const retry = await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN });
+    const retryCommands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:")).length;
+    seen = null;
+    is("retry reads and sends within the reserved public-request ceiling", retryCommands <= MOVE_ASK_COMMANDS, true);
     is("retry resends the same request", retry, "sent");
     const originalLink = linkIn(mails[m].text);
     is("a retry reuses the exact confirmation link that may already be in the inbox", [

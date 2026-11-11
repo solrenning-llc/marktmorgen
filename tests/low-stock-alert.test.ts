@@ -9,7 +9,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { setLowStock } from "@/lib/low-stock";
-import { LOW_STOCK_EMAILS_A_DAY, tellLowStock } from "@/lib/low-stock-alert";
+import { LOW_STOCK_ALERTS_A_STORE_DAY, LOW_STOCK_EMAILS_A_DAY, tellLowStock } from "@/lib/low-stock-alert";
 import { setWeeklyOff } from "@/lib/stats-report";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -80,6 +80,28 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline;
   is("no email", emails.length, 2);
   is("a product with no number", await tellLowStock(store, { ...product, id: "other00001" }, 1, now), "off");
+
+  part(`At most ${LOW_STOCK_ALERTS_A_STORE_DAY} a day for the whole store, however many products cross (Claude 1 and Claude 3 on #3725)`);
+  emails.length = 0;
+  const many: { id: string; title: string }[] = [];
+  for (let i = 0; i < LOW_STOCK_ALERTS_A_STORE_DAY + 2; i += 1) {
+    const extra = await addProduct(OWNER, `Bowl ${i}`, "", "30", null);
+    if (!extra.ok) throw new Error("no product");
+    await setLowStock(store, extra.product.id, 5, 10);
+    many.push(extra.product);
+  }
+  const results = [];
+  for (const p of many) results.push(await tellLowStock(store, p, 4, now + 5 * DAY));
+  is("only the first ones are told", results.filter((r) => r === "told").length, LOW_STOCK_ALERTS_A_STORE_DAY);
+  is("and only as many emails", emails.length, LOW_STOCK_ALERTS_A_STORE_DAY);
+  is("the rest are not, never unknown", results.slice(LOW_STOCK_ALERTS_A_STORE_DAY), ["no", "no"]);
+  const pipe = redis.pipeline.bind(redis);
+  const another = await addProduct(OWNER, "Cup", "", "30", null);
+  if (!another.ok) throw new Error("no product");
+  await setLowStock(store, another.product.id, 5, 10);
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "INCR" && String(c[1]).includes(":lowday:")) ? [["QUEUED"], [1]] : pipe(commands));
+  is("a store count that cannot be read: nothing sent", await tellLowStock(store, another.product, 4, now + 6 * DAY), "unknown");
+  redis.pipeline = pipe;
   done();
 }
 

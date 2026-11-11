@@ -80,11 +80,19 @@ async function main(): Promise<void> {
   ] as const) {
     is(`${what}: unreadable`, state(await clientSessions(store, TOKEN, reads(asAna, () => Promise.resolve(reply)), NOW)), "unreadable");
   }
-  is("a store with no Stripe account has no bookings: an empty list, confirmed, and nothing read", await (async () => {
-    const r = reads(asAna, () => Promise.resolve({ paid: [booking(ANA, NOW + HOUR)], partial: false }));
-    const view = await clientSessions({ ...store, stripeAccountId: null } as unknown as Store, TOKEN, r, NOW);
+  // Review 6787433579: disconnecting an account must not erase the buyer's history in the UI.
+  for (const stripeAccountId of [null, undefined, ""] as const) {
+    is("a disconnected account is unreadable, never confirmed empty, without a provider read", await (async () => {
+      const r = reads(asAna, () => Promise.resolve({ paid: [booking(ANA, NOW + HOUR)], partial: false }));
+      const view = await clientSessions({ ...store, stripeAccountId } as unknown as Store, TOKEN, r, NOW);
+      return [view.state, r.asked];
+    })(), ["unreadable", 0]);
+  }
+  is("a connected account whose history is confirmed empty still shows no sessions", await (async () => {
+    const r = reads(asAna, () => Promise.resolve({ paid: [], partial: false }));
+    const view = await clientSessions(store, TOKEN, r, NOW);
     return [view.state === "shown" ? [view.upcoming.length, view.past.length, view.partial] : view.state, r.asked];
-  })(), [[0, 0, false], 0]);
+  })(), [[0, 0, false], 1]);
 
   part("Only this client's own bookings");
   const mine = [booking(ANA, NOW + 48 * HOUR), booking(" Ana@Example.com ", NOW + 2 * HOUR, { buyerTz: "Europe/Lisbon" }), booking(ANA, NOW - 72 * HOUR), booking(ANA, NOW - 24 * HOUR)];

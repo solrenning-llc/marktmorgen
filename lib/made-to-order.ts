@@ -105,14 +105,21 @@ export function parseMadeRecord(raw: unknown): MadeRecord | null {
   return order ? { sale, person, order } : null;
 }
 
+/**
+ * How far ahead of our clock a payment time may be (another clock, Stripe's):
+ * past it the order is refused, since a record ending after the store's list
+ * could no longer be found by the person's copy or erasure.
+ */
+export const CLOCK_SLACK_SECONDS = 300;
+
 export type KeepResult = "kept" | "already" | "full" | "invalid" | "unknown";
 
 /**
  * Keeps a paid sale's order, once. "kept" when this call wrote it; "already"
  * when the sale's record was there (another run kept it); "full" when the
  * store keeps MAX_KEPT_ORDERS or its room is full; "invalid" for a sale, an
- * address or an order these rules refuse, or one whose record would already
- * have ended; "unknown" for any answer that does not read.
+ * address or an order these rules refuse, one paid more than
+ * CLOCK_SLACK_SECONDS after now, or one whose record would already have ended; "unknown" for any answer that does not read.
  */
 export async function keepMadeOrder(store: DataStore, input: { sale: string; email: string; order: MadeOrder }, now = Date.now()): Promise<KeepResult> {
   const statsId = statsOf(store);
@@ -123,7 +130,9 @@ export async function keepMadeOrder(store: DataStore, input: { sale: string; ema
   const value = valueOf(record);
   if (Buffer.byteLength(value, "utf8") > RECORD_MAX_BYTES) return "invalid";
   const nowSeconds = Math.floor(now / 1000);
-  const endsAt = order.paidAt + KEEP_SECONDS;
+  if (order.paidAt > nowSeconds + CLOCK_SLACK_SECONDS) return "invalid";
+  // Counted from now at the latest, so the record never ends after the list (EXPIRE KEEP_SECONDS from now) that finds it.
+  const endsAt = Math.min(order.paidAt, nowSeconds) + KEEP_SECONDS;
   const seconds = endsAt - nowSeconds;
   if (seconds <= 0) return "invalid";
   if (!isRedisConfigured()) return "unknown";

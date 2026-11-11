@@ -64,8 +64,10 @@ import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_
 import { giveImportRows, takeImportRows } from "@/lib/imports";
 import { rowsWords } from "@/lib/import-limits";
 import { type Held, LockBusyError, releaseLock } from "@/lib/redis-lock";
-import { DataRoomError, dataUsed, needData } from "@/lib/store-data";
-import { contentRoomFor, dataFullWords } from "@/lib/store-data-rules";
+import { DataRoomError, dataKey, monthOf, needData } from "@/lib/store-data";
+import { redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
+import { contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 import { largerPlanFor } from "@/lib/larger-plan";
 import type { Store } from "@/lib/store";
 
@@ -303,6 +305,41 @@ function planAgainst(
   };
 }
 
+/** A whole count of bytes as the room keeps it, or null: anything else is unknown. */
+const roomCount = (value: unknown): number | null => {
+  if (value === null) return 0;
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(value)) return null;
+  const n = Number(value);
+  return Number.isSafeInteger(n) ? n : null;
+};
+
+/**
+ * What the store's data room holds now, as TAKE_DATA (lib/store-data.ts) counts it before it decides: the kept
+ * total less every month's hold already over (its bytes and its own field's 64), which the script lets go on its
+ * next run (Revisor 2 on #2048). Null when any reply is not in its shape: unknown, never empty.
+ */
+async function liveDataUsed(store: Store, now: number): Promise<number | null> {
+  const key = dataKey(store);
+  if (!key) return null;
+  const head = repliesFor(await redisPipeline([["HMGET", key, "#", "~"]]).catch(() => null), 1)?.[0];
+  if (!Array.isArray(head) || head.length !== 2) return null;
+  const total = roomCount(head[0]);
+  const listed = head[1];
+  if (total === null || (listed !== null && typeof listed !== "string")) return null;
+  const month = monthOf(now);
+  const over = (typeof listed === "string" ? listed : "").split(",").filter((m: string) => /^\d{4}-\d{2}$/.test(m) && m < month);
+  if (!over.length) return total;
+  const held = repliesFor(await redisPipeline([["HMGET", key, ...over.map((m) => `~${m}`)]]).catch(() => null), 1)?.[0];
+  if (!Array.isArray(held) || held.length !== over.length) return null;
+  let lapsed = 0;
+  for (const raw of held) {
+    const n = roomCount(raw);
+    if (n === null) return null;
+    if (n > 0) lapsed += n + 64;
+  }
+  return Math.max(0, total - lapsed);
+}
+
 /**
  * Brings a HubSpot deals file into the store's CRM, or, with `write` false,
  * says what it would do (the dry run: nothing is written, no lock, no rows
@@ -348,9 +385,9 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     // per-deal take below still decides, in one step; this only refuses what it would surely refuse.
     const room = importRoom(snapshot.raw, pipelines, deals);
     const grows = room.take.reduce((sum, change) => sum + change.bytes, 0);
-    const kept = await dataUsed(store, now);
-    if (!kept) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
-    if (grows > 0 && kept.used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(kept.used, kept.room, largerPlanFor(store, nowSeconds)));
+    const used = await liveDataUsed(store, now);
+    if (used === null) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
+    if (grows > 0 && used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(used, dataRoomFor(store, nowSeconds), largerPlanFor(store, nowSeconds)));
 
     // The month's rows first, then the room: the room's work for each deal is done only for rows the month still has,
     // so a file refused for the month costs nothing per deal (Codex J on #2048). Nothing is written until both are taken.

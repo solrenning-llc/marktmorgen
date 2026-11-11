@@ -2104,6 +2104,8 @@ export function ProductEditor({
       pwyw: product.pwyw !== null,
       suggested: product.pwyw ? moneyField(product.pwyw.suggestedCents, currency) : "",
       about: "",
+      // An edit never sends a delivery link: the product's row changes it.
+      deliveryLink: "",
     };
     setDraft(form);
     setOpened(form);

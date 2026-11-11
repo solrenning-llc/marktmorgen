@@ -6,10 +6,13 @@ import { PLAN_PRICES } from "@/lib/plan";
 import { store as redis } from "./redis-stub";
 
 const DAY = 86_400;
+// Synthetic key only: runBreaks does nothing unless billing is configured; every request is intercepted below.
+process.env.STRIPE_SECRET_KEY = "sk_test_restart_contract_only";
 
 async function fixture(handle: string) {
   const email = `${handle}@example.test`, now = Math.floor(Date.now() / 1000);
-  await claimHandle(email, handle, "Restart contract fixture", "");
+  const claimed = await claimHandle(email, handle, "Restart contract fixture", "");
+  assert.equal(claimed.ok, true, `fixture handle ${handle} must be a valid store address`);
   const subscription = `sub_${handle.replaceAll("-", "")}`;
   await setSubscription(email, { customerId: "cus_RestartContract01", subscriptionId: subscription,
     active: false, tier: "creator", cycle: "month" });
@@ -53,7 +56,7 @@ function provider(f: Awaited<ReturnType<typeof fixture>>, loseFirstAck = false, 
 }
 
 test("a prior legacy key binding prevents a second subscription and leaves the pause held", async () => {
-  const f = await fixture("restart-contract-legacy-accepted"), p = provider(f);
+  const f = await fixture("restart-legacy-bound"), p = provider(f);
   try {
     const result = await runBreaks(f.now);
     assert.equal(result.failed, 1, "an idempotency conflict is unknown prior acceptance, not success");
@@ -74,7 +77,7 @@ test("a prior legacy key binding prevents a second subscription and leaves the p
 });
 
 test("a lost response is never retried after the provider idempotency window", async () => {
-  const f = await fixture("restart-contract-expired-key"), p = provider(f, true, false);
+  const f = await fixture("restart-expired-key"), p = provider(f, true, false);
   try {
     assert.equal((await runBreaks(f.now)).failed, 1);
     assert.equal(p.requests.length, 1);

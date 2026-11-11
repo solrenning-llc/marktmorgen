@@ -39,6 +39,7 @@ import { storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { personKeys, personWrite } from "@/lib/joined-stores";
@@ -67,8 +68,11 @@ export async function rememberAffiliate(sid: string, email: string): Promise<voi
 /** The ids of the stores an address is an affiliate of. */
 export async function storesPromoted(email: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["SUNION", ...personKeys(HUB, HUB_SALT, email)]]);
-  return Array.isArray(ids) ? [...new Set(ids.filter((id): id is string => typeof id === "string" && STORE_ID.test(id)))].slice(0, MAX_HUB_STORES) : [];
+  // Read exactly (rule 24): a reply cut short or of another shape is not "no stores"; it throws, so the page says the
+  // programs could not be read and asking for the link answers "error", never "Nothing is listed" or "sent".
+  const ids = stringList(repliesFor(await redisPipeline([["SUNION", ...personKeys(HUB, HUB_SALT, email)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("the stores an affiliate promotes");
+  return [...new Set(ids.filter((id) => STORE_ID.test(id)))].slice(0, MAX_HUB_STORES);
 }
 
 export type HubRequest = "sent" | "email" | "limited" | "error";
@@ -84,7 +88,8 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   const email = normaliseEmail(raw);
   if (!(await withinLimit("affhub-ip", input.ip, 10, 3_600))) return "limited";
   if (!(await withinLimit("affhub-address", sha(email), 5, 3_600))) return "limited";
-  const stores = await storesPromoted(email);
+  const stores = await storesPromoted(email).catch(() => null);
+  if (!stores) return "error";
   if (!stores.length) return "sent";
   const token = randomBytes(32).toString("hex");
   await redisPipeline([["SET", linkKey(token), email, "EX", HUB_LINK_SECONDS]]);

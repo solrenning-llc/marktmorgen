@@ -66,11 +66,18 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
   const email = token ? await hubOwner(token) : null;
 
   const rows: Row[] = [];
+  // Programs that could not be read just now (rule 24, VR 2): said so on the page, never taken for "none".
+  let unread = false;
   if (email) {
     const origin = SITE_URL;
-    const stores = (await Promise.all((await storesPromoted(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+    const ids = await storesPromoted(email).catch(() => null);
+    if (ids === null) unread = true;
+    const found = await Promise.all((ids ?? []).map((sid) => storeForId(sid).then((store) => ({ store }), () => null)));
+    if (found.some((one) => one === null)) unread = true;
+    const stores = found.flatMap((one) => (one?.store ? [one.store] : []));
     for (const store of stores) {
-      const affiliate = await affiliateByEmail(store, email).catch(() => null);
+      const affiliate = await affiliateByEmail(store, email).catch(() => undefined);
+      if (affiliate === undefined) unread = true;
       if (!affiliate) continue;
       const on = affiliatesOn(store);
       rows.push({
@@ -161,9 +168,14 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                     </li>
                   ))}
                 </ul>
-              ) : (
+              ) : unread ? null : (
                 <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
               )}
+              {unread ? (
+                <p role="status" className="notice notice-warn mt-6">
+                  We could not read the programs you are in just now. Reload this page in a minute; your link works for 24 hours.
+                </p>
+              ) : null}
               <div className="card mt-10 flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
                 <div>
                   <h2 className="text-lg font-semibold text-ink">Looking for more to promote?</h2>

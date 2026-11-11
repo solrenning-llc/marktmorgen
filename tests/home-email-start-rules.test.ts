@@ -32,7 +32,7 @@ const base = {
 
 part("Off, and the boxes");
 is("off until the owner chooses the home field", HOME_EMAIL_START_ON, false);
-is("each box has its own words and a version", [REMINDER_BOX.text !== NEWSLETTER_BOX.text, REMINDER_BOX.version > 0, NEWSLETTER_BOX.version > 0], [true, true, true]);
+is("each box has its own words and a version", [(REMINDER_BOX.text as string) !== NEWSLETTER_BOX.text, REMINDER_BOX.version > 0, NEWSLETTER_BOX.version > 0], [true, true, true]);
 is("the reminder box says one reminder", /one reminder/i.test(REMINDER_BOX.text), true);
 is("the ceilings are the proposal's", [SIGNUP_REMINDERS_DAILY, NEWSLETTER_SENDS_MONTHLY], [1_000, 20_000]);
 is("the reminder waits a day", REMINDER_DELAY_SECONDS, 86_400);

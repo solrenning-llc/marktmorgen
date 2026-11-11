@@ -338,7 +338,10 @@ async function main(): Promise<void> {
     // Rule 23 (#2801, the thumbnail copy; MR audit gap 1, one studio-blob line since C4-20261106-2790-C56-167): the US$ 66
     // is room for the Blob operations of studio pictures; that line is left out to show the readings figure is still the
     // one sized under 65.
-    const uploads = ["studio-blob"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd("creator") ?? Number.NaN), 0);
+    // Changed (rule 23, #2852): every picture upload's Blob operations, as the owner's decision reads (the dollar more "is
+    // room for every picture upload's Blob operations"): the studio's, a community picture's and an email's (buyer-blob
+    // holds students' files too, at the dearest action, a community picture's check, which leaves nothing out).
+    const uploads = ["studio-blob", "buyer-blob", "mail-picture-blob"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd("creator") ?? Number.NaN), 0);
     is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
     is("the readings figure is still the one sized under US$ 65: without the picture-upload lines, one more heavy reading a day would pass it", year - uploads < 65 && year - uploads + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);

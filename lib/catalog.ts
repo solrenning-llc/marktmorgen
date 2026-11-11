@@ -795,13 +795,37 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
   const raws = await getMany(asked.flatMap((id) => [listingKey(catalog.id!, id), extrasKey(catalog.id!, id)]));
   const out: Product[] = [];
   asked.forEach((id, i) => {
-    const listing = parseJson(raws[i * 2]);
-    if (!listing || typeof listing !== "object") return;
-    const extras = parseJson(raws[i * 2 + 1]);
-    const product = parseProduct({ ...(listing as object), ...(extras && typeof extras === "object" ? extras : {}) });
-    if (product && product.id === id) out.push(product);
+    const product = productRead(raws[i * 2], raws[i * 2 + 1], id);
+    if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * One product as its two GETs answered (CX-123 rule 24): null only when Redis answered nil for its listing (no
+ * record); an extras nil is a product with no checkout questions and no funnel. Any other reply (not text, text that
+ * is not a JSON record, extras without their list of questions or with a funnel that does not read, a record that is
+ * not a product or is another product's) throws UnknownReplyError. Every product edit writes back what this read
+ * (lib/store.ts, onProduct), so extras taken for "none" would DEL the creator's questions and funnel, and a listing
+ * taken for "none" would drop the product from a store copy's batch.
+ */
+function productRead(rawListing: unknown, rawExtras: unknown, id: string): Product | null {
+  if (rawListing === null) return null;
+  const listing = typeof rawListing === "string" ? parseJson(rawListing) : null;
+  if (!listing || typeof listing !== "object" || Array.isArray(listing)) throw new UnknownReplyError("a product's listing");
+  let extras: Record<string, unknown> = {};
+  if (rawExtras !== null) {
+    const parsed = typeof rawExtras === "string" ? parseJson(rawExtras) : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError("a product's checkout questions and funnel");
+    extras = parsed as Record<string, unknown>;
+    // productWrites writes both: the questions as a list, the funnel as null or one that reads (as readProductsStrict checks).
+    if (!Array.isArray(extras.fields) || (extras.funnel !== null && !parseFunnel(extras.funnel))) {
+      throw new UnknownReplyError("a product's checkout questions and funnel");
+    }
+  }
+  const product = parseProduct({ ...(listing as object), ...extras });
+  if (!product || product.id !== id) throw new UnknownReplyError("a product's records");
+  return product;
 }
 
 /** One product in full, or null when the store has no such product (or no id was given). */

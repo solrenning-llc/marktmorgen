@@ -93,6 +93,17 @@ is("each answer is its own link, its words the link's text", lines.slice(1, 4), 
 ]);
 is("says opening a link is not a vote", lines.some((l) => /counted only when you press Confirm/.test(l)), true);
 is("says when it closes", lines.some((l) => l.includes("December 8, 2026")), true);
-is("says nobody sees who answered what", lines.some((l) => /only the totals/.test(l)), true);
+is("with the hour it closes, not the day alone (Claude 3 on #3673, LEVE)", lines.some((l) => l.includes("12:00 PM UTC on December 8, 2026")), true);
+is("says the sender sees the totals, not a list of who answered", lines.some((l) => /sees only the totals, not a list of who answered/.test(l)), true);
+
+part("The email never promises what the totals cannot keep (Claude 3 and R1 on #3673)");
+// One recipient, one vote: the totals are that person's answer. With N recipients and N − 1 votes known some other way,
+// the last one's answer is the totals minus theirs. So no absolute "never who answered what".
+const one = tallyPoll(2, ["1"]);
+is("one vote: the totals show how that one person answered", one.known && one.counts, [0, 1]);
+const allButOne = tallyPoll(3, ["0", "0", "2"]);
+is("N − 1 answers known elsewhere: the totals give away the last one's", allButOne.known && allButOne.counts[2] - 0, 1);
+is("so no line promises the sender never learns who answered what", lines.some((l) => /never who answered/i.test(l)), false);
+is("and the email says a very small list can show one person's answer", lines.some((l) => /very few people/.test(l) && /how one person answered/.test(l)), true);
 
 done();

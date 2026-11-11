@@ -18,6 +18,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { BROADCAST_ID } from "@/lib/broadcasts";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { MAX_POLL_OPTIONS, tallyPoll } from "@/lib/email-poll-rules";
 
@@ -26,7 +27,6 @@ export const POLL_RESULTS_DAYS = 30;
 /** One vote as kept: a place of up to six digits, its answer's digit and what Redis keeps beside a field. */
 export const POLL_VOTE_BYTES = 6 + 1 + 64;
 
-const BROADCAST_ID = /^[A-Za-z0-9_-]{6,64}$/;
 export const pollKey = (broadcastId: string) => `nl:mail:bc:${broadcastId}:poll`;
 
 const isPlace = (place: unknown): place is number => typeof place === "number" && Number.isInteger(place) && place >= 0 && place < MAX_LEADS;

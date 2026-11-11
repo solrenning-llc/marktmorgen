@@ -1293,7 +1293,8 @@ export async function listSales(store: Store): Promise<SaleList> {
           answers: [],
           trial: false,
           isTip: false,
-          risk: riskLevelOf(pi.latest_charge),
+          // The same test as a checkout's payment (Codex G on #3647): only a row that says it is a payment_intent.
+          risk: riskLevelOf(chargeOfPayment(pi)),
         };
       })
       .filter((sale) => sale.reference !== "");

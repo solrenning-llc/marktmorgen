@@ -68,7 +68,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
         Commissions waiting for a buyer check
       </h2>
       <p className="mt-2 text-sm text-ink-soft">
-        {`These sales did not give us the buyer's email, so we cannot tell whether the buyer is the affiliate who invited the seller. For a sale, we keep looking for ${days} days and decide on our own if the email turns up. A membership's renewal cannot be looked up again, so it waits for you. Until then they are not in your payment batch. If you know the buyer is somebody else, you can approve one.`}
+        {`These sales did not give us the buyer's email, so we cannot tell whether the buyer is the affiliate who made the sale or the affiliate who invited them. For a sale, we keep looking for ${days} days and decide on our own if the email turns up. A membership's renewal cannot be looked up again, so it waits for you. Until then they are not in your payment batch. If you know the buyer is somebody else, you can approve one.`}
       </p>
       <p className="mt-2 text-sm text-ink-soft" role="status">
         {total > lines.length ? `Showing ${lines.length} of ${total} waiting.` : `${total} waiting.`}
@@ -92,7 +92,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
               {!open ? (
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm mt-2 min-h-11"
+                  className="btn btn-secondary btn-sm mt-2 inline-flex min-h-11 items-center"
                   disabled={busy !== null}
                   aria-label={`Review and approve ${money(line.commission, line.currency)} for ${who2}, sale of ${line.title} on ${day(line.at)}`}
                   onClick={(event) => {
@@ -107,15 +107,15 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
                 <div className="notice notice-warn mt-3 text-sm" role="group" aria-label={`Confirm approving ${money(line.commission, line.currency)} for ${who2}`}>
                   <p className="font-semibold text-ink">{`Approve ${money(line.commission, line.currency)} for ${who2}?`}</p>
                   <p className="mt-1 text-ink-soft">
-                    Approve only if you know the buyer is not this affiliate, and not the affiliate who invited them. It goes into your next payment batch and counts as owed. You cannot undo it here. If it was a mistake, record a smaller payout.
+                    Approve only if you know the buyer is neither this affiliate nor the affiliate they invited who made the sale. It goes into your next payment batch and counts as owed. You cannot undo it here. If it was a mistake, record a smaller payout.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button ref={confirmButton} type="button" className="btn btn-primary btn-sm min-h-11" disabled={busy !== null} onClick={() => approve(line.ref)}>
+                    <button ref={confirmButton} type="button" className="btn btn-primary btn-sm inline-flex min-h-11 items-center" disabled={busy !== null} onClick={() => approve(line.ref)}>
                       Yes, approve it
                     </button>
                     <button
                       type="button"
-                      className="btn btn-secondary btn-sm min-h-11"
+                      className="btn btn-secondary btn-sm inline-flex min-h-11 items-center"
                       disabled={busy !== null}
                       onClick={() => {
                         setAsking(null);

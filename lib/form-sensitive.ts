@@ -41,6 +41,12 @@ const REQUEST_VERB = /^(?:(?:please|kindly|now|then|and|also)\s+)*(?:(?:can|coul
 // The same verbs handing over "it" anywhere in a clause ("If yes type it in the box").
 const REQUEST_IT = /\b(?:enter|provide|type|input|write|share|send|tell|give|confirm|re[-\s]?enter|put|paste|fill)\s+(?:(?:in|out|down|us|me)\s+)?(?:it|them|that|this)\b/i;
 
+// A question whose answer is the visitor's own secret (Claude 4 cloud D, #3668): "What do you use as your password?",
+// "Which password do you use for Gmail?". Never "What do you use to store your passwords?" (no "as"/"for" + secret).
+const OWN_USE = new RegExp(String.raw`^(?:what\s+(?:do|did|would|will)\s+you\s+use\s+(?:as|for)\s+(?:(?:your|the|a)\s+)?(?:${WORD}\s+){0,3}${SECRET}(?=\s*$|\s+(?:for|on|to|at|in)\b)|which\s+(?:${WORD}\s+){0,2}${SECRET}\s+(?:do|did|would|will)\s+you\s+use)\b`, "iu");
+// "What is it?" after a sentence naming the visitor's own secret ("Do you remember your password? If so, what is it?").
+const WHAT_IS_IT = /^(?:(?:and|so|then)\s+)?what(?:'s|\s+is|\s+are)\s+(?:it|they|that)$/i;
+
 function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.
   // Keep the other secret in "your password manager's password" detectable.
@@ -49,7 +55,7 @@ function asksForPassword(label: string): boolean {
   // Enter your password") and a request is never excused by the question before it.
   const sentences = request.split(/[?!.:;\n]+/).map((part) => part.trim()).filter(Boolean);
   for (const sentence of sentences) {
-    if (EXPLICIT.test(sentence) || PASSWORD_FOR.test(sentence) || PASSWORD_IS.test(sentence)) return true;
+    if (EXPLICIT.test(sentence) || PASSWORD_FOR.test(sentence) || PASSWORD_IS.test(sentence) || OWN_USE.test(sentence)) return true;
     // Naming the visitor's own secret is a request, unless the sentence is a question about something
     // ("How do you remember your passwords?", "Which of your apps needs a new password most often?").
     if (!ABOUT_QUESTION.test(sentence) && OWN_SECRET.test(sentence)) return true;
@@ -58,7 +64,7 @@ function asksForPassword(label: string): boolean {
   // also after a comma or a short opener ("If yes, type it in the box", "Great, enter it here"). Clauses that are
   // themselves questions ("Do you write them down?") ask about the secret, not for it.
   const clauses = request.split(/[?!.:;,\n]+/).map((part) => part.trim()).filter(Boolean);
-  if (OWN_SECRET.test(request) && clauses.some((clause) => !ABOUT_QUESTION.test(clause) && (REQUEST_VERB.test(clause) || REQUEST_IT.test(clause)))) return true;
+  if (OWN_SECRET.test(request) && clauses.some((clause) => WHAT_IS_IT.test(clause) || (!ABOUT_QUESTION.test(clause) && (REQUEST_VERB.test(clause) || REQUEST_IT.test(clause))))) return true;
 
   // Punctuation is a separator in ordinary credential labels ("Email, password"
   // and "Gmail — password"), not a reason to let the secret through.

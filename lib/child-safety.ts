@@ -279,6 +279,14 @@ export const HIDE_DUE = "nl:csa:hide";
 export const HIDE_RETRY_MS = 3_600_000;
 /** The most held products one run tries to take off; the rest wait for the next run, by when each is due. */
 export const HIDES_PER_RUN = 25;
+/**
+ * How long one run of the step may go on before it stops trying the next product: the step runs inside the hourly
+ * route (app/api/cron/quiet, maxDuration 60 s) next to its other work, and a busy store lock is exactly what puts a
+ * product here, so it never spends the run on them (Claude 4 on #3486). What it did not reach stays due.
+ */
+export const HIDE_BUDGET_MS = 5_000;
+/** How long the step waits for a store's lock another write holds, against the write's own 8 s: a busy store is tried again an hour later. */
+export const HIDE_LOCK_WAIT_MS = 500;
 
 /** One waiting product: the store's ref (lib/store.ts storeRef), the tag its mark is kept under, and the product. */
 const hideMember = (store: Store, productId: string) => JSON.stringify([storeRef(store), storeTag(store), productId]);
@@ -288,7 +296,7 @@ const hideMember = (store: Store, productId: string) => JSON.stringify([storeRef
  * write said so), "gone" when there is nothing left to take off (the hold is over, or the store has no such product),
  * "waiting" for anything not confirmed, an unknown reply included, so it is tried again and never dropped for it.
  */
-async function hideOne(member: string): Promise<"hidden" | "gone" | "waiting"> {
+async function hideOne(member: string, lockWaitMs: number): Promise<"hidden" | "gone" | "waiting"> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(member);
@@ -311,7 +319,7 @@ async function hideOne(member: string): Promise<"hidden" | "gone" | "waiting"> {
   if (listing === "unknown") return "waiting";
   if (!listing) return "gone";
   if (!listing.hidden) {
-    const done = await setProductHidden(storeRef(store), productId, true);
+    const done = await setProductHidden(storeRef(store), productId, true, { lockWaitMs });
     if (!(done.ok && done.product.hidden)) return "waiting";
   }
   // Off: its draft preview link revoked too, confirmed, before it is let go.
@@ -336,11 +344,14 @@ async function previewRevoked(store: Store, productId: string): Promise<boolean>
 /**
  * The hourly job's step (app/api/cron/quiet): tries to take off the store each held product whose taking off did not
  * go through (holdReported), up to HIDES_PER_RUN of those due, and lets each go only once it is confirmed off or has
- * nothing left to take off; anything else is tried again an hour later. Never throws: a queue that cannot be read is
- * left for the next run.
+ * nothing left to take off; anything else is tried again an hour later. It tries no product once `until` (by the clock,
+ * HIDE_BUDGET_MS from the call unless the caller gives less) is past, and waits at most HIDE_LOCK_WAIT_MS, and never
+ * past `until`, for a busy store: what it did not reach stays due as it was, for the next run. Never throws: a queue
+ * that cannot be read is left for the next run.
  */
-export async function hideHeldProducts(now = Date.now()): Promise<{ hidden: number; waiting: number; gone: number }> {
+export async function hideHeldProducts(now = Date.now(), until = Date.now() + HIDE_BUDGET_MS): Promise<{ hidden: number; waiting: number; gone: number }> {
   const out = { hidden: 0, waiting: 0, gone: 0 };
+  if (Date.now() >= until) return out;
   let due: string[];
   try {
     const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", HIDE_DUE, "-inf", String(now), "LIMIT", 0, HIDES_PER_RUN]]), 1);
@@ -352,7 +363,9 @@ export async function hideHeldProducts(now = Date.now()): Promise<{ hidden: numb
     return out;
   }
   for (const member of due) {
-    const done = await hideOne(member).catch((error) => {
+    const left = until - Date.now();
+    if (left <= 0) break;
+    const done = await hideOne(member, Math.min(HIDE_LOCK_WAIT_MS, left)).catch((error) => {
       console.error("a held product could not be taken off", error instanceof Error ? error.message : "unknown");
       return "waiting" as const;
     });

@@ -260,9 +260,10 @@ export async function requestCopy(input: {
       g.freeSentBy(name),
     ].join("\n"),
   });
-  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts.
-  if (sent) await countOrder(store, `free:${token}`, 0);
-  await settleAdmitted(store, admitted.hour);
+  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts. A count not confirmed keeps
+  // the room it was admitted with until its hours end, never given back as if counted.
+  const tally = sent ? await countOrder(store, `free:${token}`, 0) : false;
+  if (tally !== "unknown") await settleAdmitted(store, admitted.hour);
   return sent ? "sent" : "error";
 }
 
@@ -471,6 +472,8 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean, through: List
     const values = statsId && fields.length ? await valuesOf(statsId, fields, batch.map((email) => personKey(statsId, email)), through) : {};
     batch.forEach((email, k) => valued.set(email, fields.map((f) => cell(values[f.id]?.[k] ?? "")).join(",")));
   };
+  // Kept but unreadable, by address (a later reading of the same field that reads takes it off): counted and said.
+  const unreadable = new Set<string>();
   let cursor = "0";
   // Bounded, so a cursor that never comes back to zero cannot hold the
   // function forever; a list not read to its end by then is unknown.
@@ -485,7 +488,14 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean, through: List
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const email = flat[i];
       const lead = parseContact(flat[i + 1]);
-      if (!lead) continue;
+      if (!lead) {
+        unreadable.add(email);
+        byEmail.delete(email);
+        // Left out of the file, so its values are not read (a later reading that reads puts it back in line).
+        waiting.delete(email);
+        continue;
+      }
+      unreadable.delete(email);
       if (onlyAgreed && !mailable(lead)) {
         byEmail.set(email, null);
         waiting.delete(email);
@@ -516,5 +526,27 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean, through: List
   }
   if (waiting.size) await readValues(waiting.size);
   for (const [email, row] of byEmail) if (row !== null) rows.push(fields.length ? `${row},${valued.get(email)}` : row);
-  return `${rows.join("\r\n")}\r\n`;
+  const csv = `${rows.join("\r\n")}\r\n`;
+  if (unreadable.size) throw new ListNotWholeError(csv, unreadable.size);
+  return csv;
+}
+
+/**
+ * listAsCsv's list holds contacts kept but unreadable (CX-123 rule 24): the
+ * file of the readable ones is never handed over as the whole list without a
+ * word. It carries that file and how many could not be read, so a caller
+ * that can say so hands it over saying so (the download's "-partial" file,
+ * app/api/store/leads/route.ts; the store export's contactsNote,
+ * lib/store-export.ts), and any other caller fails as for a list it could
+ * not read.
+ */
+export class ListNotWholeError extends Error {
+  readonly csv: string;
+  readonly unreadable: number;
+  constructor(csv: string, unreadable: number) {
+    super(`${unreadable} contact(s) on a list could not be read`);
+    this.name = "ListNotWholeError";
+    this.csv = csv;
+    this.unreadable = unreadable;
+  }
 }

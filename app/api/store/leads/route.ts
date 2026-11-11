@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
 import { ListDownloadRefused, holdListDownload } from "@/lib/list-download";
-import { listAsCsv } from "@/lib/free";
+import { ListNotWholeError, listAsCsv } from "@/lib/free";
 
 /**
  * The creator's list, as a file they can take anywhere.
@@ -29,9 +29,21 @@ export async function GET(request: NextRequest) {
 
   try {
     // Each read held before it is made and counted at what it moved; the file held before it is sent.
-    const csv = await listAsCsv(store, onlyAgreed, held.read);
+    // Contacts kept but unreadable (rule 24): the readable ones are handed over, and the file's name says it is not the
+    // whole list and how many were left out ("-partial", as the sales file says it, then "-3-contacts-not-read"),
+    // never a file given as the list without a word. The count is in the name, not in the file, so every email tool
+    // still imports the file as it is.
+    const read = await listAsCsv(store, onlyAgreed, held.read).then(
+      (csv) => ({ csv, unreadable: 0 }),
+      (error: unknown) => {
+        if (error instanceof ListNotWholeError) return { csv: error.csv, unreadable: Math.max(1, error.unreadable) };
+        throw error;
+      },
+    );
+    const csv = read.csv;
     const day = new Date().toISOString().slice(0, 10);
-    const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}.csv`;
+    const left = read.unreadable ? `-partial-${read.unreadable}-${read.unreadable === 1 ? "contact" : "contacts"}-not-read` : "";
+    const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}${left}.csv`;
     // The byte-order mark makes Excel read the file as UTF-8, so a name with
     // an accent arrives with its accent. Every email tool ignores it.
     const body = `\uFEFF${csv}`;

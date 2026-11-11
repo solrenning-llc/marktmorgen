@@ -21,6 +21,7 @@
  */
 import { DEEMED_SUPPLIER_RECORDS, deemedSupplierReady, type DeemedSupplierRecord } from "@/lib/deemed-supplier";
 import {
+  ASSIGNED_COUNTRY_CODES,
   EU_MEMBER_STATES,
   MIN_LOCATION_EVIDENCE,
   UNVERIFIED_TERRITORIES,
@@ -65,6 +66,21 @@ for (const bad of [null, undefined, "", "us", "USA", "1A", "XX", "ZZ", "T1", "AA
   is(`${JSON.stringify(bad)} is unknown, never guessed`, [got.allowed, got.allowed ? null : got.reason], [false, "location-unknown"]);
 }
 is("more than two pieces are all read", decide(["US", "US", "FR"]).allowed, false);
+
+part("Only assigned ISO 3166-1 codes are countries; every other two letters are unknown (Claude 3 on #3681, MEDIUM)");
+// Never assigned (JJ, OO, WW, ZX), Greece's VAT prefix (EL, never a country code: Greece is GR), and codes ISO only keeps
+// transitionally reserved for countries that no longer exist (AN, CS, YU, TP): none of them says where a buyer is.
+for (const bad of ["JJ", "OO", "WW", "ZX", "EL", "AN", "CS", "YU", "TP"]) {
+  const beside = decide(["US", bad]);
+  const twice = decide([bad, bad]);
+  is(`${bad}: not a country, so unknown, beside a real one and on its own`, [candidateJurisdictions(bad), beside.allowed ? null : beside.reason, twice.allowed ? null : twice.reason], [null, "location-unknown", "location-unknown"]);
+}
+is("every one of the 249 assigned codes, and XK as providers send Kosovo, is a country", ASSIGNED_COUNTRY_CODES.length === 249 && [...ASSIGNED_COUNTRY_CODES, "XK"].every((code) => candidateJurisdictions(code) !== null), true);
+is("Curaçao, Sint Maarten and the Caribbean Netherlands (once AN) still count for the EU too", [candidateJurisdictions("CW"), candidateJurisdictions("SX"), candidateJurisdictions("BQ")], [["EU", "other"], ["EU", "other"], ["EU", "other"]]);
+
+part("Records the gate itself refuses are refused here too, before any copy (Claude 3 on #3681, LEVE)");
+const extraKey = SYNTHETIC.map((row, i) => (i === 2 ? { ...row, sneaky: 1 } : row));
+is("a record with a field the gate does not know: the gate says not ready, and nobody can buy", [deemedSupplierReady(extraKey), decide(["US", "US"], extraKey).allowed], [false, false]);
 
 part("Every piece counts");
 is("US and US: collected there, so sold", decide(["US", "US"]), { allowed: true, jurisdictions: ["US"] });

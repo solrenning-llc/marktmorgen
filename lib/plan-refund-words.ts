@@ -145,3 +145,29 @@ export const REFUND_DONE: Record<string, { tone: "success" | "warn"; title: stri
   none: { tone: "warn", title: "Nothing was refunded", body: "The reason is below." },
   owner: { tone: "warn", title: "Only the store's owner can ask for this refund", body: "Ask the owner of this store to open this page." },
 };
+
+/**
+ * When a refund's record of what was still owed was damaged and stayed unreadable for GIVE_UP_DAYS: we do not know how
+ * much went through, so the letter says only that, the plan as Stripe shows it (or to check the studio when it cannot
+ * be read), and who settles it (Claude 4 on #2692 and #3585).
+ */
+export function planRefundUnknownLetter(o: { store: string; plan: "stops" | "renews" | "ended" | "unknown" }): { subject: string; text: string } {
+  const store = o.store || "your store";
+  return {
+    subject: `${store}: we could not confirm your refund`,
+    text: [
+      `We could not confirm how much of the refund you asked for on your Marktmorgen plan for ${store} went through.`,
+      "",
+      o.plan === "stops"
+        ? "Your plan is set to stop at the end of the period you paid for, and nothing more will be charged for it."
+        : o.plan === "renews"
+          ? "Your plan goes on and renews as usual unless you cancel it in your studio."
+          : o.plan === "ended"
+            ? "Your plan has ended, and nothing more will be charged for it."
+            : "We could not read your plan just now, so check your plan in your studio to see whether it renews.",
+      `Reply to this email or write to ${SUPPORT_ADDRESS}, and we will check your refund and settle anything still owed.`,
+      "",
+      "Marktmorgen",
+    ].join("\n"),
+  };
+}

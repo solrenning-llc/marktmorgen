@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ENDING_KEY, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
+import { ENDING_KEY, GIVE_UP_DAYS, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
@@ -162,6 +162,91 @@ await t.test(`present debt evidence with a ${malformed} is retained`, async () =
   assert.equal(await shop.note(), damaged, "the unknown evidence remains byte-identical for recovery");
   assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0);
   assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
+});
+await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_DAYS, with the creator told (Claude 4's LOW on #2692)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number };
+  note.p = malformed === "null entry" ? [null] : [note.p[0], null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  const callsBefore = world.calls.length;
+  world.emails = [];
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+
+  assert.equal(await shop.note(), null, "past GIVE_UP_DAYS the unknown note is let go, never kept forever");
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0, "the plan is never ended on unknown debt evidence");
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("POST /refunds")).length, 0, "no refund is made on it");
+  assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
+  assert.equal(world.emails.length, 1, "the creator is told once");
+  assert.equal(world.emails[0].subject.endsWith("we could not confirm your refund"), true);
+  assert.equal(world.emails[0].text.includes("We could not confirm how much of the refund"), true, "the letter says what is not known, not that part went through");
+  assert.equal(world.emails[0].text.includes("set to stop at the end of the period you paid for"), true, "and says what Stripe shows of the plan: the stop this refund set is still there");
+  assert.equal(world.emails[0].text.includes("support@marktmorgen.com"), true);
+
+  world.emails = [];
+  await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
+  assert.equal(world.emails.length, 0, "a second run sends nothing more");
+  } finally {
+    delete process.env.RESEND_API_KEY;
+  }
+});
+}
+
+// Rule 24 (Codex CX1's MEDIUM on #3585): a status Stripe has no name for, a stop flag that is missing or not a boolean,
+// and a cancel_at that is neither null nor a number are not read as "renews"; the letter says to check the studio.
+const UNREADABLE_SHAPES = ["an unknown status", "no stop flag", "a string stop flag", "a string cancel_at", "no cancel_at"] as const;
+// Claude 1's LOW 1 on #3585: a paused or unpaid plan does not renew as usual, so the letter says to check the studio.
+const NOT_RENEWING = ["paused", "unpaid"] as const;
+for (const plan of ["the creator's own stop", "kept by the creator", "unreadable", "gone at Stripe", ...UNREADABLE_SHAPES, ...NOT_RENEWING] as const) {
+await t.test(`the give-up letter says what Stripe shows of the plan, not the note's flag: ${plan} (Claude 4's LOW on #3585)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY, stopSet: plan === "the creator's own stop" });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[]; m: number; s: string };
+  note.p = [null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  const row = world.subs.get(note.s)!;
+  if (plan === "kept by the creator") row.cancel_at_period_end = false;
+  if (plan === "unreadable") row.status = 42;
+  if (plan === "gone at Stripe") world.subs.delete(note.s);
+  const shape = row as Record<string, unknown>;
+  if (plan === "an unknown status") shape.status = "a_status_stripe_never_named";
+  if (plan === "no stop flag") delete shape.cancel_at_period_end;
+  if (plan === "a string stop flag") shape.cancel_at_period_end = "true";
+  if (plan === "a string cancel_at") shape.cancel_at = "2000000000";
+  if (plan === "no cancel_at") delete shape.cancel_at;
+  if (plan === "paused" || plan === "unpaid") shape.status = plan;
+  const callsBefore = world.calls.length;
+  world.emails = [];
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+  } finally {
+    delete process.env.RESEND_API_KEY;
+  }
+  assert.equal(await shop.note(), null);
+  assert.equal(world.calls.slice(callsBefore).filter((call) => !call.startsWith("GET ")).filter((call) => call.includes("/subscriptions/") || call.startsWith("POST /refunds")).length, 0, "the letter only reads the plan; nothing is changed or refunded");
+  assert.equal(world.emails.length, 1);
+  const text = world.emails[0].text;
+  const said = {
+    stops: text.includes("set to stop at the end of the period you paid for"),
+    renews: text.includes("renews as usual"),
+    ended: text.includes("Your plan has ended"),
+    check: text.includes("check your plan in your studio"),
+  };
+  const expected = plan === "the creator's own stop" ? "stops" : plan === "kept by the creator" ? "renews" : plan === "gone at Stripe" ? "ended" : "check";
+  assert.deepEqual(Object.entries(said).filter(([, on]) => on).map(([k]) => k), [expected], `the letter says only "${expected}" (note m was ${note.m})`);
 });
 }
 });

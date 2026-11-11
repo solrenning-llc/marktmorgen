@@ -63,7 +63,7 @@ for (const status of ["replied", "deal", "stopped"] as const) {
 }
 is("a stop kept for their domain ends it, even with the pitch still \"sent\"", reminderState({ ...base, domainStopped: true, now: SENT + 30 * DAY }), { state: "closed", reason: "stopped" });
 is("a \"no solicitations\" on their site ends it", reminderState({ ...base, refusesProposals: true, now: SENT + 30 * DAY }), { state: "closed", reason: "refused" });
-is("a stop wins over a reminder already opened", reminderState({ ...base, domainStopped: true, remindedAt: SENT + 8 * DAY, now: SENT + 30 * DAY }).reason, "stopped");
+is("a stop wins over a reminder already opened", reminderState({ ...base, domainStopped: true, remindedAt: SENT + 8 * DAY, now: SENT + 30 * DAY }), { state: "closed", reason: "stopped" });
 is("a draft never sent has nothing to remind", reminderState({ ...base, status: "draft", sentAt: 0, now: SENT + 30 * DAY }), { state: "closed", reason: "not-sent" });
 
 part("What the first email already promised is kept");

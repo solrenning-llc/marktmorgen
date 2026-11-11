@@ -1539,6 +1539,7 @@
     "components/report-download.tsx",
     "components/report-form.tsx",
     "components/resend-purchase.tsx",
+    "components/returning-code-box.tsx",
     "components/revenue-quality.tsx",
     "components/review-ai-summaries.tsx",
     "components/review-form.tsx",

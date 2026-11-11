@@ -7,10 +7,18 @@ import { toast } from "@/components/toast";
  * Which team members get the weekly email too (lib/stats-report.ts). Only
  * members whose role sees the numbers are offered; each gets their own stop link.
  */
-export function WeeklyTeamPicker({ members, chosen }: { members: string[]; chosen: string[] }) {
-  const [picked, setPicked] = useState(new Set(chosen));
+export function WeeklyTeamPicker({ members, chosen }: { members: string[]; chosen: string[] | null }) {
+  const [picked, setPicked] = useState(new Set(chosen ?? []));
   const [busy, setBusy] = useState(false);
   if (!members.length) return null;
+  // Not read (VR 2, rule 24): said in words, with no box to tick, so a save never drops whoever really gets it.
+  if (chosen === null) {
+    return (
+      <p className="mt-4 text-sm text-ink-soft" role="status">
+        We could not read who gets the weekly email just now. Reload the page in a minute to change it.
+      </p>
+    );
+  }
   async function save(next: Set<string>) {
     setBusy(true);
     try {

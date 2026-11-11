@@ -495,7 +495,8 @@ export function StatsPanel({
   /** Whether this person may choose how long after a visit a sale is credited to it (lib/attribution-rules.ts). */
   canSetAttribution?: boolean;
   /** For whoever runs the team: members who see the numbers, and those who get the weekly email too. */
-  weeklyTeam?: { members: string[]; chosen: string[] } | null;
+  /** `chosen` null: who gets it could not be read just now (the picker says so and offers nothing to save). */
+  weeklyTeam?: { members: string[]; chosen: string[] | null } | null;
   /** The month's goal (lib/sales-goal-rules.ts), 0 for none. */
   goal?: number;
   /** For whoever may change settings: the chat the numbers are posted to (lib/chat-summary.ts); undefined for anybody else. */

@@ -29,6 +29,19 @@ export const MAX_POLL_QUESTION = 200;
 export const MAX_POLL_OPTION = 60;
 export const POLL_DEFAULT_DAYS = 7;
 export const MAX_POLL_DAYS = 30;
+/**
+ * Database commands one confirmed answer makes at the most (lib/email-poll-vote.ts):
+ * the broadcast's record, the store's handle and record, the vote and its
+ * expiry. A review ceiling.
+ */
+export const POLL_VOTE_COMMANDS = 5;
+/**
+ * Public requests of the store's month one confirmed answer takes before it
+ * is kept: more than its reads (the store's record at 1 MB at the most, the
+ * broadcast's record) and its writes cost (POLL_VOTE_READ in
+ * tests/plan-cost-registry.test.ts).
+ */
+export const POLL_VOTE_REQUEST_UNITS = 2;
 
 const DAY_MS = 86_400_000;
 

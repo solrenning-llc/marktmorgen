@@ -10,18 +10,18 @@
  *   2. the broadcast is read: it must keep a poll, have gone out ("sending"
  *      or "sent"), and its list must reach the link's place;
  *   3. the poll must be open (from sendAt for its days);
- *   4. the store is read and one buyer action of its month is taken
- *      (lib/buyer-actions.ts takeBuyerAction): past its figure the store is
- *      resting and nothing is kept;
+ *   4. the store is read and POLL_VOTE_REQUEST_UNITS of its month's public
+ *      requests are taken (lib/buyer-actions.ts takeBuyerRead): past its
+ *      figure the store is resting and nothing is kept;
  *   5. the answer is kept, or taken back, under the place (recordVote).
  *
  * Anything that does not read is "unknown", never kept and never refused
  * (rule 24).
  */
 import { BROADCAST_ID, readBroadcast } from "@/lib/broadcasts";
-import { takeBuyerAction } from "@/lib/buyer-actions";
+import { takeBuyerRead } from "@/lib/buyer-actions";
 import { checkPollLink } from "@/lib/email-poll-links";
-import { pollClosesAt, voteStep } from "@/lib/email-poll-rules";
+import { POLL_VOTE_REQUEST_UNITS, pollClosesAt, voteStep } from "@/lib/email-poll-rules";
 import { recordVote } from "@/lib/email-polls";
 import { type Store, storeForHandle } from "@/lib/store";
 
@@ -32,7 +32,7 @@ export type PollVoteDeps = {
   take: (store: Store) => Promise<boolean>;
 };
 
-const DEPS: PollVoteDeps = { loadStore: storeForHandle, take: (store) => takeBuyerAction(store) };
+const DEPS: PollVoteDeps = { loadStore: storeForHandle, take: (store) => takeBuyerRead(store, POLL_VOTE_REQUEST_UNITS) };
 
 const nonnegative = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 

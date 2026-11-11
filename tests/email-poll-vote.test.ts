@@ -8,7 +8,7 @@
  *     past the broadcast's list;
  *   - a link that is refused costing a read of the database;
  *   - a vote kept for a broadcast with no poll, not sent yet, or canceled;
- *   - a vote kept after the poll closed, or with no buyer action of the
+ *   - a vote kept after the poll closed, or with no public requests of the
  *     store's month taken first (then the store is resting: nothing kept);
  *   - anything that does not read (the broadcast, the store, the month,
  *     the write) answered as kept or as refused, never "unknown" (rule 24);
@@ -63,7 +63,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   taken = 0;
   is("kept", await votePoll({ broadcastId: ID, link: link(2), option: 1, now }, deps()), "recorded");
   is("under the place, the answer's index", votes(), ["2", "1"]);
-  is("one buyer action of the store's month taken first", taken, 1);
+  is("the store's month taken from first, once", taken, 1);
   is("changed", await votePoll({ broadcastId: ID, link: link(2), option: 2, now }, deps()), "recorded");
   is("taken back", await votePoll({ broadcastId: ID, link: link(2), option: null, now }, deps()), "withdrawn");
   is("nothing kept for that place", votes(), []);

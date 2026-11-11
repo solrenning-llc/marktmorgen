@@ -309,14 +309,14 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
     const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
+    // Waiting to be taken off before anything else is done: should the files below or the hide not go through (or the
+    // request be cut short), the hourly job takes it off (hideHeldProducts). A queue write not confirmed does not stop the hide; the owner's email says what happened.
+    const member = hideMember(store, product.id);
+    await redisPipeline([["ZADD", HIDE_DUE, now, member], ["EXPIRE", HIDE_DUE, KEEP_SECONDS]]).catch(() => console.error("a held product could not be queued to be taken off"));
     // Its files are kept and closed to everyone before it is taken off (unit 3b, lib/held-files.ts).
     const files = await productFilePaths(product, store.statsId || undefined)
       .then(async ({ paths, complete }) => (await holdFiles(paths)) && (await listHeldFiles(store, product.id, paths)) && complete)
       .catch(() => false);
-    // Waiting to be taken off before it is: should the hide below not go through, the hourly job takes it off
-    // (hideHeldProducts). A queue write not confirmed does not stop the hide; the owner's email says what happened.
-    const member = hideMember(store, product.id);
-    await redisPipeline([["ZADD", HIDE_DUE, now, member], ["EXPIRE", HIDE_DUE, KEEP_SECONDS]]).catch(() => console.error("a held product could not be queued to be taken off"));
     const done = await setProductHidden(storeRef(store), product.id, true);
     if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
     // Confirmed off: it waits no more. If this is lost, the job confirms it off and lets it go.

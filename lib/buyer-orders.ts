@@ -1240,6 +1240,22 @@ export async function ordersGrant(store: Store, token: string): Promise<string |
   return grantFrom(raw, grantAccount(store));
 }
 
+/**
+ * ordersGrant, with an unreadable link told apart (rule 24): null only when the
+ * link is exactly not there (nil) or its record grants nothing; "unknown" when
+ * the GET's reply was lost or is not text, so a caller says "try again" rather
+ * than "no purchase". A failed request still throws.
+ */
+export async function ordersGrantExactly(store: Store, token: string): Promise<string | null | "unknown"> {
+  if (!ORDERS_TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
+  if (!replies) return "unknown";
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") return "unknown";
+  return raw ? grantFrom(raw, grantAccount(store)) : null;
+}
+
 /** The address in a grant record written exactly as `Grant` for this account, or null. */
 function grantFrom(raw: string, account: string): string | null {
   let grant: unknown;

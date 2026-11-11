@@ -4,7 +4,7 @@ import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { fromAnotherSite, limited, clientAddress } from "@/lib/request-guard";
 import { readOrder } from "@/lib/store-checkout";
-import { ordersGrant } from "@/lib/buyer-orders";
+import { ordersGrantExactly } from "@/lib/buyer-orders";
 import { authorizeUrl, isDiscordConfigured, redirectUri } from "@/lib/discord";
 import { readServerOrThrow, startTrip } from "@/lib/discord-store";
 import { storeKey } from "@/lib/learn";
@@ -52,7 +52,13 @@ export async function POST(request: NextRequest) {
     if (order.state === "error") return page("failed");
     email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
   } else if (token) {
-    email = await ordersGrant(store, token);
+    // The orders link read exactly: not there is "none"; a reply that does not read, or no answer, is "failed".
+    const grant = await ordersGrantExactly(store, token).catch((error: unknown) => {
+      console.error("reading an orders link for the Discord button failed", error);
+      return "unknown" as const;
+    });
+    if (grant === "unknown") return page("failed");
+    email = grant;
   }
   if (!email) return page("none");
   const redirect = redirectUri(origin);

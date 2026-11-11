@@ -56,6 +56,7 @@ import { MAX_BUTTON, MAX_FIELDS, MAX_LABEL } from "@/lib/forms";
 import { MAX_SITE_TITLE } from "@/lib/site-page-rules";
 import { MAX_HEADLINE_LENGTH, MAX_STEP_TEXT_LENGTH } from "@/lib/funnel";
 import { MAX_PITCH_LENGTH } from "@/lib/product-extras";
+import { MAX_SAVED_PICTURES, type SavedPicture, savedPictureRef } from "@/lib/clickfunnels-pictures";
 
 /** The biggest file the studio reads, as it is on the creator's computer. */
 export const MAX_SAVED_PAGE_BYTES = 15 * 1024 * 1024;
@@ -127,6 +128,8 @@ export type PageDraft = {
   dropped: DroppedItem[];
   /** What was found, for the summary. */
   found: { headings: number; paragraphs: number; buttons: number; videos: number; pictures: number; forms: number; scripts: number };
+  /** Each picture, by its path in the saved page's own folder (null when it is only an address elsewhere), at most MAX_SAVED_PICTURES (394 [CX5]). */
+  pictures: SavedPicture[];
 };
 
 // ---- Trimming, in the browser --------------------------------------------------
@@ -320,6 +323,7 @@ type Reading = {
 function readPage(html: string, drop: Reading["drop"]): Omit<Reading, "drop"> {
   const tokens = tokenize(html);
   const found: PageDraft["found"] = { headings: 0, paragraphs: 0, buttons: 0, videos: 0, pictures: 0, forms: 0, scripts: 0 };
+  const pictures: SavedPicture[] = [];
   const pieces: Piece[] = [];
   const checkboxes: string[] = [];
   let title = "";
@@ -522,6 +526,7 @@ function readPage(html: string, drop: Reading["drop"]): Omit<Reading, "drop"> {
         else {
           found.pictures += 1;
           drop("pictures", squash(attrs.alt ?? "") || fileOf(src));
+          if (pictures.length < MAX_SAVED_PICTURES) pictures.push({ ref: savedPictureRef(src), alt: squash(attrs.alt ?? "").slice(0, 300) });
         }
       } else if (name === "iframe" || name === "embed" || name === "object" || name === "video" || name === "audio") {
         const src = attrs.src ?? attrs.data ?? "";
@@ -571,7 +576,7 @@ function readPage(html: string, drop: Reading["drop"]): Omit<Reading, "drop"> {
   spendLabel();
   if (inForm && fields.length && !form) form = { fields, button: cutAtWord(formButton, MAX_BUTTON) };
   if (linksDropped) drop("links", "", linksDropped);
-  return { title, pieces, form, checkboxes, checkout, found };
+  return { title, pieces, form, checkboxes, checkout, found, pictures };
 }
 
 function hostOf(url: string): string {
@@ -749,5 +754,6 @@ export function convertSavedPage(input: string, fileName = ""): PageDraft {
     },
     dropped: [...dropped.values()],
     found: { ...read.found, paragraphs: pieces.filter((p) => p.kind === "para" || p.kind === "item").length, buttons: pieces.filter((p) => p.kind === "button").length },
+    pictures: read.pictures,
   };
 }

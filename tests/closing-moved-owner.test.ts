@@ -13,19 +13,22 @@
  *
  * A store in its closing (its plan ended on or after KEEP_NOTHING_FROM and does not run, or it is in the final line
  * or the walk's line) now keeps its address until it is erased or its plan runs again: the move is refused,
- * read under the store's own lock, and a line that does not read is never "not closing" (rule 24).
+ * read under the store's own lock, and a line that does not read is never "not closing" (rule 24). A store whose plan
+ * runs again while its members are still held (HELD_INDEX, from the day its plan ended) keeps its address too, until
+ * the daily releaseRestarted lets them go under that ref (Claude 1's review on #3672).
  *
  * Synthetic stores, in-memory Redis.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { BATCH_KEY, DUE_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
-import { FINAL_INDEX } from "@/lib/closing-holds";
+import { FINAL_INDEX, HELD_INDEX, releaseRestarted } from "@/lib/closing-holds";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { KEEP_NOTHING_FROM } from "@/lib/plan-closing-rules";
-import { type MoveResult, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { type MoveResult, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -50,6 +53,8 @@ async function linkSession(email: string): Promise<string> {
 let onBatchWrite: ((ref: string) => Promise<void>) | null = null;
 /** The two reads of a store's closing lines answered in a shape Redis never gives. */
 let linesUnread = false;
+/** Only the read of the line of stores whose members are held answered in a shape Redis never gives. */
+let heldUnread = false;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (onBatchWrite && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) {
@@ -58,6 +63,10 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     await hook(String(commands[0][2]));
   }
   if (linesUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === FINAL_INDEX)) return [{}];
+  if (heldUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === HELD_INDEX)) {
+    const replies = await realPipeline(commands);
+    return commands.map((c, i) => (c[1] === HELD_INDEX ? { unexpected: true } : replies[i]));
+  }
   return realPipeline(commands);
 };
 
@@ -171,6 +180,41 @@ async function main(): Promise<void> {
     is(`in ${what}: the record stays at its address`, [traces(C, "lined-c-new@example.com", c.sid, c.handle).atOld, traces(C, "lined-c-new@example.com", c.sid, c.handle).atNew], [true, false]);
   }
 
+  part("Restarted, members still held: the move is refused until they are let go (Claude 1's review on #3672)");
+  // From the day its plan ends, a store's members are held under its ref (holdCharges, lib/closing-holds.ts). A plan
+  // that runs again is let go only by the daily releaseRestarted, which finds the store by that ref: a move before it
+  // ran left the members paused for good, the buyers never told, and the paid periods under the old folder.
+  redis.clear();
+  const M = "held-m@example.com";
+  const M2 = "held-m-new@example.com";
+  const m = await endedStore(M, "heldm");
+  const endedM = Date.parse(m.planEndedAt);
+  redis.run(["ZADD", HELD_INDEX, endedM, M]);
+  await setSubscription(M, { active: true });
+  is("restarted, members still held: the move is refused", outcome(await moveAccount(M, M2)), refused);
+  is("the store and its place among the held stay at its address", [traces(M, M2, m.sid, m.handle).atOld, traces(M, M2, m.sid, m.handle).atNew, Number(redis.run(["ZSCORE", HELD_INDEX, M])), redis.run(["ZSCORE", HELD_INDEX, M2])], [true, false, endedM, null]);
+  const told: string[] = [];
+  const releasedM = await releaseRestarted(Date.now() + 30_000, async (store) => (told.push(storeRef(store)), true));
+  is("the daily run then lets its members go and tells its buyers, at its address", [releasedM, told], [[{ key: M, state: "released" }], [M]]);
+  is("it has left the line of held stores", redis.run(["ZSCORE", HELD_INDEX, M]), null);
+  is("control: once its members are let go, it moves", (await moveAccount(M, M2)).ok, true);
+
+  part("Rule 24: the line of held stores that does not read is never \"not held\"");
+  redis.clear();
+  const U = "unread-u@example.com";
+  const u = await makeStore(U, "unreadu");
+  heldUnread = true;
+  let heldThrew = "";
+  try {
+    await moveAccount(U, "unread-u-new@example.com");
+  } catch (error) {
+    heldThrew = (error as Error).name;
+  } finally {
+    heldUnread = false;
+  }
+  is("the move throws an unknown reply", heldThrew, "UnknownReplyError");
+  is("nothing moved", [traces(U, "unread-u-new@example.com", u.sid, u.handle).atOld, traces(U, "unread-u-new@example.com", u.sid, u.handle).atNew, redis.run(["GET", idKey(u.sid)])], [true, false, U]);
+
   part("Rule 24: a closing line that does not read is never \"not closing\"");
   redis.clear();
   const H = "unread-h@example.com";
@@ -200,6 +244,13 @@ async function main(): Promise<void> {
   const tapped = await moveRoute(form(`${ORIGIN}/api/auth/move`, { token }));
   is("tapped: refused, and said so on the sign-in page", tapped.headers.get("location"), `${ORIGIN}/signin?status=move-closing`);
   is("tapped: the store stays at its address", [traces(R, R2, r.sid, r.handle).atOld, traces(R, R2, r.sid, r.handle).atNew, redis.run(["GET", idKey(r.sid)])], [true, false, R]);
+  // The same refusal covers a store on its creator's break (its pause is kept under its ref, lib/plan-pause.ts) and
+  // one whose plan just started again with its members still held: the notice is true for each (Claude 1's LOW 1).
+  const notice = readFileSync("app/signin/page.tsx", "utf8").match(/"move-closing": \{\s*title: "([^"]*)",\s*body: "([^"]*)"/);
+  is("the notice is read from the sign-in page", notice !== null, true);
+  const said = notice ? notice[2] : "";
+  is("the notice does not say the plan has ended as if it always had", /plan has ended/i.test(said), false);
+  is("the notice names a closing, a break and members' payments on hold", [/closing/.test(said), /on a break/.test(said), /payments are still on hold/.test(said)], [true, true, true]);
 
   part("Controls: a store that is not closing moves as before");
   redis.clear();

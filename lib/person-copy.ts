@@ -115,6 +115,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/assistant-reminder.ts": { how: "copied", what: "A checkout reminder you asked for with the store's assistant box" },
   "lib/move-members.ts": { how: "copied", what: "Invitations to keep a membership you had elsewhere" },
   "lib/inbox.ts": { how: "copied", what: "Your conversations with the store's inbox" },
+  "lib/buyer-block.ts": { how: "marks", what: "Whether the store chose not to take messages from you, kept as a one-way mark of your address; the store's reason is its own note" },
   "lib/discord-access.ts": { how: "copied", what: "Your Discord account's link to the store, and its roles" },
   "lib/email-sync.ts": { how: "copied", what: "The record of sending you to the store's connected email platform" },
   "lib/segments.ts": { how: "marks", what: "A ten-minute copy of the store's buyers, made from its Stripe account" },

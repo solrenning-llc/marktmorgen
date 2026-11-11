@@ -4,7 +4,8 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { setInboxSetting } from "@/lib/store";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { assignTo, openConversation, readInbox, replyTo, setStatus, suggestReply } from "@/lib/inbox";
+import { assignTo, conversationOf, openConversation, readInbox, replyTo, setStatus, suggestReply } from "@/lib/inbox";
+import { blockPerson, blockedState, unblockPerson } from "@/lib/buyer-block";
 import { CONVERSATION_ID, parseInboxSetting } from "@/lib/inbox-rules";
 
 /**
@@ -19,6 +20,9 @@ import { CONVERSATION_ID, parseInboxSetting } from "@/lib/inbox-rules";
  *   { action: "suggest", id }              a suggested answer (one of the month's writing jobs)
  *   { action: "saved", saved }             the saved replies
  *   { action: "chat", on }                 the chat on the store's pages, on or off ("settings")
+ *   { action: "blocked", id }              whether the person of a conversation is blocked, and why (567 [GD1] (f))
+ *   { action: "block", id, reason }        blocks them in the store's messages, the reason kept for the creator alone
+ *   { action: "unblock", id }              lets them write again
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, (body) => (body.action === "chat" ? "settings" : "orders"), 40_000);
@@ -64,6 +68,23 @@ export async function POST(request: NextRequest) {
       case "chat": {
         const saved = await setInboxSetting(store.email, { ...store.inbox, chat: body.on === true });
         return saved.ok ? answer({ ok: true, inbox: saved.store.inbox }) : refuse("none", 404);
+      }
+      case "blocked":
+      case "block":
+      case "unblock": {
+        const conversation = id ? await conversationOf(store.statsId, id) : null;
+        if (!conversation) return refuse("none", 404);
+        if (body.action === "blocked") {
+          const state = await blockedState(store, conversation.email);
+          return state === "unknown" ? refuse("unknown", 503) : answer({ ok: true, ...state });
+        }
+        if (body.action === "block") {
+          const outcome = await blockPerson(store, conversation.email, body.reason);
+          if (outcome === "blocked" || outcome === "already") return answer({ ok: true, blocked: true });
+          return refuse(outcome === "full" ? "store_full" : outcome, outcome === "full" ? 409 : outcome === "many" ? 400 : 503);
+        }
+        const removed = await unblockPerson(store, conversation.email);
+        return removed === "error" ? refuse("error", 503) : answer({ ok: true, blocked: false });
       }
       default:
         return refuse("invalid");

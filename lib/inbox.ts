@@ -34,6 +34,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, monthOf, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { withinLimit } from "@/lib/request-guard";
+import { mayWrite } from "@/lib/buyer-block";
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
@@ -221,6 +222,9 @@ export async function startChat(input: { store: Store; email: unknown; name: unk
   const { store } = input;
   if (!chatOpen(store)) return { ok: false, reason: "closed" };
   if (!(await withinLimit("chat-start", `${store.statsId}:${input.ip}`, 5, 3_600))) return { ok: false, reason: "limited" };
+  // Someone the creator blocked (lib/buyer-block.ts), or whose standing cannot be read, is told the chat is closed.
+  const asked = readEmail(input.email);
+  if (asked && !(await mayWrite(store, asked))) return { ok: false, reason: "closed" };
   // A store whose data room is full is not taking messages here: said as closed, nothing kept.
   const made = await open({ ...input, source: "chat" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const, reason: "closed" as const };
@@ -251,6 +255,8 @@ export async function fileContact(input: { store: Store; email: string; name: st
 export async function handOver(input: { store: Store; email: unknown; name: unknown; text: unknown; now?: number }): Promise<ChatResult> {
   const { store } = input;
   if (!store.statsId || !isRedisConfigured() || store.suspended || isHouseStore(store) || !store.email) return { ok: false, reason: "closed" };
+  const asked = readEmail(input.email);
+  if (asked && !(await mayWrite(store, asked))) return { ok: false, reason: "closed" };
   const made = await open({ ...input, source: "chat" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const, reason: "closed" as const };
     throw error;
@@ -323,6 +329,7 @@ export async function visitorSend(
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
   const conversation = await readKept(found.statsId, found.id);
   if (!conversation || conversation.token !== token) return { ok: false, reason: "gone" };
+  if (!(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
   if (!(await withinLimit("chat-send", `${found.statsId}:${found.id}`, VISITOR_PER_HOUR, 3_600))) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
@@ -638,6 +645,12 @@ export async function suggestReply(store: Store, id: string, now = Date.now()): 
  * (lib/person-erasure.ts): what they wrote, what the store answered, and the
  * link their chat opened with.
  */
+/** One conversation as the studio sees it, without marking it read; null when it is not there. */
+export async function conversationOf(statsId: string, id: string): Promise<Conversation | null> {
+  const kept = await readKept(statsId, id);
+  return kept ? shown(kept) : null;
+}
+
 export async function forgetInboxPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);

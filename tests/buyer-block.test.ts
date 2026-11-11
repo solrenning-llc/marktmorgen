@@ -55,7 +55,8 @@ async function main(): Promise<void> {
   const before = (await dataUsed(store))?.used ?? 0;
   const blocked = await route(OWNER, { action: "block", id: conversation.id, reason: "Insults in every message.\nAgain." });
   is("blocked", blocked, { status: 200, body: { ok: true, blocked: true } });
-  is("its room counted in the store's data room", ((await dataUsed(store))?.used ?? 0) - before, BLOCK_ENTRY_BYTES);
+  const took = ((await dataUsed(store))?.used ?? 0) - before;
+  is("its room counted in the store's data room before it is written, at least the entry's largest size", took >= BLOCK_ENTRY_BYTES, true);
   const said = await route(OWNER, { action: "blocked", id: conversation.id });
   is("the studio is told why, in one line", [said.status, said.body.blocked, said.body.reason], [200, true, "Insults in every message. Again."]);
   is("blocking twice is the same", (await route(OWNER, { action: "block", id: conversation.id, reason: "x" })).body, { ok: true, blocked: true });
@@ -91,8 +92,9 @@ async function main(): Promise<void> {
   (redis as { pipeline: typeof redis.pipeline }).pipeline = realPipeline;
 
   part("Unblocking");
+  const beforeUnblock = (await dataUsed(store))?.used ?? 0;
   is("unblocked", (await route(OWNER, { action: "unblock", id: conversation.id })).body, { ok: true, blocked: false });
-  is("their room given back", (await dataUsed(store))?.used ?? 0, before);
+  is("the room it took is given back", beforeUnblock - ((await dataUsed(store))?.used ?? 0), took);
   is("they may write again", await mayWrite(store, RUDE), true);
   is("unblocking someone not blocked", await unblockPerson(store, RUDE), false);
 

@@ -79,6 +79,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/customer-voice.ts", how: "erased", only: "team", what: "The month's summary of what your customers said, which may quote their review words without their name; read again, it still quotes the reviews they wrote, which are kept. What members wrote when leaving is counted there, never quoted" },
   { file: "lib/member-health.ts", how: "erased", what: "The ten-minute copy of your members' scores" },
   { file: "lib/inbox.ts", how: "erased", what: "Their conversations in your inbox: what they wrote and what you answered" },
+  { file: "lib/buyer-block.ts", how: "erased", what: "Whether you blocked them from writing to your store, with your reason" },
   { file: "lib/imports.ts", how: "expires", days: 14, what: "A file you imported is kept for 14 days after the import began, then deleted with everything in it" },
 
   // ---------------------------------------------------------------- what the store keeps about them

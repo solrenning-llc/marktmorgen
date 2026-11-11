@@ -6,7 +6,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
+import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
@@ -354,7 +354,11 @@ export async function POST(request: NextRequest) {
         ...(returning ? { returning: returning.code, email: returning.email } : {}),
       }),
     );
-    if (!held.ok) return away(`/@${store.handle}?status=${held.reason}`);
+    if (!held.ok) {
+      // No checkout opened: the link's claim is let go, so it can be used again.
+      if (returning) await releaseReturningLink(linkToken);
+      return away(`/@${store.handle}?status=${held.reason}`);
+    }
     // The link is spent only once its checkout exists: going back from Stripe's
     // page and pressing buy again before that still has it.
     if (returning) await spendReturningLink(linkToken);
@@ -381,6 +385,8 @@ export async function POST(request: NextRequest) {
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {
+    // No checkout opened: the link's claim is let go, so it can be used again.
+    if (returning) await releaseReturningLink(linkToken);
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked, or the page was from before its words

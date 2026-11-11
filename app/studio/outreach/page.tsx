@@ -41,7 +41,8 @@ export default async function StudioOutreachPage({ searchParams }: Params) {
   const [sender, pitches, left] = await Promise.all([
     readSender(store).catch(() => null),
     listPitches(store).catch(() => null),
-    on ? aiLeft(store).catch(() => 0) : 0,
+    // An unread allowance is said as unknown, never as 0 left (rule 24).
+    on ? aiLeft(store).catch(() => null) : 0,
   ]);
 
   return (

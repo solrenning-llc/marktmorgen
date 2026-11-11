@@ -128,7 +128,9 @@ async function main(): Promise<void> {
   is("a depth count below zero is an error, never 0 visitors", [negative?.visitors_measured ?? "not given", typeof negative?.error], ["not given", "string"]);
   // A field countDepth never writes (Codex R1 on #3225, LEVE): not a block, so never added to the visitors.
   const depthKey = `nl:depth:${store.statsId}:${product}`;
-  await realPipeline([["DEL", depthKey], ["HSET", depthKey, "blok0001", "2", "junk", "1"]]);
+  // ("junk" itself has a block id's shape, /^[a-z0-9]{4,12}$/, so it reads as a block since removed from the page,
+  // whose visitors still count; a name no block can have is the case.)
+  await realPipeline([["DEL", depthKey], ["HSET", depthKey, "blok0001", "2", "junk field", "1"]]);
   const junk = (await readPageReadingTool(store, product, charge)) as Reading;
   is("a depth field of another shape is an error, never counted as a visitor", [junk?.visitors_measured ?? "not given", typeof junk?.error], ["not given", "string"]);
   for (const odd of ["blok0001?maybe", "blok0001!blok0002.33", "blok0001?price?fit", "Blok0001", "blok0001!blok0002.25!x"]) {

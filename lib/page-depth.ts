@@ -93,6 +93,18 @@ export async function readDepth(statsId: string | null, productId: string): Prom
   return depthOf(pairs);
 }
 
+/**
+ * A field as countDepth writes it (depthField: the block, then `?answer`, then `!videoBlock.step`), or the visitors
+ * field `_n` kept until 11 October 2026 (Codex R1 on #3225). Any other name is not a block, so never a visitor.
+ */
+function isDepthField(field: string): boolean {
+  if (field === "_n") return true;
+  const [head = "", video = "", ...moreVideo] = field.split("!");
+  const [block = "", answer = "", ...moreAnswer] = head.split("?");
+  if (moreVideo.length || moreAnswer.length) return false;
+  return depthField(block, answer, video) === field;
+}
+
 /** A count as countDepth keeps it with HINCRBY by one: a whole number, never below zero, as text (Codex T on #3225). */
 const COUNT_TEXT = /^\d{1,15}$/;
 
@@ -110,7 +122,7 @@ export async function readDepthExact(statsId: string, productId: string): Promis
   // No prototype: a field is only ever a count, whatever its name.
   const pairs = Object.create(null) as Record<string, string>;
   for (let i = 0; i < list.length; i += 2) {
-    if (!COUNT_TEXT.test(list[i + 1])) throw new UnknownReplyError(what);
+    if (!COUNT_TEXT.test(list[i + 1]) || !isDepthField(list[i])) throw new UnknownReplyError(what);
     pairs[list[i]] = list[i + 1];
   }
   return depthOf(pairs);

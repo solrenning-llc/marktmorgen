@@ -106,6 +106,29 @@ function linesOf(reply: unknown, what: string): Map<string, string> {
 }
 
 /**
+ * Only whether this address moved its purchases away, and where to: the
+ * cheaper half of readMovedIndex, for a reader that asks it every time (a
+ * podcast feed, tests/traffic-cost.ts COMMANDS.feed): one GET, and one HGET
+ * only when there is a mark. The same agreement as readMovedIndex: moved only
+ * when the mark names the new address and its line names it back. Throws
+ * UnknownReplyError when either cannot be read.
+ */
+export async function movedAwayTo(sid: string, raw: string): Promise<string | null> {
+  const address = normaliseEmail(raw);
+  if (!isRedisConfigured()) return null;
+  const what = "a store's moved addresses";
+  const first = repliesFor(await redisPipeline([["GET", movedKey(sid, address)]]), 1);
+  if (!first) throw new UnknownReplyError(what);
+  const mark = markOf(first[0], what);
+  if (!mark) return null;
+  const second = repliesFor(await redisPipeline([["HGET", intoKey(sid, mark.to), address]]), 1);
+  if (!second) throw new UnknownReplyError(what);
+  const back = second[0];
+  if (back !== null && typeof back !== "string") throw new UnknownReplyError(what);
+  return back === mark.id ? mark.to : null;
+}
+
+/**
  * Where an address's purchases at a store stand, as the readers will ask
  * (unit 4b onward): the address they moved to, and the addresses whose
  * purchases it holds, each only where the mark and the line agree. Throws

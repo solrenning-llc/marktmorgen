@@ -142,10 +142,15 @@ export const COMMANDS = {
    * code under both): the day's first time, which also writes the day's
    * visit and starts the day's count of it, and each time after. The day's
    * count sends its expiry with every count since November 7, 2026 (finding
-   * L1 on #2888), one command more each time after the first.
+   * L1 on #2888), one command more each time after the first. Since 611
+   * [WP10] unit 4e, each time also asks whether the address moved its
+   * purchases away (lib/purchase-move-index.ts, movedAwayTo: a GET), one
+   * command more; the whole index is read only for an address that does not
+   * hold the product itself, and each old address it then reads is paid
+   * with one more of the store's public requests first.
    */
-  feedFirst: 13,
-  feed: 10,
+  feedFirst: 14,
+  feed: 11,
 };
 
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */

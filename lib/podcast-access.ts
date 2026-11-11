@@ -37,6 +37,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
+import { MAX_MOVED_INTO, movedAwayTo, readMovedIndex } from "@/lib/purchase-move-index";
+import { takePublicRequest } from "@/lib/traffic";
 import { sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
@@ -134,11 +136,48 @@ export async function readFeedToken(token: string): Promise<FeedGrant | null> {
   }
 }
 
-/** Whether this address may listen now: the creator always, a buyer while they hold it. */
+/**
+ * Whether this address may listen now: the creator always, a buyer while they hold it.
+ *
+ * A buyer may have moved their purchases at this store to another address
+ * (611 [WP10]; lib/purchase-move-index.ts), as for the emails kept for
+ * members (lib/letter-access.ts, holdsLetter): an address that moved away
+ * listens no more; an address purchases moved to listens to what each of its
+ * old addresses (at most MAX_MOVED_INTO) holds, each asked as the address
+ * itself is, after one more of the store's public requests is taken for it
+ * (no room throws, so the feed answers an error its app asks again after,
+ * never "ended"). When the index cannot be read, nothing changes: the
+ * address listens to what it bought itself, as if nothing moved.
+ */
 export async function mayListen(store: Store, productId: string, email: string): Promise<boolean> {
   if (!store.statsId) return false;
   if (normaliseEmail(email) === normaliseEmail(store.email)) return true;
-  return holdsProducts(store, [productId], email, okKey(store.statsId, productId, email), "1");
+  const statsId = store.statsId;
+  const holds = (address: string) => holdsProducts(store, [productId], address, okKey(statsId, productId, address), "1");
+  if (!store.sid) return holds(email);
+  const sid = store.sid;
+  // Asked every time a feed is put together, so only the mark first (one command): the whole index is read only for
+  // an address that does not hold the product itself (tests/traffic-cost.ts, COMMANDS.feed).
+  try {
+    if (await movedAwayTo(sid, email)) return false;
+  } catch (error) {
+    console.error("the moved addresses could not be read; who may listen is answered as if nothing moved", error);
+    return holds(email);
+  }
+  if (await holds(email)) return true;
+  let movedFrom: string[];
+  try {
+    movedFrom = (await readMovedIndex(sid, email)).movedFrom;
+  } catch (error) {
+    console.error("the moved addresses could not be read; who may listen is answered as if nothing moved", error);
+    return false;
+  }
+  const olds = movedFrom.slice(0, MAX_MOVED_INTO);
+  if (!olds.length) return false;
+  // Each old address is one more reading, paid before it is made: no room is unknown, never "holds none".
+  if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length))) throw new UnknownReplyError("the store's room to read moved purchases");
+  for (const old of olds) if (await holds(old)) return true;
+  return false;
 }
 
 /** An episode fetched: counted, and refused past what any one listener's apps ask. */

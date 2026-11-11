@@ -192,7 +192,13 @@ export async function sendCallReminders(
   for (const [key, members] of groups) {
     if (Date.now() > deadline) break;
     const [callsId, handle] = key.split("|");
-    const store = await findStore(handle).catch(() => null);
+    let store: Awaited<ReturnType<typeof findStore>>;
+    try {
+      store = await findStore(handle);
+    } catch (error) {
+      console.error("reading the store for call reminders failed", error);
+      continue;
+    }
     const done: string[] = [];
     if (!store || store.callsId !== callsId) {
       await redisPipeline([["ZREM", REMINDER_QUEUE, ...members.map((m) => m.member)]]);
@@ -221,7 +227,14 @@ export async function sendCallReminders(
       // A booking made long ahead in a busy account may be older than the
       // sessions paidCalls reads: it is looked up on its own before it is
       // taken for unpaid or refunded.
-      const call = bySession.get(item.session) ?? (await paidCall(store, item.session).catch(() => null)) ?? undefined;
+      let call: PaidCall | null | undefined;
+      try {
+        call = bySession.get(item.session) ?? await paidCall(store, item.session);
+      } catch (error) {
+        console.error("reading one paid call for reminders failed", error);
+        done.pop();
+        continue;
+      }
       const product = call ? await find(call.product) : null;
       if (!call || !product || !isCallProduct(product)) {
         // Never paid, refunded out of the list, or the product is gone.

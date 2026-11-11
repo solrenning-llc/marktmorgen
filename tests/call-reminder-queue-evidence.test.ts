@@ -9,6 +9,7 @@ const now = Date.now();
 const member = `calls-evidence|harbor|cs_test_123456789012345678901234|1|${now + 3600_000}`;
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.RESEND_API_KEY;
+const originalStripeKey = process.env.STRIPE_SECRET_KEY;
 let reply: unknown;
 let reads: number;
 let mutations: number;
@@ -33,9 +34,11 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalKey === undefined) delete process.env.RESEND_API_KEY;
   else process.env.RESEND_API_KEY = originalKey;
+  if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+  else process.env.STRIPE_SECRET_KEY = originalStripeKey;
 });
 
-const run = () => sendCallReminders(async () => { lookups += 1; return null; }, Date.now() + 60_000, "https://local.example");
+const run = (findStore: (handle: string) => Promise<import("@/lib/store").Store | null> = async () => { lookups += 1; return null; }) => sendCallReminders(findStore, Date.now() + 60_000, "https://local.example");
 
 for (const [label, value] of Object.entries({
   absent: [], null: [null], wrongType: [{}], outerExtra: [[], null],
@@ -63,6 +66,38 @@ test("confirmed empty due queue remains a successful empty run", async () => {
   reply = [[]];
   assert.deepEqual(await run(), { reminded: 0, confirmed: 0, dropped: 0 });
   assert.equal(reads, 1); assert.equal(lookups, 0); assert.equal(mutations, 0);
+});
+
+test("an unknown store lookup preserves due reminders", async () => {
+  reply = [[member, String(now - 1)]];
+  const counts = await run(async () => { throw new Error("synthetic store read timeout"); });
+  assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 0 });
+  assert.equal(lookups, 0);
+  assert.equal(mutations, 0, "an unknown store must not ZREM the due reminder");
+});
+
+test("an unknown single-session payment read preserves due reminders", async () => {
+  reply = [[member, String(now - 1)]];
+  process.env.STRIPE_SECRET_KEY = "sk_test_call_reminder_only";
+  let stripeReads = 0;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    assert.equal(url.hostname, "api.stripe.com");
+    if (url.pathname === "/v1/checkout/sessions") {
+      stripeReads += 1;
+      return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
+    }
+    if (url.pathname === "/v1/checkout/sessions/cs_test_123456789012345678901234") {
+      stripeReads += 1;
+      return new Response(JSON.stringify({ error: { message: "synthetic timeout", type: "api_error" } }), { status: 503 });
+    }
+    throw new Error("unexpected synthetic Stripe route");
+  }) as typeof fetch;
+  const store = { callsId: "calls-evidence", handle: "harbor", email: "owner@example.invalid", stripeAccountId: "acct_test_reminders" } as import("@/lib/store").Store;
+  const counts = await run(async () => store);
+  assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 0 });
+  assert.equal(stripeReads, 2, "the list is confirmed empty before the individual read fails");
+  assert.equal(mutations, 0, "an unknown payment read must not ZREM the due reminder");
 });
 
 test("a complete due pair is processed, with string and numeric scores", async () => {

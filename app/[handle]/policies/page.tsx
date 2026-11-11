@@ -10,7 +10,9 @@ import { speech } from "@/lib/buyer-words";
 import { POLICY_WORDS } from "@/lib/buyer-words/policies";
 import { parseLanguage } from "@/lib/store-language";
 import { notAdvice, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
-import { policyInput } from "@/lib/store-policy-input";
+import { policyInputPaid } from "@/lib/store-policy-input";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = { params: Promise<{ handle: string }> };
 
@@ -40,8 +42,16 @@ export default async function PoliciesPage({ params }: Params) {
   const reachedOn = (await headers()).get("x-nimbus-domain");
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) redirect(`${SITE_URL}/@${store.handle}/policies`);
 
+  // A store resting on its visits or suspended is resting here too, as on its other public pages.
+  if (await isResting(store)) return <StoreResting store={store} />;
+  if (store.suspended) return <StoreResting store={store} suspended />;
+
   const words = POLICY_WORDS[parseLanguage(store.language)];
-  const sections = policyFacts(await policyInput(store), store.language);
+  // Every visible product's listing is read for these facts: paid for from the store's public requests first, and
+  // nothing read when they are refused (Claude 1 on #1824, owner's rule MR).
+  const input = await policyInputPaid(store);
+  if (input === "resting") return <StoreResting store={store} />;
+  const sections = policyFacts(input, store.language);
   if (sections.length === 0) notFound();
   const version = policyFingerprint(sections);
   const said = speech(store);

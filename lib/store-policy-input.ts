@@ -16,6 +16,8 @@ import { deliversDigitally } from "@/lib/digital-consent";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
 import type { PolicyFactsInput } from "@/lib/store-policy-facts";
+import { takePublicRequest } from "@/lib/traffic";
+import { bundleItemUnits } from "@/lib/page-read-rules";
 
 type Sold = { priceCents?: number; recurring?: unknown; pwyw?: unknown; plan?: unknown } & Parameters<typeof deliversDigitally>[0];
 
@@ -41,4 +43,16 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   // must not quietly leave out the 14-day rules or the subscription terms (Codex G's review of #1824).
   const products = await readListingsAll(store, visibleIds(store));
   return policyInputFrom(store, products as unknown as Sold[], sellsThroughPayPal(store));
+}
+
+/**
+ * The input for the public policy page, its reads paid for first (Claude 1 on #1824, owner's rule MR): every visible
+ * product's listing is read, one listing a product, as a bundle's items are (bundleItemUnits, held over their cost in
+ * tests/store-policy-paid-read.test.ts for every catalog size), so they are taken from the store's public requests
+ * before any is read. "resting" when they are refused: nothing is read, and the page shows the resting page.
+ */
+export async function policyInputPaid(store: Store): Promise<PolicyFactsInput | "resting"> {
+  const listed = visibleIds(store).length;
+  if (listed > 0 && !(await takePublicRequest(store, "public", undefined, bundleItemUnits(listed)))) return "resting";
+  return policyInput(store);
 }

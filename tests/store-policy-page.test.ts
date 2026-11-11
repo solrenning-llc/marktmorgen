@@ -38,7 +38,8 @@ is("no postal address: no contact section", policyFacts(policyInputFrom({ ...sto
 
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
-is("built from the store as it is now, in its language", page.includes("policyFacts(await policyInput(store), store.language)"), true);
+// Read through the paid reader since Claude 1's MEDIUM on #1824 (tests/store-policy-paid-read.test.ts): still built from the store as it is now.
+is("built from the store as it is now, in its language", [page.includes("const input = await policyInputPaid(store);"), page.includes("policyFacts(input, store.language)")], [true, true]);
 is("its version is the fingerprint of its words", page.includes("const version = policyFingerprint(sections);"), true);
 is("says it is not legal advice", page.includes("{notAdvice(store.language)}"), true);
 is("one h1, a titled h2 per section, the page's language marked", [(page.match(/<h1\b/g) ?? []).length, page.includes("aria-labelledby={`policy-${section.id}`}"), page.includes("lang={said.lang.locale}")], [1, true, true]);

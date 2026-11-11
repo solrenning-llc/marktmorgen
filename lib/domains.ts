@@ -19,6 +19,8 @@
 import { createHash } from "node:crypto";
 import { DOMAINS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
+import { claimMark, releaseMark } from "@/lib/claim-mark";
 import { canUse } from "@/lib/plan";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -125,7 +127,10 @@ export async function handleForDomain(name: string): Promise<string | null> {
  * still points at its old one; one not proved stays not proved.
  */
 export async function pointDomain(name: string, from: string[], handle: string): Promise<void> {
-  const [raw] = await redisPipeline([["GET", domainKey(name)]]);
+  // Read exactly (rule 24): only GET's exact null is "nobody holds it"; another shape does nothing this time.
+  const read = repliesFor(await redisPipeline([["GET", domainKey(name)]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) return false;
   const holder = typeof raw === "string" ? raw.replace(/^\?/, "") : "";
   if (holder && from.includes(holder)) {
     const value = typeof raw === "string" && raw.startsWith(UNPROVED) ? `${UNPROVED}${handle}` : handle;
@@ -284,8 +289,12 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
 
   // Claimed as not proved yet: it serves nothing, and lapses, until the
   // creator adds the TXT record that proves it is theirs.
-  const [claimed] = await redisPipeline([["SET", domainKey(name), `${UNPROVED}${store.handle}`, "NX", "EX", UNPROVED_SECONDS]]);
-  if (claimed === null) return { ok: false, reason: "taken" };
+  // Ours only on "OK" or our own value read back (claimMark, rule 24): a reply cut short never takes a domain another
+  // store holds, and Vercel (a paid API) is not asked for it.
+  const claim = `${UNPROVED}${store.handle}`;
+  const claimed = await claimMark(domainKey(name), UNPROVED_SECONDS, claim);
+  if (claimed === "taken") return { ok: false, reason: "taken" };
+  if (claimed !== "ours") return { ok: false, reason: "unavailable" };
 
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });
   // Already on this project (a second press, or added by hand) is fine;
@@ -293,7 +302,8 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   const alreadyHere =
     added.status === 409 && (await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`)).status === 200;
   if (added.status !== 200 && !alreadyHere) {
-    await redisPipeline([["DEL", domainKey(name)]]);
+    // Only our own claim is let go, never one another store took meanwhile.
+    await releaseMark(domainKey(name), claim);
     cache.delete(name);
     if (added.status === 409) return { ok: false, reason: "elsewhere" };
     if (added.status === 400) return { ok: false, reason: "shape" };
@@ -312,7 +322,10 @@ export async function verifyDomain(name: string): Promise<void> {
 export async function disconnectDomain(name: string, handles: string[]): Promise<boolean> {
   // A claim that lapsed and was taken by another store is theirs now: only
   // this store's side of it is let go of.
-  const [raw] = await redisPipeline([["GET", domainKey(name)]]);
+  // Read exactly (rule 24): only GET's exact null is "nobody holds it"; another shape does nothing this time.
+  const read = repliesFor(await redisPipeline([["GET", domainKey(name)]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) return false;
   const holder = typeof raw === "string" ? raw.replace(/^\?/, "") : "";
   if (holder && !handles.includes(holder)) return true;
   const removed = await vercel("DELETE", `/v9/projects/${vercelProject()}/domains/${name}`);

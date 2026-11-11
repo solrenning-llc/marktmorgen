@@ -37,6 +37,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMMAND, DB_BYTE, DB_BYTE_MONTH, ORDER_COST, ORDER_LIBRARY, PER_PAYMENT_LINES, UNIT_COST, closureCost, exportCommands, exportCost, nonPayingWorst } from "./plan-cost-registry";
 import { FAMILIES, lifetimeByteMonths, partAverage } from "./store-data-registry";
+import { MAX_TEAM } from "@/lib/team";
+import { STORE_LOCK_TRIES } from "@/lib/read-ceilings";
+import { PREPARE_COMMANDS } from "./plan-cost-registry";
 
 test("a closing's worst cost, part by part, for each plan and for a free trial", () => {
   for (const tier of TIERS) {
@@ -101,4 +104,18 @@ test("the walk, the company's: what it costs a walk for every million keys the d
   const perWalk = (1_000_000 / WALK_COUNT) * COMMAND + 1_000_000 * 80 * DB_BYTE;
   console.log(`a walk reads a million keys for $${perWalk.toFixed(4)}; at one a day, $${(31 * perWalk).toFixed(3)} a month for every million keys`);
   assert.ok(perWalk < 0.01);
+});
+
+test("a closing's last steps pay for the record's going under the store's lock, its read again and the entry written again", () => {
+  const source = readFileSync(join(process.cwd(), "lib/store.ts"), "utf8");
+  const close = source.slice(source.indexOf("export async function closeStoreRecord"), source.indexOf("export type RenameResult"));
+  // The lock is the store's own, tried again for LOCK_WAIT_MS (8 seconds): at most STORE_LOCK_TRIES, as ensureListId's.
+  assert.match(close, /takeLock\(lockKeyOf\(owner\), LOCK_SECONDS, LOCK_WAIT_MS\)/);
+  assert.match(source, /const LOCK_WAIT_MS = 8_000;/);
+  assert.match(close, /\["GET", owner\]/);
+  assert.match(close, /deleteIfHeldOnly\(held,/);
+  assert.match(close, /releaseLock\(held\)/);
+  const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
+  // The lock's tries, the GET, the entry's HSET again, the fenced delete's script (EVAL, GET, DEL) and the release's (EVAL, GET, DEL).
+  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 3 + 3, `last steps priced at ${PREPARE_COMMANDS} commands`);
 });

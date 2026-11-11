@@ -93,6 +93,14 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
   if (address === normaliseEmail(email)) return "same";
   if (!(await withinLimit("recovery-address", normaliseEmail(email), 5, 60 * 60))) return "limited";
   const code = String(randomInt(1_000_000)).padStart(6, "0");
+  // The code is only worth sending once it is kept: the pending record is written first, and only a SET answered
+  // exactly "OK" lets the email go (CX-123 rule 24). Any other reply sends nothing and answers "unsent", so the form
+  // asks to try again instead of mailing a code that could never be confirmed.
+  const written = repliesFor(
+    await redisPipeline([["SET", setKey(session), JSON.stringify({ e: normaliseEmail(email), a: address, c: sha(`nimbus-rec-code:${code}`) }), "EX", SET_SECONDS]]),
+    1,
+  );
+  if (!written || written[0] !== "OK") return "unsent";
   const sent = await mail(address, `${code} is your code to confirm a recovery address`, [
     `The Marktmorgen account ${normaliseEmail(email)} is choosing this address to get back in if its owner can no longer open their email or lose their phone.`,
     "",
@@ -100,9 +108,7 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
     "",
     "It works for ten minutes. If you did not expect this, ignore it: nothing happens unless the code is typed in.",
   ]);
-  if (!sent) return "unsent";
-  await redisPipeline([["SET", setKey(session), JSON.stringify({ e: normaliseEmail(email), a: address, c: sha(`nimbus-rec-code:${code}`) }), "EX", SET_SECONDS]]);
-  return "sent";
+  return sent ? "sent" : "unsent";
 }
 
 /** Keeps the address once its code is right; the sign-in address is told. */
@@ -168,7 +174,10 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
   const address = await recoveryAddress(email);
   if (!address) return;
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]);
+  // A login link is only as good as its grant: only a SET answered exactly "OK" is one (CX-123 rule 24). Any other
+  // reply sends neither the link nor the notice to the sign-in address; the route still answers "sent", telling nothing.
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a recovery-address login link's grant");
   const sent = await mail(address, "Get back into your Marktmorgen account", [
     `This is the recovery address of the Marktmorgen account ${email}. Somebody said they can no longer open that inbox and asked for a way in.`,
     "",

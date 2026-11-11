@@ -11,7 +11,7 @@
  * creates the hash; a hash already there keeps its expiry as it was.
  */
 import { cappedCount, cappedCountCommand } from "@/lib/capped-count";
-import { countSearchMiss, recordHit } from "@/lib/stats";
+import { countReach, countSearchMiss, recordHit } from "@/lib/stats";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -92,6 +92,14 @@ async function main(): Promise<void> {
   is("the day's record expires", kept(await ttl(DAY_KEY)), true);
   await recordHit(store, { kind: "view", ip: "203.0.113.8", userAgent: UA, source: "direct" }, NOW + 1000);
   is("and still does after the next view", kept(await ttl(DAY_KEY)), true);
+
+  part("A measured visit on a day with no counted view (a token kept past midnight): the day's record still expires");
+  redis.clear();
+  // /api/store/read is authorised by the page's signed token alone, so it can create the day's record by itself
+  // (Claude 1, cloud reviewer C4, and H2 on #3778).
+  await countReach(STATS, "sr:1:a:", NOW);
+  is("the visit was counted", (await real([["HGET", DAY_KEY, "sr:1:a:"]]))[0], "1");
+  is("the day's record expires", kept(await ttl(DAY_KEY)), true);
 
   done();
 }

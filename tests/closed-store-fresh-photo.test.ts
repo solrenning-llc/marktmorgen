@@ -35,8 +35,14 @@ let rewriteUnconfirmed = false;
 let ownerOf = "";
 // The addresses' hold and the id's release before the record goes answered [] with nothing done (Claude 6's P8 on #3643).
 let releaseLost = false;
+// How many takings-out of a walk entry (WITHDRAW_ENTRY) answer what EVAL never says, from now.
+let withdrawUnknown = 0;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (commands: (string | number)[][]) => {
+  if (withdrawUnknown > 0 && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:closing-withdraw-entry:v1")) {
+    withdrawUnknown -= 1;
+    return [null];
+  }
   if (inWindow && commands.some((c) => c[0] === "HSET" && c[1] === BATCH_KEY)) {
     const run = inWindow;
     inWindow = null;
@@ -221,6 +227,36 @@ async function main(): Promise<void> {
     is("a second walk prepares nothing", next.stores, 0);
     is("the other store's record is still not deleted after it", (await storeForEmail(email))?.sid ?? null, otherSid);
     is("nor its photo", photoKeys().some((key) => key.includes(other)), true);
+  }
+
+  part("Rule 24 (Revisor 2 on #3643): a closing store's entry, with another store at its key, taken out only on Redis's own answer");
+  for (const [what, unknown] of [["one answer unknown, then taken on the next try", 1], ["never confirmed", 99]] as const) {
+    redis.clear();
+    const email = `withdraw${unknown}@example.com`;
+    await makeStore(email, `withdraw${unknown}`);
+    const otherSid = "e".repeat(32);
+    const ownerKey = String(redis.keys().find((key) => key.startsWith("nl:store:owner:") && String(redis.run(["GET", key])).includes(email)));
+    const otherBreak = JSON.stringify({ subscription: "sub_withdrawother", customer: "cus_withdrawother", paymentMethod: "pm_withdrawother", tier: "creator", from: 2_000_000_000, until: 2_005_000_000, told: 0 });
+    inWindow = async () => {
+      const record = JSON.parse(String(redis.run(["GET", ownerKey])));
+      redis.run(["SET", ownerKey, JSON.stringify({ ...record, sid: otherSid, planEndedAt: "" })]);
+      redis.run(["SET", `nl:pause:${email}`, otherBreak]);
+    };
+    withdrawUnknown = unknown;
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const report = await erase(T);
+    const left = withdrawUnknown;
+    withdrawUnknown = 0;
+    is(`${what}: the other store and its break are kept`, [(await storeForEmail(email))?.sid ?? null, redis.run(["GET", `nl:pause:${email}`])], [otherSid, otherBreak]);
+    is(`${what}: the ref is out of line, never moved back to be prepared again as the other store`, redis.run(["ZSCORE", DUE_KEY, email]), null);
+    is(`${what}: nothing is prepared and no walk starts`, [report.stores, report.started], [0, false]);
+    if (unknown === 1) {
+      is(`${what}: the entry is out of the batch`, [left, redis.run(["HGET", BATCH_KEY, email])], [0, null]);
+      is(`${what}: the run is done`, report.done, true);
+    } else {
+      is(`${what}: the entry is left in the batch, and the run is not said to be done`, [redis.run(["HGET", BATCH_KEY, email]) !== null, report.done], [true, false]);
+    }
   }
 
   part("Rule 24 (Claude 6's P8 on #3643): an addresses' hold and id release that Redis did not confirm keep the record, and the store waits a walk");

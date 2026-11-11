@@ -122,3 +122,15 @@ test("a closing's last steps pay for the record's going under the store's lock, 
   // DEL) and the release's (EVAL, GET, DEL).
   assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3, `last steps priced at ${PREPARE_COMMANDS} commands`);
 });
+
+test("an entry taken out, with another store at the key, costs no more than the record's going it replaces (Revisor 2 on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const tries = Number(source.match(/const WITHDRAW_TRIES = (\d+);/)?.[1]);
+  assert.ok(Number.isInteger(tries) && tries >= 1, "WITHDRAW_TRIES is read from lib/closed-store-data.ts");
+  // Each try is one script (EVAL, HGET, HDEL), priced as the fenced delete's is. With another store at the key none of
+  // the record's going runs, and each is priced in PREPARE_COMMANDS: at least one address held back (SET), the id's
+  // DEL, its SREM at both accounts, the ZREM and SREM of the company's lists, the entry's HSET again and the fenced
+  // delete's script (EVAL, GET, DEL).
+  const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
+  assert.ok(tries * 3 <= replaced, `${tries} tries (${tries * 3} commands) priced inside the ${replaced} they replace`);
+});

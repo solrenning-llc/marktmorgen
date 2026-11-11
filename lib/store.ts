@@ -1890,13 +1890,16 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
  * still does (Codex G on #3614). A write after this waits for the lock and
  * then finds no store. A read again that does not read is never "unchanged"
  * (rule 24): it throws, with the record still there. The record goes last,
- * and only while the lock is still this call's (deleteIfHeldOnly).
+ * and only while the lock is still this call's (deleteIfHeldOnly). Answers
+ * false, with nothing done, when another store (another sid) is kept at its
+ * key by then: its ref and its owner's folder are that store's now, so the
+ * caller must not walk them (Revisor 2 on #3643); true otherwise.
  */
 export async function closeStoreRecord(
   store: Store,
   extraKeys: string[] = [],
   beforeDelete?: (fresh: Store | null) => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
   const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
   let held: Held;
@@ -1917,7 +1920,7 @@ export async function closeStoreRecord(
     // (Codex G on #3643) means this one's record is already gone. Nothing of the other is read, released or deleted,
     // and this returns as for a record that is gone, so the walk takes this ref out of line and never prepares the
     // other store under it a walk later (Claude 6 on #3643); this store's entry still walks only its own marks.
-    if (fresh && fresh.sid !== store.sid) return;
+    if (fresh && fresh.sid !== store.sid) return false;
     await beforeDelete?.(fresh);
     // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
     // go first, and the record last. Its id leaves its account's list at both addresses read, as one moved since is the
@@ -1937,6 +1940,7 @@ export async function closeStoreRecord(
       throw new UnknownReplyError("a closing store's addresses held back and its places released");
     }
     if (!(await deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner), ...extraKeys]))) throw new StoreBusyError();
+    return true;
   } finally {
     await releaseLock(held);
   }

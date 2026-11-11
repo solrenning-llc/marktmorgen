@@ -181,6 +181,26 @@ export async function markDue(ref: string, now = Date.now()): Promise<void> {
   await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]);
 }
 
+/**
+ * Takes this call's own walk entry out of the batch, only while it still holds the exact bytes this call wrote
+ * (another preparation's entry for the same ref is never taken). 1 taken, 0 not this call's; anything else unknown.
+ */
+const WITHDRAW_ENTRY = `-- marktmorgen:closing-withdraw-entry:v1
+if #KEYS ~= 1 or #ARGV ~= 2 then return -1 end
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+return redis.call("HDEL", KEYS[1], ARGV[1])`;
+
+/**
+ * Another store (another sid) is kept at a closing store's key by the time its record is read again, and its walk entry,
+ * which names that store's ref and its owner's folder, could not be confirmed taken out of the batch (rule 24). The
+ * caller takes the ref out of line all the same (never prepared again under it: that is the other store) and starts no
+ * walk in this run.
+ */
+export class EntryNotWithdrawnError extends UnknownReplyError {}
+
+/** How many times prepareStore tries to take such an entry out before it throws EntryNotWithdrawnError. */
+const WITHDRAW_TRIES = 3;
+
 /** Takes a store out of line: its plan was started again before its walk began. */
 export async function unmarkDue(ref: string): Promise<void> {
   await redisPipeline([["ZREM", DUE_KEY, ref]]);
@@ -211,9 +231,10 @@ async function del(keys: string[]): Promise<void> {
 /**
  * The first step for one store, while its record can still be read: what
  * is found only through it, and then the record. Answers what the walk
- * needs of it. Safe to run again.
+ * needs of it, or null when another store is kept at its key by the time its
+ * record is read again: then nothing of it is walked. Safe to run again.
  */
-export async function prepareStore(store: Store, now = Date.now()): Promise<Batched> {
+export async function prepareStore(store: Store, now = Date.now()): Promise<Batched | null> {
   const ref = storeRef(store);
   const { marks } = await marksOf(store);
   const extra: string[] = [];
@@ -271,9 +292,12 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // keys. A write that fails throws with the record still there, and the walk tries the store again later.
   // Only HSET's own count (0 for an entry rewritten, 1 for a new one) is a write; any other answer is not known to
   // have landed and throws before the record goes (Codex T on #3181).
+  let wrote = "";
   const write = async (batched: Batched) => {
-    const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(batched)]]), 1)?.[0];
+    const bytes = JSON.stringify(batched);
+    const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, bytes]]), 1)?.[0];
     if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
+    wrote = bytes;
   };
   await write(entry);
   // The record is read again under its lock right before it goes (closeStoreRecord), since all of the above worked
@@ -283,7 +307,7 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // Only ids never to be marks stay out: our own Stripe customer and subscription, its Stripe account (a mark already,
   // unless another store shares it) and its owner's address. The entry rewritten is confirmed or this throws, with the
   // record still there, and the store waits a walk.
-  await closeStoreRecord(store, [], async (fresh) => {
+  const closed = await closeStoreRecord(store, [], async (fresh) => {
     if (!fresh) return;
     const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
     const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
@@ -293,7 +317,21 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     entry.handles = [...entry.handles, ...moved];
     await write(entry);
   });
-  return entry;
+  if (closed) return entry;
+  // Another store (another sid) is kept at this one's key: this one's record is already gone, and its ref and its
+  // owner's folder are the other store's now. Its entry, left in the batch, made the walk erase the other store's keys
+  // by that ref (its break and its last break, nl:pause:<ref> and nl:pause:last:<ref>) and finish it under that ref
+  // (Revisor 2 on #3643): it is taken out, only while it still holds the bytes written here, and nothing of it is
+  // walked. At most WITHDRAW_TRIES scripts, no more commands than the record's going they replace (its addresses held
+  // back, its id and places released, the entry's rewrite, the fenced delete), so inside PREPARE_COMMANDS
+  // (tests/closing-cost.test.ts).
+  // Tried WITHDRAW_TRIES times: 0 after a try whose answer was unknown is that try having taken it, or another
+  // preparation's entry, which is not this call's either way.
+  for (let tries = 0; tries < WITHDRAW_TRIES; tries += 1) {
+    const taken = repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, ref, wrote]]).catch(() => null), 1)?.[0];
+    if (taken === 0 || taken === 1) return null;
+  }
+  throw new EntryNotWithdrawnError("a closing store's walk entry, taken out with another store at its key (EVAL)");
 }
 
 /** Who owns a key: the closing store one of whose ids names it. */
@@ -719,6 +757,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   if (!isRedisConfigured()) return report;
   // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
   let unsure = false;
+  // An entry naming another store's key not confirmed out of the batch (EntryNotWithdrawnError): no walk starts in this run.
+  let entryLeft = false;
   const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
   const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
   let phase = phaseRaw || "idle";
@@ -751,20 +791,30 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
         continue;
       }
       if (store) {
+        let prepared: Batched | null;
         try {
-          await prepareStore(store, now);
+          prepared = await prepareStore(store, now);
         } catch (error) {
+          if (error instanceof EntryNotWithdrawnError) {
+            // Never moved back: the record at this key is another store's, which must not be prepared under it.
+            console.error("a closing store's walk entry, with another store at its key, was not confirmed taken out; no walk starts in this run", error);
+            entryLeft = true;
+            unsure = true;
+            await redisPipeline([["ZREM", DUE_KEY, ref]]);
+            continue;
+          }
           // Something it needs could not be read (rule 24), such as whether a host still serves another store:
           // never taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
           console.error("a closed store could not be prepared; it waits for the next walk", error);
           if (!(await moveBack(ref, now))) unsure = true;
           continue;
         }
-        // prepareStore wrote the walk's entry before it closed the record.
-        report.stores += 1;
+        // prepareStore wrote the walk's entry before it closed the record; none when another store is kept at its key.
+        if (prepared) report.stores += 1;
       }
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
+    if (entryLeft) return { ...report, done: false };
     // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again.
     if (![...(await readBatch()).entries.values()].some((entry) => !entry.unfinished)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);

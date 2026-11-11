@@ -580,7 +580,7 @@ async function main(): Promise<void> {
     "join/confirm": "not:a person confirming their own sign-up to the list",
     "keys": { clear: "act:products", off: "open:reversible", revoke: "open:reversible", setup: "open:edits", upload: "open:adds" },
     "link-image": { attach: "lockedFor", remove: "act:page" },
-    "links": { add: "open:adds", edit: "lockedFor", remove: "act:page" },
+    "links": { add: "open:adds", archive: "open:reversible", edit: "lockedFor", remove: "act:page", unarchive: "open:reversible" },
     "mail": {
       broadcast: "need:send", cancel: "need:send", copy: "open:adds", count: "open:reads", "draft-remove": "act:draft", "draft-save": "open:edits",
       flow: "need:send", "flow-activate": "need:send", "flow-forget": "need:send", "flow-import": "need:send", "flow-remove": "need:send",

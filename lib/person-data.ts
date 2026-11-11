@@ -99,7 +99,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/imported-purchases.ts", how: "erased", only: "person", what: "What an import from another platform gave them here. Nothing was paid here for it, so they lose access to it" },
   { file: "lib/imported-purchases.ts", how: "kept", only: "team", what: "What an import from another platform gave them here", why: "It is how they keep what they bought on your old platform. They can delete it themselves, from your store's privacy link." },
   { file: "lib/move-members.ts", how: "erased", what: "The invitations an import gave them to keep a membership here, with their links and reminders" },
-  { file: "lib/reviews.ts", how: "erased", only: "person", what: "Their reviews, with their photos; their stars leave your averages" },
+  { file: "lib/reviews.ts", how: "erased", only: "person", what: "Their reviews, with their photos; their stars leave your averages, and their name and words leave your store page's quotes" },
   { file: "lib/reviews.ts", how: "kept", only: "team", what: "Reviews they wrote, under the name they chose, without their address", why: "A store may not take down a review by deleting its writer (the FTC's rule on consumer reviews). They can delete it themselves, or delete themselves from your store's privacy link." },
   { file: "lib/review-proof.ts", how: "erased", via: "lib/erasure-index.ts", what: "The links that let them write a review" },
 

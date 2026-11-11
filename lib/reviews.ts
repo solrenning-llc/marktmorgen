@@ -380,6 +380,8 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
     // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.
+    // Read before anything is written: an index that does not read stops the save whole, never half (rule 24).
+    const entry = review.pi ? await payEntry(statsId, review.pi, `${review.productId}|${id}`) : null;
     await write(statsId, review, before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : []);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
@@ -387,17 +389,28 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     ]);
     // Which reviews a payment paid for, kept for its refund: counted in the
     // store's room at what it really adds (lib/order-data.ts).
-    if (review.pi) await orderWrite(room, [["HSET", payKey(statsId), review.pi, await payEntry(statsId, review.pi, `${review.productId}|${id}`)]]);
+    if (review.pi && entry !== null) await orderWrite(room, [["HSET", payKey(statsId), review.pi, entry]]);
     await recount(statsId, input.productId);
     return { state: before ? "updated" : "created", review };
   });
   return result === "busy" ? { state: "busy" } : result;
 }
 
+/**
+ * The reviews a payment paid for, read exactly (rule 24): none only when HGET answers exactly null (or an empty
+ * text); a reply cut short or of another shape throws UnknownReplyError, never "none". Otherwise a refund sweep took
+ * the refund as seen with nothing marked, and payEntry wrote the list again with only the newest review.
+ */
+async function payMembers(statsId: string, pi: string): Promise<string[]> {
+  const replies = repliesFor(await redisPipeline([["HGET", payKey(statsId), pi]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("the reviews a payment paid for");
+  return raw ? raw.split(";").filter(Boolean) : [];
+}
+
 /** The reviews a payment paid for, with one more added. */
 async function payEntry(statsId: string, pi: string, member: string): Promise<string> {
-  const [raw] = await redisPipeline([["HGET", payKey(statsId), pi]]);
-  const list = typeof raw === "string" && raw ? raw.split(";").filter(Boolean) : [];
+  const list = await payMembers(statsId, pi);
   if (!list.includes(member)) list.push(member);
   return list.slice(-20).join(";");
 }
@@ -573,8 +586,7 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  */
 export async function markRefunded(statsId: string, pi: string): Promise<number> {
   if (!STATS_ID_PATTERN.test(statsId) || !pi) return 0;
-  const [raw] = await redisPipeline([["HGET", payKey(statsId), pi]]);
-  const members = typeof raw === "string" && raw ? raw.split(";").filter(Boolean) : [];
+  const members = await payMembers(statsId, pi);
   let changed = 0;
   for (const member of members) {
     const [productId, id] = member.split("|");

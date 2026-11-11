@@ -6,9 +6,9 @@
  *     "this payment paid for no review": it throws, so the refund sweep
  *     (lib/review-proof.ts) does not take the refund as seen and tries again,
  *     instead of leaving a refunded buyer's review public and counted;
- *   - payEntry (inside saveReview): a reply of another shape throws instead of
- *     writing the payment's list again with only the newest review, which lost
- *     the others for a later refund.
+ *   - payEntry (inside saveReview): a reply of another shape throws, before the
+ *     review is written, instead of writing the payment's list again with only
+ *     the newest review, which lost the others for a later refund.
  *
  * Synthetic store, product and reviews only.
  */
@@ -73,6 +73,7 @@ for (const [label, reply] of SHAPES) {
     const [after] = await pipeline([["HGET", PAY, PI]]);
     assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
     assert.equal(after, before, "the payment's list is kept as it was");
+    assert.equal(await readReview(statsId, "synthjam0001", reviewId(statsId, "synthjam0001", "ana@example.com")), null, "and the review is not saved half");
   });
 }
 

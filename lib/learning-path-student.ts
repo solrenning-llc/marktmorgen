@@ -4,7 +4,7 @@
  *
  *   - the path's products, read exactly (readListingsExact): their titles,
  *     and which of them are courses;
- *   - had: the courses this address paid for (lib/learn.ts paidCourses,
+ *   - had: the courses this address paid for (lib/learn.ts paidCoursesExact,
  *     the ledger a course page opens on), within the courses this browser
  *     was let into (Learner.scope); the creator has every course;
  *   - finished: for each course had, every lesson done and every required
@@ -23,7 +23,7 @@
 import { readListingsExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { hasFinished } from "@/lib/certificate";
-import { doneLessons, emailKey, paidCourses, type Learner } from "@/lib/learn";
+import { doneLessons, emailKey, paidCoursesExact, type Learner } from "@/lib/learn";
 import type { LearningPath } from "@/lib/learning-path-rules";
 import { passedQuizzes } from "@/lib/quiz";
 import type { Store } from "@/lib/store";
@@ -54,7 +54,7 @@ export async function pathStudent(store: Store, path: LearningPath, learner: Lea
   } else {
     let paid: Map<string, number>;
     try {
-      paid = await paidCourses(store, learner.email);
+      paid = await paidCoursesExact(store, learner.email);
     } catch {
       return unknown();
     }

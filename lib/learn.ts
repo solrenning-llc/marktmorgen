@@ -51,7 +51,7 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
-import { readKind, readListing } from "@/lib/catalog";
+import { readKind, readKindExact, readListing } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -222,14 +222,14 @@ type Ledger = {
 };
 
 /** Asks the creator's Stripe account what this address paid for here. */
-async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
+async function paidAtStripe(store: Store, email: string, exact = false): Promise<Ledger> {
   const found = new Map<string, number>();
   const ended = new Set<string>();
   const refunded = new Set<string>();
   const account = store.stripeAccountId;
   if (!account) return { paid: found, ended, refunded };
   const handles = saleHandles(store);
-  const courses = new Map((await readKind(store, "course")).filter((p) => p.course).map((p) => [p.id, p]));
+  const courses = new Map((await (exact ? readKindExact : readKind)(store, "course")).filter((p) => p.course).map((p) => [p.id, p]));
   if (courses.size === 0) return { paid: found, ended, refunded };
 
   // Stripe keeps the address as it was typed at checkout.
@@ -240,6 +240,9 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
     query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
+    // Read exactly (lib/learning-path-student.ts): a list that is not one, or that has more pages than the one read,
+    // is unknown, never "bought nothing" (review of #3724).
+    if (exact && (!Array.isArray(listed.data) || (listed as { has_more?: unknown }).has_more !== false)) throw new UnknownReplyError("an address's course purchases at Stripe");
     const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     for (const session of rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
@@ -314,25 +317,40 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
   return (await courseLedger(store, email)).paid;
 }
 
-/** The same answer, with the memberships that ended kept apart. */
-async function courseLedger(store: Store, email: string): Promise<Ledger> {
+/**
+ * The same, read exactly: it throws when Stripe, the address's own record, the
+ * store's courses or the levels a community hands courses at do not read, so
+ * a course that only Stripe knows of is never taken for one not bought (rule 24;
+ * review of #3724). The course page keeps paidCourses and its own rule.
+ */
+export async function paidCoursesExact(store: Store, email: string): Promise<Map<string, number>> {
+  return (await courseLedger(store, email, true)).paid;
+}
+
+/** The same answer, with the memberships that ended kept apart; `exact` throws where the lenient read goes on. */
+async function courseLedger(store: Store, email: string, exact = false): Promise<Ledger> {
   const result = new Map<string, number>();
   if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set() };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
-  const [cached, ledger, broughtOver] = await redisPipeline([
+  const commands: (string | number)[][] = [
     ["GET", paidCacheKey(store, email)],
     ["HGETALL", ledgerKey(store, email)],
     ...(imported ? [imported] : []),
-  ]);
+  ];
+  const replies = await redisPipeline(commands);
+  if (exact && !repliesFor(replies, commands.length)) throw new UnknownReplyError("an address's course record");
+  const [cached, ledger, broughtOver] = replies;
+  if (exact && cached !== null && typeof cached !== "string") throw new UnknownReplyError("an address's cached course purchases");
   let asked: Ledger | null = typeof cached === "string" ? parseLedger(cached) : null;
   if (!asked) {
     try {
-      asked = await paidAtStripe(store, email);
+      asked = await paidAtStripe(store, email, exact);
       const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
       await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
     } catch (error) {
+      if (exact) throw error;
       console.error("reading course purchases failed", error);
       asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
     }
@@ -347,6 +365,8 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     for (let i = 0; i + 1 < ledger.length; i += 2) pairs.push([ledger[i], ledger[i + 1]]);
   } else if (ledger && typeof ledger === "object") {
     pairs.push(...Object.entries(ledger as Record<string, unknown>));
+  } else if (exact && ledger !== null) {
+    throw new UnknownReplyError("the courses written down for an address");
   }
   for (const [field, value] of pairs) {
     const began = wholeSeconds(value);
@@ -364,7 +384,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     }
   }
 
-  const courses = await readKind(store, "course");
+  const courses = await (exact ? readKindExact : readKind)(store, "course");
   for (const product of courses) {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
@@ -387,6 +407,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
         if (product.course && !result.has(product.id) && at !== undefined) result.set(product.id, at);
       }
     } catch (error) {
+      if (exact) throw error;
       console.error("reading courses earned by level failed", error);
     }
   }

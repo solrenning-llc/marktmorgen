@@ -172,6 +172,41 @@ async function main(): Promise<void> {
   is("Harbor's team does not offer her then", await offered(harbor.store, harbor.product, G), false);
   if (seat1.ok) await releaseOwnHold(lanternNow, seat1.session);
   is("one seat given back: the other still holds her", [(await mayaClaims()).some((c) => c.start === G), await offered(harbor.store, harbor.product, G)], [true, false]);
+
+  part("A seat paid while another seat's hold is being written keeps the shared claim for good (cloud J's review of #3490, MEDIUM)");
+  // confirmBooking takes no store lock: seat A's payment can land between seat B's read of the owner's claims and its
+  // claim script, which wrote B's hold over A's "kept for good", so the shared claim lapsed with B's unpaid hold and
+  // Harbor sold Maya's hour while seat A was paid.
+  const H = weekdayAt(8, 900);
+  const seatA = await hold(lanternNow, group, H);
+  if (!seatA.ok) throw new Error("no seat A");
+  const plain = redis.pipeline;
+  let armed = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (armed && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:host-claim:"))) {
+      armed = false;
+      await confirmBooking({ store: lanternNow, product: group, session: seatA.session, start: H, end: H + HOUR, buyerEmail: "seat-a@example.com", buyerTz: NY, due: null, cancel: null, origin: "https://marktmorgen.com" });
+    }
+    return plain(commands);
+  }) as typeof redis.pipeline;
+  let seatB: Awaited<ReturnType<typeof hold>>;
+  try {
+    seatB = await hold(lanternNow, group, H);
+  } finally {
+    redis.pipeline = plain;
+  }
+  is("seat A was paid while seat B's hold was written, and seat B is held", [armed, seatB.ok], [false, true]);
+  is("[CORRETO] the shared claim on her is still kept for good", (await mayaClaims()).filter((c) => c.start === H), [{ start: H, held: false }]);
+  const realNow = Date.now;
+  const later = realNow() + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS + 60_000;
+  Date.now = () => later;
+  try {
+    is("[CORRETO] after seat B's hold would have lapsed, Harbor still does not offer her then", await offered(harbor.store, harbor.product, H), false);
+    const sold = await hold(harbor.store, harbor.product, H);
+    is("[CORRETO] and a Harbor buyer cannot hold her for it", sold.ok ? "held" : sold.reason, "taken");
+  } finally {
+    Date.now = realNow;
+  }
   done();
 }
 

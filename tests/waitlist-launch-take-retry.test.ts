@@ -8,6 +8,9 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, storeForEmail, st
 import { readListing } from "@/lib/catalog";
 import { confirmSpot, joinWaitlist, launch, runLaunches, setSoon } from "@/lib/waitlist";
 import { HASH_TAKE_ALL } from "@/lib/redis-take";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { WaitlistPanel } from "@/components/waitlist-panel";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -87,6 +90,15 @@ async function main(): Promise<void> {
   await run();
   await run();
   is("a later run deletes the waitlist", (await redis.pipeline([["EXISTS", listKey]]))[0], 0);
+
+  part("While the deletion waits for the next run, the studio says what is true (Claude 4's LOW on #3707)");
+  const panel = (launch: { total: number; cursor: number; sent: number; finished: number }) =>
+    renderToStaticMarkup(createElement(WaitlistPanel, { productId: "p1", suggestedAddress: "", price: "$39", initial: { soon: false, confirmed: 0, waiting: 0, launch: { handle: "harbor", note: "", address: "", started: 1, ...launch } } }));
+  const allSent = panel({ total: 3, cursor: 3, sent: 3, finished: 0 });
+  is("every email went: said as sent, the waitlist being deleted, never \"going out\"", [allSent.includes("going out"), allSent.includes("3 of 3 waitlist emails went out") && allSent.includes("the waitlist is being deleted")], [false, true]);
+  const noneToEmail = panel({ total: 0, cursor: 0, sent: 0, finished: 0 });
+  is("nobody to email: never \"0 of 0 so far\"", [noneToEmail.includes("0 of 0 so far"), noneToEmail.includes("the waitlist is being deleted")], [false, true]);
+  is("still sending: as before", panel({ total: 3, cursor: 1, sent: 1, finished: 0 }).includes("The waitlist email is going out: 1 of 3 so far"), true);
 
   done();
 }

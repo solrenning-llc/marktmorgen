@@ -998,7 +998,9 @@ function FormView({ block, form, ctx }: { block: Extract<PageBlock, { kind: "for
         {/* Only what the branching needs reaches the browser: a scored quiz's points and ranges stay on the server. */}
         {branches(form) && !ctx.preview ? <FormBranching form={{ id: form.id, fields: form.fields.map((f) => ({ ...f, options: f.options.map(({ id, label, outcome, next }) => ({ id, label, outcome, ...(next ? { next } : {}) })) })), outcomes: form.outcomes.map(({ id, title, body, product }) => ({ id, title, body, product })) }} /> : null}
         {/* A long form can be finished later: its answers kept in the visitor's own browser, only if they ask (639 [GL7](26)). */}
-        {offersKeep(form) && !ctx.preview && target ? <FormKeep handle={target.handle} form={form.id} words={w} /> : null}
+        {/* Its three sentences only, as plain strings: the form's words hold functions, and a function handed to a client
+            component makes the whole page answer 500 (VR, 11/11/2026). */}
+        {offersKeep(form) && !ctx.preview && target ? <FormKeep handle={target.handle} form={form.id} words={{ keepLabel: w.keepLabel, keepHelp: w.keepHelp, keepBack: w.keepBack }} /> : null}
         {form.offerList && target?.listOpen ? (
           <label className="sp-form-option">
             <input type="checkbox" name="consent" value="yes" disabled={ctx.preview} />

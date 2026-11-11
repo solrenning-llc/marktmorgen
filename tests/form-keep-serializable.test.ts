@@ -58,7 +58,7 @@ function notSendable(value: unknown, path = "props"): string[] {
 
 const field = (id: string, type = "short") => ({ id, type, label: `Question ${id}`, required: false, options: [] });
 const base = { id: "frm0000001", name: "Synthetic application", button: "", doneHeading: "", doneBody: "", outcomes: [], offerList: true, updatedAt: 1 };
-const draw = (form: FormDef, lang: string) => {
+const draw = (form: FormDef, lang: keyof typeof FORM_WORDS) => {
   const ctx: BlockContext = { storeName: "Synthetic Shop", productTitle: "", picture: null, photo: null, action: { kind: "none" } as never, defaultLabel: "", now: 1_790_000_000, lang, forms: { [form.id]: form }, formTarget: { handle: "syntheticshop", page: "p1", funnel: "", listOpen: true } };
   return clientProps(BlockView({ block: { id: "blk001", kind: "form", heading: "Apply", form: form.id } as never, ctx, reviews: null }));
 };
@@ -69,13 +69,13 @@ for (const [label, form] of [
 ] as const) {
   part(`A form with ${label}, as a visitor opens it`);
   is("it offers to keep the answers", offersKeep(form), true);
-  for (const lang of Object.keys(FORM_WORDS)) {
+  for (const lang of Object.keys(FORM_WORDS) as (keyof typeof FORM_WORDS)[]) {
     const found = draw(form, lang);
     const keep = found.find((c) => c.type === FormKeep);
     is(`${lang}: the box to keep the answers is handed to the browser`, Boolean(keep), true);
     is(`${lang}: nothing it gets is a function (the page answered 500)`, found.flatMap((c) => notSendable(c.props)), []);
     const words = keep?.props.words as Record<string, unknown> | undefined;
-    is(`${lang}: its three sentences, in the store's language`, [words?.keepLabel, words?.keepHelp, words?.keepBack], [FORM_WORDS[lang as keyof typeof FORM_WORDS].keepLabel, FORM_WORDS[lang as keyof typeof FORM_WORDS].keepHelp, FORM_WORDS[lang as keyof typeof FORM_WORDS].keepBack]);
+    is(`${lang}: its three sentences, in the store's language`, [words?.keepLabel, words?.keepHelp, words?.keepBack], [FORM_WORDS[lang].keepLabel, FORM_WORDS[lang].keepHelp, FORM_WORDS[lang].keepBack]);
   }
 }
 

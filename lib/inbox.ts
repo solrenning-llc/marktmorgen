@@ -34,7 +34,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, monthOf, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { withinLimit } from "@/lib/request-guard";
-import { alertCreator } from "@/lib/phone-alerts";
+import { alertCreator, messageEpisodeKey, messageEpisodeSeed } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
@@ -144,6 +144,8 @@ async function write(store: Store, statsId: string, handle: string, conversation
   }
   commands.push(["EXPIRE", msgKey(statsId, conversation.id), KEEP]);
   if (conversation.token) commands.push(["SET", tokenKey(conversation.token), `${statsId}|${conversation.id}|${handle}`, "EX", KEEP]);
+  // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
+  if (conversation.unread === 0) commands.push(["DEL", messageEpisodeKey(statsId, conversation.id)]);
   await redisPipeline(commands);
   return conversation;
 }
@@ -385,7 +387,9 @@ async function giveBack(store: Store, id: string, stale: string): Promise<void> 
 /**
  * Tells the store's installed studios that asked for "message" (lib/phone-alerts.ts, 451 [AP3] complement): once
  * while a conversation is unread, so a buyer writing five times before anyone reads is one notification, and again
- * only after it was read. Says "New message from a buyer": never their words, name or address, which a lock screen
+ * only after it was read. The once is atomic: the seed is the conversation's unread episode, not the message, so
+ * two messages written at the same moment by two workers make one claim (alertCreator's SET NX), and the write
+ * that marks it read deletes that claim. An unknown claim answer sends nothing, and the message is kept anyway. Says "New message from a buyer": never their words, name or address, which a lock screen
  * would show; the tap opens the conversation. A failure is written down, never the visitor's message lost.
  */
 async function tellPhones(store: Store, conversation: Kept, unreadBefore: number, at: number): Promise<void> {
@@ -395,7 +399,7 @@ async function tellPhones(store: Store, conversation: Kept, unreadBefore: number
     store,
     "message",
     { title: "New message from a buyer", body: `In ${store.name}'s inbox. Open it to read and answer.`, url: `/studio/inbox?${sid}c=${conversation.id}` },
-    { seed: `${conversation.id}:${at}`, at },
+    { seed: messageEpisodeSeed(conversation.id), at },
   ).catch((error) => console.error("telling a store's phones of a message failed", error));
 }
 

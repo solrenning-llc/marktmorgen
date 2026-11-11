@@ -150,6 +150,14 @@ const cfgKey = (statsId: string) => `nl:phone:cfg:${statsId}`;
 const stateKey = (statsId: string) => `nl:phone:st:${statsId}`;
 const seenKey = (statsId: string, event: string, seed: string) =>
   `nl:phone:seen:${createHash("sha256").update(`${statsId}|${event}|${seed}`).digest("hex").slice(0, 40)}`;
+/**
+ * The seed of a conversation's unread episode in the inbox (event "message"): alertCreator's SET NX on it is the
+ * one atomic claim of "told once until read" across workers, and lib/inbox.ts deletes it in the same write that
+ * marks the conversation read, so the next message tells again (Codex C2 on #3619).
+ */
+export const messageEpisodeSeed = (conversationId: string) => `inbox:${conversationId}`;
+/** The key alertCreator claims for a conversation's unread episode; deleted when it is read. */
+export const messageEpisodeKey = (statsId: string, conversationId: string) => seenKey(statsId, "message", messageEpisodeSeed(conversationId));
 const testsKey = (statsId: string) => `nl:rl:phone:test:${statsId}`;
 const quietKey = (statsId: string, event: string) => `nl:rl:phone:quiet:${statsId}:${event}`;
 

@@ -90,6 +90,22 @@ test('a failed daily usage read is logged and still blocks list email',async()=>
   assert.equal(JSON.stringify(seen[0].map(String)).includes(made.listId),false,'no list id in the log');
  } finally { console.error=previous; }
 });
+test('an unknown daily usage reply that does not throw is logged too (Claude 4 B LOW)',async()=>{
+ const previous=console.error, seen:unknown[][]=[];
+ console.error=(...args:unknown[])=>{seen.push(args);};
+ try {
+  const made=await fullStore();
+  for(const [i,value] of ([[null,null],['01'],[0],{}] as unknown[]).entries()){
+   seen.length=0;
+   dayRead={value};
+   const result=await sendTo(made,['reader@example.com'],'Synthetic','Test only','odd-day-read-'+i);
+   assert.equal(result.stopped,'day');
+   assert.equal(seen.length,1,'logged once: '+JSON.stringify(value));
+   assert.equal(seen[0][0],'reading the daily email usage failed');
+   assert.equal(JSON.stringify(seen[0].map(String)).includes('reader@example.com'),false);
+  }
+ } finally { console.error=previous; }
+});
 test('unknown daily usage stops the real list loop before reservations and dispatch',async()=>{
  const made=await fullStore();pipelines=[];
  const inherited=new Array(1);Object.setPrototypeOf(inherited,{0:null});

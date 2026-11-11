@@ -79,12 +79,14 @@ const MESSAGES: Record<string, string> = {
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
   auto_busy: "Captions for this video are already being written. They appear here when they are done.",
+  auto_checking: "Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, in about 15 minutes. If your card was charged and no captions are written, the charge is refunded on its own.",
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
   auto_declined: "Your card was declined, so nothing was charged and nothing is being written.",
   auto_owed: "A refund for an earlier request for this video's captions is not confirmed by Stripe yet, so new AI captions can't be bought for it until it is. Its state is shown at the top of this page.",
   auto_refund_pending: "The video service would not write these captions. The charge is being refunded, but Stripe has not confirmed the refund yet; its state is shown at the top of this page.",
   auto_refunded: "The video service would not write these captions, so the charge was refunded to your card. Nothing is being written; try again in a moment.",
+  auto_credited: "The video service would not write these captions, so the charge was returned to your account credit. Nothing is being written; try again in a moment.",
   auto_unavailable: "The video service could not take this just now. Nothing was charged; try again in a moment.",
   auto_unknown: "That video is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include charging the plan's card. Ask the owner to do this.",
@@ -234,8 +236,11 @@ export function CourseEditor({
   openFirst = null,
   look = null,
   language = "en",
+  draft = false,
 }: {
   productId: string;
+  /** Whether the course's product is hidden from the store (a draft): each lesson then says so (754 [STN1]). */
+  draft?: boolean;
   /** The store's look, so a lesson's text is previewed as students see it. */
   look?: StoreLook | null;
   /** The store's language, so the preview is marked as the lesson page is. */
@@ -356,6 +361,7 @@ export function CourseEditor({
           openLesson={openLesson}
           setOpenLesson={setOpenLesson}
           room={MAX_LESSONS - lessons}
+          draft={draft}
           run={run}
           onCourse={setCourse}
           onError={setError}
@@ -476,11 +482,14 @@ function ModuleCard({
   openLesson,
   setOpenLesson,
   room,
+  draft,
   run,
   onCourse,
   onError,
 }: {
   unit: CourseModule;
+  /** The course is a draft: each lesson says it is hidden. */
+  draft: boolean;
   index: number;
   last: boolean;
   busy: boolean;
@@ -589,6 +598,8 @@ function ModuleCard({
                   .join(" · ") || "empty"}
               </p>
             </div>
+            {/* Said in words on each lesson, not by colour, so a free preview is never taken for one buyers see (754 [STN1]). */}
+            {draft ? <p className="mt-1 text-sm text-ink-soft">Off your store: new buyers cannot see it, but people who already bought the course still do.</p> : null}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm font-bold">
               <button type="button" className={small} onClick={() => setOpenLesson(openLesson === lesson.id ? null : lesson.id)} aria-expanded={openLesson === lesson.id}>
                 {openLesson === lesson.id ? "Close" : "Edit lesson"}

@@ -20,7 +20,7 @@ async function fixture(handle: string) {
   return { store, ref, record, now, oldKey: `restart:${subscription}:${record.until}` };
 }
 
-function provider(f: Awaited<ReturnType<typeof fixture>>, loseFirstAck = false) {
+function provider(f: Awaited<ReturnType<typeof fixture>>, loseFirstAck = false, legacyBound = true) {
   const original = globalThis.fetch;
   const price = { id: "price_RestartContract01", active: true, currency: "usd",
     unit_amount: PLAN_PRICES.creator.month, lookup_key: "nimbus_labs_creator_month",
@@ -30,7 +30,7 @@ function provider(f: Awaited<ReturnType<typeof fixture>>, loseFirstAck = false) 
     payment_behavior: "error_if_incomplete", "metadata[store]": f.store.handle,
     "metadata[tier]": "creator", "metadata[restarted]": "break" }).toString();
   const requests: { key: string; body: string; version: string | null }[] = [];
-  const ledger = new Map<string, string>([[f.oldKey, oldBody]]);
+  const ledger = new Map<string, string>(legacyBound ? [[f.oldKey, oldBody]] : []);
   let creations = 0, lose = loseFirstAck;
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -49,36 +49,44 @@ function provider(f: Awaited<ReturnType<typeof fixture>>, loseFirstAck = false) 
       trial_end: null, metadata: { tier: "creator" }, items: { data: [{ quantity: 1,
         current_period_start: f.now - 10, current_period_end: f.now + 30 * DAY, price }] } });
   };
-  return { requests, creations: () => creations, restore: () => { globalThis.fetch = original; } };
+  return { requests, creations: () => creations, expireKey: (key: string) => { ledger.delete(key); }, restore: () => { globalThis.fetch = original; } };
 }
 
-test("the real pause worker separates the classic body from a previously bound legacy request key", async () => {
-  process.env.STRIPE_SECRET_KEY = "sk_test_plan_pause_only";
-  const f = await fixture("restart-contract-first"), p = provider(f);
+test("a prior legacy key binding prevents a second subscription and leaves the pause held", async () => {
+  const f = await fixture("restart-contract-legacy-accepted"), p = provider(f);
   try {
     const result = await runBreaks(f.now);
-    assert.equal(result.restarted, 1, "the new body must not collide with the earlier request contract");
-    assert.equal(p.requests.length, 1); assert.equal(p.creations(), 1);
-    assert.notEqual(p.requests[0].key, f.oldKey);
-    assert.equal(p.requests[0].key, `${f.oldKey}:classic`);
-    assert.equal(new URLSearchParams(p.requests[0].body).get("billing_mode[type]"), "classic");
-    assert.equal(p.requests[0].version, "2025-09-30.clover");
-    assert.equal(await pauseOf(f.store), null);
+    assert.equal(result.failed, 1, "an idempotency conflict is unknown prior acceptance, not success");
+    assert.equal(p.requests.length, 1);
+    assert.equal(p.requests[0].key, f.oldKey, "a retry must preserve the legacy key that may own an accepted result");
+    assert.notEqual(new URLSearchParams(p.requests[0].body).get("billing_mode[type]"), null);
+    assert.equal(p.creations(), 0, "the changed body cannot create a second subscription under a fresh key");
+    assert.ok(await pauseOf(f.store), "the exact pause evidence remains for reconciliation");
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), null, "a held attempt is not scheduled for another POST");
+    const later = await runBreaks(f.now + 2 * DAY);
+    assert.equal(later.restarted, 0);
+    assert.equal(p.requests.length, 1, "a held legacy key is never retried");
+    assert.ok(await pauseOf(f.store));
   } finally {
     p.restore();
     await redis.pipeline([["DEL", `nl:pause:${f.ref}`], ["ZREM", "nl:pause:due", f.ref]]);
   }
 });
 
-test("a lost classic response retries the same key and body without another provider creation", async () => {
-  const f = await fixture("restart-contract-retry"), p = provider(f, true);
+test("a lost response is never retried after the provider idempotency window", async () => {
+  const f = await fixture("restart-contract-expired-key"), p = provider(f, true, false);
   try {
     assert.equal((await runBreaks(f.now)).failed, 1);
-    assert.ok(await pauseOf(f.store), "unknown acceptance retains the original pause");
-    assert.equal((await runBreaks(f.now + 1)).restarted, 1);
-    assert.equal(p.requests.length, 2); assert.deepEqual(p.requests[1], p.requests[0]);
-    assert.equal(p.requests[0].key, `${f.oldKey}:classic`); assert.equal(p.creations(), 1);
-    assert.equal(await pauseOf(f.store), null);
+    assert.equal(p.requests.length, 1);
+    assert.equal(p.creations(), 1, "the synthetic provider accepted before losing its response");
+    assert.ok(await pauseOf(f.store), "unknown acceptance retains the exact pause");
+    assert.equal(redis.run(["ZSCORE", "nl:pause:due", f.ref]), null, "the held attempt is removed from due before any later run");
+    p.expireKey(p.requests[0].key);
+    const later = await runBreaks(f.now + 2 * DAY);
+    assert.equal(later.restarted, 0);
+    assert.equal(p.requests.length, 1, "expiry cannot turn a retry into a second provider creation");
+    assert.equal(p.creations(), 1);
+    assert.ok(await pauseOf(f.store));
   } finally {
     p.restore();
     await redis.pipeline([["DEL", `nl:pause:${f.ref}`], ["ZREM", "nl:pause:due", f.ref]]);

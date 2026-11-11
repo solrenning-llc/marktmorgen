@@ -26,6 +26,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   // Nothing of a store switched off after a report (lib/takedown.ts) is named in the tab.
   const product = store && !store.suspended ? await readListing(store, productIdFromAddress(store, id) ?? id) : null;
   // A draft has no page of its own, so no list of its reviews either (MM-SA-30), as p/[product]/page.tsx.
+  // A suspended store's pages answer 200 with StoreResting while its robots.txt is 404 (crawl allowed): this one
+  // asks on its own not to be indexed, as the other rested pages do.
+  if (store?.suspended) return { title: "Not found — Marktmorgen", robots: { index: false, follow: true } };
   if (!store || !product || product.hidden) return { title: "Not found — Marktmorgen" };
   return {
     title: `${speech(store).w.reviewsOf(product.title)} — ${store.name}`,

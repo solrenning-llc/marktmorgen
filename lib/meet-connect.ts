@@ -590,12 +590,6 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
   });
 }
 
-/** Every DEL of one pipeline confirmed by its own count, or UnknownReplyError: a deletion is never taken as done unseen. */
-function confirmDeleted(replies: unknown, commands: number, what: string): void {
-  const answered = repliesFor(replies, commands);
-  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
-}
-
 /**
  * Zoom's notice that a user removed the app: every store that user connected
  * forgets the connection. Returns, for each store that did, who to tell.

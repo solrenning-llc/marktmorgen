@@ -68,11 +68,27 @@ const REFUND_PASS_SECONDS = 7 * 86_400;
  * back (KEPT_SECONDS, renewed with every row put on it): past that there is nothing left for it to take back.
  */
 const retryKey = (sid: string) => `nl:pre:${sid}:refunds:retry`;
+/**
+ * The last refund on the list to try again that a run read again (focal review of #3302, comment 6786660350, MEDIUM),
+ * in the store's nl:pre: keys (erased with it): the next run of this store reads on from the one after it, in the
+ * order of their ids, and back to the first after the last, so the place moves with this store's own runs, never with
+ * the clock, and every refund on the list is read again within a bounded number of runs however often the sweep
+ * reaches the store. Kept as long as the list (KEPT_SECONDS); a place absent or in another shape reads from the first:
+ * read again, never skipped.
+ */
+const retryFromKey = (sid: string) => `nl:pre:${sid}:refunds:retry:from`;
+/**
+ * The time a run gives the refunds on the list to try again before it reads its pages (focal review of #3302, LOW 1):
+ * past it the run reads none more (at least one is read whenever the deadline allows), and the next run reads on from
+ * where this one stopped, so a list of rows kept on every read never takes the time the pages need.
+ */
+const REFUND_REREAD_MS = 2_000;
 const REFUND_RETRY_CAP = 100;
 /**
  * Refunds on the list to try again read again from Stripe (GET /refunds/{id}, its charge expanded) per store per run,
- * before any is taken back (review of #3302, Claude 2 MEDIUM; the owner's decision 18 of 9 November 2026): from a place
- * that moves on every five minutes, so each on the list is read in turn. Priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ * before any is taken back (review of #3302, Claude 2 MEDIUM; the owner's decision 18 of 9 November 2026): in the order of
+ * their ids from the one after the last a run of this store read (retryFromKey), so each on the list is read in turn
+ * whatever the time of the runs. Priced in tests/plan-cost-registry.ts (NOT_A_COST).
  */
 export const PREORDER_REFUND_REREADS_PER_STORE = 10;
 const REFUND_ID = /^(re|pyr)_[A-Za-z0-9]{3,250}$/;
@@ -827,11 +843,13 @@ export async function revokeRefundedPreorders(
   };
 
   // The refunds Stripe finished whose work could not be done, first, at most PREORDER_REFUND_REREADS_PER_STORE a run
-  // from a place that moves on every five minutes: each read again from Stripe and handled as the row Stripe sends only
-  // when it succeeded on a charge refunded in full; let go once handled, or once Stripe failed or canceled it or its
+  // and at most REFUND_REREAD_MS of the run, in the order of their ids from the one after the last this store's runs
+  // read (retryFromKey; focal review of #3302, MEDIUM: a place taken from the clock read the same rows on every run of
+  // a store reached every ten minutes, and the refunds behind rows never handled stayed with the buyer): each read
+  // again from Stripe and handled as the row Stripe sends only when it succeeded on a charge refunded in full; let go once handled, or once Stripe failed or canceled it or its
   // charge is not refunded in full, nothing taken back. A list read in another shape, or a row on it that is not a
   // refund and a payment, is left as it is and read again next run: never taken as empty or dropped.
-  const retrying = repliesFor(await redisPipeline([["HGETALL", retryKey(sid)]]), 1);
+  const retrying = repliesFor(await redisPipeline([["HGETALL", retryKey(sid)], ["GET", retryFromKey(sid)]]), 2);
   const flat = retrying ? stringList(retrying[0]) : null;
   if (!flat || flat.length % 2 !== 0) console.error("reading refunds for pre-orders: the list to try again was read in another shape; read again next run");
   else {
@@ -840,10 +858,24 @@ export async function revokeRefundedPreorders(
       if (REFUND_ID.test(flat[i]) && PAYMENT_ID.test(flat[i + 1])) listed.push([flat[i], flat[i + 1]]);
       else console.error("reading refunds for pre-orders: a row to try again in another shape; kept");
     }
-    const turn = listed.length ? (Math.floor(Date.now() / 300_000) * PREORDER_REFUND_REREADS_PER_STORE) % listed.length : 0;
+    // In the order of their ids, whatever order the store keeps the list in; from the one after the last read.
+    listed.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const from = retrying?.[1] ?? null;
+    const place = typeof from === "string" && REFUND_ID.test(from) ? from : null;
+    if (from !== null && place === null) console.error("reading refunds for pre-orders: the place on the list to try again was read in another shape; read from its first row");
+    const past = place === null ? 0 : listed.findIndex(([id]) => id > place);
+    const start = past < 0 ? 0 : past;
+    const until = Math.min(deadline, Date.now() + REFUND_REREAD_MS);
+    let last = "";
+    let late = false;
     for (let k = 0; k < Math.min(listed.length, PREORDER_REFUND_REREADS_PER_STORE); k += 1) {
-      if (Date.now() >= deadline) return revoked;
-      const [id, pi] = listed[(turn + k) % listed.length];
+      if (Date.now() >= deadline) {
+        late = true;
+        break;
+      }
+      if (k > 0 && Date.now() >= until) break;
+      const [id, pi] = listed[(start + k) % listed.length];
+      last = id;
       const verdict = await reread(id, pi);
       if (verdict === "keep") continue;
       if (verdict !== "drop" && !(await handle(verdict))) continue;
@@ -851,6 +883,13 @@ export async function revokeRefundedPreorders(
       const gone = repliesFor(await redisPipeline([["HDEL", retryKey(sid), id]]), 1);
       if (!oneWrite(gone?.[0])) console.error("reading refunds for pre-orders: letting go of a row was left unknown; read again next run");
     }
+    // The place moves past every row read this run, kept or not, also when the deadline cut the run short. A write left
+    // unknown reads the same rows again next run: never one skipped.
+    if (last) {
+      const moved = repliesFor(await redisPipeline([["SET", retryFromKey(sid), last, "EX", KEPT_SECONDS]]), 1);
+      if (moved?.[0] !== "OK") console.error("reading refunds for pre-orders: the place on the list to try again was left unknown; read from it again next run");
+    }
+    if (late) return revoked;
   }
 
   if (!anchorKnown) {

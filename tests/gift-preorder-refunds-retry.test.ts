@@ -37,7 +37,11 @@
  *      Stripe failed or canceled, or whose charge is not refunded in full, is
  *      let go with nothing taken back; a read in another shape or one Stripe
  *      answers with an error leaves it on the list, nothing taken back. At most
- *      ten are read a run, from a place that moves on every five minutes.
+ *      ten are read a run, in the order of their ids from the one after the
+ *      last this store's runs read (nl:<job>:<store>:refunds:retry:from), so
+ *      the place moves with the store's own runs, never with the clock (focal
+ *      review of #3302, MEDIUM), and they get at most two seconds of the run,
+ *      so the pages still have time (LOW 1).
  *
  * Checked through the real gift and pre-order journeys against a stand-in for
  * the creator's Stripe account that pages as Stripe does.
@@ -62,6 +66,8 @@ const ledger = new Map<string, Record<string, unknown>>();
 const rereads: { id: string; account: string; expand: string[] }[] = [];
 /** Refunds Stripe answers with an error when read by themselves. */
 const erring = new Set<string>();
+/** Called on each refund read by itself, before Stripe answers: a stand-in for the time a slow Stripe takes. */
+let onReread: (() => void) | null = null;
 const ACCOUNT = "acct_1TestRetryRef01";
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -81,6 +87,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (one) {
     const id = decodeURIComponent(one[1]);
     rereads.push({ id, account: new Headers(init?.headers).get("Stripe-Account") ?? "", expand: url.searchParams.getAll("expand[]") });
+    onReread?.();
     if (erring.has(id)) return answer({ error: { type: "api_error", message: "a stand-in error" } }, 500);
     const row = refunds.find((r) => r.id === id) ?? ledger.get(id);
     return row ? answer(row) : answer({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such refund" } }, 404);
@@ -391,7 +398,7 @@ async function stale(job: Job, base: number): Promise<void> {
   is(`${job.name}: control: no longer held`, await odd.made.holds(), false);
   is(`${job.name}: control: let go of the list`, await waiting(job.retry), {});
 
-  part(`${job.name}: at most ten refunds on the list are read again a run, from a place that moves on every five minutes`);
+  part(`${job.name}: at most ten refunds on the list are read again a run, each run on from the last one read`);
   await original.call(redis, [["DEL", job.anchor], ["DEL", job.pass]]);
   refunds = [];
   const many = Array.from({ length: 25 }, (_, i) => ({ id: row("m", i), pi: `pi_${job.name}many${String(i).padStart(6, "0")}` }));
@@ -490,6 +497,111 @@ async function rotation(job: Job, base: number): Promise<void> {
     is(`${job.name} ${c.tag}: the rows always kept stay on the list, nothing taken back for them`, Object.keys(await waiting(job.retry)).sort(), [...stuckIds].sort());
     await original.call(redis, [["DEL", job.retry]]);
   }
+
+  const fromKey = `${job.retry}:from`;
+  const ids = Array.from({ length: 25 }, (_, i) => `re_${job.name}vS${String(i).padStart(6, "0")}`);
+  const fill = async () => {
+    await original.call(redis, [["DEL", job.anchor], ["DEL", job.pass], ["DEL", job.retry], ["DEL", fromKey]]);
+    // Put on the list in an order that is not that of their ids: the order kept by the store does not decide.
+    const shuffled = [...ids].reverse();
+    await original.call(redis, [["HSET", job.retry, ...shuffled.flatMap((id) => [id, `pi_${id.slice(3)}`])]]);
+    for (const id of ids) ledger.set(id, { id, object: "refund", created: base, status: "pending", payment_intent: `pi_${id.slice(3)}`, charge: { object: "charge", refunded: true } });
+    refunds = [];
+  };
+  const ttlOf = async (key: string) => (await original.call(redis, [["TTL", key]]))[0] as number;
+
+  part(`${job.name}: the place on the list is the last refund read, kept as long as the list; absent or in another shape, read from the first`);
+  await fill();
+  rereads.length = 0;
+  await job.run();
+  is(`${job.name}: the first run reads the first ten by id`, rereads.map((r) => r.id), ids.slice(0, 10));
+  is(`${job.name}: and keeps the last one read as the place`, await read(fromKey), ids[9]);
+  const ttl = await ttlOf(fromKey);
+  is(`${job.name}: kept 400 days, as the list`, ttl > 399 * 86_400 && ttl <= 400 * 86_400, true);
+  rereads.length = 0;
+  await job.run();
+  is(`${job.name}: the next run reads on from the one after it`, rereads.map((r) => r.id), ids.slice(10, 20));
+  rereads.length = 0;
+  await job.run();
+  is(`${job.name}: and back to the first after the last`, rereads.map((r) => r.id), [...ids.slice(20), ...ids.slice(0, 5)]);
+  for (const [label, kept] of [["text that is not a refund id", "not a refund"], ["an empty text", ""]] as const) {
+    await original.call(redis, [["SET", fromKey, kept]]);
+    rereads.length = 0;
+    await job.run();
+    is(`${job.name}: a place kept as ${label} reads from the first: read again, never skipped`, rereads.map((r) => r.id), ids.slice(0, 10));
+  }
+  redis.pipeline = async (commands) => {
+    const replies = await original.call(redis, commands);
+    return commands.length === 2 && commands[1][0] === "GET" && commands[1][1] === fromKey ? [replies[0], 7] : replies;
+  };
+  rereads.length = 0;
+  try {
+    await job.run();
+  } finally {
+    redis.pipeline = original;
+  }
+  is(`${job.name}: a place read as something other than text reads from the first`, rereads.map((r) => r.id), ids.slice(0, 10));
+  // The write never reached the store, and its reply is not "OK": unknown.
+  redis.pipeline = async (commands) => (commands[0]?.[0] === "SET" && commands[0][1] === fromKey ? ["OK?"] : original.call(redis, commands));
+  rereads.length = 0;
+  try {
+    await job.run();
+  } finally {
+    redis.pipeline = original;
+  }
+  is(`${job.name}: a write of the place left unknown: these ten read`, rereads.map((r) => r.id), ids.slice(10, 20));
+  rereads.length = 0;
+  await job.run();
+  is(`${job.name}: and read again next run, never skipped`, rereads.map((r) => r.id), ids.slice(10, 20));
+  is(`${job.name}: nothing let go while not final yet`, Object.keys(await waiting(job.retry)).length, 25);
+
+  const realClock = Date.now;
+  let clock = Math.floor(realClock() / 1000) * 1000;
+  try {
+    Date.now = () => clock;
+    part(`${job.name}: a run cut short by the deadline moves the place past what it read`);
+    await fill();
+    onReread = () => {
+      clock += 61_000;
+    };
+    rereads.length = 0;
+    refundCalls.length = 0;
+    await job.run();
+    is(`${job.name}: one read before the deadline`, rereads.map((r) => r.id), [ids[0]]);
+    is(`${job.name}: and the run ends there, no page read`, refundCalls.length, 0);
+    is(`${job.name}: the place is the one read`, await read(fromKey), ids[0]);
+    onReread = null;
+    rereads.length = 0;
+    await job.run();
+    is(`${job.name}: the next run reads on from the one after it`, rereads[0]?.id, ids[1]);
+
+    part(`${job.name}: a slow Stripe: the list gets at most two seconds of the run, the pages are still read, and the next run reads on`);
+    await fill();
+    const paid = await job.make(80);
+    refunds = list(`${job.name}vP`, 1, base, { 0: paid.pi });
+    onReread = () => {
+      clock += 700;
+    };
+    rereads.length = 0;
+    refundCalls.length = 0;
+    is(`${job.name}: the refund on the page is taken back in the same run`, await job.run(), 1);
+    is(`${job.name}: three read again in two seconds, at 0, 0.7 and 1.4 seconds`, rereads.map((r) => r.id), ids.slice(0, 3));
+    is(`${job.name}: and the page of refunds asked of Stripe`, refundCalls.length > 0, true);
+    is(`${job.name}: no longer held`, await paid.holds(), false);
+    rereads.length = 0;
+    await job.run();
+    is(`${job.name}: the next run reads on from the fourth`, rereads.map((r) => r.id), ids.slice(3, 6));
+    onReread = () => {
+      clock += 5_000;
+    };
+    rereads.length = 0;
+    await job.run();
+    is(`${job.name}: a read that alone takes longer still reads one a run`, rereads.map((r) => r.id), [ids[6]]);
+  } finally {
+    onReread = null;
+    Date.now = realClock;
+  }
+  await original.call(redis, [["DEL", job.retry], ["DEL", fromKey]]);
 }
 
 async function main(): Promise<void> {

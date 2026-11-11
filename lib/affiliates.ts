@@ -443,9 +443,9 @@ export type ShareProposal =
  * until revoked applies at once; every other change waits for the partner's yes (answerShareChange) and the share in
  * force stays as it is until then. Saving the share in force again withdraws a waiting change.
  *
- * Under the partner lock, as every write of a standing share is: a share that starts counting now (an approved
- * partner given one where they held none) is checked against the cap first (partnerShareProblem, against the people
- * read exactly now) and written only if it is still the share checked. Unknown reply: UnknownReplyError; the lock not
+ * Under the partner lock, as every write of a standing share is: every share asked for is checked against the cap
+ * first (partnerShareProblem, against the people read exactly now), and a share that starts at once is written only
+ * if it is still the share checked. Unknown reply: UnknownReplyError; the lock not
  * held: LockBusyError; nothing written either way. `nowSeconds` is the time of the save.
  */
 export async function proposePartnerShare(store: Store, id: string, next: PartnerShare | null, nowSeconds: number, charge: Charge = PAID): Promise<ShareProposal> {
@@ -455,12 +455,14 @@ export async function proposePartnerShare(store: Store, id: string, next: Partne
     const found = await readAffiliate(store, id);
     if (!found) return unknown;
     const plan = proposed(found, next, nowSeconds);
-    const starts = found.status === "approved" && found.share === null && plan.next.share !== null;
-    if (starts && plan.next.share) {
-      const problem = await partnerShareProblem(store, plan.next.share, id, charge);
+    // Every share asked for is checked against the cap first, as main's studio route always checked a share before
+    // saving it: one that starts now, and one that waits (checked again at the partner's yes, answerShareChange).
+    if (next !== null) {
+      const problem = await partnerShareProblem(store, next, id, charge);
       if (problem) return { ok: false, reason: "cap", problem };
       if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before a partner's share was written");
     }
+    const starts = found.share === null && plan.next.share !== null;
     let out: ShareProposal = unknown;
     const written = await changeAffiliate(store, id, (now) => {
       const again = proposed(now, next, nowSeconds);

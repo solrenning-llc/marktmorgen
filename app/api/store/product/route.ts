@@ -46,6 +46,7 @@ import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, r
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
+import { templateLeft } from "@/lib/template-text";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
 
@@ -416,6 +417,10 @@ export async function POST(request: NextRequest) {
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
           const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
           if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
+          // Nor while its sales page, in either version, still holds a part a template left to write: saving it
+          // is refused once the product is on the store, so publishing never takes it there (754 [STN1], Revisor 2 on #3593).
+          const pageLeft = shownPage ? templateLeft(shownPage) : null;
+          if (pageLeft) return Response.json({ ok: false, error: "placeholder", ...pageLeft, product: draft.title }, { status: 409 });
           // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
           if (draft.course) {
             const course = await readCourse(draft.course.id);

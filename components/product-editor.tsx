@@ -3,6 +3,8 @@
 import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
+import { templatePublishMessage } from "@/lib/template-text-rules";
+import { BLOCK_KINDS, type BlockKind } from "@/lib/sales-page";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
 import { WaitlistPanel } from "@/components/waitlist-panel";
@@ -135,6 +137,7 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   title: "Give it a name before saving.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
+  placeholder: "This product's sales page still has a part for you to write, marked ⟦like this⟧ or in [brackets] from a campaign. Open it under Sales pages, replace each one with your own words, then publish it. Nothing was published.",
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
   payments: `Type ${MIN_MEMBER_PAYMENTS} to ${MAX_MEMBER_PAYMENTS} payments, or leave it empty for a membership that runs until it is canceled.`,
@@ -290,6 +293,16 @@ async function send(
     if (data.error === "outline_left") {
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
+    }
+    if (data.error === "placeholder") {
+      // A part left to write on the draft's sales page (754 [STN1]), said with where it is.
+      const said = data as { field?: unknown; kind?: unknown; part?: unknown; product?: unknown };
+      const field = said.field === "block" || said.field === "search" || said.field === "test" ? said.field : null;
+      const kind = field === "block" && (said.kind === "booking" || BLOCK_KINDS.some((k) => k.kind === said.kind)) ? (said.kind as BlockKind) : null;
+      if (field && typeof said.part === "string" && said.part && (field !== "block" || kind)) {
+        return wrong(templatePublishMessage({ field, kind, part: said.part }, typeof said.product === "string" ? said.product : null));
+      }
+      return wrong(MESSAGES.placeholder);
     }
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);

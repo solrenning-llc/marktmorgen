@@ -14,6 +14,7 @@
  *     the write) answered as kept or as refused, never "unknown" (rule 24);
  *   - a broadcast whose poll does not read taken as one without a poll.
  */
+import type { NextRequest } from "next/server";
 import { BroadcastsUnreadable, readBroadcast } from "@/lib/broadcasts";
 import { pollLinkPart } from "@/lib/email-poll-links";
 import { votePoll } from "@/lib/email-poll-vote";
@@ -127,7 +128,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   const post = (query: string, form: Record<string, string>) => {
     const body = new FormData();
     for (const [k, v] of Object.entries(form)) body.set(k, v);
-    return route.POST(new Request(`https://marktmorgen.com/api/mail/poll?${query}`, { method: "POST", body }));
+    return route.POST(new Request(`https://marktmorgen.com/api/mail/poll?${query}`, { method: "POST", body }) as NextRequest);
   };
   redis.clear();
   put();

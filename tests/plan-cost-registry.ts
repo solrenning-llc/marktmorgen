@@ -386,7 +386,7 @@ export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMAN
  */
 export const ASSIST_REMIND_READ = request("wait", ASSIST_REMIND_COMMANDS + TAKE_COMMANDS, 1_000_000 + ASSIST_REMIND_PRODUCTS * 16_384 + 4_096);
 /**
- * What one confirmed answer to a poll in a broadcast costs (lib/email-poll-vote.ts),
+ * What one opening of a poll's page, or one confirmed answer to it, costs (lib/email-poll-vote.ts, pollPage and votePoll),
  * at the most: its commands and its counting, the store's record (1 MB at the
  * most) and the broadcast's record (its subject twice, for a second subject
  * tried, and its body, every character escaped at six bytes, and the poll),

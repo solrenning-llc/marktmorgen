@@ -847,6 +847,12 @@
       "parameters": []
     },
     {
+      "source": "app/poll/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/poll",
+      "parameters": []
+    },
+    {
       "source": "app/pricing/page.tsx",
       "status": "AAA review not completed; scoped keyboard, viewport and automated AA checks in tests/e2e/pricing.mjs",
       "routeTemplate": "/pricing",
@@ -2074,6 +2080,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

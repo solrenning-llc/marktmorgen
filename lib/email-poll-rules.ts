@@ -36,7 +36,8 @@ export const MAX_POLL_DAYS = 30;
  */
 export const POLL_VOTE_COMMANDS = 5;
 /**
- * Public requests of the store's month one confirmed answer takes before it
+ * Public requests of the store's month one opening of a poll's page, or one
+ * confirmed answer, takes before it
  * is kept: more than its reads (the store's record at 1 MB at the most, the
  * broadcast's record) and its writes cost (POLL_VOTE_READ in
  * tests/plan-cost-registry.test.ts).

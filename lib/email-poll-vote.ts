@@ -21,7 +21,7 @@
 import { BROADCAST_ID, readBroadcast } from "@/lib/broadcasts";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { checkPollLink } from "@/lib/email-poll-links";
-import { POLL_VOTE_REQUEST_UNITS, pollClosesAt, voteStep } from "@/lib/email-poll-rules";
+import { type EmailPoll, POLL_VOTE_REQUEST_UNITS, pollClosesAt, pollState, voteStep } from "@/lib/email-poll-rules";
 import { recordVote } from "@/lib/email-polls";
 import { type Store, storeForHandle } from "@/lib/store";
 
@@ -68,4 +68,48 @@ export async function votePoll(
     return "unknown";
   }
   return recordVote(broadcastId, checked.recipient, step.step === "record" ? step.option : null, closesAt, now);
+}
+
+export type PollPage =
+  | { state: "open" | "closed"; poll: EmailPoll; sender: string; language: string; closesAt: number }
+  | { state: "resting"; language: string }
+  | { state: "invalid" }
+  | { state: "unknown" };
+
+/**
+ * What the page a recipient's link opens shows (unit 5): the poll, open or
+ * closed, with who sent it and in the store's language. It keeps, changes
+ * and takes back nothing: mail scanners open every link, and only the press
+ * of Confirm (votePoll) counts. The same checks in the same order as a vote,
+ * so a link that is not someone's costs nothing, and the same
+ * POLL_VOTE_REQUEST_UNITS taken before the store is shown.
+ */
+export async function pollPage(input: { broadcastId: string; link: unknown; now: number }, deps: PollVoteDeps = DEPS): Promise<PollPage> {
+  const { broadcastId, now } = input;
+  if (typeof broadcastId !== "string" || !BROADCAST_ID.test(broadcastId)) return { state: "invalid" };
+  const checked = checkPollLink(broadcastId, input.link);
+  if (!checked.ok) return checked.unknown ? { state: "unknown" } : { state: "invalid" };
+  let broadcast;
+  try {
+    broadcast = await readBroadcast(broadcastId);
+  } catch {
+    return { state: "unknown" };
+  }
+  if (!broadcast || !broadcast.poll) return { state: "invalid" };
+  if (broadcast.status !== "sending" && broadcast.status !== "sent") return { state: "invalid" };
+  if (!nonnegative(broadcast.total) || !nonnegative(broadcast.sendAt)) return { state: "unknown" };
+  if (checked.recipient >= broadcast.total) return { state: "invalid" };
+  const state = pollState(broadcast.sendAt, broadcast.poll.days, now);
+  const closesAt = pollClosesAt(broadcast.sendAt, broadcast.poll.days);
+  if (state === "unknown" || closesAt === null) return { state: "unknown" };
+  let store: Store | null;
+  try {
+    store = await deps.loadStore(broadcast.handle);
+    if (!store) return { state: "unknown" };
+    if (!(await deps.take(store))) return { state: "resting", language: store.language };
+  } catch {
+    return { state: "unknown" };
+  }
+  const sender = store.mail?.fromName || store.name;
+  return { state, poll: broadcast.poll, sender, language: store.language, closesAt };
 }

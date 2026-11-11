@@ -48,8 +48,8 @@ Under the MR rule a unit must have positive net at full use, and the company mus
 | 4 | 472 [TX2], 473 [TX3] | Partly merged (most-correct reading, sales evidence journal, threshold evidence). | US per-state counters and the parts the step 5 records need. |
 | 5 | `DEEMED_SUPPLIER_RECORDS` | Not built. No checkout refuses a jurisdiction before a charge. | "refuse-consumers" checkout refusal per jurisdiction (with tests), or "collect" where built; then the records. EU/UK collection (7, 8, 300–303) comes right after opening. |
 | 6 | 275 [FX1] | Inventory and monthly/annual gate merged; every ceiling in `CURRENT_LLC_FIXED_COST_CEILINGS` is `null` with empty evidence. | Real contracts and ceilings (group A), then the minimum customer base. |
-| 7 | 89 [C2-CAPACITY], 232 [CA1] | Guards merged; 89 waits for real configuration and rates; 232 units 1–6 merged. | 89: owner's real figures. 232: remaining units. |
-| 8 | 305 [SY1], 306 [SY2], 307 [EC1], 91 [D2-EU-WITHDRAWAL], 98 [D2-COMPLIANCE-REVIEW] | 305 partly merged; 306 unit 1 merged; 307 queued; 91 built and off; 98 in progress. | 305 refund button; 306 next units; 307; 98 remaining checks. |
+| 7 | 89 [C2-CAPACITY], 232 [CA1] | Guards merged; 89 waits for real configuration and rates; 232: API-write units 1–6, 4b and 4c merged, while the original 4c, the free-trial funding and the proof that every path is a direct charge stay open (see #3669). | 89: owner's real figures. 232: remaining units. |
+| 8 | 305 [SY1], 306 [SY2], 307 [EC1], 91 [D2-EU-WITHDRAWAL], 98 [D2-COMPLIANCE-REVIEW] | 305 partly merged; 306 unit 1 merged; 307 merged (#1292), published per the queue and off behind the gates, with end-to-end use and three test gaps still open; 91 built and off; 98 noted in progress on 31 October with no update since (its state line still says to do). | 305 refund button; 306 next units; 307: end-to-end use and its three test gaps; 98 remaining checks. |
 | 9 | 114 [E2-AFFILIATE-TAX-FORMS] | Queued. | Build W-9/W-8BEN and 1099 export, or start affiliate payouts off (AV1 allows it). |
 | 10 | 465 [MR2], 466 [MR3] | Partly merged; real profit input `null`. | The criterion the commercial review needs; the monthly report comes after opening. |
 | 11 | Cost items (k) | 309 [EM1] and 313 [CV1] partly merged; 319, 315, 320, 331 not started. | Only those that lower the first months' cost or the minimum base. |
@@ -66,7 +66,7 @@ In the order they unblock opening:
 3. **A US bank account in the LLC's exact name.**
 4. **The US Stripe platform account in the LLC's name**, then dated written or account proof that it can connect creators in the US, Canada, the UK and Europe with direct charges. Keep any message asking for SSN or ITIN (SR5).
 5. **Answer or obtain the Stripe Tax question** (who pays the Stripe Tax fee on direct charges on creators' Standard accounts); until then the dearer reading in `lib/receiving-costs.ts` stays.
-6. **Real fixed costs**: contracts and invoices for every LLC fixed cost (Delaware, registered agent, address, domains, tools, GDPR/DSA/UK representatives, INSS), with monthly and annual ceilings and the reserve review (275 [FX1]).
+6. **Real fixed costs**: contracts and invoices for every LLC fixed cost (Delaware, registered agent, address, domains, tools, GDPR/DSA/UK representatives, and INSS only if the remuneration facts make it due: unresolved, TX point 5 and `lib/llc-fixed-costs.ts`), with monthly and annual ceilings and the reserve review (275 [FX1]).
 7. **Real supplier configuration and rates** for capacity (89 [C2-CAPACITY]): plan, price tier and ceiling of each paid supplier account (Vercel, Upstash, Resend Pro, SES, R2, video, Anthropic).
 8. **Proof of the Resend Pro account** and of real SES sending, needed by 309 [EM1].
 9. **Supplier agreements**: which plan, entity and DPF/SCC terms cover each current account (SV policy). No terms are accepted by an agent.
@@ -82,7 +82,7 @@ Each one ends "built and tested, off behind the gates" until group A is done. No
 2. Renewals, resource allocations and settlement/reserve reconciliation coverage (AV1 step 3; core keys of `CONTRACT_ADMISSION_COVERAGE`).
 3. The "refuse-consumers" checkout refusal per jurisdiction before any charge, with tests (AV1 step 5). Recording it in `DEEMED_SUPPLIER_RECORDS` stays a reviewed step.
 4. US per-state counters and threshold switch-on (472 [TX2], 473 [TX3], TX point 11).
-5. 232 [CA1] remaining units; 305 [SY1] refund button; 306 [SY2] next units; 307 [EC1]; 98 [D2-COMPLIANCE-REVIEW] remaining checks.
+5. 232 [CA1] remaining units; 305 [SY1] refund button; 306 [SY2] next units; 307 [EC1] end-to-end use and its three test gaps (the item itself is merged, #1292); 98 [D2-COMPLIANCE-REVIEW] remaining checks.
 6. 114 [E2-AFFILIATE-TAX-FORMS], or keeping affiliate payouts off at opening, with a test.
 7. The 465 [MR2] criterion the commercial review needs and 466 [MR3] with current prices.
 8. Cost items (k) that lower the first months' cost or the minimum base.

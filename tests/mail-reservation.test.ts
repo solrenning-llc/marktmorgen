@@ -75,6 +75,16 @@ test('funded paid list dispatch stops before the provider when financial approva
  assert.equal(await usedThisMonth(made.listId,windowId(made)),0);
 });
 
+test('a failed daily usage read is logged and still blocks list email',async()=>{
+ const previous=console.error, seen:unknown[][]=[];
+ console.error=(...args:unknown[])=>{seen.push(args);};
+ try {
+  dayRead={value:new Error('synthetic daily usage failure')};
+  assert.equal(await reserveDay(1),false);
+  assert.equal(seen.length,1);
+  assert.equal(seen[0][0],'reading the daily email usage failed');
+ } finally { console.error=previous; }
+});
 test('unknown daily usage stops the real list loop before reservations and dispatch',async()=>{
  const made=await fullStore();pipelines=[];
  const inherited=new Array(1);Object.setPrototypeOf(inherited,{0:null});

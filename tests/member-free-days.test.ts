@@ -163,10 +163,15 @@ async function main(): Promise<void> {
   is("nothing was sent to Stripe for any of them", posted.length, 0);
 
   part("An answer that cannot be read records nothing as done");
+  // Rule 23 (Claude 4's LOW on #2912): a write sent and not confirmed keeps the membership's lock a full term
+  // (tests/member-free-days-lock-kept.test.ts); each case here lets it run out, as that term passing would.
+  const termOver = () => redis.run(["DEL", "nl:tier:sub_live000001:lock"]);
   mode = "error";
   is("Stripe failing: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
+  termOver();
   mode = "odd";
   is("Stripe answering without the date asked for: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
+  termOver();
   const realPipeline = redis.pipeline.bind(redis);
   // Regra 23: this bent every SET; since Codex V's review of #2912 the press first takes the membership's lock (a SET NX
   // of nl:tier:...:lock), so only the claim's own SET (nl:free-days:) is bent, as the check means.

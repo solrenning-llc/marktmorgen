@@ -92,7 +92,17 @@ export async function giveFreeDays(
 ): Promise<GiveResult> {
   if (!SUB_PATTERN.test(subscription) || !isRedisConfigured()) return giveUnlocked(store, email, subscription, rawDays, expected, by, nowSeconds);
   try {
-    return await withLock(membershipLockKey(subscription), MEMBERSHIP_LOCK_SECONDS, MEMBERSHIP_LOCK_WAIT_MS, () => giveUnlocked(store, email, subscription, rawDays, expected, by, nowSeconds));
+    // A write sent to Stripe and not confirmed keeps the lock a full term and lets it run out, as an unconfirmed switch
+    // does (lib/tier-switch.ts, keepWhileUnconfirmed; Claude 4's LOW on #2912): a switch never reads the membership
+    // while that update may still land.
+    const sent = { maybe: false };
+    return await withLock(
+      membershipLockKey(subscription),
+      MEMBERSHIP_LOCK_SECONDS,
+      MEMBERSHIP_LOCK_WAIT_MS,
+      () => giveUnlocked(store, email, subscription, rawDays, expected, by, nowSeconds, sent),
+      (result) => sent.maybe && !result.ok && result.reason === "unknown",
+    );
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     console.error("giving a member free days could not take the membership's lock", error);
@@ -108,6 +118,8 @@ async function giveUnlocked(
   expected: unknown,
   by: { who: string; role: Role },
   nowSeconds: number,
+  /** Set once the write is sent to Stripe: an "unknown" after it may still land. */
+  sent: { maybe: boolean } = { maybe: false },
 ): Promise<GiveResult> {
   const account = store.stripeAccountId;
   const days = parseFreeDays(rawDays);
@@ -149,6 +161,7 @@ async function giveUnlocked(
   });
   for (const [key, value] of Object.entries(marks)) body.set(`metadata[${key}]`, value);
   let answer: Record<string, unknown>;
+  sent.maybe = true;
   try {
     answer = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, API_VERSION, `member-free-days:${subscription}:${expected}:${days}`);
   } catch (error) {

@@ -32,7 +32,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -208,7 +208,14 @@ export async function writePage(statsId: string, productId: string, page: SalesP
   const empty = page.blocks.length === 0 && !page.seoTitle && !page.seoDescription && !page.next;
   const json = JSON.stringify(page);
   const key = versionsKey(statsId, productId);
-  const [before, kept, oldest] = await redisPipeline([["GET", pageKey(statsId, productId)], ["LLEN", key], ["LINDEX", key, -1]]);
+  // Read exactly (CX-123 rule 24): the page as it was, null or text; its versions counted; the oldest, null or text.
+  // Anything else throws before the room is taken or anything is written, so a page is never written over without
+  // the version that lets the creator undo it.
+  const read = repliesFor(await redisPipeline([["GET", pageKey(statsId, productId)], ["LLEN", key], ["LINDEX", key, -1]]), 3);
+  if (!read || (read[0] !== null && typeof read[0] !== "string") || countOf(read[1]) === null || (read[2] !== null && typeof read[2] !== "string")) {
+    throw new UnknownReplyError("a page and its versions before a save");
+  }
+  const [before, kept, oldest] = read;
   const commands: (string | number)[][] = [empty ? ["DEL", pageKey(statsId, productId)] : ["SET", pageKey(statsId, productId), json]];
   // What the page was, kept so a save can be undone from the studio. The
   // version pushed takes room; the oldest one it pushes out gives its own back.

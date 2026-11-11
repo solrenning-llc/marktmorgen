@@ -123,6 +123,49 @@ async function main(): Promise<void> {
   writeReply = null;
   is("a smaller list not written: the slot is never below the kept list's size", await slotNow(), keptSize);
 
+  part("Review (ALTO 1): a smaller save whose room answer is lost never leaves the slot below what is stored");
+  await savePaths(STORE, [two("A long name so that the kept list is the larger one of the two"), two("Another long name, again to make the kept list larger")], COURSES, NOW + 13);
+  const bigSize = await slotNow();
+  room = [["?"]];
+  // The room script ran (the slot set) but its answer was lost: here, run it for real and garble the reply.
+  room = null;
+  let garble = true;
+  const before2 = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => {
+    const values = await before2(batch);
+    if (garble && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))) return [["?"]];
+    return values;
+  }) as typeof redis.pipeline;
+  is("unknown", (await savePaths(STORE, [two("S")], COURSES, NOW + 14)).state, "unknown");
+  garble = false;
+  redis.pipeline = before2;
+  is("the slot still counts the stored, larger list", (await slotNow()) >= bigSize, true);
+
+  part("Review (ALTO 2): a save whose lock ran out never sets back another save's count");
+  const storedSize = async () => {
+    const [json] = await real([["GET", KEY]]);
+    return typeof json === "string" ? json.length : 0;
+  };
+  let other = true;
+  const before3 = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => {
+    if (other && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-set:"))) {
+      // A's lock runs out here; B takes it, saves a larger list, and lets go; then A's fenced write finds it gone.
+      other = false;
+      await real([["DEL", `nl:paths:lock:${statsId}`]]);
+      const b = await savePaths(STORE, Array.from({ length: 10 }, (_, i) => two(`B's path number ${i}, saved while A was stalled, with a long name`)), COURSES, NOW + 16);
+      if (b.state !== "saved") throw new Error(`fixture: B ${b.state}`);
+    }
+    return before3(batch);
+  }) as typeof redis.pipeline;
+  is("A is not said as saved", (await savePaths(STORE, [two("A")], COURSES, NOW + 15)).state, "unknown");
+  redis.pipeline = before3;
+  is("the slot still counts B's stored list", (await slotNow()) >= (await storedSize()), true);
+
+  part("Review (LEVE 2): an id that would not read back is never given");
+  const odd = readPathsInput([two("X")], [], COURSES, () => Number.NaN);
+  is("a random that gives no letter refuses rather than writing a bad id", odd.ok ? /^[a-z0-9]{8}$/.test(odd.paths[0].id) : odd.problem, "list");
+
   part("One save at a time");
   await real([["SET", `nl:paths:lock:${statsId}`, "someone", "EX", 60]]);
   is("a save while another holds the lock is busy", (await savePaths(STORE, [two("Z")], COURSES, NOW + 8)).state, "busy");

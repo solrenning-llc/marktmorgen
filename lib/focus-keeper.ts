@@ -55,6 +55,11 @@ export type FocusKeeper = {
   treeChanged: (added?: KeptElement[]) => void;
 };
 
+/** How many parts up the page the keeper looks for what a change added (an editor in a button's place). */
+const NEAR_ADDED = 6;
+/** How many parts up the page it looks for a control when nothing was added near the one taken away. */
+const NEAR = 3;
+
 /** `active` reads the document's active element; `body` is the page's body, where a browser leaves a lost focus. */
 export function focusKeeper(active: () => unknown, body: unknown, place?: KeeperPlace): FocusKeeper {
   // The element that has, or last had, the focus while it was on; null once it was left on purpose.
@@ -101,16 +106,30 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       }
       if (!place) return;
       const lost = last;
-      for (const part of around) {
-        if (!part.isConnected) continue;
-        // The page itself was replaced: a navigation brings its own focus.
-        if (!place.inMain(part)) return;
-        // What the change added in that part comes first: the editor that took the control's place, which may sit
-        // after other controls of the same part (a product card's waitlist box before its shipping editor).
+      const parts = around.filter((part) => part.isConnected);
+      // The page itself was replaced: a navigation brings its own focus.
+      if (parts.length === 0 || !place.inMain(parts[0])) return;
+      const inside = parts.filter((part) => place.inMain(part));
+      // First, what the change added in the nearest part that holds any of it: the editor that took the control's
+      // place, beside it or a level up (a goal's form beside its title row), and after other controls of that part (a
+      // product card's waitlist box before its shipping editor).
+      for (const part of inside.slice(0, NEAR_ADDED)) {
         const fresh = added.filter((node) => node.isConnected && place.contains(part, node));
-        const next = fresh.map((node) => place.firstControlIn(node)).find((control) => control !== null) ?? place.firstControlIn(part);
-        if (next && next !== lost) next.focus({ preventScroll: true });
-        return;
+        if (fresh.length === 0) continue;
+        const next = fresh.map((node) => place.firstControlIn(node)).find((control) => control !== null && control !== lost);
+        if (next) {
+          next.focus({ preventScroll: true });
+          return;
+        }
+      }
+      // Nothing added near it: the first control of the nearest part that has one, a few levels up at most, never an
+      // unrelated control far up the page.
+      for (const part of inside.slice(0, NEAR)) {
+        const next = place.firstControlIn(part);
+        if (next && next !== lost) {
+          next.focus({ preventScroll: true });
+          return;
+        }
       }
     },
   };

@@ -1121,6 +1121,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/moved/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/moved",
+      "parameters": []
+    },
+    {
       "source": "app/studio/new/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/new",
@@ -1378,6 +1384,7 @@
     "components/email-sync-editor.tsx",
     "components/embed-messenger.tsx",
     "components/empty-state.tsx",
+    "components/exit-notice-editor.tsx",
     "components/exit-offer-editor.tsx",
     "components/exit-offer-slot.tsx",
     "components/exit-offer.tsx",
@@ -1813,6 +1820,7 @@
     "app/api/store/email-sync/route.ts",
     "app/api/store/embed-sites/route.ts",
     "app/api/store/exit-offer/route.ts",
+    "app/api/store/exit/route.ts",
     "app/api/store/export/route.ts",
     "app/api/store/extras/route.ts",
     "app/api/store/fair/route.ts",
@@ -2074,6 +2082,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

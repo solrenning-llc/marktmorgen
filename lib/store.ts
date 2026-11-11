@@ -188,7 +188,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
-import { type ExitNotice, exitHoldSeconds, readExitNotice, releasedValue } from "@/lib/exit-redirect-rules";
+import { type ExitDestination, type ExitNotice, exitDestination, exitHoldSeconds, mayChooseExit, readExitNotice, releasedValue } from "@/lib/exit-redirect-rules";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -1923,6 +1923,37 @@ export async function closeStoreRecord(store: Store, extraKeys: string[] = []): 
     ["ZREM", ENDED_INDEX, storeRef(store)],
     ["SREM", SHARING_INDEX, storeRef(store)],
   ]);
+}
+
+export type ExitChoice =
+  | { ok: true; store: Store }
+  | { ok: false; reason: "none" | "not_closing" | Exclude<ExitDestination, { ok: true }>["reason"] };
+
+/**
+ * Keeps, or takes away (an empty address), the new address a closing
+ * store's owner gives for its moved notice (97 [D2-OPEN-EXIT];
+ * lib/exit-redirect-rules.ts): only for a store that closes whole and only
+ * before its closing day (mayChooseExit), with that store's own closing day,
+ * under the store's lock. A refused choice changes nothing.
+ */
+export async function chooseExitNotice(
+  ref: string,
+  raw: unknown,
+  closing: { endedAt: number; day: number },
+  now = Date.now(),
+): Promise<ExitChoice> {
+  const result = await withStore<ExitChoice>(ref, async (store, save) => {
+    if (!mayChooseExit({ endedAt: closing.endedAt, closingDay: closing.day, now })) return { ok: false, reason: "not_closing" };
+    if (raw === "" || raw === null || raw === undefined) {
+      const { exitNotice: _gone, ...rest } = store;
+      void _gone;
+      return { ok: true, store: await save(rest) };
+    }
+    const checked = exitDestination(raw);
+    if (!checked.ok) return { ok: false, reason: checked.reason };
+    return { ok: true, store: await save({ ...store, exitNotice: { to: checked.url, host: checked.host, closedAt: closing.day, setAt: now } }) };
+  });
+  return result ?? { ok: false, reason: "none" };
 }
 
 export type RenameResult =

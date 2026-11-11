@@ -23,7 +23,7 @@ import { KEEP_NOTHING_FROM } from "@/lib/plan-closing-rules";
 import { redisPipeline } from "@/lib/redis";
 
 const DAY = 86_400_000;
-const root = join(__dirname, "..");
+const root = process.cwd();
 
 (async () => {
   is("a store is made", (await claimHandle("chooser@example.com", "choosing-shop", "Choosing", "")).ok, true);

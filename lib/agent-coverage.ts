@@ -148,6 +148,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/dunning": row("email", draft),
   "POST store/email-sync": row("connections", never(CONNECT)),
   "POST store/embed-sites": row("settings", draft),
+  "POST store/exit": row("settings", draft, "A closing store's new address, shown for 90 days at its old address (97 [D2-OPEN-EXIT]): the agent may propose it, which the creator confirms; it sends visitors to another site."),
   "POST store/exit-offer": row("offers", draft),
   "GET store/export": row("buyers", never(PEOPLE_FILE)),
   "POST store/extras": row("products", draft),

@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs";
 import { startOrder, moveStage } from "@/lib/made-to-order-rules";
-import { KEEP_SECONDS, MAX_KEPT_ORDERS, ROOM_BYTES, forgetMadeOrdersPerson, keepMadeOrder, madeOrdersOf, readMadeOrders } from "@/lib/made-to-order";
+import { CLOCK_SLACK_SECONDS, KEEP_SECONDS, MAX_KEPT_ORDERS, ROOM_BYTES, forgetMadeOrdersPerson, keepMadeOrder, madeOrdersOf, readMadeOrders } from "@/lib/made-to-order";
 import type { DataStore } from "@/lib/store-data";
 import { dataRoomFor } from "@/lib/store-data-rules";
 import { PERSON_DATA } from "@/lib/person-data";
@@ -193,6 +193,23 @@ void (async () => {
   is("the erasure runs it", ERASERS.some((e) => e.module === file), true);
   is("the copy copies it", COPY_PLAN[file]?.how === "copied" && typeof COPIERS[file] === "function", true);
   is("the store data registry names both key families as the room", ["nl:mto:i:@lib/made-to-order.ts", "nl:mto:o:@lib/made-to-order.ts"].every((k) => readFileSync("tests/store-data-registry.ts", "utf8").includes(`"${k}": room(`)), true);
+
+  part("A payment time in the future never outlives the store's list (Claude 3 on #3630, MEDIUM)");
+  reset();
+  const nowS = Math.floor(NOW / 1000);
+  const future = startOrder({ paidAt: nowS + 5 * 365 * 86_400, days: 14 })!;
+  is("paid years from now: refused, nothing written", [await keepMadeOrder(SHOP, { sale: sale(40), email: ANN, order: future }, NOW), (await keys("nl:mto:*")).length], ["invalid", 0]);
+  const beyond = startOrder({ paidAt: nowS + CLOCK_SLACK_SECONDS + 1, days: 14 })!;
+  is("just past the clock's slack: refused", await keepMadeOrder(SHOP, { sale: sale(41), email: ANN, order: beyond }, NOW), "invalid");
+  const ahead = startOrder({ paidAt: nowS + CLOCK_SLACK_SECONDS, days: 14 })!;
+  is("within the clock's slack: kept", await keepMadeOrder(SHOP, { sale: sale(42), email: ANN, order: ahead }, NOW), "kept");
+  const [aheadRecord] = (await keys("nl:mto:o:*"));
+  const [recordTtl] = await real([["TTL", aheadRecord]]);
+  const [listTtl] = await real([["TTL", list]]);
+  is("and its record never ends after the list that finds it", typeof recordTtl === "number" && typeof listTtl === "number" && recordTtl > 0 && recordTtl <= listTtl, true);
+  const later = (nowS + KEEP_SECONDS - 1) * 1000;
+  is("a second before the list ends, the copy still finds it", (await madeOrdersOf(SHOP, ANN, later)).length, 1);
+  is("and the erasure deletes it", await forgetMadeOrdersPerson(SHOP, ANN, later), 1);
 
   reset();
   done();

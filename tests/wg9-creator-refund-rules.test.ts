@@ -21,7 +21,7 @@ import {
 } from "@/lib/creator-refund-rules";
 import { done, is, part } from "./check";
 
-const charge = (over: Record<string, unknown> = {}) => ({ id: "ch_1", object: "charge", status: "succeeded", paid: true, amount: 5_000, amount_refunded: 0, currency: "usd", disputed: false, refunded: false, ...over });
+const charge = (over: Record<string, unknown> = {}) => ({ id: "ch_1", object: "charge", status: "succeeded", paid: true, amount: 5_000, amount_captured: 5_000, captured: true, amount_refunded: 0, currency: "usd", disputed: false, refunded: false, ...over });
 
 part("Who may refund: only the role with the payments permission");
 is("the owner may; admin, editor and support may not", [canRefund("owner"), canRefund("admin"), canRefund("editor"), canRefund("support")], [true, false, false, false]);
@@ -37,6 +37,10 @@ is("not paid (pending, failed): nothing to refund yet", [refundableOf(charge({ s
 const unreadable = { ok: false, reason: "unreadable" };
 is("an amount or a refunded amount we cannot read: unknown, never zero", [refundableOf(charge({ amount: "5000" })), refundableOf(charge({ amount_refunded: null })), refundableOf(charge({ amount_refunded: -1 })), refundableOf(charge({ amount: 50.5 }))], [unreadable, unreadable, unreadable, unreadable]);
 is("more refunded than charged: unknown, never a negative or the whole charge", refundableOf(charge({ amount_refunded: 6_000 })), unreadable);
+is("a hold only authorized, never captured: not paid, nothing to refund (Claude 6 on #3634)", refundableOf(charge({ captured: false, amount_captured: 0 })), { ok: false, reason: "not_paid" });
+is("a hold captured in part: unknown, never the whole authorized amount", refundableOf(charge({ amount_captured: 3_000 })), unreadable);
+is("captured not said, or not a boolean: unknown", [refundableOf(charge({ captured: undefined })), refundableOf(charge({ captured: "true" }))], [unreadable, unreadable]);
+is("an amount captured we cannot read: unknown", [refundableOf(charge({ amount_captured: undefined })), refundableOf(charge({ amount_captured: 50.5 })), refundableOf(charge({ amount_captured: -1 }))], [unreadable, unreadable, unreadable]);
 is("no currency, a disputed flag we cannot read, or a paid flag that says otherwise: unknown", [refundableOf(charge({ currency: "" })), refundableOf(charge({ disputed: "no" })), refundableOf(charge({ paid: false }))], [unreadable, unreadable, unreadable]);
 is("not a charge, no id, a bare id: unknown", [refundableOf(null), refundableOf("ch_1"), refundableOf({ ...charge(), object: "payment_intent" }), refundableOf({ ...charge(), id: "" })], [unreadable, unreadable, unreadable, unreadable]);
 
@@ -47,10 +51,10 @@ is("all: exactly what is left", refundAmount({ full: true, typed: "" }, left), {
 is("a typed part, read as a price is read", [refundAmount({ full: false, typed: "12.5" }, left), refundAmount({ full: false, typed: " 38 " }, left)], [{ ok: true, cents: 1_250 }, { ok: true, cents: 3_800 }]);
 is("more than is left: refused, never cut down to fit", refundAmount({ full: false, typed: "38.01" }, left), { ok: false, reason: "over_refundable" });
 is("nothing typed, zero, or not one plain amount: refused", [refundAmount({ full: false, typed: "" }, left), refundAmount({ full: false, typed: "0" }, left), refundAmount({ full: false, typed: "$12" }, left), refundAmount({ full: false, typed: "1,200" }, left), refundAmount({ full: false, typed: "12.345" }, left), refundAmount({ full: false, typed: "-5" }, left)], [{ ok: false, reason: "empty" }, { ok: false, reason: "zero" }, { ok: false, reason: "not_an_amount" }, { ok: false, reason: "not_an_amount" }, { ok: false, reason: "not_an_amount" }, { ok: false, reason: "not_an_amount" }]);
-const yen = refundableOf(charge({ currency: "jpy", amount: 2_700 }));
+const yen = refundableOf(charge({ currency: "jpy", amount: 2_700, amount_captured: 2_700 }));
 if (!yen.ok) throw new Error("the yen charge reads");
 is("a zero-decimal currency is typed whole", [refundAmount({ full: false, typed: "1000" }, yen), refundAmount({ full: false, typed: "10.5" }, yen)], [{ ok: true, cents: 1_000 }, { ok: false, reason: "not_an_amount" }]);
-const other = refundableOf(charge({ currency: "xof", amount: 2_700 }));
+const other = refundableOf(charge({ currency: "xof", amount: 2_700, amount_captured: 2_700 }));
 if (!other.ok) throw new Error("a currency off the list still reads");
 is("a currency we do not price in: only all of it, never a typed part read as dollars", [refundAmount({ full: false, typed: "10" }, other), refundAmount({ full: true, typed: "" }, other)], [{ ok: false, reason: "currency_not_listed" }, { ok: true, cents: 2_700 }]);
 
@@ -66,13 +70,15 @@ is("the key names the store, the charge and the action, within Stripe's 255 char
 is("no key without a real action token, or with ids we do not make", [refundIdempotencyKey("st1", "ch_1", "short"), refundIdempotencyKey("st1", "ch_1", "z".repeat(32)), refundIdempotencyKey("st 1", "ch_1", A), refundIdempotencyKey("st1", "ch:1", A), refundIdempotencyKey("st1", "", A)], [null, null, null, null, null]);
 
 part("Stripe's answer: done only when it is this refund and it succeeded");
-const asked = { chargeId: "ch_1", cents: 1_250 };
+const asked = { chargeId: "ch_1", cents: 1_250, currency: "usd" };
 const refund = (over: Record<string, unknown> = {}) => ({ id: "re_1", object: "refund", charge: "ch_1", amount: 1_250, currency: "usd", status: "succeeded", ...over });
 is("succeeded, for this charge and this amount: done", refundOutcome(refund(), asked), "done");
 is("the charge expanded as an object reads the same", refundOutcome(refund({ charge: { id: "ch_1", object: "charge" } }), asked), "done");
 is("pending or waiting on an action: pending, not done", [refundOutcome(refund({ status: "pending" }), asked), refundOutcome(refund({ status: "requires_action" }), asked)], ["pending", "pending"]);
 is("failed or canceled: failed", [refundOutcome(refund({ status: "failed" }), asked), refundOutcome(refund({ status: "canceled" }), asked)], ["failed", "failed"]);
 is("another amount, another charge, a status Stripe does not send: unknown, never done", [refundOutcome(refund({ amount: 1_200 }), asked), refundOutcome(refund({ charge: "ch_2" }), asked), refundOutcome(refund({ status: "ok" }), asked)], ["unknown", "unknown", "unknown"]);
+is("a currency missing, null, not text or not the charge's: unknown, never done (Codex Cloud 1 on #3634)", [refundOutcome(refund({ currency: undefined }), asked), refundOutcome(refund({ currency: null }), asked), refundOutcome(refund({ currency: 840 }), asked), refundOutcome(refund({ currency: "eur" }), asked), refundOutcome(refund({ currency: "USD" }), asked)], ["unknown", "unknown", "unknown", "unknown", "unknown"]);
+is("pending or failed in another currency: unknown too", [refundOutcome(refund({ currency: "eur", status: "pending" }), asked), refundOutcome(refund({ currency: "eur", status: "failed" }), asked)], ["unknown", "unknown"]);
 is("no answer, an error body, not a refund: unknown", [refundOutcome(null, asked), refundOutcome({ error: { type: "api_error" } }, asked), refundOutcome({ ...refund(), object: "charge" }, asked), refundOutcome({ ...refund(), id: "" }, asked)], ["unknown", "unknown", "unknown", "unknown"]);
 
 part("Pure: no Stripe call, no Redis, no email");

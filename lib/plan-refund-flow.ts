@@ -47,6 +47,7 @@ import { syncAssistant } from "@/lib/assistant-billing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -559,12 +560,21 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         // Unknown stays unknown: a store reply that is not an exact answer keeps the note, and so does a letter that was
         // not sent. The note is dropped only after the send, so nothing is let go without the creator being told
         // (Revisor 2's LOW on #3585). The letter's key makes a retry never send it twice.
-        const damagedStore = await storeForId(sid);
-        if (!damagedStore) {
+        // Read exactly (cloud D on #3740): a store that is gone has nobody to tell, and its note goes, so it never holds
+        // a place among the first MAX_NOTES for good; only a reply that is not an exact answer keeps it.
+        const found = await storeForIdExactly(sid);
+        if (found === "none") {
+          await dropNote(sid);
+          console.error(`plan-refund: store ${sid} is gone; its damaged recovery note is dropped, with nobody to tell`);
+          counts.dropped += 1;
+          continue;
+        }
+        if (found === "unknown") {
           console.error(`plan-refund: store ${sid}'s damaged recovery note is retained: its store could not be read exactly`);
           counts.left += 1;
           continue;
         }
+        const damagedStore = found;
         // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
         // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
         const sub = await subscriptionOf(note.s);

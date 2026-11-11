@@ -1,6 +1,7 @@
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {resolve,join} from "node:path";
+import {readFileSync} from "node:fs";
 const appRoot=resolve(process.argv[2]??".");
 const require=createRequire(join(appRoot,"package.json"));
 const {chromium}=require("playwright-core");
@@ -45,6 +46,15 @@ let browser;const results=[];let failed=false;
 try{
  let ready=false;for(let attempt=0;attempt<120;attempt++){if(app.exitCode!==null)throw Error("Application exited: "+output);try{const reply=await fetch(LOCAL);if(reply.ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,500));}if(!ready)throw Error("Application unavailable: "+output);
  browser=await chromium.launch({channel:"chrome",headless:true});
+ // A path the app rewrites to another host is a third-party request on this site's own name: withBotId
+ // (next.config.ts) sends /149e9513-…/a-4-a/c.js and its proxy paths to api.vercel.com. Since #3360 put the host's
+ // browser check on creators' pages too (components/store-beacon.tsx), that script arrived from the internet at a
+ // varying moment and ran a 150-250 ms task just as the first tap landed, failing about one run in four on
+ // /@harborkitchen's interaction (16 of 57 runs from 9 to 11 November, against 1 of 44 before it). Read from the
+ // measured build's own rewrites, aborted like every other third party and counted in each result, never hidden.
+ const manifest=JSON.parse(readFileSync(join(appRoot,".next/routes-manifest.json"),"utf8"));
+ const rewrites=Array.isArray(manifest.rewrites)?manifest.rewrites:Object.values(manifest.rewrites??{}).flat();
+ const PROXIED=rewrites.filter(rule=>/^https?:\/\//i.test(rule.destination??"")&&new URL(rule.destination).origin!==LOCAL).map(rule=>{if(typeof rule.regex!=="string")throw Error("A rewrite to another host has no regex: "+rule.source);return new RegExp(rule.regex);});
  // The demo store is made on its first visit (lib/demo-seed.ts); asked here, outside any measurement.
  const demo=await fetch(LOCAL+"/demo",{redirect:"follow"});
  if(!demo.ok||!new URL(demo.url).pathname.startsWith("/@"))throw Error("Demo store not seeded: "+demo.status+" "+demo.url);
@@ -59,7 +69,7 @@ try{
    const page=await context.newPage();const cdp=await context.newCDPSession(page);
    await cdp.send("Emulation.setCPUThrottlingRate",{rate:4});await cdp.send("Network.enable");await cdp.send("Network.setCacheDisabled",{cacheDisabled:true});
    await cdp.send("Network.emulateNetworkConditions",{offline:false,latency:150,downloadThroughput:1600000/8,uploadThroughput:750000/8});
-   let writes=0,visitBeacons=0;await page.route("**/*",route=>{const request=route.request(),url=new URL(request.url());if(!["GET","HEAD"].includes(request.method())){/* A creator's page counts its visit (components/store-beacon.tsx): aborted like every write, and said, not failed. */if(STORE_PATHS.has(path)&&request.method()==="POST"&&url.pathname==="/api/store/hit"){visitBeacons++;return route.abort();}writes++;return route.abort();}/* A creator's pictures are read from the store's own API: reads, let through so they count in the page's time. */if(STORE_PATHS.has(path)&&url.origin===LOCAL&&(url.pathname.startsWith("/api/image/")||url.pathname.startsWith("/api/photo/")))return route.continue();if(url.pathname.startsWith("/api/")||url.origin!==LOCAL)return route.abort();return route.continue();});
+   let writes=0,visitBeacons=0,proxiedThirdParty=0;await page.route("**/*",route=>{const request=route.request(),url=new URL(request.url());if(url.origin===LOCAL&&PROXIED.some(rule=>rule.test(url.pathname))){proxiedThirdParty++;return route.abort();}if(!["GET","HEAD"].includes(request.method())){/* A creator's page counts its visit (components/store-beacon.tsx): aborted like every write, and said, not failed. */if(STORE_PATHS.has(path)&&request.method()==="POST"&&url.pathname==="/api/store/hit"){visitBeacons++;return route.abort();}writes++;return route.abort();}/* A creator's pictures are read from the store's own API: reads, let through so they count in the page's time. */if(STORE_PATHS.has(path)&&url.origin===LOCAL&&(url.pathname.startsWith("/api/image/")||url.pathname.startsWith("/api/photo/")))return route.continue();if(url.pathname.startsWith("/api/")||url.origin!==LOCAL)return route.abort();return route.continue();});
    await page.addInitScript(()=>{
     window.__renderLab={lcp:null,lcpAttribution:null,cls:0,lastShift:0,windowStart:0,windowScore:0,paint:[],events:[],shifts:[],longTasks:[],animationFrames:[],inputTargets:[]};
     new PerformanceObserver(list=>{for(const entry of list.getEntries()){window.__renderLab.lcp=entry.startTime;window.__renderLab.lcpAttribution={tag:entry.element?.tagName,id:entry.element?.id,text:entry.element?.textContent?.trim().slice(0,120),url:entry.url,size:entry.size,loadTime:entry.loadTime,renderTime:entry.renderTime};}}).observe({type:"largest-contentful-paint",buffered:true});
@@ -99,7 +109,7 @@ try{
    const interaction=await page.evaluate(()=>{const state=window.__renderLab;return {paint:state.paint,event:state.events,longTasks:state.longTasks,animationFrames:state.animationFrames,inputTargets:state.inputTargets};});
    const interactionMs=interaction.paint.length?Math.max(...interaction.paint,...interaction.event.map(item=>item.duration)):null;
    const result={label,version,path,sample,viewport:390,cpuSlowdown:4,latencyMs:150,downloadMbps:1.6,cache:"cold",thirdPartyRequests:"blocked",apiWrites:writes,lcpMs:before.lcp,lcpAttribution:before.lcpAttribution,cls:before.cls,interactionToPaintMs:interactionMs,eventTiming:interaction.event,longTasks:interaction.longTasks,longAnimationFrames:interaction.animationFrames,inputTargets:interaction.inputTargets,fieldINP:null,browserWork,layoutShiftSources:before.shifts};
-   result.creatorPage=STORE_PATHS.has(path);
+   result.proxiedThirdPartyAborted=proxiedThirdParty;result.creatorPage=STORE_PATHS.has(path);
    if(result.creatorPage){
     result.visitBeaconsAborted=visitBeacons;
     // Pictures the page drew, and those that did not load: a page measured without its pictures is said so, never hidden.

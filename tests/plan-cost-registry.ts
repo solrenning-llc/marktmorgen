@@ -45,6 +45,8 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  * single month, and closed carries all of it in that payment's own margin.
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
+import { EXIT_NOTICE_DAYS, EXIT_RELEASED_MAX_BYTES } from "@/lib/exit-redirect-rules";
+import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
@@ -1469,6 +1471,17 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/closed-store-data.ts", names: ["eraseClosed", "WALK_GAP_MS"] },
     ],
     basis: "The room full, and every record outside it with no expiry of its own (capped), for the closing days and the week a late last notice adds. A record a unit writes, which goes by itself, is not counted here a second time: each window's share of the database line is at least the whole life of what that window writes (tests/closing-cost.test.ts, lifetimeByteMonths), so it is paid for to its end, past the plan's end and the store's closing. Until 18 October 2026 this line counted those records again, at the most they hold at once.",
+  },
+  {
+    id: "exit-notice",
+    feature: "A closed store's moved notice, kept in its old addresses' values for 90 days after its closing day (97 [D2-OPEN-EXIT])",
+    monthlyUsd: () => MAX_ADDRESSES * (EXIT_RELEASED_MAX_BYTES + KEY_NAME_BYTES) * (EXIT_NOTICE_DAYS / 30) * DB_BYTE_MONTH,
+    sources: [
+      { file: "lib/exit-redirect-rules.ts", names: ["EXIT_NOTICE_DAYS", "EXIT_RELEASED_MAX_BYTES", "exitHoldSeconds", "releasedValue"] },
+      { file: "lib/store.ts", names: ["closeStoreRecord", "releasedValue(new Date(now), store.exitNotice ?? null)"] },
+      { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
+    ],
+    basis: "Once for each store, so against each of its payments, like the closure: every address it can have (MAX_ADDRESSES, its own and the ones it used before) held for the whole EXIT_NOTICE_DAYS at the longest value a notice can make (EXIT_RELEASED_MAX_BYTES) and its name, at Upstash's storage rate. The addresses were already held RELEASE_QUARANTINE_DAYS with a short value; the whole is counted here again, not only the difference. Writing them is the closing's own SETs (closure), with no command more. A visit to an old address already reads its key, so the notice adds no command per visit (lib/exit-redirect-rules.ts).",
   },
   {
     id: "closure",

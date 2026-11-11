@@ -24,7 +24,7 @@ const STEPS = new Set(["prepare", "files"]);
 /** The store's own records the closing keeps as the company's, and why. */
 const KEPT_AS_COMPANY: Record<string, string> = {
   "nl:plan:closing:": "The closing job's record of the store: dates only, kept ERASED_KEPT_DAYS after (lib/plan-closing.ts).",
-  "nl:store:handle:": "The store's addresses, held back from anybody else for RELEASE_QUARANTINE_DAYS (lib/store.ts, closeStoreRecord).",
+  "nl:store:handle:": "The store's addresses, held back from anybody else for RELEASE_QUARANTINE_DAYS, or until its moved notice ends, EXIT_NOTICE_DAYS after its closing day (lib/store.ts, closeStoreRecord; lib/exit-redirect-rules.ts).",
   "nl:ship:done:": "The legacy physical delivery record has400days; a matching inactive outbox source has no TTL while pending and400days after an explicit outcome. The outbox cleanup handles pending payloads, not an invented universal expiry.",
 };
 /** Families gone by themselves whose time is set in code and not by a part of the registry. */

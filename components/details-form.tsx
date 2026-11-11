@@ -6,6 +6,7 @@ import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import { MAX_BIO_LENGTH, MAX_NAME_LENGTH } from "@/lib/store-field-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { closeDisclosure } from "@/lib/close-disclosure";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -82,7 +83,7 @@ export function DetailsForm({
   }, [current, currentBio]);
 
   function closeEditor() {
-    if (disclosure.current) disclosure.current.open = false;
+    closeDisclosure(disclosure.current, document);
     setName(current);
     setBio(currentBio);
     setState({ kind: "closed" });

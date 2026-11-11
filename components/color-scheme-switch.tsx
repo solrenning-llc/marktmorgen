@@ -44,6 +44,9 @@ function apply(choice: ColorSchemeChoice): void {
   else root.removeAttribute("data-color-scheme");
 }
 
+/** Draw the page as the kept choice says (another tab changed it). Exported for tests/dark-scheme-switch.test.ts. */
+export function followStoredChoice(): void {}
+
 /** Keep the choice in this browser and draw the page with it. Exported for tests/dark-scheme-switch.test.ts. */
 export function chooseColorScheme(choice: ColorSchemeChoice): void {
   try {

@@ -21,7 +21,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { COLOR_SCHEME_HASH, COLOR_SCHEME_KEY, COLOR_SCHEME_SCRIPT, isDark, toChoice } from "@/lib/color-scheme";
 import { DARK_OVERRIDES, DARK_OVERRIDE_PREFIX, DARK_READY, DARK_SELECTOR, DARK_BLOCK_START, DARK_BLOCK_END, LEGACY_TOKENS } from "@/lib/dark-tokens";
 import { dynamicPolicy } from "@/lib/csp";
-import { ColorSchemeSwitch, chooseColorScheme } from "@/components/color-scheme-switch";
+import { ColorSchemeSwitch, chooseColorScheme, followStoredChoice } from "@/components/color-scheme-switch";
 import AccessibilityPage from "@/app/accessibility/page";
 import { closure, pagePairs, pagesUsing } from "./dark-pairs";
 import { done, is, part } from "./check";
@@ -31,8 +31,10 @@ const read = (f: string) => readFileSync(f, "utf8").replace(/\r\n/g, "\n");
 // ---------------------------------------------------------------- a stand-in browser for the script
 
 type Call = string;
-function browser(stored: string | null | "throws", deviceDark = false, startDark = false) {
+function browser(first: string | null | "throws", deviceDark = false, startDark = false) {
   const calls: Call[] = [];
+  // What the key holds now: the switch, or another tab, may change it while the page is open.
+  const box = { stored: first };
   const attrs = new Map<string, string>(startDark ? [["data-color-scheme", "dark"]] : []);
   const listeners: (() => void)[] = [];
   const media = {
@@ -56,13 +58,13 @@ function browser(stored: string | null | "throws", deviceDark = false, startDark
   const localStorage = {
     getItem: (k: string) => {
       calls.push(`read ${k}`);
-      if (stored === "throws") throw new Error("storage refused");
-      return stored;
+      if (box.stored === "throws") throw new Error("storage refused");
+      return box.stored;
     },
   };
   const window = { matchMedia: (q: string) => (calls.push(`media ${q}`), media) };
   const document = { documentElement: root };
-  return { calls, attrs, media, listeners, sandbox: { window, document, localStorage } };
+  return { calls, attrs, media, listeners, box, sandbox: { window, document, localStorage } };
 }
 const run = (b: ReturnType<typeof browser>) => runInNewContext(COLOR_SCHEME_SCRIPT, b.sandbox);
 const writes = (b: ReturnType<typeof browser>) => b.calls.filter((c) => /^(set|remove|listen)/.test(c));
@@ -97,6 +99,18 @@ sys.media.matches = true;
 sys.listeners.forEach((f) => f());
 is("and dark again", [...sys.attrs], [["data-color-scheme", "dark"]]);
 is("it asks the device only through the standard query", sys.calls.filter((c) => c.startsWith("media")), ["media (prefers-color-scheme: dark)"]);
+// Claude 1's review 6799166638: the head script's device listener outlived the reader's choice.
+for (const [picked, device, after] of [["light", true, []], ["dark", false, [["data-color-scheme", "dark"]]]] as const) {
+  const b = browser("system", !device);
+  run(b);
+  // The reader picks in the switch, which keeps the choice and draws it (components/color-scheme-switch.tsx).
+  b.box.stored = picked === "light" ? null : picked;
+  if (picked === "dark") b.attrs.set("data-color-scheme", "dark");
+  else b.attrs.delete("data-color-scheme");
+  b.media.matches = device;
+  b.listeners.forEach((f) => f());
+  is(`loaded on "Match my device", then ${picked} picked: the device turning ${device ? "dark" : "light"} changes nothing`, [...b.attrs], after);
+}
 const noMedia = browser("system", true);
 (noMedia.sandbox.window as { matchMedia?: unknown }).matchMedia = undefined;
 run(noMedia);
@@ -174,6 +188,15 @@ fake.refuse = true;
 fake.store.clear();
 chooseColorScheme("dark");
 is("storage refused: the choice still holds on this page, no error", [[...fake.store], [...fake.attrs]], [[], [["data-color-scheme", "dark"]]]);
+fake.refuse = false;
+// Claude 1's review 6799166638 (LOW): another tab's choice is drawn here too, not only checked in the switch.
+fake.store.set(COLOR_SCHEME_KEY, "dark");
+fake.attrs.clear();
+followStoredChoice();
+is("another tab picks dark: this page turns dark as its switch shows", [...fake.attrs], [["data-color-scheme", "dark"]]);
+fake.store.delete(COLOR_SCHEME_KEY);
+followStoredChoice();
+is("and back to light", [...fake.attrs], []);
 delete (g as { window?: unknown }).window;
 delete (g as { document?: unknown }).document;
 

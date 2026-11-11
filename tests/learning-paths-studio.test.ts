@@ -123,7 +123,7 @@ async function main(): Promise<void> {
 
   // Review of #3723: a keyboard user stepping through the closed list (ArrowDown fires change) must not add a course.
   const editorSource = readFileSync("components/learning-paths-editor.tsx", "utf8");
-  is("choosing in the list adds nothing; a button next to it adds the chosen course", [/onChange=\{[^}]*courses:/.test(editorSource), html.includes("Add to path 1")], [false, true]);
+  is("choosing in the list adds nothing; a button next to it adds the chosen course", [/onChange=\{[^}]*courses:/.test(editorSource), renderToStaticMarkup(createElement(LearningPathsEditor, { initial: [{ id: "abcdefgh", name: "Baker", courses: [bread], order: "sequence" }], courses })).includes("Add to path 1")], [false, true]);
   // Review of #3723: removing a second path keeps the first one's undo.
   is("every removed path can be put back until the save, not only the last", /useState<\{ path: Draft; at: number \}\[\]>/.test(editorSource), true);
 

@@ -7,8 +7,9 @@ import { MAX_PATHS, MAX_PATH_COURSES, MAX_PATH_NAME, MIN_PATH_COURSES, type Path
  * The studio's editor of a store's learning paths (249 [ST2], unit 3): each
  * path a group with its name, its order and its courses, moved with buttons
  * (never only by dragging, WCAG 2.5.7), and one save for the whole list
- * (app/api/store/learning-paths). A path removed can be put back until the
- * page is left; nothing is kept until the save says so. `initial` null: the
+ * (app/api/store/learning-paths). Every path removed can be put back until the
+ * save or until the page is left; a course is added by a button, never by
+ * moving through the list (review of #3723); nothing is kept until the save says so. `initial` null: the
  * kept list could not be read, so no editor is drawn over it (rule 24).
  */
 
@@ -19,7 +20,8 @@ const button = "btn btn-secondary btn-sm min-h-11";
 
 export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[] | null; courses: Course[] }) {
   const [paths, setPaths] = useState<Draft[]>(() => (initial ?? []).map((p) => ({ id: p.id, name: p.name, courses: [...p.courses], order: p.order })));
-  const [removed, setRemoved] = useState<{ path: Draft; at: number } | null>(null);
+  const [removed, setRemoved] = useState<{ path: Draft; at: number }[]>([]);
+  const [picked, setPicked] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -49,7 +51,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
       const reply = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string; paths?: StoredPath[] } | null;
       if (response.ok && reply?.ok && Array.isArray(reply.paths)) {
         setPaths(reply.paths.map((p) => ({ id: p.id, name: p.name, courses: [...p.courses], order: p.order })));
-        setRemoved(null);
+        setRemoved([]);
         setSaid({ ok: true, text: reply.paths.length === 1 ? "Saved: 1 path." : `Saved: ${reply.paths.length} paths.` });
       } else if (reply?.error === "busy") {
         setSaid({ ok: false, text: "Your paths are being saved from another window. Wait a moment, reload, and try again. Nothing was saved from here." });
@@ -113,16 +115,26 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
                   <select
                     id={`path-${i}-add`}
                     className="field mt-1"
-                    value=""
-                    onChange={(event) => {
-                      if (event.target.value) change(i, { courses: [...path.courses, event.target.value] });
-                    }}
+                    value={picked[i] ?? ""}
+                    onChange={(event) => setPicked((p) => ({ ...p, [i]: event.target.value }))}
                   >
                     <option value="">Choose a course…</option>
                     {left.map((c) => (
                       <option key={c.id} value={c.id}>{c.title}</option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    className={`${button} mt-2`}
+                    onClick={() => {
+                      const id = picked[i];
+                      if (!id || !left.some((c) => c.id === id)) return;
+                      change(i, { courses: [...path.courses, id] });
+                      setPicked((p) => ({ ...p, [i]: "" }));
+                    }}
+                  >
+                    {`Add to path ${i + 1}`}
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -131,7 +143,8 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
               className={button}
               onClick={() => {
                 setSaid(null);
-                setRemoved({ path, at: i });
+                setRemoved((list) => [...list, { path, at: i }]);
+                setPicked({});
                 setPaths((list) => list.filter((_, j) => j !== i));
               }}
             >
@@ -140,15 +153,17 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
           </fieldset>
         );
       })}
-      {removed ? (
+      {removed.length > 0 ? (
         <p className="flex flex-wrap items-center gap-3 text-sm">
-          <span>{`Removed "${removed.path.name || "a path"}". It is gone once you save.`}</span>
+          <span>{`Removed "${removed[removed.length - 1].path.name || "a path"}"${removed.length > 1 ? ` and ${removed.length - 1} more` : ""}. Each is gone once you save.`}</span>
           <button
             type="button"
             className={button}
             onClick={() => {
-              setPaths((list) => [...list.slice(0, removed.at), removed.path, ...list.slice(removed.at)]);
-              setRemoved(null);
+              const last = removed[removed.length - 1];
+              setPaths((list) => [...list.slice(0, last.at), last.path, ...list.slice(last.at)]);
+              setRemoved((list) => list.slice(0, -1));
+              setPicked({});
             }}
           >
             Put it back

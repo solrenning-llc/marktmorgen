@@ -38,7 +38,10 @@ is("a large one takes one for each part of its size", importUnits(IMPORT_BYTES_P
 is("a save takes one for each lesson and one for the outline", importUnits(1_000, 3), 4);
 const source = readFileSync("app/api/store/course/import/route.ts", "utf8");
 is("taken before the texts are written", source.indexOf("countStudio(") > 0 && source.indexOf("countStudio(") < source.indexOf("saveNewBodies("), true);
-is("the outline's size is taken before it is read", source.indexOf("importUnits(raw.length, null)") > 0 && source.indexOf("importUnits(raw.length, null)") < source.indexOf("previewCourseImport("), true);
+is("the outline's size is taken before it is read", source.indexOf("importUnits(bytes, null)") > 0 && source.indexOf("importUnits(bytes, null)") < source.indexOf("previewCourseImport("), true);
+// Counted in UTF-8 bytes, as the body limit and a studio request's transfer are (Revisor 1 on e-kj5-u3b, MEDIUM).
+is("its size is its UTF-8 bytes, not its characters", /const bytes = Buffer\.byteLength\(raw, "utf8"\);/.test(source) && !source.includes("raw.length"), true);
+is("an outline in a script of three bytes a character pays for its bytes", importUnits(Buffer.byteLength("課".repeat(1_333_233), "utf8"), null), 79);
 
 async function main(): Promise<void> {
   const owner = "importer@example.com";
@@ -106,6 +109,30 @@ async function main(): Promise<void> {
   is("failed", broken.status, 500);
   is("no lesson saved", lessonCount((await readCourse(courseId))!), 0);
   is("no text left behind", redis.run(["SCAN", 0, "MATCH", `nl:course:${courseId}:body:*`, "COUNT", 1000]), ["0", []]);
+
+  part("If the outline write fails after it was kept, the import stands (Revisor 1 on e-kj5-u3b, LEVE)");
+  const second = await addProduct(owner, "Glazing", "", "40");
+  const id2 = second.ok ? second.product.id : "";
+  is("a second course", (await call(courseRoute, "/api/store/course", { action: "enable", id: id2 })).body.ok, true);
+  const courseId2 = (await readListing((await storeForEmail(owner))!, id2))!.course!.id;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "SET" && c[1] === `nl:course:${courseId2}`)) {
+      await original(commands);
+      throw new Error("synthetic timeout after the write");
+    }
+    return original(commands);
+  }) as typeof redis.pipeline;
+  let late: { status: number; body: Record<string, unknown> };
+  try {
+    late = await post({ id: id2, outline: good, confirm: true });
+  } finally {
+    redis.pipeline = original;
+  }
+  is("answered as saved", [late.status, late.body.ok], [200, true]);
+  const kept2 = (await readCourse(courseId2))!;
+  const first2 = lessonsInOrder(kept2)[0].lesson;
+  is("its lessons keep their texts", [first2.hasBody, await readBody(courseId2, first2.id)], [true, "Clay, water and patience."]);
+  is("the product counts its lessons", (await readListing((await storeForEmail(owner))!, id2))!.course!.lessons, 3);
 
   part("Saved only when confirmed, whole");
   const saved = await post({ id, outline: good, confirm: true });

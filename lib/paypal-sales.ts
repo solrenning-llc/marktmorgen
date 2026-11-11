@@ -46,7 +46,7 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -1114,8 +1114,14 @@ export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
  */
 export async function paypalKept(statsId: string | null, refunds: boolean): Promise<{ sales: number; refunds: number }> {
   if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
-  const [sold, refunded] = await redisPipeline([["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])]);
-  return { sales: Number(sold) || 0, refunds: refunds ? Number(refunded) || 0 : 0 };
+  // Read exactly (rule 24, MR): a reading is paid for by these counts, so a reply cut short or of another shape throws,
+  // never 0; every caller refuses the reading on it.
+  const commands = [["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])];
+  const read = repliesFor(await redisPipeline(commands), commands.length);
+  const sales = countOf(read?.[0]);
+  const refunded = refunds ? countOf(read?.[1]) : 0;
+  if (sales === null || refunded === null) throw new UnknownReplyError("the PayPal sales counted for a reading");
+  return { sales, refunds: refunded };
 }
 
 /**

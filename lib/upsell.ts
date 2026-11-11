@@ -46,6 +46,7 @@
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
   type FunnelStep,
@@ -360,10 +361,17 @@ export async function takeUpsell(input: {
   const digital = deliversDigitally(target);
   if (digital && !validConsent(input.consent)) return { kind: "consent" };
 
-  // Once, however many times the button is pressed.
-  const [claimed] = await redisPipeline([
-    ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
-  ]);
+  // Once, however many times the button is pressed. Taken here only on exactly "OK"; null is an answer already
+  // written. Any other reply (none, a number, another word, more than one) does not say the claim is this press's,
+  // so it is unknown (CX-123 rule 24): the card is not charged and nothing more is written.
+  const claim = repliesFor(
+    await redisPipeline([
+      ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
+    ]),
+    1,
+  );
+  const claimed = claim?.[0];
+  if (!claim || (claimed !== "OK" && claimed !== null)) throw new UnknownReplyError("an offer's claim");
   if (claimed === null) {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };

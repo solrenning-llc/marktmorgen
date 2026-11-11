@@ -175,41 +175,52 @@ export function parseReview(raw: unknown): Review | null {
   }
 }
 
+/**
+ * A kept summary, read exactly (CX-123 rule 24): null (none kept) is no reviews; a summary is its own JSON with every
+ * number a whole count and five in its spread. Anything else is unknown and throws, never zeros: a page that shows the
+ * numbers says nothing instead (its own catch), never "0.0 from 12 reviews" or a hidden list.
+ */
 function parseSummary(raw: unknown): Summary {
-  if (typeof raw !== "string" || !raw) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
+  if (raw === null) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
+  if (typeof raw !== "string" || !raw) throw new UnknownReplyError("a product's review summary");
+  let value: Partial<Record<keyof Summary, unknown>>;
   try {
-    const value = JSON.parse(raw) as Partial<Summary>;
-    const n = (x: unknown) => (typeof x === "number" && Number.isInteger(x) && x >= 0 ? x : 0);
-    const dist = Array.isArray(value.dist) && value.dist.length === 5 ? value.dist.map(n) : [0, 0, 0, 0, 0];
-    return {
-      count: n(value.count),
-      stars: n(value.stars),
-      visible: n(value.visible),
-      hidden: n(value.hidden),
-      refunded: n(value.refunded),
-      dist: dist as Summary["dist"],
-    };
+    value = JSON.parse(raw) as Partial<Record<keyof Summary, unknown>>;
   } catch {
-    return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
+    throw new UnknownReplyError("a product's review summary");
   }
+  const whole = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a product's review summary");
+  const { count, stars, visible, dist } = value;
+  // The hidden and refunded counts may be absent from a summary kept before they were counted (never shown to buyers);
+  // present, they read exactly as the others.
+  const hidden = value.hidden === undefined ? 0 : value.hidden;
+  const refunded = value.refunded === undefined ? 0 : value.refunded;
+  if (!whole(count) || !whole(stars) || !whole(visible) || !whole(hidden) || !whole(refunded) || !Array.isArray(dist) || dist.length !== 5 || !dist.every(whole)) {
+    throw new UnknownReplyError("a product's review summary");
+  }
+  return { count, stars, visible, hidden, refunded, dist: dist as Summary["dist"] };
 }
 
-/** The numbers of every product of a store that has reviews, in one read. */
+/** The numbers of every product of a store that has reviews, in one read. Throws when the read or any summary does not read. */
 export async function summaries(statsId: string | null): Promise<Map<string, Summary>> {
   const out = new Map<string, Summary>();
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", summaryKey(statsId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    if (typeof flat[i] === "string") out.set(flat[i] as string, parseSummary(flat[i + 1]));
+  const flat = repliesFor(await redisPipeline([["HGETALL", summaryKey(statsId)]]), 1)?.[0];
+  if (!Array.isArray(flat) || flat.length % 2 !== 0) throw new UnknownReplyError("a store's review summaries");
+  for (let i = 0; i < flat.length; i += 2) {
+    if (typeof flat[i] !== "string") throw new UnknownReplyError("a store's review summaries");
+    out.set(flat[i] as string, parseSummary(flat[i + 1]));
   }
   return out;
 }
 
+/** One product's numbers: none kept is no reviews; a reply or a summary that does not read throws. */
 export async function summaryOf(statsId: string | null, productId: string): Promise<Summary> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
-  const [raw] = await redisPipeline([["HGET", summaryKey(statsId), productId]]);
-  return parseSummary(raw);
+  const reply = repliesFor(await redisPipeline([["HGET", summaryKey(statsId), productId]]), 1);
+  if (!reply) throw new UnknownReplyError("a product's review summary");
+  return parseSummary(reply[0]);
 }
 
 /** The reviews on a product's page, newest first. */

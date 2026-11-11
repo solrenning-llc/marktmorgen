@@ -83,7 +83,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeForRefExact, storeRef } from "@/lib/store";
+import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -626,7 +626,16 @@ const HANDS: Hands = {
  * the next day's run carries on from what is left in the folders.
  */
 export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY): Promise<{ files: number; clean: boolean }> {
-  const store = await storeForEmail(key);
+  // Only a record Redis says is not there (nil) has nothing left to remove. One that does not read (a failed request,
+  // a record that does not parse, or one under that key for another owner) is unknown (rule 24): nothing is deleted
+  // and it is not seen through, so the store is not written down as done and this runs again the next day.
+  let store: Store | null;
+  try {
+    store = await storeForRefExact(key);
+  } catch (error) {
+    console.error("removing what a store kept: its record could not be read; it is tried again tomorrow", error);
+    return { files: 0, clean: false };
+  }
   if (!store) return { files: 0, clean: true };
   const folder = await storeFolder(key);
   const gone: string[] = [];

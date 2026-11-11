@@ -3222,7 +3222,7 @@ All three comments were fetched back by their IDs and confirmed on the intended 
 
 ### Publication hold and preserved work
 
-Fresh main: b4ba5ce2ecf6bbfe2c73fd52fef961f4bd5692b5. Issue #3677 remains OPEN. #3680 remains OPEN/unmerged at 9e8be260ecb862054f4ad57c0653a93991e86bfd. #3642 remains OPEN/unmerged at 17e0331a07f454d0477a42f309c7eb433d230a69. A fresh Actions queued collection returned total_count=0; this clears only the queue-count condition, not MV(a). No new product ref or PR may be published while #3677 is open, except the main repair. Existing own heads remain #3515 4b0de90a7a614740969944ea9970ed7d856c5716 and #3516 69325b2ad4cb8a417df6caaa6f6820a725805355, both OPEN/unmerged. #3515 is mergeable; #3516 is not mergeable in the latest observation. No head was changed. STN11's dependent next step still requires #3515 MERGED.
+Fresh main: b4ba5ce2ecf6bbfe2c73fd52fef961f4bd5692b5. Issue #3677 remains OPEN. #3680 remains OPEN/unmerged at 9e8be260ecb862054f4ad57c0653a93991e86bfd. #3642 remains OPEN/unmerged at 17e0331a07f454d0477a42f309c7eb433d230a69. A fresh Actions queued collection returned total_count=0; this clears only the queue-count condition, not MV(a). No new product ref or PR may be published while #3677 is open, except the main repair. Existing own heads remain #3515 4b0de90a7a614740969944ea9970ed7d856c5716 and #3516 69325b2ad4cb8a417df6caaa6f6820a725805355, both OPEN/unmerged. Both own PRs are mergeable in the latest observation (the earlier #3516 conflict indication has cleared without a head change). No head was changed. STN11's dependent next step still requires #3515 MERGED.
 
 ### Next-unit preparation: do not blindly implement the old compliance design
 

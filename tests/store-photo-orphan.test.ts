@@ -206,6 +206,32 @@ async function main(): Promise<void> {
   hook = null;
   is("the store's record is gone: the closing walk ran", [closed, await storeForEmail(OWNER)], [true, null]);
   is("the photo written for it is deleted, never kept with nothing naming it", photoKeys().filter((key) => !kept.has(key.slice(PHOTO.length))), []);
+
+  part("Control: when the record cannot be read again either, the photo is never deleted on a guess");
+  redis.clear();
+  await claimHandle(OWNER, "photoshop", "Photo Shop", "");
+  await ensureStatsId(OWNER);
+  let wroteAgain = false;
+  let reads = 0;
+  fault = (commands) => {
+    if (touches(commands, "SET", PHOTO)) wroteAgain = true;
+    else if (wroteAgain && touches(commands, "GET", "nl:store:owner:")) {
+      reads += 1;
+      if (reads >= 2) fault = null;
+      return "throw";
+    }
+    return null;
+  };
+  const sessionAgain = await openSession(OWNER);
+  const again = await photoRoute(
+    new NextRequest(`${ORIGIN}/api/store/photo`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${sessionAgain}` },
+      body: JSON.stringify({ photo: `data:image/png;base64,${PNG}` }),
+    }),
+  );
+  is("told to try again; the record read twice, both unknown", [again.status, reads], [500, 2]);
+  is("the photo stays, named in the record as waiting", [photoKeys().length, ((await storeForEmail(OWNER))?.photoLeft ?? []).length], [1, 1]);
   done();
 }
 

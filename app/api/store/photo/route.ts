@@ -79,8 +79,19 @@ export async function POST(request: NextRequest) {
       throw error;
     }
     // When this throws the photo stays named as waiting, whether or not the store was pointed at it: never deleted
-    // here, as the store may show it; the next upload deletes it past the wait if the store does not.
-    const result = await setPhotoId(guarded.ref, id);
+    // here while the store may show it; the next upload deletes it past the wait if the store does not. But the
+    // record that names it may be gone: a closing walk prepared from a record read before this upload named the
+    // photo, then removed the record (Codex G on #3614). The record is read again, exactly: only when it is gone for
+    // sure (no record) is nothing left that could show or find this photo, so it goes now. A record that is there,
+    // or one that cannot be read, keeps the photo as before (rule 24: unknown is never "gone").
+    let result: Awaited<ReturnType<typeof setPhotoId>>;
+    try {
+      result = await setPhotoId(guarded.ref, id);
+    } catch (error) {
+      const still = await storeForEmail(guarded.ref).catch(() => "unknown" as const);
+      if (still === null) await deletePhoto(id).catch((drop) => console.error("deleting a store photo whose store closed failed", drop));
+      throw error;
+    }
     if (!result.ok) {
       // The record that named it is gone: nothing else can find this photo, so it goes now.
       await deletePhoto(id).catch((drop) => console.error("deleting a store photo with no store failed", drop));

@@ -1217,7 +1217,13 @@ export default function PrivacyPage() {
           went to, when, and the buyer&apos;s email address, so the buyer can
           see it again and the creator can see who has it, and whether the
           creator revoked it. Anyone can ask whether a key is valid; the answer
-          says nothing about who bought it. Keys are kept with the
+          says nothing about who bought it. When a creator limits a key to a
+          few devices, we keep, for each device their software names, a one-way
+          code made with a key only our server holds, different for every
+          license key and never the identifier the software sent, and when the
+          buyer freed a device. Nobody can turn a code back into the device or
+          match it on another key. These codes are kept with the key and go by
+          themselves 400 days after their last change. Keys are kept with the
           store&apos;s records.
         </p>
         <p id="quizzes">
@@ -2220,7 +2226,8 @@ export default function PrivacyPage() {
             their sales and tax records and are not stored by us; and the few
             order records a purchase still needs for a refund or for delivery,
             each with only what it needs and for the time section 1 gives it:
-            PayPal orders, license keys you bought, gifts and group places,
+            PayPal orders, license keys you bought and the codes of the devices
+            they run on, gifts and group places,
             pre-orders, packages of calls, your place on a booked group
             call&apos;s guest list until 60 days after it, and when a physical
             order shipped. The links emailed to you before stop working. A few

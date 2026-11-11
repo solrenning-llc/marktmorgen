@@ -58,4 +58,9 @@ const sentences = (text: string) => text.split(/(?<=[.!?])\s+/).map((x) => x.tri
 const rest = JSON.stringify({ ...topic, blocks: (topic?.blocks ?? []).map((b) => ((b as { kind?: string }).kind === "faq" ? { ...b, items: faq?.items.slice(3) } : b)) });
 is("no sentence of the answers said elsewhere on the page, or twice among them", [now, later].map((l) => { const mine = l.flatMap((x) => sentences(x.a)); return mine.some((x) => rest.includes(x)) || new Set(mine).size !== mine.length; }), [false, false]);
 
+part("C5 LOW A: the connection answer names the one-page limitation");
+for (const questions of [now, later]) {
+  const how = answer(questions, "How do I connect my email tool?");
+  is("a complete single page is required, with a practical alternative", /all destinations.*one page/i.test(how) && /fewer destinations/i.test(how), true);
+}
 done();

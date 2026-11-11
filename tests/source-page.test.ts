@@ -16,7 +16,7 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { writeStoreSetup } from "@/lib/ai";
+import { aiLeft, writeStoreSetup } from "@/lib/ai";
 import { SOURCE_PAGE_READING_ON, readSourcePage, setSourceReadingForTests, sourceText } from "@/lib/source-page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -127,10 +127,36 @@ async function main(): Promise<void> {
   pageType = "text/html; charset=windows-1252";
   is("a page in another charset is read in it", (await readSourcePage("https://ana.example.com/", hooks)).ok, true);
   pageType = "text/html";
+  part("Unexpected transport failures never put creator input in logs");
+  const input = "https://ana.example.com/?access_token=synthetic-test-only\r\nFORGED_LOG_LINE";
+  class FailingAgent extends https.Agent {
+    createConnection(): net.Socket { throw new Error(`Transport failed for ${input}`); }
+  }
+  const captured: unknown[][] = [], realError = console.error;
+  let unexpected;
+  console.error = (...args: unknown[]) => { captured.push(args); };
+  try { unexpected = await readSourcePage(input, { ...hooks, agent: new FailingAgent() as never }); }
+  finally { console.error = realError; }
+  is("an unexpected transport exception still gives the same unreadable result", unexpected, { ok: false, reason: "unreadable" });
+  is("the diagnostic is only its fixed failure code, without an exception object", captured, [["SOURCE_PAGE_READ_FAILED"]]);
+  const logText = captured.flat().map(value => value instanceof Error ? value.message : String(value)).join(" ");
+  is("URL, query token, forged line and CRLF never reach the log", /ana\.example|access_token|synthetic-test-only|FORGED_LOG_LINE|[\r\n]/.test(logText), false);
   const unreadable = await writeStoreSetup((await storeForEmail(owner))!, { about: "", selling: "", link: "https://10.0.0.5/" }, Date.now(), hooks);
-  is("an unreadable link and no words: no draft (the started job counts, as every started attempt does)", unreadable.ok, false);
+  is("an unreadable link and no words: no draft (the started job counts: the read is part of it)", unreadable.ok, false);
   const withWords = await writeStoreSetup((await storeForEmail(owner))!, { about: "I plan dinners for busy parents.", selling: "", link: "https://10.0.0.5/" }, Date.now(), hooks);
   is("an unreadable link with words: the draft is made from the words alone", [withWords.ok, withWords.ok ? withWords.value.sourceRead : null], [true, undefined]);
+  part("A page read with no model call still counts as one of the month's writing jobs");
+  pageType = "application/octet-stream";
+  const before = await aiLeft((await storeForEmail(owner))!);
+  const [servedBefore, askedBefore] = [served, asked.length];
+  const notText = [];
+  for (let i = 0; i < 5; i++) notText.push((await writeStoreSetup((await storeForEmail(owner))!, { about: "", selling: "", link: "https://ana.example.com/" }, Date.now(), hooks)).ok);
+  is("five links that are not text and no words: no draft", notText, [false, false, false, false, false]);
+  is("each was fetched once and the model was never asked", [served - servedBefore, asked.length - askedBefore], [5, 0]);
+  is("each read took one writing job, as the page reader promises (lib/source-page.ts)", before - await aiLeft((await storeForEmail(owner))!), 5);
+  const refused = await aiLeft((await storeForEmail(owner))!);
+  is("a link refused before any request is a started job too", [(await writeStoreSetup((await storeForEmail(owner))!, { about: "", selling: "", link: "https://10.0.0.5/" }, Date.now(), hooks)).ok, refused - await aiLeft((await storeForEmail(owner))!)], [false, 1]);
+  pageType = "text/html";
   setSourceReadingForTests(null);
 
   server.close();

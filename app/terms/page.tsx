@@ -18,7 +18,7 @@ import { SETUP_STORAGE_BYTES, SETUP_VIDEO_SECONDS, TRIAL_STORAGE_BYTES } from "@
 import { CLOSING_DAYS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, KEEP_NOTHING_FROM, WARN_MONTH_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { RELEASE_QUARANTINE_DAYS } from "@/lib/store";
 import { CALL_ORDER_UNITS, ORDERS_INCLUDED, TRIAL_ORDERS } from "@/lib/order-rules";
-import { API_WRITE_UNITS, allowanceListWords } from "@/lib/store-allowance-rules";
+import { API_SALES_UNITS, API_WRITE_UNITS, allowanceListWords } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { FREE_POOL_BASE_STORES, PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { BUYER_RESERVE_BPS, EXTRA_REQUESTS, REQUESTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS, SETUP_VISITS, TRIAL_VISITS, VISITS_INCLUDED, countWords, partsWords } from "@/lib/traffic-rules";
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 2, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -443,7 +443,8 @@ export default function TermsPage() {
           studio you open (each counts as {STUDIO_PAGE_UNITS}), any save, and
           the studio&apos;s own refreshing; an API request is one made with
           one of your store&apos;s keys (a contact added or a product given
-          counts as {API_WRITE_UNITS}); store emails are the emails your
+          counts as {API_WRITE_UNITS}, and a page of sales read counts as{" "}
+          {API_SALES_UNITS}); store emails are the emails your
           store&apos;s own tools send outside your monthly emails and your
           orders (inbox notices and replies, a purchase sent again, reminders,
           offers, notices to members); access emails hand a buyer what they
@@ -889,14 +890,14 @@ export default function TermsPage() {
         </p>
         <p>
           <strong className="text-black">Download what you want to keep before that day.</strong>{" "}
-          The studio offers your whole store as one file: while your plan
+          The studio offers your store&rsquo;s main data as one file: while your plan
           runs, as often as your plan&rsquo;s studio use allows, and{" "}
           {ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`}{" "}
           after it ends, before the closing day, whatever the store&rsquo;s
-          size. It holds your products and their pages, posts,
+          size. It holds your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts,
           courses with every lesson&rsquo;s text, forms and their answers,
           contacts and your orders as a spreadsheet. Files and videos
-          download from their own pages. Your students can download their
+          download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio. Your students can download their
           course certificates until the closing day, and not after.
         </p>
         <p>

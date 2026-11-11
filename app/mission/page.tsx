@@ -12,6 +12,9 @@ import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_NAME, ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 import { isDomainsConfigured } from "@/lib/domains";
 import { feeWords } from "@/lib/fee-words";
+import { hostSyncOn } from "@/lib/meet-providers";
+import { calendarEventsMissionLine } from "@/lib/host-sync-words";
+import { paypalAtCheckout, paypalCheckoutLine } from "@/lib/public-explanations";
 
 export const metadata: Metadata = {
   title: "Our mission — Marktmorgen",
@@ -94,7 +97,6 @@ const BUILT = [
   "Links to everywhere else you are — the channel, the podcast, the booking page — with no price and no checkout on them",
   "Discount codes a buyer types at checkout, made as coupons on your own Stripe account",
   "Free products given for an email address, each address confirmed by its owner, and the list downloadable from your studio at any time",
-  "Email to your list, on Studio: one-off emails now or at a time you choose, and sequences that send themselves after someone joins or buys — only to people who agreed, with a one-click unsubscribe in every one",
   "Every store installs to the home screen on iPhone and Android as an app of its own, with its name, its icon and its color",
   "A community for your buyers, open only to the buyers of the products you choose: up to 20 spaces, each for the whole community or for the buyers of some products, posts with a picture that can be edited, polls, comments, likes, @mentions, pinned posts, an opt-in member directory, reports and moderation — with announcements emailed to members who asked, on Studio",
   "A live room in the community, with a cooldown, links on or off and a creator-only mode, and private messages to you, and between members if you allow it, with first messages that wait to be accepted if you choose",
@@ -145,6 +147,14 @@ const STRIPE_LINE =
 const CHECKOUT_LINE =
   "Selling: the buyer pays on your account and the file is handed over the moment Stripe confirms it";
 
+/**
+ * Selling from a creator's store needs a paid plan (canSell, lib/store-checkout.ts),
+ * and no plan can be started while plans are not on sale (lib/opening.ts): the
+ * code is there and no store can sell, which this page counts as not built.
+ */
+const CHECKOUT_CLOSED_LINE =
+  "Selling from your own store: the checkout is written and runs in test mode on the demo store, and it is not open until Marktmorgen's plans are on sale";
+
 const ORDERS_LINE =
   "A list of what you have sold, read from your own Stripe account, with the buyer's email address so you can answer them";
 
@@ -170,13 +180,25 @@ const BILLING_CLOSED_LINE = `Starting a paid plan: the subscription is written, 
 const ASSISTANT_LINE = `The ${ASSISTANT_NAME}, an add-on at $${ASSISTANT_PRICE_CENTS / 100} a month for one store: an AI chat on every page of the store that answers only from what you published, labels every reply as AI and hands what it cannot answer to your inbox, ${ASSISTANT_MESSAGES_MONTHLY.toLocaleString("en-US")} replies a month`;
 const ASSISTANT_CLOSED_LINE = `The ${ASSISTANT_NAME}: an AI chat on every page of a store that answers only from what the creator published, labels every reply as AI and hands what it cannot answer to the inbox, ${ASSISTANT_MESSAGES_MONTHLY.toLocaleString("en-US")} replies a month at $${ASSISTANT_PRICE_CENTS / 100} a month for one store; the code is written, and it is not on sale until Marktmorgen opens`;
 
-/** The store on its own domain: built, and live where this deployment can add domains. */
+/**
+ * What only Studio has: built, and counted as built only while Studio can be
+ * bought (plans on sale), and the domain only where this deployment can add domains.
+ */
 const DOMAIN_LINE =
   "Your store on your own domain, on Studio: type it in the studio, add the one record we show you, and the certificate is handled for you";
+const DOMAIN_CLOSED_LINE =
+  "Your store on your own domain, on Studio: the code is written, and Studio is not on sale until Marktmorgen opens";
+const EMAIL_LINE =
+  "Email to your list, on Studio: one-off emails now or at a time you choose, and sequences that send themselves after someone joins or buys — only to people who agreed, with a one-click unsubscribe in every one";
+const EMAIL_CLOSED_LINE =
+  "Email to your list, on Studio: one-off emails and sequences that send themselves, only to people who agreed; the code is written, and Studio is not on sale until Marktmorgen opens";
 
+/*
+ * PayPal at checkout (paypalCheckoutLine, by the PayPal client) and writing
+ * every booking as an event (calendarEventsMissionLine, by hostSyncOn) are
+ * placed by the component, from the state this deployment is in.
+ */
 const NOT_BUILT = [
-  "PayPal at checkout: Stripe offers it only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and does not support it for the direct charges every sale here is made with",
-  "Writing every booking into your calendar as an event: only calls set to Google Meet are written there, other bookings come as a feed you subscribe to, and calendars are read for busy times",
   "Paying affiliates with no PayPal account of your own: they are paid from your PayPal, in one press or on your payday, never from money we hold",
   "A thank-you page of your own: after paying, the store's own page hands over what was bought, with your note and, in a funnel, a button to the next step",
   "Automatic replies on Instagram",
@@ -200,7 +222,7 @@ const RELEASES: { date: string; items: string }[] = [
   { date: "September 26, 2026", items: "Up to 200 products with pictures and pages of their own, questions at checkout, pay what you want, free trials and fixed-length memberships, group calls and live sessions with reminders and self-serve moves, a confirmation email for every purchase, every store installable as its own app, 43 Stripe countries, and one reminder after an unpaid checkout. Then a community for your buyers, funnels of offers after paying, an affiliate program, calendar sync, webhooks, course quizzes and certificates, license keys, stamped PDFs, longer windows and exports for your numbers, and memberships whose access ends when they do." },
   { date: "September 27, 2026", items: "Up to 2,000 products, a private video room for each booking, up to five stores in one account and a team with roles for each, passkeys, 15 currencies and more ways to pay, sales and landing pages, reviews only buyers can write, Mailchimp, Kit, beehiiv and MailerLite built in, and notifications on your phone. Then live events in the community, bundles, drafts, moving your list, products and past buyers from another platform, and Google Meet links made on your own Google Calendar." },
   { date: "October 5, 2026", items: "The demo store became an ordinary store, made and drawn by the same code as every creator's, and product pictures reach a phone at the phone's own size. Then Outreach: one short email to a business that could sponsor you, sell for you or buy from you, written from what you say and opened as a draft in your own mailbox." },
-  { date: "October 18, 2026", items: "A store whose plan ends closes after 30 days and three emails, with its whole store downloadable as one file first: its files, the renewals of what it sold and every record it kept go, and only a compressed record of its sales is kept for tax, for seven years." },
+  { date: "October 18, 2026", items: "A store whose plan ends closes after 30 days and three emails, with its main data (products, courses, posts, forms, contacts and orders) downloadable as one file first: its files, the renewals of what it sold and every record it kept go, and only a compressed record of its sales is kept for tax, for seven years." },
 ];
 
 /* Facts a creator can check before trusting us with a store. */
@@ -219,19 +241,29 @@ export default function MissionPage() {
   const ready = isConnectConfigured();
   const billingReached = isBillingConfigured();
   const billing = billingReached && PLANS_ON_SALE;
+  // A store sells only on a paid plan (canSell), and Studio is a paid plan:
+  // both wait for a plan that can be started.
+  const selling = ready && billing;
   const domains = isDomainsConfigured();
+  const paypal = paypalAtCheckout();
+  const calendarSync = hostSyncOn();
   const built = [
     ...BUILT,
-    ...(domains ? [DOMAIN_LINE] : []),
-    ...(ready ? [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE] : []),
+    ...(paypal ? [paypalCheckoutLine(true)] : []),
+    ...(billing ? [EMAIL_LINE] : []),
+    ...(domains && billing ? [DOMAIN_LINE] : []),
+    ...(ready ? [STRIPE_LINE, ...(selling ? [CHECKOUT_LINE] : []), ORDERS_LINE] : []),
     ...(billing ? [BILLING_LINE] : []),
     ...(billing && ASSISTANT_ON_SALE ? [ASSISTANT_LINE] : []),
   ];
   const notBuilt = [
-    ...(domains ? [] : ["Your own domain for your store"]),
-    ...(ready ? [] : [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE]),
+    ...(domains ? (billing ? [] : [DOMAIN_CLOSED_LINE]) : ["Your own domain for your store"]),
+    ...(ready ? (selling ? [] : [CHECKOUT_CLOSED_LINE]) : [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE]),
+    ...(billing ? [] : [EMAIL_CLOSED_LINE]),
     ...(billing ? [] : [billingReached ? BILLING_CLOSED_LINE : BILLING_LINE]),
     ...(billing && ASSISTANT_ON_SALE ? [] : [ASSISTANT_CLOSED_LINE]),
+    ...(paypal ? [] : [paypalCheckoutLine(false)]),
+    calendarEventsMissionLine(calendarSync),
     ...NOT_BUILT,
   ];
   return (

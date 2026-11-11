@@ -47,6 +47,7 @@ const en = {
       body: "It has as many affiliates as one store can hold. Write to the store if you would like to be considered.",
     },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
+    resting: { title: "This store can't take this right now", body: "Accepting checks the store's partners first, and the store can't take that many requests right now. Nothing was changed. Try again later, or write to the store." },
     expired: {
       title: "This link has expired",
       body: "An emailed link works once, within 24 hours. Ask for a new one below; it takes a few seconds.",
@@ -60,6 +61,7 @@ const en = {
       body: "This store decided on this address before. Write to the store if you think that should change.",
     },
     signedout: { title: "You are signed out on this browser", body: "To see your affiliate page again, ask for a new link below." },
+    "signedout-unknown": { title: "Your session may still be open on our side", body: "This browser is signed out, but we could not close your session on our side just now. It closes by itself within 30 days." },
   } as Record<string, { title: string; body: string }>,
 
   // ---- Applying -----------------------------------------------------------------
@@ -132,7 +134,18 @@ const en = {
   nextPayment: (date: string) => `Next payment: ${date}.`,
   waitingNote: (amount: string) => `${amount} of what you are owed is still inside that wait, and is not payable yet.`,
   refundsUnchecked:
-    "Refunds and chargebacks could not all be checked just now, so a sale refunded or disputed recently may still show as earning. It is corrected the next time this page opens.",
+    "Refunds and chargebacks could not all be checked just now, so a sale refunded or disputed recently may still show as earning. It is corrected when these figures next refresh.",
+  /** When an affiliate's figures were worked out (lib/affiliate-book-snapshot.ts): `when` arrives written in the store's language, in UTC. Then figuresDaily, or figuresShort for an incomplete book worked out again sooner. */
+  figuresAsOf: (when: string) => `Figures as of ${when}, Coordinated Universal Time (UTC).`,
+  figuresDaily: "They refresh at most once a day.",
+  figuresShort: "They can refresh again after 15 minutes.",
+  /**
+   * Shown while none are kept yet and none are being worked out for this load: another load is working them out,
+   * or a recent refresh that kept nothing holds the next off (up to a day after a few incomplete ones), so no time is promised.
+   */
+  figuresSoon: "Your figures are not ready yet.",
+  /** Shown when none are kept and working them out was refused because a limit on page views was reached: no time is promised, as it may take days. */
+  figuresNoRoom: "Your figures cannot be updated right now because a limit on page views was reached. They will show again when there is room.",
   salesHead: "Sales through your link",
   noneYet: "None yet.",
   aProduct: "A product",
@@ -341,6 +354,11 @@ const en = {
   reviewsAsk: (who: string) => `Stop review requests from ${who || "this store"}?`,
   reviewsFor: (email: string) => `For ${email}. One press stops them for good. A review you already wrote stays as it is.`,
   stopReviews: "Stop review requests",
+  /** Said on the stop page when the last press was not saved; the button is offered again. */
+  reviewsNotSaved: "We could not save that just now. Please try again.",
+  /** Said on a community stop page whose link could not be read just now (CX-123 rule 24): never "unknown", never stopped. */
+  linkNotReadTitle: "We could not open this link just now",
+  linkNotReadBody: "Please try again in a minute.",
 };
 
 export type AffiliatesWords = typeof en;
@@ -361,6 +379,7 @@ const es: AffiliatesWords = {
       body: "Tiene tantos afiliados como puede tener una tienda. Escribe a la tienda si quieres que te tengan en cuenta.",
     },
     error: { title: "Algo salió mal por nuestra parte", body: "No se cambió nada. Inténtalo de nuevo en un momento." },
+    resting: { title: "Esta tienda no puede atender esto ahora", body: "Para aceptar, primero se comprueban los socios de la tienda, y la tienda no puede atender tantas solicitudes en este momento. No se cambió nada. Inténtalo más tarde o escribe a la tienda." },
     expired: {
       title: "Este enlace ha caducado",
       body: "Un enlace enviado por email funciona una sola vez, dentro de las 24 horas. Pide uno nuevo abajo; solo tarda unos segundos.",
@@ -374,6 +393,7 @@ const es: AffiliatesWords = {
       body: "Esta tienda ya tomó una decisión sobre esta dirección. Escribe a la tienda si crees que debería cambiar.",
     },
     signedout: { title: "Has cerrado sesión en este navegador", body: "Para volver a ver tu página de afiliado, pide un enlace nuevo abajo." },
+    "signedout-unknown": { title: "Puede que tu sesión siga abierta de nuestro lado", body: "Este navegador ha cerrado sesión, pero no pudimos cerrar tu sesión de nuestro lado ahora mismo. Se cierra sola en un plazo de 30 días." },
   },
 
   whereShare: "Dónde lo compartirías",
@@ -441,7 +461,12 @@ const es: AffiliatesWords = {
   nextPayment: (date) => `Próximo pago: ${date}.`,
   waitingNote: (amount) => `${amount} de lo que se te debe aún está dentro de ese plazo de espera, y todavía no se puede pagar.`,
   refundsUnchecked:
-    "No se pudieron comprobar todos los reembolsos ahora mismo, así que una venta reembolsada hace poco puede seguir apareciendo como si generara ganancias. Se corrige la próxima vez que se abra esta página.",
+    "No se pudieron comprobar todos los reembolsos ahora mismo, así que una venta reembolsada hace poco puede seguir apareciendo como si generara ganancias. Se corrige cuando estas cifras se actualicen de nuevo.",
+  figuresAsOf: (when: string) => `Cifras del ${when}, tiempo universal coordinado (UTC).`,
+  figuresDaily: "Se actualizan como máximo una vez al día.",
+  figuresShort: "Pueden actualizarse de nuevo pasados 15 minutos.",
+  figuresSoon: "Tus cifras todavía no están listas.",
+  figuresNoRoom: "Tus cifras no se pueden actualizar ahora porque se alcanzó un límite de visitas a páginas. Volverán a mostrarse cuando haya margen.",
   salesHead: "Ventas a través de tu enlace",
   noneYet: "Ninguna todavía.",
   aProduct: "Un producto",
@@ -622,6 +647,9 @@ const es: AffiliatesWords = {
   reviewsAsk: (who) => `¿Dejar de recibir solicitudes de reseña de ${who || "esta tienda"}?`,
   reviewsFor: (email) => `Para ${email}. Con una sola pulsación dejan de llegar para siempre. Una reseña que ya escribiste se queda como está.`,
   stopReviews: "Dejar de recibir solicitudes de reseña",
+  reviewsNotSaved: "No pudimos guardarlo ahora. Inténtalo de nuevo.",
+  linkNotReadTitle: "No pudimos abrir este enlace ahora",
+  linkNotReadBody: "Inténtalo de nuevo en un minuto.",
 };
 
 // ---- French ------------------------------------------------------------------------------------------
@@ -640,6 +668,7 @@ const fr: AffiliatesWords = {
       body: "Il compte autant d'affiliés qu'une boutique peut en avoir. Écrivez à la boutique si vous souhaitez être pris en considération.",
     },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
+    resting: { title: "Cette boutique ne peut pas traiter cela pour le moment", body: "Accepter vérifie d'abord les partenaires de la boutique, et la boutique ne peut pas traiter autant de requêtes pour le moment. Rien n'a été modifié. Réessayez plus tard ou écrivez à la boutique." },
     expired: {
       title: "Ce lien a expiré",
       body: `Un lien envoyé par e-mail ne fonctionne qu'une fois, dans les 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
@@ -653,6 +682,7 @@ const fr: AffiliatesWords = {
       body: "Cette boutique a déjà pris une décision sur cette adresse. Écrivez à la boutique si vous pensez que cela devrait changer.",
     },
     signedout: { title: "Vous êtes déconnecté sur ce navigateur", body: "Pour revoir votre page d'affilié, demandez un nouveau lien ci-dessous." },
+    "signedout-unknown": { title: "Votre session est peut-être encore ouverte de notre côté", body: "Ce navigateur est déconnecté, mais nous n'avons pas pu fermer votre session de notre côté pour l'instant. Elle se ferme d'elle-même sous 30 jours." },
   },
 
   whereShare: "Où vous le partageriez",
@@ -718,7 +748,12 @@ const fr: AffiliatesWords = {
     `Déjà versé${S}: ${amount}. ${store} vous paie directement, depuis son propre compte. Marktmorgen ne détient jamais cet argent${S}: il n'y a donc ici aucun solde à attendre ni rien à réclamer avant une date limite.`,
   nextPayment: (date) => `Prochain paiement${S}: ${date}.`,
   waitingNote: (amount) => `${amount} de ce qui vous est dû est encore dans ce délai d'attente et n'est pas encore payable.`,
-  refundsUnchecked: `Tous les remboursements n'ont pas pu être vérifiés à l'instant${S}: une vente remboursée récemment peut donc encore apparaître comme rapportant de l'argent. C'est corrigé la prochaine fois que cette page s'ouvre.`,
+  refundsUnchecked: `Tous les remboursements n'ont pas pu être vérifiés à l'instant${S}: une vente remboursée récemment peut donc encore apparaître comme rapportant de l'argent. C'est corrigé à la prochaine mise à jour de ces chiffres.`,
+  figuresAsOf: (when: string) => `Chiffres du ${when}, temps universel coordonné (UTC).`,
+  figuresDaily: "Ils sont mis à jour au plus une fois par jour.",
+  figuresShort: "Ils peuvent être mis à jour à nouveau après 15 minutes.",
+  figuresSoon: "Vos chiffres ne sont pas encore prêts.",
+  figuresNoRoom: "Vos chiffres ne peuvent pas être mis à jour pour l'instant, car une limite de pages vues a été atteinte. Ils réapparaîtront quand il y aura de nouveau de la marge.",
   salesHead: "Ventes via votre lien",
   noneYet: "Aucune pour l'instant.",
   aProduct: "Un produit",
@@ -901,6 +936,9 @@ const fr: AffiliatesWords = {
   reviewsAsk: (who) => `Ne plus recevoir de demandes d'avis de ${who || "cette boutique"}${S}?`,
   reviewsFor: (email) => `Pour ${email}. Une seule pression les arrête définitivement. Un avis que vous avez déjà écrit reste tel quel.`,
   stopReviews: "Arrêter les demandes d'avis",
+  reviewsNotSaved: "Nous n'avons pas pu l'enregistrer pour le moment. Veuillez réessayer.",
+  linkNotReadTitle: "Nous n'avons pas pu ouvrir ce lien pour le moment",
+  linkNotReadBody: "Veuillez réessayer dans une minute.",
 };
 
 // ---- German ------------------------------------------------------------------------------------------
@@ -919,6 +957,7 @@ const de: AffiliatesWords = {
       body: "Es hat so viele Affiliates, wie ein Shop haben kann. Schreiben Sie dem Shop, wenn Sie berücksichtigt werden möchten.",
     },
     error: { title: "Bei uns ist etwas schiefgelaufen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
+    resting: { title: "Dieser Shop kann das gerade nicht bearbeiten", body: "Beim Annehmen werden zuerst die Partner des Shops geprüft, und der Shop kann gerade nicht so viele Anfragen bearbeiten. Es wurde nichts geändert. Versuchen Sie es später erneut oder schreiben Sie dem Shop." },
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein per E-Mail gesendeter Link funktioniert einmal, innerhalb von 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
@@ -932,6 +971,7 @@ const de: AffiliatesWords = {
       body: "Dieser Shop hat über diese Adresse bereits entschieden. Schreiben Sie dem Shop, wenn Sie meinen, dass sich das ändern sollte.",
     },
     signedout: { title: "Sie sind in diesem Browser abgemeldet", body: "Um Ihre Affiliate-Seite wieder zu sehen, fordern Sie unten einen neuen Link an." },
+    "signedout-unknown": { title: "Ihre Sitzung ist auf unserer Seite möglicherweise noch offen", body: "Dieser Browser ist abgemeldet, aber wir konnten Ihre Sitzung auf unserer Seite gerade nicht beenden. Sie endet von selbst innerhalb von 30 Tagen." },
   },
 
   whereShare: "Wo Sie es teilen würden",
@@ -1000,7 +1040,12 @@ const de: AffiliatesWords = {
   nextPayment: (date) => `Nächste Zahlung: ${date}.`,
   waitingNote: (amount) => `${amount} von dem, was Ihnen zusteht, liegt noch in dieser Wartezeit und ist noch nicht auszahlbar.`,
   refundsUnchecked:
-    "Nicht alle Erstattungen konnten gerade geprüft werden, daher kann ein kürzlich erstatteter Verkauf noch so erscheinen, als bringe er etwas ein. Das wird beim nächsten Öffnen dieser Seite korrigiert.",
+    "Nicht alle Erstattungen konnten gerade geprüft werden, daher kann ein kürzlich erstatteter Verkauf noch so erscheinen, als bringe er etwas ein. Das wird bei der nächsten Aktualisierung dieser Zahlen korrigiert.",
+  figuresAsOf: (when: string) => `Zahlen vom ${when}, koordinierte Weltzeit (UTC).`,
+  figuresDaily: "Sie werden höchstens einmal am Tag aktualisiert.",
+  figuresShort: "Sie können nach 15 Minuten erneut aktualisiert werden.",
+  figuresSoon: "Ihre Zahlen sind noch nicht fertig.",
+  figuresNoRoom: "Ihre Zahlen können gerade nicht aktualisiert werden, weil ein Limit für Seitenaufrufe erreicht wurde. Sie erscheinen wieder, sobald wieder Spielraum besteht.",
   salesHead: "Verkäufe über Ihren Link",
   noneYet: "Noch keine.",
   aProduct: "Ein Produkt",
@@ -1188,6 +1233,9 @@ const de: AffiliatesWords = {
   reviewsFor: (email) =>
     `Für ${email}. Ein Klick beendet sie endgültig. Eine Bewertung, die Sie bereits geschrieben haben, bleibt, wie sie ist.`,
   stopReviews: "Bewertungsanfragen stoppen",
+  reviewsNotSaved: "Das konnten wir gerade nicht speichern. Bitte versuchen Sie es erneut.",
+  linkNotReadTitle: "Wir konnten diesen Link gerade nicht öffnen",
+  linkNotReadBody: "Bitte versuchen Sie es in einer Minute erneut.",
 };
 
 // ---- Italian -----------------------------------------------------------------------------------------
@@ -1206,6 +1254,7 @@ const it: AffiliatesWords = {
       body: "Ha tutti gli affiliati che un negozio può avere. Scrivi al negozio se vuoi essere preso in considerazione.",
     },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è stato cambiato nulla. Riprova tra un momento." },
+    resting: { title: "Questo negozio non può gestirlo in questo momento", body: "Per accettare si controllano prima i partner del negozio, e il negozio non può gestire così tante richieste in questo momento. Non è stato cambiato nulla. Riprova più tardi o scrivi al negozio." },
     expired: {
       title: "Questo link è scaduto",
       body: "Un link inviato per email funziona una sola volta, entro 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
@@ -1219,6 +1268,7 @@ const it: AffiliatesWords = {
       body: "Questo negozio ha già deciso su questo indirizzo. Scrivi al negozio se pensi che debba cambiare.",
     },
     signedout: { title: "Sei disconnesso su questo browser", body: "Per rivedere la tua pagina di affiliato, chiedi un nuovo link qui sotto." },
+    "signedout-unknown": { title: "La tua sessione potrebbe essere ancora aperta da parte nostra", body: "Questo browser è disconnesso, ma non siamo riusciti a chiudere la tua sessione da parte nostra in questo momento. Si chiude da sola entro 30 giorni." },
   },
 
   whereShare: "Dove lo condivideresti",
@@ -1285,7 +1335,12 @@ const it: AffiliatesWords = {
   nextPayment: (date) => `Prossimo pagamento: ${date}.`,
   waitingNote: (amount) => `${amount} di quanto ti spetta è ancora in questo periodo di attesa, e non è ancora pagabile.`,
   refundsUnchecked:
-    "Non è stato possibile controllare subito tutti i rimborsi, quindi una vendita rimborsata di recente potrebbe ancora risultare come guadagno. Viene corretto la prossima volta che si apre questa pagina.",
+    "Non è stato possibile controllare subito tutti i rimborsi, quindi una vendita rimborsata di recente potrebbe ancora risultare come guadagno. Viene corretto al prossimo aggiornamento di questi dati.",
+  figuresAsOf: (when: string) => `Dati del ${when}, tempo coordinato universale (UTC).`,
+  figuresDaily: "Si aggiornano al massimo una volta al giorno.",
+  figuresShort: "Possono aggiornarsi di nuovo dopo 15 minuti.",
+  figuresSoon: "I tuoi dati non sono ancora pronti.",
+  figuresNoRoom: "I tuoi dati non possono essere aggiornati ora perché è stato raggiunto un limite di pagine visualizzate. Torneranno visibili quando ci sarà di nuovo margine.",
   salesHead: "Vendite tramite il tuo link",
   noneYet: "Ancora nessuna.",
   aProduct: "Un prodotto",
@@ -1469,6 +1524,9 @@ const it: AffiliatesWords = {
   reviewsAsk: (who) => `Non ricevere più richieste di recensione da ${who || "questo negozio"}?`,
   reviewsFor: (email) => `Per ${email}. Basta un clic per fermarle per sempre. Una recensione che hai già scritto resta com'è.`,
   stopReviews: "Interrompi le richieste di recensione",
+  reviewsNotSaved: "Non siamo riusciti a salvarlo ora. Riprova.",
+  linkNotReadTitle: "Non siamo riusciti ad aprire questo link ora",
+  linkNotReadBody: "Riprova tra un minuto.",
 };
 
 // ---- Dutch -------------------------------------------------------------------------------------------
@@ -1487,6 +1545,7 @@ const nl: AffiliatesWords = {
       body: "Het heeft zoveel affiliates als één winkel kan hebben. Schrijf de winkel als je in aanmerking wilt komen.",
     },
     error: { title: "Er ging iets mis aan onze kant", body: "Er is niets gewijzigd. Probeer het zo meteen opnieuw." },
+    resting: { title: "Deze winkel kan dit nu niet verwerken", body: "Bij het accepteren worden eerst de partners van de winkel gecontroleerd, en de winkel kan nu niet zoveel aanvragen verwerken. Er is niets gewijzigd. Probeer het later opnieuw of schrijf de winkel." },
     expired: {
       title: "Deze link is verlopen",
       body: "Een gemailde link werkt één keer, binnen 24 uur. Vraag hieronder een nieuwe aan; dat duurt een paar seconden.",
@@ -1500,6 +1559,7 @@ const nl: AffiliatesWords = {
       body: "Deze winkel heeft eerder over dit adres beslist. Schrijf de winkel als je vindt dat dat moet veranderen.",
     },
     signedout: { title: "Je bent uitgelogd in deze browser", body: "Vraag hieronder een nieuwe link aan om je affiliatepagina weer te zien." },
+    "signedout-unknown": { title: "Je sessie staat aan onze kant mogelijk nog open", body: "Deze browser is uitgelogd, maar we konden je sessie aan onze kant nu niet sluiten. Hij sluit vanzelf binnen 30 dagen." },
   },
 
   whereShare: "Waar je het zou delen",
@@ -1566,7 +1626,12 @@ const nl: AffiliatesWords = {
   nextPayment: (date) => `Volgende betaling: ${date}.`,
   waitingNote: (amount) => `${amount} van wat je tegoed hebt, valt nog binnen die wachttijd en kan nog niet worden uitbetaald.`,
   refundsUnchecked:
-    "Niet alle terugbetalingen konden zojuist worden gecontroleerd, dus een onlangs terugbetaalde verkoop kan nog als opbrengst worden getoond. Dat wordt rechtgezet de volgende keer dat deze pagina opent.",
+    "Niet alle terugbetalingen konden zojuist worden gecontroleerd, dus een onlangs terugbetaalde verkoop kan nog als opbrengst worden getoond. Dat wordt rechtgezet bij de volgende bijwerking van deze cijfers.",
+  figuresAsOf: (when: string) => `Cijfers van ${when}, gecoördineerde wereldtijd (UTC).`,
+  figuresDaily: "Ze worden hoogstens één keer per dag bijgewerkt.",
+  figuresShort: "Ze kunnen na 15 minuten opnieuw worden bijgewerkt.",
+  figuresSoon: "Je cijfers zijn nog niet klaar.",
+  figuresNoRoom: "Je cijfers kunnen nu niet worden bijgewerkt, omdat een limiet voor paginaweergaven is bereikt. Ze verschijnen weer zodra er weer ruimte is.",
   salesHead: "Verkopen via je link",
   noneYet: "Nog geen.",
   aProduct: "Een product",
@@ -1751,6 +1816,9 @@ const nl: AffiliatesWords = {
   reviewsAsk: (who) => `Geen beoordelingsverzoeken meer van ${who || "deze winkel"}?`,
   reviewsFor: (email) => `Voor ${email}. Eén klik stopt ze voorgoed. Een beoordeling die je al hebt geschreven, blijft zoals hij is.`,
   stopReviews: "Stop de beoordelingsverzoeken",
+  reviewsNotSaved: "We konden dat nu niet opslaan. Probeer het opnieuw.",
+  linkNotReadTitle: "We konden deze link nu niet openen",
+  linkNotReadBody: "Probeer het over een minuut opnieuw.",
 };
 
 // ---- European Portuguese -------------------------------------------------------------------------------
@@ -1773,6 +1841,7 @@ const pt: AffiliatesWords = {
       body: "Tem tantos afiliados quantos uma loja pode ter. Escreva à loja se quiser ser considerado.",
     },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente novamente daqui a pouco." },
+    resting: { title: "Esta loja não pode tratar disto agora", body: "Para aceitar, verificam-se primeiro os parceiros da loja, e a loja não consegue tratar tantos pedidos neste momento. Nada foi alterado. Tente novamente mais tarde ou escreva à loja." },
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação enviada por email funciona uma vez, no prazo de 24 horas. Peça uma nova abaixo; demora poucos segundos.",
@@ -1786,6 +1855,7 @@ const pt: AffiliatesWords = {
       body: "Esta loja já decidiu sobre este endereço. Escreva à loja se achar que isso deve mudar.",
     },
     signedout: { title: "Terminou a sessão neste navegador", body: "Para voltar a ver a sua página de afiliado, peça uma nova ligação abaixo." },
+    "signedout-unknown": { title: "A sua sessão pode ainda estar aberta do nosso lado", body: "Este navegador terminou a sessão, mas não conseguimos fechar a sua sessão do nosso lado neste momento. Fecha-se sozinha no prazo de 30 dias." },
   },
 
   whereShare: "Onde o partilharia",
@@ -1853,7 +1923,12 @@ const pt: AffiliatesWords = {
   nextPayment: (date) => `Próximo pagamento: ${date}.`,
   waitingNote: (amount) => `${amount} do que lhe é devido ainda está dentro desse prazo de espera e ainda não pode ser pago.`,
   refundsUnchecked:
-    "Não foi possível verificar agora todos os reembolsos, por isso uma venda reembolsada recentemente pode ainda aparecer como se gerasse ganhos. Fica corrigido da próxima vez que esta página abrir.",
+    "Não foi possível verificar agora todos os reembolsos, por isso uma venda reembolsada recentemente pode ainda aparecer como se gerasse ganhos. Fica corrigido na próxima atualização destes números.",
+  figuresAsOf: (when: string) => `Números de ${when}, tempo universal coordenado (UTC).`,
+  figuresDaily: "São atualizados no máximo uma vez por dia.",
+  figuresShort: "Podem ser atualizados de novo após 15 minutos.",
+  figuresSoon: "Os seus números ainda não estão prontos.",
+  figuresNoRoom: "Os seus números não podem ser atualizados agora, porque foi atingido um limite de visualizações de páginas. Voltam a aparecer quando houver margem de novo.",
   salesHead: "Vendas através da sua ligação",
   noneYet: "Ainda nenhuma.",
   aProduct: "Um produto",
@@ -2037,6 +2112,9 @@ const pt: AffiliatesWords = {
   reviewsAsk: (who) => `Deixar de receber pedidos de avaliação ${deLoja(who)}?`,
   reviewsFor: (email) => `Para ${email}. Basta um clique para os parar de vez. Uma avaliação que já escreveu fica como está.`,
   stopReviews: "Parar os pedidos de avaliação",
+  reviewsNotSaved: "Não conseguimos guardar isso agora. Tente novamente.",
+  linkNotReadTitle: "Não conseguimos abrir este link agora",
+  linkNotReadBody: "Tente novamente daqui a um minuto.",
 };
 
 export const AFFILIATES_WORDS: Record<LanguageCode, AffiliatesWords> = { en, es, fr, de, it, nl, pt };

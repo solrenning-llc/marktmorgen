@@ -35,6 +35,7 @@
  */
 
 import { SITE_URL } from "./site-url";
+import { contrast } from "./store-look";
 
 /** What the tags call the way in, beside the place name the creator picks. */
 export const EMBED_MEDIUM = "buy-button";
@@ -119,14 +120,24 @@ export function cardCode({
   );
 }
 
+/** A readable pair for copied buttons and their previews; never changes saved store colors. */
+export function buttonColors(fill: string, onFill: string): { fill: string; onFill: string; changed: boolean } {
+  const valid = (color: string) => /^#[0-9a-f]{6}$/i.test(color);
+  const background = valid(fill) ? fill : "#15112e";
+  const foreground = valid(onFill) ? onFill : "#ffffff";
+  const pair = contrast(background, foreground) >= 7 ? [background, foreground] : ["#15112e", "#ffffff"];
+  return { fill: pair[0], onFill: pair[1], changed: pair[0] !== fill || pair[1] !== onFill };
+}
+
 /** The plain button's look, shared by the code and the studio's preview of it. */
 export function buttonStyle(fill: string, onFill: string): Record<string, string> {
+  const colors = buttonColors(fill, onFill);
   return {
     display: "inline-block",
     padding: "14px 28px",
     borderRadius: "999px",
-    background: fill,
-    color: onFill,
+    background: colors.fill,
+    color: colors.onFill,
     font: "600 16px/1.25 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
     textDecoration: "none",
   };

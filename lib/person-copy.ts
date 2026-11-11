@@ -27,22 +27,24 @@
  */
 import { type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
-import { readDeals, readFields, readStages, readValues } from "@/lib/crm";
+import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
-import { listAgreements, readVersion } from "@/lib/agreement-store";
+import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
-import { submissionsOf } from "@/lib/assignment";
+import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
+import { notesOf } from "@/lib/lesson-notes";
 import { bondRecordOf } from "@/lib/affiliate-bond";
-import { readLeads } from "@/lib/affiliate-leads";
+import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
-import { inviteField, readInvite } from "@/lib/move-members";
+import { inviteField, inviteForCopy } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
 import { readReview, reviewId } from "@/lib/reviews";
@@ -70,20 +72,26 @@ import { toldOf } from "@/lib/closing-buyers";
 import { paidCheckoutsOf } from "@/lib/person-copy-stripe";
 import { readGift } from "@/lib/gifts";
 import { isGroupJob, readGroup } from "@/lib/group-buy";
-import { packagesKey, readBought } from "@/lib/call-packages";
+import { type Bought, packageKeys, packagesKey } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
+import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
+import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
 /** What the copy does with each module the erasure reaches, said in a few words to the person. */
 export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>> = {
+  "lib/shipment-mail-outbox.ts": { how: "copied", what: "Your saved shipping-update messages and their pending state, if the queue has been activated; deletion fences are kept as one-way marks" },
+  "lib/order-confirmation-outbox.ts": { how: "copied", what: "Your linked purchase confirmations, original payment reference, amount and pending state, if the queue has been activated; erasure and duplicate-prevention fences are kept as one-way marks" },
+  "lib/resend-fallback-budget.ts": { how: "marks", what: "Linked financial send-intent and message fingerprints, quota holds and outcome marks, without a plain address or message; no account-wide ledger of other people's sends is included" },
+  "lib/orders.ts": { how: "marks", what: "Order-reference and accounting fingerprints that prevent counting a payment twice; they contain no plain email message and do not prove delivery" },
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
   "lib/mail-health.ts": { how: "marks", what: "A mark that your address was counted in this week's delivery checks, with nothing else in it" },
-  "lib/crm.ts": { how: "copied", what: "The store's fields about you, and its deals with you" },
+  "lib/crm.ts": { how: "copied", what: "The store's fields about you, its deals with you, and the tasks its team wrote about you" },
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
   "lib/agreement-store.ts": { how: "copied", what: "Proposals and agreements the store sent you, each version's text, and your signature" },
   "lib/buyer-profile.ts": { how: "copied", what: "Notes the store's team wrote about you" },
@@ -94,6 +102,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
+  "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
@@ -109,8 +118,11 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/discord-access.ts": { how: "copied", what: "Your Discord account's link to the store, and its roles" },
   "lib/email-sync.ts": { how: "copied", what: "The record of sending you to the store's connected email platform" },
   "lib/segments.ts": { how: "marks", what: "A ten-minute copy of the store's buyers, made from its Stripe account" },
+  "lib/store-readings.ts": { how: "marks", what: "A day's copy of the store's sales numbers, which may name its biggest buyers, made from its Stripe account" },
+  "lib/calendar-sync.ts": { how: "marks", what: "A copy of the store's private booking calendar, which may name you if you booked, made from its bookings" },
   "lib/member-health.ts": { how: "marks", what: "A ten-minute copy of the store's members' scores, made from its Stripe account" },
   "lib/reviews.ts": { how: "copied", what: "Your reviews, and the store's replies to them" },
+  "lib/customer-voice.ts": { how: "marks", what: "The store's monthly summary of what its customers said, which may quote your review words without your name; your reviews themselves are in this copy" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },
   "lib/erasure-index.ts": { how: "marks", what: "Links the store emailed you that still work (stop, waitlist, review, free-product and sign-up links)" },
   // What the erasure keeps on purpose (lib/person-data.ts, "kept"): still theirs to see.
@@ -170,15 +182,52 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
 
 /** One reader per copied module, each only reading. */
+// A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
+const PACKAGE_CHECKOUT = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
+
+/**
+ * A call package's record for the data copy, read exactly (CX-123 rule 24) from the same key
+ * lib/call-packages.ts writes (packageKeys(checkout, "")[0]): the record is the only place that
+ * says whose package it is, so one that cannot be read is never taken as somebody else's. Null
+ * only when GET answered null (the record ran out); a checkout id that is not one, a reply of
+ * another shape, text that is not a JSON object or a record with no buyer's address throws
+ * UnknownReplyError, and the copy is made again rather than handed over without it. Kept here,
+ * not in lib/call-packages.ts, because only the copy reads a package this strictly.
+ */
+async function packageForCopy(checkout: string): Promise<Bought | null> {
+  if (!PACKAGE_CHECKOUT.test(checkout)) throw new UnknownReplyError("a call package's checkout id");
+  const replies = repliesFor(await redisPipeline([["GET", packageKeys(checkout, "")[0]]]), 1);
+  if (!replies) throw new UnknownReplyError("a call package");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a call package");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a call package");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as { e?: unknown }).e !== "string") {
+    throw new UnknownReplyError("a call package");
+  }
+  return value as Bought;
+}
+
 export const COPIERS: Readonly<Record<string, Copier>> = {
+  "lib/shipment-mail-outbox.ts": s => shipmentMailOf(s.statsId, s.email),
+  "lib/order-confirmation-outbox.ts": s => orderConfirmationMailOf(s.statsId, s.email),
   "lib/contacts.ts": async (s) => {
     if (!s.listId) return [];
-    const [raw] = await redisPipeline([["HGET", leadsKey(s.listId), s.email]]);
-    const contact = parseContact(raw);
-    return contact ? [{ email: s.email, ...contact }] : [];
+    const reply = repliesFor(await redisPipeline([["HGET", leadsKey(s.listId), s.email]]), 1);
+    if (!reply) throw new UnknownReplyError("the person's contact record");
+    if (reply[0] === null) return [];
+    // A record that does not read would leave out whether they agreed or left: the copy fails rather than omit it.
+    const contact = parseContact(reply[0]);
+    if (!contact) throw new UnknownReplyError("the person's contact record");
+    return [{ email: s.email, ...contact }];
   },
   "lib/crm.ts": async (s) => {
-    const [fields, stages] = await Promise.all([readFields(s.statsId), readStages(s.statsId)]);
+    const [fields, stages, tasks] = await Promise.all([readFields(s.statsId), readStages(s.statsId), readPersonTasks(s.statsId, s.person)]);
     const values = await readValues(s.statsId, s.person, fields);
     const deals = (await readDeals(s.statsId, stages)).filter((d) => d.email && same(d.email, s.email));
     const stageName = new Map(stages.map((st) => [st.id, st.name]));
@@ -186,6 +235,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       ...fields.filter((f) => values[f.id]).map((f) => ({ field: f.name, value: values[f.id] })),
       // Who of the team the deal is given to is that teammate's, not yours.
       ...deals.map((d) => ({ deal: d.title, stage: stageName.get(d.stage) ?? "", value: d.cents, note: d.note, nextAction: d.nextAction ?? "", dueDate: d.dueDate ?? "", created: iso(d.createdAt), updated: iso(d.updatedAt) })),
+      // The team's tasks about you (639 [GL7](6)), at most MAX_PERSON_TASKS; the teammate responsible is theirs, left out.
+      ...tasks.map((t) => ({ task: t.text, dueDate: t.due, done: t.done, created: iso(t.createdAt), doneAt: iso(t.doneAt) })),
     ];
   },
   "lib/buyer-profile.ts": async (s) => (await readPersonNotes(s.statsId, s.person)).map((n) => ({ note: n.text, at: iso(n.at) })),
@@ -213,7 +264,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const out: unknown[] = [];
     for (const a of list.filter((a) => same(a.email, s.email))) {
       const versions = [];
-      for (const mark of a.versions) versions.push({ ...mark, ...((await readVersion(a, mark.n)) ?? {}) });
+      for (const mark of a.versions) versions.push({ ...mark, ...((await readVersionExact(a, mark.n)) ?? {}) });
       out.push({ ...a, versions });
     }
     return out;
@@ -243,6 +294,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       const subs = await submissionsOf(c.courseId, c.lessonIds.map((lessonId) => ({ lessonId, who: s.learner })));
       subs.forEach((sub, i) => {
         if (!sub) return;
+        // A record that is there but does not read is said, never left out of the copy (CX-123 rule 24).
+        if (isUnreadSubmission(sub)) {
+          out.push({ course: c.productId, lesson: c.lessonIds[i], unread: "Work you handed in is kept for this lesson, but its record could not be read for this copy." });
+          return;
+        }
         out.push({ course: c.productId, lesson: c.lessonIds[i], text: sub.text, file: sub.file?.name ?? "", handedIn: iso(sub.at), state: sub.state, tries: sub.tries, feedback: sub.feedback, reviewed: iso(sub.reviewedAt) });
       });
     }
@@ -260,17 +316,28 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
+  "lib/lesson-notes.ts": async (s) => {
+    // Named by the course's product as the other course records are; a course since deleted by its own id.
+    const productOf = new Map(s.courses.map((c) => [c.courseId, c.productId]));
+    return (await notesOf(s.statsId, s.learner)).map((n) => ({ course: productOf.get(n.course) ?? n.course, lesson: n.lesson, text: n.text, at: iso(n.at) }));
+  },
   "lib/affiliate-bond.ts": async (s) => {
     const affiliate = await bondRecordOf(s.statsId, s.email);
+    if (affiliate === null) throw new UnknownReplyError("the person's affiliate bond");
     return affiliate ? [{ affiliate }] : [];
   },
-  "lib/affiliate-leads.ts": async (s) => (await readLeads(s.store)).filter((l) => l.email && same(l.email, s.email)),
+  // Only their own field (leadOf): another person's lead that does not read never blocks this copy; theirs throws.
+  "lib/affiliate-leads.ts": async (s) => {
+    const lead = await leadOf(s.store, s.email);
+    return lead && lead.email && same(lead.email, s.email) ? [lead] : [];
+  },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     for (const productId of s.productIds) {
-      const invite = await readInvite(s.statsId, inviteField(s.email, productId));
+      const invite = await inviteForCopy(s.statsId, inviteField(s.email, productId));
+      if (invite === "unknown") throw new UnknownReplyError("an invitation to keep a membership");
       if (invite) out.push({ product: productId, ...invite });
     }
     return out;
@@ -386,10 +453,14 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/call-packages.ts": async (s) => {
-    const [raw] = await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]);
+    // The store's packages, exactly: a set that cannot be read is never "none sold", which would leave theirs out.
+    const checkouts = stringList(repliesFor(await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]), 1)?.[0]);
+    if (!checkouts) throw new UnknownReplyError("the store's call packages");
     const out: unknown[] = [];
-    for (const checkout of (Array.isArray(raw) ? raw : []).map(String)) {
-      const bought = await readBought(checkout);
+    // Each listed package read exactly too: one that cannot be read, or a member that is not a checkout id, fails
+    // the copy, never taken as somebody else's (packageForCopy). A record that ran out is none.
+    for (const checkout of checkouts) {
+      const bought = await packageForCopy(checkout);
       // The booking link's token is a key, left out: they have it in the email that sent it.
       if (bought && same(bought.e, s.email)) out.push({ product: bought.p, sessions: bought.total, bought: iso(bought.at), bookBy: iso(bought.until), booked: bought.holds });
     }

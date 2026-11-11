@@ -34,19 +34,40 @@ const ownReviewData=(record:object,key:string)=>{
   return field&&Object.prototype.hasOwnProperty.call(field,"value")?field.value:undefined;
  }catch{return undefined;}
 };
+/** A reviewed cost map is complete own data. Projecting only known categories
+ * would silently discard an additional or hidden liability as though it were zero. */
+export function customerCostSnapshot(record:unknown):CustomerWorstCase['costCeilings']|null{
+ try{
+  if(!record||typeof record!=="object"||Array.isArray(record))return null;
+  const prototype=Object.getPrototypeOf(record);
+  if(prototype!==Object.prototype&&prototype!==null)return null;
+  if(Reflect.ownKeys(record).length!==CUSTOMER_COST_CATEGORIES.length)return null;
+  const costs:CustomerWorstCase['costCeilings']=Object.create(null);
+  for(const key of CUSTOMER_COST_CATEGORIES){
+   const field=Object.getOwnPropertyDescriptor(record,key);
+   if(!field||!Object.hasOwn(field,"value")||!field.enumerable)return null;
+   costs[key]=field.value;
+  }
+  // Probe the ORIGINAL map only after every field is a validated scalar amount.
+  // A Proxy cannot hide an extra liability or disguise an accessor; a plain
+  // map has only these eleven own numeric data fields, so no getter is cloned.
+  if(CUSTOMER_COST_CATEGORIES.every(key=>money(costs[key])))structuredClone(record);
+  return costs;
+ }catch{return null;}
+}
 /** Exact whole-cent comparison: zero profit or a rounded display never passes MR. */
 export function assessCustomerWorstCase(value:CustomerWorstCase|null,expectedMonths?:1|12):MarginAssessment{
  if(!value||typeof value!=="object"||Array.isArray(value))return stopped("unknown");
  const fields=customerTaxReviewFields(value);
  const fiscal=captureCustomerTaxInput({taxReview:fields.taxReview,taxContext:fields.taxContext});
- const suppliedCosts=ownReviewData(value,"costCeilings");
- if(!suppliedCosts||typeof suppliedCosts!=="object"||Array.isArray(suppliedCosts))return stopped("unknown");
+ const costsSnapshot=customerCostSnapshot(ownReviewData(value,"costCeilings"));
+ if(costsSnapshot===null)return stopped("unknown");
  // Read once into a plain snapshot. Validation and arithmetic use identical data.
  value={
   collectedRevenueCents:ownReviewData(value,"collectedRevenueCents"),
   refundableRevenueCents:ownReviewData(value,"refundableRevenueCents"),
   taxesCeilingCents:ownReviewData(value,"taxesCeilingCents"),
-  costCeilings:Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key=>[key,ownReviewData(suppliedCosts,key)])),
+  costCeilings:costsSnapshot,
   allCostsBounded:ownReviewData(value,"allCostsBounded")===true,
   allTaxesReviewed:ownReviewData(value,"allTaxesReviewed")===true,
   revenueCollected:ownReviewData(value,"revenueCollected")===true,

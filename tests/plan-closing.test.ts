@@ -93,7 +93,8 @@ const stripeAsked: string[] = [];
 
 type Sent = { to: string[]; subject: string; text: string; reply_to?: string };
 const sent: Sent[] = [];
-let mail: "up" | "down" = "up";
+let mail: "up" | "down" | "uncertain" = "up";
+let mailAttempts = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -136,13 +137,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return json({ data: [...running.entries()].filter(([handle]) => query.includes(`'${handle}'`)).map(([, subscription]) => subscription), has_more: false });
     }
     if (path === "/subscriptions") return json({ data: [], has_more: false });
+    // A closing day expires the store's open plan checkouts (lib/closing-plan-guard.ts); none is open here.
+    if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
     const one = [...running.values()].find((subscription) => path === `/subscriptions/${String(subscription.id)}`);
     if (one) return json(one);
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
 
   if (url.hostname === "api.resend.com") {
-    if (mail === "down") return json({ message: "unavailable" }, 500);
+    mailAttempts += 1;
+    if (mail === "down") return json({ message: "unavailable" }, 429);
+    if (mail === "uncertain") return json({ message: "acceptance unknown" }, 500);
     sent.push(JSON.parse(String(init?.body)) as Sent);
     return json({ id: `email-${sent.length}` });
   }
@@ -377,7 +382,7 @@ async function main(): Promise<void> {
   const V = await endedAt(eve.email);
   for (const day of [0, M, W]) await closeOne(eve.email, V + day * DAY, hands);
   is("told three times, like anybody", mailTo(eve.email).map((m) => m.subject.slice(0, 7)), ["Eve Stu", "14 days", "7 days "]);
-  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
+  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
   const repaired = await closeOne(eve.email, V + C * DAY, hands);
   const eveNow = (await storeForEmail(eve.email))!;
   is("Stripe says the plan runs: nothing is removed and nobody is told it was", [repaired.state, repaired.note, objects.has((await readListing(eveNow, evesFile))!.file!.pathname), mailTo(eve.email).length], ["running", "Stripe says the plan runs", true, 3]);
@@ -390,7 +395,7 @@ async function main(): Promise<void> {
   await endPlan(kai.email);
   const K = await endedAt(kai.email);
   for (const day of [0, M, W]) await closeOne(kai.email, K + day * DAY, hands);
-  running.set("nobody-by-search", { id: "sub_kai0001", status: "trialing", created: 1_790_000_000, trial_end: 1_900_000_000, customer: "cus_kai0001", metadata: {}, items: { data: [{ price: { unit_amount: 2900, recurring: { interval: "month" } } }] } });
+  running.set("nobody-by-search", { id: "sub_kai0001", status: "trialing", created: 1_790_000_000, trial_end: 1_900_000_000, customer: "cus_kai0001", metadata: {}, cancel_at: null, cancel_at_period_end: false, items: { data: [{ price: { unit_amount: 2900, recurring: { interval: "month" } } }] } });
   const own = await closeOne(kai.email, K + C * DAY, hands);
   const kaiNow = (await storeForEmail(kai.email))!;
   is("asked about by its own number first: running, so nothing is removed", [own.state, own.note, kaiNow.subscriptionActive, kaiNow.planEndedAt, [...objects.keys()].filter((path) => path.startsWith(`vault/${kai.folder}/`)).length, mailTo(kai.email).length], ["running", "Stripe says the plan runs", true, "", 1, 3]);
@@ -548,7 +553,7 @@ async function main(): Promise<void> {
     /keeps the rule it ended under: the store and its records stay/.test(terms),
   ], [true, true, true, true, true, true]);
   const help = JSON.stringify(HELP_SECTIONS);
-  is("the help pages say the same", [help.includes(`stays as it is for ${CLOSING_DAYS} days`), help.includes(`${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it`), help.includes(`keeps more than ${storageWords(SETUP_STORAGE_BYTES)} has a date`), help.includes("download your whole store as one file")], [true, true, true, true]);
+  is("the help pages say the same", [help.includes(`stays as it is for ${CLOSING_DAYS} days`), help.includes(`${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it`), help.includes(`keeps more than ${storageWords(SETUP_STORAGE_BYTES)} has a date`), help.includes("download your store's main data as one file")], [true, true, true, true]);
   is("and the privacy policy says when such files are deleted", read("app/privacy/page.tsx").includes(`deleted ${CLOSING_DAYS} days after the plan`), true);
   const studio = read("app/studio/page.tsx");
   is("and the studio shows a store past its room the day, counted the way the job counts it", [/closingOf\(store\)/.test(studio), /keptNow > keptRoom/.test(studio), /keptRoomFor\(closingAt\.endedAt\)/.test(studio), /dayWords\(closing\.day\)/.test(studio)], [true, true, true, true]);
@@ -598,6 +603,19 @@ async function main(): Promise<void> {
   const walked = await eraseClosed(Date.now() + 20_000, finishClosed, Z + (C + 1) * DAY + 3_600_000);
   is("the walk deletes its records, and nobody else's", [walked.done, walked.finished, await storeForEmail(zoe.email), (await storeForEmail(ana.email))?.handle, (await storeForEmail(ben.email))?.handle], [true, 1, null, "ana", "ben"]);
   is("and its owner, told three times before, is not written to again", [told, mailTo(zoe.email).length], [3, 3]);
+
+  part("Unknown acceptance never authorizes a second provider attempt");
+  const unknownOwner = await storeWith("uncertain");
+  await productWith(unknownOwner, "Kept source", 6 * GB);
+  await endPlan(unknownOwner.email);
+  const unknownEnd = await endedAt(unknownOwner.email);
+  const attemptsBefore = mailAttempts, sentBefore = sent.length;
+  mail = "uncertain";
+  const unknownFirst = await closeOne(unknownOwner.email, unknownEnd + 60_000, hands);
+  mail = "up";
+  const unknownRetry = await closeOne(unknownOwner.email, unknownEnd + 120_000, hands);
+  is("a server error may follow acceptance: hold the notice without another POST", [unknownFirst.state, unknownRetry.state, mailAttempts - attemptsBefore, sent.length - sentBefore], ["held", "held", 1, 0]);
+  is("the ended-plan source and recovery entry remain available", [await endedAt(unknownOwner.email), await inLine(unknownOwner.email), (await storeForEmail(unknownOwner.email))?.handle], [unknownEnd, unknownEnd, unknownOwner.handle]);
 
   done();
 }

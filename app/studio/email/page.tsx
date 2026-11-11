@@ -19,7 +19,7 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
 import { listBroadcastsStrict } from "@/lib/broadcasts";
-import { letterIdFor, publishedLetterIds } from "@/lib/letters";
+import { letterIdFor, publishedLetters } from "@/lib/letters";
 import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";
 import { sellsSomething } from "@/lib/mail-starters";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
@@ -38,7 +38,7 @@ import { can } from "@/lib/team-roles";
 import { isBillingConfigured, trialOffered } from "@/lib/billing";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { listSegments } from "@/lib/segments";
-import { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
+import { MAX_WAITS_PER_RUN, activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
 import { listHeld, runsToday } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 
@@ -65,7 +65,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     usedThisMonth(store.listId, windowId(store)),
-    listBroadcastsStrict(store.listId).catch(() => null),
+    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.
+    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).
@@ -107,12 +108,15 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),
   ]);
   const trial = allowance > 0 && inTrial(store);
-  // Which sent emails are published on the store (lib/letters.ts): one read.
-  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetterIds(store) : new Set<string>();
+  // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.
+  // A failed read is not "not published": the studio says it does not know (null).
+  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();
   const letterPath = (id: string) => {
+    if (published === null) return null;
     const letter = letterIdFor(store.sid, id);
     return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;
   };
+  const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -155,7 +159,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
         ) : allowance === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</p>
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>
               <span className="tag tag-brand">{priceWords("pro", "month")}</span>
             </div>
             <ul className="mt-4 space-y-2 text-ink-soft">
@@ -208,6 +212,15 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           </div>
         ) : (
           <>
+          {/* Switched off after notices about its content (lib/takedown.ts): nothing is sent, everything waits. */}
+          {store.suspended ? (
+            <div role="status" className="mt-8 rounded-[var(--r-md)] border border-line bg-sand p-5 text-ink">
+              <p className="font-semibold">Email from your store is paused while it is switched off</p>
+              <p className="mt-2 text-sm text-ink-soft">
+                {`Your store is switched off after notices about its content, so nothing goes out to your list or your community: emails to your list, workflow steps and community announcements wait. They go out by themselves once your store is back on. A workflow step is tried again once a day; a run waits ${MAX_WAITS_PER_RUN} times at the most, then stops at that step, and its history says so.`}
+              </p>
+            </div>
+          ) : null}
           {pause ? (
             <div role="status" className="mt-8 rounded-[var(--r-md)] border border-line bg-sand p-5 text-ink">
               <p className="font-semibold">Email to your list is paused</p>
@@ -279,6 +292,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               visits: visits?.[b.id] ?? null,
               test: b.test,
               published: letterPath(b.id),
+              publishedMembers: letterMembers(b.id),
+              publishedUnknown: published === null,
             }))}
             currency={store.currency}
             sells={sellsSomething(store)}
@@ -308,6 +323,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               runsToday: await runsToday(store.listId),
               held: can(role, "send") ? ((await listHeld(store.listId, 500).catch(() => null))?.length ?? null) : null,
             }}
+            switchedOff={Boolean(store.suspended)}
             assignees={can(role, "send") ? [store.email.toLowerCase(), ...(await readTeam(store.sid).catch(() => ({ members: [] as { email: string; role: Parameters<typeof can>[0] }[] }))).members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []}
           />
           </>

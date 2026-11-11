@@ -102,7 +102,10 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
           : "No pixel on your store."}
       </p>
       <details ref={disclosure} className="mt-4">
-        <summary role="button" aria-disabled={!ready} onClick={(event) => { if (!ready) event.preventDefault(); }} className="btn btn-secondary w-fit cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        {/* Never marked off before the page is ready: a <details> opens without any script, so "off" was untrue, and
+            the change to "on" a moment later was drawn in WebKit's forced colors as GrayText on sand (2.78:1, inbox
+            C4-35). Until ready, what it opens is held by the fieldset below, which is disabled. */}
+        <summary role="button" className="btn btn-secondary w-fit cursor-pointer list-none [&::-webkit-details-marker]:hidden">
           {hasPixels(pixels) ? "Change pixels" : "Add a pixel"}
         </summary>
         <form onSubmit={save} className="mt-5" noValidate aria-busy={busy}>

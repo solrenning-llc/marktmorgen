@@ -110,6 +110,8 @@ export function standIns(stripe: StripeWorld, sent: Sent[], passThrough: ((input
         const since = Number(url.searchParams.get("created[gte]") ?? 0), until = Number(url.searchParams.get("created[lt]") ?? Infinity);
         return json({ object: "list", data: stripe.sessions.filter((s) => s.account === account && Number(s.created) >= since && Number(s.created) < until), has_more: false });
       }
+      // A closing day expires the store's open plan checkouts on the platform (lib/closing-plan-guard.ts); none is open here.
+      if (path === "/checkout/sessions" && !account) return json({ object: "list", data: [], has_more: false });
       if (path === "/payment_intents/search") return json({ object: "search_result", data: [], has_more: false, next_page: null });
       if (path === "/subscriptions/search" && account) {
         const query = url.searchParams.get("query") ?? "";
@@ -214,7 +216,10 @@ async function reachedThroughRecords(world: World, tag: string, pdf: ProductFile
 }
 
 /** The days a family's keys that name no store are kept at the most, as CLOSING declares them. */
-function keptDays(key: string): number {
+function keptDays(key: string, terminalSale = false): number {
+  // Only the terminal sources seeded below have this deadline; pending
+  // physical mail is a company obligation with no expiration.
+  if (terminalSale && key.startsWith("nl:ship:done:")) return 400;
   const rule = ruleOf(key);
   return rule?.how === "expires" || rule?.how === "lapses" ? rule.days : rule && "rest" in rule ? rule.rest ?? 0 : 0;
 }
@@ -229,7 +234,8 @@ async function soldThrough(world: World, stripe: StripeWorld, tag: string, pdf: 
   stripe.sessions.push({ id: session, account: s.stripeAccountId, object: "checkout.session", status: "complete", payment_status: "paid", created: Math.floor(at / 1000), amount_total: 4_900, currency: "usd", payment_intent: pi, subscription: sub, customer_details: { email: "tess.taylor@example.com", name: "Tess Taylor", address: { country: "US" } }, total_details: { amount_tax: 0, amount_discount: 0 }, metadata: { store: s.handle, product: world.plain, gift } });
   stripe.memberships.push({ id: sub, account: s.stripeAccountId, status: "active", cancel_at_period_end: false, metadata: { store: s.handle } });
   const keys = [...giftKeys(gift, pi), preorderPiKey(pi), adsSubKey(sub), shippedKey(session), movedKey(session), confirmedKey(session), copyKey(session, pdf), copyKey(pi, pdf)];
-  for (const key of keys) await redisPipeline([["SET", key, JSON.stringify({ s: s.sid, e: "tess.taylor@example.com" }), "EX", Math.min(300, keptDays(key)) * 86_400]]);
+  // This fixture represents a terminal physical source. Pending sources have no TTL.
+  for (const key of keys) await redisPipeline([["SET", key, JSON.stringify({ s: s.sid, e: "tess.taylor@example.com" }), "EX", Math.min(300, keptDays(key, true)) * 86_400]]);
   return keys;
 }
 
@@ -359,9 +365,9 @@ export async function runClosingJourney(is: Check, sent: Sent[], stripe: StripeW
   const company = suspects.filter((key) => ruleOf(key)?.how === "company");
   console.log(`  (kept as the company's: ${company.map((key) => key.replace(/[0-9a-f]{24,}/g, "…")).join(", ")})`);
   const byThemselves = suspects.filter((key) => {
-    const days = keptDays(key);
+    const days = keptDays(key, soldClosing.includes(key));
     const ttl = ttlOf.get(key) ?? -1;
-    return ruleOf(key)?.how !== "company" && days > 0 && ttl > 0 && ttl <= days * 86_400;
+    return (ruleOf(key)?.how !== "company" || (soldClosing.includes(key) && key.startsWith("nl:ship:done:"))) && days > 0 && ttl > 0 && ttl <= days * 86_400;
   });
   console.log(`  (gone by themselves later: ${byThemselves.length}, of ${[...new Set(byThemselves.map((key) => closingFamilyOf(key)))].join(", ")})`);
   is("of what the closed store made, and of what names it, only the company's records and what is gone by itself within its days are left", suspects.filter((key) => !company.includes(key) && !byThemselves.includes(key)), []);

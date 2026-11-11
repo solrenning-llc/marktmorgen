@@ -25,7 +25,8 @@
  */
 import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
@@ -95,14 +96,18 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
   if (standing !== "paid" && standing !== "trial") return "skipped";
   if (await weeklyOff(store.handle)) return "skipped";
   const day = new Date(now).toISOString().slice(0, 10);
-  const [first] = await redisPipeline([["SET", checkedKey(day, store.handle), "1", "NX", "EX", 2 * 86400]]);
-  if (first === null) return "seen";
+  // The day's look and the email are ours only on an exact claim (lib/claim-mark.ts): an unknown answer
+  // reads nothing and sends nothing this run, and lets nothing go.
+  const first = await claimMark(checkedKey(day, store.handle), 2 * 86400);
+  if (first === "taken") return "seen";
+  if (first !== "ours") return "skipped";
   const times = await saleTimes(store, now).catch(() => null);
   if (times === null) return "skipped";
   const verdict = isQuiet(times, now);
   if (!verdict.quiet) return "fine";
-  const [claimed] = await redisPipeline([["SET", sentKey(store.handle, verdict.last), "1", "NX", "EX", 90 * 86400]]);
-  if (claimed === null) return "fine";
+  const claimed = await claimMark(sentKey(store.handle, verdict.last), 90 * 86400);
+  if (claimed === "taken") return "fine";
+  if (claimed !== "ours") return "skipped";
 
   // What the quiet days look like from the store's side: people still coming,
   // people starting to pay and not finishing, or nobody coming at all.

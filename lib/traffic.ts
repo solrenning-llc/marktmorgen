@@ -255,7 +255,7 @@ export async function isResting(store: Store, now = Date.now(), who: "public" | 
  * requests and what buyers have at all of them (lib/traffic-rules.ts,
  * requestLimitFor). A count that cannot be made is a request refused.
  */
-async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null): Promise<boolean> {
+async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<boolean> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
   if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return false;
@@ -266,10 +266,16 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   // past it this connection alone is refused, and nothing is counted against the store.
   if (client && (await overShare(folder, window, whole, client, units, now))) return false;
   const key = requestsKey(folder, window.id);
-  const [count] = await redisPipeline([["INCRBY", key, units]]);
-  const n = Number(count);
+  const reply = await redisPipeline([["INCRBY", key, units]]);
+  // Only Redis's own answer to this one command counts (Codex G2 on #2583):
+  // one reply, an integer at least `units`. Anything else, a `true`, a text
+  // or a second item, is a count that cannot be made: the request is refused.
+  const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
   if (!Number.isSafeInteger(n) || n < units) return false;
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
+  // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
+  // read for it. A request refused as a page resting stays counted, as it always has.
+  if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});
   return n <= limit;
 }
 
@@ -280,16 +286,71 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
  * `units` is how many requests it counts as: more than one for a request
  * that sends a file's bytes through us (a community picture, since 18
  * October 2026), so each is priced at what it costs (tests/plan-cost-registry.ts).
+ * `shared` is for work done once for everybody, not for the connection that
+ * happens to ask (an affiliate program's book refreshed for all its
+ * affiliates, lib/affiliate-page-admission.ts): it counts against the
+ * store's window alone, not the connection's share of the day.
  */
-export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1): Promise<boolean> {
+export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
+  return takePublic(store, who, now, units, from.shared === true, false);
+}
+
+/**
+ * `units` public requests set aside at a reading's worst, before it (lib/affiliates.ts, accepting a partnership by its
+ * emailed link): taken as takePublicRequest takes them, from the asking connection's share too, except that a hold
+ * refused over the window is not left counted, since nothing was read for it. What the reading did not need is given
+ * back after it (givePublicRequests), and what it read beyond them counted (forcePublicRequests).
+ */
+export async function holdPublicRequests(store: Store, units: number, now: number): Promise<boolean> {
+  return takePublic(store, "public", now, units, false, true);
+}
+
+async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   try {
     const window = allowanceWindow(store, now);
     if (!window) return false;
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, await askingConnection());
+    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
   } catch {
     return false;
+  }
+}
+
+/**
+ * Gives back `units` of the store's window that a public request took at `now` (takePublicRequest, the same moment,
+ * so the same window) and did not need: a reading taken at its worst, then measured (lib/affiliates.ts, accepting a
+ * partnership by its emailed link). One DECRBY on the window's count; its connection's share of the day is not given
+ * back. Best effort: a give-back that fails leaves the count higher, never lower.
+ */
+export async function givePublicRequests(store: Store, units: number, now: number): Promise<void> {
+  await movePublicRequests(store, -units, now);
+}
+
+/**
+ * Counts `units` more in the store's window at `now`, already used by a reading that moved more than was set aside
+ * for it, past the window's figure if it must (as lib/store-allowance.ts forceAllowance does for a store's own
+ * figures): only the true count of what was spent, so the next request is refused as usual. Best effort.
+ */
+export async function forcePublicRequests(store: Store, units: number, now: number): Promise<void> {
+  await movePublicRequests(store, units, now);
+}
+
+/** One INCRBY (or DECRBY, below zero) on the store's window at `now`. */
+async function movePublicRequests(store: Store, by: number, now: number): Promise<void> {
+  const units = Math.abs(by);
+  if (!Number.isSafeInteger(units) || units < 1 || !isRedisConfigured()) return;
+  try {
+    const window = allowanceWindow(store, now);
+    if (!window) return;
+    const folder = await storeFolder(storeRef(store));
+    if (!FOLDER_PATTERN.test(folder)) return;
+    const key = requestsKey(folder, window.id);
+    const [n] = await redisPipeline([[by < 0 ? "DECRBY" : "INCRBY", key, units]]);
+    // A count made by this INCRBY (none was there) keeps the window's expiry, as countRequest's does.
+    if (by > 0 && Number(n) === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
+  } catch {
+    // Best effort: a give-back that fails leaves the count higher; a count that fails was already spent.
   }
 }
 

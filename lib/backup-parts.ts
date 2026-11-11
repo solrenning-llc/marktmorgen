@@ -9,9 +9,16 @@
  *   back before the next one is copied; the manifest is written last and read
  *   back too. The set counts as verified only when the manifest read back
  *   names every part with the sums of what was stored.
- * - Nothing is ever deleted or replaced: a run that fails leaves the parts it
- *   wrote as unreferenced objects (no manifest names them) and every earlier
- *   verified set as it was. The bucket's lifecycle rule removes them all.
+ * - Nothing here is ever deleted or replaced: a run that fails leaves the parts
+ *   it wrote as unreferenced objects (no manifest names them) and every earlier
+ *   verified set as it was. The run deletes every object past the retention
+ *   before its next copy (lib/backup-run.ts); the bucket's lifecycle rule is a
+ *   safety net.
+ * - The walk reads at most BACKUP_SCAN_PAGES pages; a walk not done by then
+ *   is refused ("scan_pages") before anything is written.
+ * - Inside a cutoff (lib/fetch-timeout.ts, withCutoff; the run's is
+ *   BACKUP_RUN_CUTOFF_MS), no page, batch, part or manifest is begun after it
+ *   ("cutoff"); outside one there is none.
  * - The walk's and the copy's commands are counted against the run's cap
  *   before the first DUMP; the parts and the bytes are counted as the copy
  *   goes, each row at the bytes it adds to its part's JSON: a database larger
@@ -25,6 +32,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { openBackup, sealBackup, type BackupRow, type BackupSnapshot } from "@/lib/backup-codec";
 import { BACKUP_MAX_BYTES, BACKUP_MAX_ROWS, BACKUP_PREFIX } from "@/lib/backup-export";
 import type { BackupObjectStore } from "@/lib/backup-roundtrip";
+import { timeLeft } from "@/lib/fetch-timeout";
 import { redisPipeline, redisPipelineBase64 } from "@/lib/redis";
 
 /** The most one part holds, as the backup format seals it (JSON), and its rows. */
@@ -40,6 +48,13 @@ const MANIFEST_ROOM = 65_536;
 export const MAX_PARTS = 10_000;
 /** Keys a SCAN is asked for at a time; a hint. */
 const SCAN_COUNT = 500;
+/**
+ * The most SCAN pages one walk reads (inbox C4-46). At 500 names a page asked for, 200 pages walk 100,000 names of the
+ * whole database, ten times the design's 10,000 keys of ours, so the cap leaves room for other products' keys in a
+ * shared database; it bounds what the walk may move (lib/backup-cost.ts). A walk whose cursor has not come back to "0"
+ * by then is refused as "scan_pages" before anything is written: a partial copy never passes as a whole one.
+ */
+export const BACKUP_SCAN_PAGES = 200;
 /** The longest key the backup format keeps (lib/backup-codec.ts), in bytes. */
 const KEY_MAX_BYTES = 1_024;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -69,7 +84,7 @@ export type BackupManifest = { version: 1; capturedAt: number; parts: PartEntry[
 
 export type PartsResult =
   | { ok: true; id: string; keys: number; bytes: number; parts: number; commands: number }
-  | { ok: false; reason: "limits" | "budget" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify"; commands: number; parts: number };
+  | { ok: false; reason: "limits" | "budget" | "cutoff" | "scan_pages" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify"; commands: number; parts: number };
 
 const whole = (n: unknown, most = Number.MAX_SAFE_INTEGER) => typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n <= most;
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -152,13 +167,17 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
   // written or read back ("verify").
   let writing = false;
   try {
-    // The walk: every name of ours, each SCAN counted before it is sent.
+    // The walk: every name of ours, each SCAN counted before it is sent, at most BACKUP_SCAN_PAGES pages.
     const keys = new Set<string>();
     let cursor = "0";
+    let pages = 0;
     do {
+      if (pages === BACKUP_SCAN_PAGES) return fail("scan_pages");
+      if (timeLeft() <= 0) return fail("cutoff");
       if (commands + 1 > maxCommands) return fail("budget");
       const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", `${BACKUP_PREFIX}*`, "COUNT", SCAN_COUNT]]);
       commands += 1;
+      pages += 1;
       if (!Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string" || !Array.isArray(reply[1])) return fail("unreadable");
       for (const name of reply[1]) {
         if (typeof name !== "string" || name.includes("�")) return fail("unreadable");
@@ -183,6 +202,7 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     const close = async () => {
       if (rows.length === 0) return;
       if (entries.length + 1 > maxParts) throw new RangeError("too_many_parts");
+      if (timeLeft() <= 0) throw new RangeError("cutoff");
       writing = true;
       entries.push(await putPart({ version: 1, capturedAt: now, rows }, key, store));
       writing = false;
@@ -191,16 +211,25 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
       filled = 0;
     };
     for (let at = 0; at < sorted.length; at += batch) {
+      if (timeLeft() <= 0) return fail("cutoff");
       const names = sorted.slice(at, at + batch);
       const replies = await redisPipelineBase64(names.flatMap((name) => [["DUMP", name], ["PEXPIRETIME", name]]));
       commands += 2 * names.length;
       if (replies.length !== 2 * names.length) return fail("unreadable");
       for (let i = 0; i < names.length; i += 1) {
         const dump = replies[2 * i];
-        const ends = Number(replies[2 * i + 1]);
-        // Gone between the walk and its copy, or ended by the time of the copy: left out, never copied empty.
-        if (dump === null || ends === -2 || (ends !== -1 && ends <= now)) continue;
-        if (typeof dump !== "string" || !dump || !BASE64.test(dump) || Buffer.from(dump, "base64").toString("base64") !== dump || !Number.isSafeInteger(ends) || ends < -1) return fail("unreadable");
+        // Read exactly (CX-123 rule 24, Codex Q): PEXPIRETIME answers an integer; anything else (nil, a text, a list)
+        // is unknown and refused below, never read as 0 ("ended long ago") and the key left out of the backup.
+        const reply = replies[2 * i + 1];
+        const ends = typeof reply === "number" ? reply : Number.NaN;
+        // Gone between the walk and its copy (DUMP answered nil): left out, never copied empty.
+        if (dump === null) continue;
+        // The ending is checked in its shape before it can leave a key out (Codex G on #2734): a safe integer, either
+        // -1 (no ending), -2 (gone) or a time; -3, a fraction, -Infinity or an unsafe integer is unknown and refused.
+        if (!Number.isSafeInteger(ends) || ends < -2) return fail("unreadable");
+        // Gone, or ended by the time of the copy: left out.
+        if (ends === -2 || (ends !== -1 && ends <= now)) continue;
+        if (typeof dump !== "string" || !dump || !BASE64.test(dump) || Buffer.from(dump, "base64").toString("base64") !== dump) return fail("unreadable");
         const row: BackupRow = { key: names[i], dump, expiresAt: ends === -1 ? null : ends };
         // The bytes it adds to its part's JSON, escapes and UTF-8 included, and its comma.
         const size = Buffer.byteLength(JSON.stringify(row), "utf8") + 1;
@@ -215,7 +244,9 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     }
     await close();
 
-    // The manifest last: the set is one only when it is read back naming every part and its sums.
+    // The manifest last: the set is one only when it is read back naming every part and its sums, and never after the
+    // run's cutoff (lib/backup-run.ts), so a run's writes all land before it.
+    if (timeLeft() <= 0) return fail("cutoff");
     writing = true;
     const manifest: BackupManifest = { version: 1, capturedAt: now, parts: entries, rows: copied };
     const sealed = sealManifest(manifest, key);
@@ -227,6 +258,8 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     return { ok: true, id, keys: copied, bytes, parts: entries.length, commands };
   } catch (error) {
     if (error instanceof RangeError && error.message === "too_many_parts") return fail("too_many_parts");
+    // The run's cutoff passed, here or inside a request given up at it: said as such.
+    if ((error instanceof RangeError && error.message === "cutoff") || timeLeft() <= 0) return fail("cutoff");
     // The database failing while it was read: said as such, nothing referenced written.
     if (!writing) return fail("error");
     // A seal, a write or a read-back failed: what was written stays unreferenced; every earlier set as it was.

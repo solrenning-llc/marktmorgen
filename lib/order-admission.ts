@@ -31,16 +31,18 @@
  * charged. A store in its free trial or with no plan is not counted here;
  * its paid orders stay what they were (docs/funded-exposure-review.md).
  *
- * scripts/test_order_admission_redis.py runs both scripts on a real Redis.
+ * scripts/test_order_admission_redis.py runs the scripts on a real Redis.
  */
 import { allowanceWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitNonPaying } from "@/lib/free-pool";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
 import { dataKey } from "@/lib/store-data";
-import { dataRoomFor, orderDataBytes } from "@/lib/store-data-rules";
+import { dataRoomFor, orderDataBytes, MAX_ORDER_ITEMS } from "@/lib/store-data-rules";
+import { shareBps } from "@/lib/platform-share";
 
 /** Hours a checkout is held for: Stripe keeps a checkout open for a day at most, and one more for the hour it was opened in. */
 export const OPEN_HOURS = 25;
@@ -123,11 +125,118 @@ const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${mon
 const openKey = (folder: string) => `nl:orders:open:${folder}`;
 const heldKey = (folder: string) => `nl:orders:open:${folder}:b`;
 const hourOf = (now: number) => Math.floor(now / 3_600_000);
+/** Orders paid while their paying store's billing window was unknown, by its folder, until the window is known (rule 30). */
+const pendingKey = (folder: string) => `nl:orders:pending:${folder}`;
+/** As long as a window's count is kept (lib/orders.ts, KEEP_SECONDS). */
+const COUNT_KEEP_SECONDS = 400 * 86_400;
+
+/**
+ * Where one paid order of a paying store whose billing window is unknown is
+ * held (lib/orders.ts, countOrder, which marks and holds it in one step):
+ * never counted in the calendar month, which the admission below never reads
+ * for it, but kept to be counted in the window once it is known
+ * (countHeldOrders), as long as a window's count (lib/orders.ts, KEEP_SECONDS).
+ */
+export const heldOrdersKey = (folder: string) => pendingKey(folder);
+
+/**
+ * KEYS[1] the orders held while the window was unknown, KEYS[2] the window's
+ * count; ARGV[1] seconds to keep the count. Moves the held orders into the
+ * count in one step, so no admission can read the count while they are in
+ * neither key (Claude 4 on #3150). Answers how many it moved (0 when none was
+ * held), or -1, with nothing written, when either key is not a whole count or
+ * the keep is not a number. Nothing is written before both are read and known
+ * to be counts, because Redis keeps a script's earlier writes when a later
+ * command fails: an INCRBY refused after the held orders were taken would lose
+ * them. Both stay under 16 digits, so INCRBY cannot overflow.
+ */
+export const MOVE_HELD_ORDERS = `-- marktmorgen:orders-held-move:v1
+local function whole(raw)
+  if #raw > 15 then return nil end
+  if raw ~= '0' and not string.match(raw, '^%-?[1-9]%d*$') then return nil end
+  return tonumber(raw)
+end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local n = whole(raw)
+if not n or n < 0 then return -1 end
+local have = redis.call('GET', KEYS[2])
+if have and not whole(have) then return -1 end
+local keep = tonumber(ARGV[1])
+if not keep or keep < 1 then return -1 end
+redis.call('DEL', KEYS[1])
+if n == 0 then return 0 end
+redis.call('INCRBY', KEYS[2], n)
+redis.call('EXPIRE', KEYS[2], keep)
+return n`;
+
+/**
+ * Counts in a known window the orders held while it was unknown, and answers
+ * how many, in one atomic step (MOVE_HELD_ORDERS). Throws when the reply is
+ * not exactly a count from zero up (rule 24): nothing may then be admitted on
+ * a count that may be short of them. A lost reply never loses them and never
+ * counts them twice: the script ran whole or not at all, so they are either in
+ * the window already or still held for the next reading, and nothing here
+ * writes them again. A held key that is not a count is kept, never dropped:
+ * unknown is not zero, so admissions stay refused, as ADMIT_ORDERS refuses on
+ * an unreadable month's count.
+ */
+export async function countHeldOrders(folder: string, window: string): Promise<number> {
+  const reply: unknown = await redisPipeline([["EVAL", MOVE_HELD_ORDERS, 2, pendingKey(folder), countKey(folder, window), COUNT_KEEP_SECONDS]]);
+  const [answer] = repliesFor(reply, 1) ?? [undefined];
+  if (answer === -1) throw new Error("the orders held for an unknown window, or the window's count, could not be read; nothing was moved");
+  const moved = countOf(answer);
+  if (moved === null) throw new UnknownReplyError("the orders held for an unknown window");
+  return moved;
+}
 
 /** What a checkout carries so its order can give its hour back: the hour, as metadata. */
 export const ADMITTED_FIELD = "mm_admit";
 
 export type Admission = { ok: true; hour: number | null } | { ok: false; reason: "paused" | "unavailable" };
+
+type ConfirmationAdmission = { hour: number | null; bytes: number; window: string; windowEnd: number; captured: number; share: number; owner: string; folder: string | null; accountId: string | null; reference?: string };
+const confirmationAdmissions = new WeakMap<object, ConfirmationAdmission>();
+
+function confirmationEvidence(store: Store, window: { id: string; start: number; end: number } | null, hour: number | null, folder: string | null, n: number, items: number, now: number): ConfirmationAdmission | null {
+  try {
+    if (n !== 1 || !window || !Number.isSafeInteger(now) || now<=0 || now<window.start || now>=window.end || !Number.isSafeInteger(items) || items<1 || items>MAX_ORDER_ITEMS) return null;
+    const source: Record<string,unknown> = Object.create(null);
+    for (const key of ["shared","subscriptionActive","trialEnds","tier"]) {
+      const d=Object.getOwnPropertyDescriptor(store,key);
+      if (!d || !("value" in d)) return null;
+      source[key]=d.value;
+    }
+    if (typeof source.shared!=="boolean" || typeof source.subscriptionActive!=="boolean" || !Number.isSafeInteger(source.trialEnds) ||
+        Number(source.trialEnds)<0 || typeof source.tier!=="string" || !["creator","pro","scale"].includes(source.tier)) return null;
+    const share=shareBps(source as unknown as Store,now/1000),owner=storeRef(store).toLowerCase();
+    if (!owner || owner.length>320 || !Number.isSafeInteger(share) || share<0 || share>10_000) return null;
+    const account=Object.getOwnPropertyDescriptor(store,"stripeAccountId");
+    if(account && (!("value" in account) || (account.value!==null && (typeof account.value!=="string" || !/^acct_[A-Za-z0-9]{6,128}$/.test(account.value))))) return null;
+    return {hour,bytes:orderDataBytes(items),window:window.id,windowEnd:window.end,captured:now,share,owner,folder,accountId:account?.value??null};
+  } catch { return null; }
+}
+
+/** Capture only from this checkout's acknowledged admission, before exposing
+ * its payment page. This must be the actual returned object in this process:
+ * an old metadata hour or reconstructed success cannot establish evidence.
+ * One admission can bind only one checkout. Group-place admissions need their
+ * own per-place protocol and are intentionally not admitted by this hook.
+ */
+export function orderConfirmationAdmission(store: Store, admission: Admission, reference: string, accountId?: string): ConfirmationAdmission | null {
+  try {
+    const evidence=confirmationAdmissions.get(admission);
+    if (!evidence || evidence.owner!==storeRef(store).toLowerCase() || (accountId!==undefined && evidence.accountId!==accountId) ||
+      (evidence.reference!==undefined && evidence.reference!==reference)) return null;
+    evidence.reference=reference;
+    return {...evidence};
+  } catch { return null; }
+}
+
+/** The original aggregate hour is never replaced with the worker's hour. */
+export function orderConfirmationHoldKeys(folder: string): [string, string] {
+  return [openKey(folder), heldKey(folder)];
+}
 
 /**
  * Admits `n` orders for a store before a checkout opens (one for a checkout,
@@ -139,7 +248,14 @@ export type Admission = { ok: true; hour: number | null } | { ok: false; reason:
  */
 export async function admitOrders(store: Store, n = 1, now = Date.now(), items = 1): Promise<Admission> {
   const limit = paidOrdersLimitFor(store, now / 1000);
-  if (limit === null) return { ok: true, hour: null };
+  if (limit === null) {
+    const result: Admission={ok:true,hour:null};
+    try {
+      const evidence=confirmationEvidence(store,allowanceWindow(store,now),null,null,n,items,now);
+      if(evidence) confirmationAdmissions.set(result,evidence);
+    } catch { /* Capturing evidence must not change this legacy admission. */ }
+    return result;
+  }
   // A store in its free trial holds one of the month's places for stores that pay nothing (lib/free-pool-rules.ts).
   if (!(await admitNonPaying(store, now))) return { ok: false, reason: "paused" };
   if (!Number.isSafeInteger(n) || n < 1) return { ok: false, reason: "unavailable" };
@@ -154,7 +270,10 @@ export async function admitOrders(store: Store, n = 1, now = Date.now(), items =
     const folder = await storeFolder(storeRef(store));
     const room = dataKey(store);
     if (!room) return { ok: false, reason: "unavailable" };
+    // Orders paid while this window was unknown are in it before it is read (rule 30).
+    await countHeldOrders(folder, window.id);
     const hour = hourOf(now);
+    const evidence=confirmationEvidence(store,window,hour,folder,n,items,now);
     const reply: unknown = await redisPipeline([
       ["EVAL", ADMIT_ORDERS, 4, countKey(folder, window.id), openKey(folder), room, heldKey(folder), limit, n, hour, hour - (OPEN_HOURS - 1), (OPEN_HOURS + 1) * 3_600, dataRoomFor(store, now / 1000), n * orderDataBytes(items)],
     ]);
@@ -165,7 +284,11 @@ export async function admitOrders(store: Store, n = 1, now = Date.now(), items =
     if (!length || !Object.hasOwn(length, "value") || length.value !== 1) return { ok: false, reason: "unavailable" };
     const answer = Object.getOwnPropertyDescriptor(reply, "0");
     if (!answer || !Object.hasOwn(answer, "value")) return { ok: false, reason: "unavailable" };
-    if (answer.value === 1) return { ok: true, hour };
+    if (answer.value === 1) {
+      const result: Admission={ok:true,hour};
+      if(evidence) confirmationAdmissions.set(result,evidence);
+      return result;
+    }
     // The figure is reached, or the data room has no space for this order's records: either way the store rests.
     if (answer.value === 0 || answer.value === 2) return { ok: false, reason: "paused" };
     return { ok: false, reason: "unavailable" };

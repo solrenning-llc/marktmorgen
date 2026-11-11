@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingRemoval, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, discardPasskeys, listPasskeys, movePasskeys, pendingNow, pendingRemoval, repointPasskeys, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, moveTwoStep, replaceCodes, resetIfDue, spendRescue, startSetup, turnOff, twoStepOn, twoStepStatus } from "@/lib/two-step";
@@ -40,9 +40,20 @@ import { done, is, part } from "./check";
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.RESEND_API_KEY = "re_test_second_step_gate_only";
 const mails: { to: string; subject: string; text: string }[] = [];
+/** Addresses the email provider answers 503 for, as if it were down. */
+const mailDown = new Set<string>();
+/** Addresses whose next email waits until `open` is called, then is refused (503) or sent, as `fail` says (C3-113). */
+const mailHeld = new Map<string, { wait: Promise<void>; fail: boolean }>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (String(input).includes("resend")) {
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
+    const held = mailHeld.get(Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""));
+    if (held) {
+      mailHeld.delete(Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""));
+      await held.wait;
+      if (held.fail) return new Response("{}", { status: 503 });
+    }
+    if (mailDown.has(Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""))) return new Response("{}", { status: 503 });
     mails.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""), subject: String(body.subject ?? ""), text: String(body.text ?? "") });
     return new Response(JSON.stringify({ id: "email_1" }), { status: 200 });
   }
@@ -1015,7 +1026,7 @@ async function main(): Promise<void> {
   await turnOnApp(RSF, "rsf-backup@example.org");
   const rsfRecord = `nl:2fa:${hex(`nimbus-2fa:${RSF}`).slice(0, 40)}`;
   const [rsfRaw] = await redis.pipeline([["GET", rsfRecord]]);
-  await redis.pipeline([["SET", rsfRecord, JSON.stringify({ ...JSON.parse(String(rsfRaw)), reset: Date.now() - 1_000 })]]);
+  await redis.pipeline([["SET", rsfRecord, JSON.stringify({ ...JSON.parse(String(rsfRaw)), since: Date.now() - (RESET_DAYS + 1) * 86_400_000, reset: Date.now() - 1_000 })]]);
   const rsfMark = await markMoving(RSF, "rsf-elsewhere@example.com");
   const tokenRsf = hex(String(Math.random()));
   await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenRsf}`).slice(0, 40)}`, RSF, "EX", 900]]);
@@ -1031,6 +1042,196 @@ async function main(): Promise<void> {
   const lcaToken = /token=([0-9a-f]{64})/.exec([...mails].reverse().find((m) => m.to === "lca-backup@example.org" && /token=/.test(m.text))?.text ?? "")?.[1] ?? "";
   is("it goes to the code page", (await lostConfirm(form(`${ORIGIN}/api/auth/lost/confirm`, { token: lcaToken }))).headers.get("location"), `${ORIGIN}/signin/code`);
   await endMoving(LCA, "lca-elsewhere@example.com", lcaMark!);
+
+  part("A session logged out while its request waited for the lock keeps and removes nothing (C3-110)");
+  const RAC = "rac-owner@example.com";
+  const racP = makePasskey(RAC, "cred-rac-p");
+  const racQ = makePasskey(RAC, "cred-rac-q");
+  await racP.keep();
+  await racQ.keep();
+  const racThief = await signInWithPasskey(racP);
+  const racOwnerLink = await linkSession(RAC);
+  /** Runs `thief` and `owner` together through the real routes, the owner's landing between the thief's check and its lock. */
+  const raced = async (thief: () => Promise<{ status: number; error?: string }>, owner: () => Promise<unknown>) => {
+    const pipe = redis.pipeline.bind(redis);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let finish: () => void = () => {};
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let first = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (first && commands.some((c) => c[0] === "SET" && c[1] === lockOf(RAC) && c.includes("NX"))) {
+        first = false;
+        release();
+        await finished;
+      }
+      return pipe(commands);
+    }) as typeof redis.pipeline;
+    const [answer] = await Promise.all([thief(), gate.then(async () => { try { await owner(); } finally { finish(); } })]);
+    redis.pipeline = pipe;
+    return answer;
+  };
+  // The owner asks for P's removal (and so logs out the thief's P session) while the thief's "Keep it" for P waits.
+  await scheduleRemoval(RAC, "cred-rac-p", "a".repeat(64), false);
+  await cancelRemoval(RAC, "cred-rac-p", await signInWithPasskey(racQ));
+  const racThief2 = await signInWithPasskey(racP);
+  const keepAnswer = await raced(() => passkeys(racThief2, { action: "keep", id: "cred-rac-p" }), () => passkeys(racOwnerLink, { action: "remove", id: "cred-rac-p" }));
+  is("“Keep it” from the thief's session, logged out meanwhile: refused, P stays set to go", [keepAnswer.error, (await pendingRemoval(RAC))?.ids], ["second_step", ["cred-rac-p"]]);
+  await cancelRemoval(RAC, "cred-rac-p", await signInWithPasskey(racQ));
+  const racThief3 = await signInWithPasskey(racP);
+  const removeAnswer = await raced(() => passkeys(racThief3, { action: "remove", id: "cred-rac-q" }), () => passkeys(racOwnerLink, { action: "remove", id: "cred-rac-p" }));
+  is("removing Q at once from it: refused, Q stays", [removeAnswer.error, (await listPasskeys(RAC)).map((p) => p.id).sort()], ["second_step", ["cred-rac-p", "cred-rac-q"]]);
+  void racThief;
+  const NAP = "nap-noapp@example.com";
+  await makePasskey(NAP, "cred-nap").keep();
+  await scheduleRemoval(NAP, "cred-nap", "a".repeat(64), false);
+  is("a session marked by the app, on an account whose app is off, keeps nothing", await cancelRemoval(NAP, "cred-nap", await openSession(NAP, "app")), "second_step");
+
+  part("A removal nobody was told about is never set (C3-110)");
+  const UNS = "uns-owner@example.com";
+  await makePasskey(UNS, "cred-uns-1").keep();
+  await makePasskey(UNS, "cred-uns-2").keep();
+  const unsLink = await linkSession(UNS);
+  mailDown.add(UNS);
+  const unsAnswer = await passkeys(unsLink, { action: "remove", id: "cred-uns-1" });
+  mailDown.delete(UNS);
+  is("the provider is down: the request answers as such, and nothing waits to be removed", [unsAnswer.status, unsAnswer.error, await pendingRemoval(UNS)], [503, "unsent", null]);
+  is("with the email going out, it is set", typeof (await passkeys(unsLink, { action: "remove", id: "cred-uns-1" })).removeOn, "number");
+
+  part("Two requests for the same removal while its first notice goes out: never a success on an unconfirmed notice (C3-113)");
+  /** Holds the account's next email until the second request has answered; then it fails or goes out. */
+  const interleaved = async (email: string, link: string, id: string, fail: boolean) => {
+    let open = () => {};
+    mailHeld.set(email, { wait: new Promise<void>((resolve) => { open = resolve; }), fail });
+    const first = passkeys(link, { action: "remove", id });
+    // The first request has written its record and waits on the provider.
+    for (let i = 0; i < 200 && mailHeld.has(email); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await passkeys(link, { action: "remove", id });
+    open();
+    return [await first, second] as const;
+  };
+  const DRR = "drr-owner@example.com";
+  await makePasskey(DRR, "cred-drr-1").keep();
+  await makePasskey(DRR, "cred-drr-2").keep();
+  const drrLink = await linkSession(DRR);
+  const [failedFirst, whileTelling] = await interleaved(DRR, drrLink, "cred-drr-1", true);
+  is("the provider fails the first: the second, asked meanwhile, answers busy, never success; the first unsent; nothing waits", [whileTelling.status, whileTelling.error, whileTelling.removeOn, failedFirst.error, await pendingRemoval(DRR)], [503, "busy", undefined, "unsent", null]);
+  const [sentFirst, whileSending] = await interleaved(DRR, drrLink, "cred-drr-1", false);
+  is("the provider delivers the first: the second, asked meanwhile, still answers busy; the first is set, told once", [whileSending.error, typeof sentFirst.removeOn, (await pendingRemoval(DRR))?.ids], ["busy", "number", ["cred-drr-1"]]);
+  const toldMails = mails.length;
+  const again = await passkeys(drrLink, { action: "remove", id: "cred-drr-1" });
+  is("asked again once the notice was delivered: answered set, keeping its moment, and not emailed again within the hour", [again.removeOn, mails.length], [sentFirst.removeOn, toldMails]);
+
+  part("A request that stopped before its notice was confirmed never has its passkey removed (C3-115)");
+  const STL = "stale-owner@example.com";
+  await makePasskey(STL, "cred-stale-1").keep();
+  await makePasskey(STL, "cred-stale-2").keep();
+  const stlLink = await linkSession(STL);
+  // Its process stops after writing the record and before settling it: here, its email held until the end.
+  let stlOpen = () => {};
+  mailHeld.set(STL, { wait: new Promise<void>((resolve) => { stlOpen = resolve; }), fail: true });
+  const stopped = passkeys(stlLink, { action: "remove", id: "cred-stale-1" });
+  for (let i = 0; i < 200 && mailHeld.has(STL); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  is("while it sends, the passkey waits as asked", (await pendingNow(STL))?.ids, ["cred-stale-1"]);
+  // Its seven days pass with nobody asking again; a login or a check applies what is due.
+  const stlLater = Date.now() + 8 * 86_400_000;
+  is("past its day, the untold removal is not applied: taken off the record, both passkeys kept", [await pendingRemoval(STL, stlLater), (await listPasskeys(STL)).map((p) => p.id).sort()], [null, ["cred-stale-1", "cred-stale-2"]]);
+  stlOpen();
+  is("the stopped request, ending late, changes nothing it no longer holds", [(await stopped).error, await pendingNow(STL), (await listPasskeys(STL)).length], ["unsent", null, 2]);
+
+  part("Moving passkeys whose last answer was lost keeps them at the new address (C3-110)");
+  const LOF = "lof-from@example.com";
+  const LOT = "lof-dest@example.com";
+  await makePasskey(LOF, "cred-lof").keep();
+  const lofList = `nl:pk:${hex(`nimbus-passkeys:${LOF}`).slice(0, 40)}`;
+  const lofPipe = redis.pipeline.bind(redis);
+  let lofLost = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!lofLost && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-del:") && c.includes(lofList))) {
+      lofLost = true;
+      await lofPipe(commands);
+      throw new Error("the answer was lost");
+    }
+    return lofPipe(commands);
+  }) as typeof redis.pipeline;
+  const lofMoved = await movePasskeys(LOF, LOT).then(() => "moved", () => "refused");
+  redis.pipeline = lofPipe;
+  is("the passkey is at the new address, nowhere lost", [lofMoved, (await listPasskeys(LOT)).map((p) => p.id), (await listPasskeys(LOF)).length, (await redis.pipeline([["GET", `nl:pk:cred:${hex("nimbus-passkey-id:cred-lof").slice(0, 40)}`]]))[0]], ["moved", ["cred-lof"], 0, LOT]);
+
+  part("Moving passkeys whose index write was applied and its answer lost: the index goes back (C3-117)");
+  const GIF = "gidx-from@example.com";
+  const GIT = "gidx-dest@example.com";
+  const gidx = makePasskey(GIF, "cred-g-index");
+  await gidx.keep();
+  const gidxCred = `nl:pk:cred:${hex("nimbus-passkey-id:cred-g-index").slice(0, 40)}`;
+  const gPipe = redis.pipeline.bind(redis);
+  let gLost = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!gLost && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-set:") && c.includes(gidxCred) && c.includes(GIT))) {
+      gLost = true;
+      await gPipe(commands);
+      throw new Error("applied; response lost");
+    }
+    return gPipe(commands);
+  }) as typeof redis.pipeline;
+  const gMoved = await movePasskeys(GIF, GIT).then(() => "moved", () => "refused");
+  redis.pipeline = gPipe;
+  is("the move is refused and the passkey stays where its list is, its index with it", [gMoved, (await listPasskeys(GIF)).length, (await listPasskeys(GIT)).length, (await redis.pipeline([["GET", gidxCred]]))[0]], ["refused", 1, 0, GIF]);
+  is("and it still logs in", (await signInWithPasskey(gidx)).length, 64);
+  // An index left on the other address all the same (as before this fix) is pointed back by the repair.
+  await redis.pipeline([["SET", gidxCred, GIT]]);
+  is("the repair points an index left on an address with no list back at the list's", [await repointPasskeys(GIF), (await redis.pipeline([["GET", gidxCred]]))[0], (await signInWithPasskey(gidx)).length], [1, GIF, 64]);
+
+  part("An old list gone while the new index write was not applied is never a finished move (C3-120)");
+  const DXF = "dx-from@example.com";
+  const DXT = "dx-dest@example.com";
+  const dx = makePasskey(DXF, "cred-dx");
+  await dx.keep();
+  const dxCred = `nl:pk:cred:${hex("nimbus-passkey-id:cred-dx").slice(0, 40)}`;
+  const dxLock = `nl:pk:lock:${hex(`nimbus-passkey-lock:${DXF}`).slice(0, 40)}`;
+  const dxPipe = redis.pipeline.bind(redis);
+  let dxDone = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!dxDone && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-set:") && c.includes(dxCred) && c.includes(DXT))) {
+      dxDone = true;
+      // The old address's lock runs out meanwhile; a valid clean-up takes it and forgets that address's passkeys.
+      await dxPipe([["DEL", dxLock]]);
+      redis.pipeline = dxPipe;
+      await discardPasskeys(DXF);
+      // The index write to the new address is not applied, and fails.
+      throw new Error("not applied");
+    }
+    return dxPipe(commands);
+  }) as typeof redis.pipeline;
+  const dxMoved = await movePasskeys(DXF, DXT).then(() => "moved", () => "refused");
+  redis.pipeline = dxPipe;
+  is("refused, and nothing is left at the new address: never said to be moved", [dxMoved, (await listPasskeys(DXF)).length, (await listPasskeys(DXT)).length, (await redis.pipeline([["GET", dxCred]]))[0]], ["refused", 0, 0, null]);
+
+  part("Small items of C3-110");
+  const KRA = "kra-owner@example.com";
+  await makePasskey(KRA, "cred-kra-1").keep();
+  const kra2 = makePasskey(KRA, "cred-kra-2");
+  await kra2.keep();
+  await keepRecoveryAddress(KRA, "kra-rec@example.org");
+  await scheduleRemoval(KRA, "cred-kra-1", "a".repeat(64), false);
+  mails.length = 0;
+  await passkeys(await signInWithPasskey(kra2), { action: "keep", id: "cred-kra-1" });
+  is("“Keep it” is told to the recovery address too", mails.some((m) => m.to === "kra-rec@example.org" && m.subject === "Your passkey stays on your Marktmorgen account"), true);
+  const RUN1 = "run-a@example.com";
+  const RUN2 = "run-b@example.com";
+  const runMark = await markMoving(RUN1, RUN2);
+  await markBrokenMove(RUN1, RUN2);
+  is("clearing by hand waits for a move that is running", await clearBrokenMoveByHand(RUN1, RUN1), "running");
+  await endMoving(RUN1, RUN2, runMark!);
+  const AGN = "agn-owner@example.com";
+  const agnP = makePasskey(AGN, "cred-agn-p");
+  await agnP.keep();
+  await makePasskey(AGN, "cred-agn-q").keep();
+  const agnLink = await linkSession(AGN);
+  await passkeys(agnLink, { action: "remove", id: "cred-agn-p" });
+  const agnOwner = await signInWithPasskey(agnP);
+  await passkeys(agnLink, { action: "remove", id: "cred-agn-p" });
+  is("asking again for the same removal does not log the owner out again", await emailForSession(agnOwner), AGN);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

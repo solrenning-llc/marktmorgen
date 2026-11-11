@@ -92,8 +92,9 @@ export default async function GrowthPage({ searchParams }: Params) {
         <TemplateLibrary
           cards={templateLibraryCards({fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",product:null,paidCount:0})}
           sid={store.sid}
-          products={(store.catalog.inline ?? store.catalog.head).map(product => ({id:product.id,title:product.title,free:isFree(product)}))}
+          products={(store.catalog.inline ?? store.catalog.head).map(product => ({id:product.id,title:product.title,free:isFree(product),course:Boolean(product.course)}))}
           canPage={can(role,"products") && can(role,"page")}
+          canCourse={can(role,"products")}
           canEmail={can(role,"draft")}
           canSequence={can(role,"send")}
         />

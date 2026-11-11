@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Intercept all settings writes; no reminder email, card update or payment occurs. */
 export async function checkDunningAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -33,6 +35,7 @@ export async function checkDunningAcknowledgment({browser,LOCAL,fixture,is}){
    });
    if(layout)console.error("DUNNING_OPEN_LAYOUT_DIAGNOSTIC:"+JSON.stringify({width,...layout}));
    const check=section.locator("#dunning-card"),count=section.locator("#dunning-reminders");
+   await waitForReactChangeHandler(page,count);
    for(const on of [false,true]){
     await count.selectOption(on?"3":"2");await check.setChecked(on);
     if(width===390)console.log("DUNNING_SELECTED_LAYOUT:"+JSON.stringify(await page.evaluate(()=>({viewport:innerWidth,scroll:document.documentElement.scrollWidth,select:(()=>{const n=document.querySelector("#dunning-reminders");return {client:n.clientWidth,scroll:n.scrollWidth,width:n.getBoundingClientRect().width,value:n.value};})()}))));

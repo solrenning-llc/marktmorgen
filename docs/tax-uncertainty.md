@@ -46,7 +46,7 @@ Unknown costs remain UNKNOWN, never zero. Any later financial review needs the a
 
 VR: documented and checked in a PR, not a deployed product change. The register makes aggravating facts, design measures and missing evidence explicit. It does not implement the measures, verify actual company/provider records, finish TX1/TX3/TX4/TX5/TX7, or certify a legal or financial outcome. Research/CI and compliance costs remain unknown where not evidenced, allocated 100% to Marktmorgen under FX275. No interface or user action changes; no accessibility certification is claimed.
 
-Historical material below remains unchanged; its old dates, consultation plans and incompatible readings are historical, not current instructions. The new register above does not adopt them.
+The TX1 section that follows is the current partial-verification record, not history, and is not changed here. Historical material below remains unchanged; its old dates, consultation plans and incompatible readings are historical, not current instructions. The new register above does not adopt them.
 <!-- TX6-RESIDUAL-RISKS:END -->
 
 ## TX1 — Conferência oficial parcial e divergências (27/10/2026)

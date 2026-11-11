@@ -28,6 +28,23 @@ export type CustomerBaseAssessment = {
 };
 const stopped = (status: CustomerBaseAssessment['status']): CustomerBaseAssessment => ({status,minimumCustomers:null,reviewedBaseSufficient:false});
 const cents = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+type ProxyInspector = { isProxy(value: unknown): boolean };
+/** Node's native predicate is the only no-trap Proxy check available here.
+ * Client graphs may import these rules, so obtain it without a Node import and
+ * fail closed in runtimes that cannot prove an input is an ordinary object. */
+function runtimeProxyInspector(): ProxyInspector | null {
+  const runtime = globalThis as typeof globalThis & {
+    process?: { getBuiltinModule?: (name: string) => unknown };
+  };
+  const runtimeModule = runtime.process?.getBuiltinModule?.('node:util') as {
+    types?: { isProxy?: unknown };
+  } | undefined;
+  const isProxy = runtimeModule?.types?.isProxy;
+  return typeof isProxy === 'function'
+    ? { isProxy: (value) => (isProxy as ProxyInspector['isProxy'])(value) }
+    : null;
+}
+const PROXY_INSPECTOR = runtimeProxyInspector();
 const FIXED_REVIEW_KEYS = [
   'monthlyFixedCostsCeilingCents', 'monthlyFixedTaxesCeilingCents', 'reviewedPayingCustomers',
   'allFixedCostsBounded', 'allFixedTaxesReviewed', 'fixedCostsEvidence', 'fixedTaxEvidence',
@@ -47,10 +64,10 @@ function ownReviewData(record: unknown, key: string): unknown {
  */
 export function assessMinimumCustomerBase(units: CustomerBaseUnit[], fixed: CustomerBaseReview | null): CustomerBaseAssessment {
   try {
-    if (!Array.isArray(units) || Object.getPrototypeOf(units) !== Array.prototype) return stopped('unknown');
+    if (!PROXY_INSPECTOR || PROXY_INSPECTOR.isProxy(units) || !Array.isArray(units) || Object.getPrototypeOf(units) !== Array.prototype) return stopped('unknown');
     const length = ownReviewData(units, 'length');
     if (!cents(length) || length === 0 || Reflect.ownKeys(units).length !== length + 1) return stopped('unknown');
-    if (!fixed || typeof fixed !== 'object' || Array.isArray(fixed)) return stopped('unknown');
+    if (!fixed || typeof fixed !== 'object' || PROXY_INSPECTOR.isProxy(fixed) || Array.isArray(fixed)) return stopped('unknown');
     if (![Object.prototype, null].includes(Object.getPrototypeOf(fixed))
       || Reflect.ownKeys(fixed).length !== FIXED_REVIEW_KEYS.length) return stopped('unknown');
     // Capture the complete fixed review. Projecting only expected fields could
@@ -72,13 +89,18 @@ export function assessMinimumCustomerBase(units: CustomerBaseUnit[], fixed: Cust
     if (fixedCosts == null || fixedTaxes == null || payingCustomers == null) return stopped('unknown');
     if (!cents(fixedCosts) || !cents(fixedTaxes) || !cents(payingCustomers)) return stopped('invalid');
     if (costsBounded !== true || taxesReviewed !== true || typeof costsEvidence !== 'string' || !costsEvidence.trim() || typeof taxEvidence !== 'string' || !taxEvidence.trim()) return stopped('unknown');
+    // Reflection alone cannot establish a complete review: Proxy traps may
+    // conceal an additional unpriced category. All seven original fields are
+    // now validated primitive data; native serialization rejects Proxy exotic
+    // objects without executing ordinary accessors or projecting away costs.
+    structuredClone(fixed);
     const fixedCents = BigInt(fixedCosts) + BigInt(fixedTaxes);
     let minimum = BigInt(1);
     // Descriptors bind the actual dense array. A supplied iterator cannot omit
     // a weaker unit, and an indexed accessor cannot supply changing evidence.
     for (let index = 0; index < length; index += 1) {
       const unit = ownReviewData(units, String(index));
-      if (!unit || typeof unit !== 'object' || Array.isArray(unit)) return stopped('invalid');
+      if (!unit || typeof unit !== 'object' || PROXY_INSPECTOR.isProxy(unit) || Array.isArray(unit)) return stopped('unknown');
       const months = ownReviewData(unit, 'months');
       const scenario = ownReviewData(unit, 'scenario') as CustomerWorstCase | null;
       if (months !== 1 && months !== 12) return stopped('invalid');

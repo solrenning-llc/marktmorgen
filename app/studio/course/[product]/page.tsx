@@ -10,6 +10,8 @@ import { storeFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
+import { StudioEmptyState } from "@/components/empty-state";
+import { productSegment } from "@/lib/product-slug";
 import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
@@ -26,6 +28,7 @@ import {
   WithdrawCertificate,
 } from "@/components/course-editor";
 import { readListing } from "@/lib/catalog";
+import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -33,7 +36,7 @@ import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
 import { parseLanguage } from "@/lib/store-language";
 import { CourseWorkStudio, type StudioWork } from "@/components/course-work-studio";
-import { submissionsOf, waitingWork } from "@/lib/assignment";
+import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
 
 
 export const metadata: Metadata = {
@@ -56,6 +59,7 @@ export default async function StudioCoursePage({
 }) {
   const { product: productId } = await params;
   const query = await searchParams;
+  const initialTemplate = typeof query.template === "string" ? templateById(query.template) : null;
   // Which store, and whether this person's role there has "products" (lib/studio-route.ts).
   const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "products");
   if (!found.ok) {
@@ -81,15 +85,18 @@ export default async function StudioCoursePage({
   const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
-  const { students, total } = await studentsOf(course, 500);
+  // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
+  const studentsRead = await studentsOf(course, 500).catch(() => null);
+  const students = studentsRead?.students ?? [];
+  const total = studentsRead?.total ?? 0;
   const lessons = lessonCount(course);
   const finished = students.filter((s) => lessons > 0 && s.done >= lessons).length;
   const started = students.filter((s) => s.done > 0).length;
   const selling = canSellProduct(store, product);
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
-  const certificates = await certificatesFor(course.id);
-  const standing = certificates.list.filter((c) => !c.withdrawnAt).length;
+  const certificates = await certificatesFor(course.id).catch(() => null);
+  const standing = certificates ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
   // The newest comments under the lessons, marked new since this page last showed them.
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
@@ -106,8 +113,10 @@ export default async function StudioCoursePage({
   const workRows: StudioWork[] = work.rows.flatMap((row, i) => {
     const submission = handed[i];
     const title = titles.get(row.lessonId);
-    return submission && title !== undefined ? [{ lessonId: row.lessonId, lessonTitle: title, who: row.who, email: addresses[i] ?? "", submission }] : [];
+    return submission && !isUnreadSubmission(submission) && title !== undefined ? [{ lessonId: row.lessonId, lessonTitle: title, who: row.who, email: addresses[i] ?? "", submission }] : [];
   });
+  // Work that is there but whose record does not read is said in the list, never left out of it (CX-123 rule 24).
+  const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(handed[i]) && titles.has(row.lessonId)).length;
   const byId = new Map(recent.comments.map((c) => [c.id, c]));
   const shownComments: StudioComment[] = recent.comments
     .filter((c) => titles.has(c.lesson))
@@ -190,8 +199,10 @@ export default async function StudioCoursePage({
         />
         <CourseEditor
           productId={product.id}
+          initialTemplate={initialTemplate?.id ?? null}
           openFirst={typeof query.lesson === "string" && lessonsInOrder(course).some(({ lesson }) => lesson.id === query.lesson) ? query.lesson : null}
           initial={course}
+          draft={product.hidden === true}
           folder={folder}
           streams={streams}
           captions={captions}
@@ -207,6 +218,7 @@ export default async function StudioCoursePage({
           <CourseWorkStudio
             productId={product.id}
             rows={workRows}
+            unread={unreadWork}
             total={work.total}
             showing={showingWork}
             hrefs={{ waiting: `${studioPath(store, "", `course/${product.id}`)}#work`, all: `${studioPath(store, "work=all", `course/${product.id}`)}#work` }}
@@ -247,13 +259,19 @@ export default async function StudioCoursePage({
             ) : null}
           </div>
 
-          <h3 className="mt-7 font-semibold text-ink">{`Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
-          {certificates.list.length === 0 ? (
-            <p className="mt-3 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">
-              {course.certificate
-                ? "Nobody has finished yet. When a student does and asks for their certificate, it is listed here."
-                : "Switch certificates on and each student who finishes is listed here with theirs."}
+          <h3 className="mt-7 font-semibold text-ink">{standing === null ? "Completions" : `Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
+          {certificates === null ? (
+            <p role="status" className="notice mt-3">
+              The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.
             </p>
+          ) : certificates.list.length === 0 ? (
+            <StudioEmptyState
+              level={4}
+              compact
+              className="mt-3"
+              title={course.certificate ? "No certificates yet" : "Certificates are off"}
+              body={course.certificate ? "Nobody has finished yet. When a student does and asks for their certificate, it is listed here." : "Switch certificates on above and each student who finishes is listed here with theirs."}
+            />
           ) : (
             <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Certificates issued, one row each">
               <table className="w-full text-left text-sm">
@@ -301,22 +319,35 @@ export default async function StudioCoursePage({
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
           </p>
-          <div className="mt-5 grid grid-cols-3 gap-3 text-center">
-            <div className="rounded-[var(--r-sm)] bg-sand p-4">
-              <p className="text-2xl font-semibold tabular-nums">{total}</p>
-              <p className="text-sm text-ink-soft">opened it</p>
+          {studentsRead === null ? null : (
+            <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-[var(--r-sm)] bg-sand p-4">
+                <p className="text-2xl font-semibold tabular-nums">{total}</p>
+                <p className="text-sm text-ink-soft">opened it</p>
+              </div>
+              <div className="rounded-[var(--r-sm)] bg-sand p-4">
+                <p className="text-2xl font-semibold tabular-nums">{started}</p>
+                <p className="text-sm text-ink-soft">finished a lesson</p>
+              </div>
+              <div className="rounded-[var(--r-sm)] bg-sand p-4">
+                <p className="text-2xl font-semibold tabular-nums">{finished}</p>
+                <p className="text-sm text-ink-soft">finished it all</p>
+              </div>
             </div>
-            <div className="rounded-[var(--r-sm)] bg-sand p-4">
-              <p className="text-2xl font-semibold tabular-nums">{started}</p>
-              <p className="text-sm text-ink-soft">finished a lesson</p>
-            </div>
-            <div className="rounded-[var(--r-sm)] bg-sand p-4">
-              <p className="text-2xl font-semibold tabular-nums">{finished}</p>
-              <p className="text-sm text-ink-soft">finished it all</p>
-            </div>
-          </div>
-          {students.length === 0 ? (
-            <p className="mt-5 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">Nobody has opened it yet.</p>
+          )}
+          {studentsRead === null ? (
+            <p role="status" className="notice mt-5">
+              The students could not be read just now. Reload this page in a moment; this does not mean nobody has opened the course.
+            </p>
+          ) : students.length === 0 ? (
+            <StudioEmptyState
+              level={3}
+              compact
+              className="mt-5"
+              title="No students yet"
+              body="Each student who opens the course is listed here, with the lessons they marked done."
+              action={selling ? { href: `/@${store.handle}/p/${productSegment(product)}`, label: "Open the sale page to share it" } : undefined}
+            />
           ) : (
             <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label="Students, one row each">
               <table className="w-full text-left text-sm">

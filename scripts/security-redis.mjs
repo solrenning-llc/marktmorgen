@@ -15,6 +15,25 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { build } from "esbuild";
+import { requireLoopbackRedis } from "./loopback-redis.mjs";
+
+// The wrapper (scripts/test_security_redis.py) serves Redis on loopback with this token; nothing else is reached.
+const redis = requireLoopbackRedis(process.env, "security-check");
+
+/** Empties the throwaway database, and stops unless Redis confirms it with exactly OK. */
+async function flush() {
+  const response = await fetch(`${redis.url}/pipeline`, { method: "POST", headers: { Authorization: `Bearer ${redis.token}`, "Content-Type": "application/json" }, body: JSON.stringify([["FLUSHDB"]]) });
+  let replies;
+  try {
+    replies = await response.json();
+  } catch {
+    replies = null;
+  }
+  const reply = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!response.ok || !reply || typeof reply !== "object" || Object.hasOwn(reply, "error") || reply.result !== "OK") {
+    throw new Error(`FLUSHDB was not confirmed (HTTP ${response.status}); no journey runs on a database that may not be empty.`);
+  }
+}
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const here = join(root, "tests", "security");
@@ -37,13 +56,13 @@ try {
         "@": root,
         "@/lib/redis": join(root, "lib", "redis.ts"),
         "@/lib/blob": join(here, "blob.ts"),
+        ...(["access-email-reserve.redis-run.ts", "agreement-signature.redis-run.ts", "erasure-request-asked.redis-run.ts", "payment-request-state.redis-run.ts"].includes(file) ? { "@/lib/resend-fallback-transport": join(root, "tests/e2e/reviewed-resend-transport.ts") } : {}),
         "next/headers": join(here, "next-headers.ts"),
         "next/og": join(here, "next-og.ts"),
       },
     });
     // Each journey starts from an empty database.
-    const url = process.env.UPSTASH_REDIS_REST_URL;
-    if (url) await fetch(`${url}/pipeline`, { method: "POST", headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify([["FLUSHDB"]]) });
+    await flush();
     console.log(`\n=== ${file} ===`);
     const run = spawnSync(process.execPath, [bundle], { stdio: "inherit", env: process.env, cwd: root });
     if (run.status !== 0) failed += 1;

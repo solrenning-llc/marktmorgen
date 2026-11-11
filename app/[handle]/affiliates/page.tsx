@@ -1,4 +1,6 @@
 import { EmailField } from "@/components/email-field";
+import { StoreResting } from "@/components/store-resting";
+import { admitAffiliatePage } from "@/lib/affiliate-page-admission";
 import { SITE_URL } from "@/lib/site-url";
 import type { Metadata } from "next";
 import { readListings, recordListings } from "@/lib/catalog";
@@ -24,7 +26,6 @@ import {
   buyersJoin,
   canApply,
   linkEmail,
-  readBook,
   recruitLink,
 } from "@/lib/affiliates";
 import { AFFILIATE_CODE_PATTERN } from "@/lib/affiliate-setting";
@@ -36,6 +37,12 @@ import { kitProduct, productAffiliateLink } from "@/lib/affiliate-kit";
 import { aiAvailableFor } from "@/lib/ai";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { type LeadStatus, maskEmail } from "@/lib/affiliate-lead-rules";
+
+// The one load that works the program's book out for everybody stops asking Stripe after
+// BOOK_READ_SECONDS and writes what it read (lib/affiliate-book-snapshot.ts), inside this limit;
+// the refresh's lock (BOOK_LOCK_SECONDS) outlasts it, so a stopped load's lock is still held when
+// it stops. Equal to AFFILIATE_PAGE_MAX_SECONDS; a literal, as the build reads it.
+export const maxDuration = 300;
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -95,10 +102,21 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const order = typeof query.order === "string" && /^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(query.order) ? query.order : "";
   const linkFor = token ? await linkEmail(store, token) : null;
   const affiliate = await affiliateForSession(store, (await cookies()).get(affiliateCookieName(store.handle))?.value);
+  // Paid for before anything that grows with the store is read (lib/affiliate-page-admission.ts):
+  // past the window, the resting page, and nothing more is read.
+  // An approved affiliate's figures come from the program's book, worked out for all its affiliates
+  // at most once a day (lib/affiliate-book-snapshot.ts); the page says when they are from, in UTC, spelled out.
+  const admission = await admitAffiliatePage(store, affiliate);
+  if (!admission.admitted) return <StoreResting store={store} buyer={affiliate !== null} />;
+  const kept = admission.book;
   const on = affiliatesOn(store);
   const open = canApply(store);
   const terms = store.affiliates;
-  const book = affiliate ? await readBook(store, affiliate.id) : null;
+  const shown = typeof kept === "object" ? kept : null;
+  const book = shown ? shown.book : null;
+  const asOf = shown
+    ? new Date(shown.at * 1000).toLocaleString(lang.locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })
+    : "";
   const row = book?.rows[0] ?? null;
   // The products a partner shares in, by name, so their own page can say what
   // they hold rather than leaving them to trust the email they accepted.
@@ -262,7 +280,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       <p className="st-muted mt-2 text-sm">{a.recruitNote(store.affiliates.secondTier, store.name)}</p>
                     </>
                   ) : null}
-                  <AffiliateCampaignLinks products={promotionProducts} />
+                  <AffiliateCampaignLinks products={promotionProducts} language={store.language} />
                   <AffiliateKit handle={store.handle} language={store.language} products={aiAvailableFor(store) ? kitProducts : []} />
                   {/*
                     A code of the store's own, given to this affiliate
@@ -342,6 +360,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       </div>
                     ))}
                   </dl>
+                  <p className="st-muted mt-3 text-sm" data-figures-as-of="">
+                    {[a.figuresAsOf(asOf), shown?.refresh === "daily" ? a.figuresDaily : shown?.refresh === "short" ? a.figuresShort : ""].filter(Boolean).join(" ")}
+                  </p>
                   <p className="st-muted mt-3 text-sm">
                     {a.paidSoFar(money(row.paid, book.currency), store.name)}
                   </p>
@@ -369,7 +390,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     </p>
                   ) : null}
 
-                  <AffiliatePromotionResults book={book} />
+                  <AffiliatePromotionResults book={book} language={store.language} />
                   {/* Each lead with where it stands (lib/affiliate-lead-rules.ts), the person's address masked. */}
                   {book.lines.some((line) => line.how === "lead") ? (
                     <>
@@ -432,6 +453,14 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     </>
                   ) : null}
                 </>
+              ) : kept === "soon" ? (
+                <p className="st-note mt-7 text-sm" role="status" data-figures-soon="">
+                  {a.figuresSoon}
+                </p>
+              ) : kept === "noRoom" ? (
+                <p className="st-note mt-7 text-sm" role="status" data-figures-no-room="">
+                  {a.figuresNoRoom}
+                </p>
               ) : null}
 
               {affiliate.status === "approved" ? (

@@ -9,7 +9,11 @@ import { store as redis } from "./redis-stub";
 
 export type Command = (string | number)[];
 type Rule = {
-  match: (command: Command) => boolean;
+  /**
+   * Named `matches`, not `match`: a call `rule.match(command)` reads to CodeQL as String.prototype.match, so every
+   * address a test stores ("https://meet.google.com/...") was reported as an unescaped hostname regular expression.
+   */
+  matches: (command: Command) => boolean;
   reply: (real: unknown[]) => unknown;
   /** Whether the command reaches the stand-in before the reply is replaced. */
   run: boolean;
@@ -24,7 +28,7 @@ const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
   sent.push(commands);
   // Rules apply in the order they were given: a read-back's rule waits for its write's.
-  if (!rules.length || commands[0] === undefined || !rules[0].match(commands[0])) return real(commands);
+  if (!rules.length || commands[0] === undefined || !rules[0].matches(commands[0])) return real(commands);
   const rule = rules.shift()!;
   rule.before?.();
   const got = rule.run ? ((await real(commands)) as unknown[]) : [];
@@ -33,7 +37,7 @@ redis.pipeline = (async (commands: Command[]) => {
 
 /** The next pipeline whose first command matches is answered with `reply` instead (once). */
 export function answer(match: (command: Command) => boolean, reply: (real: unknown[]) => unknown, options: { run?: boolean; before?: () => void } = {}): void {
-  rules.push({ match, reply, run: options.run ?? true, before: options.before });
+  rules.push({ matches: match, reply, run: options.run ?? true, before: options.before });
 }
 
 export function clearAnswers(): void {

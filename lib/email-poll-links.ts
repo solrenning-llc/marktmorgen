@@ -11,6 +11,7 @@
  * set no link is made, and none is accepted (unknown, never a vote).
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { BROADCAST_ID } from "@/lib/broadcasts";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { deriveKey } from "@/lib/secret-box";
 
@@ -27,7 +28,8 @@ function signature(key: Buffer, broadcastId: string, place: number): string {
 /** The part of the link that names the recipient: their place and its signature; null with no key or a place that is not one. */
 export function pollLinkPart(broadcastId: string, place: number): string | null {
   const key = deriveKey(LABEL);
-  if (!key || !broadcastId || !isPlace(place)) return null;
+  // Only a broadcast's own id (lib/broadcasts.ts), never another shape (Claude 3 on #3673).
+  if (!key || !BROADCAST_ID.test(broadcastId) || !isPlace(place)) return null;
   return `${place}.${signature(key, broadcastId, place)}`;
 }
 
@@ -35,7 +37,7 @@ export function pollLinkPart(broadcastId: string, place: number): string | null 
 export function checkPollLink(broadcastId: string, raw: unknown): { ok: true; recipient: number } | { ok: false; unknown?: true } {
   const key = deriveKey(LABEL);
   if (!key) return { ok: false, unknown: true };
-  const match = typeof raw === "string" && broadcastId ? PART.exec(raw) : null;
+  const match = typeof raw === "string" && BROADCAST_ID.test(broadcastId) ? PART.exec(raw) : null;
   if (!match) return { ok: false };
   const place = Number(match[1]);
   if (!isPlace(place)) return { ok: false };

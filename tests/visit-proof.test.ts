@@ -80,12 +80,10 @@ async function main(): Promise<void> {
 
   part("The page sends its count through the host's browser check");
   const beacon = readFileSync("components/store-beacon.tsx", "utf8");
-  is("the check guards the count's own address, for a POST", /initBotId\(\{ protect: \[\{ path: "\/api\/store\/hit", method: "POST" \}\] \}\)/.test(beacon), true);
-  is("the count goes by fetch, which the check signs, never by sendBeacon, which it cannot", [/via\("\/api\/store\/hit", \{ method: "POST"/.test(beacon) && /send\(fetch\)/.test(beacon), /navigator\.sendBeacon/.test(beacon)], [true, false]);
-  // A count retried without the check from a page being left starts a request that never ends (the signup matrix's
-  // reload waited for the network forever), and a visit, a page or a funnel step without the check counts as nothing.
-  is("only a link's count is ever sent again without the check", /const retryUnsigned = payload\.k === "l"/.test(beacon), true);
-  is("and never from a page being left", /addEventListener\("pagehide"/.test(beacon) && /retryUnsigned && unsigned && !leaving/.test(beacon), true);
+  const client = readFileSync("lib/browser-check-client.ts", "utf8");
+  is("the check guards the count's own address, for a POST, set up once for the window", /startBrowserCheck\(\);/.test(beacon) && /\{ path: "\/api\/store\/hit", method: "POST" \}/.test(client), true);
+  is("a visit, a page or a funnel step goes by fetch, which the check signs, and is never sent again unsigned", /send\(fetch\)\.catch\(\(\) => \{\}\)/.test(beacon), true);
+  is("a link's count, which needs no check, goes by sendBeacon and never waits on the challenge", /payload\.k === "l"/.test(beacon) && /navigator\.sendBeacon\("\/api\/store\/hit"/.test(beacon), true);
 
   done();
 }

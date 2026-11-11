@@ -54,6 +54,8 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   emailsPossible: boolean;
   onDraft: (draft: FunnelAiDraft) => void;
 }) {
+  // The sentence under the two buttons says what they use, or why they are off: each button names it (AX274).
+  const statusId = useId();
   const [audience, setAudience] = useState("");
   const [offer, setOffer] = useState("");
   const [proof, setProof] = useState("");
@@ -63,8 +65,6 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   const [error, setError] = useState<string | null>(null);
   const [left, setLeft] = useState(ai.left ?? 0);
   const [known, setKnown] = useState(ai.left !== null);
-  // The sentence beside the two AI buttons says what they use, or why they are off; each button names it (1.3.1).
-  const usesId = useId();
   const [research, setResearch] = useState<FunnelResearch | null>(null);
   const [drafted, setDrafted] = useState(false);
   if (!ai.on) return null;
@@ -147,14 +147,14 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
         </label>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button type="button" className="btn btn-primary btn-sm" aria-describedby={usesId} onClick={() => void run("funnel")} disabled={busy !== null || !known || left < draftJobs} aria-busy={busy === "draft"}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => void run("funnel")} disabled={busy !== null || !known || left < draftJobs} aria-busy={busy === "draft"} aria-describedby={statusId}>
           {busy === "draft" ? "Drafting…" : drafted ? "Draft again" : "Draft the funnel"}
         </button>
-        <button type="button" className="btn btn-secondary btn-sm" aria-describedby={usesId} onClick={() => void run("funnel-research")} disabled={busy !== null || !known || left < FUNNEL_RESEARCH_JOBS} aria-busy={busy === "research"}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void run("funnel-research")} disabled={busy !== null || !known || left < FUNNEL_RESEARCH_JOBS} aria-busy={busy === "research"} aria-describedby={statusId}>
           {busy === "research" ? "Reading…" : "Summarize who it is for"}
         </button>
       </div>
-      <p id={usesId} className="mt-2 text-xs text-ink-soft" role="status">
+      <p id={statusId} className="mt-2 text-xs text-ink-soft" role="status">
         {known
           ? `The draft uses ${draftJobs} of your monthly AI uses; the summary uses ${FUNNEL_RESEARCH_JOBS}. ${left} left this month. Each request also sets aside the most it could cost from your plan's monthly AI budget, which can run out before the uses do. Started attempts count, even if they fail.`
           : AI_ALLOWANCE_UNKNOWN}

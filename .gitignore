@@ -42,3 +42,7 @@ next-env.d.ts
 
 .vercel
 zapier/node_modules/
+
+# Python's compiled files, made by running the Redis checks in scripts/ locally
+__pycache__/
+*.pyc

@@ -121,6 +121,38 @@ async function main(): Promise<void> {
   is("an error: not kept", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "ODDTWO")], ["stripe", false]);
   couponAnswer = "exact";
 
+  part("A store write whose answer is lost never deletes the coupon the store points at");
+  // Claude 3 (6799778380) and Claude 4 cloud D (6799891060): the write lands, then its answer is lost.
+  const pipeline = redis.pipeline.bind(redis);
+  const lose = (word: string, when: "after" | "before") => {
+    (redis as unknown as { pipeline: typeof pipeline }).pipeline = async (commands: (string | number)[][]) => {
+      const hit = commands.some((c) => c.some((a) => String(a).includes(`"${word}"`)));
+      if (hit && when === "before") throw new Error("connection reset before the write (synthetic)");
+      const replies = await pipeline(commands);
+      if (hit) throw new Error("connection reset after the write (synthetic)");
+      return replies;
+    };
+  };
+  const restore = () => { (redis as unknown as { pipeline: typeof pipeline }).pipeline = pipeline; };
+  sent.length = 0;
+  lose("LOSTWORD", "after");
+  try {
+    made = await makeReturningCode(OWNER, await store(), asked("LOSTWORD"));
+  } finally {
+    restore();
+  }
+  const lost = (await store()).returningCodes.find((c) => c.code === "LOSTWORD");
+  is("written, answer lost: the code is made, and its coupon is not deleted", [made.ok, Boolean(lost), sent.some((s) => s.method === "DELETE")], [true, true, false]);
+  sent.length = 0;
+  lose("NEVERKEPT", "before");
+  try {
+    made = await makeReturningCode(OWNER, await store(), asked("NEVERKEPT"));
+  } finally {
+    restore();
+  }
+  is("never written: refused, and its coupon deleted", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "NEVERKEPT"), sent.some((s) => s.method === "DELETE")], ["stripe", false, true]);
+  await stopReturningCode(OWNER, await store(), "LOSTWORD");
+
   part("Twenty at most");
   for (let i = (await store()).returningCodes.length; i < MAX_RETURNING_CODES; i += 1) await makeReturningCode(OWNER, await store(), asked(`THANKS-${i}`));
   sent.length = 0;

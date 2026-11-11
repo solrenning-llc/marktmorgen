@@ -16,7 +16,9 @@
  * free: pdf-lib writes every object a file holds, so nothing of the source's
  * tree is copied by reference. An element with any content on a page left
  * out is kept only for the part on the kept pages, and loses its alternate
- * and replacement text, which may describe the rest. Links to annotations
+ * and replacement text, and the text in its attributes, which may describe
+ * the rest. A marked-content number past MAX_PREVIEW_MCID, negative or not
+ * whole, or a tree past MAX_PREVIEW_ELEMENTS, leaves the preview untagged. Links to annotations
  * (OBJR) and marked content in other streams are not carried; the annotations
  * on the kept pages lose their now unused StructParent.
  */
@@ -35,8 +37,40 @@ import {
   PDFString,
 } from "pdf-lib";
 
+/**
+ * The highest marked-content number (MCID) a kept page may use, plus one. The number comes from the creator's file and
+ * indexes the page's row of the parent tree, so an unbounded one is unbounded memory (500 million ran the server out of
+ * memory, which no try/catch holds): above it, negative or not whole, the tree is taken as unreadable and the preview
+ * stays untagged. A page of a book marks far fewer.
+ */
+export const MAX_PREVIEW_MCID = 10_000;
+/** The most elements one preview's tree is rebuilt with; past it the tree is taken as unreadable, as above. */
+export const MAX_PREVIEW_ELEMENTS = 20_000;
+
 /** The entries copied from an element when all its content is kept; only its role and language otherwise. */
 const TEXT_KEYS = ["Alt", "ActualText", "E", "T"];
+
+/** A marked-content number that may index a page's row of the parent tree; anything else throws, and the tree is left out. */
+function mcidOf(value: PDFNumber): number {
+  const mcid = value.asNumber();
+  if (!Number.isSafeInteger(mcid) || mcid < 0 || mcid >= MAX_PREVIEW_MCID) throw new Error("a marked-content number out of range");
+  return mcid;
+}
+
+/** The same plain value with every string taken out: an element partly on a page left out keeps only names and numbers. */
+function withoutText(value: PDFObject | null, into: PDFDocument): PDFObject | null {
+  if (value === null || value instanceof PDFString || value instanceof PDFHexString) return null;
+  if (value instanceof PDFArray) return into.context.obj(value.asArray().map((item) => withoutText(item, into)).filter((item): item is PDFObject => item !== null));
+  if (value instanceof PDFDict) {
+    const out = into.context.obj({});
+    for (const [key, item] of value.entries()) {
+      const kept = withoutText(item, into);
+      if (kept !== null) out.set(key, kept);
+    }
+    return out;
+  }
+  return value;
+}
 
 /** A plain value, rebuilt in `into`: names, numbers, booleans, strings, and arrays and dictionaries of them. Anything else is null. */
 function plainCopy(value: PDFObject | undefined, into: PDFDocument, depth = 0): PDFObject | null {
@@ -88,11 +122,13 @@ function carryTree(source: PDFDocument, out: PDFDocument, kept: PDFPage[]): void
   // For each page of the preview, the element that holds each MCID.
   const owners: PDFRef[][] = copies.map(() => []);
   const seen = new Set<PDFDict>();
+  let elements = 0;
 
   /** The rebuilt element, or null when nothing of it is on a kept page; `whole` says whether every part of it was. */
   const rebuild = (element: PDFDict, parent: PDFRef, inheritedPage: number | null | undefined): { ref: PDFRef; whole: boolean } | null => {
     if (seen.has(element)) return null;
     seen.add(element);
+    if ((elements += 1) > MAX_PREVIEW_ELEMENTS) throw new Error("more elements than a preview's tree is rebuilt with");
     const role = element.lookup(PDFName.of("S"));
     if (!(role instanceof PDFName)) return null;
     const ref = out.context.nextRef();
@@ -107,8 +143,8 @@ function carryTree(source: PDFDocument, out: PDFDocument, kept: PDFPage[]): void
       if (value instanceof PDFNumber) {
         if (page === null || page === undefined) whole = false;
         else {
+          owners[page][mcidOf(value)] = ref;
           outKids.push(value);
-          owners[page][value.asNumber()] = ref;
         }
       } else if (value instanceof PDFDict && value.lookup(PDFName.of("Type"))?.toString() === "/MCR") {
         const mcrPg = value.get(PDFName.of("Pg"));
@@ -116,8 +152,8 @@ function carryTree(source: PDFDocument, out: PDFDocument, kept: PDFPage[]): void
         const mcid = value.lookup(PDFName.of("MCID"));
         if (at === null || at === undefined || !(mcid instanceof PDFNumber) || value.has(PDFName.of("Stm"))) whole = false;
         else {
+          owners[at][mcidOf(mcid)] = ref;
           outKids.push(out.context.obj({ Type: "MCR", Pg: copies[at].ref, MCID: mcid }));
-          owners[at][mcid.asNumber()] = ref;
         }
       } else if (value instanceof PDFDict && value.has(PDFName.of("S"))) {
         const child = rebuild(value, ref, page);
@@ -135,7 +171,9 @@ function carryTree(source: PDFDocument, out: PDFDocument, kept: PDFPage[]): void
     if (page !== null && page !== undefined && pgRef instanceof PDFRef) dict.set(PDFName.of("Pg"), copies[page].ref);
     const elementLang = plainCopy(element.lookup(PDFName.of("Lang")), out);
     if (elementLang) dict.set(PDFName.of("Lang"), elementLang);
-    const attributes = plainCopy(element.lookup(PDFName.of("A")), out);
+    // Attributes may hold text (a table's Summary, user properties) that describes a part left out: only whole elements keep it.
+    const copied = plainCopy(element.lookup(PDFName.of("A")), out);
+    const attributes = whole ? copied : withoutText(copied, out);
     if (attributes) dict.set(PDFName.of("A"), attributes);
     if (whole) {
       for (const key of TEXT_KEYS) {

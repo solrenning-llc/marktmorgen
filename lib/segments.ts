@@ -26,7 +26,7 @@ import { importedBuyers, importedWhoKey } from "@/lib/imported-purchases";
 import { IMPORTED_CHANNEL } from "@/lib/channel-names";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
@@ -258,13 +258,19 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   }
   // Partial when any list was cut short or unread, or when an invoice's payment was needed and not found.
   const partial = readPartial || missed;
-  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial };
   // Buyers brought over from another platform (lib/imported-purchases.ts): history, never a sale.
-  // Nothing spent here and no purchase date here; they first came "imported".
-  for (const email of (await importedBuyers(store.statsId).catch(() => new Map<string, number>())).keys()) {
+  // Nothing spent here and no purchase date here; they first came "imported". Read unread or fewer than the HLEN
+  // counted before: the reading is partial, and no ten-minute copy is kept without them (sweep A6, CX-123 rule 24).
+  const importedRead = await importedBuyers(store.statsId).catch((error: unknown) => {
+    console.error("reading a store's imported buyers failed", error);
+    return null;
+  });
+  const importedMissed = !importedRead || importedRead.size < imported;
+  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial: partial || importedMissed };
+  for (const email of (importedRead ?? new Map<string, number>()).keys()) {
     if (!out.buyers.has(email)) out.buyers.set(email, { cents: 0, last: 0, channel: IMPORTED_CHANNEL, orders: 0 });
   }
-  if (store.statsId && isRedisConfigured()) {
+  if (store.statsId && isRedisConfigured() && !importedMissed) {
     const rows: Row[] = [...out.buyers].map(([e, r]) => [e, r.cents, r.last, r.channel, r.orders]);
     await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
   }
@@ -324,14 +330,37 @@ function parseSegment(raw: unknown): Segment | null {
   }
 }
 
-/** The store's saved groups, by name. */
+const byName = (a: Segment, b: Segment) => a.name.localeCompare(b.name);
+
+/**
+ * The store's saved groups, by name. HVALS answers an empty list when there
+ * are none, never another shape: a reply missing, of another shape or with a
+ * member that is not a string is unknown and throws UnknownReplyError
+ * (CX-123 rule 24), so neither MAX_SEGMENTS nor the id of a group saved again
+ * is decided on it (saveSegment).
+ */
 export async function listSegments(listId: string | null): Promise<Segment[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", segmentsKey(listId)]]);
-  return (Array.isArray(raw) ? raw : []).map(parseSegment).filter((s): s is Segment => s !== null).sort((a, b) => a.name.localeCompare(b.name));
+  const raw = stringList(repliesFor(await redisPipeline([["HVALS", segmentsKey(listId)]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("a store's saved groups");
+  const segments = raw.map((value) => {
+    const segment = parseSegment(value);
+    // An unreadable kept member is unknown, never an absent group for the cap or name lookup.
+    if (!segment) throw new UnknownReplyError("a store's saved group");
+    return segment;
+  });
+  return segments.sort(byName);
 }
 
-export type SegmentResult = { ok: true; segments: Segment[] } | { ok: false; reason: "name" | "empty" | "product" | "full" | "setup" };
+/** listSegments, with null for a reply in an unknown shape; any other failure is thrown as it was. */
+async function listSegmentsKnown(listId: string | null): Promise<Segment[] | null> {
+  return listSegments(listId).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+}
+
+export type SegmentResult = { ok: true; segments: Segment[] } | { ok: false; reason: "name" | "empty" | "product" | "full" | "setup" | "unavailable" };
 
 /** Saves a group under a name; the same name again replaces it. */
 export async function saveSegment(store: Store, raw: Record<string, unknown>): Promise<SegmentResult> {
@@ -345,12 +374,22 @@ export async function saveSegment(store: Store, raw: Record<string, unknown>): P
   const narrow = readNarrow(raw.narrow);
   const label = typeof raw.label === "string" ? readTags([raw.label])[0] ?? "" : "";
   if (who === "all" && !productId && !notProductId && !label && !isNarrowed(narrow)) return { ok: false, reason: "empty" };
-  const existing = await listSegments(store.listId);
+  // Unknown is never "no groups": neither the cap nor the id of a name saved again is chosen on it (CX-123 rule 30).
+  const existing = await listSegmentsKnown(store.listId);
+  if (!existing) return { ok: false, reason: "unavailable" };
   const same = existing.find((s) => s.name.toLowerCase() === name.toLowerCase());
   if (!same && existing.length >= MAX_SEGMENTS) return { ok: false, reason: "full" };
   const segment: Segment = { id: same?.id ?? randomBytes(6).toString("hex"), name, who, productId, notProductId, label, ...narrow };
-  await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]);
-  return { ok: true, segments: await listSegments(store.listId) };
+  const written = countOf(repliesFor(await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]), 1)?.[0]);
+  // HSET answers how many fields it added: any other reply is unknown, never "saved". The group read before is put back
+  // (or a new one taken back), so "not saved" stays true (Claude 6 on #2892, CX-123 rule 24).
+  if (written === null) {
+    await redisPipeline([same ? ["HSET", segmentsKey(store.listId), same.id, JSON.stringify(same)] : ["HDEL", segmentsKey(store.listId), segment.id]]);
+    return { ok: false, reason: "unavailable" };
+  }
+  // The groups as they are after; when they cannot be read, those read before with this one in its place.
+  const after = await listSegmentsKnown(store.listId);
+  return { ok: true, segments: after ?? [...existing.filter((s) => s.id !== segment.id), segment].sort(byName) };
 }
 
 export async function removeSegment(store: Store, id: unknown): Promise<Segment[]> {

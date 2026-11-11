@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
+import * as versionsUi from "@/components/workflow-versions";
 import { WorkflowVersions } from "@/components/workflow-versions";
 import { forgetStoreWorkflows, readFlows, removeFlow, saveFlow, setFlowActive } from "@/lib/flows";
 import { MAX_FLOW_VERSIONS, readFlowVersions } from "@/lib/flow-versions";
@@ -108,6 +109,15 @@ async function main(): Promise<void> {
   const studio = readFileSync("components/email-studio.tsx", "utf8");
   is("the workflow list opens it with a toggle that says whether it is open", studio.includes("aria-expanded={versionsOpen === f.id}") && studio.includes("<WorkflowVersions flowId={f.id} request={call} onRestored={refreshFlows} />"), true);
   is("putting one back is a sequence write, so an unconfirmed one is said as such", studio.includes('"flow-resolve", "flow-restore"].includes'), true);
+
+  part("The studio's words for every refusal, and the removal that worked (Claude 1's LOWs on #1927)");
+  const versionError = (versionsUi as Record<string, unknown>).versionError as ((a: { ok: false; error: string }, fallback: string) => string) | undefined;
+  const fallback = "That version could not be put back just now. Try again in a moment.";
+  const notTryAgain = ["signed_taken", "paid_request_taken", "tag", "trigger", "name", "placeholder", "route", "steps", "plan", "setup"].filter((reason) => !versionError || versionError({ ok: false, error: reason }, fallback) === fallback);
+  is("a version that no longer fits the store is never told to try again", [typeof versionError, notTryAgain], ["function", []]);
+  const removal = studio.slice(studio.indexOf('call({ action: "flow-remove", id: f.id })'), studio.indexOf('call({ action: "flow-remove", id: f.id })') + 900);
+  is("a removal whose earlier versions were not confirmed deleted is said as done, with that note, and the list refreshed", removal.includes('if (!a.ok && a.error === "history_unconfirmed") {') && removal.indexOf("refreshFlows()") < removal.indexOf("could not be confirmed. Reload"), true);
+  is("the result of putting one back is said in a status region kept mounted, so screen readers announce it", /<div role="status"[^>]*>\s*\{done \?/.test(source) && !source.includes('<p className="notice mt-3" role="status">'), true);
   done();
 }
 

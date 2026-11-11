@@ -3,16 +3,21 @@
  * not one whole reply is never "no companies" (a page fails, a copy of a person's data fails, a deletion is not
  * done), and a write is written only on its exact 1 and refused only on its exact 0; anything else is unconfirmed
  * and keeps the room it took. Real CRM company mutation, erasure and export; synthetic transport only. G2's case of
- * an undo after an erasure comes with its fix, on the deletion's mark of #2287.
+ * an undo after an erasure (MEDIUM 3; proof 950de50f, tests/review-g2-company-evidence.test.ts, its ninth case, kept
+ * as written), with an erasure landing between the undo's read and its write: an erased person never comes back.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {addCompany,changeCompanies,readCompanies,linkPerson} from '@/lib/crm-companies';
+import {NextRequest} from 'next/server';
+import {POST} from '@/app/api/store/companies/route';
+import {SESSION_COOKIE,openSession} from '@/lib/auth';
+import {addCompany,changeCompanies,readCompanies,linkPerson,dropCompany} from '@/lib/crm-companies';
 import {companiesPageData} from '@/lib/companies-read';
 import {claimHandle,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
-import {ERASERS} from '@/lib/person-erasure';
+import {ERASERS,erasePerson} from '@/lib/person-erasure';
 import {COPIERS} from '@/lib/person-copy';
 import {personKey} from '@/lib/person-key';
+import {isSuppressed} from '@/lib/suppression';
 import {dataKey} from '@/lib/store-data';
 import {dataBytes} from '@/lib/store-data-rules';
 import {store as redis} from './redis-stub';
@@ -58,4 +63,36 @@ test('G2 extra company-write acknowledgement cannot claim an unapplied mutation'
  const s=await seed(),original=redis.pipeline.bind(redis);redis.pipeline=async commands=>commands[0]?.[0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:crm-companies-write:')?[1,0] as never:original(commands);
  let claimed=false;try{claimed=(await changeCompanies(s.store.statsId!,s.store,c=>addCompany(c,{name:'Not applied',website:'',note:''},'bbbbbbbbbb',101))).ok;}finally{redis.pipeline=original;}
  assert.equal((await readCompanies(s.store.statsId)).length,1);assert.equal(claimed,false,'extra reply certified an unpersisted company');
+});
+test('G2 stale undo cannot put back a person after real successful erasure',async()=>{
+ const s=await seed(true),snapshot=(await readCompanies(s.store.statsId))[0];assert.ok((await changeCompanies(s.store.statsId!,s.store,c=>dropCompany(c,id))).ok);
+ const oldFetch=globalThis.fetch;globalThis.fetch=async()=>{throw Error('External transport prohibited in independent review');};let erased;
+ try{erased=await erasePerson(s.store,who,{kind:'person'});}finally{globalThis.fetch=oldFetch;}
+ assert.ok(erased.ok,JSON.stringify(erased));const current=await storeForEmail(s.owner);assert.ok(current?.listId);assert.equal(await isSuppressed(current.listId,who),true);
+ const cookie=`${SESSION_COOKIE}=${await openSession(s.owner)}`;
+ const response=await POST(new NextRequest('https://marktmorgen.com/api/store/companies',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'restore',name:snapshot.name,website:snapshot.website,note:snapshot.note,people:snapshot.people})}));
+ const rows=await readCompanies(s.store.statsId);assert.equal(rows.some(c=>c.people.includes(s.person)),false,JSON.stringify({status:response.status,companies:rows,erased:erased.ok}));
+});
+test('An undo whose read came before a whole erasure cannot write the person back, and a person not erased still comes back',async()=>{
+ const s=await seed(true),other=personKey(s.store.statsId!,'stays@example.test');assert.ok((await changeCompanies(s.store.statsId!,s.store,c=>linkPerson(c,id,other))).ok);
+ const snapshot=(await readCompanies(s.store.statsId))[0];assert.deepEqual(snapshot.people,[s.person,other]);
+ assert.ok((await changeCompanies(s.store.statsId!,s.store,c=>dropCompany(c,id))).ok);
+ const cookie=`${SESSION_COOKIE}=${await openSession(s.owner)}`,original=redis.pipeline.bind(redis);let erased:Awaited<ReturnType<typeof erasePerson>>|null=null,step=0;
+ // The undo read the companies, then stalled past its lock's ten seconds; the person was deleted, whole, in that time;
+ // then the undo's write arrives.
+ redis.pipeline=async commands=>{
+  if(!step&&commands[0]?.[0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:crm-companies-write:')){
+   step=1;redis.pipeline=original;redis.run(['DEL',`nl:crm:co:lock:${s.store.statsId}`]);const oldFetch=globalThis.fetch;globalThis.fetch=async()=>{throw Error('no transport');};
+   try{erased=await erasePerson(s.store,who,{kind:'person'});}finally{globalThis.fetch=oldFetch;}
+  }
+  return original(commands);
+ };
+ let first;try{first=await POST(new NextRequest('https://marktmorgen.com/api/store/companies',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'restore',name:snapshot.name,website:snapshot.website,note:snapshot.note,people:snapshot.people})}));}finally{redis.pipeline=original;}
+ assert.equal((erased as {ok:boolean}|null)?.ok,true,JSON.stringify(erased));const after=await readCompanies(s.store.statsId);
+ assert.equal(after.some(c=>c.people.includes(s.person)),false,JSON.stringify({status:first.status,companies:after,erased}));
+ // Pressed again (or answered at once): the person not erased comes back, the erased one is left out and said so.
+ const again=first.status===200?first:await POST(new NextRequest('https://marktmorgen.com/api/store/companies',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'restore',name:snapshot.name,website:snapshot.website,note:snapshot.note,people:snapshot.people})}));
+ const body=await again.json() as {ok:boolean;skipped?:string[]};const rows=await readCompanies(s.store.statsId);
+ assert.equal(again.status,200);assert.deepEqual(rows.map(c=>c.people),[[other]]);assert.equal(rows.some(c=>c.people.includes(s.person)),false);assert.deepEqual(body.skipped,[s.person]);
+ assert.equal(held(s),weight(s));
 });

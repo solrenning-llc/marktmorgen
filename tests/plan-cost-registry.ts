@@ -969,6 +969,9 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "transactional"] },
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
+      // A buyer's move of purchases to another email (611 [WP10]): two access emails a request, the new address's as `asked`, at most three requests an address a day.
+      { file: "lib/purchase-move-rules.ts", names: ["MOVE_EMAILS_PER_REQUEST", "MAX_MOVES_PER_ADDRESS_DAY"] },
+      { file: "lib/purchase-move-flow.ts", names: ["kind: \"transactional\"", "asked: true"] },
     ],
     basis: "The plan's access emails, each at the most an email costs and its count; taken from the store's window before sending, refused past it.",
   },
@@ -1139,6 +1142,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
+      // A buyer's move of purchases (611 [WP10]): the ask, a link's page and its Confirm each hold a public request before they read (tests/purchase-move-flow.test.ts holds the reads under it).
+      { file: "lib/purchase-move-flow.ts", names: ["MOVE_ASK_UNITS", "MOVE_LINK_UNITS", "MOVE_ASK_COMMANDS", "MOVE_LINK_COMMANDS", "MOVE_CONFIRM_COMMANDS"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
@@ -1810,6 +1815,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/paypal-sales.ts": ORDER, "lib/preorders.ts": ORDER, "lib/shipments.ts": ORDER,
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
+  // A buyer's move of purchases to another email (611 [WP10]): one link to each address, from the store's access emails.
+  "lib/purchase-move-flow.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE,
   "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,

@@ -342,6 +342,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pm:c:@lib/purchase-moves.ts": short("A purchase move's two confirmations, a day", "access", 1, 2 * MARK, MAIL("purchase-move")),
   "nl:pm:done:@lib/purchase-moves.ts": short("A purchase move claimed once, two days", "access", 2, MARK, MAIL("purchase-move")),
   "nl:pm:day:@lib/purchase-moves.ts": short("An address's purchase moves of the day, under a one-way fingerprint, two days", "access", 2, MARK, MAIL("purchase-move")),
+  "nl:pm:retry:@lib/purchase-moves.ts": short("A same-day purchase-move retry index, under a one-way fingerprint, one day", "access", 1, MARK, MAIL("purchase-move")),
   "nl:listed:@lib/buyer-list.ts": short("An order put on the list", "order", 8, MARK),
   "nl:lostdispute:cursor:@lib/refunds.ts": short("Where a job that takes things back left off in a store's lost disputes, when there were more than one run reads", "run", 30),
   "nl:orders:link:@lib/buyer-orders.ts": short("A buyer's purchases link, a day", "access", 1, LINK_BYTES, MAIL("orders")),

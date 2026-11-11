@@ -211,6 +211,10 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_capped_count_redis.py
+      - name: Actual Redis purchase-move retry checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_purchase_move_retry_redis.py
       - name: Actual Redis order records checks
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"

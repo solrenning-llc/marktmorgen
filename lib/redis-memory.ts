@@ -943,6 +943,19 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/purchase-moves.ts MOVE_RETRY_CREATE: select one tuple identity and write its request and two grants atomically.
+        if (key.startsWith("-- marktmorgen:purchase-move-retry-create:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, retry, request, from, to, indexValue, requestValue, fromValue, toValue, ttl] = args;
+          const current = this.run(["GET", retry]);
+          if (typeof current === "string") return [0, current];
+          if (current !== null) return [-1, ""];
+          const reserved = this.run(["SET", retry, indexValue, "EX", ttl, "NX"]);
+          if (reserved !== "OK") return [-1, indexValue];
+          for (const [target, value] of [[request, requestValue], [from, fromValue], [to, toValue]]) {
+            if (this.run(["SET", target, value, "EX", ttl, "NX"]) !== "OK") return [-1, indexValue];
+          }
+          return [1, indexValue];
+        }
         // lib/purchase-moves.ts MOVE_DAY_COUNT: INCR then EXPIRE in one step; the new count.
         if (key.startsWith("-- marktmorgen:purchase-move-day:v1\n") && args[0] === "1" && args.length === 3) {
           const made = this.run(["INCR", args[1]]);

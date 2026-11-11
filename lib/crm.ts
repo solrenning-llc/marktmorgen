@@ -24,7 +24,7 @@ import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf as replyCount, repliesFor } from "@/lib/redis-reply";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
@@ -801,8 +801,12 @@ export async function readPersonTasks(statsId: string | null, person: string): P
  */
 export async function taskPeople(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [fields, counted] = await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]);
-  return Math.max(0, (Number(fields) || 0) - (counted === 1 ? 1 : 0));
+  // Rule 24: HLEN and HEXISTS as Redis answered them, or unknown; never "nobody has tasks".
+  const replies = repliesFor(await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]), 2);
+  const fields = replyCount(replies?.[0]);
+  const counted = replies?.[1];
+  if (fields === null || (counted !== 0 && counted !== 1)) throw new TasksUnreadable("the store's task count reply");
+  return Math.max(0, fields - counted);
 }
 
 /**
@@ -905,7 +909,11 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (added > 0 && count === null) {
     // No count yet: none is needed for a store with no tasks; one that has
     // some has every task read, once, paid for first.
-    const people = Math.max(0, (Number(fields) || 0) - (kept === null || kept === undefined ? 0 : 1));
+    // Rule 24: a reply that is not a whole count is unknown, never a store with
+    // no tasks, which would start the count over from this change alone.
+    const fieldCount = replyCount(fields);
+    if (fieldCount === null) throw new TasksUnreadable("the store's task count reply");
+    const people = Math.max(0, fieldCount - (kept === null || kept === undefined ? 0 : 1));
     if (people > 0) {
       const units = tasksRecountUnits(people);
       if (units > paid) return { units };

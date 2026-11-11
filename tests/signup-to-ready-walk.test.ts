@@ -36,6 +36,7 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { canSell } from "@/lib/store-checkout";
+import { handsOver } from "@/lib/product-option";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { store as redis } from "./redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
@@ -119,13 +120,15 @@ async function main(): Promise<void> {
   const productUrl = `${ORIGIN}/api/store/product`;
   is("without a title: refused", (await product(asJson(productUrl, { action: "add", price: "19" }, true))).ok, false);
   is("without a price: refused", (await product(asJson(productUrl, { action: "add", title: "Field notes" }, true))).ok, false);
-  const added = await product(asJson(productUrl, { action: "add", title: "Field notes", price: "19" }, true));
+  // 251 [ST4] unit 3: a sellable product needs something to deliver; the add step already takes a link, optional.
+  const added = await product(asJson(productUrl, { action: "add", title: "Field notes", price: "19", link: "https://example.com/field-notes.pdf" }, true));
   is("with both: added", added.status, 200);
   const store = await storeForEmail(EMAIL);
   // The store's listings, read whole (no ids: all of them), never an id guessed (review of #3754).
   const listings = store ? await readListings(store) : [];
   is("the product added is found, by its title (review of #3754)", listings.map((listing) => listing.title), ["Field notes"]);
   is("published at once: no separate publish step", listings[0]?.hidden, false);
+  is("with its delivery given in the same step, it has something to hand over (unit 3)", listings[0] ? handsOver(listings[0]) : null, true);
   walk.push({ step: 4, action: "Add the first product", required: ["title", "price"] });
 
   part("5. Start Stripe's onboarding");
@@ -155,6 +158,7 @@ async function main(): Promise<void> {
   is("one row per step, with its action and required fields", rows, walk);
   const fields = walk.reduce((sum, step) => sum + step.required.length, 0);
   is("the totals it states", [record.includes(`**${walk.length} actions**`), record.includes(`**${fields} required fields**`)], [true, true]);
+  is("it says the add step already takes the delivery, not that it could (unit 3)", [record.includes("already takes the delivery"), record.includes("could ask for the delivery")], [true, false]);
   is("it says selling stays closed and no person's time was measured", [/PLANS_ON_SALE/.test(record), /not measured/i.test(record)], [true, true]);
 
   done();

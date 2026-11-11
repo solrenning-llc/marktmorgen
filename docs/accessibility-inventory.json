@@ -1788,6 +1788,7 @@
     "app/api/store/course/certificate/route.ts",
     "app/api/store/course/comment/route.ts",
     "app/api/store/course/file/route.ts",
+    "app/api/store/course/import/route.ts",
     "app/api/store/course/link/route.ts",
     "app/api/store/course/note/route.ts",
     "app/api/store/course/open/route.ts",

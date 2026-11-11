@@ -98,6 +98,8 @@ async function main(): Promise<void> {
   is("every email went: said as sent, the waitlist being deleted, never \"going out\"", [allSent.includes("going out"), allSent.includes("3 of 3 waitlist emails went out") && allSent.includes("the waitlist is being deleted")], [false, true]);
   const noneToEmail = panel({ total: 0, cursor: 0, sent: 0, finished: 0 });
   is("nobody to email: never \"0 of 0\", said as nobody on the waitlist (Revisor 2's LOW on #3707)", [noneToEmail.includes("0 of 0"), noneToEmail.includes("Nobody on the waitlist had confirmed, and the waitlist is being deleted")], [false, true]);
+  const finishedNobody = panel({ total: 0, cursor: 0, sent: 0, finished: 5 });
+  is("finished with nobody to email: never \"0 of 0\" (Claude 4's LOW on #3707)", [finishedNobody.includes("0 of 0"), finishedNobody.includes("Launched. Nobody on the waitlist had confirmed, so no email went out.")], [false, true]);
   is("still sending: as before", panel({ total: 3, cursor: 1, sent: 1, finished: 0 }).includes("The waitlist email is going out: 1 of 3 so far"), true);
 
   done();

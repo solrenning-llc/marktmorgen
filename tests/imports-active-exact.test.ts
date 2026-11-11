@@ -142,6 +142,16 @@ async function main(): Promise<void> {
   await real([["LPUSH", `nl:imports:list:${sid}`, gonePast]]);
   is("healthy control: an import that is truly gone is left out", (await storeImports(store)).map((job) => job.id).includes(gonePast), false);
 
+  // Codex V on #3661 (6788586117), the studio's sibling (rule 30): GET nl:import:A answering a well-formed import of this
+  // store that names another id is not import A, so the list is unknown, never shown with it as A nor with A left out.
+  part("A record kept under one import's id that names another is not that import");
+  const misfiled = "b".repeat(24);
+  const kept = JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0]));
+  await real([["SET", `nl:import:${misfiled}`, JSON.stringify({ ...kept, id: "c".repeat(24) })], ["LPUSH", `nl:imports:list:${sid}`, misfiled]]);
+  is("storeImports throws UnknownReplyError", await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+  await real([["LREM", `nl:imports:list:${sid}`, 0, misfiled], ["DEL", `nl:import:${misfiled}`]]);
+  is("healthy control: with it gone, the list reads again", (await storeImports(store))[0]?.id, running);
+
   part("Healthy control: the emails of an import are done only when its queue is empty");
   const mailing = (id: string): ImportJob => ({
     id,

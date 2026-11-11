@@ -14,8 +14,8 @@
  *   - location needs MIN_LOCATION_EVIDENCE pieces (the visitor's IP country
  *     and the billing country the buyer gives, as planned in
  *     docs/eu-vat-article-9a.md, "The code that would be needed", step 1),
- *     each an ISO 3166-1 alpha-2 country code; anything else is unknown and
- *     refused, never guessed;
+ *     each an assigned ISO 3166-1 alpha-2 country code (ASSIGNED_COUNTRY_CODES);
+ *     anything else is unknown and refused, never guessed;
  *   - every piece counts: if any piece points to a jurisdiction that refuses,
  *     the sale is refused, whatever the other pieces say;
  *   - "refuse-consumers" refuses every product: the record type says that
@@ -68,19 +68,44 @@ const MAY_BELONG: Readonly<Record<string, readonly DeemedSupplierJurisdiction[]>
 });
 export const UNVERIFIED_TERRITORIES = Object.freeze(Object.keys(MAY_BELONG));
 
-/** User-assigned and non-country codes: a header or a form that sends one says nothing about a country. */
-function notACountry(code: string): boolean {
-  if (code === "XK") return false; // Kosovo, as providers send it.
-  return code === "AA" || code === "ZZ" || /^Q[M-Z]$/.test(code) || /^X[A-Z]$/.test(code) || code === "EZ" || code === "UN" || code === "SU";
-}
+/**
+ * The 249 officially assigned ISO 3166-1 alpha-2 codes, the only two letters
+ * read as a country (Claude 3 on #3681). Anything else, a code never assigned
+ * (JJ), a VAT prefix (EL, Greece's; Greece is GR) or a code ISO keeps only
+ * transitionally reserved for a country that is gone (AN, CS, YU, TP), says
+ * nothing about where a buyer is, and is unknown. Read on 11 November 2026
+ * from github.com/datasets/country-list (data/data.csv, the ISO 3166-1 list,
+ * 249 rows), and checked against the region names of CLDR 48 in Node's ICU
+ * 78.3: every code here has a CLDR name, and every other code CLDR names is
+ * reserved, regional or private. A change in the ISO list is a change here.
+ */
+export const ASSIGNED_COUNTRY_CODES = Object.freeze([
+  "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT", "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE",
+  "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS", "BT", "BV", "BW", "BY", "BZ", "CA", "CC", "CD",
+  "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN", "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM",
+  "DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK", "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF",
+  "GG", "GH", "GI", "GL", "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM", "HN", "HR", "HT", "HU",
+  "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS", "IT", "JE", "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN",
+  "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME",
+  "MF", "MG", "MH", "MK", "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ", "NA",
+  "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP", "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM",
+  "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW", "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI",
+  "SJ", "SK", "SL", "SM", "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ", "TC", "TD", "TF", "TG", "TH", "TJ", "TK",
+  "TL", "TM", "TN", "TO", "TR", "TT", "TV", "TW", "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
+  "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+] as const);
+const ASSIGNED: ReadonlySet<string> = new Set<string>(ASSIGNED_COUNTRY_CODES);
 
 /** Every jurisdiction a country code may belong to; null when it is not a country code at all. */
 export function candidateJurisdictions(code: unknown): readonly DeemedSupplierJurisdiction[] | null {
-  if (typeof code !== "string" || !/^[A-Z]{2}$/.test(code) || notACountry(code)) return null;
+  if (typeof code !== "string" || !/^[A-Z]{2}$/.test(code)) return null;
   if (code === "EU" || (EU_MEMBER_STATES as readonly string[]).includes(code)) return ["EU"];
   if (code === "GB" || code === "UK") return ["UK"];
   if (code === "US") return ["US"];
-  return Object.hasOwn(MAY_BELONG, code) ? MAY_BELONG[code] : ["other"];
+  // ISO's exceptionally reserved codes for parts of a country (EA, IC, FX, CP, AC, TA, DG) are named one by one there.
+  if (Object.hasOwn(MAY_BELONG, code)) return MAY_BELONG[code];
+  // Kosovo has no assigned code; providers send XK for it.
+  return ASSIGNED.has(code) || code === "XK" ? ["other"] : null;
 }
 
 export type RefusalReason = "not-recorded" | "location-unknown" | "refused-jurisdiction";
@@ -129,6 +154,14 @@ const refuse = (reason: RefusalReason, jurisdictions: readonly DeemedSupplierJur
  * records (the real ones by default). Pure: reads nothing else, writes nothing.
  */
 export function checkoutLocationDecision(countries: readonly (string | null | undefined)[], records: unknown = DEEMED_SUPPLIER_RECORDS): CheckoutLocationDecision {
+  // The original value is held to the gate's own reading first (Claude 3 on #3681): what deemedSupplierReady refuses is refused here too.
+  let original: string[];
+  try {
+    original = deemedSupplierProblems(records);
+  } catch {
+    return refuse("not-recorded", []);
+  }
+  if (original.length > 0) return refuse("not-recorded", []);
   const own = detachedRecords(records);
   if (!own || deemedSupplierProblems(own).length > 0) return refuse("not-recorded", []);
   const treatment = new Map<DeemedSupplierJurisdiction, DeemedSupplierRecord["treatment"]>();

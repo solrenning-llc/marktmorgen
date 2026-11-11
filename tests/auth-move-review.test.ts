@@ -125,12 +125,15 @@ async function move(
   const fromKey = (await real([["GET", addressKey(from)]]))[0];
   const team = sid ? (await readTeam(sid)).members : [];
   const members = team.map((m) => m.email);
+  // An unread log is a failure of the check, never an empty list (rule 24): main's readLog answers null for it.
+  const lines = sid ? await readLog(sid) : [];
+  if (lines === null) throw new Error("the team's log could not be read");
   return {
     toRole: team.find((m) => m.email === to)?.role ?? null,
     // What a session of the old address would get by naming the store (?store=), as the studio reads it (finding HIGH).
     oldOpens: sid ? (await resolveAccess(from, { pinned: sid }, null)).ok : false,
     all, fromKey, sid, members,
-    log: sid ? (await readLog(sid))?.map((line) => line.what) ?? null : [],
+    log: lines.map((line) => line.what),
     fromTeams: sid ? (await memberStores(from)).length : 0,
     mails: [...mails],
     location,

@@ -590,15 +590,17 @@ export async function noteTaskUpload(path: string, now = Date.now()): Promise<vo
 
 /**
  * Lists a name a door is about to open for, before the file store is asked about it (app/api/store/course/task/upload):
- * true when this call listed it anew, false when it was listed already (another door for it still open; its time is
- * moved on, as noteTaskUpload does). Read exactly (CX-123 rule 24): any other answer throws UnknownReplyError, and no
+ * true when this call listed it anew, false when it was listed already (another door for it still open; it keeps the
+ * time it was first listed at, so the sweep still deletes it a day after that first door). Read exactly (CX-123 rule 24): any other answer throws UnknownReplyError, and no
  * door is opened. Listed first, then the file store asked: a door listed after a hand-in took the name finds the
  * handed-in file there, is refused and takes back only its own listing (dropTaskDoor), so the sweep is not pointed at
  * handed-in work. (Only a file that lands between a hand-in's two steps, its take and its read of the file, while the
  * same student asks a second door for the same name, could still be listed; it is that student's own file.)
  */
 export async function listTaskDoor(path: string, now = Date.now()): Promise<boolean> {
-  const added = countOf(repliesFor(await redisPipeline([["ZADD", DOORS_KEY, Math.floor(now / 1000), path]]), 1)?.[0]);
+  // NX: a name listed already keeps the time it was first listed at, so doors asked again and again never keep an
+  // unused file out of the sweep (Claude 6's review of #3461, MEDIUM 2).
+  const added = countOf(repliesFor(await redisPipeline([["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), path]]), 1)?.[0]);
   if (added !== 0 && added !== 1) throw new UnknownReplyError("an assignment upload's listing");
   return added === 1;
 }
@@ -617,10 +619,15 @@ export async function dropTaskDoor(path: string): Promise<void> {
  * keeps its file lets go of the hold (releaseTaskHold), so the sweep has nothing to read for it.
  */
 export async function takeTaskUpload(path: string, now = Date.now()): Promise<boolean> {
-  const [added] = await redisPipeline([["ZADD", HELD_KEY, Math.floor(now / 1000), path]]);
-  const [removed] = await redisPipeline([["ZREM", DOORS_KEY, path]]);
-  if (Number(removed) === 1) return true;
-  if (Number(added) === 1) await redisPipeline([["ZREM", HELD_KEY, path]]).catch(() => null);
+  // Read exactly (CX-123 rule 24; Claude 6's review of #3461, MEDIUM 3): the hold's ZADD and the doors' ZREM each
+  // answer the whole number 0 or 1. Any other answer is not known: it throws, the route answers server_error, and the
+  // hold stays, so the sweep reads the name a day on (it deletes only a file no work keeps), never left in neither list.
+  const added = countOf(repliesFor(await redisPipeline([["ZADD", HELD_KEY, Math.floor(now / 1000), path]]), 1)?.[0]);
+  if (added !== 0 && added !== 1) throw new UnknownReplyError("holding an assignment upload for the sweep");
+  const removed = countOf(repliesFor(await redisPipeline([["ZREM", DOORS_KEY, path]]).catch(() => null), 1)?.[0]);
+  if (removed === 1) return true;
+  if (removed !== 0) throw new UnknownReplyError("taking an assignment upload from the doors");
+  if (added === 1) await redisPipeline([["ZREM", HELD_KEY, path]]).catch(() => null);
   return false;
 }
 

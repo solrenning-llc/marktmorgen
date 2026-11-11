@@ -437,6 +437,7 @@ async function main(): Promise<void> {
     "course/comment": ["lockedFor"],
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
+    "course/task/upload": ["not:a student's own door for a file to hand in: it takes back only the listing it made itself when the door is not opened"],
     "creator-card": ["act:page:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],

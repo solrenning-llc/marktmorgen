@@ -13,7 +13,7 @@ import {
   sendCourseLink,
   touchStudent,
 } from "@/lib/learn";
-import { clientAddress, limited, withinEssentialLimit } from "@/lib/request-guard";
+import { clientAddress, essentialLimitState, limited } from "@/lib/request-guard";
 import { courseToStart } from "@/lib/order-courses";
 
 /**
@@ -50,10 +50,7 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   // A press may email the buyer a link, so it is counted like the other
   // forms that send one: per connection, and per order.
-  if (
-    !(await withinStore("course-start", `${clientAddress(request)}|${store.handle}`, 10, 3600, store, "buyer")) ||
-    !(await withinEssentialLimit("course-start-order", sessionId.slice(0, 220), 5, 3600))
-  ) {
+  if (!(await withinStore("course-start", `${clientAddress(request)}|${store.handle}`, 10, 3600, store, "buyer"))) {
     return away(`/@${store.handle}`);
   }
 
@@ -73,6 +70,12 @@ export async function POST(request: NextRequest) {
     const token = await mintPass(store, order.email, [course.id]);
     return away(path, passCookie(store, token, origin.startsWith("https://")));
   }
+  // The order's email counter is read only when an email goes (Claude 5 LOW 2 on #2608): an instant start
+  // above sends none. Past its limit, back to the store as before; a count that cannot be read is said as a
+  // link that could not go, on the course's own page, never a silent trip back to the storefront.
+  const tries = await essentialLimitState("course-start-order", sessionId.slice(0, 220), 5, 3600);
+  if (tries === "exceeded") return away(`/@${store.handle}`);
+  if (tries === "unknown") return away(`${path}?link=error`);
   const sent = await sendCourseLink(store, product, order.email, linkOrigin(request, store));
   return away(`${path}?link=${sent ? "sent" : "error"}`);
 }

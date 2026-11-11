@@ -47,7 +47,7 @@ export function FunnelStarterGallery({ starters, busy, onChoose, initialGoal = "
                 {niche !== "all" && NICHE_FIT[niche][starter.id] ? <p className="mt-2 text-sm font-semibold text-ink">{NICHE_FIT[niche][starter.id]}</p> : null}
                 <p className="mt-2 text-sm text-ink-soft">{starter.hint}</p>
                 <p className="mt-3 text-xs text-ink-mute">{`${starter.steps.length} steps · ${starter.pages} pages · ${starter.forms} ${starter.forms === 1 ? "form" : "forms"}`}</p>
-                <button type="button" className="btn btn-ghost btn-sm mt-3" aria-expanded={open} aria-controls={detailsId} onClick={() => setExpanded(open ? null : starter.id)}>{open ? "Hide the journey" : "See the journey and what you need"}</button>
+                <button type="button" className="btn btn-ghost btn-sm mt-3" aria-expanded={open} aria-controls={detailsId} onClick={() => setExpanded(open ? null : starter.id)}>{open ? "Hide the journey" : "See the journey and what you need"}<span className="sr-only">{`: ${starter.label}`}</span></button>
                 <div id={detailsId} hidden={!open}>
                   <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-ink-soft">
                     {starter.steps.map((step, index) => <li key={`${step.kind}-${index}`}>{step.title}<span className="text-ink-mute">{step.kind === "product" ? " — your product" : " — page"}</span></li>)}

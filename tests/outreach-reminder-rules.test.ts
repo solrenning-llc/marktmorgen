@@ -85,7 +85,9 @@ part("The draft: short, polite, honest, with the same way to stop");
 const draft = reminderDraft({ subject: "A sponsorship idea for Brand", sentAt: SENT, footer: footer("CA") });
 is("the subject says it is a follow-up, never \"Re:\" for a thread that does not exist", draft.subject, "Following up: A sponsorship idea for Brand");
 is("the body names the day the first email went", draft.body.includes("on January 15"), true);
-is("the body promises no more emails after this one", draft.body.includes("I will not write again"), true);
+is("the body promises no more follow-ups on this email", draft.body.includes("I will not follow up on this email again"), true);
+// The same business may get a new pitch after REPITCH_DAYS (lib/outreach-rules.ts): no promise of never again (Claude 3 and Codex G on #3655).
+is("never an absolute promise the repitch rule would break", /will not write again|never write again|no more emails/i.test(draft.body), false);
 is("the body is short", draft.body.length <= 400, true);
 is("no pressure, urgency or figure", /\b(urgent|last chance|only|today|limited|\d+%)\b/i.test(draft.body), false);
 is("the whole email keeps the first email's footer, stop link included", draft.text.endsWith(footer("CA")), true);

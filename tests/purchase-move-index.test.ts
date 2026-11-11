@@ -18,7 +18,7 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccou
 import { allowanceUsed } from "@/lib/store-allowance";
 import { suppressCommand } from "@/lib/suppression";
 import { askPurchaseMove, confirmPurchaseMove, readPurchaseMove } from "@/lib/purchase-moves";
-import { applyPurchaseMove, copyMovedPerson, forgetMovedPerson, readMovedIndex } from "@/lib/purchase-move-index";
+import { applyPurchaseMove, copyMovedPerson, forgetMovedPerson, movedRoomSlot, readMovedIndex } from "@/lib/purchase-move-index";
 import { COPY_PLAN } from "@/lib/person-copy";
 import { MOVE_APPLY_COMMANDS, confirmMoveLink } from "@/lib/purchase-move-flow";
 import { PURCHASE_MOVE_DELIVERED } from "@/lib/purchase-move-open";
@@ -75,7 +75,8 @@ async function main(): Promise<void> {
   const moss = (await storeForEmail(OWNER)) as Store;
   const told = () => mails.filter((m) => m.to === OWNER);
   const used = () => allowanceUsed(moss, "email");
-  const roomField = (id: string) => redis.keys().some((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, `pm:${id}`]) === 1);
+  /** Whether the store's data room counts a move from this old address (one slot per old address). */
+  const roomField = (old: string) => redis.keys().some((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, movedRoomSlot(moss.sid, old)]) === 1);
   /** The store's data room in use, as its own record says. */
   const roomTotal = () => {
     const key = redis.keys().find((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, "#"]) === 1 && String(redis.run(["HKEYS", k])).includes("pm:"));
@@ -108,17 +109,15 @@ async function main(): Promise<void> {
   }
 
   part("Moved: the new address has the purchases, the old one no longer, and the creator is told once");
-  let firstId = "";
   {
     const both = await asked("ana.old@example.com", "ana.new@example.com");
-    firstId = both.id;
     const [t0, q0] = [told().length, await used()];
     const result = await applyPurchaseMove(moss, both.id);
     is("moved, and told", result, { state: "moved", told: "sent" });
     is("the old address moved to the new one", await readMovedIndex(moss.sid, "Ana.Old@example.com"), { movedTo: "ana.new@example.com", movedFrom: [] });
     is("the new address holds the old one's purchases", await readMovedIndex(moss.sid, "ana.new@example.com"), { movedTo: null, movedFrom: ["ana.old@example.com"] });
     is("the request is marked moved", typeof (await readPurchaseMove(both.id))?.appliedAt, "number");
-    is("its room taken from the store's data room", roomField(both.id), true);
+    is("its room taken from the store's data room", roomField("ana.old@example.com"), true);
     const notice = told().slice(t0);
     is("one notice to the creator, from the store's emails", [notice.length, (await used()) - q0], [1, 1]);
     is("it names both addresses", [notice[0]?.text.includes("ana.old@example.com"), notice[0]?.text.includes("ana.new@example.com")], [true, true]);
@@ -149,24 +148,23 @@ async function main(): Promise<void> {
     is(`${what}: the creator told once`, told().length - t0, 1);
   }
 
-  part("The index switches at one write: a mark without its line moves nothing");
+  part("The index switches at one step: a line that cannot be written leaves nothing of the move");
   {
     const request = await asked("half.old@example.com", "half.new@example.com");
     odd = { command: "HSET", prefix: "nl:pm:into:", reply: [], times: 1 };
-    await applyPurchaseMove(moss, request.id);
+    is("unknown", (await applyPurchaseMove(moss, request.id)).state, "unknown");
     odd = null;
-    const marked = redis.keys().some((k) => k.startsWith("nl:pm:moved:"));
-    is("the old address's mark is written first", marked, true);
-    is("but alone it moves nothing", [(await readMovedIndex(moss.sid, "half.old@example.com")).movedTo, (await readMovedIndex(moss.sid, "half.new@example.com")).movedFrom], [null, []]);
+    is("no mark is written alone", indexState().some((line) => line.includes("half.new@example.com")), false);
+    is("and nothing moved", [(await readMovedIndex(moss.sid, "half.old@example.com")).movedTo, (await readMovedIndex(moss.sid, "half.new@example.com")).movedFrom], [null, []]);
   }
 
   part("An address already moved elsewhere");
   {
     const again = await asked("ana.old@example.com", "ana.other@example.com");
     const t0 = told().length;
-    const before = indexState();
+    const [before, room] = [indexState(), roomTotal()];
     is("refused", await applyPurchaseMove(moss, again.id), { state: "already-moved", told: null });
-    is("nothing written, nobody told, its room given back", [indexState(), told().length - t0, roomField(again.id)], [before, 0, false]);
+    is("nothing written, nobody told, no room taken for it", [indexState(), told().length - t0, roomTotal()], [before, 0, room]);
     is("the first move stands", (await readMovedIndex(moss.sid, "ana.old@example.com")).movedTo, "ana.new@example.com");
   }
 
@@ -306,7 +304,7 @@ async function main(): Promise<void> {
       { movedTo: null, movedFrom: [] },
       { movedTo: null, movedFrom: [] },
     ]);
-    is("and the room given back", roomField(firstId), false);
+    is("and the room given back", roomField("ana.old@example.com"), false);
     const removedOld = await forgetMovedPerson(moss, "flow.old@example.com");
     is("the old address: its mark and its line", removedOld, 2);
     is("nothing left of that move", (await readMovedIndex(moss.sid, "flow.new@example.com")).movedFrom, []);

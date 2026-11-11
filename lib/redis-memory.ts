@@ -943,6 +943,17 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/purchase-move-index.ts MOVE_APPLY: the old address's mark and the new address's line in one step.
+        if (key.startsWith("-- marktmorgen:purchase-move-apply:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, marked, into, text, from, id] = args;
+          const held = this.run(["GET", marked]);
+          if (held !== null && typeof held !== "string") throw new Error("ERR purchase-move-apply: the mark");
+          if (held !== null) return held === text ? "moved" : "elsewhere";
+          const lined = this.run(["HSET", into, from, id]);
+          if (lined !== 0 && lined !== 1) throw new Error("ERR purchase-move-apply: the line");
+          if (this.run(["SET", marked, text]) !== "OK") throw new Error("ERR purchase-move-apply: the mark");
+          return "moved";
+        }
         // lib/purchase-moves.ts MOVE_DAY_COUNT: INCR then EXPIRE in one step; the new count.
         if (key.startsWith("-- marktmorgen:purchase-move-day:v1\n") && args[0] === "1" && args.length === 3) {
           const made = this.run(["INCR", args[1]]);

@@ -20,16 +20,19 @@
  * The two agree or nothing moved (readMovedIndex): an old address has moved
  * away, and its purchases are the new one's, only when its mark names the
  * new address and the new address's line names it back with the same move.
- * The mark is written first and the line second, so the purchases switch
- * at the line's one write: before it the old address has them, after it the
- * new one does, and there is no moment when neither does. A crash between
- * the two leaves a mark alone, which moves nothing, and the next try
- * finishes it: every write is the same on a second run (the mark taken with
- * the same value, the line set to the same id), and the move is claimed
- * once (claimPurchaseMove), so it is never written for two requests.
+ * The mark and the line are written together, in one script (MOVE_APPLY),
+ * so the purchases switch at that one step: before it the old address has
+ * them, after it the new one does, and no moment leaves neither with them.
+ * A crash or a lost answer leaves both or neither, never a mark alone
+ * (Claude 3 on #3625): a mark alone would say "already moved" to the buyer
+ * asking again, and keep the new address where erasing it cannot reach.
+ * The script is the same on a second run (a mark with the same value is the
+ * move already written), and the move is claimed once (claimPurchaseMove),
+ * so it is never written for two requests.
  *
  * Kept for as long as the purchases are, so counted in the store's data
- * room before it is written (lib/store-data.ts, slot "pm:<id>"), erased with
+ * room before it is written (lib/store-data.ts, slot "pm:<print(old)>",
+ * one per old address, the same for every request from it), erased with
  * a store that closes (lib/data-families.ts), and taken out, both lines of
  * the move, when the store deletes either address (lib/person-erasure.ts,
  * forgetMovedPerson). An address the store deleted is never written here.
@@ -37,8 +40,7 @@
  * moved" (rule 24).
  */
 import { createHash } from "node:crypto";
-import { normaliseEmail } from "@/lib/auth";
-import { claimMark } from "@/lib/claim-mark";
+import { MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { MoveRequest } from "@/lib/purchase-move-rules";
 import { claimPurchaseMove, readPurchaseMove } from "@/lib/purchase-moves";
 import { type Told, tellCreatorOfMove } from "@/lib/purchase-move-notice";
@@ -53,7 +55,32 @@ const ID = /^[0-9a-f]{32}$/;
 const print = (sid: string, address: string) => createHash("sha256").update(`nimbus-pm-moved:${sid}:${normaliseEmail(address)}`).digest("hex").slice(0, 32);
 const movedKey = (sid: string, address: string) => `nl:pm:moved:${sid}:${print(sid, address)}`;
 const intoKey = (sid: string, address: string) => `nl:pm:into:${sid}:${print(sid, address)}`;
-const slot = (id: string) => `pm:${id}`;
+/**
+ * The data room's slot for a move from this address: one per old address, since an address moves once. A request
+ * that stopped with its answer unknown leaves its room there, and the next request from the same address sets the
+ * same slot again rather than leaving a second one (Claude 3 on #3625).
+ */
+export const movedRoomSlot = (sid: string, from: string) => `pm:${print(sid, from)}`;
+/** What a move from this address keeps, its new address counted at the longest an address may be, so every request from it sets the same room. */
+const roomOf = (sid: string, from: string, id: string, at: number) =>
+  dataBytes([movedKey(sid, from), markText({ id, to: "x".repeat(MAX_EMAIL_LENGTH), at }), intoKey(sid, from), from, id], 2);
+
+/**
+ * The old address's mark and the new address's line, in one step, as Redis runs a script whole: "moved" when written
+ * now or by an earlier try of the same move (its mark already there with the same value), "elsewhere" when the old
+ * address's mark is another move's, and nothing written then. The line goes first: a line on a key that is not a hash
+ * stops the script before anything is written, and a SET on a string cannot fail. Billed as four commands (the EVAL,
+ * GET, HSET and SET). lib/redis-memory.ts models it for the tests.
+ */
+export const MOVE_APPLY = `-- marktmorgen:purchase-move-apply:v1
+local held = redis.call('GET', KEYS[1])
+if held then
+  if held == ARGV[1] then return 'moved' end
+  return 'elsewhere'
+end
+redis.call('HSET', KEYS[2], ARGV[2], ARGV[3])
+redis.call('SET', KEYS[1], ARGV[1])
+return 'moved'`;
 
 type Mark = { id: string; to: string; at: number };
 
@@ -115,7 +142,8 @@ export async function readMovedIndex(sid: string, raw: string): Promise<{ movedT
   let movedTo: string | null = null;
   if (mark) {
     const back = second[0];
-    if (back !== null && typeof back !== "string") throw new UnknownReplyError(what);
+    // A line is a move's id: anything else is unknown, never "not moved" (Claude 3 on #3625, LOW 4).
+    if (back !== null && (typeof back !== "string" || !ID.test(back))) throw new UnknownReplyError(what);
     if (back === mark.id) movedTo = mark.to;
   }
   const movedFrom = olds.filter((old, i) => {
@@ -171,26 +199,23 @@ export async function applyPurchaseMove(store: Store, id: string, now = Date.now
     const before = markOf(held[0], "a moved address's mark");
     if (before && before.id !== id) return stop("already-moved");
 
-    // The room first: what the two lines keep, for as long as they are kept. Set, not added, so a second try takes nothing more.
-    const bytes = dataBytes([movedKey(store.sid, from), text, intoKey(store.sid, to), from, id], 2);
-    const room = await takeData(store, [{ slot: slot(id), bytes, set: true }], now);
+    // The room first: what the two lines keep, for as long as they are kept. Set, not added, and the same for every
+    // request from this address, so a second try, or a later request after one that stopped, takes nothing more.
+    const room = await takeData(store, [{ slot: movedRoomSlot(store.sid, from), bytes: roomOf(store.sid, from, id, request.appliedAt), set: true }], now);
     if (!room.ok) return stop(room.reason === "full" ? "full" : "unknown");
 
-    // The old address's mark, then the new address's line: the purchases switch at the second write.
-    const marked = await claimMark(movedKey(store.sid, from), null, text);
-    if (marked === "unknown") return stop("unknown");
-    if (marked === "taken") {
-      const again = repliesFor(await redisPipeline([["GET", movedKey(store.sid, from)]]), 1);
-      const theirs = again ? markOf(again[0], "a moved address's mark") : undefined;
-      if (theirs === undefined) return stop("unknown");
-      if (!theirs || theirs.id !== id) {
-        // Another move of this address got there first: its room goes back.
-        await giveData(store, [{ slot: slot(id), bytes: 0, set: true }], now);
-        return stop("already-moved");
-      }
+    // The mark and the line in one step: the purchases switch there, and nothing is ever left half written.
+    let written: unknown;
+    try {
+      const reply = repliesFor(await redisPipeline([["EVAL", MOVE_APPLY, 2, movedKey(store.sid, from), intoKey(store.sid, to), text, from, id]]), 1);
+      written = reply ? reply[0] : undefined;
+    } catch {
+      // Whether it ran is not known: unknown, and the next try finishes it or finds it done.
+      return stop("unknown");
     }
-    const lined = repliesFor(await redisPipeline([["HSET", intoKey(store.sid, to), from, id]]), 1);
-    if (!lined || (lined[0] !== 0 && lined[0] !== 1)) return stop("unknown");
+    // Another move of this address got there first. Its room is this same slot, so it stays.
+    if (written === "elsewhere") return stop("already-moved");
+    if (written !== "moved") return stop("unknown");
   } catch (error) {
     if (error instanceof UnknownReplyError) return stop("unknown");
     throw error;
@@ -234,21 +259,21 @@ export async function forgetMovedPerson(store: Store, raw: string): Promise<numb
   const mark = markOf(read[0], what);
   const lines = linesOf(read[1], what);
   const commands: (string | number)[][] = [];
-  const ids = new Set<string>();
+  const olds = new Set<string>();
   if (mark) {
     commands.push(["DEL", movedKey(sid, address)], ["HDEL", intoKey(sid, mark.to), address]);
-    ids.add(mark.id);
+    olds.add(address);
   }
   if (lines.size) {
     commands.push(["DEL", intoKey(sid, address)]);
-    for (const [old, id] of lines) {
+    for (const old of lines.keys()) {
       commands.push(["DEL", movedKey(sid, old)]);
-      ids.add(id);
+      olds.add(old);
     }
   }
   if (!commands.length) return 0;
   const done = repliesFor(await redisPipeline(commands), commands.length);
   if (!done || done.some((reply) => typeof reply !== "number")) throw new UnknownReplyError(what);
-  await giveData(store, [...ids].map((id) => ({ slot: slot(id), bytes: 0, set: true })));
+  await giveData(store, [...olds].map((old) => ({ slot: movedRoomSlot(sid, old), bytes: 0, set: true })));
   return (mark ? 2 : 0) + (lines.size ? 1 + lines.size : 0);
 }

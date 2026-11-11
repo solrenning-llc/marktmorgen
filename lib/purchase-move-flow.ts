@@ -70,11 +70,13 @@ export const MOVE_LINK_COMMANDS = 6;
 export const MOVE_CONFIRM_COMMANDS = MOVE_LINK_COMMANDS + 1 + 4 + 2 + 4;
 /**
  * Commands writing a move into the index makes at the most (lib/purchase-move-index.ts): the claim (the request and
- * its marks read, the mark with its read-back), the deleted people, the old address's mark read, the data room's
- * script billed as four, the mark with its read-back and its read again, the line, and the creator's notice mark with
- * its read-back and its release. The notice itself is one of the store's emails, taken from its figure.
+ * its marks read, the claim's mark with its read-back), the request read again on a later try of a move already
+ * claimed, the deleted people, the old address's mark read, the data room's script billed as four, the mark and the
+ * line in one script billed as four (MOVE_APPLY: the EVAL, GET, HSET and SET), and the creator's notice mark with its
+ * read-back and its release. The notice itself is one of the store's emails, taken from its figure. Each part at its
+ * most, so a later try of the same move is inside it too (Claude 3 on #3625, LOW 3).
  */
-export const MOVE_APPLY_COMMANDS = 4 + 2 + 1 + 1 + 4 + 3 + 1 + 3;
+export const MOVE_APPLY_COMMANDS = 4 + 2 + 4 + 2 + 1 + 4 + 4 + 3;
 
 const MAX_BODY_BYTES = 2_000;
 const sec = (ms: number) => Math.floor(ms / 1000);

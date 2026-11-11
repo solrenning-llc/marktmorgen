@@ -237,6 +237,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:inbound:seen:@app/api/mail/inbound/route.ts": company("Inbound mail already handled", "The email provider's notices, kept a few days: the company's."),
   "nl:sns:seen:@app/api/mail/ses/route.ts": company("Amazon's notices already handled", "The email provider's notices, kept a few days: the company's."),
   "nl:course:@app/api/store/course/route.ts": short("A course's lock while the studio changes it", "studio", 1),
+  "nl:crefund:told:@lib/creator-refund.ts": short("A refund given from a buyer's record, marked once it is written into the team's log, so a repeat of the same form never writes it twice (649 [WG9])", "studio", 2, MARK),
   "nl:rl:export:@app/api/store/export/route.ts": { what: "Downloads of a store's files: counted ten minutes at a time, and its whole exports since its plan ended", parts: [per("studio", 1, KEY, "Downloads counted ten minutes at a time."), capped(() => KEY, "One count of whole exports since the plan ended, sixty days.")] },
   "nl:rl:licence:@app/api/store/licence/route.ts": short("A license check's count per connection", "request", 1, KEY, REQ("license")),
   "nl:pod:@app/api/store/podcast/route.ts": short("A podcast's lock while the studio changes it", "studio", 1),

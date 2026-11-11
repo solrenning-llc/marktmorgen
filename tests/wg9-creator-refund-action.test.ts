@@ -119,7 +119,7 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
   await setStripeAccount(OWNER, ACCOUNT, true);
-  await setSubscription(OWNER, { customerId: "cus_rowan", subscriptionId: "sub_rowan", active: true, tier: "studio", period: paidPeriod() });
+  await setSubscription(OWNER, { customerId: "cus_rowan", subscriptionId: "sub_rowan", active: true, tier: "pro", period: paidPeriod() });
   const store = (await storeForEmail(OWNER))!;
   cookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;
 
@@ -152,8 +152,9 @@ async function main(): Promise<void> {
   is("one log line for it", (await logLines(store)).length, 2);
 
   part("Checked before Stripe is asked to give anything back");
+  const asked = refundPosts().length;
   const over = await post({ charge: CHARGE, token: T3, amount: "27.51" });
-  is("more than is left (27.50): refused, nothing sent", [over.status, over.body.error, refundPosts().length], [400, "over_refundable", 3]);
+  is("more than is left (27.50): refused, nothing sent", [over.status, over.body.error, refundPosts().length], [400, "over_refundable", asked]);
   const typed = await post({ charge: CHARGE, token: T3, amount: "$5" });
   is("an amount that is not plain: refused", [typed.status, typed.body.error], [400, "not_an_amount"]);
   const badToken = await post({ charge: CHARGE, token: "abc", amount: "5" });
@@ -162,13 +163,13 @@ async function main(): Promise<void> {
   is("a reason Stripe does not take: refused", [badReason.status, badReason.body.error], [400, "invalid"]);
   stripe.charge.store = "someoneelse";
   const other = await post({ charge: CHARGE, token: T3, amount: "5" });
-  is("a payment of another store on the same account: not found, nothing sent", [other.status, other.body.error, refundPosts().length], [404, "not_found", 3]);
+  is("a payment of another store on the same account: not found, nothing sent", [other.status, other.body.error, refundPosts().length], [404, "not_found", asked]);
   stripe.charge.store = HANDLE;
   const missing = await post({ charge: "ch_wg9nothere", token: T3, amount: "5" });
   is("a payment Stripe does not know: not found", [missing.status, missing.body.error], [404, "not_found"]);
   stripe.charge.disputed = true;
   const disputed = await post({ charge: CHARGE, token: T3, full: true });
-  is("a disputed payment: refused, defended in the dispute instead", [disputed.status, disputed.body.error, refundPosts().length], [409, "disputed", 3]);
+  is("a disputed payment: refused, defended in the dispute instead", [disputed.status, disputed.body.error, refundPosts().length], [409, "disputed", asked]);
   stripe.charge.disputed = false;
 
   part("Stripe's answer, read exactly");
@@ -207,7 +208,7 @@ async function main(): Promise<void> {
     is(`${role}: forbidden`, await giveRefund(store, { email: "team@example.com", role }, { charge: CHARGE, token: T1, full: true }), { ok: false, error: "forbidden" });
   }
   is("no Stripe call for them", stripe.calls.length, 0);
-  is("a store with no Stripe account: said so, nothing asked", await giveRefund({ ...store, stripeAccountId: undefined } as Store, { email: OWNER, role: "owner" }, { charge: CHARGE, token: T1, full: true }), { ok: false, error: "no_stripe" });
+  is("a store with no Stripe account: said so, nothing asked", await giveRefund({ ...store, stripeAccountId: null }, { email: OWNER, role: "owner" }, { charge: CHARGE, token: T1, full: true }), { ok: false, error: "no_stripe" });
   const signedOut = await POST(new NextRequest("https://marktmorgen.com/api/store/person-refund", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ charge: CHARGE, token: T1, full: true }) }));
   is("signed out: 401, nothing asked", [signedOut.status, stripe.calls.length], [401, 0]);
 

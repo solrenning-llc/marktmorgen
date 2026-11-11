@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { STORE_ID_PATTERN } from "@/lib/store";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { DisputePurchaseReviewPanel } from "@/components/dispute-purchase-review";
 
@@ -24,7 +25,7 @@ export default async function StudioDisputesPage({ searchParams }: Params) {
     <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
     <StudioStorePin sid={store.sid}>
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Disputed purchases</p>
+        <StudioTrail store={store} here="Disputed purchases" />
         <h1 className="t-h2 mt-3">Review one disputed purchase</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">Check a payment on this store&apos;s Stripe account before preparing your response. This page only reads the purchase record; it does not send evidence or promise a result.</p>
         <DisputePurchaseReviewPanel connected={Boolean(store.stripeAccountId)} />

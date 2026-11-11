@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { Icon, type IconName } from "@/components/icons";
 import { type ImportJob, IMPORT_LIMITS, storeImports } from "@/lib/imports";
@@ -155,7 +156,7 @@ export default async function StudioImportPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Moving from another platform</p>
+          <StudioTrail store={store} here="Moving from another platform" />
           <h1 className="t-h2 mt-3">Bring your store with you</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Export a spreadsheet from Stan, Gumroad, Kajabi, Patreon, Mailchimp or anywhere else, choose it here, and say which column is

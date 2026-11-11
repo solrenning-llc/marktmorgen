@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { readTitles } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { storeKey } from "@/lib/learn";
 import { isDiscordConfigured, serverRoles } from "@/lib/discord";
@@ -64,7 +65,7 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Discord</p>
+          <StudioTrail store={store} here="Discord" />
           <h1 className="t-h2 mt-3">Your Discord server, opened by what people buy</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`Choose which products give which roles in your server. A buyer presses “Join the Discord” after paying, says yes on Discord's own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, which comes about every ${CHECK_HOURS} hours. While Stripe or Discord cannot be reached, or Discord will not let the bot remove a role, nothing is taken until it can be.`}

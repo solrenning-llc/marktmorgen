@@ -3,6 +3,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { EmailField } from "@/components/email-field";
 import { studioPath, studioView } from "@/lib/studio-route";
@@ -123,13 +124,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: back, label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <nav aria-label="Breadcrumb" className="mb-4 text-sm text-ink-soft">
-            <ol className="flex flex-wrap items-center gap-2">
-              <li><Link href={studioPath(store)} className={CRUMB}>Studio</Link> <span aria-hidden="true">›</span></li>
-              <li><Link href={back} className={CRUMB}>What you pay us</Link> <span aria-hidden="true">›</span></li>
-              <li aria-current="page">Refund your payment</li>
-            </ol>
-          </nav>
+          <div className="mb-4"><StudioTrail store={store} path={[{ label: "What you pay us", href: back }]} here="Refund your payment" /></div>
           <div className="card max-w-2xl p-6 sm:p-8">
             <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-3xl">{`Refund your payment for ${name}`}</h1>
             {withdrawOpen ? (

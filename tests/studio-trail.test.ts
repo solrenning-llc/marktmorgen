@@ -52,8 +52,11 @@ function pages(dir: string): string[] {
   });
 }
 // The studio's first page is where every trail starts: its heading says
-// "Studio" above the store's name, so it needs no trail of one item.
-const EXEMPT = ["app/studio/page.tsx"];
+// "Studio" above the store's name, so it needs no trail of one item. The
+// paused page is shown in place of the studio once its requests are used:
+// it has no way back to the studio by design, since the studio would only
+// send the creator here again, so a link to it would do nothing.
+const EXEMPT = ["app/studio/page.tsx", "app/studio/paused/page.tsx"];
 // Pages added by an open PR (9 November 2026); remove each when it gets a
 // trail. They may not exist yet here, and are then simply not checked.
 const FROM_OPEN_PRS = [
@@ -65,21 +68,9 @@ const FROM_OPEN_PRS = [
   "app/studio/students/page.tsx", // #3035
   "app/studio/devices/page.tsx", // #3459
 ];
-// Pages that still wait for the trail. For the pages that exist, this list
-// may only get shorter: a page given the trail leaves it, and a new page of
-// the studio is made with one.
-const PENDING = [
-  ...FROM_OPEN_PRS,
-  "app/studio/add/page.tsx", "app/studio/affiliates/page.tsx", "app/studio/agent/page.tsx", "app/studio/agreements/page.tsx",
-  "app/studio/calendar/page.tsx", "app/studio/card/page.tsx", "app/studio/community/page.tsx", "app/studio/copy/page.tsx",
-  "app/studio/course/[product]/page.tsx", "app/studio/deals/page.tsx", "app/studio/discord/page.tsx", "app/studio/disputes/page.tsx",
-  "app/studio/email/page.tsx", "app/studio/forms/page.tsx", "app/studio/growth/page.tsx", "app/studio/import/page.tsx",
-  "app/studio/inbox/page.tsx", "app/studio/integrations/page.tsx", "app/studio/invite/page.tsx", "app/studio/labels/page.tsx",
-  "app/studio/meetings/page.tsx", "app/studio/memberships/page.tsx", "app/studio/new/page.tsx", "app/studio/outreach/page.tsx",
-  "app/studio/pages/page.tsx", "app/studio/path/page.tsx", "app/studio/path/privacy/page.tsx", "app/studio/paused/page.tsx",
-  "app/studio/people/page.tsx", "app/studio/phone/page.tsx", "app/studio/refund/page.tsx", "app/studio/requests/page.tsx",
-  "app/studio/reviews/page.tsx", "app/studio/tax/page.tsx", "app/studio/team/page.tsx", "app/studio/totals/page.tsx",
-];
+// Pages that still wait for the trail: only the ones open PRs are adding.
+// Every page of the studio here has it, and a new page is made with one.
+const PENDING = [...FROM_OPEN_PRS];
 const all = pages("app/studio").sort();
 const read = (path: string) => readFileSync(path, "utf8");
 is("every page of the studio draws the trail (a new page is made with one)", all.filter((p) => !EXEMPT.includes(p) && !PENDING.includes(p) && !read(p).includes("<StudioTrail")), []);

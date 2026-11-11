@@ -15,6 +15,7 @@ import { channelCashflows, cashflowStatus } from "@/lib/channel-cashflow";
 import { creativeResultsReport } from "@/lib/channel-reports";
 import { ReportDownload } from "@/components/report-download";
 import { CampaignResultsPanel } from "@/components/campaign-results";
+import { campaignResultsFrom, hasCampaignResults } from "@/lib/campaign-results";
 import { PromotionPlanner } from "@/components/promotion-planner";
 import { PaymentComparisonPanel } from "@/components/payment-comparison";
 import { PaymentMixPanel } from "@/components/payment-mix";
@@ -772,7 +773,7 @@ export function StatsPanel({
       ) : null}
 
       {range !== "all" && insightContext?.promotionProducts?.length ? (
-        <PromotionPlanner key={range} data={data} range={range} products={insightContext.promotionProducts} />
+        <PromotionPlanner key={range} data={data} range={range} products={insightContext.promotionProducts} campaignResults={hasCampaignResults(campaignResultsFrom(data, range, spends))} />
       ) : null}
 
       {range !== "all" && insights.length ? (

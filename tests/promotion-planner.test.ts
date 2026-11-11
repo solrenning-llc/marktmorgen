@@ -9,7 +9,7 @@ const data = { sales: "ok", partial: false, currency: "usd", days: [{date:"2026-
  channels:{d7:[{source:"x",visits:100,cents:12345,sales:1}],d30:[],d90:[]},
 } as unknown as StatsData;
 const products=[{id:"a",title:"<Product>",url:"https://shop.example/p/a?coupon=SAVE"}];
-const html=(d=data,p=products)=>renderToStaticMarkup(createElement(PromotionPlanner,{data:d,range:"d7",products:p}));
+const html=(d=data,p=products)=>renderToStaticMarkup(createElement(PromotionPlanner,{data:d,range:"d7",products:p,campaignResults:true}));
 part("The rendered planner uses public choices and communicates its limits");
 is("empty eligible list does not render",html(data,[]),"");
 is("product names are escaped",html().includes("&lt;Product&gt;"),true);

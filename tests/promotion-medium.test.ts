@@ -9,7 +9,7 @@ import type { StatsData } from '@/lib/stats';
 function markup(channel:string){
  const row={views:20,cents:100,sales:1,checkouts:1};
  const data={sales:'ok',partial:false,currency:'usd',days:[{date:'2026-10-17'}],products:[{id:'a',title:'Guide',d7:row,d30:row,d90:row}],channels:{d7:[{source:channel,visits:20,cents:100,sales:1,checkouts:1,free:0}],d30:[],d90:[]}} as unknown as StatsData;
- return renderToStaticMarkup(createElement(PromotionPlanner,{data,range:'d7',products:[{id:'a',title:'Guide',url:'https://shop.example/p/guide'}]}));
+ return renderToStaticMarkup(createElement(PromotionPlanner,{data,range:'d7',products:[{id:'a',title:'Guide',url:'https://shop.example/p/guide'}],campaignResults:false}));
 }
 test('email and newsletter channels start with email attribution',()=>{
  assert.equal(promotionMedium('email'),'email');assert.equal(promotionMedium('newsletter'),'email');

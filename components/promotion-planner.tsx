@@ -9,7 +9,11 @@ import { formatMoney } from "@/lib/money";
 import { channelName } from "@/lib/channel-names";
 import { copyCampaignLink } from "@/lib/campaign-copy";
 
-export function PromotionPlanner({ data, range, products }: { data: StatsData; range: PromotionWindow; products: PromotionProduct[] }) {
+/**
+ * `campaignResults`: whether the "Campaigns, payments and recorded ads" panel is on the page (hasCampaignResults,
+ * lib/campaign-results.ts). Without it there is nothing for "See campaign results" to go to, so it is not offered (VR).
+ */
+export function PromotionPlanner({ data, range, products, campaignResults }: { data: StatsData; range: PromotionWindow; products: PromotionProduct[]; campaignResults: boolean }) {
   const id = useId();
   const plan = promotionChoices(data, range, products);
   const [selected, setSelected] = useState("");
@@ -71,7 +75,7 @@ export function PromotionPlanner({ data, range, products }: { data: StatsData; r
     {!link ? <p className="mt-1 text-xs text-ink-soft">Enter a campaign name with letters or numbers to create the link.</p> : null}
     <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" className="btn btn-primary" disabled={!link} onClick={() => void copy()}>Copy campaign link</button>
-      <button type="button" className="btn btn-secondary" onClick={() => document.getElementById("numbers-posts")?.scrollIntoView({ behavior: "smooth", block: "start" })}>See campaign results</button>
+      {campaignResults ? <button type="button" className="btn btn-secondary" onClick={() => document.getElementById("numbers-posts")?.scrollIntoView({ behavior: "smooth", block: "start" })}>See campaign results</button> : null}
     </div>
     <p id={id + "-copy-status"} className="mt-2 text-xs text-ink-soft" role="status">{copied === link && link ? "Campaign link copied." : copied === "selected:" + link ? "The campaign link is selected. Copy it using your keyboard or device menu." : copied === "failed:" + link ? "Select the campaign link above and copy it." : "Share this link, then review its recorded visits and payments in Campaigns. Results are not guaranteed; gross revenue excludes refunds, fees and other costs."}</p>
   </section>;

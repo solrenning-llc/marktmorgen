@@ -36,7 +36,7 @@ test('the selected period controls traffic evidence',()=>{
  assert.equal(promotionChoices(value,'d30',products).channel,'email');
 });
 test('the interface labels traffic evidence without claiming revenue evidence',()=>{
- const markup=renderToStaticMarkup(createElement(PromotionPlanner,{data:data(),range:'d7',products}));
+ const markup=renderToStaticMarkup(createElement(PromotionPlanner,{data:data(),range:'d7',products,campaignResults:false}));
  assert.ok(markup.includes('based on store-wide visits'));
  assert.equal(markup.includes('based on store-wide gross revenue'),false);
  assert.ok(markup.includes('does not prove this product sold through that channel'));

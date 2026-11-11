@@ -3,6 +3,11 @@ import { spendWithin, type AdSpend } from "@/lib/ad-spend-rules";
 export type CampaignResultRow = { campaign: string; paymentChannels: string[] | null; adChannels: string[] | null; visits: number; paidRecords: number | null; gross: number | null; ads: number | null; grossLessAds: number | null };
 export type CampaignResults = { from: string; to: string; partial: boolean; salesKnown: boolean; unassignedAds: number | null; rows: CampaignResultRow[] };
 /** Campaign tags aggregate visits and paid records across channels, without guessing a traffic-channel split. */
+/** Whether the "Campaigns, payments and recorded ads" panel is drawn: a campaign or an ad not tied to one was recorded. */
+export function hasCampaignResults(report: CampaignResults | null): report is CampaignResults {
+  return Boolean(report && (report.rows.length || report.unassignedAds));
+}
+
 export function campaignResultsFrom(data: Pick<StatsData, "sales" | "partial" | "posts" | "days">, range: "d7" | "d30" | "d90", spends?: AdSpend[]): CampaignResults | null {
   const days = (data.days ?? []).slice(-(range === "d7" ? 7 : range === "d30" ? 30 : 90));
   if (!days.length) return null;

@@ -314,15 +314,17 @@ function placeBytes(sid: string, productId: string, email: string, raw: string):
  * still kept (the launch email carries it), so what it takes moves to a
  * record that comes off by itself once the link has expired.
  */
-async function takeList(room: DataStore, sid: string, productId: string, at = Date.now()): Promise<void> {
-  const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)]]);
+async function takeList(room: DataStore, sid: string, productId: string, at = Date.now()): Promise<boolean> {
   let places: [string, string][];
   try {
+    const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)]]);
     places = takenPairs(taken, "a launched waitlist's deletion");
   } catch (error) {
-    // Unknown whether the list went: nothing is given back, the room erring fuller.
-    console.error("launching a waitlist: its deletion was not confirmed, so its room stays counted", error);
-    return;
+    // Unknown whether the list went: nothing is given back, the room erring fuller, and the launch stays on the
+    // queue (JOBS), unfinished, so the next run deletes it again (Claude 1 on #2576): a list already gone answers
+    // an empty take, which confirms it.
+    console.error("launching a waitlist: its deletion was not confirmed, so it is tried again next run", error);
+    return false;
   }
   const freed = places.reduce((sum, [email, raw]) => sum + placeBytes(sid, productId, email, raw), 0);
   const kept = places.reduce((sum, [email, raw]) => {
@@ -331,6 +333,7 @@ async function takeList(room: DataStore, sid: string, productId: string, at = Da
   }, 0);
   if (freed > 0) await giveData(room, [{ slot: waitSlot(productId), bytes: freed }], at);
   if (kept > 0) await noteData(room, [{ until: at + WAIT_SECONDS * 1000, bytes: kept }], at);
+  return true;
 }
 
 /**
@@ -434,15 +437,23 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
   const total = confirmed.length;
   // A postal address is the law's for an email that offers something for sale (CAN-SPAM).
   if (total > 0 && !address) return { ok: false, reason: "address" };
-  const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: total ? 0 : now() };
+  // The launch goes on the queue (JOBS) unfinished even with nobody to email, so a deletion of the list that is
+  // not confirmed here is done by the next run (Claude 1 on #2576); it is finished here once it is.
+  const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: 0 };
   await redisPipeline([
     ["SREM", soonKey(sid), product.id],
     ["SET", jobKey(sid, product.id), JSON.stringify(job), "EX", 120 * 86_400],
     ["DEL", sendKey(sid, product.id)],
-    ...(total ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400], ["SADD", JOBS, `${sid}|${product.id}`]] : []),
+    ...(total ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400]] : []),
+    ["SADD", JOBS, `${sid}|${product.id}`],
   ]);
   // Nobody to email: the waitlist goes now, and its room comes back.
-  if (!total) await takeList(store, sid, product.id);
+  if (!total && (await takeList(store, sid, product.id))) {
+    await redisPipeline([
+      ["SET", jobKey(sid, product.id), JSON.stringify({ ...job, finished: now() }), "EX", 90 * 86_400],
+      ["SREM", JOBS, `${sid}|${product.id}`],
+    ]);
+  }
   return { ok: true, total };
 }
 
@@ -596,15 +607,18 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       await redisPipeline([["SET", jobKey(sid, pid), JSON.stringify(job), "EX", 120 * 86_400]]);
     }
     if (job.cursor >= job.total) {
-      job.finished = now();
       // The waitlist has done its one job: its addresses go. Whoever asked to
-      // hear more is on the creator's list already (confirmSpot).
+      // hear more is on the creator's list already (confirmSpot). The launch
+      // is finished and leaves the queue only once that deletion is confirmed:
+      // one that failed or answered in another shape is tried again next run,
+      // with nothing sent again (the cursor is at the end) (Claude 1 on #2576).
+      if (!(await takeList(store, sid, pid))) continue;
+      job.finished = now();
       await redisPipeline([
         ["SET", jobKey(sid, pid), JSON.stringify(job), "EX", 90 * 86_400],
         ["DEL", sendKey(sid, pid)],
         ["SREM", JOBS, member],
       ]);
-      await takeList(store, sid, pid);
     }
   }
   return sent;

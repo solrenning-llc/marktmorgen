@@ -366,25 +366,33 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
  * out: a store whose team or record does not read, or an index of more than MEMBER_STORES_READ stores, throws
  * UnknownReplyError instead of being skipped, since a store skipped may be the live one they still serve. Only a team
  * read exactly without them, an id with no store (nil) or a store they own is not one. Its one caller takes a throw as
- * not known (servesAnother): the person's calendar is kept, and the closing store is still erased, never held back a
- * walk for it (Claude 4 on #3660). Reads only: the index's stale
+ * not known (servesAnother): the person's calendar is kept and decided again on a later run, and the closing store is
+ * still erased, never held back a walk for it (Claude 4 on #3660). With `other`, it stops at the first store other
+ * than `other` the person serves, so a longer index than is read is unknown only when none was found. Reads only: the index's stale
  * entries are dropped by memberStores, never here. memberStores itself is unchanged for its other callers (the
  * studio's store list, sign-in and alerts), where one unreadable store must not stop the person's own studio.
  */
-export async function memberStoresExact(email: string): Promise<{ store: Store; role: TeamRole }[]> {
+export async function memberStoresExact(email: string, other?: string): Promise<{ store: Store; role: TeamRole }[]> {
   if (!isRedisConfigured()) return [];
   const address = normaliseEmail(email);
   const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
   if (!ids) throw new UnknownReplyError("a teammate's stores");
   const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
-  if (list.length > MEMBER_STORES_READ) throw new UnknownReplyError(`a teammate's stores, more than the ${MEMBER_STORES_READ} read,`);
+  const over = () => new UnknownReplyError(`a teammate's stores, more than the ${MEMBER_STORES_READ} read,`);
+  // Without `other`, the whole list or nothing. With it, the first store found other than `other` is enough, so an
+  // index longer than is read is unknown only when none was found among those read (Claude 4 on #3660).
+  if (other === undefined && list.length > MEMBER_STORES_READ) throw over();
   const found: { store: Store; role: TeamRole }[] = [];
-  for (const sid of list) {
+  for (const sid of list.slice(0, MEMBER_STORES_READ)) {
     const member = (await readTeam(sid)).members.find((m) => m.email === address);
     if (!member) continue;
     const store = await storeForIdExact(sid);
-    if (store && normaliseEmail(store.email) !== address) found.push({ store, role: member.role });
+    if (store && normaliseEmail(store.email) !== address) {
+      found.push({ store, role: member.role });
+      if (other !== undefined && store.sid !== other) return found;
+    }
   }
+  if (list.length > MEMBER_STORES_READ) throw over();
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
 }
 

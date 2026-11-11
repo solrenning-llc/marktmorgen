@@ -130,6 +130,14 @@ export type Batched = {
    * is never walked by its ids again, since by then another store may hold its address or key.
    */
   unfinished?: number;
+  /**
+   * Hosts (their emails) whose own calendar was kept at the preparation because whether they serve another store
+   * could not be known (servesAnother): each is read again before the store is finished (decideCalendars), and the
+   * store stays in the batch, set aside, until each is known (Claude 4 on #3660).
+   */
+  calendars?: string[];
+  /** Its last mark was written (ms; finishStores): it stays in the batch only for `calendars`, and is not told again. */
+  finished?: number;
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -505,8 +513,13 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
   // calendar. Not known is never "no other store" (rules 24 and 30): their calendar is kept, and the rest of the
   // closing store goes on. Until then not known moved the store back a walk, and a host on more stores than are read
   // (MEMBER_STORES_READ), which nothing bounds, made every closing store they host unerasable (Claude 4 on #3660).
+  // One not known is read again before the store is finished (decideCalendars), so a reply that did not read once
+  // never keeps a host's calendar, with their private calendar link, for good (Claude 4 on #3660 at af59d74bde).
+  const calendars: string[] = [];
   for (const email of hosts) {
-    if ((await servesAnother(email, store.sid)) === false) extra.push(...hostCalendarKeys(hostId(email)));
+    const serves = await servesAnother(email, store.sid);
+    if (serves === false) extra.push(...hostCalendarKeys(hostId(email)));
+    else if (serves === null) calendars.push(email);
   }
   await keep();
   await dropTeam(store, apply);
@@ -536,6 +549,7 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
     marks,
     endedAt: Date.parse(store.planEndedAt) || now,
     at: now,
+    ...(calendars.length ? { calendars } : {}),
   };
   // The walk's entry is written before the record goes: once the record is gone, only this entry names the store's
   // keys (#3181). Under the walk's lock both go in one CLOSING_FENCED step, the entry first, so neither is made
@@ -655,7 +669,7 @@ async function clearClaims(store: Store, hosts: string[], own: Set<string>, keep
  */
 async function servesAnother(email: string, sid: string): Promise<boolean | null> {
   try {
-    if ((await memberStoresExact(email)).some((m) => m.store.sid !== sid)) return true;
+    if ((await memberStoresExact(email, sid)).some((m) => m.store.sid !== sid)) return true;
     return await ownsAnother(email, sid);
   } catch (error) {
     console.error("whether a closing store's host serves another store could not be known; their own calendar is kept", error);
@@ -1336,15 +1350,31 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
   let confirmed = true;
   for (const [ref, entry] of entries) {
     if (Date.now() > deadline) return null;
-    try {
-      await finish(entry, now);
-    } catch (error) {
-      console.error("a closed store's records are gone but its last mark could not be written; it is finished again on the next run", error);
-      left += 1;
-      if (entry.unfinished) continue;
-      const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify({ ...entry, unfinished: now })]]), 1)?.[0];
-      if (set !== 0 && set !== 1) confirmed = false;
-      continue;
+    // Its last mark is written once: a store kept in the batch only for its hosts' calendars is not told again.
+    if (!entry.finished) {
+      try {
+        await finish(entry, now);
+      } catch (error) {
+        console.error("a closed store's records are gone but its last mark could not be written; it is finished again on the next run", error);
+        left += 1;
+        if (entry.unfinished) continue;
+        const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify({ ...entry, unfinished: now })]]), 1)?.[0];
+        if (set !== 0 && set !== 1) confirmed = false;
+        continue;
+      }
+    }
+    if (entry.calendars?.length) {
+      const undecided = await decideCalendars(entry);
+      if (undecided.length) {
+        // Still not known (Claude 4 on #3660): the store stays in the batch, set aside and marked finished, with what
+        // is left to decide, read again on every run until it is known; never taken as "no other store".
+        left += 1;
+        if (entry.finished && entry.unfinished && undecided.length === entry.calendars.length) continue;
+        const kept = { ...entry, calendars: undecided, finished: entry.finished ?? now, unfinished: entry.unfinished ?? now };
+        const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(kept)]]), 1)?.[0];
+        if (set !== 0 && set !== 1) confirmed = false;
+        continue;
+      }
     }
     // Out of the batch only on Redis's own answer (Claude 5 on #3279, rule 30): one still in it, not set aside,
     // would have its ids counted by the next walk. Not known to be out, the run stops here and finishes it again.
@@ -1357,6 +1387,27 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
     report.finished += 1;
   }
   return confirmed ? left : null;
+}
+
+/**
+ * The hosts of a walked store whose own calendar was kept because whether they serve another store was not known
+ * (prepareStore), read again: one known to serve no other store loses their calendar now, one known to serve another
+ * keeps it, and one still not known is answered back, to be read again on the next run. A delete not confirmed is not
+ * known either (rule 24). The store's record is gone by then, so the store itself is never counted as another.
+ */
+async function decideCalendars(entry: Batched): Promise<string[]> {
+  const undecided: string[] = [];
+  for (const email of entry.calendars ?? []) {
+    const serves = typeof email === "string" ? await servesAnother(email, entry.sid) : null;
+    if (serves === true) continue;
+    if (serves === false) {
+      const reply = repliesFor(await redisPipeline([["DEL", ...hostCalendarKeys(hostId(email))]]), 1)?.[0];
+      if (Number.isSafeInteger(reply) && (reply as number) >= 0) continue;
+      console.error("deleting a closed store's host's calendar was not confirmed; it is decided again on the next run", reply);
+    }
+    undecided.push(email);
+  }
+  return undecided;
 }
 
 /**

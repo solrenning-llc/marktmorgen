@@ -1,0 +1,9 @@
+{
+  "@vercel/blob/client": "community-upload-door-exact-world.ts",
+  "@/lib/blob": "community-upload-door-exact-world.ts",
+  "@/lib/store": "community-upload-door-exact-world.ts",
+  "@/lib/community": "community-upload-door-exact-world.ts",
+  "@/lib/community-access": "community-upload-door-exact-world.ts",
+  "@/lib/buyer-actions": "community-upload-door-exact-world.ts",
+  "@/lib/community-picture-rules": "community-upload-door-exact-world.ts"
+}

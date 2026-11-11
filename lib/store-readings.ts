@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
@@ -393,6 +394,10 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   // And the memberships' own cache, which keeps what members wrote when leaving (Codex E2 on #2111).
-  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), copyKey("members", statsId), membershipCacheKey(statsId)]]);
-  return Number(gone) || 0;
+  const keys = [copyKey("sales", statsId), copyKey("members", statsId), membershipCacheKey(statsId)];
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (CX-123 rule 24; as forgetLedgerCopy, lib/segments.ts): thrown, so the
+  // erasure says this part did not finish (lib/person-erasure.ts) while a copy naming the person may still be kept.
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of the store's kept sales and memberships readings");
+  return gone;
 }

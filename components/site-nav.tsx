@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
-import { moveFocus, shouldEnterMenuOnTab } from "@/lib/menu-keys";
+import { moveFocus, shouldEnterMenuOnTab, tabOutOfMenu } from "@/lib/menu-keys";
 
 type MenuItem = {
   label: string;
@@ -218,6 +218,9 @@ export function SiteNav() {
       const firstLink = document.getElementById(control)?.querySelector<HTMLElement>("a[href]");
       if (firstLink) {
         event.preventDefault();
+        // Entered from the keyboard, as with the arrows: no pending hover timer closes it under the focus.
+        keepOpen();
+        openedByClick.current = true;
         firstLink.focus();
         return;
       }
@@ -244,6 +247,32 @@ export function SiteNav() {
     items[next].focus();
   };
   const onListKey = (event: React.KeyboardEvent<HTMLElement>) => {
+    // The panel is drawn after the whole row, so Tab's two edges are routed (lib/menu-keys.ts tabOutOfMenu):
+    // Shift+Tab from the first link goes back to the menu's button, Tab from the last goes on to what follows it.
+    if (event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const panel = event.currentTarget;
+      const links = [...panel.querySelectorAll<HTMLElement>("a[href]")];
+      const edge = tabOutOfMenu(event.shiftKey, links.indexOf(event.target as HTMLElement), links.length);
+      const button = edge ? headerRef.current?.querySelector<HTMLElement>(`button[aria-controls="${panel.id}"]`) : null;
+      if (edge && button) {
+        // What follows the button in the header, in the order Tab takes, outside this panel and only if drawn.
+        const after = () => {
+          const stops = [...(headerRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])]
+            .filter((el) => !panel.contains(el) && el.getClientRects().length > 0);
+          return stops[stops.indexOf(button) + 1] ?? null;
+        };
+        const target = edge === "button" ? button : after();
+        if (target) {
+          event.preventDefault();
+          if (edge === "after") setOpenMenu(null);
+          target.focus();
+          return;
+        }
+        // Nothing after it in the header: the browser's own Tab leaves the header, which is the right order; the panel closes.
+        setOpenMenu(null);
+        return;
+      }
+    }
     if (modified(event)) return;
     const links = [...event.currentTarget.querySelectorAll<HTMLElement>("a[href]")];
     const at = links.indexOf(event.target as HTMLElement);

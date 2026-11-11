@@ -12,7 +12,7 @@
  * the rule and the wiring.
  */
 import { readFileSync } from "node:fs";
-import { moveFocus, shouldEnterMenuOnTab } from "@/lib/menu-keys";
+import { moveFocus, shouldEnterMenuOnTab, tabOutOfMenu } from "@/lib/menu-keys";
 import { done, is, part } from "./check";
 
 part("The rule");
@@ -20,6 +20,8 @@ is("down and up in a list, round at the ends", [moveFocus("ArrowDown", 0, 3, "li
 is("right and left in the row", [moveFocus("ArrowRight", 1, 4, "row"), moveFocus("ArrowLeft", 0, 4, "row")], [2, 3]);
 is("Home and End in both", [moveFocus("Home", 2, 5, "row"), moveFocus("End", 0, 5, "list")], [0, 4]);
 is("Tab enters an expanded menu only", [shouldEnterMenuOnTab("Tab", true), shouldEnterMenuOnTab("Tab", false), shouldEnterMenuOnTab("ArrowDown", true)], [true, false, false]);
+is("Tab leaves the panel only at its edges: back to the button, on past it", [tabOutOfMenu(true, 0, 4), tabOutOfMenu(false, 3, 4), tabOutOfMenu(false, 0, 4), tabOutOfMenu(true, 3, 4), tabOutOfMenu(false, 0, 1), tabOutOfMenu(true, 0, 1)], ["button", "after", null, null, "after", "button"]);
+is("outside the panel's links, or with none: the browser's order", [tabOutOfMenu(false, -1, 4), tabOutOfMenu(true, 4, 4), tabOutOfMenu(false, 0, 0), tabOutOfMenu(false, 1.5, 4)], [null, null, null, null]);
 is("the other axis's arrows, and any other key, move nothing", [moveFocus("ArrowDown", 0, 3, "row"), moveFocus("ArrowRight", 0, 3, "list"), moveFocus("Tab", 0, 3, "list"), moveFocus("a", 0, 3, "row")], [null, null, null, null]);
 is("nothing to move among: nothing", [moveFocus("ArrowDown", 0, 0, "list"), moveFocus("End", 0, -1, "row")], [null, null]);
 

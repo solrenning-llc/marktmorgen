@@ -101,8 +101,10 @@ export async function pollPage(input: { broadcastId: string; link: unknown; now:
   if (broadcast.status !== "sending" && broadcast.status !== "sent") return { state: "invalid" };
   if (!nonnegative(broadcast.total) || !nonnegative(broadcast.sendAt)) return { state: "unknown" };
   if (checked.recipient >= broadcast.total) return { state: "invalid" };
-  const state = pollState(broadcast.sendAt, broadcast.poll.days, now);
-  const closesAt = pollClosesAt(broadcast.sendAt, broadcast.poll.days);
+  // In seconds on the broadcast (createBroadcast), in milliseconds for the poll's rules.
+  const sentAt = broadcast.sendAt * 1000;
+  const state = pollState(sentAt, broadcast.poll.days, now);
+  const closesAt = pollClosesAt(sentAt, broadcast.poll.days);
   if (state === "unknown" || closesAt === null) return { state: "unknown" };
   let store: Store | null;
   try {

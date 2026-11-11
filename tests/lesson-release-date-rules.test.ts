@@ -77,6 +77,22 @@ is("a lesson never opens before its module, even if dated earlier", releaseAt({ 
 is("a module with both is unknown, never one picked", releaseAt({ module: { dripDays: 7, fixed: jan }, lesson: null, dripOpensAt: drip }), null);
 is("a drip date that is not a time is unknown", releaseAt({ module: { dripDays: 7, fixed: null }, lesson: null, dripOpensAt: Number.NaN }), null);
 
+
+part("Days after joining that cannot be read are unknown, never no drip (Claude 3 and Codex G on #3653)");
+for (const days of [Number.NaN, -3, 1.5, Number.POSITIVE_INFINITY, "7" as unknown as number]) {
+  is(`days ${String(days)} beside a fixed date: a schedule problem`, scheduleProblem({ dripDays: days, fixed: jan }), "format");
+  is(`days ${String(days)} beside a fixed date: never opens on the fixed date`, releaseAt({ module: { dripDays: days, fixed: jan }, lesson: null, dripOpensAt: drip }), null);
+  is(`days ${String(days)} alone: unknown`, releaseAt({ module: { dripDays: days, fixed: null }, lesson: null, dripOpensAt: drip }), null);
+}
+is("control: zero days and a fixed date is still fine", releaseAt({ module: { dripDays: 0, fixed: jan }, lesson: null, dripOpensAt: drip }), jan.at);
+
+part("A drip time of zero or less is not a time: unknown, never open to everyone (Claude 3 on #3653)");
+// The caller passes lib/course.ts opensAt (the time the student joined, plus the days), which is always after 1970;
+// a missing time read as 0 must not open the lesson for everyone.
+is("zero: unknown", releaseAt({ module: { dripDays: 0, fixed: null }, lesson: null, dripOpensAt: 0 }), null);
+is("negative: unknown", releaseAt({ module: { dripDays: 0, fixed: null }, lesson: null, dripOpensAt: -5 }), null);
+is("and so never open", releaseState(releaseAt({ module: { dripDays: 0, fixed: null }, lesson: null, dripOpensAt: 0 }), jan.at), "unknown");
+is("control: the moment a student joined, no days to wait, opens then", releaseAt({ module: { dripDays: 0, fixed: null }, lesson: null, dripOpensAt: drip }), drip);
 part("Open, waits, unknown");
 is("a second before: waits", releaseState(jan.at, jan.at - 1), "waits");
 is("on the instant: open", releaseState(jan.at, jan.at), "open");

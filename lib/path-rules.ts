@@ -351,7 +351,7 @@ export function dayMissions(facts: PathFacts, answers: Pick<PathAnswers, "minute
         "Mention it in your next post with one of your post links.",
         ...(long ? ["Say in one line what they get by signing up."] : []),
       ],
-      closesOn: "Closes when somebody confirms their address from the email we send them. An address that was only typed in does not count, and neither did one that was never confirmed before this changed, so a store may show no leads until someone confirms.",
+      closesOn: "Closes when somebody confirms their address from the email we send them. An address that was only typed in does not count. Older sign-ups that were never confirmed no longer count either, so a store may show no leads until someone confirms.",
       place: { label: "Sign-up box", hash: "#signup" },
       state: facts.leads > 0 ? "done" : "open",
     },
@@ -410,7 +410,7 @@ export function trafficMissions(facts: PathFacts): Mission[] {
         title: `${count} people on your list`,
         why: "People who signed up and confirmed their address are the ones most likely to buy later.",
         steps: ["Offer something free for an email address, or mention your sign-up box in a post.", "Write to them when you have something new."],
-        closesOn: `Closes when ${count} people have confirmed their address from the email we send them. An address that was only typed in does not count, so a store that counted sign-ups before this changed may show fewer now.`,
+        closesOn: `Closes when ${count} people have confirmed their address from the email we send them. An address that was only typed in does not count, and older sign-ups that were never confirmed no longer count either, so a store may show fewer than it did before.`,
         place: { label: "Sign-up box", hash: "#signup" } as Place,
       },
       visitors: {

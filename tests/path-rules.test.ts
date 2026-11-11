@@ -162,8 +162,8 @@ part("The lead missions say what Path counts today (Revisor 2's LOW on #3591)");
   const texts = [lead.why, lead.closesOn, ...lead.steps, ...traffic.flatMap((d) => [d.why, d.closesOn])];
   is("no text says that leaving an address is what counts", texts.some((t) => /leaves? their address|left their address|left an address/i.test(t)), false);
   is("the lead mission says confirming from the email is what counts", lead.closesOn.includes("confirms their address from the email"), true);
-  is("and that earlier unconfirmed sign-ups no longer count", lead.closesOn.includes("never confirmed before this changed"), true);
-  is("the list missions say the same", traffic.filter((d) => d.closesOn.includes("people have")).every((d) => d.closesOn.includes("confirmed their address") && d.closesOn.includes("before this changed")), true);
+  is("and that earlier unconfirmed sign-ups no longer count", lead.closesOn.includes("never confirmed no longer count"), true);
+  is("the list missions say the same", traffic.filter((d) => d.closesOn.includes("people have")).every((d) => d.closesOn.includes("confirmed their address") && d.closesOn.includes("never confirmed no longer count")), true);
 }
 
 part("The lead missions name what changed in plain words, never an unexplained \"this\" (Claude 1 and Claude 4 cloud B on #3741)");

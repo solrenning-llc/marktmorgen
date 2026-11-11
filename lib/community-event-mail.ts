@@ -70,6 +70,7 @@ import { alertCreator } from "@/lib/phone-alerts";
 import { JOIN_EARLY_MINUTES } from "@/lib/community-text";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+import { emailDocument } from "@/lib/email-document";
 import {
   type CommunityEvent,
   EVENT_QUEUE,
@@ -468,15 +469,24 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-/** A notice's email, which is not a list email: no way to stop it, just why it came. */
-function noticeHtml(body: string, why: string, lang: string, sent: string): string {
-  return `<!doctype html><html lang="${escapeHtml(lang)}"><body style="margin:0;padding:0;background:#f7f5f0">
+/**
+ * A notice's email, which is not a list email: no way to stop it, just why it
+ * came. A whole page in the store's language with its subject as the title
+ * (WCAG 2.4.2, 3.1.1; lib/email-document.ts).
+ */
+export function noticeHtml(body: string, why: string, lang: string, sent: string, subject: string): string {
+  return emailDocument({
+    lang,
+    title: subject,
+    bodyStyle: "margin:0;padding:0;background:#f7f5f0",
+    body: `
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
 <div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body)}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
 <p style="margin:0 0 8px">${escapeHtml(why)}</p>
 <p style="margin:0">${escapeHtml(sent)}</p>
-</div></div></body></html>`;
+</div></div>`,
+  });
 }
 
 /** What one kind of email says. The event's own words are the creator's; the rest is ours. */
@@ -747,7 +757,7 @@ export async function advanceEventJob(
               to: member.e,
               subject: words.subject.slice(0, 150),
               text: `${words.body}\n\n—\n${words.why}\n${communityWords(store.language).mailSentWith}`,
-              html: noticeHtml(words.body, words.why, LANGUAGES[parseLanguage(store.language)].locale, communityWords(store.language).mailSentWith),
+              html: noticeHtml(words.body, words.why, LANGUAGES[parseLanguage(store.language)].locale, communityWords(store.language).mailSentWith, words.subject.slice(0, 150)),
               replyTo: store.email,
             });
           }

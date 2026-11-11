@@ -32,8 +32,19 @@ import { readAbout } from "@/lib/product-about";
 import { withinLimit } from "@/lib/request-guard";
 import { summaries, summaryOf } from "@/lib/reviews";
 import { stockLeft } from "@/lib/stock";
-import { addProduct, claimHandle, setProductFile, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
-import { isResting, recordVisit, visitedFolders, visitsIn } from "@/lib/traffic";
+import { addProduct, addStoreLink, claimHandle, setAffiliateSetting, setProductFile, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
+import { NO_AFFILIATES } from "@/lib/affiliate-setting";
+import { MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, MAX_FUNNEL_SLUG } from "@/lib/page-funnel";
+import { countFunnelStep, readPageFunnel } from "@/lib/page-funnel-store";
+import { countGap, countGapNote, isResting, recordVisit, takeSignal, visitedFolders, visitsIn } from "@/lib/traffic";
+import { sampleFrom } from "@/lib/benchmark-rules";
+import { visitsWhole } from "@/lib/benchmarks";
+import { commercialMarginReady } from "@/lib/commercial-margin";
+import { directoryNumbers } from "@/lib/affiliate-directory";
+import { HELP_SECTIONS } from "@/lib/help-content";
+import { affiliateCookieName } from "@/lib/affiliates";
+import { createHash } from "node:crypto";
+import { answering } from "./security/next-headers";
 import { firstWordOnVisits } from "@/lib/traffic-billing";
 import {
   SETUP_VISITS,
@@ -43,18 +54,28 @@ import {
   BUYER_RESERVE_BPS,
   publicVisitLimit,
   countWords,
+  SIGNALS_PER_VISIT,
+  signalsWords,
+  HIT_STORE_LIMIT,
+  countGapWords,
+  SHARE_BATCH,
+  clientDayShare,
+  signalLimitFor,
   visitLimitFor,
   visitorAddress,
   visitsIncluded,
   visitsWords,
 } from "@/lib/traffic-rules";
 import { storeOf } from "@/lib/usage-billing";
+import { DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { countHit, countVisit } from "@/lib/visit";
 import { isSoon, soonProducts } from "@/lib/waitlist";
 import { centsWords } from "@/lib/watch-rules";
 import { store as redis } from "./redis-stub";
-import { COMMANDS, PAGES_PER_VISIT, STATIC_FILES, visitCost } from "./traffic-cost";
+import { COMMANDS, EVALS, EVAL_BYTES, FUNDED_SIGNAL_PATH_MEASURED, PAGES_PER_VISIT, SIGNAL_READ_BYTES, STATIC_FILES, STORE_READS, visitCost } from "./traffic-cost";
 import { POST as readRoute } from "@/app/api/store/read/route";
+import { POST as hitRoute } from "@/app/api/store/hit/route";
+import { NextRequest } from "next/server";
 import { STORE_SCOPE, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -123,17 +144,72 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 // ---------------------------------------------------------------- counting
 
-/** How many commands were sent to the database while something ran. */
+/**
+ * How many commands the database billed while something ran: each command
+ * sent, and each one a script ran inside it. Upstash bills an EVAL as one
+ * command plus one for every redis.call it runs
+ * (https://upstash.com/docs/redis/overall/billing, read 31 October 2026);
+ * until that day only what was sent was counted here, so a view's count,
+ * held at 12, was billed up to 32 for a returning visitor (313 [CV1]). The stand-in counts what
+ * lib/capped-count.ts runs inside (lib/redis-memory.ts, scriptCalls), and
+ * scripts/test_capped_count_redis.py holds it to what a real server runs.
+ */
 let commands = 0;
+/** Any other script a counted request sent: its inside is not counted here, so a visit must send none. */
+const uncounted: string[] = [];
+let measuring = false;
+/**
+ * The count scripts sent while something ran: each is sent whole, its bytes
+ * moved through the database every time, priced in tests/traffic-cost.ts
+ * (EVALS). The last measurement's, read after counted().
+ */
+let evals = 0;
+/** Reads of a store's whole record (lib/store.ts, nl:store:owner:), priced by the byte in tests/traffic-cost.ts (STORE_READS). */
+let records = 0;
+/** Bytes the database answered with, other than the store's record (priced apart) and the count scripts' answers: the last measurement's. */
+let replyBytes = 0;
+/** Every write sent while something was measured, as sent: which commands went together. */
+const sentPipelines: (string | number)[][][] = [];
+/** Run before a DECR is sent: what another request does meanwhile (fourth round, L3). */
+let decrHook: ((key: string) => void) | null = null;
+/** A write that fails as a Redis that does not answer would: the whole pipeline throws (Claude 5 on b2acc71c18, M2). */
+let failWhen: ((command: (string | number)[]) => boolean) | null = null;
+/** A write answered in another shape than Redis's own (CX-123 rule 24): the replies it returns instead, or null to send it. */
+let replyHook: ((list: (string | number)[][]) => unknown[] | null) | null = null;
+const sizeOf = (value: unknown): number => (typeof value === "string" ? Buffer.byteLength(value) : Array.isArray(value) ? value.reduce((n: number, v) => n + sizeOf(v), 0) : 0);
 const real = redis.pipeline.bind(redis);
-(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
+(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
   commands += list.length;
-  return real(list);
+  for (const command of list) {
+    if (command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:")) records += 1;
+    if (command[0] !== "EVAL") continue;
+    if (String(command[1]).startsWith("-- marktmorgen:capped-count:")) evals += 1;
+    else if (measuring) uncounted.push(String(command[1]).split("\n")[0]);
+  }
+  if (measuring) sentPipelines.push(list.map((command) => [...command]));
+  if (decrHook) for (const command of list) if (command[0] === "DECR") decrHook(String(command[1]));
+  if (failWhen && list.some(failWhen)) throw new Error("Redis did not answer");
+  const shaped = replyHook ? replyHook(list) : null;
+  if (shaped) return shaped as never;
+  const replies = await real(list);
+  list.forEach((command, i) => {
+    if (!(command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:")) && command[0] !== "EVAL") replyBytes += sizeOf((replies as unknown[])[i]);
+  });
+  return replies;
 }) as typeof redis.pipeline;
 async function counted(work: () => Promise<unknown>): Promise<number> {
   commands = 0;
-  await work();
-  return commands;
+  evals = 0;
+  records = 0;
+  replyBytes = 0;
+  const inside = redis.scriptCalls;
+  measuring = true;
+  try {
+    await work();
+  } finally {
+    measuring = false;
+  }
+  return commands + redis.scriptCalls - inside;
 }
 
 /** The request a page's count arrives as. */
@@ -307,6 +383,8 @@ async function main(): Promise<void> {
   const listings = await drawFront();
   // And the request the page is, counted in the store's window: priced apart (tests/plan-cost-registry.ts, public-requests).
   is("a full page of a store that pays is drawn in a few reads", [listings.length, (await counted(drawFront)) <= COMMANDS.frontPage + REQUEST_COMMANDS], [24, true]);
+  const evalsSent = { page: [evals], front: [] as number[], later: [] as number[], read: [] as number[] };
+  const recordsRead = { page: [records], front: [] as number[], later: [] as number[], read: [] as number[] };
   const countFront = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
@@ -317,9 +395,13 @@ async function main(): Promise<void> {
   // beside the count is written once in a hundred visits, not by each.
   await countFront("192.0.2.49");
   const firstView = await counted(() => countFront("192.0.2.50"));
+  evalsSent.front.push(evals);
+  recordsRead.front.push(records);
   const secondView = await counted(() => countFront("192.0.2.50"));
+  evalsSent.front.push(evals);
+  recordsRead.front.push(records);
   is("counting it a second time that day is inside the model", secondView <= COMMANDS.frontCount, true);
-  is("and what somebody new to the day adds is too", firstView - secondView <= COMMANDS.firstOfDay, true);
+  is("and with what somebody new to the day adds, the whole view is too", firstView <= COMMANDS.frontCount + COMMANDS.firstOfDay, true);
   const product = listings[0];
   const drawLater = async () => {
     const store = (await storeForPage("joy"))!;
@@ -334,6 +416,8 @@ async function main(): Promise<void> {
     ]);
   };
   is("a product's page is drawn inside it", (await counted(drawLater)) <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
+  evalsSent.page.push(evals);
+  recordsRead.page.push(records);
   const countLater = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
@@ -344,7 +428,84 @@ async function main(): Promise<void> {
   // Somebody before them today: the product's first visitor of the day also gives the day's record its end, once.
   await countLater("192.0.2.52");
   const laterCount = await counted(() => countLater("192.0.2.51"));
+  evalsSent.later.push(evals);
+  recordsRead.later.push(records);
   is("and saying it was opened is too, with the product's own visitor", laterCount <= COMMANDS.laterCount, true);
+  // The heaviest view (313 [CV1], 31 October 2026): a medium and a campaign
+  // beside its source, nine counts in all (lib/stats.ts), with the day's
+  // record already at its most fields and the all-time one near its own, so
+  // the count script also asks which names are there (lib/capped-count.ts).
+  const countTagged = async (ip: string) => {
+    const store = (await storeForHandle("joy"))!;
+    await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
+    await countHit(asking(ip), store, { kind: "view", source: "newsletter", medium: "email", campaign: "fall" });
+    await countVisit(asking(ip), store);
+  };
+  const joyStats = (await storeForHandle("joy"))!.statsId;
+  const today = new Date().toISOString().slice(0, 10);
+  // The keys lib/stats.ts counts a day's and the all-time record under.
+  for (let i = 0; redis.run(["HLEN", `nl:stats:${joyStats}:${today}`]) as number < DAY_FIELDS_MAX; i += 1) redis.run(["HSET", `nl:stats:${joyStats}:${today}`, `f:${i}`, "1"]);
+  for (let i = 0; i < LIFE_WRITE_MAX - 2; i += 1) redis.run(["HSET", `nl:stats:${joyStats}:life`, `f:${i}`, "1"]);
+  const fullFirst = await counted(() => countTagged("192.0.2.60"));
+  evalsSent.front.push(evals);
+  recordsRead.front.push(records);
+  const fullSecond = await counted(() => countTagged("192.0.2.60"));
+  evalsSent.front.push(evals);
+  recordsRead.front.push(records);
+  is("the heaviest view is inside the model too, at its record's most", [fullSecond <= COMMANDS.frontCount, fullFirst <= COMMANDS.frontCount + COMMANDS.firstOfDay], [true, true]);
+  is("and what it counted beyond the most is kept under ~, so the day's total stays right", Number(redis.run(["HGET", `nl:stats:${joyStats}:${today}`, "~"])) >= 2, true);
+  // What was counted before 31 October 2026 for this view, and what it is now (printed for the record of 313 [CV1]).
+  console.log(`a view's count, billed: ${secondView} (${firstView} by somebody new to the day); the heaviest: ${fullSecond} (${fullFirst})`);
+  // The store's first view of the day, by somebody new, arriving when the
+  // day's record is already one name short of its most (products, links and
+  // checkouts counted earlier that day) and the all-time one at its own: the
+  // nine counts, both lookups of which names are there, and the writes made
+  // once a day with the day's first view (lib/stats.ts). The most a single
+  // view can send; held to the model with somebody new to the day's share.
+  await storeWith("kim", "paid");
+  const kimStore = (await storeForHandle("kim"))!;
+  const kimDay = `nl:stats:${kimStore.statsId}:${new Date().toISOString().slice(0, 10)}`;
+  const tagged = async (handle: string, ip: string) => {
+    const store = (await storeForHandle(handle))!;
+    await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
+    await countHit(asking(ip), store, { kind: "view", source: "newsletter", medium: "email", campaign: "fall" });
+    await countVisit(asking(ip), store);
+  };
+  // Somebody before them this month (so the month's first-visit writes are not in it), then the day's record made one short.
+  await tagged("kim", "192.0.2.70");
+  redis.run(["DEL", kimDay]);
+  for (let i = 0; i < DAY_FIELDS_MAX - 1; i += 1) redis.run(["HSET", kimDay, `f:${i}`, "1"]);
+  for (let i = 0; i < LIFE_WRITE_MAX; i += 1) redis.run(["HSET", `nl:stats:${kimStore.statsId}:life`, `f:${i}`, "1"]);
+  const dayFirst = await counted(() => tagged("kim", "192.0.2.71"));
+  evalsSent.front.push(evals);
+  recordsRead.front.push(records);
+  is("the store's first view of the day, by somebody new, at its records' most, is inside the model", dayFirst <= COMMANDS.frontCount + COMMANDS.firstOfDay, true);
+  is("and it is the day's first: its expiry is written with it", redis.run(["TTL", kimDay]) as number > 0, true);
+  console.log(`a view's count, billed, the store's first of the day at its records' most, by somebody new: ${dayFirst}`);
+  // The same view, when the visit it adds is the month's hundredth: what the
+  // month is marked with (lib/traffic.ts, markMonth) lands on it too. It is
+  // counted apart, COMMANDS.monthMark, and priced on every visit at a share
+  // (tests/traffic-cost.ts, MONTH_MARKS_PER_VISIT).
+  const lia = await storeWith("lia", "paid");
+  const liaStore = (await storeForHandle("lia"))!;
+  const liaDay = `nl:stats:${liaStore.statsId}:${new Date().toISOString().slice(0, 10)}`;
+  await tagged("lia", "192.0.2.80");
+  for (let i = 0; i < 98; i += 1) await recordVisit(liaStore, `198.18.0.${i + 1}`);
+  redis.run(["DEL", liaDay]);
+  for (let i = 0; i < DAY_FIELDS_MAX - 1; i += 1) redis.run(["HSET", liaDay, `f:${i}`, "1"]);
+  for (let i = 0; i < LIFE_WRITE_MAX; i += 1) redis.run(["HSET", `nl:stats:${liaStore.statsId}:life`, `f:${i}`, "1"]);
+  const before100 = await visitsIn(lia.folder, windowOf(liaStore));
+  const marked = await counted(() => tagged("lia", "192.0.2.81"));
+  evalsSent.front.push(evals);
+  recordsRead.front.push(records);
+  is("and when that visit is the month's hundredth, with what the month is marked with", [before100, marked <= COMMANDS.frontCount + COMMANDS.firstOfDay + COMMANDS.monthMark, marked - dayFirst <= COMMANDS.monthMark], [99, true, true]);
+  console.log(`the same view as the month's hundredth visit, billed: ${marked}`);
+  // A product page opened with the day's record at its most (made so above): its one count asks which names are there.
+  const laterFull = await counted(() => countLater("192.0.2.61"));
+  evalsSent.later.push(evals);
+  recordsRead.later.push(records);
+  is("and so is a product's page with the day's record at its most", laterFull <= COMMANDS.laterCount, true);
+  console.log(`a later page's count, billed: ${laterCount}; with the day's record at its most: ${laterFull}`);
   // How a page was read, sent by one visitor in eight as they leave (lib/page-read.ts):
   // the route, with a block of a sales page counted before and one of the store's page.
   const readStore = (await storeForHandle("joy"))!;
@@ -352,10 +513,371 @@ async function main(): Promise<void> {
     readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)" }, body: JSON.stringify(body) }) as never);
   await readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" });
   const depthCount = await counted(() => readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" }));
+  evalsSent.read.push(evals);
+  recordsRead.read.push(records);
   const reachCount = await counted(() => readRequest({ t: readToken(readStore.statsId, STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
-  // Exactly one each: none would mean nothing was counted, which would pass the model for the wrong reason.
-  is("and how a page was read is too, without reading the store", [depthCount, reachCount], [COMMANDS.readBeacon, COMMANDS.readBeacon]);
-  is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0002, visitCost() < 0.0003], [3, 13, true, true]);
+  evalsSent.read.push(evals);
+  recordsRead.read.push(records);
+  is("and every count script a visit sends is in what its bytes are priced at", [Math.max(...evalsSent.page), Math.max(...evalsSent.front) <= EVALS.frontCount, Math.max(...evalsSent.later) <= EVALS.laterCount, Math.max(...evalsSent.read) <= EVALS.readBeacon, Math.min(...evalsSent.front, ...evalsSent.later, ...evalsSent.read) >= 1], [0, true, true, true, true]);
+  // The store's record, read whole (4 November 2026, independent review of #1496): once by each page drawn and
+  // once by each count it sends, never by a reading. Each read is priced at MAX_STORE_BYTES (tests/traffic-cost.ts).
+  is("and every read of the store's whole record is in what a visit is priced at", [
+    Math.max(...recordsRead.page) <= STORE_READS.page,
+    Math.max(...recordsRead.front, ...recordsRead.later) <= STORE_READS.count,
+    Math.min(...recordsRead.page, ...recordsRead.front, ...recordsRead.later) >= 1,
+    Math.max(...recordsRead.read),
+  ], [true, true, true, 0]);
+  console.log(`store records read: a page drawn ${recordsRead.page.join("/")}, a view's count ${recordsRead.front.join("/")}, a later page's count ${recordsRead.later.join("/")}, a reading ${recordsRead.read.join("/")}`);
+  console.log(`count scripts sent, each ${EVAL_BYTES} bytes: a view ${evalsSent.front.join("/")}, a later page ${evalsSent.later.join("/")}, a reading ${evalsSent.read.join("/")}`);
+  // A click on one of the store's links, a visit through an affiliate's link
+  // and a funnel's step (app/api/store/hit, k "l", "a", "f") are not a page
+  // of a visit: each takes one of the store's signals, a count of their own
+  // (lib/traffic.ts, takeSignal; lib/traffic-rules.ts, SIGNALS_PER_VISIT),
+  // never one of the requests its pages are drawn from, and is priced on its
+  // own line at what is measured here (tests/traffic-cost.ts, signalCost;
+  // tests/plan-cost-registry.ts, signals). Independent review of #1496, 4
+  // November 2026: measured on the path that counts, an approved affiliate and
+  // a funnel's real step, by a visitor signed in to another store, whose
+  // session is read to know they are not this store's people.
+  const linked = await addStoreLink(joy.email, "My site", "https://example.com/site");
+  const linkId = linked.ok ? linked.store.links[linked.store.links.length - 1].id : "";
+  await setAffiliateSetting(joy.email, { ...NO_AFFILIATES, enabled: true });
+  const AFF = "aaaaaaaaaaaa";
+  await real([
+    ["HSET", `nl:aff:${joyStats}:people`, AFF, JSON.stringify({ id: AFF, email: "partner@example.com", code: "partner", status: "approved", appliedAt: Date.now() - 30 * DAY, decidedAt: 1, note: "" })],
+    ["HSET", `nl:aff:${joyStats}:codes`, "partner", AFF],
+  ]);
+  // A funnel at its most steps, the first of which is the product the visitor is on.
+  const funnelId = "fnl0000001";
+  const funnelSteps = [{ kind: "product", id: product.id }, ...Array.from({ length: MAX_FUNNEL_PAGES - 1 }, (_, i) => ({ kind: "page", id: `page${String(i + 1).padStart(6, "0")}` }))];
+  await real([["HSET", `nl:pfunnels:${joyStats}`, funnelId, JSON.stringify({ id: funnelId, name: "N".repeat(MAX_FUNNEL_NAME), slug: "s".repeat(MAX_FUNNEL_SLUG), steps: funnelSteps, on: true, since: 1760000000 })]]);
+  is("the funnel measured is a real one, at its most steps", (await readPageFunnel(joyStats, funnelId))?.steps.length, MAX_FUNNEL_PAGES);
+  const stranger = await openSession(ben.email);
+  const signal = (body: Record<string, string>, ip: string, session = stranger) =>
+    hitRoute(new NextRequest("https://marktmorgen.com/api/store/hit", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)", "x-forwarded-for": ip, cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
+  const joyNow = (await storeForHandle("joy"))!;
+  const joyRequests = `nl:traffic:r:${joy.folder}:${windowOf(joyNow)}`;
+  const joySignals = `nl:traffic:s:${joy.folder}:${windowOf(joyNow)}`;
+  const clicks: Record<string, Record<string, string>> = {
+    l: { h: "joy", k: "l", id: linkId },
+    a: { h: "joy", k: "a", c: "partner" },
+    f: { h: "joy", k: "f", f: funnelId, t: "p", id: product.id },
+  };
+  const counts = (): Record<string, number> => ({
+    // The day's and all-time records, where the click is under its link or, past a record's most fields, under "~" (lib/capped-count.ts).
+    l: ["day", "life"].reduce((sum, which) => sum + ["l:" + linkId, "~"].reduce((n, field) => n + Number(redis.run(["HGET", `nl:stats:${joyStats}:${which === "day" ? today : "life"}`, field]) ?? 0), 0), 0),
+    a: Number(redis.run(["HGET", `nl:aff:${joyStats}:clicks`, AFF]) ?? 0),
+    f: redis.keys().filter((k) => k.startsWith(`nl:pfunnel:seen:${joyStats}:${funnelId}:`)).length,
+  });
+  const clickCost: string[] = [];
+  const signalMeasured: number[] = [];
+  let clickIp = 90;
+  const measureSignal = async (label: string, body: Record<string, string>, ip: string, keys: { requests: string; signals: string }, counter: () => number, extra: { session?: string; cookie?: string } = {}) => {
+    const before = [Number(redis.run(["GET", keys.requests]) ?? 0), Number(redis.run(["GET", keys.signals]) ?? 0)];
+    const countedBefore = counter();
+    const cookie = [`${SESSION_COOKIE}=${extra.session ?? stranger}`, ...(extra.cookie ? [extra.cookie] : [])].join("; ");
+    const sentCommands = await counted(() => hitRoute(new NextRequest("https://marktmorgen.com/api/store/hit", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)", "x-forwarded-for": ip, cookie }, body: JSON.stringify(body) })));
+    const after = [Number(redis.run(["GET", keys.requests]) ?? 0), Number(redis.run(["GET", keys.signals]) ?? 0)];
+    signalMeasured.push(sentCommands);
+    clickCost.push(`${label} ${sentCommands} commands, ${evals} scripts, ${records} records, ${replyBytes} other bytes read`);
+    return { counted: counter() > countedBefore, requests: after[0] - before[0], signals: after[1] - before[1], sentCommands, evals, records, replyBytes };
+  };
+  const within = (m: { sentCommands: number; evals: number; records: number; replyBytes: number }, pool = 0) =>
+    m.sentCommands <= COMMANDS.signal + pool && m.evals <= EVALS.signal && m.records <= STORE_READS.signal && m.replyBytes <= SIGNAL_READ_BYTES;
+  const joyKeys = { requests: joyRequests, signals: joySignals };
+  for (const [kind, body] of Object.entries(clicks)) {
+    const m = await measureSignal(kind, body, `192.0.2.${clickIp++}`, joyKeys, () => counts()[kind]);
+    const name = kind === "l" ? "link's click" : kind === "a" ? "visit through an affiliate's link" : "funnel's step";
+    is(`a ${name} by a signed-in stranger is counted, takes one of the store's signals and none of its requests, inside what a signal is priced at`, [m.counted, m.requests, m.signals, within(m)], [true, 0, 1, true]);
+  }
+  // A count and its expiry go in one write (third round, L2): a request that
+  // died between two writes left a count kept for ever. The window's requests
+  // and its signals alike. The expiry is the same point at every count
+  // (keepSecondsFor), set again with each, and never by an EXPIRE with an
+  // option, which a Redis or REST service may refuse (tests/letter-members.test.ts).
+  sentPipelines.length = 0;
+  await counted(() => signal(clicks.l, `192.0.2.${clickIp++}`));
+  await counted(async () => { await isResting((await storeForHandle("joy"))!); });
+  const together = (prefix: string, add: string) => sentPipelines.some((list) => list.some((c) => c[0] === add && String(c[1]).startsWith(prefix)) && list.some((c) => c[0] === "EXPIRE" && String(c[1]).startsWith(prefix) && c.length === 3 && Number(c[2]) > 0));
+  const optioned = sentPipelines.some((list) => list.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && String(c[1]).startsWith("nl:traffic:") && c.length > 3));
+  is("a count of the window's signals and of its requests is written with its expiry, in one write, and no EXPIRE takes an option", [together("nl:traffic:s:", "INCR"), together("nl:traffic:r:", "INCRBY"), optioned], [true, true, false]);
+  // The help center says it, its figures from the rule (third round, M3).
+  const helpText = JSON.stringify(HELP_SECTIONS);
+  is("the help center says how many clicks, affiliates' visits and funnel steps are counted, and what happens past them", [helpText.includes(JSON.stringify(signalsWords()).slice(1, -1)), signalsWords().includes(countWords(SIGNALS_PER_VISIT * VISITS_INCLUDED.creator)), (helpText.match(/Clicks on your store's links, visits through an affiliate's link and steps of your page funnels are counted up to/g) ?? []).length >= 2], [true, true, true]);
+  // The heavier paths (independent review of #1496, third round, 4 November
+  // 2026): a link's first click of the day on a store whose day's record is
+  // under its most fields, which writes the day's expiry with it; a visit
+  // through an affiliate's link reached from a paid ad, by a browser signed in
+  // as another of the store's affiliates (its session and that affiliate are
+  // read); and a store in its free trial, which reads its place in the
+  // month's pool as well (priced apart, nonPayingWorst).
+  const kai = await storeWith("kai", "paid");
+  const kaiLinked = await addStoreLink(kai.email, "My site", "https://example.com/site");
+  const kaiLink = kaiLinked.ok ? kaiLinked.store.links[kaiLinked.store.links.length - 1].id : "";
+  await setAffiliateSetting(kai.email, { ...NO_AFFILIATES, enabled: true });
+  const kaiNow = (await storeForHandle("kai"))!;
+  const kaiStats = kaiNow.statsId!;
+  const OTHER = "bbbbbbbbbbbb";
+  await real([
+    ["HSET", `nl:aff:${kaiStats}:people`, AFF, JSON.stringify({ id: AFF, email: "partner@example.com", code: "partner", status: "approved", appliedAt: Date.now() - 30 * DAY, decidedAt: 1, note: "" })],
+    ["HSET", `nl:aff:${kaiStats}:codes`, "partner", AFF],
+    ["HSET", `nl:aff:${kaiStats}:people`, OTHER, JSON.stringify({ id: OTHER, email: "other@example.com", code: "other", status: "approved", appliedAt: Date.now() - 30 * DAY, decidedAt: 1, note: "" })],
+    ["HSET", `nl:aff:${kaiStats}:codes`, "other", OTHER],
+  ]);
+  // Another affiliate's own session, as lib/affiliates.ts writes it (sessionKey).
+  const otherToken = "c".repeat(64);
+  await real([["SET", `nl:aff:session:${createHash("sha256").update(`nimbus-aff-session:${otherToken}`).digest("hex").slice(0, 40)}`, JSON.stringify({ s: kaiStats, a: OTHER })]]);
+  const kaiKeys = { requests: `nl:traffic:r:${kai.folder}:${windowOf(kaiNow)}`, signals: `nl:traffic:s:${kai.folder}:${windowOf(kaiNow)}` };
+  const kaiToday = new Date().toISOString().slice(0, 10);
+  const kaiLinkCount = () => Number(redis.run(["HGET", `nl:stats:${kaiStats}:${kaiToday}`, `l:${kaiLink}`]) ?? 0);
+  const kaiClicks = () => Number(redis.run(["HGET", `nl:aff:${kaiStats}:clicks`, AFF]) ?? 0);
+  const kaiFirst = await measureSignal("l, the store's first of the day", { h: "kai", k: "l", id: kaiLink }, `192.0.2.${clickIp++}`, kaiKeys, kaiLinkCount);
+  // From a paid ad it is counted on its own pool (paid-arrivals), at a signal's cost.
+  const kaiPaidKeys = { requests: kaiKeys.requests, signals: `nl:traffic:sp:${kai.folder}:${windowOf(kaiNow)}` };
+  const kaiPaid = await measureSignal("a, from a paid ad, signed in as another affiliate", { h: "kai", k: "a", c: "partner", p: "1" }, `192.0.2.${clickIp++}`, kaiPaidKeys, kaiClicks, { cookie: `${affiliateCookieName("kai")}=${otherToken}` });
+  is("a link's first click of the day, and an affiliate's visit from a paid ad by another affiliate's browser, are inside what a signal is priced at", [kaiFirst.counted, within(kaiFirst), kaiPaid.counted, kaiPaid.signals, within(kaiPaid)], [true, true, true, 1, true]);
+  // The owner's decision of 11 November 2026 (#1496, A1): the click's reads batched, so the browser's own affiliate is
+  // known from its session without reading that affiliate's record a second time. The affiliate's own browser is still
+  // never counted, and its signal is given back.
+  const ownToken = "d".repeat(64);
+  await real([["SET", `nl:aff:session:${createHash("sha256").update(`nimbus-aff-session:${ownToken}`).digest("hex").slice(0, 40)}`, JSON.stringify({ s: kaiStats, a: AFF })]]);
+  const kaiOwn = await measureSignal("a, by the affiliate's own browser", { h: "kai", k: "a", c: "partner" }, `192.0.2.${clickIp++}`, kaiKeys, kaiClicks, { cookie: `${affiliateCookieName("kai")}=${ownToken}` });
+  is("the affiliate's own browser is not counted, and its signal is given back", [kaiOwn.counted, kaiOwn.signals], [false, 0]);
+  is("an affiliate's visit by another affiliate's browser tells that browser's affiliate from its session, without reading its record: 18 commands at the most", kaiPaid.sentCommands, 18);
+  const tia = await storeWith("tia", "trial");
+  const tiaLinked = await addStoreLink(tia.email, "My site", "https://example.com/site");
+  const tiaLink = tiaLinked.ok ? tiaLinked.store.links[tiaLinked.store.links.length - 1].id : "";
+  const tiaNow = (await storeForHandle("tia"))!;
+  const tiaKeys = { requests: `nl:traffic:r:${tia.folder}:${windowOf(tiaNow)}`, signals: `nl:traffic:s:${tia.folder}:${windowOf(tiaNow)}` };
+  const tiaCount = () => Number(redis.run(["HGET", `nl:stats:${tiaNow.statsId}:${kaiToday}`, `l:${tiaLink}`]) ?? 0);
+  // Its first count of the month takes the store's place in the pool (lib/free-pool.ts), as its first page would have; every one after reads it.
+  await signal({ h: "tia", k: "l", id: tiaLink }, `192.0.2.${clickIp++}`);
+  const tiaNext = await measureSignal("l, a store in its trial", { h: "tia", k: "l", id: tiaLink }, `192.0.2.${clickIp++}`, tiaKeys, tiaCount);
+  is("a store in its trial counts one too, with its place in the month's pool read beside it (priced in nonPayingWorst)", [tiaNext.counted, tiaNext.signals, within(tiaNext, 1)], [true, 1, true]);
+  console.log(`signals that are not a page, billed: ${clickCost.join("; ")}`);
+  // The model is not a figure far over what is sent: within two commands of the heaviest paid store's.
+  const paidMeasured = signalMeasured.slice(0, -1);
+  is("and the commands a signal is priced at are the heaviest measured, near enough", [COMMANDS.signal >= Math.max(...paidMeasured), COMMANDS.signal - Math.max(...paidMeasured) <= 2], [true, true]);
+  // Only what is written spends one (third round, H1): a code nobody has, an
+  // affiliate's click already counted today for this visitor, and a funnel
+  // step its visitor already opened give theirs back.
+  const heldIp = `192.0.2.${clickIp++}`;
+  const spentAt0 = Number(redis.run(["GET", joySignals]) ?? 0);
+  for (let i = 0; i < 5; i += 1) await signal({ h: "joy", k: "a", c: `madeup${i}` }, `192.0.2.${clickIp++}`);
+  await signal(clicks.a, heldIp);
+  const afterFirst = Number(redis.run(["GET", joySignals]) ?? 0);
+  await signal(clicks.a, heldIp);
+  await signal(clicks.f, heldIp);
+  const afterStep = Number(redis.run(["GET", joySignals]) ?? 0);
+  await signal(clicks.f, heldIp);
+  is("a made-up code, a click already counted today and a step already opened spend none of the store's signals", [afterFirst - spentAt0, Number(redis.run(["GET", joySignals]) ?? 0) - afterStep, afterStep - afterFirst], [1, 0, 1]);
+  // The store's own people, and a robot, never spend one.
+  const ownerSession = await openSession(joy.email);
+  const spentBefore = Number(redis.run(["GET", joySignals]) ?? 0);
+  for (const body of Object.values(clicks)) await signal(body, `192.0.2.${clickIp++}`, ownerSession);
+  await hitRoute(new NextRequest("https://marktmorgen.com/api/store/hit", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "x-forwarded-for": "192.0.2.200" }, body: JSON.stringify(clicks.l) }));
+  is("the store's own people and a robot never spend one of its signals", Number(redis.run(["GET", joySignals]) ?? 0), spentBefore);
+  // One connection takes its share of a day at most (clientDayShare of the window's signals), and another is still counted.
+  const shareOf = clientDayShare(signalLimitFor(joyNow));
+  const busyIp = "198.51.100.77";
+  const shareDay = new Date().toISOString().slice(0, 10);
+  // The connection is read from the request being answered, as Next.js hands it (tests/security/next-headers.ts).
+  const signalAnswered = async (body: Record<string, string>, ip: string) => {
+    const request = new NextRequest("https://marktmorgen.com/api/store/hit", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)", "x-forwarded-for": ip, cookie: `${SESSION_COOKIE}=${stranger}` }, body: JSON.stringify(body) });
+    answering(request);
+    try {
+      await hitRoute(request);
+    } finally {
+      answering(null);
+    }
+  };
+  redis.run(["DEL", "nl:traffic:gap:joy"]);
+  for (let i = 0; i < SHARE_BATCH; i += 1) await signalAnswered(clicks.l, busyIp);
+  const shareKeyNow = `nl:traffic:sc:${joy.folder}:${windowOf(joyNow)}`;
+  const fields = (redis.run(["HKEYS", shareKeyNow]) as string[]).filter((f) => f.startsWith(`${shareDay}:`));
+  is("a connection's signals are added to its share of the day, apart from its requests'", fields.length >= 1, true);
+  for (const field of fields) redis.run(["HSET", shareKeyNow, field, String(shareOf)]);
+  const linkBefore = counts().l;
+  for (let i = 0; i < SHARE_BATCH; i += 1) await signalAnswered(clicks.l, busyIp);
+  const busyAfter = counts().l;
+  await signalAnswered(clicks.l, `192.0.2.${clickIp++}`);
+  // Each click counts on the day's and the all-time record, two in counts().
+  is("past its share of the day one connection is not counted, and another still is", [busyAfter - linkBefore < 2 * SHARE_BATCH, counts().l - busyAfter], [true, 2]);
+  // A count refused for its connection's share is one connection's alone: it is left out as a repeat and
+  // never written down, or one machine could hide any store's rates (Claude 5 on b2acc71c18, M1; until then
+  // written down, fourth round, H1).
+  const gapKeyOf = (handle: string) => `nl:traffic:gap:${handle}`;
+  is("M1: a count refused for its connection's share is not written down as not made", [await countGap(joyNow, "clicks"), await countGapNote(joyNow, "clicks", 0)], [null, ""]);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  // Past the window's signals nothing is counted, the store's pages do not rest
+  // for it, and its rates are said to be incomplete rather than shown too high.
+  const spentAt = redis.run(["GET", joySignals]);
+  redis.run(["SET", joySignals, String(signalLimitFor(joyNow))]);
+  is("before any count is refused, no rate is said to be incomplete", [await countGap(joyNow, "clicks"), await countGapNote(joyNow, "clicks", 0)], [null, ""]);
+  const pastBefore = counts();
+  const spentMoment = Date.now();
+  for (const body of Object.values(clicks)) await signal(body, `192.0.2.${clickIp++}`);
+  is("once the store's signals are spent, a click, an affiliate's visit and a funnel's step are not counted", [counts(), Number(redis.run(["GET", joySignals]))], [pastBefore, signalLimitFor(joyNow)]);
+  is("and its pages do not rest for it", await isResting((await storeForHandle("joy"))!), false);
+  const gapNow = await countGap(joyNow, "clicks");
+  const dayNow = new Date(spentMoment).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  is("and its rates since before then say they are not complete, with the day; a rate counted only since after it does not", [
+    gapNow !== null && gapNow !== "unknown" && gapNow.first >= spentMoment - 60_000,
+    await countGapNote(joyNow, "clicks", 0),
+    await countGapNote(joyNow, "steps", 0),
+    await countGapNote(joyNow, "steps", Date.now() + DAY),
+  ], [true, `Not complete: some clicks on ${dayNow} were not counted, so no rate is shown.`, `Not complete: some steps on ${dayNow} were not counted, so no rate is shown.`, ""]);
+  is("a record that cannot be read is never taken as whole", [countGapWords("unknown", "clicks", 0).startsWith("Not complete"), countGapWords({ first: 1, last: 2 }, "visits", 3), countGapWords({ first: Date.UTC(2026, 9, 1), last: Date.UTC(2026, 9, 3) }, "clicks", 0)], [true, "", "Not complete: some clicks from October 1, 2026 to October 3, 2026 were not counted, so no rate is shown."]);
+  const fullNumbers = { affiliates: 2, since: 1, clicks: 500, clickSales: 50, clickEarnedCents: 10_000, sales: 50, earnedCents: 10_000, paidCents: 0 };
+  const note = await countGapNote(joyNow, "clicks", 0);
+  is("the directory then shows no share of clicks that became a sale, and says why", [directoryNumbers(fullNumbers as never)?.conversion, directoryNumbers(fullNumbers as never, note)?.conversion, directoryNumbers(fullNumbers as never, note)?.per100Cents, directoryNumbers(fullNumbers as never, note)?.incomplete], [10, null, null, note]);
+  const directoryPage = read("components/affiliate-directory.tsx");
+  const funnelEditor = read("components/page-funnel-editor.tsx");
+  is("the directory's page and the funnel's counts say it where the rate would be, and a program with no rate sorts last by sales per click", [
+    /numbers\.incomplete\s*\?/.test(directoryPage),
+    /\(b\.numbers\?\.conversion \?\? -1\) - \(a\.numbers\?\.conversion \?\? -1\)/.test(directoryPage),
+    /incomplete \? `\$\{incomplete\} ` : funnelReachRatioMetric/.test(funnelEditor),
+    /countGapWords\(gap, "steps", funnel\.since \* 1000\)/.test(read("app/studio/funnels/page.tsx")),
+    /countGapNote\(store, "clicks", raw\.since\)/.test(read("lib/affiliate-directory.ts")),
+  ], [true, true, true, true, true]);
+  // The benchmark's visits that became a sale: neither shown nor set beside others from visits not all counted in its 90 days.
+  const benchData = { sales: "ok", partial: false, totals: { d90: { visitors: 5_000, sales: 100, checkouts: 200 } }, refunds: null, buyers: null };
+  // Clicks and steps not counted say nothing of the visits (M1); a view whose count failed does.
+  is("clicks and steps not counted leave the visits whole", await visitsWhole(joyNow), true);
+  failWhen = (c) => c[0] === "EVAL";
+  await signal({ h: "joy", k: "v", r: "", u: "" }, `192.0.2.${clickIp++}`);
+  failWhen = null;
+  is("the benchmark leaves out visits that became a sale when its visits were not all counted", [sampleFrom(benchData as never)?.converted, sampleFrom(benchData as never, false)?.converted, sampleFrom(benchData as never, false)?.paid, await visitsWhole(joyNow), await visitsWhole(joyNow, Date.now() + 100 * DAY)], [0.02, undefined, 0.5, false, true]);
+  redis.run(["SET", joySignals, String(spentAt)]);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  // L3: written down only if, once its place is given back, the count is still at its figure (another may have given one back meanwhile).
+  redis.run(["SET", joySignals, String(signalLimitFor(joyNow))]);
+  decrHook = (key) => { if (key === joySignals) redis.run(["DECRBY", joySignals, "2"]); };
+  await signal(clicks.l, `192.0.2.${clickIp++}`);
+  decrHook = null;
+  is("a signal past the figure while another was given back meanwhile is not written down as a count not made", await countGap(joyNow, "clicks"), null);
+  redis.run(["SET", joySignals, String(spentAt)]);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  // L1: a write that throws keeps its place, since it may have written.
+  const keptBefore = Number(redis.run(["GET", joySignals]) ?? 0);
+  is("a write whose outcome is not known keeps its place, and one that wrote nothing gives it back", [await takeSignal(joyNow, async () => { throw new Error("unknown"); }), Number(redis.run(["GET", joySignals]) ?? 0) - keptBefore, await takeSignal(joyNow, async () => false), Number(redis.run(["GET", joySignals]) ?? 0) - keptBefore], [false, 1, false, 1]);
+  // A store whose window is not known counts nothing, and writes that down.
+  await takeSignal({ ...joyNow, period: undefined } as never);
+  is("a signal refused because the store's window is not known is written down", (await countGap(joyNow, "clicks")) !== null, true);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  // H2: an affiliate's visit from a paid ad is counted on its own pool, even once the store's signals are spent.
+  const joyPaid = `nl:traffic:sp:${joy.folder}:${windowOf(joyNow)}`;
+  redis.run(["SET", joySignals, String(signalLimitFor(joyNow))]);
+  const paidBefore = Number(redis.run(["HGET", `nl:aff:${joyStats}:paid`, AFF]) ?? 0);
+  await signal({ h: "joy", k: "a", c: "partner", p: "1" }, `192.0.2.${clickIp++}`);
+  is("a visit from a paid ad is still marked once the store's other signals are spent, from a pool of its own", [Number(redis.run(["HGET", `nl:aff:${joyStats}:paid`, AFF]) ?? 0) - paidBefore, Number(redis.run(["GET", joyPaid]) ?? 0), Number(redis.run(["GET", joySignals]))], [1, 1, signalLimitFor(joyNow)]);
+  redis.run(["SET", joySignals, String(spentAt)]);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  // A robot is left out before any allowance is asked.
+  const robotSent = await counted(() => hitRoute(new NextRequest("https://marktmorgen.com/api/store/hit", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "x-forwarded-for": "192.0.2.201" }, body: JSON.stringify(clicks.l) })));
+  is("a robot that says it is one asks no allowance and reads nothing", robotSent, 0);
+  // A count refused for its address, or for the store's ten minutes, reads nothing of the store (third round, M2), and is written down (fourth round, H1).
+  for (let i = 0; i < 125; i += 1) await withinLimit("hit", `192.0.2.250|joy`, 120, 600);
+  const refusedReads = await counted(() => signal(clicks.l, "192.0.2.250")).then(() => records);
+  is("M1: a count refused for its address reads none of the store's record, and is not written down: one address alone hides no rate", [refusedReads, await countGap(joyNow, "clicks"), await countGap(joyNow, "steps"), await countGap(joyNow, "visits")], [0, null, null, null]);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  await signal({ h: "nobodyhere", k: "l", id: "x" }, "192.0.2.250");
+  is("a made-up address leaves nothing written down", redis.keys().some((k) => k === gapKeyOf("nobodyhere")), false);
+  // The address is the one a site is handed: two machines of one /48 share it.
+  for (let i = 0; i < 120; i += 1) await withinLimit("hit", `2001:db8:77::/48|joy`, 120, 600);
+  const v6Before = counts().l;
+  await signal(clicks.l, "2001:db8:77:1::5");
+  is("two addresses of one /48 share one allowance", counts().l - v6Before, 0);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  // Claude 5's review of b2acc71c18 (7 November 2026), M1: a refusal one address can cause alone never hides a rate,
+  // and a count not made hides only the rates made from its own kind.
+  for (let i = 0; i < 120; i += 1) await withinLimit("hit", `192.0.2.251|joy`, 120, 600);
+  await signal({ h: "joy", k: "v", r: "", u: "" }, "192.0.2.251");
+  is("M1: one address sending 121 page views is refused for its address and hides none of the store's rates", [await countGap(joyNow, "clicks"), await countGap(joyNow, "steps"), await countGap(joyNow, "visits"), await countGapNote(joyNow, "clicks", 0)], [null, null, null, ""]);
+  redis.run(["DEL", gapKeyOf("joy")]);
+  {
+    const spentHere = redis.run(["GET", joySignals]);
+    redis.run(["SET", joySignals, String(signalLimitFor(joyNow))]);
+    await signal(clicks.l, `192.0.2.${clickIp++}`);
+    is("M1: a click not counted hides the rates made from clicks, never a funnel's steps or the visits", [(await countGap(joyNow, "clicks")) !== null, await countGapNote(joyNow, "steps", 0), await countGap(joyNow, "visits")], [true, "", null]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+    await signal(clicks.f, `192.0.2.${clickIp++}`);
+    is("M1: and a step not counted hides a funnel's steps, never the clicks' rates", [(await countGap(joyNow, "steps")) !== null, await countGapNote(joyNow, "clicks", 0)], [true, ""]);
+    redis.run(["SET", joySignals, String(spentHere)]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
+  {
+    // A mark left under this address before this store took it (a store that let it go; RELEASE_QUARANTINE_DAYS is
+    // shorter than the benchmark's 90 days) is not this store's: its visits are whole from when it was made.
+    const before = Date.parse(joyNow.createdAt) - 10 * DAY;
+    redis.run(["HSET", gapKeyOf("joy"), "first", String(before), "last", String(before), "visits:first", String(before), "visits:last", String(before)]);
+    is("M1: a mark older than the store itself leaves its visits whole", await visitsWhole(joyNow), true);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
+  // M2: every count not made is written down, a write that failed included.
+  {
+    const keptBefore2 = Number(redis.run(["GET", joySignals]) ?? 0);
+    await takeSignal(joyNow, async () => { throw new Error("unknown"); });
+    is("M2: a write whose outcome is not known keeps its place and is written down as a count not made", [Number(redis.run(["GET", joySignals]) ?? 0) - keptBefore2, (await countGap(joyNow, "clicks")) !== null], [1, true]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+    const keptF = Number(redis.run(["GET", joySignals]) ?? 0);
+    const stepsBefore = counts().f;
+    failWhen = (c) => c[0] === "PFADD";
+    await signal(clicks.f, `192.0.2.${clickIp++}`);
+    failWhen = null;
+    is("M2: a funnel step whose count failed keeps its place and is written down, never taken for a visitor already seen", [Number(redis.run(["GET", joySignals]) ?? 0) - keptF, counts().f - stepsBefore, (await countGap(joyNow, "steps")) !== null], [1, 0, true]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+    failWhen = (c) => c[0] === "PFADD";
+    const failed = await countFunnelStep(joyStats!, (await readPageFunnel(joyStats!, funnelId))!, 0, "v".repeat(24));
+    failWhen = null;
+    replyHook = (list) => (list[0]?.[0] === "PFADD" ? ["1", 1] : null);
+    const odd = await countFunnelStep(joyStats!, (await readPageFunnel(joyStats!, funnelId))!, 0, "w".repeat(24));
+    replyHook = null;
+    is("M2: a funnel step's count that failed or answered in another shape is unknown, never false", [failed, odd], [null, null]);
+    const keptA = Number(redis.run(["GET", joySignals]) ?? 0);
+    replyHook = (list) => (list[0]?.[0] === "SET" && String(list[0][1]).startsWith("nl:rl:aff:click:") ? ["OK", "many"] : null);
+    await signal(clicks.a, `192.0.2.${clickIp++}`);
+    replyHook = null;
+    is("M2: an affiliate's visit whose address count answered in another shape keeps its place and is written down", [Number(redis.run(["GET", joySignals]) ?? 0) - keptA, (await countGap(joyNow, "clicks")) !== null], [1, true]);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
+  // And past what one store's links, affiliates' visits and steps may send in ten minutes from every address together.
+  for (let i = 0; i < HIT_STORE_LIMIT; i += 1) await withinLimit("hit-store", "joy", HIT_STORE_LIMIT, 600);
+  const floodReads = await counted(() => signal(clicks.l, `192.0.2.${clickIp++}`)).then(() => records);
+  const viewsBefore = await visitsIn(joy.folder, windowOf(joyNow));
+  await signal({ h: "joy", k: "v", r: "", u: "" }, `192.0.2.${clickIp++}`);
+  is("a count past the store's ten minutes reads none of its record and is written down, as a click; a view is never under it", [floodReads, (await countGap(joyNow, "clicks")) !== null, (await visitsIn(joy.folder, windowOf(joyNow))) - viewsBefore, /withinLimit\("hit-store", handle, HIT_STORE_LIMIT, 600\)[\s\S]*storeForHandle\(handle\)/.test(read("app/api/store/hit/route.ts"))], [0, true, 1, true]);
+  is("the store's ten minutes are sized at the largest plan's busiest hour, a tenth of its month's signals", HIT_STORE_LIMIT, Math.ceil((SIGNALS_PER_VISIT * VISITS_INCLUDED.scale) / 60));
+  redis.run(["DEL", gapKeyOf("joy")]);
+  // L1: past the store's ten minutes a flood writes the mark at most once a minute, not three commands a request.
+  {
+    for (let i = 0; i < HIT_STORE_LIMIT; i += 1) await withinLimit("hit-store", "joy", HIT_STORE_LIMIT, 600);
+    let marks = 0;
+    const markHook = (list: (string | number)[][]) => {
+      for (const c of list) if (String(c[1]).startsWith("nl:traffic:gap:") || (c[0] === "GET" && String(c[1]).startsWith("nl:store:handle:"))) marks += 1;
+      return null;
+    };
+    replyHook = markHook;
+    for (let i = 0; i < 20; i += 1) await signal(clicks.l, `192.0.2.${clickIp++}`);
+    replyHook = null;
+    is("L1: twenty refused past the store's ten minutes write the mark once at most", marks <= 3, true);
+    redis.run(["DEL", gapKeyOf("joy")]);
+  }
+  // The Terms say it, from the same words, dated when they changed.
+  const termsPage = read("app/terms/page.tsx");
+  is("the Terms say how many are counted, one connection's share, the busiest moments and the rates not shown", [/id="counted-clicks"[\s\S]*\{signalsWords\(\)\}/.test(termsPage), /lastUpdated="November 11, 2026"/.test(termsPage), signalsWords().includes("at the busiest moments some of them may not be counted"), signalsWords().includes("say they are not complete"), signalsWords().includes("left out as a repeat, without a note")], [true, true, true, true, true]);
+  // L6: the funded window's path is measured before the commercial margin can be ready.
+  is("the commercial margin cannot be ready while a signal's funded-window path is unmeasured", !commercialMarginReady() || FUNDED_SIGNAL_PATH_MEASURED, true);
+  // Billed, the count script with its one name inside (lib/capped-count.ts): never more than the model,
+  // and never one or none, which would mean the script's inside or the count itself went uncounted.
+  is("and how a page was read is too, without reading the store", [depthCount <= COMMANDS.readBeacon, reachCount <= COMMANDS.readBeacon, depthCount >= 3, reachCount >= 3], [true, true, true, true]);
+  is("every script a visit sends is billed in what is counted here", uncounted, []);
+  // Between $0.0002 and $0.0003 until October 31, 2026, when the count
+  // scripts were costed as Upstash bills them (313 [CV1]): $0.000304. From
+  // 4 November 2026 also the six reads of the store's whole record a visit
+  // makes, a megabyte each at the most (STORE_READS): $0.000484.
+  is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0004, visitCost() < 0.0005], [3, 13, true, true]);
+  console.log(`a visit at the most: ${visitCost().toFixed(7)} dollars`);
 
   part("Where it is counted, and where a store rests");
   const hit = read("app/api/store/hit/route.ts");

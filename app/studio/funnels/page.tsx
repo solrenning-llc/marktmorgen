@@ -18,6 +18,8 @@ import { FunnelEditor } from "@/components/funnel-editor";
 import { offerableAfterPaying } from "@/lib/bundles";
 import { PageFunnelEditor, type SavedFunnel, type StepChoice } from "@/components/page-funnel-editor";
 import { readFunnelCountsStrict, readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
+import { countGap } from "@/lib/traffic";
+import { countGapWords } from "@/lib/traffic-rules";
 import { MAX_SITE_PAGES, pageOut } from "@/lib/site-page-rules";
 import { FunnelTypePicker, type TypeProduct } from "@/components/funnel-type-picker";
 import { MAX_PAGE_FUNNELS } from "@/lib/page-funnel";
@@ -133,12 +135,15 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
   };
   const inventory = await readPageFunnelsStrict(store.statsId).catch(() => null);
   const formReviews = readFunnelFormReviews(store, inventory ?? [], { reviewOffers: true });
+  // When the store's funnel steps were not all counted (lib/traffic.ts, countGap): a funnel whose steps were counted since then says so.
+  const gap = await countGap(store, "steps").catch(() => "unknown" as const);
   const savedFunnels: SavedFunnel[] = await Promise.all(
     (inventory ?? []).map(async (funnel) => {
       const [states, counts, pageReviews] = await Promise.all([stepStates(store, funnel, { strictProducts: true, includeReviewProduct: true }).catch(() => null), readFunnelCountsStrict(store.statsId, funnel).catch(() => null), formReviews]);
       const offerRecords = cachedOfferListings(store, (states ?? []).flatMap(state => state.reviewProduct ? [state.reviewProduct] : []));
       return {
         funnel,
+        incomplete: countGapWords(gap, "steps", funnel.since * 1000),
         pageIssues: [...(pageReviews.get(funnel.id) ?? []), ...(states ?? []).flatMap((state,stepIndex) => (state.reviewProduct ? savedOfferIssues(store,state.reviewProduct,offerRecords) : []).map(detail => ({ code: "step" as const, title: `Step ${stepIndex + 1}: ${state.title}`, detail, stepIndex })))],
         steps: (states ?? funnel.steps.map(step => ({
           step,

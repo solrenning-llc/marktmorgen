@@ -23,14 +23,19 @@ import { GET as news } from "@/app/api/store/community/chat/new/route";
 import { type Grant, grantRoom } from "@/lib/chat-grant";
 import { AWAY_AFTER_MS, GRANT_MS, IDLE_LOOKS, IDLE_MS, LIVE_LOOKS, LIVE_MS, ROOM_GRANT_MINUTES, TALKING_FOR_MS, askEvery, isTalking, paceFor, shareFor } from "@/lib/chat-pace";
 import { passFits, roomPass, slotOf } from "@/lib/chat-pass";
+import { HELP_SECTIONS } from "@/lib/help-content";
 import { lastSaid, parseChatSetting, quietFor, room, say } from "@/lib/community-chat";
 import { monthKey } from "@/lib/delivery";
 import { allowanceWindow } from "@/lib/allowance-window";
-import { claimHandle, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { claimHandle, setCommunity, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { readConfig, saveConfig } from "@/lib/community";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { GET as roomRoute } from "@/app/api/store/community/chat/route";
+import { NextRequest } from "next/server";
 import { isResting, recordParts, recordVisit, trafficIn, visitedFolders, visitsIn } from "@/lib/traffic";
 import { PARTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS, SETUP_VISITS, VISITS_INCLUDED, partsWords, roomHourWords } from "@/lib/traffic-rules";
 import { store as redis } from "./redis-stub";
-import { roomLeaveCost, roomLookCost, roomMinutesCost, visitCost } from "./traffic-cost";
+import { STORE_READS, roomLeaveCost, roomLookCost, roomMinutesCost, visitCost } from "./traffic-cost";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -41,9 +46,12 @@ const BIA = "b2b2b2b2b2b2";
 const open = parseChatSetting({ on: true });
 
 let commands = 0;
+/** Reads of a store's whole record (lib/store.ts, nl:store:owner:), priced by the byte (tests/traffic-cost.ts, STORE_READS). */
+let records = 0;
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   commands += list.length;
+  for (const command of list) if (command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:")) records += 1;
   return real(list);
 }) as typeof redis.pipeline;
 
@@ -168,11 +176,37 @@ async function main(): Promise<void> {
   is("a paid store at its finite threshold receives no new polling grant", await grantRoom(paid, ROOM, { key: "c3c3c3c3c3c3", owner: false }, false, false, t1), "resting");
   is("the page of a resting room has a button and asks nothing by itself", [/t\.checkNew/.test(page) && /checkNew: "Check for new messages"/.test(roomWordsSource), /pace === "stopped" \|\| restingNow\.current\) return IDLE_MS;/.test(page)], [true, true]);
 
-  part("What it is counted as is what it can cost, and a little over");
+  part("What it is counted as is never less than what it can cost");
   const part$ = visitCost() / PARTS_PER_VISIT;
-  is("ten minutes of a talking room, every look answered by the database", [roomMinutesCost(LIVE_LOOKS) <= ROOM_LIVE_PARTS * part$, roomMinutesCost(LIVE_LOOKS) > (ROOM_LIVE_PARTS - 15) * part$], [true, true]);
-  is("ten minutes of a quiet one", [roomMinutesCost(IDLE_LOOKS) <= ROOM_IDLE_PARTS * part$, roomMinutesCost(IDLE_LOOKS) > (ROOM_IDLE_PARTS - 15) * part$], [true, true]);
-  is("a look is a small thing, and being handed leave a larger one", [roomLookCost() < 0.000006, roomLeaveCost() < 0.00005, roomLeaveCost() > roomLookCost()], [true, true, true]);
+  // What the room counts against a plan's visits is never below what it
+  // costs. Above that it is not tied to a cost: the talking room's 260
+  // hundredths and the quiet room's 60 are the figures the customer is shown
+  // (the help page and the Terms), and the owner kept 260 on 4 November 2026
+  // (C2-58). Until 4 November 2026 these checks also held each figure within
+  // a little of its cost; since a visit pays for reading the store's whole
+  // record (tests/traffic-cost.ts, STORE_READS) a visit costs more and the
+  // same ten minutes are fewer hundredths of one, so the figures sit well
+  // over their cost, printed below. Lowering them is the owner's decision.
+  const liveCost = roomMinutesCost(LIVE_LOOKS);
+  const idleCost = roomMinutesCost(IDLE_LOOKS);
+  is("ten minutes of a talking room, every look answered by the database", liveCost <= ROOM_LIVE_PARTS * part$, true);
+  is("ten minutes of a quiet one", idleCost <= ROOM_IDLE_PARTS * part$, true);
+  console.log(`ten minutes of a talking room: ${(liveCost / part$).toFixed(1)} hundredths of a visit, counted as ${ROOM_LIVE_PARTS} (${((ROOM_LIVE_PARTS * part$ / liveCost - 1) * 100).toFixed(1)}% over); a quiet one: ${(idleCost / part$).toFixed(1)}, counted as ${ROOM_IDLE_PARTS} (${((ROOM_IDLE_PARTS * part$ / idleCost - 1) * 100).toFixed(1)}% over)`);
+  // Being handed leave reads the store's whole record once (STORE_READS.roomLeave), a megabyte at the most.
+  is("a look is a small thing, and being handed leave a larger one", [roomLookCost() < 0.000006, roomLeaveCost() < 0.0001, roomLeaveCost() > roomLookCost()], [true, true, true]);
+  // Held, not only said (4 November 2026, independent review of #1496): the
+  // route that hands the leave (app/api/store/community/chat, GET with
+  // grant) reads the store's whole record exactly as often as it is priced.
+  await claimHandle("rooms@example.com", "rooms", "Rooms", "");
+  await setSubscription("rooms@example.com", { customerId: "cus_Rooms00001", subscriptionId: "sub_Rooms00001", active: true, period: paidPeriod() });
+  const roomsId = (await setCommunity("rooms@example.com", true))!.community!.id;
+  await saveConfig(roomsId, { ...(await readConfig(roomsId))!, chat: open });
+  const roomsSession = await openSession("rooms@example.com");
+  const askLeave = () =>
+    roomRoute(new NextRequest(`https://marktmorgen.com/api/store/community/chat?handle=rooms&grant=live`, { headers: { cookie: `${SESSION_COOKIE}=${roomsSession}`, "x-forwarded-for": "192.0.2.40" } }));
+  records = 0;
+  const leaveAnswer = (await (await askLeave()).json()) as { ok: boolean; grant: unknown };
+  is("being handed leave reads the store's whole record as often as it is priced, and leave is given", [leaveAnswer.ok, Boolean(leaveAnswer.grant), records, records <= STORE_READS.roomLeave], [true, true, 1, true]);
   // What the room cost before: a look every four seconds at a route that
   // sent about ten commands, for as long as the tab was in front.
   const old = (GRANT_MS / 4_000) * (roomLookCost() + 9 * 0.000002);
@@ -180,7 +214,8 @@ async function main(): Promise<void> {
 
   part("What is published");
   const terms = readFileSync(join(process.cwd(), "app/terms/page.tsx"), "utf8");
-  const help = readFileSync(join(process.cwd(), "lib/help-content.ts"), "utf8");
+  const helpSource = readFileSync(join(process.cwd(), "lib/help-content.ts"), "utf8");
+  const help = `${helpSource}\n${HELP_SECTIONS.flatMap((section) => section.items.flatMap((item) => item.a)).join("\n")}`;
   is("the Terms say what a buyer coming back counts as, from the figures the count is made from", [/ROOM_GRANT_MINUTES\} minutes it is open: \{partsWords\(ROOM_LIVE_PARTS\)\}/.test(terms), /partsWords\(ROOM_IDLE_PARTS\)\} of a visit while the room is/.test(terms), /one visit on each day their podcast app checks/.test(terms), /is that\s+day&apos;s visit, once/.test(terms)], [true, true, true, true]);
   is("the help page says the same, in the same figures", [help.includes(`by the ${ROOM_GRANT_MINUTES} minutes it is open, for each member: ${partsWords(ROOM_LIVE_PARTS)} visits while people are talking, when it checks every ${LIVE_MS / 1000} seconds, and ${partsWords(ROOM_IDLE_PARTS)} of a visit while the room is quiet`), help.includes(`one nobody has touched for ${AWAY_AFTER_MS / MINUTE} minutes, checks nothing and counts nothing`)], [true, true]);
   is("both say what a resting store's room does", [/stops checking by itself and shows new\s+messages when a member asks for them/.test(terms), /stops checking by itself,? and shows new messages when a member presses a button/.test(help)], [true, true]);

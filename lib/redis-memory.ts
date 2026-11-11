@@ -1519,10 +1519,15 @@ export class MemoryRedis {
         else this.until.delete(key);
         return "OK";
       }
-      case "EXPIRE":
+      case "EXPIRE": {
         if (!this.data.has(key)) return 0;
+        // NX: only when the key has no expiry yet (Redis 7, which Upstash runs).
+        const flag = String(args[1] ?? "").toUpperCase();
+        if (flag === "NX" && this.until.has(key)) return 0;
+        if (flag === "XX" && !this.until.has(key)) return 0;
         this.until.set(key, this.now() + Number(args[0]) * 1000);
         return 1;
+      }
       case "TTL": {
         if (!this.data.has(key)) return -2;
         const ends = this.until.get(key);
@@ -1593,7 +1598,8 @@ export class MemoryRedis {
       case "DEL": {
         // DEL takes several keys.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        // The key's expiry goes with it, as in Redis: a key made again has none.
+        for (const one of [key, ...args]) if (this.data.delete(one)) { gone += 1; this.until.delete(String(one)); }
         return gone;
       }
       case "EXISTS":

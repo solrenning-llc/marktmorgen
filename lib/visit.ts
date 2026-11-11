@@ -7,7 +7,7 @@ import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { type HitKind, isBot, recordHit } from "@/lib/stats";
 import type { Store } from "@/lib/store";
 import { affiliateCookieName, recordClick } from "@/lib/affiliates";
-import { recordVisit } from "@/lib/traffic";
+import { markCountGap, recordVisit } from "@/lib/traffic";
 import { countryOf, deviceOf } from "@/lib/source-rules";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { requestHost } from "@/lib/request-origin";
@@ -75,25 +75,45 @@ export async function countHit(
   request: NextRequest,
   store: Store,
   hit: { kind: HitKind; id?: string; source?: string; medium?: string; campaign?: string; free?: boolean },
+  /**
+   * Asked once the store's own people are known not to be the ones looking,
+   * with what the count writes: a signal that is not a page takes its place
+   * in the store's window around it (lib/traffic.ts, takeSignal), so the owner
+   * and the store's team never spend one, and nothing is written once the
+   * window's are spent.
+   */
+  signal?: (write: () => Promise<boolean>) => Promise<boolean>,
 ): Promise<void> {
   try {
     if (await isOwner(request, store)) return;
     const userAgent = request.headers.get("user-agent") ?? "";
-    const today = await recordHit(store, {
-      ...hit,
-      ip: clientIp(request),
-      userAgent,
-      // A view says where and on what (lib/stats.ts); a checkout says which
-      // channel it came from, read the way the sale itself is credited.
-      ...(hit.kind === "view" ? { country: countryOf(request.headers.get("x-vercel-ip-country")), device: deviceOf(userAgent) } : {}),
-      ...(hit.kind === "checkout" || hit.kind === "signup"
-        ? { channel: channelOfRequest(request, store.handle, requestHost(request), Date.now() / 1000, store.attributionDays).channel }
-        : {}),
-    });
-    // Asked only at 64, 128, 256… views in a day, so a visit costs nothing more.
+    let today: number | null = null;
+    const write = async () => {
+      today = await recordHit(store, {
+        ...hit,
+        ip: clientIp(request),
+        userAgent,
+        // A view says where and on what (lib/stats.ts); a checkout says which
+        // channel it came from, read the way the sale itself is credited.
+        ...(hit.kind === "view" ? { country: countryOf(request.headers.get("x-vercel-ip-country")), device: deviceOf(userAgent) } : {}),
+        ...(hit.kind === "checkout" || hit.kind === "signup"
+          ? { channel: channelOfRequest(request, store.handle, requestHost(request), Date.now() / 1000, store.attributionDays).channel }
+          : {}),
+      });
+      return true;
+    };
+    if (signal) {
+      if (!(await signal(write))) return;
+    } else await write();
+    // Asked only at 64, 128, 256… views in a day: the fortnight before is read
+    // once a day per store, and each later power of two costs a few commands
+    // (lib/stats-report.ts, maybeBusyAlert; priced in tests/traffic-cost.ts).
     if (today) await maybeBusyAlert(store, today);
   } catch (error) {
     console.error("counting a visit failed", error);
+    // A count not made is written down under its kind, so no rate is shown from it (lib/traffic.ts, markCountGap):
+    // a link's click under the clicks, any other count (a view, a product's visitor, a checkout) under the visits.
+    await markCountGap(store.handle, hit.kind === "link" ? "clicks" : "visits");
   }
 }
 
@@ -116,17 +136,29 @@ export async function countVisit(request: NextRequest, store: Store): Promise<vo
  * Counts a click on an affiliate's link, unless it is the creator's own or a
  * robot's (lib/affiliates.ts does the rest). Never throws, like countHit.
  */
-export async function countAffiliateClick(request: NextRequest, store: Store, code: string, paid = false): Promise<void> {
+export async function countAffiliateClick(
+  request: NextRequest,
+  store: Store,
+  code: string,
+  paid = false,
+  /** As countHit's: the click's signal is kept only when recordClick wrote it (an approved code, new today, under the address's limit). */
+  signal?: (write: () => Promise<boolean>) => Promise<boolean>,
+): Promise<void> {
   try {
     const userAgent = request.headers.get("user-agent") ?? "";
+    // A robot and the store's own people never spend the store's signals.
     if (isBot(userAgent) || (await isOwner(request, store))) return;
-    await recordClick(store, code, {
-      ip: clientIp(request),
-      userAgent,
-      session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-      paid,
-    });
+    const write = () =>
+      recordClick(store, code, {
+        ip: clientIp(request),
+        userAgent,
+        session: request.cookies.get(affiliateCookieName(store.handle))?.value,
+        paid,
+      });
+    if (signal) await signal(write);
+    else await write();
   } catch (error) {
     console.error("counting an affiliate click failed", error);
+    await markCountGap(store.handle, "clicks");
   }
 }

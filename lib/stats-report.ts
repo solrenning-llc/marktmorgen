@@ -609,27 +609,91 @@ export function isBusy(today: number, before: number[]): { busy: boolean; times:
   return { busy, times: usual >= 5 ? Math.floor(today / usual) : 0 };
 }
 
+const busyDayKey = (handle: string, day: string) => `nl:busy:${day}:${handle}:before`;
+/** What the day's key holds once its email has gone: no later power of two reads anything more. */
+const BUSY_SENT = "sent";
+/**
+ * How long a claim to read the fortnight holds before the days are written
+ * under it. A request that dies in between (a function's timeout) leaves an
+ * empty claim; it lapses after this, and a later power of two reads the days
+ * itself. Written days, and the email's mark, are kept two days.
+ */
+export const BUSY_CLAIM_SECONDS = 60;
+
+/**
+ * The views a usual day of the last two weeks had, read once a day per store:
+ * the first power of two a store reaches that day claims the day (SET NX,
+ * before any read) and keeps the fourteen days it read under the claim; every
+ * later one that day reads them back, one command. Before 4 November 2026 the
+ * fourteen days and the creator's choice were read again at every power of
+ * two, before the day's email was claimed. "sent" once the day's email has
+ * gone; null while another request holds the claim and has not written the
+ * days yet: that power of two is not checked, and a later one is. The claim
+ * is let go at once when the read fails, and lapses after
+ * BUSY_CLAIM_SECONDS if its request died before writing (4 November 2026:
+ * it was kept two days, so one failed read lost the day's email).
+ */
+async function busyBefore(store: Store, day: string, now: number): Promise<number[] | typeof BUSY_SENT | null> {
+  const key = busyDayKey(store.handle, day);
+  // Read exactly (CX-123 rule 24): an answer of another shape is not "nothing held", and nothing is checked on it.
+  const got = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (!got) return null;
+  const held = got[0];
+  if (typeof held === "string") {
+    if (held === BUSY_SENT) return BUSY_SENT;
+    try {
+      const days = JSON.parse(held) as unknown;
+      // Another request's claim (its own value, a number) is not the days yet: null.
+      return Array.isArray(days) && days.every((n) => typeof n === "number" && Number.isFinite(n)) ? (days as number[]) : null;
+    } catch {
+      return null;
+    }
+  }
+  if (held !== null) return null;
+  // The claim is exact too (lib/claim-mark.ts): taken or unknown reads nothing.
+  if ((await claimMark(key, BUSY_CLAIM_SECONDS)) !== "ours") return null;
+  try {
+    const before = await viewsBefore(store, 14, now);
+    await redisPipeline([["SET", key, JSON.stringify(before), "XX", "EX", 2 * 86400]]);
+    return before;
+  } catch {
+    // The read failed: let the claim go at once, so the next power of two
+    // tries again. A request that dies here without this (a timeout) leaves
+    // a claim that lapses after BUSY_CLAIM_SECONDS.
+    await redisPipeline([["DEL", key]]).catch(() => undefined);
+    return null;
+  }
+}
+
 /**
  * The email when a store is busier than usual (added 11 October 2026): a post
  * is bringing people now, which is the moment to answer comments, pin the
  * post or post again — and the one the creator would otherwise learn about
  * the next week.
  *
- * Asked only when today's views reach 64, 128, 256 and so on (lib/visit.ts),
- * so it costs a visit nothing: the few reads it makes happen a handful of
- * times a day at most. Once a day per store, only for a store with a plan
- * running, and never for one whose creator stopped the numbers emails.
+ * Asked only when today's views reach 64, 128, 256 and so on (lib/visit.ts).
+ * The fourteen days before are read once a day per store (busyBefore); each
+ * later power of two that day reads them back, one command, and on a busy
+ * day before the email has gone also the creator's choice. Bounded, and
+ * priced in tests/traffic-cost.ts (BUSY). Once a day per store, only for a
+ * store with a plan running, and never for one whose creator stopped the
+ * numbers emails.
  */
 export async function maybeBusyAlert(store: Store, today: number, now = Date.now()): Promise<boolean> {
   if (today < BUSY_FLOOR || (today & (today - 1)) !== 0) return false;
   if (!isRedisConfigured() || !isSenderConfigured()) return false;
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return false;
-  if (await weeklyOff(store.handle)) return false;
-  const verdict = isBusy(today, await viewsBefore(store, 14, now));
-  if (!verdict.busy) return false;
   const day = new Date(now).toISOString().slice(0, 10);
+  const before = await busyBefore(store, day, now);
+  if (!before || before === BUSY_SENT) return false;
+  const verdict = isBusy(today, before);
+  if (!verdict.busy) return false;
+  if (await weeklyOff(store.handle)) return false;
+  // The day's email claimed exactly (lib/claim-mark.ts, CX-123 rule 24): taken or unknown sends nothing.
   if (!(await ownClaim(busyKey(store.handle, day), 2 * 86400))) return false;
+  // Then no later power of two today reads anything more (best effort: a lost mark only costs the claim's read).
+  await redisPipeline([["SET", busyDayKey(store.handle, day), BUSY_SENT, "XX", "EX", 2 * 86400]]).catch(() => undefined);
 
   const top = (await sourcesToday(store, now)).filter((s) => s.name !== "direct")[0];
   const token = weeklyToken(store.handle);

@@ -1217,6 +1217,18 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 }
 
 /**
+ * Whether a public address leads to a store, from its small index alone, not
+ * the store's record: what a refused count reads before writing down that the
+ * store's counts were not whole (app/api/store/hit, lib/traffic.ts
+ * markCountGap), so a made-up address leaves nothing behind.
+ */
+export async function handleTaken(handle: string): Promise<boolean> {
+  if (!isRedisConfigured() || handleProblem(handle)) return false;
+  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
+  return typeof email === "string" && email !== "" && !email.startsWith(RELEASED_PREFIX);
+}
+
+/**
  * The store behind a public address, read once per page view: the layout,
  * the page's head and the page itself ask for it, and all three are given
  * the one answer. Only for pages; anything that writes reads afresh.

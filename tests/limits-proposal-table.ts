@@ -18,7 +18,7 @@ import { HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
 import { PLAN_PRICES, PLAN_TITLES, TIERS, monthlyEmails, type Cycle, type Tier } from "@/lib/plan";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
-import { VISITS_INCLUDED } from "@/lib/traffic-rules";
+import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { AI_MONTHLY } from "@/lib/ai-rules";
@@ -73,6 +73,12 @@ const centsUp = (usd: number) => Math.ceil(Math.round(usd * 1e7) / 1e5);
 export function usageCents(tier: Tier, cycle: Cycle, share: Partial<Record<Printed, number>>): number {
   let monthly = COST_LINES.reduce((sum, line) => sum + line.monthlyUsd(tier), 0);
   for (const id of ORDER) monthly -= lineUsd(tier, id) * (1 - (share[id] ?? 1));
+  // A store's signals that are not a page are SIGNALS_PER_VISIT for each visit of its figure (lib/traffic-rules.ts,
+  // signalLimitFor): they follow the visits line wherever it is put (4 November 2026).
+  // So do the paid-search arrivals (one a visit), and the signals given back through the visits' part of the window's requests (4 November 2026).
+  for (const id of ["signals", "paid-arrivals"]) monthly -= lineUsd(tier, id) * (1 - (share.visits ?? 1));
+  const visitsPart = (REQUESTS_PER_VISIT * VISITS_INCLUDED[tier]) / (REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier]);
+  monthly -= lineUsd(tier, "signals-returned") * visitsPart * (1 - (share.visits ?? 1));
   // Only the plan's storage is taken off what is kept after the end; anything else a cut might save there is left in, so a proposal never counts on it.
   const after = perPaymentCost(tier) - retainedStorageUsd(tier) * (1 - (share.storage ?? 1));
   return centsUp(months(cycle) * monthly + after);

@@ -70,12 +70,13 @@ const rate = (part: number, whole: number) => Math.round((part / whole) * 10_000
  * A store's own rates from its numbers, or null when it is too small to be
  * set beside others, or its sales were not read in full.
  */
-export function sampleFrom(data: StatsData): Sample | null {
+export function sampleFrom(data: StatsData, visitsWhole = true): Sample | null {
   if (data.sales !== "ok" || data.partial) return null;
   const t = data.totals.d90;
   const band = bandOf(t.visitors);
   if (!band) return null;
-  const sample: Sample = { band, converted: rate(Math.min(t.sales, t.visitors), t.visitors) };
+  // Visits that became a sale only from visits all counted over the 90 days (lib/traffic.ts, countGap): neither shown nor set beside others otherwise.
+  const sample: Sample = { band, ...(visitsWhole ? { converted: rate(Math.min(t.sales, t.visitors), t.visitors) } : {}) };
   if (t.checkouts >= MIN_CHECKOUTS) sample.paid = rate(Math.min(t.sales, t.checkouts), t.checkouts);
   const refunds = data.refunds ? data.refunds.d90.reduce((sum, r) => sum + r.refunds, 0) : null;
   if (refunds !== null && t.sales >= MIN_SALES) sample.refunded = rate(Math.min(refunds, t.sales), t.sales);

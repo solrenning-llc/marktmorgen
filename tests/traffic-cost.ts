@@ -65,8 +65,13 @@
  * for its feed (lib/podcast-access.ts). tests/room.test.ts and
  * tests/podcast.test.ts hold what each is counted as over what it costs.
  */
+import { CAPPED_COUNT } from "@/lib/capped-count";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
+import { MAX_STORE_BYTES } from "@/lib/store";
+import { RESEND_TIMEOUT_MS, SES_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { UPSTASH_MICRO_USD_PER_GB_TRANSFER } from "@/lib/spend-cost-table";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { SHARE_COMMANDS_PER_REQUEST } from "@/lib/traffic-rules";
 
 export const CDN_PER_REQUEST = 2.0 / 1_000_000;
 export const COMMAND = 2.0 / 1_000_000;
@@ -102,32 +107,64 @@ export const COMMANDS = {
    * gained who is on the store now (one command) and lost the all-time
    * record's count of views, which is now the sum of its sources (lib/stats.ts,
    * readLife): 12 measured, held at 12.
+   *
+   * Since October 31, 2026 (313 [CV1]) what is BILLED, not what is sent:
+   * Upstash bills a script as one command plus one for every redis.call it
+   * runs (https://upstash.com/docs/redis/overall/billing, read that day),
+   * and the count script (lib/capped-count.ts) was counted as one. Billed,
+   * a returning visitor's view was 18 commands, and 32 at its heaviest (a
+   * medium and a campaign beside its source, nine counts, with the day's
+   * record at its most fields). The script was rewritten the same day to
+   * read each hash's length once rather than before every count: 15, and 21
+   * at the heaviest, measured in tests/traffic.test.ts. The most one view
+   * can send is the store's first of the day, by somebody new, with both
+   * records at their most: 29 measured, held by tests/traffic.test.ts at
+   * this and firstOfDay together (25 + 4 = 29). Held at 25.
    */
-  frontCount: 12,
+  frontCount: 25,
   /**
    * What a visitor new to the day adds, once: the visit, how long the day
-   * is kept, and the store's all-time visitors. A month's first visit, and
-   * each hundredth after, writes five more (lib/traffic.ts, markMonth):
-   * a twentieth of a command to the visit, inside what is rounded up here.
-   * Since October 11, 2026 also the expiry of the day's visitors, written
-   * with the visitor new to the day rather than with every view.
+   * is kept, and the store's all-time visitors. Since October 11, 2026 also
+   * the expiry of the day's visitors, written with the visitor new to the
+   * day rather than with every view. What the month is marked with is
+   * counted apart, monthMark.
    */
   firstOfDay: 4,
+  /**
+   * What a month is marked with (lib/traffic.ts, markMonth): how long its
+   * counts are kept, the line of stores the daily job reads and whose folder
+   * this is, five commands. Written with the month's first visit and every
+   * hundredth after, and the same with the live room's hundredths (each
+   * hundred visits' worth); tests/traffic.test.ts measures it landing on the
+   * heaviest view there is, the store's first of the day (4 November 2026:
+   * until then it was said to fit inside firstOfDay, which it did not).
+   * Priced on every visit at MONTH_MARKS_PER_VISIT.
+   */
+  monthMark: 5,
   /**
    * Drawing another page of the store, and saying it was opened. On a
    * product's own page that also counts the page's view (lib/stats.ts, added
    * 8 October 2026): two commands more, measured, and a third once a day.
    */
   laterPage: 10,
-  laterCount: 8,
+  /**
+   * Saying another page was opened, billed (October 31, 2026, as frontCount):
+   * 10 measured on a product's page, and 11 with the day's record at its
+   * most. 8 before, counting the script as one command.
+   */
+  laterCount: 11,
   /**
    * How a page was read (lib/page-read.ts), sent as a visitor leaves it by
    * one visitor in READ_SAMPLE: one command, and an expiry the first time a
    * block of a sales page is counted at all, which is once per block and not
    * per visit. Until October 11, 2026 this went through the store's general
    * count at seven commands and was in none of these sums.
+   *
+   * Billed (October 31, 2026, as frontCount): its count is the count script
+   * with one name, its length read and its count, and the expiry the first
+   * time: 4 at the most, 3 and 4 measured. It was held at 1, the script alone.
    */
-  readBeacon: 1,
+  readBeacon: 4,
   /**
    * Handing a member's page ten minutes' leave to ask the room, at the
    * route that knows who is asking: the store, the community's settings,
@@ -146,7 +183,137 @@ export const COMMANDS = {
    */
   feedFirst: 13,
   feed: 10,
+  /**
+   * A signal that is not a page (app/api/store/hit, k "l", "a" or "f"): a
+   * click on one of the store's links, an arrival through an affiliate's
+   * link, a step of a funnel. Measured on the path that counts (4 November
+   * 2026, independent review of #1496), by a visitor signed in to another
+   * store, whose session is read, with an approved affiliate and a funnel's
+   * real step, each taking its place on the store's count of signals
+   * (lib/traffic.ts, takeSignal): held in tests/traffic.test.ts at the
+   * heaviest of the three, never more than two over it. 15 measured for a
+   * link's click (its count script billed with what it runs), 13 for an
+   * affiliate's visit and 10 for a funnel's step. Third round of the review
+   * (4 November 2026): the address's and the store's allowances asked before
+   * the store is read, the count's expiry in the same write, and the heavier
+   * paths measured too (a link's first click of the day, an affiliate's visit
+   * from a paid ad by another affiliate's browser): 19 at the most. A store
+   * in its trial reads its place in the pool as well, one more, priced in
+   * nonPayingWorst. Fourth round (4 November 2026), measured again with the
+   * address taken as its /48, robots left out first, the paid-ad visit on
+   * its own pool and every count not made written down: still 15 to 19, the
+   * paid-ad visit the heaviest. Kept signals only: one given back or refused
+   * costs returnedSignalCost (two commands more), priced on its own line.
+   * The owner's decision of 11 November 2026 (#1496, A1: the cost brought
+   * under the exposure ceilings without raising them, writes and reads batched
+   * first): an affiliate's visit reads the code and the browser's session in
+   * one round trip, and the browser's own affiliate is told by the session's
+   * id, not by reading that affiliate's record again: 18 at the most.
+   */
+  signal: 18,
 };
+
+/**
+ * The marks a month gets, shared over its visits: the month's first visit,
+ * every hundredth after, and the same for the live room's hundredths (its
+ * first and every hundred visits' worth), so 2 + visits / 100 at the most.
+ * A fiftieth on every visit pays for them in any month of 200 visits or more;
+ * a plan's worst month is every visit it covers, the fewest of which is
+ * Store's 3,400 (lib/traffic-rules.ts, VISITS_INCLUDED), and a store under
+ * 200 visits costs less in all than one at its plan's figure.
+ */
+export const MONTH_MARKS_PER_VISIT = 1 / 50;
+
+/**
+ * The count script (lib/capped-count.ts, CAPPED_COUNT) is sent whole with
+ * every EVAL, not by its hash, so each one moves its bytes through the
+ * database, priced by the byte as tests/plan-cost-registry.ts prices them
+ * (Upstash's bandwidth, lib/spend-cost-table.ts). How many a visit sends is
+ * measured in tests/traffic.test.ts and held to these figures: the front
+ * page's count, a later page's, and a reading of a page.
+ */
+export const EVAL_BYTES = Buffer.byteLength(CAPPED_COUNT);
+const DB_BYTE = UPSTASH_MICRO_USD_PER_GB_TRANSFER / 1_000_000 / 1e9;
+export const EVALS = {
+  /** The front page's view and its visit: the view's counts go in one script (lib/stats.ts, recordHit), 1 measured. */
+  frontCount: 1,
+  /** A later page's count, with the product's own visitor: 1 measured. */
+  laterCount: 1,
+  /** A reading of a page (lib/page-depth.ts): 1 measured. */
+  readBeacon: 1,
+  /** A signal that is not a page: a link's click is one count script, an affiliate's visit and a funnel's step none. */
+  signal: 1,
+};
+const evalCost = (n: number) => n * EVAL_BYTES * DB_BYTE;
+
+/**
+ * The store's record is read whole from the database (lib/store.ts,
+ * storeForHandle and storeForPage), up to MAX_STORE_BYTES, and every byte read
+ * is billed as the EVAL's are. Until 4 November 2026 (independent review of
+ * #1496) no visit paid for it. Reads of the record, measured in
+ * tests/traffic.test.ts: each page drawn reads it once, each count a page
+ * sends (app/api/store/hit) once more, and the live room's leave once
+ * (app/api/store/community/chat). A reading of a page does not read it.
+ */
+export const STORE_READS = { page: 1, count: 1, roomLeave: 1, signal: 1 };
+const storeReadCost = (n: number) => n * MAX_STORE_BYTES * DB_BYTE;
+
+
+/**
+ * The busy-day email (lib/stats-report.ts, maybeBusyAlert), asked by a
+ * view when the day's views reach 64, 128, 256 and so on: at most once a
+ * store a day for each power of two a day's count can reach, and a day's
+ * count is a 64-bit integer in the database, so from 2^6 to 2^62, BUSY_POWERS.
+ * Commands, as tests/numbers-three.test.ts measures them (4 November 2026).
+ * The fortnight is read once a day unless the request reading it dies before
+ * writing it down: its claim then lapses after a minute
+ * (lib/stats-report.ts, BUSY_CLAIM_SECONDS) and the next power of two reads
+ * it again, so the day is priced as if every power of two were its first.
+ */
+export const BUSY = {
+  /** The day's first ask: whether the day is kept, its claim, the fourteen days before, and keeping them. */
+  first: 17,
+  /** Any later ask that day: the fourteen days read back, or that the email has gone. */
+  later: 1,
+  /** On a busy day before the email has gone, each ask also: whether the creator stopped the emails. */
+  busy: 1,
+  /**
+   * The one that sends: the day's email claim and its mark and today's
+   * channels (3), and the sender's own bookkeeping. Measured on Resend, 2
+   * (its monthly count), 5 in all. Read from lib/email.ts and lib/ses.ts for
+   * Amazon, which tests here cannot reach: Amazon's state read and, when
+   * stale, written again (2), and either what Amazon took counted (2) or,
+   * when the account refuses, its state set down (2), the day's notice to
+   * the site's inbox claimed (1) and sent through Resend (2), and the email
+   * itself sent through Resend (2): 9 at the most. 12 in all.
+   */
+  send: 12,
+};
+/**
+ * How long the one that sends can hold its function, waiting on the
+ * senders, all of it inside the view's request (lib/visit.ts awaits it):
+ * Amazon's key borrowed and its account asked (8 s each, SES_TIMEOUT_MS),
+ * three tries at Amazon (8 s each) with 1.2 s of pauses, and Resend twice,
+ * the site's notice and the email, each three tries of 10 s
+ * (RESEND_TIMEOUT_MS) with 3 s of pauses for a 429: 107.2 s, rounded up.
+ */
+export const BUSY_SEND_SECONDS = Math.ceil((2 * SES_TIMEOUT_MS + 3 * SES_TIMEOUT_MS + 1_200 + 2 * (3 * RESEND_TIMEOUT_MS + 3_000)) / 1000);
+/** That time, at the memory held while waiting and a tenth of a second of work. */
+export function busySendFunctionCost(): number {
+  return BUSY_SEND_SECONDS * MEMORY_PER_SECOND + 0.1 * CPU_PER_SECOND;
+}
+export const BUSY_POWERS = 62 - 6 + 1;
+
+/**
+ * A store's day of the busy-day email at the most, in commands: every power
+ * of two reached, each one reading the fortnight as the day's first would
+ * (a claim left by a request that died lapses, BUSY.first), every one of them
+ * on a busy day, and the email sent. The email itself is priced where emails
+ * are (tests/plan-cost-registry.ts).
+ */
+export function busyDayCommands(): number {
+  return BUSY_POWERS * (BUSY.first + BUSY.busy) + BUSY.send;
+}
 
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */
 const PAGE_AND_COUNT = 2 * CALL + 0.1 * CPU_PER_SECOND + 1.3 * MEMORY_PER_SECOND;
@@ -157,18 +324,20 @@ const PAGE_AND_COUNT = 2 * CALL + 0.1 * CPU_PER_SECOND + 1.3 * MEMORY_PER_SECOND
  * an empty answer.
  */
 export function readBeaconCost(): number {
-  return CDN_PER_REQUEST + CALL + COMMANDS.readBeacon * COMMAND + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + COMMANDS.readBeacon * COMMAND + evalCost(EVALS.readBeacon) + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
 }
 
 /** What one visit costs at the most this is worked out for, in dollars. */
 export function visitCost(): number {
   const later = PAGES_PER_VISIT - 1;
   const requests = 1 + STATIC_FILES + 1 + 1 + STORE_PAGE_SIZE + later * (1 + 1 + PICTURES_ON_A_LATER_PAGE);
-  const commands = COMMANDS.frontPage + COMMANDS.frontCount + COMMANDS.firstOfDay + later * (COMMANDS.laterPage + COMMANDS.laterCount);
+  const commands = COMMANDS.frontPage + COMMANDS.frontCount + COMMANDS.firstOfDay + MONTH_MARKS_PER_VISIT * COMMANDS.monthMark + later * (COMMANDS.laterPage + COMMANDS.laterCount);
   // Every page of the visit is taken to be measured for how it is read, at the
   // share of visitors the pages send it for: the store's page and two sales pages.
   const reading = (PAGES_PER_VISIT / READ_SAMPLE) * readBeaconCost();
-  return requests * CDN_PER_REQUEST + commands * COMMAND + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
+  const evals = evalCost(EVALS.frontCount + later * EVALS.laterCount);
+  const records = storeReadCost(PAGES_PER_VISIT * (STORE_READS.page + STORE_READS.count));
+  return requests * CDN_PER_REQUEST + commands * COMMAND + evals + records + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
 }
 
 /**
@@ -181,8 +350,55 @@ export function visitCost(): number {
  * more than a page does.
  */
 export function laterPageCost(): number {
-  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
+  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + evalCost(EVALS.laterCount) + storeReadCost(STORE_READS.page + STORE_READS.count) + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
 }
+
+/**
+ * What a signal reads from the database besides the store's record and the
+ * count script's answer, at the most: the session of a visitor signed in
+ * elsewhere, a funnel at its most steps and names, an approved affiliate.
+ * 893 bytes measured at the most (a funnel's step), held in
+ * tests/traffic.test.ts; priced at 8,000, room for an affiliate's record with
+ * every field it can carry.
+ */
+export const SIGNAL_READ_BYTES = 8_000;
+
+/**
+ * One signal that is not a page (app/api/store/hit, k "l", "a", "f"): its
+ * request at the CDN, the call, its commands, its count script, the store's
+ * record and what else it reads, a hundredth of a second of work, memory held
+ * while the database is waited on, and an empty answer, with its connection's
+ * share of the day written a batch at a time (SHARE_COMMANDS_PER_REQUEST).
+ * Priced on its own line, SIGNALS_PER_VISIT for each visit of a plan's figure
+ * (tests/plan-cost-registry.ts, signals).
+ *
+ * Not measured: a store whose period is funded (store.period.funded) asks
+ * reservePaidResourceWindow, an EVAL of its own, before each signal, as before
+ * each request. That path must be measured and priced here before
+ * commercialMarginReady is switched on (independent review of #1496, 4
+ * November 2026).
+ */
+export function signalCost(): number {
+  return CDN_PER_REQUEST + CALL + (COMMANDS.signal + SHARE_COMMANDS_PER_REQUEST) * COMMAND + evalCost(EVALS.signal) + storeReadCost(STORE_READS.signal) + SIGNAL_READ_BYTES * DB_BYTE + 0.01 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+}
+
+/**
+ * A signal given back or refused (lib/traffic.ts, takeSignal): the same
+ * request, the same reads, and the count taken back with its expiry, two
+ * commands more. A visitor's own reload of a funnel step or an affiliate's
+ * link, or a click past the window's, costs this and is not counted.
+ */
+export function returnedSignalCost(): number {
+  return signalCost() + 2 * COMMAND;
+}
+
+/**
+ * Whether the signal's path through a funded window
+ * (reservePaidResourceWindow, an EVAL) has been measured and priced in
+ * signalCost. False: tests/traffic.test.ts fails if commercialMarginReady()
+ * turns true while it is.
+ */
+export const FUNDED_SIGNAL_PATH_MEASURED = false;
 
 /**
  * One look at what is new in a room, with the CDN holding no answer for it:
@@ -197,7 +413,7 @@ export function roomLookCost(): number {
 
 /** Being handed ten minutes' leave to look: once, at the route that knows who is asking. */
 export function roomLeaveCost(): number {
-  return CDN_PER_REQUEST + CALL + COMMANDS.roomLeave * COMMAND + 0.03 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 4_000 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + COMMANDS.roomLeave * COMMAND + storeReadCost(STORE_READS.roomLeave) + 0.03 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 4_000 * ORIGIN_PER_BYTE;
 }
 
 /** Ten minutes of the room for one member, at a number of looks. */

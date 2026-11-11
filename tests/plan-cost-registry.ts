@@ -47,9 +47,9 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
-import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
+import { EXTRA_REQUESTS, PAID_ARRIVALS_PER_VISIT, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, SIGNALS_PER_VISIT, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
-import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
+import { TRIAL_DAYS, TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
@@ -111,7 +111,7 @@ import {
   PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { PAGES_PER_VISIT, busyDayCommands, busySendFunctionCost, laterPageCost, returnedSignalCost, signalCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -137,6 +137,17 @@ export const STREAM_STORAGE_PER_GB = 0.02;
 export const STREAM_DELIVERY_PER_GB = 0.005;
 export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
+/** Days a billing month can have, for what is asked at most once a day. */
+export const BUSY_DAYS_A_MONTH = 31;
+/**
+ * A store's day of the busy-day email at the most (tests/traffic-cost.ts,
+ * BUSY): its commands, the time the send holds the view's function, the
+ * email, and the day's one notice to the site's inbox when Amazon refuses,
+ * which a store's email can be the one to set off.
+ */
+export function busyDayCost(): number {
+  return busyDayCommands() * COMMAND + busySendFunctionCost() + 2 * PER_EMAIL;
+}
 /** DR1 unit 1 components. A priced successful delivery is not evidence of
  * the live retry policy, total provider publications or admission funding.
  * Lua includes EVAL and every internal command. These are disconnected
@@ -645,9 +656,12 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
  * reads its place as well (nonPayingWorst). Since 18 October 2026 also its
  * connection's share of the day, written a batch of requests at a time
  * (lib/traffic-rules.ts, SHARE_COMMANDS_PER_REQUEST; docs/security-audit-2026-10-18.md,
- * MM-SA-01), priced on every request of the window.
+ * MM-SA-01), priced on every request of the window. Since 4 November 2026
+ * the count's expiry goes with every count (EXPIRE in the same write, the
+ * same point each time), not apart after the window's first: two commands
+ * where it was one.
  */
-export const REQUEST_COMMANDS = 1 + SHARE_COMMANDS_PER_REQUEST;
+export const REQUEST_COMMANDS = 2 + SHARE_COMMANDS_PER_REQUEST;
 
 /** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */
 export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0): number {
@@ -931,6 +945,41 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/traffic.ts", names: ["isResting"] },
     ],
     basis: "The month's figure, every visit made by the heavy visitor a visit is costed as. Nothing is sold past it: public pages rest at 95% and buyers' pages at 100%.",
+  },
+  {
+    id: "busy-day-email",
+    feature: "The busy-day email to the creator (added 11 October 2026; costed 4 November 2026)",
+    monthlyUsd: ALL_TIERS_SAME(BUSY_DAYS_A_MONTH * busyDayCost()),
+    sources: [{ file: "lib/stats-report.ts", names: ["maybeBusyAlert", "BUSY_FLOOR"] }],
+    basis: "Asked by a store's views at 64, 128, 256 and so on in a day, which no plan figure bounds: every day of the month at every power of two a day's count can reach, the fortnight before read once a day, its one email a day at the company's cost, the time its send holds the view's function, and the site's one notice a day when Amazon refuses (tests/traffic-cost.ts, BUSY; measured in tests/numbers-three.test.ts on Resend, read from the code for Amazon). A line of its own, so a cut to the visits never takes it off.",
+  },
+  {
+    id: "signals",
+    feature: "Signals that are not a page: a click on one of the store's links, a visit through an affiliate's link, a step of a funnel of pages (counted on their own since 4 November 2026)",
+    monthlyUsd: (tier) => SIGNALS_PER_VISIT * VISITS_INCLUDED[tier] * signalCost(),
+    sources: [
+      { file: "lib/traffic-rules.ts", names: ["SIGNALS_PER_VISIT", "signalLimitFor"] },
+      { file: "lib/traffic.ts", names: ["takeSignal", "signalsKey", "signalShareKey"] },
+      { file: "app/api/store/hit/route.ts", names: ["takeSignal(store, write)", "HIT_STORE_LIMIT"] },
+    ],
+    basis: "Each is written inside one of the store's signals (lib/traffic.ts, takeSignal), after everything that costs nothing has passed and the store's own people are known not to be looking, and the signal is kept only when something was written: an approved affiliate's click new today, a funnel step new for its visitor, a link's click. Past SIGNALS_PER_VISIT for each visit of the plan's figure nothing is written, each connection takes at most its day's share (clientDayShare of them, counting what it asks for), and every count not made is written down (markCountGap) so no rate is shown from it. A count of its own, never the requests the store's pages are drawn from, so a funnel or a link in bio never brings the pages to rest before the printed visits. Every kept signal at what the heaviest of the three is measured to cost on the path that counts (tests/traffic.test.ts; tests/traffic-cost.ts, signalCost). A signal refused or given back is priced on its own line (signals-returned); beyond it they are bounded by each address's allowance and the store's HIT_STORE_LIMIT in ten minutes (app/api/store/hit), asked before the record is read, not by the plan's figure, so a flood from many machines at once is the host's firewall's to stop, as clientDayShare says of requests. Until 4 November 2026 they were bounded only by each address's allowance.",
+  },
+  {
+    id: "signals-returned",
+    feature: "Signals given back or refused: a visitor's reload of a funnel step or an affiliate's link, a click past the window's (4 November 2026)",
+    monthlyUsd: (tier) => 2 * (REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier]) * returnedSignalCost(),
+    sources: [{ file: "lib/traffic.ts", names: ["takeSignal", "markCountGap"] }],
+    basis: "A signal that writes nothing (a step its visitor already opened, a click already counted today) or comes past the window's still reads the store's record and takes its place back (tests/traffic-cost.ts, returnedSignalCost). Real visitors send them about as often as they reload pages: priced at twice the window's requests (independent review of #1496, 4 November 2026). Made-up ones beyond that are bounded by each address's allowance and the store's HIT_STORE_LIMIT, not by the plan.",
+  },
+  {
+    id: "paid-arrivals",
+    feature: "Affiliates' visits from a paid search ad, on a pool of their own (4 November 2026)",
+    monthlyUsd: (tier) => PAID_ARRIVALS_PER_VISIT * VISITS_INCLUDED[tier] * signalCost(),
+    sources: [
+      { file: "lib/traffic-rules.ts", names: ["PAID_ARRIVALS_PER_VISIT"] },
+      { file: "lib/traffic.ts", names: ["paidArrivalsKey"] },
+    ],
+    basis: "Counted apart from the signals, so the mark the creator's paid-search hold reads (lib/affiliates.ts) never stops because the store's other clicks were many: one for each visit of the plan's figure, each at a signal's cost. An arrival is a visit, and past the plan's visits its pages rest.",
   },
   {
     id: "orders",
@@ -1566,11 +1615,18 @@ export function nonPayingWorst(): number {
   const allowances = NON_PAYING_ALLOWANCES.trial;
   const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
   return TRIAL_VISITS * visitCost()
+    // The busy-day email its views can ask for, on each UTC day a trial touches: its TRIAL_DAYS and the one it starts in.
+    + (TRIAL_DAYS + 1) * busyDayCost()
+    // Its signals that are not a page (signals), SIGNALS_PER_VISIT for each of the trial's visits, each also reading its place in the month's pool.
+    + SIGNALS_PER_VISIT * TRIAL_VISITS * (signalCost() + COMMAND)
+    // And those given back or refused, at twice its requests, and its paid-search arrivals (signals-returned, paid-arrivals).
+    + 2 * (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (returnedSignalCost() + COMMAND)
+    + PAID_ARRIVALS_PER_VISIT * TRIAL_VISITS * (signalCost() + COMMAND)
     + requests
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
     + TRIAL_VIDEO_HOURS * hourCost()
-    + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
+    + TRIAL_DAILY_RUNS * (TRIAL_DAYS + 1) * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
@@ -1732,6 +1788,8 @@ const BURST = (under: string): ScopeClass => guard(`A burst limit per connection
 const METERED_EMAIL = guard("Per connection or person; the email it sends is taken from the store's figure before it goes (lib/email.ts, EmailMeter).");
 
 export const SCOPES: Record<string, ScopeClass> = {
+  // A store's pages' counts in ten minutes, from every address together, asked before its record is read (app/api/store/hit, HIT_STORE_LIMIT, 4 November 2026).
+  "hit-store": guard("A flood guard per store, asked before the store's record is read: what is counted under it is priced in the visits and signals lines; a flood from many machines at once is the host's firewall's to stop."),
   // Counted in a line.
   "import-preview": line("clickfunnels"), "import-preview-month": line("clickfunnels"), "import-preview-buyers-month": line("clickfunnels"),
   "import-cf-page": line("clickfunnels"), "import-cf-page-month": line("clickfunnels"), "import-cf-plan": line("clickfunnels"),

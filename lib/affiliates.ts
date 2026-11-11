@@ -1477,6 +1477,17 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
   return { ok: true, session, affiliate, created };
 }
 
+/** The id of the affiliate a session record (as GET answered it) is signed in as on this store, or null. */
+function sessionAffiliateId(raw: unknown, statsId: string): string | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const value = JSON.parse(raw) as { s?: unknown; a?: unknown };
+    return value.s === statsId && typeof value.a === "string" ? value.a : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The affiliate a browser is signed in as, on this store, or null. */
 export async function affiliateForSession(store: Store, session: string | undefined): Promise<Affiliate | null> {
   if (!session || !AFFILIATE_TOKEN_PATTERN.test(session) || !store.statsId || !isRedisConfigured()) return null;
@@ -2216,11 +2227,17 @@ export async function recordClick(
   code: string,
   visitor: { ip: string; userAgent: string; session: string | undefined; paid?: boolean },
 ): Promise<boolean> {
-  const affiliate = await approvedByCode(store, code);
-  if (!affiliate) return false;
-  const own = await affiliateForSession(store, visitor.session);
-  if (own?.id === affiliate.id) return false;
-  const statsId = store.statsId as string;
+  if (!affiliatesOn(store) || !AFFILIATE_CODE_PATTERN.test(code) || !store.statsId) return false;
+  const statsId = store.statsId;
+  // The code and the browser's own session in one round trip, and the browser's affiliate told by the session's id,
+  // not by reading that affiliate's record again (the owner's decision of 11 November 2026 on #1496: the worst month
+  // brought under the exposure ceilings, writes and reads batched first). The affiliate's own browser is never counted.
+  const session = visitor.session && AFFILIATE_TOKEN_PATTERN.test(visitor.session) && isRedisConfigured() ? visitor.session : null;
+  const [id, raw] = await redisPipeline([["HGET", codesKey(statsId), code], ...(session ? [["GET", sessionKey(session)]] : [])]);
+  if (typeof id !== "string") return false;
+  if (sessionAffiliateId(raw, statsId) === id) return false;
+  const affiliate = await readAffiliate(store, id);
+  if (affiliate?.status !== "approved") return false;
   // A count that could not be read counts no click; thrown so the visit's log says why (lib/visit.ts).
   const allowed = await within(clickIpKey(visitor.ip, statsId), CLICK_IP_LIMIT);
   if (allowed === null) throw new UnknownReplyError("an affiliate click count");

@@ -99,6 +99,13 @@ is("each language on its own: the short leg never pulls the long one's p90 down"
 is("a skipped job is not counted; a canceled one is (a time-out ends canceled)",
   codeqlSlow([...Array.from({ length: 9 }, () => job("js", 10)), job("js", 0, "skipped"), job("js", 30, "cancelled")], 30).map((c) => c.p90), []);
 is("and with enough canceled at the limit, it warns", codeqlSlow(Array.from({ length: 5 }, () => job("js", 30, "cancelled")), 30).map((c) => [c.language, c.p90]), [["js", 30]]);
+// A pull request's own run of codeql.yml names its matrix (Claude 1 on #3426, LOW): a "language" that is not a plain
+// CodeQL language name is never written into the issue, so no link, mention or markup reaches it.
+const planted = "x](https://example.invalid) cc @someone";
+is("a language that is not a plain name is never reported",
+  codeqlSlow([...Array.from({ length: 5 }, () => job(planted, 50)), ...Array.from({ length: 5 }, () => job("c-cpp", 50))], 60).map((c) => c.language),
+  ["c-cpp"]);
+is("nor one with markup, a backtick or a line break", codeqlSlow(["java`kotlin", "go\n## x", "<b>ruby</b>", "a".repeat(41)].map((lang) => job(lang, 50)), 60), []);
 
 part("the whole run, against a synthetic GitHub (read-only on pull requests)");
 type Call = { method: string, path: string, body?: unknown };

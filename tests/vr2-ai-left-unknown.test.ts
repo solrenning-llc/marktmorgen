@@ -251,7 +251,6 @@ test("editor tools control: a spent allowance is still 0 left, with every AI job
 // when this test was written (AV5). The list may only shrink: a file that no longer has the line must leave it.
 const PENDING = new Set([
   "app/studio/page.tsx",
-  "app/studio/email/page.tsx",
   "app/studio/pages/page.tsx",
   "app/studio/site/page.tsx",
   "app/studio/funnels/page.tsx",

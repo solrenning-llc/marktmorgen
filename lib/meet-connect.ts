@@ -55,9 +55,9 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
 import {
   type Account,
@@ -590,9 +590,28 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
   });
 }
 
+/** Every DEL of one pipeline confirmed by its own count, or UnknownReplyError: a deletion is never taken as done unseen. */
+function confirmDeleted(replies: unknown, commands: number, what: string): void {
+  const answered = repliesFor(replies, commands);
+  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+}
+
 /**
  * Zoom's notice that a user removed the app: every store that user connected
  * forgets the connection. Returns, for each store that did, who to tell.
+ *
+ * Read exactly (CX-123 rule 24): the user's stores, each connection and each
+ * deletion. An unknown reply throws before the user's index is deleted, so
+ * nothing they connected is left without a way to find it, and the notice is
+ * not answered with a success (app/api/integrations/zoom/deauthorize), so
+ * Zoom sends it again. Only a confirmed absence (no member, no connection)
+ * counts as nothing to forget.
+ *
+ * One pass walks at most FORGET_PASS stores, each leaving the index under its
+ * renewal lock with its connection. With more, the pass is not answered as
+ * done, so the next notice walks the rest (Codex H2 on #2869). A pass that stops throws IncompleteForget with the
+ * stores it already forgot, so their owners are still told: on the next
+ * notice they read as gone (Claude 5 on #2869).
  */
 export async function forgetUser(
   provider: MeetProvider,
@@ -613,23 +632,50 @@ export async function forgetUser(
   const stores = stringList(read[1]);
   if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
-  for (const statsId of stores.slice(0, 50)) {
-    // Each store leaves the index under its renewal lock, with its connection: a store connected again since (a flow
-    // begun after the mark, which keeps only holding this lock) keeps its place for the next notice to find. Before,
-    // the whole index was deleted at the end, under any connection made meanwhile.
-    const c = await withLock(refreshLockKey(statsId, provider), 20, 9_000, async () => {
-      const found = await readConnection(statsId, provider);
-      const unlist = ["SREM", userKey(provider, accountId), statsId];
-      if (!found || found.account.id !== accountId) {
-        confirmCounts(await redisPipeline([unlist]), 1, "a meeting account's store leaving its index");
-        return null;
-      }
-      confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)], unlist]), 3, "a meeting connection's deletion");
-      return found;
-    });
-    if (c) forgot.push({ statsId, owner: c.owner, account: viewOf(c).account });
+  const pass = stores.slice(0, FORGET_PASS);
+  try {
+    for (const statsId of pass) {
+      // Each store leaves the index under its renewal lock, with its connection: a store connected again since (a flow
+      // begun after the mark, which keeps only holding this lock) keeps its place for the next notice to find. Before,
+      // the whole index was deleted at the end, under any connection made meanwhile.
+      const c = await withLock(refreshLockKey(statsId, provider), 20, 9_000, async () => {
+        const got = repliesFor(await redisPipeline([["GET", connKey(statsId, provider)]]), 1);
+        if (!got) throw new UnknownReplyError("a meeting connection");
+        const found = got[0] === null ? null : parseConnection(got[0], provider);
+        if (got[0] !== null && !found) throw new UnknownReplyError("a meeting connection");
+        const unlist = ["SREM", userKey(provider, accountId), statsId];
+        if (!found || found.account.id !== accountId) {
+          confirmCounts(await redisPipeline([unlist]), 1, "a meeting account's store leaving its index");
+          return null;
+        }
+        confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)], unlist]), 3, "a meeting connection's deletion");
+        return found;
+      });
+      if (c) forgot.push({ statsId, owner: c.owner, account: viewOf(c).account });
+    }
+    // The stores of this pass left the index one by one; the rest wait for the next notice.
+    if (stores.length > pass.length) throw new IncompleteForget(forgot, "more stores than one pass walks; the next notice walks the rest");
+  } catch (error) {
+    throw error instanceof IncompleteForget ? error : new IncompleteForget(forgot, error);
   }
   return forgot;
+}
+
+/** The most stores one provider deletion notice walks; with more, the next notice walks the rest. */
+export const FORGET_PASS = 50;
+
+/**
+ * A provider deletion pass that did not finish: not answered as done, so the provider asks again. `forgot` holds
+ * the stores it did forget, whose owners are told now, since the next pass reads them as gone.
+ */
+export class IncompleteForget<T = { statsId: string; owner: { email: string; handle: string }; account: string }> extends Error {
+  constructor(
+    readonly forgot: T[],
+    cause: unknown,
+  ) {
+    super("a provider deletion pass did not finish", { cause });
+    this.name = "IncompleteForget";
+  }
 }
 
 // ---- Using a connection --------------------------------------------------------

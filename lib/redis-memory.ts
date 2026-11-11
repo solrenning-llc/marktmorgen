@@ -129,6 +129,18 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/sent-links.ts KEEP_CHANGE: a link's history written only while it, and when the links go, are as read; when they go set once.
+        if (key.startsWith("-- marktmorgen:sent-link-keep:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, hash, field, expected, ends, value, until] = args;
+          // Redis keeps no empty hash; this stand-in's HGET leaves one, which is read as none.
+          const kept = this.data.get(hash);
+          const endsNow = kept instanceof Map && kept.size === 0 ? -2 : this.run(["PEXPIRETIME", hash]);
+          if (String(endsNow) !== ends) return 0;
+          if ((this.run(["HGET", hash, field]) ?? "") !== expected) return 0;
+          this.run(["HSET", hash, field, value]);
+          if (ends === "-2") this.until.set(hash, Number(until));
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

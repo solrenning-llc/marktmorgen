@@ -66,7 +66,9 @@ export function readSentLinkTarget(raw: unknown): { ok: true; to: string } | { o
   } catch {
     return { ok: false };
   }
-  if (url.hostname === site.hostname && url.pathname.startsWith("/r/")) return { ok: false };
+  // One of these links itself would loop; www. is the same site (review of #3713).
+  const bare = (host: string) => host.toLowerCase().replace(/^www\./, "");
+  if (bare(url.hostname) === bare(site.hostname) && url.pathname.startsWith("/r/")) return { ok: false };
   return { ok: true, to: text };
 }
 
@@ -96,20 +98,18 @@ export function readSentLinkPath(
   return { ok: true, n: number, original: query.u };
 }
 
-/** Where a link goes: its newest kept change when that reads, else where it was written to go. */
-export function sentLinkGoesTo(original: string, newest: LinkChange | null): string {
-  if (newest) {
-    const read = readSentLinkTarget(newest.to);
-    if (read.ok) return read.to;
-  }
-  return original;
+/** Where a link goes: its newest kept change, else where it was written to go; null when that does not read as an address. */
+export function sentLinkGoesTo(original: string, newest: LinkChange | null): string | null {
+  // A change kept but no longer readable, or an original that is not an address, is unknown (null): never the old
+  // address, which the creator may have changed because it was wrong (rule 24; review of #3713).
+  const read = readSentLinkTarget(newest ? newest.to : original);
+  return read.ok ? read.to : null;
 }
 
 /** A change to a link, kept newest first with at most MAX_LINK_CHANGES. Going back to the original is a change too. */
 export function changeSentLink(history: readonly LinkChange[], original: string, raw: unknown, at: number): { ok: true; history: LinkChange[] } | { ok: false; problem: "address" | "same" } {
   const read = readSentLinkTarget(raw);
   if (!read.ok) return { ok: false, problem: "address" };
-  const now = sentLinkGoesTo(original, history[0] ?? null);
-  if (read.to === now) return { ok: false, problem: "same" };
+  if (read.to === sentLinkGoesTo(original, history[0] ?? null)) return { ok: false, problem: "same" };
   return { ok: true, history: [{ to: read.to, at }, ...history].slice(0, MAX_LINK_CHANGES) };
 }

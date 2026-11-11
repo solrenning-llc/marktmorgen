@@ -64,6 +64,13 @@ async function main(): Promise<void> {
     is(`unreadable, so unknown, never zero: ${JSON.stringify(bad).slice(0, 40)}`, await readDeclines({ stripeAccountId: ACCOUNT }, since), null);
   }
 
+  for (const [label, envelope] of [["another object", { object: "charge", data: [], has_more: false }], ["no object", { data: [], has_more: false }], ["object not a word", { object: 1, data: [charge("ch_e1", {})], has_more: false }]] as const) {
+    pages = [envelope];
+    is(`a page that is not Stripe's list (${label}) is unknown, never "nothing declined" (Codex G, Claude 1 LOW)`, await readDeclines({ stripeAccountId: ACCOUNT }, since), null);
+  }
+  pages = [{ object: "list", data: [], has_more: false }];
+  is("control: Stripe's own empty list is a complete read with nothing declined", await readDeclines({ stripeAccountId: ACCOUNT }, since), { rows: [], partial: false, charges: 0, oldest: null });
+
   part("A read cut short is said to be incomplete, with how far back it went (Codex H MEDIUM 2, Claude 5 LEVE 1)");
   pages = Array.from({ length: DECLINE_PAGES }, (_, i) => ({ object: "list", has_more: true, data: [charge(`ch_ok${i}a`, { status: "succeeded", created: 1_790_000_100 - i * 10 }), charge(`ch_ok${i}b`, { status: "succeeded", created: 1_790_000_095 - i * 10 })] }));
   is("three full pages of payments that went through: no decline found, partial, how many read and the oldest read", await readDeclines({ stripeAccountId: ACCOUNT }, since), { rows: [], partial: true, charges: DECLINE_PAGES * 2, oldest: 1_790_000_095 - (DECLINE_PAGES - 1) * 10 });

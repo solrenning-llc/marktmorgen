@@ -39,7 +39,7 @@ import * as learn from "@/lib/learn";
 import { courseAccess, emailKey, mintPass, storeKey, passCookieName, recordEnrollment, registerDrip, sendDripEmails, touchStudent } from "@/lib/learn";
 import * as accessEnd from "@/lib/course-access-end";
 import { grantImported } from "@/lib/imported-purchases";
-import { type Course, editCourse, emptyCourse, saveCourse } from "@/lib/course";
+import { type Course, editCourse, emptyCourse, readCourseExact, saveCourse } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { withConsent } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
@@ -168,6 +168,40 @@ async function main(): Promise<void> {
   listed = [session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY)];
   is("moved later after it passed: open again until the new date", await gate(a.store, a.product, withEnd(a.courseId, LATER + DAY), "move-later@example.test", LATER).then((x) => [x.state, x.state === "open" ? x.endsAt : null]), ["open", LATER + DAY]);
   is("taken off: open, no end", await gate(a.store, a.product, emptyCourse(a.courseId), "move-off@example.test", LATER).then((x) => [x.state, x.state === "open" ? x.endsAt : null]), ["open", null]);
+
+  part("M-R (Codex Cloud 1 on #3445): taking the date off and setting an earlier one never shortens an end already reached");
+  {
+    const r = await shop("stampmr");
+    const T = (day: number) => SET_AT + day * DAY;
+    const edit = (c: Course, at: number | null, now: number) => {
+      const result = editCourse(c, { op: "access-end", at, now, membership: false } as never);
+      if (!result.ok) throw new Error(`edit refused: ${result.reason}`);
+      return result.course;
+    };
+    // Bought at day 1 under an end of day 10 (stamped), the date then moved later to day 50, which reached them.
+    let c = edit(emptyCourse(r.courseId), T(10), T(0));
+    listed = [session(r.store, { product: r.product.id, access_end: String(T(10)) }, T(1))];
+    c = edit(c, T(50), T(2));
+    is("after the date moved to day 50, at day 20 the stamped buyer is open until day 50", await gate(r.store, r.product, c, "mr-early@example.test", T(20)).then((x) => [x.state, x.state === "open" ? x.endsAt : null]), ["open", T(50)]);
+    const direct = editCourse(c, { op: "access-end", at: T(5), now: T(2), membership: false } as never);
+    is("a direct move from day 50 to day 5 is refused", direct.ok ? "set" : direct.reason, "access_end_earlier");
+    // The studio's own path to end sooner for new buyers: take the date off, then set an earlier one.
+    c = edit(c, null, T(3));
+    c = edit(c, T(5), T(3));
+    is("the earlier date is set for new buyers", c.accessEndsAt, T(5));
+    const kept = await gate(r.store, r.product, c, "mr-early@example.test", T(20));
+    is("at day 20 the same buyer is still open, until the day 50 they were given", [kept.state, kept.state === "open" ? kept.endsAt : null], ["open", T(50)]);
+    const after = await gate(r.store, r.product, c, "mr-early@example.test", T(51));
+    is("after day 50 their access ends, at day 50", [after.state, after.state === "expired" ? after.endedAt : null], ["expired", T(50)]);
+    // A buyer stamped with day 5, after the earlier date was set, was never given day 50.
+    listed = [session(r.store, { product: r.product.id, access_end: String(T(5)) }, T(4))];
+    const late = await gate(r.store, r.product, c, "mr-late@example.test", T(20));
+    is("a buyer who bought after the date came off and was set earlier keeps only the day 5 they were shown", [late.state, late.state === "expired" ? late.endedAt : null], ["expired", T(5)]);
+    // The record keeps it across a save and a read.
+    await saveCourse(c, r.store);
+    const reread = await gate(r.store, r.product, (await readCourseExact(r.courseId))!, "mr-early@example.test", T(20));
+    is("read back from Redis, the early buyer still has day 50", [reread.state, reread.state === "open" ? reread.endsAt : null], ["open", T(50)]);
+  }
 
   part("H1: a membership course never takes an end");
   const refusal = editCourse(emptyCourse(a.courseId), { op: "access-end", at: SET_AT + DAY, now: SET_AT, membership: true } as never);

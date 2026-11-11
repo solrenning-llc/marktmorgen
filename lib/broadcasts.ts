@@ -191,7 +191,7 @@ const QUEUE = "nl:mail:queue";
 const bcKey = (id: string) => `nl:mail:bc:${id}`;
 const toKey = (id: string) => `nl:mail:bc:${id}:to`;
 /** Every key a broadcast keeps, by its id: for a closed store (lib/closed-store-data.ts). */
-export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`];
+export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`, `${bcKey(id)}:poll`];
 const listKey = (listId: string) => `nl:mail:bcs:${listId}`;
 const lockKey = (id: string) => `nl:mail:bc:${id}:lock`;
 export const BROADCAST_ID = /^[0-9a-f]{24}$/;

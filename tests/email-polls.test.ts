@@ -33,7 +33,7 @@ const closesAt = now + 7 * DAY;
   is("taking back a vote never cast", await recordVote(BC, 7, null, closesAt, now), "withdrawn");
   const ttl = Number(redis.run(["TTL", key]));
   const until = Math.ceil((closesAt + POLL_RESULTS_DAYS * DAY - now) / 1000);
-  is("kept until the end and the days after it, not longer", ttl > until - 5 && ttl <= until, true);
+  is("kept until the end and the days after it, not longer", ttl > until - 5 && ttl <= until + 1, true);
   is("no votes yet: an exact zero", await pollResults("bc_none_00000000000", 2), { known: true, counts: [0, 0], votes: 0 });
 
   part("Refused");

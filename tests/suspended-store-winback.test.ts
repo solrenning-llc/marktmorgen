@@ -35,6 +35,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown) => new Response(JSON.stringify(body));
   if (path === "/events") return answer({ object: "list", data: ended, has_more: false });
   if (path === "/customers/cus_SwOffMember1") return answer({ id: "cus_SwOffMember1", email: "member@example.com" });
+  // Every customer of the address, read for whether they came back (lib/winback-send.ts, cameBackUnder): only this one.
+  if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_SwOffMember1", object: "customer", email: "member@example.com" }] : [], has_more: false });
   if (path === "/subscriptions") return answer({ object: "list", data: [], has_more: false });
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
 }) as typeof fetch;

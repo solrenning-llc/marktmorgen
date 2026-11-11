@@ -29,6 +29,7 @@ import * as inbound from "@/lib/inbound-mail";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { essentialLimitState } from "@/lib/request-guard";
 import * as registry from "./plan-cost-registry";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
 
@@ -54,6 +55,7 @@ const NOON = Date.UTC(2026, 10, 9, 12, 0, 0);
 const DAY = 86_400_000;
 /** The route's own commands before forwardInbound: its connection limit (SET NX, INCR) and the seen mark. */
 const ROUTE_COMMANDS = 3;
+const hundredFiles = Array.from({ length: 100 }, () => 1_000);
 const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
 
 /** What each received message looks like: its sender, where it was written, its files' listed and real sizes. */
@@ -247,6 +249,51 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   commands = 0;
   await forward(message("loud@example.com"), NOON);
   is(`held after its read: ${commands + ROUTE_COMMANDS} commands, at most SUPPORT_HELD_READ_COMMANDS`, commands + ROUTE_COMMANDS <= (costs.SUPPORT_HELD_READ_COMMANDS ?? 0), true);
+
+  part("a store owner's announced message stays within the registry's commands (cloud J's review of #3481, MEDIUM)");
+  // The worst path a paying store owner's mail can take: the announcement's EXISTS, its own share of the reserve, the
+  // reserve and then the public share (7 commands), then the read and every count after it.
+  const ownerDay = new Date(NOON).toISOString().slice(0, 10);
+  const spend = async (scope: string, who: string, limit: number, seconds: number) => {
+    for (let i = 0; i < limit; i++) await essentialLimitState(scope, who, limit, seconds);
+  };
+  const owner = "owner-worst@studio.example";
+  for (const reserveSpent of [false, true]) {
+    fresh();
+    makeCreator(owner);
+    if (reserveSpent) await spend("support-announced-creator", ownerDay, limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200, 2 * 86_400);
+    let ownerSent = 0;
+    for (let i = 0; i < CREATOR_SENDER_DAILY; i++) if ((await forward(message(owner), NOON, undefined, owner)) === "sent") ownerSent++;
+    commands = 0;
+    const ninth = await forward(message(owner), NOON, undefined, owner);
+    is(
+      `a paying owner's message past its own day${reserveSpent ? ", the reserve spent" : ""}: held after its read at ${commands + ROUTE_COMMANDS} commands, at most SUPPORT_HELD_READ_COMMANDS`,
+      [ownerSent, ninth, commands + ROUTE_COMMANDS <= (costs.SUPPORT_HELD_READ_COMMANDS ?? 0)],
+      [CREATOR_SENDER_DAILY, "held", true],
+    );
+  }
+  fresh();
+  makeCreator(owner);
+  await spend("support-announced-creator", ownerDay, limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200, 2 * 86_400);
+  await spend("support-forward", ownerDay, DAILY, 2 * 86_400);
+  commands = 0;
+  const ownerPastDay = await forward(message(owner), NOON, undefined, owner);
+  is(
+    `a paying owner's message past the company's day, the reserve spent: held after its read at ${commands + ROUTE_COMMANDS} commands, at most SUPPORT_HELD_READ_COMMANDS`,
+    [ownerPastDay, commands + ROUTE_COMMANDS <= (costs.SUPPORT_HELD_READ_COMMANDS ?? 0)],
+    ["held", true],
+  );
+  fresh();
+  makeCreator(owner);
+  await spend("support-announced-creator", ownerDay, limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200, 2 * 86_400);
+  commands = 0;
+  const ownerFiles = await forward(message(owner, hundredFiles), NOON, undefined, owner);
+  is(
+    `a paying owner's message with 100 files, the reserve spent: ${commands + ROUTE_COMMANDS} commands, at most SUPPORT_FORWARD_COMMANDS`,
+    [ownerFiles, commands + ROUTE_COMMANDS <= (costs.SUPPORT_FORWARD_COMMANDS ?? 0)],
+    ["sent", true],
+  );
+  is("the registry counts the announcement's worst path, 7 commands", costs.SUPPORT_ANNOUNCEMENT_COMMANDS, 7);
 
   part("files: SUPPORT_FILE_BYTES_DAILY a UTC day, the rest left out and named");
   fresh();

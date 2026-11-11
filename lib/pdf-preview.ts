@@ -26,6 +26,7 @@
  */
 import { createHash } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
+import { carryTags } from "@/lib/pdf-preview-tags";
 import { readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
@@ -61,6 +62,8 @@ export async function firstPages(bytes: Uint8Array, pages: number): Promise<Uint
   for (const page of copied) out.addPage(page);
   const title = source.getTitle();
   out.setTitle(`${title || "Preview"} (first ${count} ${count === 1 ? "page" : "pages"})`);
+  // The language, the title shown and the kept pages' tags (AX274; PDF/UA 7.1, 7.2).
+  carryTags(source, out, source.getPages().slice(0, count));
   return out.save();
 }
 

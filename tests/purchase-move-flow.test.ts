@@ -297,6 +297,15 @@ async function main(): Promise<void> {
     const first = await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN });
     ackLost = { skip: 0, times: 0 };
     is("the current address's email taken, its answer lost: the page does not say no link was sent", [mails.length - m, first, moveWords.asked[first].title], [1, "unconfirmed", "We could not confirm the email went"]);
+    const retryStart = mails.length;
+    const retry = await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN });
+    is("retry resends the same request", retry, "sent");
+    const originalLink = linkIn(mails[m].text);
+    is("a retry reuses the exact confirmation link that may already be in the inbox", [
+      originalLink,
+      linkIn(mails[retryStart]?.text ?? ""),
+      linkIn(mails[retryStart + 1]?.text ?? ""),
+    ], [originalLink, originalLink, originalLink]);
     const two = await signIn("lost2.buyer@example.com");
     const m2 = mails.length;
     ackLost = { skip: 1, times: 1 };

@@ -162,6 +162,7 @@ async function main(): Promise<void> {
     [1, "900", "usd", "cus_TestBuyer01", "pm_test_card0001", "true", "upsell", "cs_test_order0000000001", "2"],
   );
   is("one idempotency key per offer of the order", first?.key, "nimbus-upsell:cs_test_order0000000001:list01");
+  is("reached by a no thanks: marked so on its charge, for the downsell's figure (752 [CD3])", first?.body.get("metadata[after_no]"), "yes");
   is("the offer's own yes, its version, its kind and its time, on its own payment", first?.body.get("metadata[dc]"), `yes:${TEST_CONSENT.version}:d:${TEST_CONSENT.at}`);
   is("pressed again: done, and not charged again", [(await take("cs_test_order0000000001", "list01", "yes")).kind, charges.length], ["done", 1]);
   is("the answer is kept as paid, with its own payment", [(await readUpsell("cs_test_order0000000001", "list01"))?.state, (await readUpsell("cs_test_order0000000001", "list01"))?.pi], ["paid", "pi_test_0000000001"]);
@@ -171,6 +172,7 @@ async function main(): Promise<void> {
   const both = await Promise.all([take("cs_test_order0000000006", "kit001", "yes"), take("cs_test_order0000000006", "kit001", "yes")]);
   is("both answered done", both.map((r) => r.kind), ["done", "done"]);
   is("one charge, at the upsell's price", [charges.length, charges[1]?.body.get("amount")], [2, "1900"]);
+  is("an offer taken with no no before it carries no such mark", charges[1]?.body.has("metadata[after_no]"), false);
 
   part("A declined card stops the funnel");
   nextCharge = "declined";

@@ -36,7 +36,7 @@ import {
   confirmBooking,
   icsLink,
   isCallProduct,
-  isConfirmed,
+  confirmationOwed,
   moveLink,
   paidCall, paidCalls,
   senderAddress,
@@ -238,7 +238,8 @@ export async function sendCallReminders(
       }
       try {
         if (item.mark === "c") {
-          if (call.end > Date.now() && !(await isConfirmed(call.session))) {
+          // Owed until it is done: a confirmation a failed try left short of done is finished here too (lib/calls.ts, ConfirmStage).
+          if (call.end > Date.now() && (await confirmationOwed(call.session))) {
             await confirmBooking({
               store,
               product,

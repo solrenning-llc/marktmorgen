@@ -15,7 +15,7 @@
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts); no request leaves (the address resolver refuses).
  */
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
-import { addEndpoint, emitEvent, resendDelivery, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
+import { RESEND_MARK, addEndpoint, emitEvent, resendDelivery, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -138,6 +138,33 @@ async function main(): Promise<void> {
     is(`exact 1: the original still expires, never later than it would have (${ttl} ms of ${ttlBefore})`, ttl > 0 && ttl <= ttlBefore, true);
     await reset();
   }
+
+  part("An original left with no expiry is given the delivery's own by the mark, in the same step");
+  {
+    await real([["SET", key, failedRaw]]);
+    marked = false;
+    is("setup: the original has no expiry", await ttlOf(key), -1);
+    markLanded = { value: FAILS };
+    writesFailAfterMark = true;
+    await outcome(resendDelivery(store, failedId));
+    writesFailAfterMark = false;
+    markLanded = null;
+    const ttl = await ttlOf(key);
+    is(`no expiry before: it expires now, within the delivery's seven days (${ttl} ms)`, ttl > 0 && ttl <= 7 * 86_400_000, true);
+    await reset();
+  }
+
+  part("The in-memory resend mark is as real Redis runs it: same compare and replies, the expiry kept");
+  await real([["SET", "nl:test:resend-mark", "a", "EX", 100]]);
+  is("another text there: [-1, its length], nothing written", [(await real([["EVAL", RESEND_MARK, 1, "nl:test:resend-mark", "x", "b", 60]]))[0], (await real([["GET", "nl:test:resend-mark"]]))[0]], [[-1, 1], "a"]);
+  is("nothing there: [-1]", (await real([["EVAL", RESEND_MARK, 1, "nl:test:resend-none", "x", "b", 60]]))[0], [-1]);
+  is("the text read: 1, written", [(await real([["EVAL", RESEND_MARK, 1, "nl:test:resend-mark", "a", "b", 60]]))[0], (await real([["GET", "nl:test:resend-mark"]]))[0]], [1, "b"]);
+  const kept = await ttlOf("nl:test:resend-mark");
+  is(`and its expiry kept, never longer (${kept} ms)`, kept > 0 && kept <= 100_000, true);
+  await real([["SET", "nl:test:resend-bare", "a"]]);
+  is("a key with no expiry: 1", (await real([["EVAL", RESEND_MARK, 1, "nl:test:resend-bare", "a", "b", 60]]))[0], 1);
+  const given = await ttlOf("nl:test:resend-bare");
+  is(`and it is given ARGV[3] seconds (${given} ms)`, given > 0 && given <= 60_000, true);
 
   part("Control: an exact mark with nothing failing sends once and the original keeps its expiry");
   {

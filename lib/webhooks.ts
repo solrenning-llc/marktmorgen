@@ -1181,6 +1181,24 @@ export async function removeEndpoint(store: Store, id: string): Promise<Webhooks
   return webhooksView(store);
 }
 
+/**
+ * A resend's mark on the original delivery (resendDelivery): written only while the original still holds the very
+ * text read, as COMPARE_AND_SET, with the same replies (1 written; [-1] or [-1, n] the text there was another), so
+ * compareAndSetReply reads it. Unlike that script, its write keeps the original's expiry in the same step (KEEPTTL),
+ * and gives one that has none the delivery's own (ARGV[3] seconds): no command after it has to put the time back, so
+ * no second failure can keep a delivery past its retention (Codex G's MEDIUM on #3444). Modelled by
+ * lib/redis-memory.ts.
+ */
+export const RESEND_MARK = `-- marktmorgen:webhook-resend-mark:v1
+local current = redis.call("GET", KEYS[1])
+if (current or "") ~= ARGV[1] then
+  if current then return {-1, string.len(current)} end
+  return {-1}
+end
+redis.call("SET", KEYS[1], ARGV[2], "KEEPTTL")
+if redis.call("PTTL", KEYS[1]) < 0 then redis.call("EXPIRE", KEYS[1], ARGV[3]) end
+return 1`;
+
 export type ResendResult =
   | { ok: true; delivery: Delivery; view: WebhooksView }
   | { ok: false; reason: "missing" | "not_failed" | "not_heard" | "resent" | "limited" | "unavailable" }
@@ -1205,10 +1223,12 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   const paused = integrationPauseWord(store, now / 1000);
   if (paused) return { ok: false, reason: "paused", message: WEBHOOK_TEST_PAUSED_WORDS[paused] };
   // Read exactly (CX-123 rule 24), before anything is marked: the delivery is text or GET null, its time left a whole
-  // number (PTTL -2 gone, -1 none); any other shape could not be read, and nothing is marked, taken or sent.
+  // number (PTTL -2 gone, -1 none); any other shape could not be read, and nothing is marked, taken or sent. One that
+  // went between the two reads (-2) is missing; the mark keeps whatever time it has (RESEND_MARK).
   const read = repliesFor(await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]), 2);
   if (!read || (read[0] !== null && typeof read[0] !== "string") || typeof read[1] !== "number" || !Number.isSafeInteger(read[1])) return { ok: false, reason: "unavailable" };
   const [raw, ttl] = read as [string | null, number];
+  if (ttl === -2) return { ok: false, reason: "missing" };
   const before = parseDelivery(raw);
   // A line left by a Stripe event that was passed over carries no message to send.
   if (typeof raw !== "string" || !before || before.statsId !== statsId || before.type === "test" || before.givenUp) return { ok: false, reason: "missing" };
@@ -1242,21 +1262,16 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // A press refused below (the minute's limit, the month's deliveries) leaves a mark naming nothing, which allows the next.
   // The mark read exactly (rules 24 and 30): [-1] / [-1, n] is another press first ("resent"); any other reply is
   // unknown, never marked: nothing is taken or sent, and it could not be sent just now. A mark that did land names a
-  // resend that was never written, which reads as gone and allows the next press.
-  // The script's write clears the original's expiry; it keeps the time it had left, never more.
-  const keepExpiry = ["PEXPIRE", deliveryKey(deliveryId), ttl > 0 ? ttl : DELIVERY_SECONDS * 1000];
+  // resend that was never written, which reads as gone and allows the next press. The mark keeps the original's
+  // expiry in its own step (RESEND_MARK), so whatever fails after it, the original still goes when it would have.
   let marked: "saved" | "changed";
   try {
-    marked = compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId })]]), "a webhook resend's mark");
+    marked = compareAndSetReply(await redisPipeline([["EVAL", RESEND_MARK, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId }), DELIVERY_SECONDS]]), "a webhook resend's mark");
   } catch (error) {
-    // The mark may have landed and cleared the expiry: the time left is put back either way (the same one command as
-    // after a mark), so the original still goes when it would have.
-    await redisPipeline([keepExpiry]).catch((lost) => console.error("a webhook delivery's expiry could not be put back after a resend's mark", statsId, deliveryId, lost));
     if (!(error instanceof UnknownReplyError)) throw error;
     return { ok: false, reason: "unavailable" };
   }
   if (marked !== "saved") return { ok: false, reason: "resent" };
-  await redisPipeline([keepExpiry]);
   const tests = repliesFor(await redisPipeline([
     ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(statsId)],

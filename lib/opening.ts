@@ -41,12 +41,9 @@ export const PLANS_ON_SALE: boolean = commercialPlansMayOpen(OPENING_REQUESTED) 
  */
 export const ASSISTANT_ON_SALE: boolean = PLANS_ON_SALE && assistantMeetsFloor();
 
-/** What every public page says at its top while plans are not on sale. */
-export const PREVIEW_LINE =
-  "Marktmorgen is still being built. You can open a store and set it up today; its paid plans are not on sale yet.";
-
-/** Where that line sends somebody who wants the detail: both lists, in full. */
-export const PREVIEW_LINK = { href: "/mission", label: "See what is built" };
+// What every public page says at its top while plans are not on sale, and where it leads: words only,
+// kept in lib/preview-words.ts so the site menu can say them without running the review above.
+export { PREVIEW_LINE, PREVIEW_LINK } from "@/lib/preview-words";
 
 /**
  * The words on a button that leads to making a store. The free days belong

@@ -114,3 +114,16 @@ test("a synthetic open state draws no preview line, and today's state follows PL
   assert.equal(bar(await pageHtml(true)), null);
   assert.equal(bar(await pageHtml()) === null, PLANS_ON_SALE);
 });
+
+test("drawn outside the root layout, the menu errs on the closed side: it still says plans are not on sale", async () => {
+  // Only a test draws a page's parts without the root layout; there the menu must not drop the
+  // preview line, which is what it shows once plans are on sale (review of #3775, LEVE).
+  const { createElement } = nodeRequire("react") as typeof import("react");
+  const { renderToStaticMarkup } = nodeRequire("react-dom/server") as typeof import("react-dom/server");
+  const { AppRouterContext } = nodeRequire("next/dist/shared/lib/app-router-context.shared-runtime");
+  const { SiteNav } = await layoutAndMenu();
+  const line = bar(renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: {} as never }, createElement(SiteNav as never))));
+  assert.ok(line, "the preview bar is drawn");
+  assert.ok(line.includes(PREVIEW_LINE.replace(/'/g, "&#x27;")));
+  assert.match(line, new RegExp(`<a[^>]*href="${PREVIEW_LINK.href}"[^>]*>${PREVIEW_LINK.label}</a>`));
+});

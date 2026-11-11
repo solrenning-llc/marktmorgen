@@ -20,6 +20,7 @@
  * so before anyone deletes.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { traceKey } from "@/lib/community-trace";
 import { DamagedConfigError, forgetMemberRecord, readConfigExact } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
@@ -53,8 +54,10 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   if (member?.t) records += await forgetCommunityUnsub(member.t);
   await unindexMember(id, who);
   // Their trace (lib/community-trace.ts): what they wrote and did, by reference.
-  const [traced] = await redisPipeline([["DEL", traceKey(id, who)]]);
-  records += Number(traced) || 0;
+  // Confirmed exactly (rule 24): an unknown reply is not "nothing to delete", and the erasure is not said done.
+  const traced = countOf(repliesFor(await redisPipeline([["DEL", traceKey(id, who)]]), 1)?.[0]);
+  if (traced === null) throw new UnknownReplyError("a member's community trace, deleted");
+  records += traced;
   records += await forgetPointsPerson(id, who);
   records += await forgetNoticesPerson(id, who);
   records += await forgetPushPerson(id, who);

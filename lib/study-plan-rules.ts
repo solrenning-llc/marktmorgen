@@ -72,6 +72,10 @@ export type StudyPlan = { known: true; weeks: string[][]; review: string[]; less
 /** The suggested order, week by week, of the lessons the student has (`has`, null when it could not be read). */
 export function studyPlan(course: PlanCourse, setup: PlanSetup, answers: PlanAnswers, has: ReadonlySet<string> | null): StudyPlan {
   if (!has) return { known: false };
+  // The answers read again here, since this is exported: minutes outside the bounds would make one lesson a week, or
+  // every lesson in one (Claude 3 on #3675).
+  const m = answers.minutes;
+  if (typeof m !== "number" || !Number.isInteger(m) || m < MIN_WEEK_MINUTES || m > MAX_WEEK_MINUTES) return { known: false };
   const goal = setup.goals.find((g) => g.id === answers.goal);
   if (!goal) return { known: false };
   const byId = new Map(course.modules.map((m) => [m.id, m]));
@@ -80,7 +84,11 @@ export function studyPlan(course: PlanCourse, setup: PlanSetup, answers: PlanAns
   for (const id of goal.first) if (!basics.has(id)) order.push(id);
   for (const m of course.modules) if (!order.includes(m.id) && !basics.has(m.id)) order.push(m.id);
   const reviewModules = course.modules.filter((m) => basics.has(m.id)).map((m) => m.id);
-  const lessons = [...order, ...reviewModules].flatMap((id) => byId.get(id)?.lessons ?? []).filter((l) => has.has(l.id));
+  // A lesson id in two modules is planned once, where it first comes.
+  const seen = new Set<string>();
+  const lessons = [...order, ...reviewModules]
+    .flatMap((id) => byId.get(id)?.lessons ?? [])
+    .filter((l) => has.has(l.id) && !seen.has(l.id) && Boolean(seen.add(l.id)));
   if (lessons.some((l) => typeof l.minutes !== "number" || !Number.isFinite(l.minutes) || l.minutes <= 0)) return { known: false };
   const weeks: string[][] = [];
   let week: string[] = [];
@@ -96,16 +104,20 @@ export function studyPlan(course: PlanCourse, setup: PlanSetup, answers: PlanAns
     used += minutes;
   }
   if (week.length) weeks.push(week);
-  const review = reviewModules.flatMap((id) => byId.get(id)?.lessons ?? []).filter((l) => has.has(l.id)).map((l) => l.id);
+  const reviewIds = new Set(reviewModules.flatMap((id) => byId.get(id)?.lessons ?? []).map((l) => l.id));
+  const review = lessons.filter((l) => reviewIds.has(l.id)).map((l) => l.id);
   return { known: true, weeks, review, lessons: lessons.length };
 }
 
 /** The plan in plain words for the student: week by week, and what it is. */
 export function planWords(plan: StudyPlan, titles: ReadonlyMap<string, string>): string[] {
-  if (!plan.known) return ["A plan could not be made just now: a lesson's length or what you have could not be read. Every lesson is still open to you as usual."];
-  const title = (id: string) => titles.get(id) ?? "A lesson";
+  // Unknown claims nothing about access it did not read (Claude 3 on #3675).
+  if (!plan.known) return ["A plan could not be made just now: a lesson's length or what you have could not be read. Nothing in your course changed."];
+  if (!plan.weeks.length) return ["There are no lessons to put in order yet."];
+  const review = new Set(plan.review);
+  // A review lesson is named once, in its week, marked as a review; never listed again below.
+  const title = (id: string) => `${titles.get(id) ?? "A lesson"}${review.has(id) ? " (a review)" : ""}`;
   const lines = plan.weeks.map((week, i) => `Week ${i + 1}: ${week.map(title).join(", ")}.`);
-  if (plan.review.length) lines.push(`At the end, as a review: ${plan.review.map(title).join(", ")}.`);
   lines.push(`A suggested order for about ${plan.weeks.length} ${plan.weeks.length === 1 ? "week" : "weeks"} at your pace. It is not a promise of any result; go at the speed that suits you.`);
   return lines;
 }

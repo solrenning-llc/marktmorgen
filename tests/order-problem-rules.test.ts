@@ -96,7 +96,7 @@ function main(): void {
     is(`${code}: every sentence is there`, missing, []);
     is(`${code}: every reason has its words`, ORDER_PROBLEM_REASONS.filter((reason) => !words.reasons[reason]?.trim()), []);
     is(`${code}: the sent line names the store and the seven days`, /Harbor Kitchen/.test(words.sent("Harbor Kitchen")) && /7/.test(words.sent("Harbor Kitchen")), true);
-    is(`${code}: no square brackets or template marks`, JSON.stringify({ ...words, sent: words.sent("X") }).match(/[[\]{}⟦⟧]|TODO/g), null);
+    is(`${code}: no square brackets or template marks`, [...ORDER_PROBLEM_KEYS.map((key) => String(words[key])), ...Object.values(words.reasons), words.sent("X")].join("\n").match(/[[\]{}⟦⟧]|TODO/g), null);
     if (code !== "en") is(`${code}: not the English button`, words.button === orderProblemWords("en").button, false);
   }
   is("English button", orderProblemWords("en").button, "Report a problem with this order");

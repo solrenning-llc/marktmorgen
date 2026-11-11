@@ -20862,6 +20862,8 @@ PR1280 union canônica: preservados integralmente #1279 (consentimento de entreg
 
 Estado atual (auditoria de completude, 05/11/2026, C4-20261105-1940-C5-4): em andamento; (e) incorporada nos PRs #1519 e #1521, e (d) unidades 1 a 3 nos PRs #1523, #1525 e #1543 (o último com commit c888ac004769c7bbe6f53e37139265a7b818605e, 01/11/2026 02h03 Fortaleza), o que deixa desatualizada a nota "Em andamento pelo Claude 2 ... unidade 1"; (a), (b), (c), (f), (g), (h) e o restante de (d) ainda não foram feitos.
 
+Parte (a) assumida pelo Claude 3 (TODOS-112), 11/11/2026 15h55 Fortaleza: unidade 1 (regras puras: 4 motivos, prazo de 7 dias, texto do caso na caixa de entrada, palavras do comprador nos 7 idiomas) no ramo claude3/gd1a-order-problem-rules; estado: testado num PR. Rota, botão, prazo vencido e pausa ficam para as unidades seguintes.
+
 **Proveniência/Pedidos repetidos:** pedido direto do dono na conversa com o Claude,30/10/2026,13h18Fortaleza; texto redigido pelo Claude e aprovado pelo dono; gravado diretamente pelo Claude para não interromper o Codex. Conferido no main c6cd3080a567eab0acff6ccd8cc6367a14a2f21e pela etiqueta, pela linha de data e hora e pelo conteúdo. Sobreposições encontradas na conferência, registradas sem alterar o texto do dono: a parte (c) sobrepõe-se ao 492 [DE1] (pacote de provas montado sozinho quando o Stripe avisa uma contestação) e a parte (d) sobrepõe-se em parte ao 493 [DE2] (conferência dos termos antes de publicar, complemento ao 98 [D2-COMPLIANCE-REVIEW]). Quando chegar a vez dessas partes, reutilizar o 492 e o 493 e fazer só a diferença, sem refazê-los nem movê-los. Nova recepção só proveniência,sem número/commit exclusivo.
 
 ### Pedido literal GD1

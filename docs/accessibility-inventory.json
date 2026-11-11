@@ -448,6 +448,28 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/move/confirm/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/move/confirm",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
+      "source": "app/[handle]/orders/move/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/move",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/orders/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/orders",
@@ -1903,6 +1925,8 @@
     "app/api/store/preview/route.ts",
     "app/api/store/product-update/route.ts",
     "app/api/store/product/route.ts",
+    "app/api/store/purchase-move/confirm/route.ts",
+    "app/api/store/purchase-move/route.ts",
     "app/api/store/read/route.ts",
     "app/api/store/recent-sales/route.ts",
     "app/api/store/recovery/route.ts",
@@ -2064,6 +2088,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 141
+    "pageTemplates": 143
   }
 }

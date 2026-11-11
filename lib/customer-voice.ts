@@ -55,6 +55,7 @@ import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
 import { assistantMissedExact } from "@/lib/store-assistant";
+import { waitlistSizes } from "@/lib/waitlist";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
@@ -62,8 +63,8 @@ import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
 import type { Store } from "@/lib/store";
 
-export type VoiceSource = "cancel" | "question" | "review" | "search" | "assistant";
-export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant"];
+export type VoiceSource = "cancel" | "question" | "review" | "search" | "assistant" | "waitlist";
+export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant", "waitlist"];
 
 /** One text from a customer, as the model is handed it, by its number. */
 export type VoiceItem = {
@@ -195,7 +196,11 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
     unread.push(source);
     return null;
   };
-  const titles = await readTitles(store).catch(() => new Map<string, string>());
+  let titlesRead = true;
+  const titles = await readTitles(store).catch(() => {
+    titlesRead = false;
+    return new Map<string, string>();
+  });
   const titleOf = (id: string) => (id === STORE_PAGE ? "the store page" : titles.get(id));
 
   if (store.stripeAccountId && sellsMemberships(store)) {
@@ -222,6 +227,15 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
     }
   }
 
+  // Products coming soon that people joined the waitlist for (95 [D2-DEMAND-RADAR]): the name and how many, never who.
+  // The product's name is the text: names that could not be read leave the waitlists unread, never left out.
+  const sizes = await waitlistSizes(store).catch(failed("waitlist"));
+  if (sizes && !titlesRead && sizes.some((w) => w.people > 0)) unread.push("waitlist");
+  else for (const w of sizes ?? []) {
+    const title = titles.get(w.productId);
+    if (w.people > 0 && title) items.push({ source: "waitlist", text: title, n: w.people });
+  }
+
   const out: VoiceItem[] = [];
   for (const item of items) {
     const text = cleanVoice(item.text);
@@ -240,9 +254,10 @@ export function voicePrompt(items: VoiceItem[]): string {
     review: "a buyer's review",
     search: "words searched for on the store that found nothing",
     assistant: "a buyer's question the Store assistant could not answer",
+    waitlist: "a product coming soon people joined the waitlist for",
   };
   return items
-    .map((i) => `[${i.id}] (${where[i.source]}${i.product ? `, about ${cleanVoice(i.product, 80)}` : ""}${i.stars ? `, ${i.stars} of 5 stars` : ""}${i.n > 1 ? `, searched ${i.n} times` : ""}) ${i.text}`)
+    .map((i) => `[${i.id}] (${where[i.source]}${i.product ? `, about ${cleanVoice(i.product, 80)}` : ""}${i.stars ? `, ${i.stars} of 5 stars` : ""}${i.n > 1 ? `, ${i.source === "waitlist" ? "joined" : "searched"} ${i.n} times` : ""}) ${i.text}`)
     .join("\n");
 }
 

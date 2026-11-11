@@ -24,8 +24,9 @@ const SOURCE_WORDS: Record<VoiceSource, [string, string]> = {
   review: ["review", "reviews"],
   search: ["search with no result", "searches with no result"],
   assistant: ["question the assistant could not answer", "questions the assistant could not answer"],
+  waitlist: ["waitlist of a product coming soon", "waitlists of products coming soon"],
 };
-const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant"];
+const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant", "waitlist"];
 
 const said = (counts: Partial<Record<VoiceSource, number>>) =>
   SOURCES.filter((s) => counts[s])
@@ -84,7 +85,7 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
         What customers are saying
       </p>
       <p className="mt-1 text-xs text-ink-soft">
-        The last 90 days of what members wrote when leaving, questions your pages or your Store assistant could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
+        The last 90 days of what members wrote when leaving, questions your pages or your Store assistant could not answer, reviews, searches that found nothing and waitlists of products coming soon, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
       </p>
       {summary ? (
         <div className="mt-3">

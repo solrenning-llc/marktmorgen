@@ -84,3 +84,9 @@ test("more products coming soon than are read is unknown, never all of them", as
 test("the screen names the list", () => {
   assert.equal(voiceScreen.unreadWords(["waitlist"]), "Waitlists of products coming soon");
 });
+
+test("names that cannot be read leave the waitlists unread, never left out", async () => {
+  const { store } = await soonStore("voice.waitnames@example.com", "voice-waitnames", { "Studio Lamp": 2 });
+  const result = await withReply((c) => c[0] === "HGETALL" || c[0] === "HMGET" || (c[0] === "GET" && String(c[1]).includes(":titles")), () => { throw new Error("synthetic"); }, () => gatherVoice(store, Date.now()));
+  assert.ok(result.unread.includes("waitlist"));
+});

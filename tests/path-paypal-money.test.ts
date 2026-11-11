@@ -173,7 +173,10 @@ async function main(): Promise<void> {
     ];
     for (const [name, to] of cases) {
       bend = bendFirst("nl:ppsell:refunded:", "ZRANGEBYSCORE", to);
-      is(`${name}: money null`, (await readPathMoney(store, now * 1000))?.cents, null);
+      const read = await readPathMoney(store, now * 1000);
+      is(`${name}: money null`, read?.cents, null);
+      // Claude 1's MEDIUM: a sale that may have been refunded is not a real sale kept, so no level moves on it.
+      is(`${name}: no sale counted as kept`, read?.real, 0);
     }
     // Only the MGET of the refunded records, the one after the refunds' range (the sales' own MGET reads the same keys).
     let afterRange = false;
@@ -184,6 +187,7 @@ async function main(): Promise<void> {
     };
     const read = await readPathMoney(store, now * 1000);
     is("the refunded records' MGET off its shape: money null", read?.cents, null);
+    is("the refunded records' MGET off its shape: no sale counted as kept", read?.real, 0);
     bend = null;
   }
 

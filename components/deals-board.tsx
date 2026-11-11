@@ -560,8 +560,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
             {allTotals.map(t => (
               <button key={t.pipeline.id} id={`pipeline-tab-${t.pipeline.id}`} type="button" aria-pressed={t.pipeline.id === pipeline.id} {...offProps(editing && t.pipeline.id !== pipeline.id, WHY_ID)} className={`btn btn-sm ${t.pipeline.id === pipeline.id ? "btn-primary" : "btn-secondary"}`} onClick={() => { if (editing || t.pipeline.id === pipeline.id) return; setPipelineId(t.pipeline.id); setError(null); setConfirming(null); }}>
                 {nameOf(t.pipeline)}
-                <span className="tabular-nums opacity-80">{` · ${t.open.count} open`}</span>
-                {readOnly.has(t.pipeline.id) ? <span className="opacity-80"> · view only</span> : null}
+                <span className="tabular-nums">{` · ${t.open.count} open`}</span>
+                {readOnly.has(t.pipeline.id) ? <span> · view only</span> : null}
               </button>
             ))}
             {pipelineCount < pipelineMax ? (

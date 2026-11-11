@@ -264,7 +264,7 @@ function RoleTable() {
         Only you pay for the store, connect its Stripe account, manage the team and delete the store. Checked by the
         server on every click, not only hidden on the screen.
       </p>
-      <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="What each role can do">
+      <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Table of what each role can do">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="text-ink-mute">

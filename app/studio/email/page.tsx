@@ -38,7 +38,7 @@ import { can } from "@/lib/team-roles";
 import { isBillingConfigured, trialOffered } from "@/lib/billing";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { listSegments } from "@/lib/segments";
-import { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
+import { MAX_WAITS_PER_RUN, activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
 import { listHeld, runsToday } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 
@@ -222,6 +222,15 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           </div>
         ) : (
           <>
+          {/* Switched off after notices about its content (lib/takedown.ts): nothing is sent, everything waits. */}
+          {store.suspended ? (
+            <div role="status" className="mt-8 rounded-[var(--r-md)] border border-line bg-sand p-5 text-ink">
+              <p className="font-semibold">Email from your store is paused while it is switched off</p>
+              <p className="mt-2 text-sm text-ink-soft">
+                {`Your store is switched off after notices about its content, so nothing goes out to your list or your community: emails to your list, workflow steps and community announcements wait. They go out by themselves once your store is back on. A workflow step is tried again once a day; a run waits ${MAX_WAITS_PER_RUN} times at the most, then stops at that step, and its history says so.`}
+              </p>
+            </div>
+          ) : null}
           {pause ? (
             <div role="status" className="mt-8 rounded-[var(--r-md)] border border-line bg-sand p-5 text-ink">
               <p className="font-semibold">Email to your list is paused</p>
@@ -334,6 +343,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               runsToday: await runsToday(store.listId),
               held: can(role, "send") ? ((await listHeld(store.listId, 500).catch(() => null))?.length ?? null) : null,
             }}
+            switchedOff={Boolean(store.suspended)}
             assignees={can(role, "send") ? [store.email.toLowerCase(), ...(await readTeam(store.sid).catch(() => ({ members: [] as { email: string; role: Parameters<typeof can>[0] }[] }))).members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []}
           />
           </>

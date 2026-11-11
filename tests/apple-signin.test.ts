@@ -89,5 +89,22 @@ test("start route is absent while off; start limit and unknown counter refuse be
  for(let i=0;i<20;i++)assert.ok((await startRoute(req())).headers.get("location")?.startsWith("https://appleid.apple.com/auth/authorize?"));
  assert.match((await startRoute(req())).headers.get("location")!,/apple-slow/);
  commands=0;store.pipeline=async cs=>{commands+=cs.length;return[null,null];};
- try{assert.match((await startRoute(req())).headers.get("location")!,/apple-slow/);assert.equal(commands,2);}finally{store.pipeline=real;}
+ // An unreadable counter is not "too many tries" (Claude 5 / Claude 1 LOW): it is said as an error.
+ try{assert.match((await startRoute(req())).headers.get("location")!,/apple-error/);assert.equal(commands,2);}finally{store.pipeline=real;}
+});
+
+test("the relay notice comes before the button and describes it (Claude 5 / Claude 1 LOW)",()=>{
+ const html=renderToStaticMarkup(createElement(AppleSignIn,{handle:"my-store"}));
+ const notice=html.indexOf("different account"),button=html.indexOf("Continue with Apple");
+ assert.ok(notice>=0&&button>notice,"read before reaching the button, by keyboard or screen reader");
+ const id=/<p[^>]*id="([^"]+)"[^>]*>[^<]*different account/.exec(html)?.[1];
+ assert.ok(id,"the notice has an id");
+ assert.match(html,new RegExp(`<button[^>]*aria-describedby="${id}"[^>]*>Continue with Apple`));
+});
+test("the cross-site binding cookie carries the __Secure- prefix (Claude 5 / Claude 1 LOW)",async()=>{
+ process.env.TEST_APPLE_SIGNIN="1";
+ const b=await beginAppleSignIn("my-store");
+ assert.ok(b);
+ assert.match(b.cookie,/^__Secure-[^=]+=asi\./);
+ assert.match(b.cookie,/; Secure/);
 });

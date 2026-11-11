@@ -80,6 +80,22 @@ export async function readInvite(statsId: string, field: string): Promise<Invite
 }
 
 /**
+ * One invitation as kept, for the person's data copy (619 [SZ3]): null is none
+ * kept; "unknown" is a reply in an unknown shape (a missing reply, anything but
+ * text or null) or a record that does not read, never taken as none, so the
+ * copy fails and is made again rather than leaving it out (CX-123 rule 24).
+ */
+export async function inviteForCopy(statsId: string, field: string): Promise<Invite | null | "unknown"> {
+  if (!FIELD_PATTERN.test(field) || !isRedisConfigured()) return null;
+  const replies: unknown = await redisPipeline([["HGET", invitesKey(statsId), field]]);
+  // The one reply, from the list's own data slot: a missing reply, a hole or a getter is unknown.
+  const slot = Array.isArray(replies) && replies.length === 1 ? Object.getOwnPropertyDescriptor(replies, "0") : undefined;
+  if (!slot || !Object.hasOwn(slot, "value")) return "unknown";
+  if (slot.value === null) return null;
+  return parseInvite(slot.value) ?? "unknown";
+}
+
+/**
  * Invites many members in one round trip: each one's record, link and
  * reminder. Returns, for each, the field it is kept under when it is new, or
  * null when that address was already invited to that membership.
@@ -89,7 +105,13 @@ export async function inviteMembers(
   job: string,
   rows: { email: string; productId: string; option: string; renews: number }[],
   now = Date.now(),
-): Promise<(string | null)[]> {
+  /**
+   * The store's prints key and how one address is printed (lib/suppression.ts), for an import: each record is then
+   * written only when its address was not deleted from the store, in the same step (INVITE_UNLESS_ERASED), and a
+   * deleted one answers false, nothing written. Throws when that step's answer is not exact (CX-123 rule 24).
+   */
+  erased: { key: string; print: (email: string) => string } | null = null,
+): Promise<(string | null | false)[]> {
   const statsId = store.statsId;
   if (!rows.length || !statsId || !store.sid || !isRedisConfigured()) return rows.map(() => null);
   const at = Math.floor(now / 1000);
@@ -109,9 +131,9 @@ export async function inviteMembers(
     { slot: INVITES_SLOT, bytes: made.reduce((sum, m) => sum + m.bytes, 0) },
     { until: now + longest * 1000, bytes: made.reduce((sum, m) => sum + m.link, 0) },
   ], now);
-  const answers = await redisPipeline(made.map(({ field, value }) => ["HSETNX", invitesKey(statsId), field, value]));
+  const answers = erased ? await invitedUnlessErased(statsId, made, erased) : await redisPipeline(made.map(({ field, value }) => ["HSETNX", invitesKey(statsId), field, value]));
   const fresh = made.filter((_, i) => Number(answers[i]) === 1);
-  // An address already invited to that membership was not written again: its room goes back.
+  // An address already invited to that membership, or deleted from the store, was not written: its room goes back.
   const already = made.filter((_, i) => Number(answers[i]) !== 1).reduce((sum, m) => sum + m.bytes, 0);
   if (already > 0) await giveData(store, [{ slot: INVITES_SLOT, bytes: already }], now);
   if (fresh.length) {
@@ -124,7 +146,41 @@ export async function inviteMembers(
       ...(reminders.length ? [["ZADD", DUE_KEY, ...reminders]] : []),
     ]);
   }
-  return made.map(({ field }, i) => (Number(answers[i]) === 1 ? field : null));
+  return made.map(({ field }, i) => (Number(answers[i]) === 1 ? field : Number(answers[i]) === -1 ? false : null));
+}
+
+/**
+ * Invitations written only for addresses not deleted from the store, in one
+ * step with the check (review of #3383, as lib/suppression.ts
+ * KEEP_UNLESS_ERASED): KEYS[1] the store's prints, KEYS[2] the store's
+ * invitations; ARGV, for each, its address's print, its field and its record.
+ * One HMGET; a print found writes nothing and answers -1, otherwise HSETNX
+ * (1 new, 0 already). Billed 1 + 1 + 1 an invitation at most, the same HSETNX
+ * as before; lib/redis-memory.ts runs it the same way.
+ */
+export const INVITE_UNLESS_ERASED = `-- marktmorgen:invite-unless-erased:v1
+local n = math.floor(#ARGV / 3)
+local prints = {}
+for i = 1, n do prints[i] = ARGV[3 * i - 2] end
+local found = redis.call("HMGET", KEYS[1], unpack(prints))
+local out = {}
+for i = 1, n do
+  if found[i] then
+    out[i] = -1
+  else
+    out[i] = redis.call("HSETNX", KEYS[2], ARGV[3 * i - 1], ARGV[3 * i])
+  end
+end
+return out`;
+
+/** Runs INVITE_UNLESS_ERASED; its answer read exactly, one of -1, 0 or 1 for each, or it throws. */
+async function invitedUnlessErased(statsId: string, made: { row: { email: string }; field: string; value: string }[], erased: { key: string; print: (email: string) => string }): Promise<number[]> {
+  const replies = await redisPipeline([["EVAL", INVITE_UNLESS_ERASED, 2, erased.key, invitesKey(statsId), ...made.flatMap(({ row, field, value }) => [erased.print(row.email), field, value])]]);
+  const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!Array.isArray(reply) || reply.length !== made.length || !reply.every((a) => a === -1 || a === 0 || a === 1)) {
+    throw new Error("the invitations could not be checked where they are written");
+  }
+  return reply as number[];
 }
 
 /** How many members a store invited, and how many kept their membership here. */

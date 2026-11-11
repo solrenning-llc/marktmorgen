@@ -4,6 +4,7 @@ import { head, issueSignedToken } from "@/lib/blob";
 import { BlobNotFoundError } from "@vercel/blob";
 import { handleUploadPresigned, type HandleUploadPresignedBody } from "@vercel/blob/client";
 import { studioAccess } from "@/lib/studio-route";
+import { PictureDoorFull, pictureDoorHour } from "@/lib/picture-door";
 import { isHeader } from "@/lib/store-link";
 import { imageFolder } from "@/lib/store";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, ownsImagePath } from "@/lib/product-image";
@@ -74,6 +75,9 @@ export async function POST(request: NextRequest) {
         if (!ownsImagePath(pathname, await imageFolder(ref))) throw new Error("invalid");
         // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
         { const paused = costPauseCode(store); if (paused) throw new Error(paused); }
+        // A ceiling before the spend (MR; lib/picture-door.ts): the store's doors are counted by the hour before the file
+        // store is asked or anything is signed, and a count that cannot be read opens nothing.
+        { const hour = await pictureDoorHour(pathname); if (hour !== "within") throw new Error(hour === "exceeded" ? "pictures_hourly" : "pictures_unavailable"); }
 
         // A name that is already a file is refused: the upload could never write over it, and noting it would let a
         // failed request later take somebody's picture for a fresh upload (lib/picture-door.ts). Only a name the file
@@ -82,11 +86,14 @@ export async function POST(request: NextRequest) {
         const there = await head(pathname).then(() => true, (error: unknown) => (error instanceof BlobNotFoundError ? false : null));
         if (there === true) throw new Error("invalid");
         if (there === null) throw new Error("could not check whether a picture name is free");
+        // A store already holding PICTURE_DOOR_MAX pictures nothing shows yet is refused, with nothing noted.
         const noted = await notePictureDoor(pathname).catch((error: unknown) => {
+          if (error instanceof PictureDoorFull) return "full";
           console.error("could not note a picture upload", error);
           return false;
         });
-        if (!noted) throw new Error("could not note a picture upload");
+        if (noted === "full") throw new Error("pictures_waiting");
+        if (!noted) throw new Error("pictures_unavailable");
 
         const rules = {
           allowedContentTypes: [...IMAGE_CONTENT_TYPES],
@@ -102,11 +109,11 @@ export async function POST(request: NextRequest) {
     return Response.json(answer);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "server_error";
-    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "renewal_unpaid", "plan_disputed"].includes(reason);
+    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "renewal_unpaid", "pictures_waiting", "pictures_hourly", "pictures_unavailable", "plan_disputed"].includes(reason);
     if (!known) console.error("signing a picture upload failed", error);
     return Response.json(
       { ok: false, error: known ? reason : "server_error" },
-      { status: reason === "signed_out" ? 401 : reason === "forbidden" || reason === "gone" ? 403 : reason === "renewal_unpaid" || reason === "plan_disputed" ? 409 : known ? 400 : 500 },
+      { status: reason === "signed_out" ? 401 : reason === "forbidden" || reason === "gone" ? 403 : reason === "renewal_unpaid" || reason === "plan_disputed" ? 409 : reason === "pictures_waiting" || reason === "pictures_hourly" ? 429 : reason === "pictures_unavailable" ? 503 : known ? 400 : 500 },
     );
   }
 }

@@ -172,6 +172,21 @@ async function main(): Promise<void> {
   is("a disputed payment: refused, defended in the dispute instead", [disputed.status, disputed.body.error, refundPosts().length], [409, "disputed", asked]);
   stripe.charge.disputed = false;
 
+  part("Refused by Stripe before anything was made: said so, and no line in the log");
+  const linesBefore = (await logLines(store)).length;
+  const changed = await post({ charge: CHARGE, token: T1, amount: "5" });
+  is("the first form's key with another amount: refused, the first refund stands", [changed.status, changed.body.error, stripe.made.length], [400, "invalid", 2]);
+  stripe.next = { body: undefined };
+  const refusedBody = { error: { type: "invalid_request_error", code: "parameter_invalid_integer", message: "Invalid integer" } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+    init?.method === "POST" ? Response.json(refusedBody, { status: 400 }) : realFetch(input, init)) as typeof fetch;
+  const refused = await post({ charge: CHARGE, token: T3, amount: "5" });
+  globalThis.fetch = realFetch;
+  stripe.next = null;
+  is("any other 4xx from Stripe: refused by Stripe, never unknown or done", [refused.status, refused.body.error, stripe.made.length], [409, "stripe_refused", 2]);
+  is("neither writes a line in the log", (await logLines(store)).length, linesBefore);
+
   part("Stripe's answer, read exactly");
   reset();
   stripe.next = { status: "pending" };

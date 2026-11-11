@@ -78,6 +78,7 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
     }
     const [claimed] = claim;
     if (claimed === null) continue;
+    let accepted = false;
     try {
       const mail = nudgeEmail({
         storeName: store.name,
@@ -98,18 +99,25 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
         idempotencyKey: `nimbus-nudge:${statsId}:${member.sub}:${member.periodEnd}`,
       });
       if (ok) {
+        accepted = true;
         sent += 1;
-        const count = countKey(statsId, monthOf(now));
-        await redisPipeline([
-          ["INCR", count],
-          ["EXPIRE", count, KEEP_SECONDS],
-        ]);
       } else {
         await redisPipeline([["DEL", key]]);
       }
     } catch (error) {
       await redisPipeline([["DEL", key]]).catch(() => {});
       console.error("sending a come-back email failed", store.handle, error);
+    }
+    if (accepted) {
+      // The email went out: the period mark stays whatever happens to the
+      // monthly count, so a lost count never sends the same member a second
+      // notice in the same period. A count that fails is only a lower figure
+      // on the studio page.
+      const count = countKey(statsId, monthOf(now));
+      await redisPipeline([
+        ["INCR", count],
+        ["EXPIRE", count, KEEP_SECONDS],
+      ]).catch((error) => console.error("counting a come-back email failed", store.handle, error));
     }
   }
   return sent;

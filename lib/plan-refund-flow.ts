@@ -182,6 +182,16 @@ async function subscriptionOf(id: string): Promise<Row | null> {
   }
 }
 const stopSet = (sub: Row) => sub.cancel_at_period_end === true || (typeof sub.cancel_at === "number" && sub.cancel_at > 0);
+/** What a letter may say of the plan, from a subscription read just now. Rule 24: a status Stripe has no name for, a
+ *  stop flag that is not a boolean, or a cancel_at that is neither null nor a number is "unknown", never "renews". */
+const planState = (sub: Row | null): "stops" | "renews" | "ended" | "unknown" => {
+  if (!sub) return "unknown";
+  if (sub.status === "canceled") return "ended";
+  if (!LIVE.includes(String(sub.status))) return "unknown";
+  if (typeof sub.cancel_at_period_end !== "boolean") return "unknown";
+  if (sub.cancel_at !== null && typeof sub.cancel_at !== "number") return "unknown";
+  return stopSet(sub) ? "stops" : "renews";
+};
 
 /** Takes back the stop we set, when it is still there. True when nothing of ours is left. */
 async function takeBackStop(id: string): Promise<boolean> {
@@ -548,8 +558,7 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
           // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
           // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
           const sub = await subscriptionOf(note.s);
-          const plan = !sub ? "unknown" : sub.status === "canceled" ? "ended" : stopSet(sub) ? "stops" : "renews";
-          await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan }), `plan-refund-unknown:${sid}:${note.at}`);
+          await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan: planState(sub) }), `plan-refund-unknown:${sid}:${note.at}`);
         }
         counts.dropped += 1;
         continue;

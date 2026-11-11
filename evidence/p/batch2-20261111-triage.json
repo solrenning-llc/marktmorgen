@@ -1529,5 +1529,389 @@
     "productRefUpdates": 0,
     "subagents": 0
   },
-  "status": "Triage comments are complete. Repairs, conflicts and finding closures remain pending; do not call this batch fully fixed."
+  "status": "Triage comments are complete. Repairs, conflicts and finding closures remain pending; do not call this batch fully fixed.",
+  "finishedAt": "2026-11-11T13:50:26.591Z",
+  "finalInventory": [
+    {
+      "n": 3017,
+      "head": "5b7a26d40625d6f2917ac433c0b3d6d9c7b83d5c",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3020,
+      "head": "baaa18ed8e9003eabbc8bd4e7fa76bf1bd9caacd",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3021,
+      "head": "cab993b0274d8ec808cbd4056ebe1c1f0ea72db0",
+      "base": "claude5/sz4-member-prices",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3022,
+      "head": "0838662d83cca8ccedb2f207035850492a60b218",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3023,
+      "head": "e008c6003b9324d60db70962ac4cf771e6ae2986",
+      "base": "claude5/kb22-u2-receipt-number",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3026,
+      "head": "e5d60ff04648ce0c9c6c1e36354223d326c0b7a4",
+      "base": "claude5/sz4-member-prices",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3027,
+      "head": "5d2e9d9eba6e695615133fc7ed9abb99f7af899c",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3029,
+      "head": "3c0a62845d3c50c70e097a3d0eb804492528e995",
+      "base": "claude5/sz2-u2-studio-fields",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3033,
+      "head": "b9c0e9c7074b1dbc2805c07f045c0352aa3c2bf3",
+      "base": "claude5/cm2-post-approval",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3034,
+      "head": "fd6ea6de1e69f551d930cb9e5d469267c589af60",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3035,
+      "head": "479bd9d69e8e0198d9a6c6ef29d91d06e698c3f3",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3036,
+      "head": "3496dde7a207e157bff578dd8befd32cddbad743",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3037,
+      "head": "585f5d333a8c5f951d1e013c6492cca55844dee0",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3051,
+      "head": "2c45b6b27d1df5cecf1d3ea291e143504d5e926e",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3062,
+      "head": "b2f741a62298c6b24ee31ad18c57297e280ea008",
+      "base": "claude5/fix-directory-index",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3066,
+      "head": "745ce60a03b3819d6dca6f530f48faaf9940ef72",
+      "base": "claude4/honest-signin-join",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3067,
+      "head": "c631abe65f48939136faef03b49fe57139fdf765",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3068,
+      "head": "801e021dd203bbf3006e097bb9528e6699bc9178",
+      "base": "claude4/within-limit-unknown",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3069,
+      "head": "7e98f9186bb0734fc0e8d081b011a7e6dac332c4",
+      "base": "claude4/meta-lines-exact",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3070,
+      "head": "92b02aa03f346da12fe8e08cfde835a8869f2aa2",
+      "base": "claude4/meta-view-exact",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3073,
+      "head": "e988e105b1528780310c1dd6a696500025645727",
+      "base": "claude4/store-read-exact",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3075,
+      "head": "e532048c4fb76d45d07bff171aeea227c7d8614d",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3079,
+      "head": "fbea9ffa6d3bd661f2d18afc6d3a61d3de5dbb73",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3086,
+      "head": "e0ede3c13d76f5a64c1fee8e5c32a6e59667247b",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3095,
+      "head": "5e748c7b48c35d177bd7c4b660a932bdf0ca697d",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3101,
+      "head": "a3430542c7549c5a79adad3c77399ee669aa76ba",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3107,
+      "head": "a46dd30840a7f44dbddf9d3141fd56211f1bd3c4",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3118,
+      "head": "1a8913d01f4b11d08310e9cf3a466de651c536c7",
+      "base": "claude4/directory-assembly-ceiling",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3129,
+      "head": "365d627e6da31aef0ff4688ea90a11142a5abf69",
+      "base": "claude4/sales-file-cheaper",
+      "draft": true,
+      "state": "open"
+    },
+    {
+      "n": 3156,
+      "head": "9ebc7b7de17b8fc731280cdd9db0ee6834525a6e",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3158,
+      "head": "db19fcb9252ce41e4c9d58f6a9ae660077d1f2e7",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3159,
+      "head": "d824cc0a413b5273d11388382dbc3e51d37ad9de",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3160,
+      "head": "26be932d6e6ffffdbe7afde926ce0ec438cf7868",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3171,
+      "head": "90fb5f74fb4e20dccfeb3f9060673ee8188e8733",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3173,
+      "head": "adf09726af8a925b71f6bd040601b302454ec14f",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3189,
+      "head": "bd0e13d753de1b79311136394fc2ae02045f6253",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3190,
+      "head": "b7c4f15c2aba07c054a007f876ff680a7a9adc7c",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3193,
+      "head": "0df0c467c70533ba18e55fb19eb852e001117588",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3194,
+      "head": "bc3ddc1501464830cd93f8d3dde3a3c8738ecb2a",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3203,
+      "head": "881caed76deeac4cd39e6bbbc87bb125d0d4a837",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3213,
+      "head": "208c078026bf16f22781a91be79bf03787b2fec3",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3215,
+      "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3225,
+      "head": "e02db96854a1e15240670506ea66dddb4879058a",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3226,
+      "head": "3c7c19af5b2a2da03a8421d15b10776e6e69cbb0",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3247,
+      "head": "453256f5a529329c7366d79c2bee2f0f51a6e4ed",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3252,
+      "head": "ba0727f2382849244fb0b497d4c11a069f0a91b2",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3261,
+      "head": "ed1ce6d5b55ee607f3613025ba41c97ca46a3ffa",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3267,
+      "head": "91aecfa183d72f9dd9499d4c26f2b6fb448f4e49",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3271,
+      "head": "aaee666db197a2738ed12b00bfedbb4738debf4c",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3272,
+      "head": "ef8922f9e64073a38808620dfff700b850b29de7",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    },
+    {
+      "n": 3273,
+      "head": "f970f05fd9ec09a6cbaf7922c0c19f3710b9e4e5",
+      "base": "main",
+      "draft": false,
+      "state": "open"
+    }
+  ],
+  "finalQueueCount": 203,
+  "main": "c6f9a7b90600c31bad5a8430fcd24234fd3cdbc3",
+  "issue3677": "closed",
+  "pr3680": "merged",
+  "readyCommentsUpdated": "Seven initial ready reports were corrected in place after direct confirmation of TODOS-110/111 release; only their stale hold paragraph changed, and every replacement body was fetched back.",
+  "ownHeads": {
+    "3515": "4b0de90a7a614740969944ea9970ed7d856c5716",
+    "3516": "d22e651499a32d2351eb28818a87adcf1b456f1e"
+  },
+  "ownHeadNote": "3516 advanced outside this run; observed and preserved, no attribution or overwrite."
 }

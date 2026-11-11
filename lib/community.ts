@@ -1048,13 +1048,24 @@ export async function toggleLike(id: string, post: string, who: string, room: Da
 
 /** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
 async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
-  const [held] = await redisPipeline([["SISMEMBER", key, who]]);
+  // Rule 24: each reply read exactly, 0 or 1; any other is unknown and throws
+  // (the route answers "error" and awards nothing). Never "already liked" on a
+  // reply that does not say so: that took the like away, gave its room back
+  // twice and took a point from the author.
+  const zeroOrOne = (reply: unknown): 0 | 1 | null => (reply === 0 || reply === 1 ? reply : null);
+  const held = zeroOrOne(repliesFor(await redisPipeline([["SISMEMBER", key, who]]), 1)?.[0]);
+  if (held === null) throw new UnknownReplyError("a like's SISMEMBER");
   // The like and its entry in the member's trace (traceKey) take their room first.
-  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
-  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
-  if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
-  const times = Number(held) === 1 ? 1 : 2;
+  if (held !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
+  const adds = repliesFor(await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]), 2);
+  const added = zeroOrOne(adds?.[0]);
+  // Unknown: the room taken is kept, since the like may be written.
+  if (added === null || zeroOrOne(adds?.[1]) === null) throw new UnknownReplyError("a like's SADD");
+  if (added === 1) return true;
+  const removed = repliesFor(await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]), 2);
+  // Room is given back only once the removal is confirmed.
+  if (zeroOrOne(removed?.[0]) === null || zeroOrOne(removed?.[1]) === null) throw new UnknownReplyError("a like's SREM");
+  const times = held === 1 ? 1 : 2;
   await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
   return false;
 }

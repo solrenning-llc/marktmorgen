@@ -51,6 +51,8 @@ import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { requestsIn } from "@/lib/traffic";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { CallSetup } from "@/lib/call-setup";
+import { ROOM_KEYS_PER_BOOKING, ROOM_KEYS_PER_MGET, roomReads } from "@/lib/call-rooms";
+import { mgetCommands } from "@/lib/redis-mget";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
 
 const OWNER = "olive@example.com";
@@ -204,9 +206,12 @@ test("an opening with forty bookings takes the most moves first, and pays their 
   const calls = await callsFor(store, BUYER, opened.meter);
   assert.equal(calls.length, MAX_LISTED);
   assert.ok(calls.every((call) => call.room), "each booking was given its room");
-  // Each booking's move, the product's listing, and each room: four reads, and a video room made and read back.
-  const rooms = sent.filter((command) => command.includes("nl:call:room:") || command.includes("nl:meet:r:")).length;
-  assert.ok(rooms > 4 * MAX_LISTED && rooms <= ORDERS_ROOM_COMMANDS * MAX_LISTED, String(rooms));
+  // Each booking's move, the product's listing, and each room: its two room keys read in shared MGETs and its two
+  // meeting records a GET each (lib/call-rooms.ts, roomReads; calendar-feed room, 10 and 11 November 2026), and a
+  // video room made and read back.
+  const roomCommands = sent.filter((command) => command.includes("nl:call:room:") || command.includes("nl:meet:r:"));
+  const roomMgets = roomCommands.filter((command) => command.startsWith("MGET ")).length;
+  assert.ok(roomMgets === mgetCommands(ROOM_KEYS_PER_BOOKING * MAX_LISTED, ROOM_KEYS_PER_MGET) && roomCommands.length <= roomReads(MAX_LISTED) + 2 * MAX_LISTED && roomCommands.length <= ORDERS_ROOM_COMMANDS * MAX_LISTED, String(roomCommands.length));
   // The forty moves were one MGET (C3-82), not forty GETs.
   assert.deepEqual(sent.filter((command) => command.includes("nl:call:moved:")).map((command) => command.split(" ")[0]), ["MGET"]);
   // ORDERS_CALL_MOVES taken before any booking is read; what the one MGET left pays the listing, then the rooms take more.
@@ -284,10 +289,10 @@ test("a meter the store has no room for reads none of the bookings, not even the
   assert.deepEqual(sent.filter(bookingReads), []);
   // Read without a meter (the other readers of bookings), the same store reads them all.
   assert.equal((await callsFor(store, BUYER)).length, MAX_LISTED);
-  // Their forty moves in one MGET (C3-82), and four reads of each room.
+  // Their forty moves in one MGET (C3-82), and each room's four keys read as roomReads counts them.
   const moves = sent.filter((command) => command.includes("nl:call:moved:"));
   assert.deepEqual([moves.length, moves[0]?.split(" ")[0], moves[0]?.split(" ").length], [1, "MGET", 1 + MAX_LISTED]);
-  assert.ok(sent.filter(bookingReads).length >= 1 + MAX_LISTED * 4, String(sent.filter(bookingReads).length));
+  assert.ok(sent.filter(bookingReads).length >= 1 + roomReads(MAX_LISTED), String(sent.filter(bookingReads).length));
 });
 
 test("the moves taken before a store's bookings are read cover every booking its pages can hold", () => {

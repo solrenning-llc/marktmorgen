@@ -2,7 +2,7 @@ import { storeForHandle } from "@/lib/store";
 import { listForNaming } from "@/lib/store-readings";
 import { paidCalls } from "@/lib/calls";
 import { FeedGone, bookedCalendar, bookedCalendarFeed, ensureFeedToken, slotRoomsBatched, storeIdForToken, withoutErasedBookers } from "@/lib/calendar-sync";
-import { idsOfKind, readListingsBatched } from "@/lib/catalog";
+import { readKind } from "@/lib/catalog";
 
 /**
  * A store's bookings as a calendar to subscribe to, at its private address
@@ -48,9 +48,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
         if (listId) store = { ...store, listId };
       }
       const calls = store.listId ? await withoutErasedBookers(store, paid) : paid.map((c) => (c.email || c.name ? { ...c, email: null, name: null, unnamed: true } : c));
-      // Every call listing and every booking's room read in chunked MGETs (lib/read-ceilings.ts, CALENDAR_BUILD_SHAPE):
-      // a reply not whole fails the making as an unknown, never a listing or a room taken for absent.
-      const listings = await readListingsBatched(store, idsOfKind(store, "call"));
+      // Every call listing read LISTINGS_PER_MGET at one MGET (lib/catalog.ts, getMany) and every booking's room keys
+      // in MGETs, its meeting records a GET each (lib/call-rooms.ts, roomsForMany; lib/read-ceilings.ts,
+      // CALENDAR_BUILD_SHAPE): a reply not whole, or a value that is not what its key holds, fails the making as an
+      // unknown, never a listing or a room taken for absent.
+      const listings = await readKind(store, "call");
       const ics = bookedCalendar(store, calls, Date.now(), listings, await slotRoomsBatched(store, calls, listings));
       // Who the file may name, checked again where its copy is kept: a deletion meanwhile is not undone by it.
       return { ics, listId: store.listId, named: calls.map((c) => c.email).filter((e): e is string => Boolean(e)) };

@@ -603,9 +603,10 @@ export async function slotRooms(store: Store, calls: BookedCall[], listings: Lis
 
 /**
  * slotRooms, for the feed's making (app/api/store/calendar/[token]/route.ts):
- * the rooms' keys read in chunked MGETs (lib/call-rooms.ts, roomsForMany),
- * a reply not whole failing the making as an unknown (UnreadableMget), never
- * a room taken for absent. Priced in CALENDAR_BUILD_SHAPE (lib/read-ceilings.ts).
+ * the same reads (lib/call-rooms.ts, roomsForMany), and a value that is there
+ * but is not what its key holds fails the making as an unknown
+ * (UnreadableMget), as a reply not whole does: never a room taken for absent.
+ * Priced in CALENDAR_BUILD_SHAPE (lib/read-ceilings.ts).
  */
 export async function slotRoomsBatched(store: Store, calls: BookedCall[], listings: Listing[]): Promise<Map<string, string | null>> {
   return slotRoomsWith(store, calls, listings, roomsForMany);

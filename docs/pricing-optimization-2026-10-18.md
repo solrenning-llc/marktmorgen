@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$159 / $1,590** | every #553 figure, none cut | 60.76% / 60.62% | 12.27% | 120 | $69 / $690 |
+| Store | **$159 / $1,590** | every #553 figure, none cut | 60.76% / 60.63% | 12.27% | 120 | $69 / $690 |
 | Studio | **$739 / $7,390** | every #553 figure, none cut | 61.35% / 61.10% | 12.51% | 15 | $449 / $4,490 |
 | Scale | **$1,539 / $15,390** | every #553 figure, none cut | 61.42% / 61.14% | 12.53% | 7 | $999 / $9,990 |
 
@@ -156,10 +156,10 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | ε = -0.5 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.94% / 61.91%; 63.20% / 63.16%; 63.30% / 63.26%) | yes |
 | ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.35% / 61.24%; 62.40% / 62.26%; 62.52% / 62.38%) | yes |
 | ε = -1 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.94% / 61.91%; 63.20% / 63.16%; 63.30% / 63.26%) | yes |
-| ε = -1.5 | A | $139 | $529 | $1,069 | yes (60.33% / 60.18%; 60.43% / 60.08%; 60.43% / 60.02%) | yes |
-| ε = -1.5 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $199 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $349 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.50% / 60.44%; 60.40% / 60.14%; 60.40% / 60.02%) | yes |
-| ε = -2 | A | $139 | $529 | $1,069 | yes (60.33% / 60.18%; 60.43% / 60.08%; 60.43% / 60.02%) | yes |
-| ε = -2 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $199 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $349 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.50% / 60.44%; 60.40% / 60.14%; 60.40% / 60.02%) | yes |
+| ε = -1.5 | A | $139 | $529 | $1,069 | yes (60.33% / 60.19%; 60.43% / 60.08%; 60.43% / 60.02%) | yes |
+| ε = -1.5 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $199 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $349 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.51% / 60.44%; 60.40% / 60.14%; 60.40% / 60.02%) | yes |
+| ε = -2 | A | $139 | $529 | $1,069 | yes (60.33% / 60.19%; 60.43% / 60.08%; 60.43% / 60.02%) | yes |
+| ε = -2 | C | $109 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $199 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $349 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.51% / 60.44%; 60.40% / 60.14%; 60.40% / 60.02%) | yes |
 
 **What the scenarios agree on, and where they part.** Under A the lowest price that keeps 60% with every #553 figure is Store $139, Studio $529, Scale $1,069 (today $69, $449, $999): nothing near the band medians is possible without cutting figures. With |ε| at most 1 (−0.5, −1), constant-elasticity demand has no finite best price, and the program goes to the top of the grid: that is the model's shape, not a finding that the market would pay it. With |ε| above 1 (−1.5, −2) the best price is that lowest one. So the scenarios disagree on direction and agree only on the floor.
 
@@ -214,7 +214,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Scale | store-email | 80 | $1,049 | 1.01× | 1.02× |
 | Scale | transactional-email | 100 | $1,049 | 1.01× | 1.02× |
 | Scale | list-email | 1,000 | $879 | 1.10× | 1.22× |
-| Scale | visits | 4,000 | $849 | 1.12× | 1.26× |
+| Scale | visits | 4,000 | $839 | 1.13× | 1.27× |
 
 ## 4. At least the best competitor in the band, on every attribute (alternative B)
 

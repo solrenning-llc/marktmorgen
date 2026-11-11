@@ -246,13 +246,21 @@ async function main(): Promise<void> {
     is("meeting records: a booking's own record is read and its link given", [placed, own.value.status, text.includes("meet.google.com/abc-defg-hij")], [true, 200, true]);
   }
 
-  part("Each reply stays within 1 MiB at the bytes it is priced at; the other readers keep their GETs");
+  part("Each reply stays within 1 MiB at the bytes it is priced at; every reader shares the same MGET reader (one reader, #3545)");
   is(`${LISTINGS_PER_MGET} listings at LISTING_READ_BYTES, ${ROOM_KEYS_PER_MGET} room keys at 1,024 bytes: each MGET's reply within 1 MiB`, [LISTINGS_PER_MGET * LISTING_READ_BYTES <= 1_048_576, ROOM_KEYS_PER_MGET * 1_024 <= 1_048_576], [true, true]);
   {
     const ids = [productId(0), productId(1), productId(2)];
     const plain = await counted(() => readListings(store, ids));
     const rooms = await counted(() => roomsFor(CALLS_ID, [{ product: productId(0), setup: listing(0).call as never, session: "cs_test_other", start: hour + 3_600_000, end: hour + 5_400_000 }]));
-    is("readListings and roomsFor, for every other reader, still send one GET a key", [plain.value.length, plain.sent.map((c) => c[0]), rooms.sent.slice(0, 4).map((c) => c[0])], [3, ["GET", "GET", "GET"], ["GET", "GET", "GET", "GET"]]);
+    // The making has no reader of its own (lib/catalog.ts, getMany; lib/call-rooms.ts, roomsFor): every other reader
+    // reads product records LISTINGS_PER_MGET at one MGET and a booking's room keys in an MGET, its meeting records a
+    // GET each, as the making does.
+    const roomCommands = rooms.sent.filter((c) => ROOM_KEY.test(String(c[1])) || /^nl:meet:r:/.test(String(c[1])));
+    is(
+      "readListings and roomsFor, for every other reader, read as the making does",
+      [plain.value.length, plain.sent.map((c) => [c[0], c.length - 1]), roomCommands.slice(0, 3).map((c) => [c[0], c.length - 1])],
+      [3, [["MGET", LISTINGS_PER_MGET], ["MGET", 3 - LISTINGS_PER_MGET]], [["MGET", 2], ["GET", 1], ["GET", 1]]],
+    );
   }
   done();
 }

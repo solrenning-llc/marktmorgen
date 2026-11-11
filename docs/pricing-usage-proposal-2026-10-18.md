@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $94.95 | $935.85 | $69 / $690 |
-| Studio | $149.55 | $1,571.65 | $449 / $4,490 |
-| Scale | $245.40 | $2,690.35 | $999 / $9,990 |
+| Store | $94.95 | $935.20 | $69 / $690 |
+| Studio | $149.50 | $1,571.00 | $449 / $4,490 |
+| Scale | $245.40 | $2,689.48 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -41,10 +41,10 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $69 / $690 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $99 / $990 | 8.0% | 60.18% | 60.10% | $59.58 | 0.66 |
-| $129 / $1,290 **(recommended)** | 90.0% | 60.21% | 60.06% | $77.68 | 0.51 |
+| $99 / $990 | 8.2% | 60.18% | 60.10% | $59.58 | 0.66 |
+| $129 / $1,290 **(recommended)** | 90.0% | 60.22% | 60.06% | $77.69 | 0.51 |
 | $149 / $1,490 | 100.0% | 60.56% | 60.42% | $90.24 | 0.44 |
-| $169 / $1,690 | 100.0% | 60.92% | 60.80% | $102.97 | 0.38 |
+| $169 / $1,690 | 100.0% | 60.92% | 60.81% | $102.97 | 0.38 |
 | $199 / $1,990 | 100.0% | 61.35% | 61.24% | $122.09 | 0.32 |
 
 ### Studio
@@ -54,8 +54,8 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $199 / $1,990 | 9.3% | 60.33% | 60.04% | $120.06 | 2.24 |
-| $249 / $2,490 **(recommended)** | 24.3% | 60.32% | 60.02% | $150.22 | 1.79 |
+| $199 / $1,990 | 9.3% | 60.32% | 60.03% | $120.05 | 2.24 |
+| $249 / $2,490 **(recommended)** | 24.3% | 60.33% | 60.02% | $150.23 | 1.79 |
 | $299 / $2,990 | 38.0% | 60.35% | 60.02% | $180.45 | 1.49 |
 | $449 / $4,490 | 81.0% | 60.36% | 60.01% | $271.04 | 0.99 |
 
@@ -90,10 +90,10 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
 | Access emails a month: included · #553 · before #553 | **130** · 150 · 150 | **97** · 400 · 400 | **140** · 1,000 · 1,000 |
 | Store emails a month: included · #553 · before #553 | **67** · 75 · 75 | **72** · 300 · 300 | **110** · 800 · 800 |
-| Net at full included use, monthly (sizing reading) | 60.21% | 60.32% | 60.41% |
+| Net at full included use, monthly (sizing reading) | 60.22% | 60.33% | 60.41% |
 | Net at full included use, yearly (sizing reading) | 60.06% | 60.02% | 60.01% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.07% | 12.11% | 12.14% |
-| Net a customer, a month, at full included use | $77.68 | $150.22 | $241.04 |
+| Net a customer, a month, at full included use | $77.69 | $150.23 | $241.04 |
 | The same at #553's price | $39.28 | $268.72 | $601.46 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
@@ -121,7 +121,7 @@ Each plan at its recommended price with every included figure used, plus one of 
 
 | Plan | Monthly: revenue, net | Yearly: revenue, net |
 | --- | --- | --- |
-| Store | $275.00, 60.37% | $3,042.00, 60.32% |
+| Store | $275.00, 60.38% | $3,042.00, 60.32% |
 | Studio | $507.00, 60.39% | $5,586.00, 60.26% |
 | Scale | $657.00, 60.42% | $7,086.00, 60.20% |
 

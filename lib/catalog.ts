@@ -42,8 +42,8 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { MGET_REPLY_BYTES, REPLY_ESCAPE_FACTOR, UnreadableMget, mgetWhole } from "@/lib/redis-mget";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { mgetCommands, mgetLotFor, mgetWhole } from "@/lib/redis-mget";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -104,6 +104,21 @@ export const HEAD_BYTES = 120_000;
 
 /** The most one product's two records may weigh together. */
 export const MAX_PRODUCT_BYTES = 256_000;
+
+/**
+ * A store's product records read at one MGET at the most (getMany): sized from the most a record can be written at,
+ * not from the bytes a reading is priced at. A record is written up to MAX_PRODUCT_BYTES (with its extras), and its
+ * JSON text can double in the REST answer (lib/redis-mget.ts, REPLY_ESCAPE_FACTOR), so one MGET of these keys answers
+ * at most LISTINGS_PER_MGET x 2 x 256,000 bytes, within MGET_REPLY_BYTES (1 MiB): 2 records, 1,024,000 bytes (review
+ * of #3079, Codex Z M1: a valid call listing of 29,538 bytes put 50 at about 1.52 MB; applied to this shared reader,
+ * 11 November 2026, where it had been 100). tests/mget-reply-bound.test.ts holds it.
+ */
+export const LISTINGS_PER_MGET = mgetLotFor(MAX_PRODUCT_BYTES);
+
+/** The commands one read of this many product records sends (getMany); a count that is not a number is never priced low. */
+export function listingReads(keys: number): number {
+  return mgetCommands(keys, LISTINGS_PER_MGET);
+}
 
 /** Thrown by a write that would take a record past its ceiling (lib/store-full.ts). */
 export { StoreFullError };
@@ -650,21 +665,13 @@ export async function listingsNamed(store: Store, meta: Record<string, string | 
 // ---- Reading ----------------------------------------------------------------
 
 /**
- * Many GETs, in pipelines of a few hundred sent side by side: one reply for each key, in its own envelope, or
- * UnknownReplyError (CX-123 rule 24), never a list cut short whose missing replies would read as "no record".
+ * Many records, LISTINGS_PER_MGET at one MGET, each MGET its own trip, MGET_CONCURRENCY trips at a time
+ * (lib/redis-mget.ts, mgetWhole). Read only whole (CX-123 rule 24): one reply for each MGET and, in each, one value for
+ * each key, a string or Redis's own nil; anything else throws UnreadableMget, an UnknownReplyError, never a list cut
+ * short whose missing replies would read as "no record", nor a value of another type taken for none.
  */
-async function getMany(keys: string[]): Promise<unknown[]> {
-  if (keys.length === 0) return [];
-  const chunks: string[][] = [];
-  for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
-  const answers = await Promise.all(
-    chunks.map(async (chunk) => {
-      const replies = repliesFor(await redisPipeline(chunk.map((key) => ["GET", key])), chunk.length);
-      if (!replies) throw new UnknownReplyError("a store's product records");
-      return replies;
-    }),
-  );
-  return answers.flat();
+async function getMany(keys: string[]): Promise<(string | null)[]> {
+  return mgetWhole(keys, LISTINGS_PER_MGET);
 }
 
 /**
@@ -731,52 +738,6 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
     });
   }
   return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
-}
-
-/**
- * Listings read at one MGET by readListingsBatched, sized from the most a
- * listing record can be written at, not from the bytes a reading is priced
- * at: a record is written up to MAX_PRODUCT_BYTES (with its extras), and its
- * JSON text can double in the REST answer (REPLY_ESCAPE_FACTOR), so one MGET
- * of these keys answers at most LISTINGS_PER_MGET x 2 x 256,000 bytes, within
- * MGET_REPLY_BYTES (1 MiB): 2 records, 1,024,000 bytes (review of #3079: a
- * valid call listing of 29,538 bytes put 50 at about 1.52 MB).
- * tests/calendar-batch-reads.test.ts holds it.
- */
-export const LISTINGS_PER_MGET = Math.floor(MGET_REPLY_BYTES / (REPLY_ESCAPE_FACTOR * MAX_PRODUCT_BYTES));
-
-/**
- * readListings, for a reader that may read every product of a store at once
- * (the booking calendar's making, lib/calendar-sync.ts): the records read
- * LISTINGS_PER_MGET at one MGET (lib/redis-mget.ts), not one GET each. A
- * reply not whole, or holding anything but text or nothing, throws
- * UnreadableMget: the reading fails, never a listing taken for absent. A key
- * that is gone (nothing) is left out as readListings leaves it out; a value
- * that is there but does not parse as a listing, or is another product's,
- * also throws UnreadableMget (review of #3079): an unknown, never a product
- * "no longer listed". readListings itself is unchanged for its other readers.
- */
-export async function readListingsBatched(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
-  const asked = wanted(store, ids);
-  const catalog = store.catalog;
-  if (catalog.inline) {
-    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
-    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
-  }
-  if (asked.length === 0) return [];
-  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
-  const missing = asked.filter((id) => !found.has(id));
-  if (missing.length && catalog.id && isRedisConfigured()) {
-    const raws = await mgetWhole(missing.map((id) => listingKey(catalog.id!, id)), LISTINGS_PER_MGET);
-    missing.forEach((id, i) => {
-      const raw = raws[i];
-      if (raw === null) return;
-      const listing = parseListing(parseJson(raw));
-      if (!listing || listing.id !== id) throw new UnreadableMget("an MGET answered a value that is not the listing asked for");
-      found.set(id, listing);
-    });
-  }
-  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
 }
 
 /**

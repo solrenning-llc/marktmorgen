@@ -117,7 +117,7 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
               the weekly, monthly and busy-day emails. Reload this page to see, or start them again here.
             </p>
           )}
-          <button type="button" className="btn btn-secondary mt-3 min-h-11" aria-busy={busy} onClick={() => void restart()}>
+          <button type="button" className="btn btn-secondary mt-3 inline-flex min-h-11 items-center justify-center" aria-busy={busy} onClick={() => void restart()}>
             Start these emails again
           </button>
         </div>
@@ -160,7 +160,7 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
                 </li>
               ))}
             </ul>
-            <button type="submit" className="btn btn-primary mt-5 min-h-11" aria-busy={busy}>
+            <button type="submit" className="btn btn-primary mt-5 inline-flex min-h-11 items-center justify-center" aria-busy={busy}>
               {busy ? "Saving…" : "Save choices"}
             </button>
           </fieldset>

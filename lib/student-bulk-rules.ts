@@ -131,6 +131,24 @@ export const ACCESS_REFUSALS: Record<AccessRefusal, string> = {
   expect: "Review the change first, then confirm it.",
 };
 
+/** The sentence for a store whose data room is full: the labels page's own (components/bulk-labels.tsx). */
+export const STORE_FULL_WORDS = "Your store has no room left for more records. Delete some you no longer need first.";
+
+const NOT_DONE_WORDS = "That did not work. Nothing was changed. Try again in a moment.";
+
+/**
+ * How the students screen reads one answer: a done change ("ok", only `ok: true`); a count that moved since the
+ * review ("moved", only a 409 that says "changed" and carries its new review); otherwise a refusal with the words to
+ * show. So a 409 of any other kind (the labels route's "data_full" for a full store) is said, never left silent.
+ */
+export function sentOutcome(status: number, answer: Record<string, unknown>): { kind: "ok" } | { kind: "moved" } | { kind: "refused"; words: string } {
+  if (answer.ok === true) return { kind: "ok" };
+  if (status === 409 && answer.error === "changed" && typeof answer.review === "object" && answer.review !== null) return { kind: "moved" };
+  if (typeof answer.message === "string" && answer.message) return { kind: "refused", words: answer.message };
+  if (answer.error === "data_full") return { kind: "refused", words: STORE_FULL_WORDS };
+  return { kind: "refused", words: NOT_DONE_WORDS };
+}
+
 /** What a change would do, read now, with nothing written. `unread`: people whose access could not be read; they are left as they are. */
 export type AccessReview = { changes: number; already: number; notStudent: number; unread: number };
 

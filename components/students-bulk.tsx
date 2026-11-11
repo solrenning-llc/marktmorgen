@@ -15,6 +15,7 @@ import {
   accessSummary,
   oppositeAccess,
   progressOf,
+  sentOutcome,
   studentsCsv,
 } from "@/lib/student-bulk-rules";
 
@@ -110,8 +111,9 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
     try {
       const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      if (answer.ok || response.status === 409) return { status: response.status, answer };
-      setError(typeof answer.message === "string" && answer.message ? answer.message : "That did not work. Nothing was changed. Try again in a moment.");
+      const outcome = sentOutcome(response.status, answer);
+      if (outcome.kind !== "refused") return { status: response.status, answer };
+      setError(outcome.words);
     } catch {
       setError("That did not work, and it is not known whether anything changed. Check your connection, then review again to see.");
       setErrorAt(place);

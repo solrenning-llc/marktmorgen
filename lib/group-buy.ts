@@ -45,6 +45,7 @@ import { allowanceUsedExact } from "@/lib/store-allowance";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
@@ -227,8 +228,16 @@ export async function settleGroup(input: {
   const group = await readGroup(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
   if (group.paid) return "already";
-  const [claimed] = await redisPipeline([["SET", `${groupKey(id)}:settling`, "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // Settled only on a mark that is ours (lib/claim-mark.ts, rule 24): "taken" is a run settling it now; "unknown"
+  // settles nothing, lets go of the mark if it holds our own value, and throws, so the confirmation is tried again.
+  const settling = `${groupKey(id)}:settling`;
+  const mark = claimValue();
+  const claimed = await claimMark(settling, 300, mark);
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") {
+    await releaseMark(settling, mark);
+    throw new UnknownReplyError("a purchase for several people's settling mark");
+  }
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   // Stripe gives the payment as its id, or whole when the caller asked for it.
@@ -243,8 +252,9 @@ export async function settleGroup(input: {
   await redisPipeline([
     ...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS] as (string | number)[]] : []),
     ["SET", anyKey(group.s), "1"],
-    ["DEL", `${groupKey(id)}:settling`],
   ]);
+  // Let go only while it holds this run's own value: never another run's mark.
+  await releaseMark(settling, mark);
 
   await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),

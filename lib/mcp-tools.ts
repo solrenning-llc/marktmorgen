@@ -49,7 +49,7 @@ import {
   COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork, BUNDLE_CHOICES_MOST, IMPORTS_MOST, bundleChoicesWork, importsWork,
 } from "@/lib/api-read-rules";
 import { PICKER_PAGE, bundleChoicesPage, choiceCursor, choiceQuery } from "@/lib/bundle-choices";
-import { storeImportsRead } from "@/lib/imports";
+import { type ImportJob, type ImportKind, type ImportSource, type ImportState, storeImportsRead } from "@/lib/imports";
 import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
 import { pathsBytes, readPaths } from "@/lib/next-bought";
@@ -773,6 +773,57 @@ export async function bundleChoicesTool(store: Store, args: Record<string, unkno
   return refused ?? { found: true as const, value };
 }
 
+const UNREAD_IMPORTS = "Your imports could not be read just now. This is not an empty history; try again in a moment.";
+// Each set whole by its type, so a kind, state or source added to lib/imports.ts must be added here too.
+const IMPORT_KINDS: Readonly<Record<ImportKind, true>> = { contacts: true, products: true, purchases: true, members: true };
+const IMPORT_STATES: Readonly<Record<ImportState, true>> = { receiving: true, queued: true, running: true, mailing: true, done: true, canceled: true, failed: true };
+const IMPORT_SOURCES: Readonly<Record<ImportSource, true>> = { csv: true, clickfunnels: true };
+const whole = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const oneOf = <K extends string>(set: Readonly<Record<K, true>>, v: unknown): v is K => typeof v === "string" && Object.hasOwn(set, v);
+
+/**
+ * An import as get_imports sends it, or null when the kept record is not in
+ * its exact shape (Claude 4 (cloud B) and Codex Nuvem 3 on #3661): every count
+ * and row figure a whole number of at least 0, both times whole numbers, kind,
+ * state and source from their sets. contacts and stopped, which imports made
+ * before they existed never recorded, are null then (rule 24: not counted,
+ * never a zero); kept with any other value they are not read. A source absent
+ * is csv: the only files read before ClickFunnels's (lib/imports.ts).
+ */
+function importRow(job: ImportJob) {
+  const raw: Record<string, unknown> = job;
+  const { counts, options } = raw;
+  if (!isRecord(counts) || !isRecord(options)) return null;
+  if (!oneOf(IMPORT_KINDS, raw.kind) || !oneOf(IMPORT_STATES, raw.state)) return null;
+  if (options.source !== undefined && !oneOf(IMPORT_SOURCES, options.source)) return null;
+  const figures = [raw.at, raw.finishedAt, raw.expected, raw.total, raw.done, counts.added, counts.already, counts.skipped, counts.errors, counts.mailed, counts.unmailed];
+  if (!figures.every(whole)) return null;
+  const notAlways = (n: unknown): number | null | undefined => (n === undefined ? null : whole(n) ? n : undefined);
+  const contacts = notAlways(counts.contacts);
+  const stopped = notAlways(counts.stopped);
+  if (contacts === undefined || stopped === undefined) return null;
+  return {
+    id: job.id,
+    kind: raw.kind,
+    from: options.source ?? "csv",
+    state: raw.state,
+    started_at: raw.at as number,
+    finished_at: raw.finishedAt as number,
+    rows_expected: raw.expected as number,
+    rows_received: raw.total as number,
+    rows_looked_at: raw.done as number,
+    added: counts.added as number,
+    already: counts.already as number,
+    skipped: counts.skipped as number,
+    errors: counts.errors as number,
+    emailed: counts.mailed as number,
+    not_emailed: counts.unmailed as number,
+    contacts_not_emailable: contacts,
+    stopped,
+  };
+}
+
 /**
  * The store's latest imports from another platform (631 [AA1] (a)): what
  * kind, where from, how far along and what each row came to, as counts. Not
@@ -787,28 +838,15 @@ export async function importsTool(store: Store, hold: Hold): Promise<Response | 
   // Only Redis's exact answers: anything else is unknown, all that was set aside is kept and it is said so, never an
   // empty or shorter history (Codex A3 and G, #1933).
   const read = await storeImportsRead(store);
-  if (read === "unknown") return (await settle(most)) ?? { found: false as const, error: "Your imports could not be read just now. This is not an empty history; try again in a moment." };
+  if (read === "unknown") return (await settle(most)) ?? { found: false as const, error: UNREAD_IMPORTS };
+  // Every field it sends read exactly (Claude 4 (cloud B) and Codex Nuvem 3 on #3661): a kept record with an import's
+  // id is not an import by that alone. One that is not in its exact shape is unknown, all set aside kept, never a
+  // TypeError after the hold was taken and never a count sent as text or an object.
+  const rows = read.jobs.map(importRow);
+  if (rows.some((row) => row === null)) return (await settle(most)) ?? { found: false as const, error: UNREAD_IMPORTS };
   const value = {
-    note: "Newest first, at most ten. started_at and finished_at are in milliseconds since 1970 (UTC); finished_at is 0 while it runs. added were brought in, already were there, skipped were left out on purpose (no consent, unsubscribed, a repeated row), errors could not be brought in: the creator downloads that report in the studio.",
-    imports: read.jobs.map((job) => ({
-      id: job.id,
-      kind: job.kind,
-      from: job.options.source ?? "csv",
-      state: job.state,
-      started_at: job.at,
-      finished_at: job.finishedAt,
-      rows_expected: job.expected,
-      rows_received: job.total,
-      rows_looked_at: job.done,
-      added: job.counts.added,
-      already: job.counts.already,
-      skipped: job.counts.skipped,
-      errors: job.counts.errors,
-      emailed: job.counts.mailed,
-      not_emailed: job.counts.unmailed,
-      contacts_not_emailable: job.counts.contacts ?? 0,
-      stopped: job.counts.stopped ?? 0,
-    })),
+    note: "Newest first, at most ten. started_at and finished_at are in milliseconds since 1970 (UTC); finished_at is 0 while it runs. added were brought in, already were there, skipped were left out on purpose (no consent, unsubscribed, a repeated row), errors could not be brought in: the creator downloads that report in the studio. contacts_not_emailable and stopped are null on an import made before they were counted: not counted, never a zero.",
+    imports: rows,
   };
   const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
   const refused = await settle(settledUnits(atLeast(importsWork(read.ids), { bytes: read.bytes, sent }), most));

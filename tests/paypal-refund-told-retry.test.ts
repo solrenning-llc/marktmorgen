@@ -77,14 +77,26 @@ setSendHooksForTests({ fetch: { resolve: async () => [{ address: "127.0.0.1", fa
 let failing = false;
 /** Replies the first-failure mark's GET gives instead of the stand-in's, while set (rule 24). */
 let oddMark: unknown = undefined;
+/**
+ * How the first-failure mark's write goes, while set (Codex C2's M1 on #3499): "lost" answers "QUEUED" and writes
+ * nothing, so its GET finds no mark; "throwOnce" gives the next pipeline that writes it no answer at all, once.
+ */
+let markWrites: "lost" | "throwOnce" | undefined = undefined;
 /** Every command sent, for the counts below. */
 const sent: (string | number)[][] = [];
 const pipeline = redis.pipeline.bind(redis);
+const isMarkWrite = (c: (string | number)[]) => c[0] === "SET" && String(c[1]).startsWith("nl:ppsell:tell:");
 redis.pipeline = (async (commands: (string | number)[][]) => {
   sent.push(...commands);
   if (failing && commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) throw new Error("synthetic: the read had no answer");
-  const replies = await pipeline(commands);
-  return commands.map((c, i) => (oddMark !== undefined && c[0] === "GET" && String(c[1]).startsWith("nl:ppsell:tell:") ? oddMark : replies[i]));
+  if (markWrites === "throwOnce" && commands.some(isMarkWrite)) {
+    markWrites = undefined;
+    throw new Error("synthetic: the mark's write had no answer");
+  }
+  const lostWrites = markWrites === "lost";
+  const replies = await pipeline(lostWrites ? commands.map((c) => (isMarkWrite(c) ? ["GET", "nl:synthetic:nothing"] : c)) : commands);
+  return commands.map((c, i) =>
+    oddMark !== undefined && c[0] === "GET" && String(c[1]).startsWith("nl:ppsell:tell:") ? oddMark : lostWrites && isMarkWrite(c) ? "QUEUED" : replies[i]);
 }) as typeof redis.pipeline;
 const logged = console.error;
 console.error = (...args: unknown[]) => {
@@ -226,6 +238,50 @@ async function main(): Promise<void> {
   if (notSentLines) {
     is("a refund already told: no line", await notSentLines(store, "refund.issued", `paypal:${healthy.capture}`, "Not sent, synthetic."), 0);
     is("still one line in all", (await notSent()).length, 1);
+  }
+
+  part("The tries stay inside REFUND_TELL_TRIES_AT_MOST whatever the mark answers (Codex C2's M1 on #3499)");
+  /** The tellings the sweep tried over `looks` hourly looks: each try reads the deletion print, which fails. */
+  const triesOver = async (looks: number, order: string) => {
+    let n = 0;
+    for (let look = 0; look < looks && (await watchedAt(order)) !== null; look += 1) {
+      const before = sent.length;
+      await sweep();
+      if (sent.slice(before).some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) n += 1;
+      hour();
+    }
+    return n;
+  };
+  const shapes: [string, () => void][] = [
+    ["a mark that reads as text, not whole seconds, on every look", () => { oddMark = "soon"; }],
+    ["a mark whose write writes nothing and answers QUEUED", () => { markWrites = "lost"; }],
+    ["a mark that reads as a time ten days ahead of the clock", () => { oddMark = String(Math.floor(Date.now() / 1000) + 10 * 86_400); }],
+  ];
+  for (const [name, set] of shapes) {
+    const odd = await paidThenRefunded(`pp-bound-${name.replace(/[^a-z]/g, "").slice(0, 24)}@example.com`);
+    const linesBefore = (await notSent()).length;
+    failing = true;
+    set();
+    const unsure = await triesOver(12, odd.order);
+    is(`${name}: twelve hourly looks try the telling at most REFUND_TELL_TRIES_AT_MOST times`, unsure <= (triesAtMost as number), true);
+    is(`${name}: unknown, so still watched, not told, nothing said not sent, the purchase held`, [(await watchedAt(odd.order)) !== null, await told(odd.capture), (await notSent()).length, await holds(odd.email)], [true, 0, linesBefore, 1]);
+    oddMark = undefined;
+    markWrites = undefined;
+    const after = await triesOver(48, odd.order);
+    is(`${name}: once the mark reads, still failing: the tries in all stay inside REFUND_TELL_TRIES_AT_MOST`, unsure + after <= (triesAtMost as number), true);
+    is(`${name}: then said not sent once, the purchase taken back, the order out of the watch`, [(await notSent()).length, await holds(odd.email), await watchedAt(odd.order)], [linesBefore + 1, 0, null]);
+    failing = false;
+  }
+  {
+    const odd = await paidThenRefunded("pp-bound-thrown@example.com");
+    const linesBefore = (await notSent()).length;
+    failing = true;
+    markWrites = "throwOnce";
+    const tries = await triesOver(48, odd.order);
+    is("a first mark write with no answer: tried again, the tries in all inside REFUND_TELL_TRIES_AT_MOST", tries > 1 && tries <= (triesAtMost as number), true);
+    is("a first mark write with no answer: then said not sent once, the order out of the watch", [(await notSent()).length, await watchedAt(odd.order)], [linesBefore + 1, null]);
+    markWrites = undefined;
+    failing = false;
   }
 
   console.error = logged;

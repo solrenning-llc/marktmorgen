@@ -234,6 +234,8 @@ const en = {
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
     limited: "Too many tries for now. Wait a few minutes and press the button again.",
+    /** The link could not be checked just now (CX-123 rule 24): never said as an offer that ended. */
+    unknown: "We could not check this offer right now. Nothing was charged. Please try again in a moment.",
   } as Record<string, string>,
   membershipLabel: "Membership",
   endedBody: (title: string) =>
@@ -597,6 +599,7 @@ const es: MembershipWords = {
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
     limited: "Demasiados intentos por ahora. Espera unos minutos y vuelve a pulsar el botón.",
+    unknown: "No pudimos comprobar esta oferta en este momento. No se cobró nada. Vuelve a intentarlo en un momento.",
   },
   membershipLabel: "Membresía",
   endedBody: (title) =>
@@ -954,6 +957,7 @@ const fr: MembershipWords = {
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
     limited: "Trop de tentatives pour le moment. Attendez quelques minutes et appuyez à nouveau sur le bouton.",
+    unknown: "Nous n'avons pas pu vérifier cette offre pour le moment. Rien n'a été débité. Réessayez dans un instant.",
   },
   membershipLabel: "Abonnement",
   endedBody: (title) =>
@@ -1318,6 +1322,7 @@ const de: MembershipWords = {
     refused:
       "Das Angebot konnte gerade nicht angewendet werden. Sie können unten zum normalen Preis zurückkehren oder auf die E-Mail antworten, mit der es kam.",
     limited: "Vorerst zu viele Versuche. Warten Sie ein paar Minuten und drücken Sie die Schaltfläche erneut.",
+    unknown: "Wir konnten dieses Angebot gerade nicht prüfen. Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal.",
   },
   membershipLabel: "Mitgliedschaft",
   endedBody: (title) =>
@@ -1679,6 +1684,7 @@ const it: MembershipWords = {
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
     limited: "Troppi tentativi per ora. Aspetta qualche minuto e premi di nuovo il pulsante.",
+    unknown: "Non è stato possibile verificare questa offerta in questo momento. Non è stato addebitato nulla. Riprova tra un momento.",
   },
   membershipLabel: "Abbonamento",
   endedBody: (title) =>
@@ -2033,6 +2039,7 @@ const nl: MembershipWords = {
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
     limited: "Even te veel pogingen. Wacht een paar minuten en druk dan opnieuw op de knop.",
+    unknown: "We konden dit aanbod nu niet controleren. Er is niets afgeschreven. Probeer het zo meteen opnieuw.",
   },
   membershipLabel: "Lidmaatschap",
   endedBody: (title) =>
@@ -2385,6 +2392,7 @@ const pt: MembershipWords = {
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",
     limited: "Demasiadas tentativas por agora. Aguarde alguns minutos e carregue novamente no botão.",
+    unknown: "Não foi possível verificar esta oferta neste momento. Não foi cobrado nada. Tente novamente daqui a pouco.",
   },
   membershipLabel: "Subscrição",
   endedBody: (title) =>

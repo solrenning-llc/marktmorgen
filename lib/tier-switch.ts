@@ -234,6 +234,42 @@ export function switchBody(itemId: string, price: string, at: number): URLSearch
   return body;
 }
 
+/**
+ * The Idempotency-Key of a switch's charging update (lib/yearly-switch.ts too): the membership, the preview's second
+ * and the price it moves onto. A retry of the same switch sends the same key, so Stripe answers it with the first
+ * request's result, or a 409 while that one still runs, never with a second charge. PREVIEW_SECONDS (15 minutes)
+ * keeps every retry inside the 24 hours Stripe keeps a key; an older preview is "stale", and the new one reads the
+ * subscription again before anything is sent.
+ */
+export function switchKey(subscription: string, at: number, price: string): string {
+  return `switch:${subscription}:${at}:${price}`;
+}
+
+/**
+ * Whether Stripe's refusal of a switch's charging update says that nothing was applied: a 4xx, except a 409 (the
+ * first request with this key still running) and an idempotency_error (this key already sent with other parameters,
+ * as when the EU box is ticked again, so the yes has another second). Those two may stand for a switch already made:
+ * "unconfirmed", never "nothing changed".
+ */
+export function refusedUnapplied(error: unknown): error is StripeError {
+  return (
+    error instanceof StripeError &&
+    error.status < 500 &&
+    error.status !== 409 &&
+    error.code !== "idempotency_error" &&
+    error.code !== "idempotency_key_in_use"
+  );
+}
+
+/**
+ * After an unconfirmed switch the membership's lock is held a full 60 seconds from that answer (withLock, keepFullTerm,
+ * whatever the reads before the charge took) and left to run out rather than let go: a new preview, whose new second makes a new key, is "busy" while the first
+ * request may still be running at Stripe, and is read again afterwards.
+ */
+export function keepWhileUnconfirmed(result: { ok: boolean; reason?: string }): boolean {
+  return !result.ok && result.reason === "unconfirmed";
+}
+
 /** The price a tier is switched onto, made once on the creator's account and reused. */
 export async function tierPrice(store: Store, product: Listing): Promise<string> {
   const account = store.stripeAccountId as string;
@@ -364,12 +400,14 @@ export async function switchTier(store: Store, token: string, subscription: stri
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.to));
       let updated: Record<string, unknown>;
       try {
-        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+        // Under the switch's stable key (switchKey): a retry of this preview is never a second charge.
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION, switchKey(subscription, at, price));
       } catch (error) {
-        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, or Stripe's own
-        // failure, after the update was sent: it may have been applied, so it is "unconfirmed", never "nothing changed"
-        // (Codex CX1 on #2764). Nothing is sent again.
-        if (error instanceof StripeError && error.status < 500) throw error;
+        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, Stripe's own
+        // failure, or its answer that this key is still running or was used (refusedUnapplied), after the update was
+        // sent: it may have been applied, so it is "unconfirmed", never "nothing changed" (Codex CX1 on #2764).
+        // Nothing is sent again, and the lock is left to run out (keepWhileUnconfirmed).
+        if (refusedUnapplied(error)) throw error;
         console.error("a tier switch's charging update had no answer that can be read", error);
         return { ok: false, reason: "unconfirmed" };
       }
@@ -401,7 +439,7 @@ export async function switchTier(store: Store, token: string, subscription: stri
       ).catch((error) => console.error("recording a tier switch failed", error));
       await tell(store, account, found, updated, kept);
       return { ok: true, title: found.to.title };
-    });
+    }, keepWhileUnconfirmed);
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("switching a tier failed", error);

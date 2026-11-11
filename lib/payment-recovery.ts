@@ -480,9 +480,10 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   let sent = 0;
   // Where the next run reads again from: before the first member read and not handled (time ran out, something could
   // not be read, the email did not go), or null when every one was.
-  let stopAt: string | null = null;
+  // Every member not handled, in list order, by where a reading starts to list it again.
+  const notHandledFrom: string[] = [];
   const notHandled = (from: string) => {
-    if (stopAt === null) stopAt = from;
+    if (notHandledFrom[notHandledFrom.length - 1] !== from) notHandledFrom.push(from);
   };
 
   for (const { sub, card, customer, email, payAt, from } of due) {
@@ -552,8 +553,11 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   // nothing moved, so a member whose notice fails every time would hold the store's cursor for good, and every member
   // after it would never be read (Claude 2 and Codex S on #3215); the walk then goes on from the last page read, and
   // that member is read again when the list comes round.
+  // Only that member is stepped past: the next one not handled, when there is one, is read again on the next run
+  // (Claude 1 on #3215: a sender outage would otherwise skip every member the run read).
+  const stopAt = notHandledFrom[0] ?? null;
   if (!ended && stopAt === start) console.error("card notices: a member at the start of this run was not handled again; the walk goes on and reads it when the list comes round", store.handle);
-  await moveCursor(ended ? "" : stopAt === null || stopAt === start ? after : stopAt);
+  await moveCursor(ended ? "" : stopAt === null ? after : stopAt === start ? (notHandledFrom[1] ?? after) : stopAt);
   return { sent, complete: stopAt === null };
 }
 
@@ -583,6 +587,10 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
   const start = { cursor, skip, held: /^\d+$/.test(savedHeld ?? "") ? Number(savedHeld) : 0 };
   // The first store not finished this run, where the next run starts (HOLD_RUNS), or null when none.
   let hold: string | null = null;
+  // A run that did not start at the top comes round to it, and stops where it started: a store held near the end
+  // of the walk never keeps the stores before it waiting (Claude 6 on #3215).
+  const fromTop = start.cursor === "0" && start.skip === 0;
+  let wrapped = false;
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
@@ -592,6 +600,8 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
         done += 1;
         continue;
       }
+      // Come round to where this run started: the walk is whole.
+      if (wrapped && cursor === start.cursor && done >= start.skip) break;
       if (Date.now() >= deadline) break;
       if (worthAsking(store)) {
         counts.stores += 1;
@@ -618,7 +628,12 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
     }
     skip = 0;
     cursor = next;
-    if (next === "0") break;
+    // The end of the walk: done when this run started at the top or came round already (the scan moved past its
+    // start without meeting it); otherwise round to the top.
+    if (next === "0") {
+      if (fromTop || wrapped) break;
+      wrapped = true;
+    }
   }
   await redisPipeline([["SET", CURSOR_KEY, hold ?? `${cursor}|0`]]);
   return counts;

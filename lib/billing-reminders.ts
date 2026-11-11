@@ -42,8 +42,9 @@ const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,64}$/;
  *   - the cap stopped this run: from before the first not handled (its email did not go), or after the last page
  *     read when every one was. Not before the first not handled when that is where this run started: nothing moved,
  *     so a subscription whose email fails every time would hold the cursor for good, and every subscription after it
- *     would never be read (Claude 2 and Codex S on #3215). The walk then goes on from the last page read, and that
- *     one is read again when the list comes round.
+ *     would never be read (Claude 2 and Codex S on #3215). The walk then steps past that one only: from before the
+ *     second not handled, or from the last page read when there is none, and that one is read again when the list
+ *     comes round.
  * `more`: the cap stopped this run.
  */
 async function walkList(
@@ -55,7 +56,8 @@ async function walkList(
   // reminder is held by its own mark.
   let after = typeof saved === "string" && SUBSCRIPTION_ID.test(saved) ? saved : "";
   const start = after;
-  let stopAt: string | null = null;
+  // Every subscription not handled, in list order, by where a reading starts to list it again.
+  const notHandledFrom: string[] = [];
   let seen = 0;
   let more = true;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -65,7 +67,7 @@ async function walkList(
       const from = previous;
       previous = String(subscription.id);
       seen += 1;
-      if (!(await each(subscription)) && stopAt === null) stopAt = from;
+      if (!(await each(subscription))) notHandledFrom.push(from);
     }
     const last = data[data.length - 1];
     if (!hasMore || typeof last?.id !== "string") {
@@ -76,8 +78,11 @@ async function walkList(
     after = last.id;
   }
   if (more) console.error(`billing reminders: more ${status} subscriptions than one run reads; the next run goes on from where this one stopped`);
+  const stopAt = notHandledFrom[0] ?? null;
   if (more && stopAt === start) console.error(`billing reminders: a ${status} subscription at the start of this run was not handled again; the walk goes on and reads it when the list comes round`);
-  const next = !more ? "" : stopAt === null || stopAt === start ? after : stopAt;
+  // Only that one is stepped past: the next one not handled, when there is one, is read again on the next run
+  // (Claude 1 on #3215: a sender outage would otherwise skip every one the run read).
+  const next = !more ? "" : stopAt === null ? after : stopAt === start ? (notHandledFrom[1] ?? after) : stopAt;
   await redisPipeline([next ? ["SET", afterKey(status), next, "EX", AFTER_SECONDS] : ["DEL", afterKey(status)]]);
   return { seen, more };
 }

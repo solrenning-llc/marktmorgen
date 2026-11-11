@@ -116,8 +116,8 @@ async function main(): Promise<void> {
   await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {} });
   const statsId = (await storeForEmail(owner))!.statsId!;
   const sha = (value: string) => createHash("sha256").update(value).digest("hex");
-  const emailed = async (email: string, token: string) => {
-    await redis.pipeline([["SET", `nl:aff:link:${sha(`nimbus-aff-link:${token}`).slice(0, 40)}`, JSON.stringify({ s: statsId, e: email, n: "" }), "EX", 600]]);
+  const emailed = async (email: string, token: string, extra: Record<string, unknown> = {}) => {
+    await redis.pipeline([["SET", `nl:aff:link:${sha(`nimbus-aff-link:${token}`).slice(0, 40)}`, JSON.stringify({ s: statsId, e: email, n: "", ...extra }), "EX", 600]]);
     return token;
   };
   const opened = await openAffiliateLink((await storeForEmail(owner))!, await emailed("partner@example.test", "a".repeat(64)));
@@ -186,6 +186,9 @@ async function main(): Promise<void> {
   is("an affiliate the store already has keeps their own page", [suspendedPage(own), (await html(own)).includes("partner@example.test")], [false, true]);
   const back = await affiliates({ token: await emailed("partner@example.test", "c".repeat(64)) });
   is("and the emailed link that signs them back in", [suspendedPage(back), (await html(back)).includes("Continue as partner@example.test")], [false, true]);
+  // The creator's invitation (grant.k) would approve them: its route refuses it while the store is switched off
+  // (lib/affiliates.ts takesNewAffiliates), so the page offers no button for it either.
+  is("but not the creator's invitation to them, which would approve them", suspendedPage(await affiliates({ token: await emailed("partner@example.test", "d".repeat(64), { k: 1 }) })), true);
   // What stays open names nothing a product's id in the address asks for: anyone who saw an old link has the id.
   const left = await open(waitlist, { status: "left", product: paid.product.id });
   const leftDrawn = await html(left);

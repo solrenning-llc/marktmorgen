@@ -21,6 +21,7 @@ for (const [reason, expectedStatus] of scenarios) {
     admission.reason = reason;
     admission.calls = 0;
     admission.needs.length = 0;
+    admission.message = "Synthetic admission refusal";
     let networkAttempts = 0;
     const previousFetch = globalThis.fetch;
     const previousError = console.error;
@@ -44,10 +45,40 @@ for (const [reason, expectedStatus] of scenarios) {
       assert.deepEqual(state.events, [], "no storage measurement, provider work or token issuance");
       assert.equal(networkAttempts, 0);
       assert.equal(response.status, expectedStatus);
-      assert.deepEqual(body, { ok: false, error: reason });
+      assert.deepEqual(body, { ok: false, error: reason, message: "Synthetic admission refusal" });
     } finally {
       globalThis.fetch = previousFetch;
       console.error = previousError;
     }
   });
 }
+
+test("an uncountable studio action keeps its own words, never just \"used\" (Claude 5 LEVE)", async () => {
+  reset();
+  resetWorld();
+  admission.reason = "used";
+  admission.calls = 0;
+  admission.needs.length = 0;
+  // countStudio's words when the figure could not be read (why: "unknown").
+  admission.message = "This can't be counted right now. Try again in a minute.";
+  const previousFetch = globalThis.fetch;
+  const previousError = console.error;
+  globalThis.fetch = async () => { throw new Error("External calls are forbidden in this synthetic test"); };
+  console.error = () => {};
+  try {
+    const request = new Request("https://upload.example.test/api/store/file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://upload.example.test" },
+      body: JSON.stringify({ pathname: `stores/${FOLDER}/product-1/file.pdf`, clientPayload: JSON.stringify({ productId: "product-1" }) }),
+    }) as NextRequest;
+    const response = await POST(request);
+    const body = await response.json() as { ok: boolean; error: string; message?: string };
+    assert.equal(response.status, 429, "the same status as the sibling download route's refusedJson");
+    assert.equal(body.error, "used");
+    assert.equal(body.message, admission.message, "the reader is told the count could not be read, not that it was used up");
+    assert.deepEqual(state.events, [], "still nothing measured, signed or issued");
+  } finally {
+    globalThis.fetch = previousFetch;
+    console.error = previousError;
+  }
+});

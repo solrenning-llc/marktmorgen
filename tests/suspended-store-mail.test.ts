@@ -7,8 +7,11 @@
  * is neither nothing nor a day ("unknown", as lib/store.ts reads it after
  * #3399) counts as switched off (CX-123 rule 24). A workflow step waits the
  * way every other workflow wait is bounded (lib/flow-retry.ts,
- * MAX_WAITS_PER_RUN), its looks spread over MAX_WAIT_DAYS_PER_STEP so a run
- * still waits weeks later and goes on once the store is back on. A look while
+ * MAX_WAITS_PER_RUN): its first look a day after it began to wait, so a
+ * store back on within the day holds it a day at most (Claude 1's MEDIUMs on
+ * #3416 and #3428), the others spread over what is left of
+ * MAX_WAIT_DAYS_PER_STEP so a run still waits weeks later and goes on once the
+ * store is back on. A look while
  * the store is switched off costs at most half of WAIT_COMMANDS_PER_TRY, so it
  * counts as half a wait: a run looks twice as often within the same commands,
  * and waits of other kinds earlier in the run leave it more looks (Claude 2's
@@ -58,8 +61,14 @@ const nowS = () => Math.floor(Date.now() / 1000);
 const DAY = 86_400;
 /** A look while the store is switched off counts as half a wait, so a run has twice as many looks as waits. */
 const LOOKS = 2 * MAX_WAITS_PER_RUN;
-/** A switched-off step's looks, spread over the days one step may wait: the first a sixth of them away. */
-const SPREAD = Math.floor((MAX_WAIT_DAYS_PER_STEP * DAY) / LOOKS);
+/**
+ * A switched-off step's first look: a day after it began to wait, so a store switched back on within the day holds
+ * it a day at most (Claude 1's MEDIUMs on #3416 and #3428: a sixth of 35 days held a short switch-off for 5.83 days,
+ * 17.5 after two earlier waits). The looks left after it share what is left of the days a step may wait.
+ */
+const FIRST_LOOK = DAY;
+/** The second look of a run that has not waited before: the looks after the first spread over what is left. */
+const SECOND_LOOK = FIRST_LOOK + Math.floor((MAX_WAIT_DAYS_PER_STEP * DAY - FIRST_LOOK) / (LOOKS - 1));
 /** The store as read, but with a switch-off value in no known shape: what lib/store.ts reads as "unknown". */
 const unknownOff = async (handle: string): Promise<Store | null> => {
   const store = await storeForHandle(handle);
@@ -154,13 +163,14 @@ async function main(): Promise<void> {
   part("When a switched-off step is looked at again (lib/flow-retry.ts, pure)");
   const t = 1_800_000_000;
   // For a switched-off look, the second argument is the run's half-waits used, this look included (a wait counts two).
-  is("the first look: a sixth of the days a step may wait, not a day and not a third", nextTry("switched_off", 1, t, { since: t }), t + SPREAD);
-  is("the next ones share what is left of them", nextTry("switched_off", 2, t + SPREAD, { since: t }), t + SPREAD + Math.floor((MAX_WAIT_DAYS_PER_STEP * DAY - SPREAD) / (LOOKS - 1)));
-  is("the last look a run may make is on the last day a step may wait", nextTry("switched_off", LOOKS, t + (LOOKS - 1) * SPREAD, { since: t }), t + MAX_WAIT_DAYS_PER_STEP * DAY);
-  is("after two waits of other kinds earlier in the run, two looks are left, half-way and on that last day", nextTry("switched_off", 2 * 2 + 1, t, { since: t }), t + Math.floor((MAX_WAIT_DAYS_PER_STEP * DAY) / 2));
+  is("the first look comes a day after the step began to wait, not a sixth of the days it may wait", nextTry("switched_off", 1, t, { since: t }), t + FIRST_LOOK);
+  is("the next ones share what is left of them", nextTry("switched_off", 2, t + FIRST_LOOK, { since: t }), t + SECOND_LOOK);
+  is("the last look a run may make is on the last day a step may wait", nextTry("switched_off", LOOKS, t + SECOND_LOOK, { since: t }), t + MAX_WAIT_DAYS_PER_STEP * DAY);
+  is("after two waits of other kinds earlier in the run, two looks are left: a day in and on that last day", [nextTry("switched_off", 2 * 2 + 1, t, { since: t }), nextTry("switched_off", 2 * 2 + 2, t + FIRST_LOOK, { since: t })], [t + FIRST_LOOK, t + MAX_WAIT_DAYS_PER_STEP * DAY]);
   is("with one look left, it is still on that last day", nextTry("switched_off", LOOKS, t, { since: t }), t + MAX_WAIT_DAYS_PER_STEP * DAY);
-  is("without this step's start, it counts from now", nextTry("switched_off", 1, t), t + SPREAD);
-  is("never sooner than any other wait, and never past the days a step may wait", [nextTry("switched_off", 3, t + MAX_WAIT_DAYS_PER_STEP * DAY, { since: t }) >= t + MAX_WAIT_DAYS_PER_STEP * DAY + 600, nextTry("switched_off", 9, t, { since: t }) <= t + MAX_WAIT_DAYS_PER_STEP * DAY], [true, true]);
+  is("a step that began to wait for something else more than a day ago shares what is left, with no early look", nextTry("switched_off", 1, t + 5 * DAY, { since: t }), t + 5 * DAY + Math.floor(((MAX_WAIT_DAYS_PER_STEP - 5) * DAY) / LOOKS));
+  is("without this step's start, it counts from now", nextTry("switched_off", 1, t), t + FIRST_LOOK);
+  is("never sooner than any other wait, and never past the days a step may wait", [nextTry("switched_off", 3, t + MAX_WAIT_DAYS_PER_STEP * DAY, { since: t }) >= t + MAX_WAIT_DAYS_PER_STEP * DAY + 600, nextTry("switched_off", 9, t, { since: t }) <= t + MAX_WAIT_DAYS_PER_STEP * DAY, nextTry("switched_off", 1, t, { since: t - DAY + 60 }) >= t + 600], [true, true, true]);
   is("other waits keep their own times", [nextTry("retry", 6, t), nextTry("day", 1, t) <= t + DAY + 300], [t + LONGEST_DELAY_SECONDS, true]);
 
   part("A switched-off look counts as half a wait, within the same per-run bound (lib/flow-retry.ts, pure)");
@@ -181,24 +191,31 @@ async function main(): Promise<void> {
   const first = await run();
   const firstCost = commands - c0;
   is("nothing goes out, nothing counted as sent", [messages.length - sentBefore, first.sent], [0, 0]);
-  is(`the step waits, looked at again in ${MAX_WAIT_DAYS_PER_STEP} / ${LOOKS} days, not the next day`, [first.later, await queuedAt("kai@example.com")], [1, kaiFirst + SPREAD]);
+  is("the step waits, looked at again a day after it began to wait", [first.later, await queuedAt("kai@example.com")], [1, kaiFirst + FIRST_LOOK]);
   is("the run is not ended", (await readRun(flowId, personOf("kai@example.com")))?.run.status === "ended", false);
   is(`that look costs at most ${WAIT_COMMANDS_PER_TRY / 2} commands, half of any other workflow wait, so it may count as half`, firstCost > 0 && firstCost <= WAIT_COMMANDS_PER_TRY / 2, true);
   is("the run counts it as a look, not as a whole wait", await redisPipeline([["HMGET", `nl:wf:run:${flowId}:${personOf("kai@example.com")}`, "waits", "offLooks"]]), [[null, "1"]]);
 
+  part("Still switched off at its first look: it waits again, its looks left spread over what is left");
+  shift = (kaiFirst + FIRST_LOOK + 1) * 1000 - baseNow;
+  const again = await run();
+  is("nothing goes out, the step waits again, within the days a step may wait", [messages.length - sentBefore, again.sent, again.later, await queuedAt("kai@example.com")], [0, 0, 1, nowS() + Math.floor((kaiFirst + MAX_WAIT_DAYS_PER_STEP * DAY - nowS()) / (LOOKS - 1))]);
+
   part("Still switched off on day 3: the run still waits, and is not tried before its time");
-  shift += 3 * DAY * 1000;
+  const kaiNext = await queuedAt("kai@example.com");
+  shift = (kaiFirst + 3 * DAY) * 1000 - baseNow;
   const c10 = commands;
   const tenth = await run();
   is("nothing goes out on day 3", [messages.length - sentBefore, tenth.sent], [0, 0]);
-  is("the run is not ended and stays in line for its next look", [(await readRun(flowId, personOf("kai@example.com")))?.run.status === "ended", await queuedAt("kai@example.com")], [false, kaiFirst + SPREAD]);
+  is("the run is not ended and stays in line for its next look", [(await readRun(flowId, personOf("kai@example.com")))?.run.status === "ended", await queuedAt("kai@example.com"), (kaiNext ?? 0) > kaiFirst + 3 * DAY], [false, kaiNext, true]);
   is("a run of the job before then counts no wait and costs no wait's commands", commands - c10 < WAIT_COMMANDS_PER_TRY / 2, true);
 
   part("A switch-off value in no known shape: the step still waits (rule 24)");
   await noteTakedown(maker, null, false);
-  shift = (kaiFirst + SPREAD + 1) * 1000 - baseNow;
+  shift = ((kaiNext ?? nowS()) + 1) * 1000 - baseNow;
+  await renew();
   const second = await run(unknownOff);
-  is("nothing goes out, the step waits again, within the days a step may wait", [messages.length - sentBefore, second.sent, second.later, await queuedAt("kai@example.com")], [0, 0, 1, nowS() + Math.floor((kaiFirst + MAX_WAIT_DAYS_PER_STEP * DAY - nowS()) / (LOOKS - 1))]);
+  is("nothing goes out, the step waits again, within the days a step may wait", [messages.length - sentBefore, second.sent, second.later, await queuedAt("kai@example.com")], [0, 0, 1, nowS() + Math.floor((kaiFirst + MAX_WAIT_DAYS_PER_STEP * DAY - nowS()) / (LOOKS - 2))]);
 
   part("Back on: the step goes out by itself, at its next look");
   shift = ((await queuedAt("kai@example.com")) ?? nowS()) * 1000 + 1000 - baseNow;
@@ -206,6 +223,26 @@ async function main(): Promise<void> {
   const third = await run();
   is("sent once, to the one waiting", [third.sent, messages.length - sentBefore, messages.at(-1)?.to], [1, 1, ["kai@example.com"]]);
   is("and it leaves the line", await queuedAt("kai@example.com"), null);
+
+  part("Switched off for an hour, then back on: the step goes out within a day, not days later (Claude 1's MEDIUMs on #3416 and #3428)");
+  await renew();
+  await upsertContact(list, "ivy@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(studio, "ivy@example.com", { joined: false, tag: "hello" });
+  await noteTakedown(maker, null, true);
+  const ivyOff = nowS();
+  await run();
+  const ivyLook = await queuedAt("ivy@example.com");
+  is("the step waits, its first look a day after it began to wait", [messages.length - sentBefore, ivyLook], [1, ivyOff + FIRST_LOOK]);
+  shift += 3_600 * 1000;
+  await noteTakedown(maker, null, false);
+  const early = await run();
+  is("back on an hour later: nothing is tried before its look, nothing sent twice", [early.sent, messages.length - sentBefore, await queuedAt("ivy@example.com")], [0, 1, ivyLook]);
+  shift = ((ivyLook ?? nowS()) + 1) * 1000 - baseNow;
+  await renew();
+  const ivySent = await run();
+  is("at its look it goes out once, within a day and ten minutes of the switch-off", [ivySent.sent, messages.length - sentBefore, messages.at(-1)?.to, nowS() - ivyOff <= FIRST_LOOK + 600], [1, 2, ["ivy@example.com"], true]);
+  is("and it leaves the line, its run not ended", [await queuedAt("ivy@example.com"), (await readRun(flowId, personOf("ivy@example.com")))?.run.status === "ended"], [null, false]);
+  const sentBeforeLee = messages.length;
 
   part("Switched off for longer than a step may wait: it stops as every workflow wait does");
   await upsertContact(list, "lee@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
@@ -216,14 +253,14 @@ async function main(): Promise<void> {
     await renew();
     await run();
     const at = await queuedAt("lee@example.com");
-    is(`wait ${i}: still waiting, nothing sent`, [at !== null, messages.length - sentBefore], [true, 1]);
+    is(`wait ${i}: still waiting, nothing sent`, [at !== null, messages.length - sentBeforeLee], [true, 0]);
     shift += ((at ?? nowS()) - nowS() + 1) * 1000;
   }
   is(`its last look comes ${MAX_WAIT_DAYS_PER_STEP} days after it began to wait, not before`, nowS() - leeFirst >= MAX_WAIT_DAYS_PER_STEP * DAY, true);
   await renew();
   await run();
   const stopped = await readRun(flowId, personOf("lee@example.com"));
-  is("one look more and the run stops, with nothing sent", [stopped?.run.status, messages.length - sentBefore, await queuedAt("lee@example.com")], ["ended", 1, null]);
+  is("one look more and the run stops, with nothing sent", [stopped?.run.status, messages.length - sentBeforeLee, await queuedAt("lee@example.com")], ["ended", 0, null]);
   is("its history says why", stopped?.events.at(-1)?.note.includes("already waited as often as one run may"), true);
 
   part("Waits of other kinds earlier in the run leave a switched-off step more than one look");
@@ -236,7 +273,7 @@ async function main(): Promise<void> {
   await renew();
   const moFirst = nowS();
   await run();
-  is("its first look is half-way through the days a step may wait, not on the last of them", await queuedAt("mo@example.com"), moFirst + Math.floor((MAX_WAIT_DAYS_PER_STEP * DAY) / 2));
+  is("its first look is a day after it began to wait, not half-way through the days a step may wait", await queuedAt("mo@example.com"), moFirst + FIRST_LOOK);
   await noteTakedown(maker, null, false);
   shift = ((await queuedAt("mo@example.com")) ?? nowS()) * 1000 + 1000 - baseNow;
   await renew();

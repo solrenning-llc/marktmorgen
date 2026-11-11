@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { lessonCount, lessonsInOrder, readCourse, saveCourse, dropBody, saveNewBodies } from "@/lib/course";
+import { dropBody, lessonCount, lessonsInOrder, readCourse, readCourseExact, saveCourse, saveNewBodies } from "@/lib/course";
 import { previewCourseImport } from "@/lib/course-import";
 import { IMPORT_MAX_BYTES, importUnits, planCourseImport } from "@/lib/course-import-apply";
 import { readListing } from "@/lib/catalog";
@@ -45,8 +45,9 @@ export async function POST(request: NextRequest) {
     if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
     if (!product.course) return Response.json({ ok: false, error: "not_course" }, { status: 400 });
 
-    // The outline's size is paid for before it is read.
-    const reading = importUnits(raw.length, null);
+    // The outline's size is paid for before it is read, in UTF-8 bytes, as the body limit and a studio request's transfer are.
+    const bytes = Buffer.byteLength(raw, "utf8");
+    const reading = importUnits(bytes, null);
     if (reading > 0) {
       const counted = await countStudio(store, null, reading);
       if (!counted.ok) return refusedJson(counted.reason, counted.message);
@@ -73,7 +74,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const saving = importUnits(raw.length, preview.lessonCount) - reading;
+    const saving = importUnits(bytes, preview.lessonCount) - reading;
     const counted = await countStudio(store, null, saving);
     if (!counted.ok) return refusedJson(counted.reason, counted.message);
 
@@ -86,9 +87,14 @@ export async function POST(request: NextRequest) {
       try {
         await saveCourse(plan.course, store);
       } catch (error) {
-        // The outline was not written: its texts go, so nothing of the import is left behind.
-        for (const { lessonId } of plan.bodies) await dropBody(course.id, lessonId, store).catch(() => {});
-        throw error;
+        // The write may have been kept though its reply was lost: read the outline back exactly first.
+        // Kept: the import stands. Not kept: its texts go, so nothing of it is left behind. Unreadable: nothing is taken away.
+        const after = await readCourseExact(course.id).catch(() => undefined);
+        if (after === undefined) throw error;
+        if (!after || JSON.stringify(after) !== JSON.stringify(plan.course)) {
+          for (const { lessonId } of plan.bodies) await dropBody(course.id, lessonId, store).catch(() => {});
+          throw error;
+        }
       }
       const community = communityOf(store);
       if (community) await courseChanged(community, product, course, plan.course).catch(() => {});

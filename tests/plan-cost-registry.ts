@@ -1254,7 +1254,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/cron/imports/route.ts", names: ["activateScheduledCodes("] },
       // A course outline imported (260 [KJ5]) takes a studio request for each IMPORT_BYTES_PER_UNIT of it past the first before it is read, and,
       // to save, one more for each lesson (its text, at most MAX_BODY_LENGTH, one SET) and one for the outline's write, before anything is written.
-      { file: "app/api/store/course/import/route.ts", names: ["importUnits(raw.length, null)", "countStudio(store, null, saving)", "IMPORT_MAX_BYTES"] },
+      { file: "app/api/store/course/import/route.ts", names: ["importUnits(bytes, null)", "countStudio(store, null, saving)", "IMPORT_MAX_BYTES", "Buffer.byteLength(raw, \"utf8\")"] },
       { file: "lib/course-import-apply.ts", names: ["IMPORT_BYTES_PER_UNIT = 50_000", "export function importUnits"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },

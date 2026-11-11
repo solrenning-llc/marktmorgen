@@ -58,6 +58,20 @@ for (const label of [
   "Do you reuse your passwords? Enter your password",
   "How often do you change your password? Enter your Gmail password",
   "Your feedback on my password course: enter your password",
+  // Claude 1, review 6784981861: common credential combinations and wording variants.
+  "Email, password",
+  "Email; password",
+  "Email | Password",
+  "Login: email, password",
+  "Instagram username, password",
+  "Gmail – password",
+  "Gmail — password",
+  "Gmail. Password",
+  "Instagram password please",
+  "Instagram password here",
+  "Gmail password below",
+  "Account email and password please",
+  "What's the password for your Instagram?",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -102,6 +116,9 @@ for (const html of [
   '<input type="text" aria-label="Email&amp;password">',
   '<input type="text" placeholder="Login(email/password)">',
   '<label>Login (email and password)<input type="text"></label>',
+  '<label>Email, password<input type="text"></label>',
+  '<input type="text" aria-label="Gmail — password">',
+  '<input type="text" placeholder="What\'s the password for your Instagram?">',
 ]) {
   const result = checkGeneratedCode({ html, css: "", js: "" });
   is("a direct password request cannot pass the generated-code check", result.staticPass, false);

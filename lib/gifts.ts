@@ -365,6 +365,12 @@ export async function revokeRefundedGifts(
   if (!begun) return 0;
   const [any, anchorRaw, passRaw] = begun;
   if (!any) return 0;
+  // The place is a time or nothing yet (rule 24): anything else does nothing this run, never a newer window written
+  // over the real place at the end of the pass.
+  if (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw))) {
+    console.error("reading refunds for gifts: the kept place is not a time; the run does nothing");
+    return 0;
+  }
   const fresh = Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
   // A pass over the refunds longer than one run goes on where the last run stopped (r24 money inventory, item 1, the
   // gap left by #3188), as lib/group-buy.ts does: without it a store with more refunds since the anchor than one run

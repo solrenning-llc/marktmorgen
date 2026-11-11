@@ -16,8 +16,8 @@ import {
   spendMoveLink,
   takeMoveRoom,
 } from "@/lib/auth";
-import { moveAccount, storeForEmail } from "@/lib/store";
-import { standingOf } from "@/lib/plan-standing";
+import { accountStoresExact, moveAccount, storeForEmail } from "@/lib/store";
+import { costStandingOf } from "@/lib/plan-standing";
 import { moveMemberships } from "@/lib/team";
 import { MoveSplitError, discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
@@ -73,10 +73,16 @@ export async function POST(request: NextRequest) {
   // id, so moving from address to address finds no fresh one, then the company's. Past either, or a count or store
   // that does not read, nothing moves and the move's own work, its EVAL included, is never done (#2271: Codex G2's
   // MEDIUM, Claude 1's decision).
-  const moving = await storeForEmail(from).catch(() => undefined);
-  if (moving === undefined) return away("/signin?status=move-error");
+  // Every store of the account, read exactly: a reply cut short is never "no store", which would skip the store's own
+  // count (Claude 5's LOW 3 on #2271).
+  const stores = await accountStoresExact(from).catch(() => undefined);
+  if (stores === undefined) return away("/signin?status=move-error");
+  const moving = stores.find((store) => !store.extra) ?? stores[0] ?? null;
   // Paying stores count apart from the others, so stores made for free never close the way out for those who pay.
-  const room = await takeMoveRoom(moving ? { id: moving.sid, paid: standingOf(moving) === "paid" } : null);
+  // Paying is the repo's "paid up" rule (costStandingOf: an unpaid renewal or a disputed plan is not), on any store of
+  // the account, an extra store's too (Claude 5's LOWs 1 and 2 on #2271).
+  const paid = stores.some((store) => costStandingOf(store) === "paid");
+  const room = await takeMoveRoom(moving ? { id: moving.sid, paid } : null);
   if (room === "store") return away("/signin?status=move-month");
   if (room === "company") return away("/signin?status=move-paused");
   if (room !== "within") return away("/signin?status=move-error");
@@ -91,7 +97,13 @@ export async function POST(request: NextRequest) {
   // address and its ways in on the other are never left with a login by the emailed link let in, and the
   // next login or move repairs it (lib/move-repair.ts, which waits while this move's mark is there).
   // Not written: nothing moves, and the 5-minute mark lapses on its own.
+  // Only with a place among the broken moves left open (lib/auth.ts MAX_OPEN_BROKEN_MOVES; #2271, Codex G's funding
+  // MEDIUM): with none, nothing was written, so the mark is taken off at once and nothing moves.
   const op = await markBrokenMove(from, to).catch(() => null);
+  if (op === "full") {
+    await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+    return away("/signin?status=move-held");
+  }
   if (!op) return away("/signin?status=move-error");
   let broken = false;
   try {

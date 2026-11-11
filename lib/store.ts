@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1279,6 +1279,43 @@ export async function accountStores(email: string): Promise<Store[]> {
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     : [];
   const main = parseStore(first);
+  return main ? [main, ...others] : others;
+}
+
+/**
+ * accountStores read exactly (SG2 rule 24; Claude 5's LOW 3 on #2271): every reply in its shape, or
+ * UnknownReplyError, never fewer stores. An id listed whose record is gone (nil) is not a store; a record there
+ * that does not read as one is unknown. For a caller that decides by every
+ * store of the account (app/api/auth/move: whether any of them pays). A store whose record names another owner is
+ * left out, as accountStores leaves it out.
+ */
+export async function accountStoresExact(email: string): Promise<Store[]> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("an account's stores");
+  const address = email.toLowerCase();
+  const replies = repliesFor(await redisPipeline([
+    ["GET", await ownerKey(address)],
+    ["SMEMBERS", await accountKey(address)],
+  ]), 2);
+  const ids = replies ? stringList(replies[1]) : null;
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string") || !ids || ids.some((id) => !STORE_ID_PATTERN.test(id))) {
+    throw new UnknownReplyError("an account's stores");
+  }
+  const owns = (store: Store | null): store is Store => store !== null && store.email.toLowerCase() === address;
+  const first = replies[0] === null ? null : parseStore(replies[0]);
+  if (replies[0] !== null && first === null) throw new UnknownReplyError("an account's first store");
+  // As storeForEmail: a first store's record kept under this address names it, or there is none here.
+  const main = first !== null && storeRef(first).toLowerCase() === address ? first : null;
+  const read = ids.length ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length) : [];
+  if (!read) throw new UnknownReplyError("an account's stores");
+  const others: Store[] = [];
+  for (const raw of read) {
+    if (raw === null) continue;
+    const store = typeof raw === "string" ? parseStore(raw) : null;
+    if (store === null) throw new UnknownReplyError("an account's store");
+    // A store whose record says it belongs to someone else (only a half-finished move leaves one) is not listed, as in accountStores.
+    if (owns(store) && store.extra) others.push(store);
+  }
+  others.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return main ? [main, ...others] : others;
 }
 

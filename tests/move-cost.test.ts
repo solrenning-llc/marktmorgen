@@ -26,7 +26,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
-import { MAX_EMAIL_LENGTH, MOVES_PER_MONTH, markBrokenMove, openSession } from "@/lib/auth";
+import { MAX_EMAIL_LENGTH, MAX_OPEN_BROKEN_MOVES, MOVES_PER_MONTH, markBrokenMove, openSession } from "@/lib/auth";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES, claimHandle, createStore, ensureStatsId, ensureStoreId, renameHandle, storeForEmail } from "@/lib/store";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
@@ -184,8 +184,9 @@ async function main(): Promise<void> {
   is("a tap is priced from the rates: call, CPU and memory for its seconds, commands, bytes", Math.abs(tapCost - byHand) < 1e-12, true);
   const recordBytes = num("MOVE_BROKEN_RECORD_BYTES");
   const roomBytes = num("MOVE_ROOM_KEY_BYTES");
-  const kept = 2 * MOVES_PER_MONTH * recordBytes * DB_BYTE_MONTH + 2 * (MOVES_PER_MONTH + 2) * roomBytes * DB_BYTE_MONTH;
-  is("the month's records are priced: two broken-move records a move, the counts kept into the next month", Math.abs(num("MOVES_MONTH_KEPT") - kept) < 1e-12, true);
+  // The broken moves' records are at most MAX_OPEN_BROKEN_MOVES moves' at any time, each with its place (#2271).
+  const kept = MAX_OPEN_BROKEN_MOVES * (2 * recordBytes + num("MOVE_BROKEN_PLACE_BYTES")) * DB_BYTE_MONTH + 2 * (MOVES_PER_MONTH + 2) * roomBytes * DB_BYTE_MONTH;
+  is("the month's records are priced: two broken-move records and a place for every open move, the counts kept into the next month", Math.abs(num("MOVES_MONTH_KEPT") - kept) < 1e-12, true);
   is("the month: MOVES_PER_MONTH taps and what they keep", Math.abs(num("MOVES_MONTH_COST") - (MOVES_PER_MONTH * tapCost + kept)) < 1e-9, true);
   is("the month is a positive dollar figure, never zero", num("MOVES_MONTH_COST") > 0, true);
   is("MOVES_PER_MONTH's line names its priced month", String(registry.NOT_A_COST.MOVES_PER_MONTH ?? "").includes("MOVES_MONTH_COST"), true);
@@ -271,9 +272,13 @@ async function main(): Promise<void> {
 
   part("4. what the code does not bound is named, and the move is a line of the LLC fixed costs");
   const unknowns = Array.isArray(r.MOVE_COST_UNKNOWNS) ? (r.MOVE_COST_UNKNOWNS as string[]) : [];
-  for (const open of ["sessions", "memberships", "phone", "broken", "undo", "repair", "ask"]) {
+  for (const open of ["sessions", "memberships", "phone", "undo", "repair", "ask"]) {
     is(`an open item names ${open}`, unknowns.some((line) => line.toLowerCase().includes(open)), true);
   }
+  // The broken moves' stock is bounded since #2271 (lib/auth.ts MAX_OPEN_BROKEN_MOVES, tests/move-broken-stock.test.ts):
+  // priced in MOVES_MONTH_KEPT at its most (part 1), and no longer an open item.
+  is("the broken moves' stock is no longer an open item", unknowns.some((line) => line.toLowerCase().startsWith("broken moves kept")), false);
+  is("the registry keeps the code's own number of places", num("MOVE_BROKEN_OPEN_MOST"), MAX_OPEN_BROKEN_MOVES);
   const ids = fixed.LLC_FIXED_COST_IDS as readonly string[];
   is("the move is one of the LLC's fixed costs (FX275: 100% Marktmorgen)", ids.includes("account-moves"), true);
   type Approval = { monthlyUsdCents?: unknown; covers?: string; excludes?: string; approvedBy?: string; decided?: string; decision?: string };

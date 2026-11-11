@@ -223,23 +223,56 @@ const brokenKey = async (email: string) =>
   `nl:auth:move-broken:${(await sha256Hex(`nimbus-auth-move-broken:${normaliseEmail(email)}`)).slice(0, 40)}`;
 
 /**
+ * Broken moves left open, all addresses together: every move holds a place among them from the moment its records
+ * are written (before anything moves) until they are cleared, finished, undone or repaired. With every place held, a
+ * new move writes nothing and is refused before anything moves (app/api/auth/move), so the records that have no
+ * expiry never grow past this many (#2271: Codex G's funding MEDIUM 6789950680, Claude 1's review 6800796209). Priced
+ * at the most in tests/plan-cost-registry.ts MOVES_MONTH_KEPT.
+ */
+export const MAX_OPEN_BROKEN_MOVES = 1_000;
+/** The tokens of the moves that hold a place, scored by when they took it (MARK_BROKEN_MOVE, CLEAR_BROKEN_MOVE). */
+const BROKEN_OPEN_KEY = "nl:auth:move-broken:open";
+
+/**
  * A move that could not be finished nor undone (app/api/auth/move): its two
  * addresses, written on both with no expiry until it is repaired
  * (lib/move-repair.ts). While it is there, both count as moving: nothing is
  * added to them, a second move waits, and a login without a second step is
- * refused (lib/signin-finish.ts and the recovery routes).
+ * refused (lib/signin-finish.ts and the recovery routes). Written, in one
+ * script (MARK_BROKEN_MOVE), only with a place among MAX_OPEN_BROKEN_MOVES
+ * taken for it: with none left, nothing is written and the answer is "full".
+ * A reply in any other shape throws UnknownReplyError.
  */
-export async function markBrokenMove(from: string, to: string): Promise<string> {
+export async function markBrokenMove(from: string, to: string): Promise<string | "full"> {
   // A token made here for this move alone: what this move writes into the record later carries it, so nothing it
   // writes late lands on another move's record, even of the same two addresses (noteMoveCopy; Codex H, #2271).
   const op = randomToken();
   const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now(), op });
-  await redisPipeline([
-    ["SET", await brokenKey(from), value],
-    ["SET", await brokenKey(to), value],
-  ]);
-  return op;
+  const replies = repliesFor(await redisPipeline([
+    ["EVAL", MARK_BROKEN_MOVE, 3, BROKEN_OPEN_KEY, await brokenKey(from), await brokenKey(to), op, value, MAX_OPEN_BROKEN_MOVES, Date.now()],
+  ]), 1);
+  if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("a broken move's place");
+  return replies[0] === 1 ? op : "full";
 }
+
+/** Takes a place for ARGV[1] and writes ARGV[2] on KEYS[2] and KEYS[3], only below ARGV[3] places held: 1, or 0 and nothing. Modelled by lib/redis-memory.ts. */
+export const MARK_BROKEN_MOVE = `-- marktmorgen:move-broken-mark:v1
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('SET', KEYS[3], ARGV[2])
+redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1])
+return 1`;
+
+/** Gives back the place of each record's move (its `op`) and deletes the records: how many records went. Modelled by lib/redis-memory.ts. */
+export const CLEAR_BROKEN_MOVE = `-- marktmorgen:move-broken-clear:v1
+for i = 2, #KEYS do
+  local held = redis.call('GET', KEYS[i])
+  if held then
+    local ok, record = pcall(cjson.decode, held)
+    if ok and type(record) == 'table' and type(record.op) == 'string' then redis.call('ZREM', KEYS[1], record.op) end
+  end
+end
+return redis.call('DEL', KEYS[2], KEYS[3])`;
 
 /**
  * A broken move's record, read exactly (SG2 rule 24; Claude 5 on #2271): null only when there is none. A reply cut
@@ -353,8 +386,11 @@ for i = 1, #KEYS do
 end
 return written`;
 
+/** Clears a move's records and gives its place back (CLEAR_BROKEN_MOVE); a reply in any other shape throws UnknownReplyError. */
 export async function clearBrokenMove(from: string, to: string): Promise<void> {
-  await redisPipeline([["DEL", await brokenKey(from), await brokenKey(to)]]);
+  const replies = repliesFor(await redisPipeline([["EVAL", CLEAR_BROKEN_MOVE, 3, BROKEN_OPEN_KEY, await brokenKey(from), await brokenKey(to)]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  if (gone === null || gone > 2) throw new UnknownReplyError("the clearing of a broken move");
 }
 
 /** An EXISTS reply read as a mark: only an exact 0 is "not there"; anything else counts as there (audit SG2, finding 22). */

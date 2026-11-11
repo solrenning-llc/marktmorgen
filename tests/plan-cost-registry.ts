@@ -119,7 +119,7 @@ import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
-import { MAX_EMAIL_LENGTH, MOVES_PER_MONTH } from "@/lib/auth";
+import { MAX_EMAIL_LENGTH, MAX_OPEN_BROKEN_MOVES, MOVES_PER_MONTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
@@ -1656,12 +1656,18 @@ export const MOVE_TAP_LOCKS: Record<string, { takes: number; waitMs: number; sou
   // moveTwoStep: the two-step login of both addresses.
   "nl:2fa:lock:": { takes: 2, waitMs: 4_000, source: { file: "lib/two-step.ts", text: "return withLock(lockKey(email), 5, 4_000, work);" } },
 };
-/** Commands a tap runs when no lock is waited on, every EVAL's own commands included: measured 213 (tests/move-cost.test.ts). */
-export const MOVE_TAP_COMMANDS_UNCONTENDED = 220;
+/**
+ * Commands a tap runs when no lock is waited on, every EVAL's own commands included: measured 226 (tests/move-cost.test.ts),
+ * 213 before #2271's place among the open broken moves and the exact read of every store of the account.
+ */
+export const MOVE_TAP_COMMANDS_UNCONTENDED = 232;
 /** Pipelines a tap sends, each a trip to the database one after another: measured 99. */
 export const MOVE_TAP_PIPELINES = 105;
-/** Bytes a tap moves through the database both ways, as the REST API carries them, with every store at MAX_STORE_BYTES: measured 21,369,012. */
-export const MOVE_TAP_BYTES_UNCONTENDED = 21_500_000;
+/**
+ * Bytes a tap moves through the database both ways, as the REST API carries them, with every store at MAX_STORE_BYTES:
+ * measured 25,372,214, 21,369,012 before #2271 read every store of the account to know whether any pays.
+ */
+export const MOVE_TAP_BYTES_UNCONTENDED = 25_500_000;
 /** A lock's try (SET NX EX and its answer), in bytes, at the most. */
 export const LOCK_TRY_BYTES = 256;
 const lockRetries = (each: (lock: { takes: number; waitMs: number }, retries: number) => number) =>
@@ -1682,12 +1688,18 @@ export const MOVE_TAP_COST = CALL + MOVE_TAP_SECONDS_MOST * (CPU_SECOND + MEMORY
 export const MOVE_BROKEN_RECORD_BYTES = 1_024;
 /** A month's count of moves (lib/auth.ts takeMoveRoom, nl:auth:move-room:), key and value, at the most. */
 export const MOVE_ROOM_KEY_BYTES = 128;
+/** The broken moves' places the code keeps at the most (lib/auth.ts MAX_OPEN_BROKEN_MOVES, held in tests/move-broken-stock.test.ts). */
+export const MOVE_BROKEN_OPEN_MOST = MAX_OPEN_BROKEN_MOVES;
+/** One place in the index of open broken moves (nl:auth:move-broken:open): its token of 64 hex, its score and the set's own bytes, at the most. */
+export const MOVE_BROKEN_PLACE_BYTES = 128;
 /**
- * What the month's moves keep: two broken-move records a move, each kept the whole month (it has no expiry: it is
- * the evidence that keeps a split account from a login without its second step until it is repaired), and a count
- * a store that moved and the company's two, each kept 32 days, so into the next month too.
+ * What the month's moves keep: the broken-move records of every move holding a place, two a move, at most
+ * MOVE_BROKEN_OPEN_MOST of them at any time, each with its place, kept the whole month (they have no expiry: they are
+ * the evidence that keeps a split account from a login without its second step until it is repaired, and a new move
+ * is refused, writing nothing, while every place is held, #2271); and a count a store that moved and the company's
+ * two, each kept 32 days, so into the next month too.
  */
-export const MOVES_MONTH_KEPT = 2 * MOVES_PER_MONTH * MOVE_BROKEN_RECORD_BYTES * DB_BYTE_MONTH + 2 * (MOVES_PER_MONTH + 2) * MOVE_ROOM_KEY_BYTES * DB_BYTE_MONTH;
+export const MOVES_MONTH_KEPT = MOVE_BROKEN_OPEN_MOST * (2 * MOVE_BROKEN_RECORD_BYTES + MOVE_BROKEN_PLACE_BYTES) * DB_BYTE_MONTH + 2 * (MOVES_PER_MONTH + 2) * MOVE_ROOM_KEY_BYTES * DB_BYTE_MONTH;
 /**
  * The month's moves in dollars: MOVES_PER_MONTH taps at their worst and what they keep. The "account-moves" line of the
  * LLC fixed costs, whose bounded part the owner approved at US$17 a month (11/11/2026 11:32 Fortaleza,
@@ -1700,7 +1712,6 @@ export const MOVE_COST_UNKNOWNS: readonly string[] = [
   "Sessions: the tap logs out every session of both addresses (lib/auth.ts endAllSessions: one SMEMBERS, then two DEL a session); no count of an account's sessions bounds them. Priced with the one session the move was asked from.",
   "Memberships: each team the address is on (lib/team.ts moveMemberships) takes its team's lock (4 s), reads and writes the team, copies its pipeline access and moves its API keys (lib/api-key-pause.ts movedMaker); no count bounds the teams one address may be on. Priced with none.",
   "Phone devices: lib/phone-alerts.ts movePhoneDevices reads every store of the account and every store the address helps run, with up to four compare-and-set tries of each one's device list; the lists' bytes are not bounded here and the member stores are counted with the memberships. Priced with no device lists.",
-  "Broken moves kept: a broken move's records have no expiry, on purpose (lib/auth.ts markBrokenMove: they keep a split account from a login without its second step until it is repaired, lib/move-repair.ts; expiring them would open that again). Each month's new ones are priced (MOVES_MONTH_KEPT); those left unrepaired from earlier months add to every later month, and no count bounds how many stay.",
   "Undo and failures: a move refused or failing after the ways in moved (app/api/auth/move finishMove, undo and the catch that reads both addresses again) moves passkeys and two-step login back and logs out; not measured, priced as the tap that moved.",
   "Repairs before the room: app/api/auth/move repairs both addresses (lib/move-repair.ts repairMove) before takeMoveRoom, at every tap of a link, so that work is not counted by MOVES_PER_MONTH.",
   "The ask and refused taps: the link's ask (app/api/store/address/route.ts, two company emails, MOVE_ASKS_PER_HOUR) is counted by the hour for an address, not by the month; and every tap reads the link, the second step and the room before it is refused. Neither is in MOVES_PER_MONTH.",

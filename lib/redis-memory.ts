@@ -903,6 +903,28 @@ export class MemoryRedis {
           held.delete(args[2]);
           return value;
         }
+        // lib/auth.ts MARK_BROKEN_MOVE: a place taken and both records written, only below the cap.
+        if (key.startsWith("-- marktmorgen:move-broken-mark:v1\n") && args[0] === "3") {
+          const [, open, from, to, op, value, cap, at] = args;
+          if (Number(this.run(["ZCARD", open])) >= Number(cap)) return 0;
+          this.run(["SET", from, value]);
+          this.run(["SET", to, value]);
+          this.run(["ZADD", open, at, op]);
+          return 1;
+        }
+        // lib/auth.ts CLEAR_BROKEN_MOVE: each record's place given back, then the records deleted.
+        if (key.startsWith("-- marktmorgen:move-broken-clear:v1\n") && args[0] === "3") {
+          const [, open, ...records] = args;
+          for (const target of records) {
+            const held = this.run(["GET", target]);
+            if (typeof held !== "string") continue;
+            let record: unknown = null;
+            try { record = JSON.parse(held); } catch { record = null; }
+            const op = record && typeof record === "object" ? (record as { op?: unknown }).op : undefined;
+            if (typeof op === "string") this.run(["ZREM", open, op]);
+          }
+          return this.run(["DEL", ...records]);
+        }
         // lib/auth.ts NOTE_MOVE_COPY: a move's record written over only where it still carries that move's token.
         if (key.startsWith("-- marktmorgen:move-copy-note:v1\n")) {
           const count = Number(args[0]);

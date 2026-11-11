@@ -93,6 +93,12 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "Address changes are paused until next month",
     body: "We handle a set number of address changes each month, and this month's are used up. Your account was not moved, and it stays at its old address. Try again from midnight UTC (Coordinated Universal Time) on the 1st.",
   },
+  // Every place among the broken moves left open is held (lib/auth.ts MAX_OPEN_BROKEN_MOVES, #2271): one comes back
+  // as soon as a move is repaired, so no date is promised.
+  "move-held": {
+    title: "Address changes are on hold for now",
+    body: "Some earlier address changes are still being fixed, and we hold new ones until they are done. Your account was not moved, and it stays at its old address. Please try again later.",
+  },
   "invite-expired": {
     title: "That invitation no longer works",
     body: "An invitation works once and lasts 7 days, and the store's owner can take it back. Ask them for a new one.",

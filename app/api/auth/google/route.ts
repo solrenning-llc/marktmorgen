@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     response.headers.append("Set-Cookie", begun.cookie);
     return response;
   } catch (error) {
-    console.error("starting a login with Google failed", error);
+    console.error("starting a login with Google failed");
     return back("google-error");
   }
 }

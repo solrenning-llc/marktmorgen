@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   try {
     email = await spendRescue(token);
   } catch (error) {
-    console.error("using a recovery-address link failed", error);
+    console.error("using a recovery-address link failed");
   }
   if (!email) return away("/signin?status=expired");
 
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   if (previous) await endSession(previous);
   const sessionId = await openSession(email);
   // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
-  await pendingRemoval(email).catch((error) => console.error("applying a passkey removal failed", error));
+  await pendingRemoval(email).catch(() => console.error("applying a passkey removal failed"));
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const response = away("/studio#two-step");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

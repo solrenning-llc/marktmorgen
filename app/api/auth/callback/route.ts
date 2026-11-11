@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   try {
     owner = await takeSignInLink(token);
   } catch (error) {
-    console.error("sign-in callback failed", error);
+    console.error("sign-in callback failed");
   }
   // Two-step login, the session, the recovery address, the browser this was
   // in: the same for every proven address (lib/signin-finish.ts).

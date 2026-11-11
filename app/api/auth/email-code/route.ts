@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (machine === "over") return Response.json({ ok: false, error: "code_rate_limited" }, { status: 429 });
     answer = await takeSignInCode(body.request, body.code);
   } catch (error) {
-    console.error("a login code could not be checked", error);
+    console.error("a login code could not be checked");
     answer = "unknown";
   }
   if (answer === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });

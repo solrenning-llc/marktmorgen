@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   try {
     moved = await spendMoveLink(token);
   } catch (error) {
-    console.error("address move failed", error);
+    console.error("address move failed");
   }
   if (!moved) return away("/signin?status=expired");
 
@@ -84,9 +84,9 @@ export async function POST(request: NextRequest) {
       broken = true;
     });
   } finally {
-    const cleared = broken ? false : await clearBrokenMove(from, to).then(() => true, (error) => (console.error("clearing a move's record failed", error), false));
+    const cleared = broken ? false : await clearBrokenMove(from, to).then(() => true, () => (console.error("clearing a move's record failed"), false));
     // Kept when the record could not be cleared either way: it holds the addresses until it is repaired.
-    if (cleared || broken) await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+    if (cleared || broken) await endMoving(from, to, mark).catch(() => console.error("unmarking a move failed"));
   }
 }
 
@@ -96,7 +96,7 @@ async function step(what: string, work: () => Promise<unknown>): Promise<boolean
     await work();
     return true;
   } catch (error) {
-    console.error(`${what} failed`, error);
+    console.error(`${what} failed`);
     return false;
   }
 }
@@ -141,7 +141,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     await moveTwoStep(from, to);
     appMoved = true;
   } catch (error) {
-    console.error("moving the ways in refused", error);
+    console.error("moving the ways in refused");
     // Passkeys that could not be put back cleanly: the move is kept marked until it is repaired.
     if (error instanceof MoveSplitError) broke();
     const undone = await undo();
@@ -167,10 +167,10 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
       moveMemberships(from, to),
       moveDevices(from, to),
       moveRecoveryAddress(from, to),
-    ]).catch((error) => console.error("moving what belongs to the account failed", error));
+    ]).catch(() => console.error("moving what belongs to the account failed"));
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
-    await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
+    await movePhoneDevices(from, to).catch(() => console.error("moving phone devices failed"));
     // Sessions that could not be read are not closed (lib/auth.ts endAllSessions answers null; review of #2556):
     // the move stands, as the store and its ways in are all at `to`, and the studio says so, not "every session closed".
     closed = (await endAllSessions(from)) !== null;
@@ -178,16 +178,16 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     closed = (await endAllSessions(to)) !== null && closed;
     sessionId = await openSession(to);
     // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
-    await pendingRemoval(to).catch((error) => console.error("applying a passkey removal failed", error));
+    await pendingRemoval(to).catch(() => console.error("applying a passkey removal failed"));
   } catch (error) {
-    console.error("address move failed", error);
+    console.error("address move failed");
     // Undone only when the store is known to be still at `from` alone: a passing error reading it never undoes
     // a move whose store already landed at `to`. Known at `to` alone, the move stands with its ways in. Any
     // other state (unknown, or on both addresses) is kept marked until it is repaired.
     const [there, here] = await Promise.all([storeForEmail(to).catch(() => undefined), storeForEmail(from).catch(() => undefined)]);
     if (there === null && here) await undo();
     else if (!(there && here === null)) {
-      console.error("a failed move left in an unknown state", { from, to });
+      console.error("a failed move left in an unknown state");
       broke();
     }
     return away("/signin?status=move-error");

@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       const sent = await sendRescue(held, linkOrigin(request));
       return sent === "expired" ? away("/signin?status=expired") : away(`/signin/code?status=rescue-${sent}`);
     } catch (error) {
-      console.error("sending a recovery-address link failed", error);
+      console.error("sending a recovery-address link failed");
       return away("/signin/code?status=rescue-unsent");
     }
   }
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       response.headers.append("Set-Cookie", await noteSignIn(entered.email, request.cookies.get(DEVICE_COOKIE)?.value, "link", request.headers.get("user-agent") ?? ""));
       return response;
     } catch (error) {
-      console.error("letting somebody in without two-step login failed", error);
+      console.error("letting somebody in without two-step login failed");
       // Not read (CX-123 rule 24): nothing was written and nobody was let in. Said in words of its own, since this
       // person asked to come in without the app and typed no code (Claude 5 on #2896, LIGHT 3).
       return away(`/signin/code?status=${error instanceof UnknownReplyError ? "reset-unknown" : "wrong"}`);
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
   try {
     answer = await finishSignIn(held, code);
   } catch (error) {
-    console.error("checking a two-step code failed", error);
+    console.error("checking a two-step code failed");
     // Not read (CX-123 rule 24): the code was not judged, so it is not called wrong.
     return away(`/signin/code?status=${error instanceof UnknownReplyError ? "unknown" : "wrong"}`);
   }
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
   // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again.
   // Unreadable (CX-123 rule 24): not known still on, so the session is closed too, and the person is told so.
   const stillOn = await twoStepOn(answer.email).catch((error: unknown) => {
-    console.error("reading two-step login after a right code failed", error);
+    console.error("reading two-step login after a right code failed");
     return null;
   });
   if (stillOn !== true) {
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
   const previous = request.cookies.get(SESSION_COOKIE)?.value;
   if (previous && previous !== sessionId) await endSession(previous);
   // A passkey removal whose days are over is applied at every login; none is called off by one (lib/passkeys.ts).
-  await pendingRemoval(answer.email).catch((error) => console.error("applying a passkey removal failed", error));
+  await pendingRemoval(answer.email).catch(() => console.error("applying a passkey removal failed"));
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const response = away("/studio");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

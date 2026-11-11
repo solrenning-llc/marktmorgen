@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
-    console.error("changing a recovery address failed", error);
+    console.error("changing a recovery address failed");
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

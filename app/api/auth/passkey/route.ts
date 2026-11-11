@@ -23,7 +23,7 @@ function failed(error: unknown, doing: string): Response {
   if (error instanceof RemovalBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
   // The email that tells the account could not be sent, so nothing was set (lib/passkeys.ts scheduleRemoval).
   if (error instanceof RemovalUnsentError) return Response.json({ ok: false, error: "unsent" }, { status: 503 });
-  console.error(doing, error);
+  console.error(doing);
   return Response.json({ ok: false, error: "server_error" }, { status: 500 });
 }
 

@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     // With the app, the login waits for its code as always (below); without it, it is refused.
     if ((await isMoving(email)) && !((await repairMove(email)) && !(await isMoving(email))) && !(await twoStepOn(email))) return away("/signin?status=move-busy");
     // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
-    await pendingRemoval(email).catch((error) => console.error("applying a passkey removal failed", error));
+    await pendingRemoval(email).catch(() => console.error("applying a passkey removal failed"));
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     if (await twoStepOn(email)) {
       const held = await holdSignIn(email, true);
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     response.headers.append("Set-Cookie", await noteSignIn(email, request.cookies.get(DEVICE_COOKIE)?.value, "link", request.headers.get("user-agent") ?? ""));
     return response;
   } catch (error) {
-    console.error("logging in through a recovery address failed", error);
+    console.error("logging in through a recovery address failed");
     return away("/signin?status=expired");
   }
 }

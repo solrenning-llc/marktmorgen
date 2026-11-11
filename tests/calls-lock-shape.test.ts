@@ -117,13 +117,21 @@ const weekly = {
   sessions: [],
 } as unknown as CallSetup;
 
+/**
+ * The `days`-th weekday (Monday to Friday, in New York) after today, at `minute`. Counted in weekdays, so two cases
+ * asking for different `days` never get the same day: counted in calendar days and moved off the weekend, 10 and 11
+ * both landed on the same Monday whenever today was a Wednesday or a Thursday there, and the second sale of one
+ * time was refused as taken (11 November 2026).
+ */
 function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
+  let weekdays = 0;
+  for (let d = 1; d <= days * 2 + 7; d += 1) {
     const day = new Date(Date.now() + d * DAY);
     const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
     const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
     if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
+    weekdays += 1;
+    if (weekdays === days) return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
   }
   throw new Error("no weekday");
 }

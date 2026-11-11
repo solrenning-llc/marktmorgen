@@ -86,11 +86,25 @@ function dayOfMonth(year: number, month: number, place: ReturnType<typeof monthl
   return 1 + ((place.weekday - firstWeekday + 7) % 7) + 7 * (place.nth - 1);
 }
 
+/** A first time a date can hold (ms) and a zone Intl knows. */
+function readable(first: number, tz: string): boolean {
+  if (!Number.isFinite(first) || Math.abs(first) > 8.64e15 || typeof tz !== "string" || !tz) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(first);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The start of each time, in order; null where the clock time does not exist
  * that day. The first is the event as the creator put it in.
  */
 export function eventSeriesStarts(first: number, tz: string, repeat: EventRepeat, count: number): (number | null)[] {
+  // Inputs that cannot be read give no dates, which is never a series (checkEventSeries: "count"), and never a throw;
+  // the count is bounded before anything is expanded (Claude 3 and Codex G on #3657).
+  if (!readable(first, tz) || !Number.isInteger(count) || count < MIN_SERIES || count > MAX_SERIES) return [];
   if (repeat !== "monthly") return seriesStarts(first, tz, repeat, count);
   const p = partsIn(first, tz);
   const minute = p.hour * 60 + p.minute;
@@ -122,6 +136,8 @@ export type SeriesCheck =
 export function checkEventSeries(starts: readonly (number | null)[], read: { now: number; upcoming: number }): SeriesCheck {
   if (starts.length < MIN_SERIES || starts.length > MAX_SERIES) return { ok: false, why: "count" };
   const { now, upcoming } = read;
+  // A clock that is not a number makes every comparison false: unknown, nothing made (Codex G on #3657).
+  if (typeof now !== "number" || !Number.isFinite(now)) return { ok: false, why: "unknown" };
   if (typeof upcoming !== "number" || !Number.isInteger(upcoming) || upcoming < 0) return { ok: false, why: "unknown" };
   const missing = starts.findIndex((s) => s === null || !Number.isFinite(s));
   if (missing >= 0) return { ok: false, why: "missing_time", at: missing };
@@ -138,10 +154,14 @@ export function checkEventSeries(starts: readonly (number | null)[], read: { now
 
 const ORDINAL = { 1: "first", 2: "second", 3: "third", 4: "fourth", last: "last" } as const;
 
-/** The series in plain words, as the studio and the event page say it. */
-export function repeatWords(first: number, tz: string, repeat: EventRepeat, count: number): string {
+/**
+ * The series in plain words, as the studio and the event page say it, with the zone the time is in ("6:00 PM ET",
+ * the zone's own name across its change of clocks); null when the first time or the zone cannot be read.
+ */
+export function repeatWords(first: number, tz: string, repeat: EventRepeat, count: number): string | null {
+  if (!readable(first, tz)) return null;
   const weekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(first);
-  const time = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(first);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit", timeZoneName: "shortGeneric" }).format(first).replace(/\s/g, " ");
   const times = `${count} ${count === 1 ? "time" : "times"}`;
   if (repeat === "weekly") return `Every week on ${weekday} at ${time}, ${times}`;
   if (repeat === "biweekly") return `Every other week on ${weekday} at ${time}, ${times}`;

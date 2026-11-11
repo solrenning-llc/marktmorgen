@@ -39,7 +39,7 @@ import * as learn from "@/lib/learn";
 import { courseAccess, emailKey, mintPass, storeKey, passCookieName, recordEnrollment, registerDrip, sendDripEmails, touchStudent } from "@/lib/learn";
 import * as accessEnd from "@/lib/course-access-end";
 import { grantImported } from "@/lib/imported-purchases";
-import { type Course, editCourse, emptyCourse, readCourseExact, saveCourse } from "@/lib/course";
+import { type Course, type KeptEnd, MAX_KEPT_ENDS, editCourse, emptyCourse, keepEnd, parseCourse, readCourseExact, saveCourse } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { withConsent } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
@@ -191,7 +191,12 @@ async function main(): Promise<void> {
     is("the earlier date is set for new buyers", c.accessEndsAt, T(5));
     const kept = await gate(r.store, r.product, c, "mr-early@example.test", T(20));
     is("at day 20 the same buyer is still open, until the day 50 they were given", [kept.state, kept.state === "open" ? kept.endsAt : null], ["open", T(50)]);
-    const after = await gate(r.store, r.product, c, "mr-early@example.test", T(51));
+    // The pass is minted under the same clock, so its 90 days (PASS_SECONDS) still run at day 51.
+    const realNow = Date.now;
+    Date.now = () => T(51) * 1000;
+    const after = await gate(r.store, r.product, c, "mr-early@example.test", T(51)).finally(() => {
+      Date.now = realNow;
+    });
     is("after day 50 their access ends, at day 50", [after.state, after.state === "expired" ? after.endedAt : null], ["expired", T(50)]);
     // A buyer stamped with day 5, after the earlier date was set, was never given day 50.
     listed = [session(r.store, { product: r.product.id, access_end: String(T(5)) }, T(4))];
@@ -201,6 +206,16 @@ async function main(): Promise<void> {
     await saveCourse(c, r.store);
     const reread = await gate(r.store, r.product, (await readCourseExact(r.courseId))!, "mr-early@example.test", T(20));
     is("read back from Redis, the early buyer still has day 50", [reread.state, reread.state === "open" ? reread.endsAt : null], ["open", T(50)]);
+    // Rule 24: a kept list in another shape is a check not made for a stamped buyer, never an end dropped.
+    const garbled = parseCourse(JSON.stringify({ ...c, accessEndsKept: [{ at: "day 50", before: T(3) }] }))!;
+    is("a kept list that does not read is \"unknown\"", garbled.accessEndsKept, "unknown");
+    is("the stamped buyer is then unchecked, neither open nor ended", (await gate(r.store, r.product, garbled, "mr-early@example.test", T(20))).state, "unchecked");
+    // The list stays bounded, and merging only ever gives a buyer more time.
+    let many: KeptEnd[] = [];
+    for (let i = 0; i < MAX_KEPT_ENDS + 5; i += 1) many = keepEnd(many, { at: T(100 - i), before: T(i + 1) });
+    is("at most MAX_KEPT_ENDS kept ends", many.length, MAX_KEPT_ENDS);
+    is("the oldest buyers keep the latest end they reached", many[0].at, T(100));
+    is("a later, longer end drops those it covers", keepEnd(many, { at: T(200), before: T(500) }), [{ at: T(200), before: T(500) }]);
   }
 
   part("H1: a membership course never takes an end");

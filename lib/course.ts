@@ -156,7 +156,47 @@ export type Course = {
    * ("access-end" in editCourse). A membership course never takes one: members keep access while they pay.
    */
   accessEndsAt?: number;
+  /**
+   * Ends already reached by stamped buyers when the date was taken off (Codex Cloud 1 on #3445): `at` is the date the
+   * course had then, and every stamped buyer who bought at or before `before` keeps at least it, so taking the date off
+   * and setting an earlier one (the studio's way to end sooner for new buyers) never shortens an end a buyer already
+   * had. "unknown": a list that did not read, so an end is a check not made for a stamped buyer (rule 24).
+   */
+  accessEndsKept?: KeptEnd[] | "unknown";
 };
+
+/** An end reached by the stamped buyers who bought at or before `before` (Course.accessEndsKept). */
+export type KeptEnd = { at: number; before: number };
+
+/**
+ * The most kept ends a course holds. Each new one drops those it covers (an end no later, for fewer buyers); past
+ * this, the two oldest merge into the later end for the later group, which only ever gives a buyer more time.
+ */
+export const MAX_KEPT_ENDS = 12;
+
+/** The list with one more kept end, taken when the date comes off at `before`. */
+export function keepEnd(kept: KeptEnd[], next: KeptEnd): KeptEnd[] {
+  const out = [...kept.filter((k) => k.at > next.at && k.before <= next.before), next].sort((a, b) => a.before - b.before);
+  while (out.length > MAX_KEPT_ENDS) {
+    const [first, second] = out;
+    out.splice(0, 2, { at: Math.max(first.at, second.at), before: second.before });
+  }
+  return out;
+}
+
+/** A stored list of kept ends: absent is none, any other shape than the one written is "unknown" (rule 24). */
+function readKeptEnds(raw: unknown): KeptEnd[] | "unknown" | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length > MAX_KEPT_ENDS) return "unknown";
+  const kept: KeptEnd[] = [];
+  for (const item of raw) {
+    const entry = item as Record<string, unknown> | null;
+    if (!entry || typeof entry !== "object" || Object.keys(entry).length !== 2) return "unknown";
+    if (!Number.isSafeInteger(entry.at) || (entry.at as number) <= 0 || !Number.isSafeInteger(entry.before) || (entry.before as number) <= 0) return "unknown";
+    kept.push({ at: entry.at as number, before: entry.before as number });
+  }
+  return kept.length ? kept : undefined;
+}
 
 /** The furthest ahead an access end may be set: ten years. */
 export const MAX_ACCESS_END_SECONDS = 3_650 * 86_400;
@@ -188,11 +228,19 @@ export function stampHolds(stamp: number, createdSeconds: number | null): boolea
 }
 
 /**
- * A stamped purchase's end, in seconds, or null for none: the later of the end its buyer was shown (`stamp`) and the
- * course's date now, so moving the date later reaches them; null once the creator has taken the date off.
+ * A stamped purchase's end, in seconds, or null for none: the latest of the end its buyer was shown (`stamp`), the
+ * course's date now, so moving the date later reaches them, and every end they had already reached when the date was
+ * taken off (accessEndsKept, for a purchase made at `boughtAt` or before; not known, every one counts); null while
+ * the creator has the date off. "unknown" when the kept ends did not read.
  */
-export function stampedAccessEnd(course: Pick<Course, "accessEndsAt">, stamp: number): number | null {
-  return course.accessEndsAt === undefined ? null : Math.max(stamp, course.accessEndsAt);
+export function stampedAccessEnd(course: Pick<Course, "accessEndsAt" | "accessEndsKept">, stamp: number, boughtAt: number | null): number | null | "unknown" {
+  if (course.accessEndsAt === undefined) return null;
+  if (course.accessEndsKept === "unknown") return "unknown";
+  let end = Math.max(stamp, course.accessEndsAt);
+  for (const kept of course.accessEndsKept ?? []) {
+    if (boughtAt === null || !Number.isSafeInteger(boughtAt) || boughtAt <= kept.before) end = Math.max(end, kept.at);
+  }
+  return end;
 }
 
 /**
@@ -201,12 +249,14 @@ export function stampedAccessEnd(course: Pick<Course, "accessEndsAt">, stamp: nu
  * time does not read, which the gate says as a check it could not make, never as ended and never as open.
  */
 export function accessEndState(
-  course: Pick<Course, "accessEndsAt">,
+  course: Pick<Course, "accessEndsAt" | "accessEndsKept">,
   stamp: number | null,
   nowSeconds: number,
+  boughtAt: number | null,
 ): "open" | "ended" | "unknown" {
   if (!Number.isFinite(nowSeconds) || (stamp !== null && !Number.isSafeInteger(stamp))) return "unknown";
-  const end = stamp === null ? null : stampedAccessEnd(course, stamp);
+  const end = stamp === null ? null : stampedAccessEnd(course, stamp, boughtAt);
+  if (end === "unknown") return "unknown";
   const state = courseAccessExpiryState(end, Math.floor(nowSeconds));
   return state === "expired" ? "ended" : state === "invalid" ? "unknown" : "open";
 }
@@ -285,7 +335,8 @@ export function parseCourse(raw: unknown): Course | null {
     // A whole number of seconds after 1970, or no end (24 [E7]): a value of any other shape is no end, the side that
     // never takes a course away from anybody (lib/learn.ts courseAccess holds an end only for a stamped purchase).
     const ends = Number.isSafeInteger(value.accessEndsAt) && (value.accessEndsAt as number) > 0 ? { accessEndsAt: value.accessEndsAt as number } : {};
-    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}), ...ends };
+    const kept = readKeptEnds(value.accessEndsKept);
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}), ...ends, ...(kept ? { accessEndsKept: kept } : {}) };
   } catch {
     return null;
   }
@@ -612,6 +663,11 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
       if (edit.at === null) {
         const rest = { ...course };
         delete rest.accessEndsAt;
+        // The end every stamped buyer has now is kept for them (Codex Cloud 1 on #3445), so a date set again, even an
+        // earlier one for new buyers, never shortens it. A list that did not read stays "unknown".
+        if (course.accessEndsAt !== undefined && course.accessEndsKept !== "unknown") {
+          rest.accessEndsKept = keepEnd(course.accessEndsKept ?? [], { at: course.accessEndsAt, before: now });
+        }
         return { ok: true, course: rest, removed: [] };
       }
       // A membership is open while it is paid: an end date would lock out a member who is still being charged.

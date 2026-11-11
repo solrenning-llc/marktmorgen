@@ -549,9 +549,9 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
   // Stripe could not be asked and the sale stands on our own record: an end is possible only while the course has a
   // date, and then it is a check not made; with no date there is none to hold.
   if (stamp === "unknown") return record.accessEndsAt === undefined ? { state: "open", learner, start, endsAt: null, stamp: null } : { state: "unchecked", learner };
-  const state = accessEndState(record, stamp, Date.now() / 1000);
-  if (state === "unknown") return { state: "unchecked", learner };
-  const endsAt = stampedAccessEnd(record, stamp);
+  const state = accessEndState(record, stamp, Date.now() / 1000, start);
+  const endsAt = stampedAccessEnd(record, stamp, start);
+  if (state === "unknown" || endsAt === "unknown") return { state: "unchecked", learner };
   if (state === "ended") return { state: "expired", learner, endedAt: endsAt! };
   return { state: "open", learner, start, endsAt, stamp };
 }
@@ -1153,7 +1153,9 @@ export async function sendDripEmails(
     for (const student of students) {
       if (student.blocked) continue;
       // The end the gate holds for this student (24 [E7]): no email for a module that opens once their access ended.
-      const end = student.stamp === undefined ? null : stampedAccessEnd(course, student.stamp);
+      const end = student.stamp === undefined ? null : stampedAccessEnd(course, student.stamp, student.since);
+      // Kept ends that did not read (rule 24): no drip email for this student on a guess; the next run reads again.
+      if (end === "unknown") continue;
       for (const unit of dripping) {
         const at = opensAt(course, unit, student.since);
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;

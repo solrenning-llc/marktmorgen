@@ -64,7 +64,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const allowance = monthlyAllowance(store);
   const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
-    usedThisMonth(store.listId, windowId(store)),
+    // A garbled month counter is unknown (rule 24), and only that card says so: never the whole page down (#3727).
+    usedThisMonth(store.listId, windowId(store)).catch(() => null),
     // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.
     listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),
     readFlowListStrict(store.listId).catch(() => null),
@@ -255,7 +256,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             counts={counts}
             used={used}
             allowance={allowance}
-            monthKnown={windowId(store) !== null}
+            monthKnown={windowId(store) !== null && used !== null}
             trial={trial}
             // The way up for a list that has outgrown Pro, offered beside the
             // month's count to whoever may change the plan (lib/plan.ts).

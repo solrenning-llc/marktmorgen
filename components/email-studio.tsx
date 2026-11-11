@@ -144,6 +144,30 @@ async function call(payload: Record<string, unknown>): Promise<Answer> {
 const message = (a: Answer) => (a.error === "studio_used" && typeof a.message === "string" && a.message ? a.message : MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
 const n = (x: number) => x.toLocaleString("en-US");
 
+/**
+ * The "This month" count. A count that could not be read is said as such, never
+ * as a number (rule 24, #3727): sending then waits for a count it can trust.
+ */
+export function MonthUsage({ used, allowance, trial }: { used: number | null; allowance: number; trial: boolean }) {
+  if (used === null) {
+    return (
+      <p className="mt-2 text-ink" role="status">
+        This month&apos;s count of emails sent could not be read just now. Nothing is guessed: reload the page in a minute to see it.
+      </p>
+    );
+  }
+  return (
+    <>
+      <p className="mt-2 text-3xl font-semibold tabular-nums">{`${n(used)} of ${n(allowance)}`}</p>
+      <p className="mt-1 text-sm text-ink-soft">
+        {trial
+          ? `emails sent. During the free trial a month holds ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")}; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with your first payment.`
+          : "emails sent, one-off and sequences together. The count starts again on the day your plan's month renews."}
+      </p>
+    </>
+  );
+}
+
 type BroadcastRow = {
   id: string;
   subject: string;
@@ -342,7 +366,8 @@ export function EmailStudio(props: {
   name: string;
   mail: MailSettings | null;
   counts: { total: number; agreed: number; left: number; mailable: number };
-  used: number;
+  /** This month's emails sent; null when the count could not be read (never shown as a guess). */
+  used: number | null;
   allowance: number;
   /** Whether the plan's month can be told (lib/allowance-window.ts windowId); without it no count before sending is shown. */
   monthKnown?: boolean;
@@ -473,7 +498,7 @@ export function EmailStudio(props: {
                 products={props.products}
                 links={props.links ?? {}}
                 counts={props.counts}
-                month={props.monthKnown ? { used: props.used, allowance: props.allowance } : null}
+                month={props.monthKnown && props.used !== null ? { used: props.used, allowance: props.allowance } : null}
                 canSend={props.canSend}
                 broadcastUnconfirmed={broadcastUnconfirmed}
                 onBroadcastUnconfirmed={() => setBroadcastUnconfirmed(true)}
@@ -518,12 +543,7 @@ export function EmailStudio(props: {
       <div className="min-w-0">
         <div className="card mt-8 p-6 sm:p-8 lg:mt-0">
           <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</h2>
-          <p className="mt-2 text-3xl font-semibold tabular-nums">{`${n(props.used)} of ${n(props.allowance)}`}</p>
-          <p className="mt-1 text-sm text-ink-soft">
-            {props.trial
-              ? `emails sent. During the free trial a month holds ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")}; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with your first payment.`
-              : "emails sent, one-off and sequences together. The count starts again on the day your plan's month renews."}
-          </p>
+          <MonthUsage used={props.used} allowance={props.allowance} trial={props.trial} />
           {!props.trial && emailEquivalence(props.allowance) ? (
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
           ) : null}

@@ -42,6 +42,10 @@ const place = {
     return false;
   },
   firstControlIn: (e: KeptElement) => (e as El).first ?? null,
+  contains: (outer: KeptElement, inner: KeptElement) => {
+    for (let at: KeptElement | null | undefined = inner; at; at = at.parentElement) if (at === outer) return true;
+    return false;
+  },
 };
 const fresh = () => {
   active = body;
@@ -124,6 +128,27 @@ part("A control taken away under the focus");
   active = body;
   k.treeChanged();
   is("a blur just before it is taken away does not stop the focus going on", field.focused, 1);
+}
+
+{
+  // Seen in Chromium on the product card: "Ship it" opened its editor further down the same card, after a waitlist box;
+  // the card's first control was that box, not the editor that took the button's place.
+  const k = fresh();
+  const main = el("main", null, { main: true });
+  const card = el("card", main);
+  const waitlist = el("Coming soon, with a waitlist", card);
+  const opener = el("Ship it", card);
+  card.first = waitlist;
+  active = opener;
+  k.focusIn(opener);
+  opener.isConnected = false;
+  opener.parentElement = null;
+  const editor = el("shipping editor", card);
+  const price = el("Shipping price", editor);
+  editor.first = price;
+  active = body;
+  k.treeChanged([editor]);
+  is("what the change added in that part comes first: the editor that took its place", [price.focused, waitlist.focused], [1, 0]);
 }
 
 part("A control moved under the focus");

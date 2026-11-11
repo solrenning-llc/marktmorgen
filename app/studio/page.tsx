@@ -185,6 +185,7 @@ import {
   isConnectInTestMode,
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
+import { RISK_WORDS } from "@/lib/payment-risk";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
 import { hoursWords } from "@/lib/watch-rules";
@@ -3378,6 +3379,7 @@ export default async function StudioPage({
                               { day: "numeric", month: "long", year: "numeric" },
                             )}
                           </p>
+                          {sale.risk ? <p className="mt-1 text-sm text-ink-soft">{RISK_WORDS[sale.risk]}</p> : null}
                           {sale.shipTo !== undefined && sale.shipTo !== null ? (
                             <MarkShipped session={sale.reference} to={sale.shipTo} shipped={sale.shipped ?? null} />
                           ) : null}

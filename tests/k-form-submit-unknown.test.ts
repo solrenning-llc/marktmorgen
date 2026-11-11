@@ -37,7 +37,9 @@ async function main() {
         }
         if (scenario === 'unknown-keep' && batch[0][0] === 'EVAL' && String(batch[0][1]).startsWith('-- marktmorgen:form-keep:')) {
           injected++;
-          return [null]; // Not applied: retaining room is conservative; there is no recorded response.
+          // Not applied here, but a lost receipt cannot tell that from applied (k-form-kept-feedback.test.ts):
+          // retaining room is conservative, and the buyer is told "unsure", never "nothing was sent".
+          return [null];
         }
         if (injected) afterUnknown += batch.length;
         return pipeline(batch);
@@ -49,7 +51,7 @@ async function main() {
       const healthy = scenario === 'healthy';
       const definitionUnknown = scenario === 'unknown-definition' || scenario === 'definition-outage';
       is('status follows confirmed evidence', response.status, definitionUnknown ? 503 : 303);
-      is('location describes only the evidenced outcome', definitionUnknown ? location === null : healthy ? location?.includes(`/form/${form.id}?`) : location?.includes(`status=${scenario === 'missing' ? 'closed' : 'error'}`), true);
+      is('location describes only the evidenced outcome', definitionUnknown ? location === null : healthy ? location?.includes(`/form/${form.id}?`) : location?.includes(`status=${scenario === 'missing' ? 'closed' : 'unsure'}`), true);
       is('successful redirect is offered only after a confirmed keep', location?.includes(`/form/${form.id}?`) ?? false, healthy);
       is('actual response storage agrees with success', saved, healthy ? 1 : 0);
       is('the form record remains unchanged', definition, scenario === 'missing' ? null : JSON.stringify(storedForm));

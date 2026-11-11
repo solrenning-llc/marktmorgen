@@ -5,7 +5,7 @@ import { DataRoomError } from "@/lib/store-data";
 import { originFrom, linkOrigin } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { readForm, addResponse } from "@/lib/form-store";
+import { readForm, addResponse, UnconfirmedKeep } from "@/lib/form-store";
 import { enroll } from "@/lib/flows";
 import { FORM_ID, formOpen, outcomeOf, readAnswers, scoreOf, scoreQuery } from "@/lib/forms";
 import { askToJoin } from "@/lib/store-join";
@@ -103,6 +103,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // No room in the store's data room: the answers were not kept (lib/store-data.ts).
     if (error instanceof DataRoomError) return back("noroom");
+    // The keep was sent and its receipt was lost: the answers may be kept, so never "nothing was sent".
+    if (error instanceof UnconfirmedKeep) return back("unsure");
     console.error("keeping a form's answers failed", error);
     return back("error");
   }

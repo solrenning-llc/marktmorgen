@@ -31,7 +31,10 @@ export async function readForms(statsId: string | null): Promise<FormDef[]> {
   const [raw] = exactReplies(await redisPipeline([["HVALS", formsKey(statsId)]]), 1, what);
   const list = plainList(raw);
   if (!list) throw new UnknownReply(what);
-  return list.map(value => confirmedForm(value, what)).sort((a, b) => b.updatedAt - a.updatedAt);
+  const forms = list.map(value => confirmedForm(value, what));
+  // Each hash field holds one form: the same form twice is not evidence of either.
+  if (new Set(forms.map(form => form.id)).size !== forms.length) throw new UnknownReply(what);
+  return forms.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /** One form, or null. */
@@ -39,20 +42,41 @@ export async function readForm(statsId: string | null, id: string): Promise<Form
   if (!statsId || !FORM_ID.test(id) || !isRedisConfigured()) return null;
   const what = "the form";
   const [raw] = exactReplies(await redisPipeline([["HGET", formsKey(statsId), id]]), 1, what);
-  return raw === null ? null : confirmedForm(raw, what);
+  if (raw === null) return null;
+  const form = confirmedForm(raw, what);
+  // A readable record of another form is not the form asked for: writing to it would edit the wrong one.
+  if (form.id !== id) throw new UnknownReply(what);
+  return form;
 }
 
-/** Only a stored, readable form is evidence of its contents. */
+/**
+ * Only a stored, readable form is evidence of its contents. parseForm
+ * sanitizes what an editor sends, so a stored record it would shorten (a
+ * question, a choice, a result or a category dropped) is unknown here, never
+ * a shorter definition that exports or edits would then certify.
+ */
 function confirmedForm(raw: unknown, what: string): FormDef {
   if (typeof raw === "string") {
     try {
-      const form = parseForm(JSON.parse(raw));
-      if (form) return form;
+      const value: unknown = JSON.parse(raw);
+      const form = parseForm(value);
+      if (form && complete(value as Record<string, unknown>, form)) return form;
     } catch {
       // The record is unavailable, rather than absent.
     }
   }
   throw new UnknownReply(what);
+}
+
+/** Whether parsing kept every question, choice, result and category the stored record has. */
+function complete(value: Record<string, unknown>, form: FormDef): boolean {
+  const count = (list: unknown) => (Array.isArray(list) ? list.length : 0);
+  if (count(value.fields) !== form.fields.length || count(value.outcomes) !== form.outcomes.length) return false;
+  if (value.scoring === "points" && count(value.categories) !== (form.categories?.length ?? 0)) return false;
+  return form.fields.every((field, at) => {
+    const options = (value.fields as unknown[])[at];
+    return !field.options.length || count(options && typeof options === "object" ? (options as Record<string, unknown>).options : null) === field.options.length;
+  });
 }
 
 function confirmedCount(raw: unknown, what: string): number {
@@ -98,6 +122,14 @@ export async function dropForm(statsId: string, id: string, room: DataStore): Pr
 
 const ANSWERS_SLOT = (formId: string) => `fr:${formId}`;
 
+/** The keep was sent but its receipt is unknown: the response may be kept, so the buyer is never told nothing was sent. */
+export class UnconfirmedKeep extends UnknownReply {
+  constructor(what: string) {
+    super(what);
+    this.name = "UnconfirmedKeep";
+  }
+}
+
 /** One response kept, the newest first, and the ones past ARGV[2] let go, answered: what was really let go. */
 export const KEEP_FORM_RESPONSE = `-- marktmorgen:form-keep:v1
 redis.call("LPUSH", KEYS[1], ARGV[1])
@@ -123,9 +155,15 @@ export async function addResponse(statsId: string, formId: string, response: For
   const guessed = kept >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const charged = dataBytes([json], 1) - guessed;
   await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
-  const [gone] = exactReplies(await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]), 1, what);
-  const list = plainList(gone);
-  if (!list || list.some(raw => parseResponse(raw) === null)) throw new UnknownReply(what);
+  // Once the keep is sent, a lost or unreadable receipt does not say whether it was kept.
+  let list: unknown[] | null;
+  try {
+    const [gone] = exactReplies(await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]), 1, what);
+    list = plainList(gone);
+  } catch {
+    throw new UnconfirmedKeep(what);
+  }
+  if (!list || list.some(raw => parseResponse(raw) === null)) throw new UnconfirmedKeep(what);
   // Unknown writes retain their reservation; only an exact receipt can release room.
   const dropped = list.reduce<number>((sum, raw) => sum + dataBytes([raw as string], 1), 0);
   const off = dataBytes([json], 1) - dropped - charged;

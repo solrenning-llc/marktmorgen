@@ -36,6 +36,8 @@ const en = {
     closed: "This form is not taking answers right now.",
     noroom: "This store has no room for more answers right now, so yours was not kept. Please try again later.",
     error: "Something went wrong, and nothing was sent. Please try again.",
+    /** The answers were sent but their keeping could not be confirmed: maybe received, never "nothing was sent". */
+    unsure: "We could not confirm that your answers arrived. They may have been received, so please check with the store before you send them again.",
   },
 };
 
@@ -68,6 +70,7 @@ const es: FormWords = {
     closed: "Este formulario no acepta respuestas en este momento.",
     noroom: "Esta tienda no tiene espacio para más respuestas ahora mismo, así que la tuya no se guardó. Inténtalo de nuevo más tarde.",
     error: "Algo salió mal y no se envió nada. Inténtalo de nuevo.",
+    unsure: "No pudimos confirmar que tus respuestas llegaron. Puede que se hayan recibido, así que consulta con la tienda antes de enviarlas de nuevo.",
   },
 };
 
@@ -98,6 +101,7 @@ const fr: FormWords = {
     closed: "Ce formulaire n'accepte pas de réponses pour le moment.",
     noroom: "Cette boutique n'a pas de place pour d'autres réponses en ce moment, donc la vôtre n'a pas été enregistrée. Réessayez plus tard.",
     error: "Une erreur s'est produite et rien n'a été envoyé. Réessayez.",
+    unsure: `Nous n’avons pas pu confirmer que vos réponses sont arrivées. Elles ont peut-être été reçues${S}: vérifiez auprès de la boutique avant de les renvoyer.`,
   },
 };
 
@@ -128,6 +132,7 @@ const de: FormWords = {
     closed: "Dieses Formular nimmt im Moment keine Antworten an.",
     noroom: "Dieser Shop hat gerade keinen Platz für weitere Antworten, deshalb wurde Ihre nicht gespeichert. Bitte versuchen Sie es später erneut.",
     error: "Etwas ist schiefgegangen, und es wurde nichts gesendet. Bitte versuchen Sie es erneut.",
+    unsure: "Wir konnten nicht bestätigen, dass Ihre Antworten angekommen sind. Sie wurden vielleicht empfangen; fragen Sie daher beim Shop nach, bevor Sie sie erneut senden.",
   },
 };
 
@@ -158,6 +163,7 @@ const it: FormWords = {
     closed: "Questo modulo al momento non accetta risposte.",
     noroom: "Questo negozio non ha spazio per altre risposte in questo momento, quindi la tua non è stata salvata. Riprova più tardi.",
     error: "Qualcosa è andato storto e non è stato inviato nulla. Riprova.",
+    unsure: "Non abbiamo potuto confermare che le tue risposte siano arrivate. Potrebbero essere state ricevute, quindi verifica con il negozio prima di inviarle di nuovo.",
   },
 };
 
@@ -188,6 +194,7 @@ const nl: FormWords = {
     closed: "Dit formulier neemt op dit moment geen antwoorden aan.",
     noroom: "Deze winkel heeft nu geen ruimte voor meer antwoorden, dus het jouwe is niet bewaard. Probeer het later opnieuw.",
     error: "Er ging iets mis en er is niets verstuurd. Probeer het opnieuw.",
+    unsure: "We konden niet bevestigen dat je antwoorden zijn aangekomen. Ze zijn misschien ontvangen, dus vraag het eerst na bij de winkel voordat je ze opnieuw verstuurt.",
   },
 };
 
@@ -218,6 +225,7 @@ const pt: FormWords = {
     closed: "Este formulário não está a aceitar respostas neste momento.",
     noroom: "Esta loja não tem espaço para mais respostas neste momento, por isso a sua não foi guardada. Tente novamente mais tarde.",
     error: "Algo correu mal e nada foi enviado. Tente novamente.",
+    unsure: "Não foi possível confirmar que as suas respostas chegaram. Podem ter sido recebidas, por isso confirme com a loja antes de as enviar novamente.",
   },
 };
 

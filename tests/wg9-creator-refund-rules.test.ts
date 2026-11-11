@@ -21,7 +21,7 @@ import {
 } from "@/lib/creator-refund-rules";
 import { done, is, part } from "./check";
 
-const charge = (over: Record<string, unknown> = {}) => ({ id: "ch_1", object: "charge", status: "succeeded", paid: true, amount: 5_000, amount_refunded: 0, currency: "usd", disputed: false, refunded: false, ...over });
+const charge = (over: Record<string, unknown> = {}) => ({ id: "ch_1", object: "charge", status: "succeeded", paid: true, amount: 5_000, amount_captured: 5_000, captured: true, amount_refunded: 0, currency: "usd", disputed: false, refunded: false, ...over });
 
 part("Who may refund: only the role with the payments permission");
 is("the owner may; admin, editor and support may not", [canRefund("owner"), canRefund("admin"), canRefund("editor"), canRefund("support")], [true, false, false, false]);
@@ -37,6 +37,10 @@ is("not paid (pending, failed): nothing to refund yet", [refundableOf(charge({ s
 const unreadable = { ok: false, reason: "unreadable" };
 is("an amount or a refunded amount we cannot read: unknown, never zero", [refundableOf(charge({ amount: "5000" })), refundableOf(charge({ amount_refunded: null })), refundableOf(charge({ amount_refunded: -1 })), refundableOf(charge({ amount: 50.5 }))], [unreadable, unreadable, unreadable, unreadable]);
 is("more refunded than charged: unknown, never a negative or the whole charge", refundableOf(charge({ amount_refunded: 6_000 })), unreadable);
+is("a hold only authorized, never captured: not paid, nothing to refund (Claude 6 on #3634)", refundableOf(charge({ captured: false, amount_captured: 0 })), { ok: false, reason: "not_paid" });
+is("a hold captured in part: unknown, never the whole authorized amount", refundableOf(charge({ amount_captured: 3_000 })), unreadable);
+is("captured not said, or not a boolean: unknown", [refundableOf(charge({ captured: undefined })), refundableOf(charge({ captured: "true" }))], [unreadable, unreadable]);
+is("an amount captured we cannot read: unknown", [refundableOf(charge({ amount_captured: undefined })), refundableOf(charge({ amount_captured: 50.5 })), refundableOf(charge({ amount_captured: -1 }))], [unreadable, unreadable, unreadable]);
 is("no currency, a disputed flag we cannot read, or a paid flag that says otherwise: unknown", [refundableOf(charge({ currency: "" })), refundableOf(charge({ disputed: "no" })), refundableOf(charge({ paid: false }))], [unreadable, unreadable, unreadable]);
 is("not a charge, no id, a bare id: unknown", [refundableOf(null), refundableOf("ch_1"), refundableOf({ ...charge(), object: "payment_intent" }), refundableOf({ ...charge(), id: "" })], [unreadable, unreadable, unreadable, unreadable]);
 

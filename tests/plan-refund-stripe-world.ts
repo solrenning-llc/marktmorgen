@@ -42,6 +42,8 @@ export const world = {
   slow: 0,
   /** Emails sent through the stand-in Resend. */
   emails: [] as { to: string; subject: string; text: string; key: string }[],
+  /** The stand-in Resend answers 500 and records nothing. */
+  emailsDown: false,
 };
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -50,6 +52,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
   const fail = () => json({ error: { message: "down", type: "api_error" } }, 500);
   if (url.hostname === "api.resend.com") {
+    if (world.emailsDown) return new Response("down", { status: 500 });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     world.emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text, key: new Headers(init?.headers).get("idempotency-key") ?? "" });
     return new Response(JSON.stringify({ id: `email_${world.emails.length}` }), { status: 200 });

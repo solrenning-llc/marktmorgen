@@ -249,4 +249,45 @@ await t.test(`the give-up letter says what Stripe shows of the plan, not the not
   assert.deepEqual(Object.entries(said).filter(([, on]) => on).map(([k]) => k), [expected], `the letter says only "${expected}" (note m was ${note.m})`);
 });
 }
+
+// Revisor 2's LOW on #3585: the damaged note is dropped only after the creator's letter was sent, and never on a store
+// reply that is not an exact answer; the log says "told" only after the send.
+for (const cause of ["an anomalous store reply", "a letter that was not sent"] as const) {
+await t.test(`a damaged note is kept, no letter lost, when the let-go cannot be finished: ${cause} (Revisor 2's LOW on #3585)`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[] };
+  note.p = [null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  world.emails = [];
+  world.emailsDown = cause === "a letter that was not sent";
+  const logs: string[] = [];
+  const logged = console.error;
+  console.error = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
+  if (cause === "an anomalous store reply") {
+    redis.pipeline = async (commands) => commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:store:id:") ? [] : original(commands);
+  }
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+    assert.notEqual(await shop.note(), null, "the note stays until the letter is known to be sent");
+    assert.equal(logs.some((line) => line.includes("the creator told")), false, "nothing says the creator was told before a send");
+    redis.pipeline = original;
+    world.emailsDown = false;
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
+    assert.equal(world.emails.length, 1, "the next run sends the letter once");
+    assert.equal(await shop.note(), null, "and only then is the note dropped");
+  } finally {
+    console.error = logged;
+    world.emailsDown = false;
+    redis.pipeline = original;
+    delete process.env.RESEND_API_KEY;
+  }
+});
+}
 });

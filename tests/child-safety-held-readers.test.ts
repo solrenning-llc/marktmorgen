@@ -186,6 +186,24 @@ async function main(): Promise<void> {
   is("nor another product's page", await productPage(freeId), "drawn without it");
   is("a product that is not held is still listed", (await front()).includes(freeId), true);
 
+  part("A hold cut short after its mark is still queued for the hourly job, before its files are held");
+  const cutMade = await addProduct(OWNER, "Held Product cut", "", "19", null);
+  if (!cutMade.ok) throw new Error("no cut product");
+  const cutId = cutMade.product.id;
+  redis.run(["DEL", ...redis.keys().filter((key) => key.startsWith("nl:csa:held:"))]);
+  let marked = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const isMark = commands.some((command) => command[0] === "SET" && String(command[1]).startsWith("nl:csa:keep:"));
+    const isQueue = commands.some((command) => command[0] === "ZADD" && command[1] === "nl:csa:hide");
+    if (marked && !isQueue) return new Promise(() => {});
+    if (isMark) marked = true;
+    return real(commands);
+  }) as typeof redis.pipeline;
+  void holdReported({ kind: "child_safety", url: `${BASE}/@${HANDLE}/p/${cutId}` }, await now());
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  redis.pipeline = real as typeof redis.pipeline;
+  is("kept, and queued although everything after the mark hung", [marked, await queued()], [true, 1]);
+
   part("A mark that cannot be read refuses, never shows the content");
   redis.pipeline = (async (commands: (string | number)[][]) =>
     commands.some((command) => command.slice(1).some((arg) => String(arg).startsWith("nl:csa:keep:"))) ? commands.map(() => 42) : real(commands)) as typeof redis.pipeline;

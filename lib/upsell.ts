@@ -557,6 +557,14 @@ export async function findOfferCharge(
   throw new StripeListUnreadable("more payments than are read");
 }
 
+/**
+ * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
+ * written since — naming the customer, a payment or an answer — is never taken off.
+ */
+const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+
 /** Settles one offer still waiting on an answer. Nothing is ever charged here. */
 async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
   if (record.state !== "pending" || !store.stripeAccountId) return;
@@ -575,6 +583,13 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
         return;
       }
     } else {
+      // Neither a customer nor a payment: only the claim was written (its reply lost, or the write naming the
+      // customer failed), and the charge is asked of Stripe only after that write. So it was never sent and nothing
+      // was charged: once older than a request in flight could still be, it is let go, only while it is still this
+      // very record, and the buyer can answer the offer again. Never shown as checking until it expires.
+      if (Date.now() - record.at > LOST_ANSWER_MS) {
+        await redisPipeline([["EVAL", ORPHAN_RELEASE, 1, recordKey(session, slot), JSON.stringify(record)]]);
+      }
       return;
     }
     const meta = pi.metadata as Record<string, string> | null;

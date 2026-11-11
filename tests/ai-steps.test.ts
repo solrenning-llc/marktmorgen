@@ -276,6 +276,13 @@ async function main(): Promise<void> {
   unknownFor = null;
   is("a confirmed mark is", await ai.markAiStop(store, "runsetknown00001"), true);
 
+  part("A stop for a run that is not running writes nothing (MEDIUM 1 of cloud I's review of #3435)");
+  fresh();
+  is("a stop for a run never started is not taken", await ai.markAiStop(store, "runneverstart001"), false);
+  is("and leaves no mark", redis.run(["GET", stopKey("runneverstart001")]), null);
+  for (let i = 0; i < 20; i += 1) await ai.markAiStop(store, `runfresh${String(i).padStart(8, "0")}`);
+  is("twenty stops for made-up runs leave no mark at all", Array.from({ length: 20 }, (_, i) => redis.run(["GET", stopKey(`runfresh${String(i).padStart(8, "0")}`)])).filter((v) => v !== null).length, 0);
+
   part("A run that is not one takes nothing");
   fresh();
   before = await ai.aiLeft(store);

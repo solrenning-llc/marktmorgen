@@ -105,6 +105,16 @@ async function main(): Promise<void> {
   const blind = await benefitsDue(store, NOW * 1000);
   redis.pipeline = real;
   is("the list of the deleted unreadable: unknown, never a list that may name them", blind, { state: "unknown", why: "erased" });
+
+  // Codex G on #3014 @c5bb936f: a store read with no list, then a person deleted while Stripe is read (the erasure
+  // gives the store its list, then writes the print): the stale store had no list, so the deleted address was listed.
+  part("A person deleted during the Stripe read, from a store read before it had a list");
+  await setUp(false);
+  // The store as a page read it before its list was made: the list the erasure makes (or found) is not in it.
+  const stale = { ...(await storeForEmail(owner))!, listId: null };
+  duringRead = () => erase(ANN);
+  const during = await benefitsDue(stale, NOW * 1000);
+  is("the deleted person is not listed; the other member is", during.state === "ok" ? [...new Set(during.rows.map((r) => r.email))] : during, ["bo@example.com"]);
   done();
 }
 

@@ -27,6 +27,7 @@ import { RETURNING_REFUSALS } from "@/lib/returning-code-rules";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
+import { KEY_PARAMS, withoutKeys } from "@/components/store-pixels";
 import { done, is, part } from "./check";
 
 const OWNER = "returning.box@example.com";
@@ -105,6 +106,14 @@ async function main(): Promise<void> {
       is(`${lang}: not left in English`, all.some((line, i) => line === [en.open, en.note, en.codeLabel, en.emailLabel, en.emailNote, en.send, en.sent, en.confirmed, ...RETURNING_REFUSALS.map((r) => en.refused[r])][i]), false);
     }
   }
+
+  part("The emailed link's one-time token never reaches the ad scripts");
+  // The link in the email is `/@store/p/<id>?rtoken=<token>#returning`: whoever holds the token
+  // opens the checkout with the code for that address, so it is a key to an order (506 [SG1], E-2).
+  const emailed = withoutKeys(`https://marktmorgen.com/@returnbox/p/prod1?rtoken=${"a".repeat(64)}&utm_source=mail#returning`);
+  is("the token is taken out of the address the ad scripts read", emailed.href, "https://marktmorgen.com/@returnbox/p/prod1?utm_source=mail#returning");
+  is("and kept aside for the page", emailed.keys, [["rtoken", "a".repeat(64)]]);
+  is("it is named among the keys", (KEY_PARAMS as readonly string[]).includes("rtoken"), true);
 
   done();
 }

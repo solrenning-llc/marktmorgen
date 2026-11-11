@@ -24,7 +24,8 @@ const stays = () => () => {};
 const query = () => new URLSearchParams(window.location.search);
 const statusHere = () => readRefusal(query().get("returning"));
 const codeHere = () => readTypedCode(query().get("rc"));
-const tokenHere = () => readLinkToken(query().get("rtoken"));
+/** The emailed link's token for this page, read from its address. */
+export const linkTokenHere = () => readLinkToken(query().get("rtoken"));
 const nothing = () => null;
 const empty = () => "";
 
@@ -33,7 +34,7 @@ export function ReturningCodeBox({ id, lang, className = "" }: { id: string; lan
   // Read from the address once the page is in the browser; on the server there is none.
   const status: ReturningStatus | null = useSyncExternalStore(stays, statusHere, nothing);
   const sentBack = useSyncExternalStore(stays, codeHere, empty);
-  const token = useSyncExternalStore(stays, tokenHere, empty);
+  const token = useSyncExternalStore(stays, linkTokenHere, empty);
   // What the buyer types wins; until then, the code that was sent back.
   const [typed, setTyped] = useState<string | null>(null);
   const code = typed ?? (status ? sentBack : "");

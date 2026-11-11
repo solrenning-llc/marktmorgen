@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { randomBytes } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { LockBusyError } from "@/lib/redis-lock";
@@ -36,7 +36,8 @@ const listed = (tasks: BusinessTask[]) => ({ ok: true, tasks: businessTaskOrder(
 /** A new task's id: ten lower-case letters and digits. */
 function newId(): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  return [...randomBytes(10)].map((b) => alphabet[b % alphabet.length]).join("");
+  // Each character drawn evenly from the alphabet: a random byte taken modulo 36 would favour some (CodeQL on #3562).
+  return Array.from({ length: 10 }, () => alphabet[randomInt(alphabet.length)]).join("");
 }
 
 export async function GET(request: NextRequest) {

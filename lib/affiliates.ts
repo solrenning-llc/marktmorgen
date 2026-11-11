@@ -3047,6 +3047,13 @@ async function notePendingOne(
     counts.waiting += 1;
     return false;
   }
+  // A membership whose subscription already carries an affiliate (a pass that put it, then failed on its first invoice)
+  // is credited, its first payment with it, never told otherwise on a decision read again (Claude 1's money review of
+  // #3479, MEDIUM 2): its renewals are credited in the book from the subscription, so a notice that no commission is
+  // counted would have the creator pay it twice. A subscription that does not answer throws: the order waits.
+  if (!once && (outcome.kind === "share" || outcome.kind === "own" || outcome.kind === "none") && (await carriesAffiliate(store, row, deadline))) {
+    return tellMembership(store, row, raw, counts, send, deadline);
+  }
   if (outcome.kind === "share" || outcome.kind === "own") {
     // Read, but sold at a share not known now, or to a buyer who may be the affiliate: it will not become known, so
     // the creator is told at once.
@@ -3098,6 +3105,13 @@ async function notePendingOne(
   await writePendingMark(statsId, row.id, `credited:${aff}`);
   counts.credited += 1;
   return true;
+}
+
+/** Whether a membership's subscription already names an affiliate (subscriptionVia); one with no subscription, none. */
+async function carriesAffiliate(store: Store, row: SessionLike & { id: string }, deadline: number | undefined): Promise<boolean> {
+  const subscription = typeof row.subscription === "string" ? row.subscription : "";
+  if (!/^sub_[A-Za-z0-9]{3,250}$/.test(subscription) || !store.stripeAccountId) return false;
+  return AFFILIATE_ID_PATTERN.test((await subscriptionVia(store, subscription, deadline)).via);
 }
 
 /**
@@ -3356,13 +3370,20 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
     await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
-  await notePartners(store, { ...sale, buyer: paid.email });
-  // A link the checkout could not read (owner's decision 6), after the partners so nothing here keeps their shares
-  // from being written: read again at the hand-over against the time it was paid, and, still unknown, kept for the
-  // sweep's next passes (notePayPalPendings), as a Stripe order is; whether the program is on now or not.
-  if (!paid.via && store.statsId && isRedisConfigured() && typeof paid.meta?.[VIA_PENDING_META] === "string") {
-    await settlePayPalPending(store, paid, title, Math.floor(Date.now() / 1000), send);
-  }
+  // A link the checkout could not read (owner's decision 6) is put on the sweep's list first (Claude 1's money review
+  // of #3479, MEDIUM 1): the partners' shares failing on an unknown read no longer drops it, and the hand-over that
+  // logs that failure marks the order handed over with its link still due. Then the partners, whatever the link; then
+  // the link read again at the hand-over against the time it was paid, and, still unknown, kept for the sweep's next
+  // passes (notePayPalPendings), as a Stripe order is; whether the program is on now or not.
+  const pending = !paid.via && typeof paid.meta?.[VIA_PENDING_META] === "string";
+  const now = Math.floor(Date.now() / 1000);
+  if (pending) await paypalDue(store.statsId, paid.order, now);
+  let partners: unknown = null;
+  await notePartners(store, { ...sale, buyer: paid.email }).catch((error: unknown) => {
+    partners = error;
+  });
+  if (pending) await settlePayPalPending(store, paid, title, now, send);
+  if (partners) throw partners;
 }
 
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {

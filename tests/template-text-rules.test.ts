@@ -20,7 +20,7 @@ import { STARTER_PROMPTS, templateLeft } from "@/lib/template-text";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId } from "@/lib/store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
-import type { TextBlock } from "@/lib/sales-page";
+import { BLOCK_KINDS, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
 import { POST as savePage } from "@/app/api/store/page/route";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { store as redis } from "./redis-stub";
@@ -32,6 +32,79 @@ const ORIGIN = "https://marktmorgen.com";
 /** A campaign's own part in [brackets], exactly as a page made from it holds it. */
 const physical = FUNNEL_STARTERS.find((starter) => starter.id === "physical-product");
 const STARTER_PART = "[Give its measurements and weight, what it is made of and how to look after it. Say anything it needs that is not in the box.]";
+
+const PICTURE: Picture = { path: "pages/pic.webp", width: 800, height: 600, alt: "A loaf on a board", caption: "Day two" };
+const VIDEO: Video = { provider: "youtube", id: "dQw4w9WgXcQ", hash: "" };
+/**
+ * One block of every kind with every field it holds written (Revisor 2 on
+ * #3593): the type makes a new kind, or a new field a kind requires, a type
+ * error here until it is added, and the check below sets each of its words
+ * to a part left to write in turn.
+ */
+const EVERY_KIND: { [K in BlockKind]: Extract<PageBlock, { kind: K }> } = {
+  hero: { id: "b-hero", kind: "hero", headline: "Bread at home", sub: "In a weekend", media: "video", video: VIDEO, layout: "split", button: true, screens: "phone", saved: "abcdefghij" },
+  text: { id: "b-text", kind: "text", heading: "Why", body: "Because." },
+  benefits: { id: "b-benefits", kind: "benefits", heading: "You get", items: ["A loaf", "A starter"] },
+  inside: { id: "b-inside", kind: "inside", heading: "Inside", items: [{ title: "Flour", detail: "Which one" }] },
+  bio: { id: "b-bio", kind: "bio", heading: "About me", body: "I bake.", photo: true },
+  faq: { id: "b-faq", kind: "faq", heading: "Questions", items: [{ q: "How long?", a: "Two days." }] },
+  guarantee: { id: "b-guarantee", kind: "guarantee", heading: "Guarantee", body: "30 days." },
+  cta: { id: "b-cta", kind: "cta", label: "Buy it", note: "Instant access" },
+  reviews: { id: "b-reviews", kind: "reviews", heading: "Reviews", first: ["0123456789abcdef01234567"] },
+  video: { id: "b-video", kind: "video", heading: "A lesson", video: VIDEO, caption: "Lesson one" },
+  pictures: { id: "b-pictures", kind: "pictures", heading: "Pages", items: [PICTURE] },
+  countdown: { id: "b-countdown", kind: "countdown", heading: "Doors close", until: 1_900_000_000, note: "Then the price goes up" },
+  fit: { id: "b-fit", kind: "fit", heading: "Who it is for", yesLabel: "For", noLabel: "Not for", yes: ["Beginners"], no: ["Pros"] },
+  steps: { id: "b-steps", kind: "steps", heading: "How", items: [{ title: "Pay", detail: "Then read" }] },
+  compare: { id: "b-compare", kind: "compare", heading: "Compare", columnA: "This", columnB: "A class", rows: [{ label: "Price", a: "$29", b: "$200" }] },
+  bonuses: { id: "b-bonuses", kind: "bonuses", heading: "Bonuses", items: [{ title: "Recipes", detail: "Ten of them" }] },
+  facts: { id: "b-facts", kind: "facts", heading: "By the numbers", show: ["lessons"] },
+  feature: { id: "b-feature", kind: "feature", heading: "Shaping", body: "Fold it twice.", picture: PICTURE, side: "left" },
+  product: { id: "b-product", kind: "product", heading: "Also", product: "p1", note: "Goes well with it" },
+  quotes: { id: "b-quotes", kind: "quotes", heading: "Said elsewhere", items: [{ text: "Best bread course.", name: "Ana", url: "https://example.com/post" }] },
+  form: { id: "b-form", kind: "form", heading: "Tell us", form: "f1" },
+  row: {
+    id: "b-row",
+    kind: "row",
+    columns: [
+      [
+        { kind: "heading", text: "One" },
+        { kind: "subheading", text: "Two" },
+        { kind: "paragraph", text: "Three" },
+        { kind: "list", items: ["Four"] },
+        { kind: "icon", name: "check", label: "Five" },
+        { kind: "button", label: "Six", url: "https://example.com/six" },
+      ],
+      [
+        { kind: "image", picture: PICTURE, decorative: false },
+        { kind: "video", video: VIDEO, title: "Seven" },
+        { kind: "video-window", video: VIDEO, title: "Eight", label: "Nine" },
+      ],
+    ],
+  },
+  booking: { id: "b-booking", kind: "booking", product: "c1", heading: "Book a call" },
+  divider: { id: "b-divider", kind: "divider" },
+  space: { id: "b-space", kind: "space", size: "small" },
+};
+
+/** Every string a block holds, by its path, but its own id and a kind, which say what it is. */
+function wordPaths(value: unknown, path: (string | number)[] = []): (string | number)[][] {
+  if (typeof value === "string") return [path];
+  if (Array.isArray(value)) return value.flatMap((item, i) => wordPaths(item, [...path, i]));
+  if (value && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, item]) => (key === "kind" || (path.length === 0 && key === "id") ? [] : wordPaths(item, [...path, key])));
+  }
+  return [];
+}
+
+/** A copy of the block with the string at `path` set to `words`. */
+function withWordsAt<T>(block: T, path: (string | number)[], words: string): T {
+  const copy = structuredClone(block) as Record<string | number, unknown>;
+  let at = copy;
+  for (const key of path.slice(0, -1)) at = at[key] as Record<string | number, unknown>;
+  at[path[path.length - 1]] = words;
+  return copy as T;
+}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -95,6 +168,31 @@ async function main(): Promise<void> {
   is("kept hidden, it saves", hidden.data.ok, true);
   const written = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [why, own], hidden: false } });
   is("once written in the creator's own words, it can be shown", written.data.ok, true);
+
+  part("Every words field of every kind of block (Revisor 2 on #3593)");
+  const quote = (text: string, name: string): QuotesBlock => ({ id: "quote001", kind: "quotes", heading: "Said elsewhere", items: [{ text, name, url: "https://example.com/post" }] });
+  const quoteOut = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [why, quote("⟦Paste what someone said about it⟧", "Ana")], hidden: false } });
+  is("a quote's words left to write are refused on a shown page, with the block", [quoteOut.status, quoteOut.data.error, quoteOut.data.block, quoteOut.data.part], [400, "placeholder", "quote001", "⟦Paste what someone said about it⟧"]);
+  const nameOut = await post(savePage, "page", { id: shown.product.id, page: { blocks: [why, quote("Best bread course.", "⟦Their name⟧")] } });
+  is("a quote's name left to write is refused on a published product's page", [nameOut.status, nameOut.data.error, nameOut.data.block, nameOut.data.part], [400, "placeholder", "quote001", "⟦Their name⟧"]);
+  const quoteHidden = await post(sitePage, "site-page", { action: "save", id, page: { blocks: [quote("⟦Paste what someone said about it⟧", "Ana")], hidden: true } });
+  is("kept hidden, a quote left to write saves", quoteHidden.data.ok, true);
+  is("a block of every kind is checked", BLOCK_KINDS.every(({ kind }) => kind in EVERY_KIND), true);
+  const missed: string[] = [];
+  let fields = 0;
+  for (const block of Object.values(EVERY_KIND) as PageBlock[]) {
+    is(`the ${block.kind} block, written, has no part left`, templateTextIn({ blocks: [block] }, STARTER_PROMPTS), null);
+    for (const path of wordPaths(block)) {
+      fields += 1;
+      for (const [where, words] of [["marked", "⟦Write this⟧"], ["bracketed", STARTER_PART]] as const) {
+        const left = withWordsAt(block, path, words);
+        const found = templateLeft({ blocks: [why, left] });
+        const second = templateLeft({ blocks: [why], variant: { id: "", blocks: [left] } as never });
+        if (found?.block !== block.id || found.part !== words || second?.block !== block.id) missed.push(`${block.kind}.${path.join(".")} (${where})`);
+      }
+    }
+  }
+  is("every words field of every kind is read, in either version", { fields: fields > 60, missed }, { fields: true, missed: [] });
 
   part("The rule, alone");
   is("every campaign part is read, each once, none a link's words", [STARTER_PROMPTS.length > 50, new Set(STARTER_PROMPTS).size === STARTER_PROMPTS.length, STARTER_PROMPTS.includes(STARTER_PART), STARTER_PROMPTS.every((p) => /^\[[^\]\n]{2,}\]$/.test(p))], [true, true, true, true]);

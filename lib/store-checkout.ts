@@ -1167,9 +1167,14 @@ type SessionRecord = {
   payment_intent?: unknown;
 };
 
-/** The charge on an expanded payment, or null when the payment was not expanded. */
+/**
+ * The charge on an expanded payment, or null when the payment was not
+ * expanded or is not one: only an object that says it is a payment_intent
+ * (rule 24; Codex C2 on #3647).
+ */
 function chargeOfPayment(paymentIntent: unknown): unknown {
   return paymentIntent && typeof paymentIntent === "object" && !Array.isArray(paymentIntent)
+    && (paymentIntent as { object?: unknown }).object === "payment_intent"
     ? (paymentIntent as { latest_charge?: unknown }).latest_charge
     : null;
 }

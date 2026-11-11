@@ -179,6 +179,18 @@ class NotOwnReply extends Error {
   }
 }
 /**
+ * The move's own reply decides only when it is this membership and carries what the move wrote (rule 30): the yearly
+ * invoice it replaces, in `metadata.monthly_replaced`, merged by Stripe into the subscription's metadata only when the
+ * change applies, atomically with its items, and kept in `pending_update.metadata` while it waits (fallbackBody). A
+ * reply for another membership, with no id, or without that invoice says nothing about this move.
+ */
+const carriesMove = (reply: Record<string, unknown>, subscription: string, failedInvoice: string): boolean => {
+  if (!isOwnReply(reply, subscription)) return false;
+  const holder = reply.pending_update ? reply.pending_update : reply;
+  const metadata = holder && typeof holder === "object" ? (holder as { metadata?: unknown }).metadata : null;
+  return Boolean(metadata) && typeof metadata === "object" && (metadata as Record<string, unknown>).monthly_replaced === failedInvoice;
+};
+/**
  * Whether the entry is on its list for the daily job: only a whole count from SADD says so (1 added, 0 already
  * there); any other reply is unknown and said as not left (CX-123 rule 24).
  */
@@ -261,6 +273,14 @@ export async function moveToMonthly(store: Store, customer: string, subscription
         }
         // No answer, a 409 or Stripe's own failure: the move may have been made and the month charged. The year stays
         // with no automatic retry, and the daily job reads the membership again before anything else.
+        return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check)) ? "unknown" : "unknown-unrecorded" };
+      }
+      // A reply that is not this move is no answer, as when Stripe does not answer: the move was sent and may have been
+      // made, so nothing is voided on it and the year is never turned back on; it waits, with no retry, for the daily
+      // job, which reads the membership again. A second try is refused by the rules, the year no longer being retried
+      // by itself, so it never sends the move twice.
+      if (!carriesMove(updated, subscription, failedInvoice)) {
+        console.error("a move to monthly was answered with a reply that is not that move; kept for the daily job", subscription);
         return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check)) ? "unknown" : "unknown-unrecorded" };
       }
       const latest = updated.latest_invoice && typeof updated.latest_invoice === "object" ? (updated.latest_invoice as InvoiceRead) : null;

@@ -65,13 +65,24 @@ export function assistantRefusal(store: Store, nowSeconds = Date.now() / 1000): 
 
 let priceId: string | null = null;
 
+/**
+ * Whether a price at Stripe is the add-on's own: ASSISTANT_PRICE_CENTS in dollars, every month. Asked of a price found
+ * by its lookup key and of the reply to the one just made (rule 30): a reply without the values just written is never
+ * used for a checkout, nor kept for the next. Every month is a month unit with interval_count exactly 1 (Codex P on
+ * #3107): a month unit every two months is another frequency, and a reply with no count says no frequency at all.
+ */
+const isAssistantPrice = (price: Record<string, unknown> | undefined): price is Record<string, unknown> & { id: string } => {
+  const recurring = price?.recurring as { interval?: unknown; interval_count?: unknown } | null | undefined;
+  return Boolean(price) && typeof price?.id === "string" && price.unit_amount === ASSISTANT_PRICE_CENTS && price.currency === "usd" &&
+    recurring?.interval === "month" && recurring.interval_count === 1;
+};
+
 /** The add-on's price at Stripe, made the first time it is needed, and replaced when it no longer matches ASSISTANT_PRICE_CENTS. */
 export async function ensureAssistantPrice(): Promise<string> {
   if (priceId) return priceId;
   const listed = await onPlatform("GET", `/prices?${new URLSearchParams({ "lookup_keys[]": ASSISTANT_LOOKUP_KEY, active: "true", limit: "1" })}`);
   const found = (listed.data as Record<string, unknown>[] | undefined)?.[0];
-  const recurring = found?.recurring as { interval?: unknown } | null | undefined;
-  if (found && typeof found.id === "string" && found.unit_amount === ASSISTANT_PRICE_CENTS && found.currency === "usd" && recurring?.interval === "month") {
+  if (isAssistantPrice(found)) {
     priceId = found.id;
     return found.id;
   }
@@ -92,13 +103,15 @@ export async function ensureAssistantPrice(): Promise<string> {
       currency: "usd",
       unit_amount: String(ASSISTANT_PRICE_CENTS),
       "recurring[interval]": "month",
+      "recurring[interval_count]": "1",
       product: ASSISTANT_PRODUCT_ID,
       lookup_key: ASSISTANT_LOOKUP_KEY,
       transfer_lookup_key: "true",
       nickname: `${ASSISTANT_NAME}, monthly`,
     }),
   );
-  if (typeof made.id !== "string") throw new Error("Stripe did not return a price");
+  // Nothing is kept on any other reply: the checkout that asked fails, and the next one asks Stripe again.
+  if (!isAssistantPrice(made)) throw new Error("Stripe did not return the price just written");
   priceId = made.id;
   return made.id;
 }

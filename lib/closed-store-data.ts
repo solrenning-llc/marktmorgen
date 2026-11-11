@@ -320,15 +320,42 @@ export async function queueDeleted(store: Store, now = Date.now()): Promise<Batc
 }
 
 /**
+ * One entry of the batch changed only while it is still exactly the text read, in one step (a compare-and-set):
+ * ARGV[3] written in its place, or, when ARGV[3] is empty, the field dropped. 1 changed, 0 not (another write landed
+ * meanwhile, such as a retried delete's fresh entry, and is kept). Modelled by lib/redis-memory.ts.
+ */
+export const BATCH_SWAP = `-- marktmorgen:closed-batch-swap:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+return 1`;
+
+/** BATCH_SWAP's answer read exactly: true changed, false kept (changed meanwhile), null unknown (rule 24). */
+async function swapEntry(ref: string, read: string, next: string): Promise<boolean | null> {
+  const reply = repliesFor(await redisPipeline([["EVAL", BATCH_SWAP, 1, BATCH_KEY, ref, read, next]]), 1)?.[0];
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
+
+/**
  * Before a walk begins: deleted stores waiting in the batch join it once Redis says their record is gone (nil). One
  * whose record still stands is never walked: it waits while its delete may be under way (DELETE_SETTLES_MS), and is
  * then dropped. A record not read, or a write not confirmed, leaves the entry waiting and the run unsure (rule 24).
+ *
+ * Each change is made only over the exact entry read (BATCH_SWAP), never by a plain HSET or HDEL: this takes no store
+ * lock, and a retried delete may write a fresh entry into the same field under its own lock after this read the old
+ * one (Codex T and reviewer 2 on #3670). The old entry's hour then said nothing about the new delete, and dropping or
+ * rewriting the field lost the fresh entry, so the deleted store's id-named keys stayed for good. A field that changed
+ * meanwhile is left as it is, for the next walk to read again.
  */
-async function admitDeleted(entries: Map<string, Batched>, now: number): Promise<{ admitted: number; sure: boolean }> {
+async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, string>, now: number): Promise<{ admitted: number; sure: boolean }> {
   let admitted = 0;
   let sure = true;
   for (const [ref, entry] of entries) {
     if (!entry.queued) continue;
+    const read = raws.get(ref);
+    if (read === undefined) {
+      sure = false;
+      continue;
+    }
     let standing: Store | null;
     try {
       standing = await storeExactly(ref);
@@ -340,14 +367,13 @@ async function admitDeleted(entries: Map<string, Batched>, now: number): Promise
     if (!standing) {
       const walkable: Batched = { ...entry };
       delete walkable.queued;
-      const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(walkable)]]), 1)?.[0];
-      if (set === 0 || set === 1) admitted += 1;
-      else sure = false;
+      const set = await swapEntry(ref, read, JSON.stringify(walkable));
+      if (set === true) admitted += 1;
+      else if (set === null) sure = false;
       continue;
     }
     if (now - entry.at <= DELETE_SETTLES_MS) continue;
-    const gone = repliesFor(await redisPipeline([["HDEL", BATCH_KEY, ref]]), 1)?.[0];
-    if (gone !== 0 && gone !== 1) sure = false;
+    if ((await swapEntry(ref, read, "")) === null) sure = false;
   }
   return { admitted, sure };
 }
@@ -702,17 +728,21 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
  * stores left as 0 from it too (Claude 5's second money review of #3279). An entry that does not read is kept and
  * counted in `unreadable`, so the count of stores left is never lowered past it.
  */
-async function readBatch(): Promise<{ entries: Map<string, Batched>; unreadable: number }> {
+async function readBatch(): Promise<{ entries: Map<string, Batched>; raws: Map<string, string>; unreadable: number }> {
   const list = stringList(repliesFor(await redisPipeline([["HGETALL", BATCH_KEY]]), 1)?.[0]);
   if (!list || list.length % 2 !== 0) throw new UnknownReplyError("the closing walk's batch (HGETALL)");
   const entries = new Map<string, Batched>();
+  // Each entry's text exactly as read, so a change is made only over it (admitDeleted, BATCH_SWAP).
+  const raws = new Map<string, string>();
   let unreadable = 0;
   for (let i = 0; i + 1 < list.length; i += 2) {
     const value = json(list[i + 1]) as Batched | null;
-    if (value && Array.isArray(value.marks)) entries.set(list[i], value);
-    else unreadable += 1;
+    if (value && Array.isArray(value.marks)) {
+      entries.set(list[i], value);
+      raws.set(list[i], list[i + 1]);
+    } else unreadable += 1;
   }
-  return { entries, unreadable };
+  return { entries, raws, unreadable };
 }
 
 /**
@@ -825,7 +855,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
     // Deleted stores waiting since the last walk join this one, once their records are gone (admitDeleted).
-    const waiting = await admitDeleted((await readBatch()).entries, now);
+    const read = await readBatch();
+    const waiting = await admitDeleted(read.entries, read.raws, now);
     report.stores += waiting.admitted;
     if (!waiting.sure) unsure = true;
     // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again; one

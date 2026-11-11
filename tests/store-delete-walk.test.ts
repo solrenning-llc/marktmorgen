@@ -161,6 +161,10 @@ async function main(): Promise<void> {
   const t1 = Date.now();
   await eraseClosed(deadline(), finishClosed, t1);
   is("a walk while a delete may still be under way keeps its keys and leaves its entry waiting", [await erasableBy(idsOf(staysStore)), typeof (await inBatch(staysRef))], [staysKeys, "string"]);
+  garble = (command) => (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:closed-batch-swap:v1\n") ? ["garbled"] : undefined);
+  const lost = await eraseClosed(deadline(), finishClosed, t1 + 2 * HOUR);
+  garble = undefined;
+  is("rule 24: a drop answered in an unknown shape keeps the entry, and the run is not done", [lost.done, typeof (await inBatch(staysRef)), await erasableBy(idsOf(staysStore))], [false, "string", staysKeys]);
   await eraseClosed(deadline(), finishClosed, t1 + 21 * HOUR);
   is("once no delete can be under way, its entry is dropped and its keys are kept", [await erasableBy(idsOf(staysStore)), await inBatch(staysRef), (await storeForId(staysStore.sid))?.handle], [staysKeys, null, "keepsstays"]);
 

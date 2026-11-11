@@ -81,6 +81,8 @@ export const MAX_NOTES = 50;
 /** Before the note: the refund's own `created` may be a few seconds before ours. */
 const CLOCK_SLACK = 300;
 const LIVE = ["active", "trialing", "past_due", "unpaid", "paused"];
+/** The live statuses a letter may say "goes on and renews as usual" of; "unpaid" and "paused" do not. */
+const RENEWS = ["active", "trialing", "past_due"];
 const ENDED = ["canceled", "incomplete_expired"];
 const REFUND_ID = /^re_[A-Za-z0-9]{6,128}$/;
 const OBJECT_ID = /^[a-z]{2,4}_[A-Za-z0-9]{6,128}$/;
@@ -188,6 +190,8 @@ const planState = (sub: Row | null): "stops" | "renews" | "ended" | "unknown" =>
   if (!sub) return "unknown";
   if (sub.status === "canceled") return "ended";
   if (!LIVE.includes(String(sub.status))) return "unknown";
+  // A paused or unpaid plan does not go on as usual (Claude 1's LOW 1 on #3585): the letter says to check the studio.
+  if (!RENEWS.includes(String(sub.status))) return "unknown";
   if (typeof sub.cancel_at_period_end !== "boolean") return "unknown";
   if (sub.cancel_at !== null && typeof sub.cancel_at !== "number") return "unknown";
   return stopSet(sub) ? "stops" : "renews";

@@ -45,8 +45,9 @@ is("sales goal: the set or change button is a 44px target", tall(goalButton), tr
 
 const coach = read("components/store-coach.tsx");
 const summary = /<summary className="([^"]*)">\{`Already done/.exec(coach)?.[1] ?? "";
-// A summary keeps its own display, so its open/closed triangle stays: 12px + a 20px line + 12px = 44px.
-is("store coach: the \"Already done\" summary is a 44px target", /\bmin-h-11\b/.test(summary) && /\bpy-3\b/.test(summary), true);
+// A summary keeps its own display, so its open/closed triangle stays: 12px + a 20px line (text-sm) + 12px = 44px. Its
+// height comes from the padding, not min-h-11, which tests/tap-targets.test.ts reserves for boxes that centre their words.
+is("store coach: the \"Already done\" summary is a 44px target", /\bpy-3\b/.test(summary) && /\btext-sm\b/.test(summary) && !/\bmin-h-/.test(summary), true);
 is("and its open/closed marker stays visible (not turned into a flex box, no list-none)", /\b(inline-)?flex\b|\blist-none\b/.test(summary), false);
 
 done();

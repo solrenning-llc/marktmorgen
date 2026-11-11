@@ -474,8 +474,16 @@ async function readBusy(
   // not answer blocks nothing.
   const weekly = sellsAny(store, "weekly");
   const calendar = weekly
-    ? calendarBusy(store, now).catch(() => ({ busy: [] as Busy[] }))
-    : Promise.resolve({ busy: [] as Busy[] });
+    ? calendarBusy(store, now)
+        .then((reading) => {
+          if (reading.failing > 0) throw new UnknownReplyError("a weekly call's calendars");
+          return reading;
+        })
+        .catch((error) => {
+          console.error("reading weekly call calendars failed", error);
+          throw error;
+        })
+    : Promise.resolve({ busy: [] as Busy[], failing: 0 });
   // The creator's dated sessions count against weekly hours only.
   const sessions = weekly ? readListings(store, idsOfKind(store, "call")).then((calls) => sessionTimes(calls, now)) : Promise.resolve([]);
   // Awaited below; marked here so a failure while Stripe is being read is not left unheard.

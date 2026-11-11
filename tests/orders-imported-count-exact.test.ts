@@ -94,6 +94,15 @@ for (const reply of [1, {}, ["x"], "LOST"]) {
   });
 }
 
+// The entry's own fields are read strictly by #2794 (lib/imported-purchases.ts, parse); here, text that is not JSON.
+for (const raw of ["{not json", "["]) {
+  test(`a download of what was brought over whose entry is text that does not read (${raw}) is unknown, never "no such purchase"`, async () => {
+    const { store, ids, token } = await shop();
+    odd = { HGET: raw };
+    await assert.rejects(findPurchase(store, token, importedReference(store.statsId!, BUYER, ids[1])), UnknownReplyError);
+  });
+}
+
 test("an entry deleted between its id and its read (HGET nil) is no such purchase", async () => {
   const { store, ids, token } = await shop();
   odd = { HGET: null };

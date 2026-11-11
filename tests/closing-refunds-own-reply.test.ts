@@ -31,13 +31,13 @@ type World = {
 let world: World;
 let posts: string[] = [];
 
-const charge = (over: Record<string, unknown> = {}) => ({ id: "ch_closeown1", amount: 1000, currency: "usd", amount_refunded: 0, disputed: false, ...over });
+const charge = (over: Record<string, unknown> = {}) => ({ id: "ch_closeown1", amount: 1000, currency: "usd", amount_refunded: 0, disputed: false, balance_transaction: null, ...over });
 const ownIntent = (id: string) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id }) });
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/balance") return Response.json({ available: [{ amount: 100_000, currency: "usd" }] });
+  if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 100_000, currency: "usd" }] });
   if (path === `/invoices/${INVOICE}`) return Response.json(world.invoice);
   if (path === "/invoice_payments") return Response.json(world.listed);
   if (path.startsWith("/payment_intents/")) return Response.json(world.intent(decodeURIComponent(path.slice("/payment_intents/".length))));

@@ -252,9 +252,25 @@ async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Lis
     const product = listed.find((p) => p.id === id);
     return product && cartable(product) && canSellProduct(store, product) ? [product] : [];
   });
-  // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3).
-  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product).catch(() => null) : Promise.resolve(null))));
-  return kept.filter((_, i) => left[i] !== 0);
+  // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3); nor one whose count cannot be
+  // read, which is never taken for "some left" (CX-123, rule 24; review of 5 November 2026).
+  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product).catch(() => undefined) : Promise.resolve(null))));
+  return kept.filter((_, i) => left[i] !== 0 && left[i] !== undefined);
+}
+
+/**
+ * Whether a reminder about one product may be sent: unlimited, or limited
+ * with some left. A limited one whose count cannot be read is never taken for
+ * "some left", as in the cart's reminder above (CX-123, rule 24; 513 [PF1],
+ * review of 5 November 2026): the buyer is never sent back to something that
+ * may be sold out.
+ */
+async function someLeftOrUnlimited(store: Store, product: Listing): Promise<boolean> {
+  const left = await stockLeft(store, product).then(
+    (count) => count,
+    () => undefined,
+  );
+  return left !== undefined && left !== 0;
 }
 
 /**
@@ -320,8 +336,7 @@ export async function remindAbandoned(
   // Only something that can still be bought, and bought now.
   const product = meta.product ? await readListing(store, meta.product) : null;
   if (!product || product.call || !canSellProduct(store, product)) return "skip";
-  const left = await stockLeft(store, product).catch(() => null);
-  if (left === 0) return "skip";
+  if (!(await someLeftOrUnlimited(store, product))) return "skip";
 
   return deliver(store, { kind: "product", product }, email, {
     claim: id,
@@ -363,8 +378,7 @@ export async function remindAsked(
   }
   const product = await readListing(store, ask.productId);
   if (!product || product.call || product.hidden || !canSellProduct(store, product)) return "skip";
-  const left = await stockLeft(store, product).catch(() => null);
-  if (left === 0) return "skip";
+  if (!(await someLeftOrUnlimited(store, product))) return "skip";
   const g = givingWords(store.language);
   return deliver(store, { kind: "product", product }, ask.email, {
     claim: `ask-${ask.key}`,
@@ -407,8 +421,7 @@ export async function remindAssisted(
   }
   const product = meta.product ? await readListing(store, meta.product) : null;
   if (!product || product.call || meta.kind === "call" || !canSellProduct(store, product)) return "skip";
-  const left = await stockLeft(store, product).catch(() => null);
-  if (left === 0) return "skip";
+  if (!(await someLeftOrUnlimited(store, product))) return "skip";
   return deliver(store, { kind: "product", product }, input.email, how);
 }
 

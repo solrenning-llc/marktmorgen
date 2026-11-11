@@ -11,6 +11,7 @@
  *   nl:health:<statsId>   JSON Health, ten minutes
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -255,6 +256,10 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */
 export async function forgetHealthCopy(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", cacheKey(store)]]);
-  return Number(gone) || 0;
+  const replies = repliesFor(await redisPipeline([["DEL", cacheKey(store)]]), 1);
+  const gone = countOf(replies?.[0]);
+  // One key: 0 (it was not there) or 1 (deleted). Any other reply is unknown, so the step is not done and the
+  // erasure says so, never a copy with the person in it counted as gone (CX-123 rule 24).
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of the members' scores copy");
+  return gone;
 }

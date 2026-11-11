@@ -20,6 +20,7 @@ import { POST as askRoute } from "@/app/api/store/stock-alert/route";
 import { POST as confirmRoute } from "@/app/api/store/stock-alert/confirm/route";
 import { POST as leaveRoute } from "@/app/api/store/stock-alert/leave/route";
 import { STOCK_ALERT_DUE } from "@/lib/stock-alerts";
+import { STOCK_ALERT_WORDS } from "@/lib/buyer-words/stock-alert";
 import { allowanceFor, askedCeiling } from "@/lib/store-allowance-rules";
 import { takeAllowance } from "@/lib/store-allowance";
 import { store as redis } from "./redis-stub";
@@ -161,6 +162,18 @@ async function main(): Promise<void> {
   mails.length = 0;
   await ask("lector@example.com", "8.8.2.1");
   is("Spanish subject and html lang", [mails[0]?.subject, mails[0]?.html.includes('lang="es-ES"')], ["Confirma: avísame cuando Signed Print vuelva", true]);
+
+  part("The links' own limit says how long it lasts: ten minutes, not an hour (Claude 3 on #3620, LOW 6)");
+  const confirms: (string | null)[] = [];
+  for (let i = 0; i < 21; i += 1) confirms.push(statusOf(await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: "1".repeat(48) }, "6.6.6.1"))));
+  is("twenty confirm presses from one connection in ten minutes, then the links' notice", [confirms.slice(0, 20).every((c) => c === "expired"), confirms[20]], [true, "busy"]);
+  const leaves: (string | null)[] = [];
+  for (let i = 0; i < 301; i += 1) leaves.push(statusOf(await leaveRoute(request("/api/store/stock-alert/leave", { handle: "harbor", token: "1".repeat(48) }, "6.6.6.2"))));
+  is("three hundred stop presses from one connection in ten minutes, then the links' notice", leaves[300], "busy");
+  for (const [code, words] of Object.entries(STOCK_ALERT_WORDS)) {
+    is(`${code}: the links' notice names ten minutes`, words.notices.busy?.body.includes("10"), true);
+    is(`${code}: and never an hour`, words.notices.busy?.body === words.notices.limited.body, false);
+  }
 
   part("One click from a mail app still works after the store lets its old address go");
   mails.length = 0;

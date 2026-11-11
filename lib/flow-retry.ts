@@ -5,6 +5,8 @@
  * A wait whose end is known is tried once, at that end: the month's emails
  * at the turn of the store's allowance window, the company's daily room at
  * the next UTC day, a pause on the store's email at the pause's end.
+ * A store switched off after notices about its content (lib/takedown.ts) is
+ * tried again a day later, each time.
  * Anything else (the sender's ceiling, a portion of a new list, a read that
  * did not answer, the deals board) is tried again after a delay that grows
  * threefold each time: 10 minutes, 30, 90, 4.5 hours, 13.5, then a day.
@@ -20,7 +22,7 @@
 import { MAX_WAIT_DAYS_PER_STEP, MAX_WAITS_PER_RUN } from "@/lib/flow-limits";
 
 /** Why a step waits. */
-export type WaitReason = "allowance" | "day" | "paused" | "sender" | "portion" | "retry" | "board" | "email_off";
+export type WaitReason = "allowance" | "day" | "paused" | "sender" | "portion" | "retry" | "board" | "email_off" | "switched_off";
 
 export const FIRST_DELAY_SECONDS = 600;
 export const LONGEST_DELAY_SECONDS = 86_400;
@@ -42,6 +44,7 @@ export function nextTry(reason: WaitReason, n: number, nowSeconds: number, known
   const soonest = nowSeconds + FIRST_DELAY_SECONDS;
   if (reason === "allowance" && known.windowEnd && known.windowEnd > nowSeconds) return Math.max(soonest, known.windowEnd + AFTER_END_SECONDS);
   if (reason === "paused" && known.pauseUntil && known.pauseUntil > nowSeconds) return Math.max(soonest, known.pauseUntil + AFTER_END_SECONDS);
+  if (reason === "switched_off") return nowSeconds + LONGEST_DELAY_SECONDS;
   if (reason === "day") return Math.max(soonest, (Math.floor(nowSeconds / 86_400) + 1) * 86_400 + 5 * AFTER_END_SECONDS);
   const delay = backoffSeconds(n);
   return nowSeconds + (reason === "portion" ? Math.max(900, delay) : delay);

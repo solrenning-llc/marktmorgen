@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import { storeForHandle } from "@/lib/store";
+import { type ExactStore, storeForHandleExactly } from "@/lib/store-exact";
 import { mintPass, passCookie, storeKey } from "@/lib/learn";
 import { readLetterGrant, spendLetterOpen } from "@/lib/letter-access";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -37,7 +37,17 @@ export async function GET(request: NextRequest) {
     console.error("reading an emailed link's grant failed", error);
     return busy(browserLanguage(request));
   }
-  const store = grant ? await storeForHandle(grant.h) : null;
+  // The store the link names, read exactly too (Claude 1 and H2 on #3779): a handle gone is "expired", but a reply lost
+  // or in another shape is "try again", never "expired" and never a bare server error.
+  let found: ExactStore | null = null;
+  try {
+    found = grant ? await storeForHandleExactly(grant.h) : null;
+  } catch (error) {
+    console.error("reading the store of an emailed link failed", error);
+    return busy(browserLanguage(request));
+  }
+  if (found === "unknown") return busy(browserLanguage(request));
+  const store = found === "none" ? null : found;
   const gone = (language: unknown) =>
     new Response(letterWords(language).linkGone, {
       status: 410,

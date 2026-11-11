@@ -34,7 +34,7 @@ import { POST as connect } from "@/app/api/stripe/connect/route";
 import { POST as plan } from "@/app/api/billing/checkout/route";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
-import { readListing } from "@/lib/catalog";
+import { readListings } from "@/lib/catalog";
 import { canSell } from "@/lib/store-checkout";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { store as redis } from "./redis-stub";
@@ -119,9 +119,10 @@ async function main(): Promise<void> {
   const added = await product(asJson(productUrl, { action: "add", title: "Field notes", price: "19" }, true));
   is("with both: added", added.status, 200);
   const store = await storeForEmail(EMAIL);
-  const productId = store?.products?.[0] ?? "";
-  is("the product added is found (review of #3754)", productId !== "", true);
-  is("published at once: no separate publish step", (await readListing(store!, productId))?.hidden === true, false);
+  // The store's listings, read whole (no ids: all of them), never an id guessed (review of #3754).
+  const listings = store ? await readListings(store) : [];
+  is("the product added is found, by its title (review of #3754)", listings.map((listing) => listing.title), ["Field notes"]);
+  is("published at once: no separate publish step", listings[0]?.hidden, false);
   walk.push({ step: 4, action: "Add the first product", required: ["title", "price"] });
 
   part("5. Start Stripe's onboarding");

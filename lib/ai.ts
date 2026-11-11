@@ -347,19 +347,10 @@ export async function describePicture(
     const sentence = answer ? line(answer.replace(/^["“]|["”]$/g, ""), 150) : "";
     return sentence || null;
   });
+  // The job is given back by counted itself, once: no call reached the provider (the merge of main into #2975:
+  // giving it back here as well took it back twice).
   if (unread.reason === null) return done;
-  await giveBack(store, now, 1);
   return { ok: false, reason: unread.reason };
-}
-
-/**
- * Jobs taken by `counted` for work that then never started (a file that could
- * not be read once they were taken), given back. A release that fails leaves
- * them counted, never more than was used.
- */
-async function giveBack(store: Store, now: number, jobs: number): Promise<void> {
-  const key = monthKey(store, new Date(now));
-  if (key) await redisPipeline([["DECRBY", key, jobs]]).catch(() => {});
 }
 
 /** The JSON object in an answer, whatever the model put around it. */
@@ -1353,7 +1344,7 @@ export async function writePage(
   const jobs = pdf ? 1 + READ_PDF_JOBS : 1;
   // The file may be given as how to read it (6 November 2026): it is read only once the jobs are taken, so a store
   // with no allowance left (Creator's is 0) never spends a paid file-store read on a request that is refused. A file
-  // that cannot be read then gives every job back, since nothing was asked of the model.
+  // that cannot be read then gives every job back (counted does it, once), since nothing was asked of the model.
   const unread = { file: false };
   const done = await counted(store, now, async () => {
     const pages = typeof pdf === "function" ? await pdf().catch(() => null) : pdf;
@@ -1426,8 +1417,8 @@ export async function writePage(
     };
     return draft.headline && draft.benefits.length ? draft : null;
   }, jobs);
+  // Every job is given back by counted itself, once: nothing was asked of the model (the merge of main into #2975).
   if (!unread.file) return done;
-  await giveBack(store, now, jobs);
   return { ok: false, reason: "file" };
 }
 

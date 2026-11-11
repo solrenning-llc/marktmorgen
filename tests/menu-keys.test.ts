@@ -12,13 +12,14 @@
  * the rule and the wiring.
  */
 import { readFileSync } from "node:fs";
-import { moveFocus } from "@/lib/menu-keys";
+import { moveFocus, shouldEnterMenuOnTab } from "@/lib/menu-keys";
 import { done, is, part } from "./check";
 
 part("The rule");
 is("down and up in a list, round at the ends", [moveFocus("ArrowDown", 0, 3, "list"), moveFocus("ArrowDown", 2, 3, "list"), moveFocus("ArrowUp", 0, 3, "list")], [1, 0, 2]);
 is("right and left in the row", [moveFocus("ArrowRight", 1, 4, "row"), moveFocus("ArrowLeft", 0, 4, "row")], [2, 3]);
 is("Home and End in both", [moveFocus("Home", 2, 5, "row"), moveFocus("End", 0, 5, "list")], [0, 4]);
+is("Tab enters an expanded menu only", [shouldEnterMenuOnTab("Tab", true), shouldEnterMenuOnTab("Tab", false), shouldEnterMenuOnTab("ArrowDown", true)], [true, false, false]);
 is("the other axis's arrows, and any other key, move nothing", [moveFocus("ArrowDown", 0, 3, "row"), moveFocus("ArrowRight", 0, 3, "list"), moveFocus("Tab", 0, 3, "list"), moveFocus("a", 0, 3, "row")], [null, null, null, null]);
 is("nothing to move among: nothing", [moveFocus("ArrowDown", 0, 0, "list"), moveFocus("End", 0, -1, "row")], [null, null]);
 
@@ -29,7 +30,7 @@ is("an open menu takes the list's keys", /id=\{`menu-\$\{menu\.id\}`\}\s*onMouse
 is("Down or Up on a menu's button opens it at its first or last link", nav.includes('const end = event.key === "ArrowDown" ? "first" : "last";') && nav.includes("focusOnOpen.current = end;"), true);
 is("a menu already open (by hover) takes the focus at once, with nothing left waiting", nav.includes("if (openMenu === id && links.length) {"), true);
 is("Escape from inside a menu puts the focus back on its button", nav.includes("button[aria-controls=\"${panel.id}\"]`)?.focus();"), true);
-is("Tab is left alone: no key handler takes it", /key === "Tab"/.test(nav), false);
+is("Tab from an open menu button enters its first link", /if \(control && shouldEnterMenuOnTab\(event\.key, openMenu === id\)\)/.test(nav) && nav.includes("firstLink.focus();"), true);
 is("with Alt, Ctrl, Cmd or Shift the keys stay the browser's, in both handlers", nav.includes("const modified = (event: React.KeyboardEvent<HTMLElement>) => event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;") && (nav.match(/if \(modified\(event\)\) return;/g) ?? []).length === 2, true);
 is("opened from the keyboard: no hover timer closes it, and Enter on the button closes it at once", /keepOpen\(\);\s*openedByClick\.current = true;\s*setOpenMenu\(id\);/.test(nav), true);
 done();

@@ -37,6 +37,7 @@ is("a small preview takes none more", importUnits(1_000, null), 0);
 is("a large one takes one for each part of its size", importUnits(IMPORT_BYTES_PER_UNIT * 3 + 1, null), 3);
 is("a save takes one for each lesson and one for the outline", importUnits(1_000, 3), 4);
 const source = readFileSync("app/api/store/course/import/route.ts", "utf8");
+is("requests not known to be taken are unknown, never used up", source.includes('counted.reason === "unknown"') && source.includes("status: 503"), true);
 is("taken before the texts are written", source.indexOf("countStudio(") > 0 && source.indexOf("countStudio(") < source.indexOf("saveNewBodies("), true);
 is("the outline's size is taken before it is read", source.indexOf("importUnits(bytes, null)") > 0 && source.indexOf("importUnits(bytes, null)") < source.indexOf("previewCourseImport("), true);
 // Counted in UTF-8 bytes, as the body limit and a studio request's transfer are (Revisor 1 on e-kj5-u3b, MEDIUM).

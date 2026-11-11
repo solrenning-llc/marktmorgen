@@ -9,7 +9,13 @@ import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { setCourseLessons, storeForEmail } from "@/lib/store";
 import { DataRoomError } from "@/lib/store-data";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { countStudio, refusedJson } from "@/lib/studio-route";
+import { countStudio } from "@/lib/studio-route";
+
+/** The studio's requests not taken: used up (429), or not known to be taken (503, rule 24), never as taken. */
+function studioRefused(counted: { reason: "used" | "unknown" | "pool" | "daily"; message: string }): Response {
+  if (counted.reason === "unknown") return Response.json({ ok: false, error: "unavailable", message: counted.message }, { status: 503 });
+  return Response.json({ ok: false, error: "studio_used", message: counted.message }, { status: 429 });
+}
 
 /**
  * A course outline imported into a product's new course (260 [KJ5], unit
@@ -50,7 +56,7 @@ export async function POST(request: NextRequest) {
     const reading = importUnits(bytes, null);
     if (reading > 0) {
       const counted = await countStudio(store, null, reading);
-      if (!counted.ok) return refusedJson(counted.reason, counted.message);
+      if (!counted.ok) return studioRefused(counted);
     }
     const preview = previewCourseImport(raw);
     if (!preview.ok) return Response.json({ ok: false, error: "invalid", path: preview.path, reason: preview.reason }, { status: 400 });
@@ -76,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     const saving = importUnits(bytes, preview.lessonCount) - reading;
     const counted = await countStudio(store, null, saving);
-    if (!counted.ok) return refusedJson(counted.reason, counted.message);
+    if (!counted.ok) return studioRefused(counted);
 
     return await withLock(`nl:course:${courseInfo.id}:lock`, 60, 15_000, async () => {
       const course = await readCourse(courseInfo.id);

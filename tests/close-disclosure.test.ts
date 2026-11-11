@@ -35,6 +35,14 @@ const make = (focusInside: boolean) => {
   is("a focus elsewhere is left where it is", [details.open, summary.focused], [false, 0]);
 }
 is("no disclosure, nothing happens", closeDisclosure(null, { activeElement: null }), undefined);
+{
+  // Claude 3 (cloud M)'s MEDIUM on this PR: Save is turned off while it sends (disabled={busy}), the browser drops the
+  // focus to the body then, and it is still there when the disclosure closes after the save.
+  const body = {};
+  const { details, summary } = make(false);
+  closeDisclosure(details, { activeElement: body, body });
+  is("a focus lost to the body while saving goes back to its summary", summary.focused, 1);
+}
 
 part("Where the studio closes one");
 const pixels = readFileSync("components/pixel-editor.tsx", "utf8");

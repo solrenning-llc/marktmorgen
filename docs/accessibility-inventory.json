@@ -1097,6 +1097,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/invoices/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/invoices",
+      "parameters": []
+    },
+    {
       "source": "app/studio/labels/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/labels",
@@ -1277,9 +1283,11 @@
     "components/affiliate-link-box.tsx",
     "components/affiliate-promotion-results.tsx",
     "components/affiliate-studio.tsx",
+    "components/affiliate-summary.tsx",
     "components/agent-proposals.tsx",
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
+    "components/ai-draft-review.tsx",
     "components/ai-posts.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
@@ -1295,6 +1303,7 @@
     "components/blog-body.tsx",
     "components/blog-browser.tsx",
     "components/blog-editor.tsx",
+    "components/breadcrumb.tsx",
     "components/bulk-labels.tsx",
     "components/bundle-delivery.tsx",
     "components/bundle-editor.tsx",
@@ -1419,11 +1428,14 @@
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
+    "components/lesson-notes-kept.tsx",
+    "components/lesson-notes.tsx",
     "components/lesson-player.tsx",
     "components/lesson-quiz.tsx",
     "components/lesson-task.tsx",
     "components/lesson-text.tsx",
     "components/letter-publish-control.tsx",
+    "components/library-continue.tsx",
     "components/licence-key-box.tsx",
     "components/licence-key-editor.tsx",
     "components/link-editor.tsx",
@@ -1500,6 +1512,7 @@
     "components/picture-viewer.tsx",
     "components/pixel-editor.tsx",
     "components/plan-dispute-notice.tsx",
+    "components/plan-invoices-list.tsx",
     "components/podcast-editor.tsx",
     "components/podcast-toggle.tsx",
     "components/post-cover.tsx",
@@ -1521,6 +1534,7 @@
     "components/recovery-address-manager.tsx",
     "components/recovery-editor.tsx",
     "components/refund-activity.tsx",
+    "components/remember-last-lesson.tsx",
     "components/rename-form.tsx",
     "components/renewal-unpaid-notice.tsx",
     "components/report-download.tsx",
@@ -1558,6 +1572,7 @@
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
     "components/stats-panel.tsx",
+    "components/step-count.tsx",
     "components/sticky-buy.tsx",
     "components/store-access-check.tsx",
     "components/store-app.tsx",
@@ -1634,6 +1649,7 @@
     "components/welcome-offer-editor.tsx",
     "components/who-answers.tsx",
     "components/winback-editor.tsx",
+    "components/withdrawal-where.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],
@@ -1775,6 +1791,7 @@
     "app/api/store/course/comment/route.ts",
     "app/api/store/course/file/route.ts",
     "app/api/store/course/link/route.ts",
+    "app/api/store/course/note/route.ts",
     "app/api/store/course/open/route.ts",
     "app/api/store/course/progress/route.ts",
     "app/api/store/course/quiz/route.ts",
@@ -2060,6 +2077,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 141
+    "pageTemplates": 142
   }
 }

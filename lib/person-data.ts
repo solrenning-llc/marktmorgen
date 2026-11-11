@@ -107,6 +107,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/learn.ts", how: "erased", what: "Their progress in your courses: when they began and came back, the lessons they marked done, the drip emails sent them, and every browser let in with their address" },
   { file: "lib/lesson-position.ts", how: "none", what: "Where they stopped in a lesson video, and the last lesson they opened (its address and names, for their library), are kept only in their own browser, under codes made on our server, and never sent to us (Privacy #lesson-places)" },
   { file: "lib/learn.ts", how: "expires", days: 1, what: "A sign-in link to a course already emailed works for an hour" },
+  { file: "lib/lesson-play.ts", how: "expires", days: 1, what: "Which lesson video they pressed Play on and the player it got, kept for at most half an hour so a reload or another lesson does not hold the store's video time again" },
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },

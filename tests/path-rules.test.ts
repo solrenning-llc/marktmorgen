@@ -166,4 +166,14 @@ part("The lead missions say what Path counts today (Revisor 2's LOW on #3591)");
   is("the list missions say the same", traffic.filter((d) => d.closesOn.includes("people have")).every((d) => d.closesOn.includes("confirmed their address") && d.closesOn.includes("before this changed")), true);
 }
 
+part("The lead missions name what changed in plain words, never an unexplained \"this\" (Claude 1 and Claude 4 cloud B on #3741)");
+{
+  const lead = dayMissions(facts(), answers)[5];
+  const traffic = pathProgress(facts({ titlePublished: true }), answers, START, START + 8 * DAY).traffic.filter((m) => m.closesOn.includes("people have"));
+  const texts = [lead.why, lead.closesOn, ...lead.steps, ...traffic.flatMap((d) => [d.why, d.closesOn])];
+  is("no text leans on \"this changed\"", texts.some((t) => /this changed/i.test(t)), false);
+  is("the lead mission says older unconfirmed sign-ups no longer count", lead.closesOn.includes("Older sign-ups that were never confirmed no longer count either"), true);
+  is("each list mission says the same", traffic.length === 2 && traffic.every((d) => d.closesOn.includes("older sign-ups that were never confirmed no longer count either")), true);
+}
+
 done();

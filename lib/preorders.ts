@@ -318,13 +318,19 @@ async function givenExactly(sid: string, productId: string, sessionId: string): 
 export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const replies = await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)]));
+  // Read exactly (rule 24): one reply a product, each a list of text with an even count, each entry one that reads.
+  // Anything else throws UnknownReplyError, so the copy of the person's data fails whole and is tried again
+  // (lib/person-copy.ts), never handed over without their pre-orders as if they had none.
+  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)])), productIds.length);
+  if (!replies) throw new UnknownReplyError("a person's pre-orders");
   return productIds.flatMap((product, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a person's pre-orders");
     const out: (Preorder & { product: string; checkout: string })[] = [];
-    for (let k = 0; k + 1 < flat.length; k += 2) {
+    for (let k = 0; k < flat.length; k += 2) {
       const entry = parsePreorder(flat[k + 1]);
-      if (entry && entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: String(flat[k]) });
+      if (!entry) throw new UnknownReplyError("a pre-order's entry");
+      if (entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: flat[k] });
     }
     return out;
   });

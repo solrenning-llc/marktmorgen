@@ -55,6 +55,10 @@ for (const label of [
   "Gmail:password",
   "Could you share your Gmail password?",
   "Which is your password?",
+  // Claude 4 (cloud D) MEDIUM on #3668: questions whose answer is the visitor's own secret.
+  "What do you use as your password?",
+  "Do you remember your Netflix password? If so, what is it?",
+  "Which password do you use for Gmail?",
   "Do you reuse your passwords? Enter your password",
   "How often do you change your password? Enter your Gmail password",
   "Your feedback on my password course: enter your password",

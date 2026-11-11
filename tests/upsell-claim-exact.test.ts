@@ -28,10 +28,8 @@ const NOW = Math.floor(Date.now() / 1000);
 
 type Charge = { body: URLSearchParams; key: string };
 const charges: Charge[] = [];
-/** What the next POST /payment_intents answers. */
-let nextCharge: "succeeded" | "requires_action" | "declined" | "lost" = "succeeded";
 const made: Record<string, unknown>[] = [];
-let sessions: Record<string, Record<string, unknown>> = {};
+const sessions: Record<string, Record<string, unknown>> = {};
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -45,21 +43,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const body = new URLSearchParams(String(init?.body));
     const key = String((init?.headers as Record<string, string>)["Idempotency-Key"] ?? "");
     charges.push({ body, key });
-    if (nextCharge === "declined") return answer({ error: { code: "card_declined", message: "Your card was declined." } }, 402);
     const pi = {
       id: `pi_test_${String(charges.length).padStart(10, "0")}`,
       object: "payment_intent",
       amount: Number(body.get("amount")),
       currency: body.get("currency"),
-      status: nextCharge === "requires_action" ? "requires_action" : "succeeded",
+      status: "succeeded",
       receipt_email: body.get("receipt_email"),
       created: NOW,
       metadata: Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])),
-      ...(nextCharge === "requires_action" ? { next_action: { redirect_to_url: { url: "https://hooks.stripe.com/3ds/confirm" } } } : {}),
     };
     made.push(pi);
-    // Charged, and the answer never reached us.
-    if (nextCharge === "lost") throw new TypeError("fetch failed");
     return answer(pi);
   }
   if (path === "/payment_intents" && method === "GET") {

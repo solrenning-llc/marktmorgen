@@ -3431,6 +3431,17 @@ export default async function StudioPage({
                               <ResendPurchase reference={sale.reference} email={sale.email} />
                             </p>
                           ) : null}
+                          {/* A one-time payment's receipt, read from Stripe when asked (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */}
+                          {sale.oneTime && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
+                            <p className="mt-2">
+                              <a
+                                href={`/api/store/receipt-pdf?${store?.sid ? `store=${store.sid}&` : ""}reference=${sale.reference}`}
+                                className="inline-flex min-h-11 items-center text-xs font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                              >
+                                Download the receipt (PDF)<span className="sr-only">{`: ${sale.title}, paid ${new Date(sale.paidAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}`}</span>
+                              </a>
+                            </p>
+                          ) : null}
                         </li>
                       ))}
                     </ul>

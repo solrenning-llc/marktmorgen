@@ -18,7 +18,17 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
-globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
+process.env.STRIPE_SECRET_KEY = "sk_test_learning_path_student_only";
+/** Stripe, simulated: an address's checkout sessions, read whole ("list"), cut short ("more") or failing ("down"). */
+let stripe: "list" | "more" | "down" = "list";
+let stripeCalls = 0;
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const url = String(input instanceof Request ? input.url : input);
+  if (!url.startsWith("https://api.stripe.com/")) return new Response("{}", { status: 404 });
+  stripeCalls += 1;
+  if (stripe === "down") throw new Error("synthetic: Stripe did not answer");
+  return Response.json({ object: "list", data: [], has_more: stripe === "more" });
+}) as typeof fetch;
 const quiet = console.error;
 
 const real = redis.pipeline.bind(redis);
@@ -105,6 +115,22 @@ async function main(): Promise<void> {
 
   const progress = pathProgress(path, ledger);
   is("and the path says nothing is done or open", [progress.finished, progress.complete, progress.courses.every((x) => x.state === "unknown")], [null, false, true]);
+
+  part("What they paid for at Stripe does not read: unknown, never \"not bought\" (review of #3724)");
+  const fresh = "fresh-student@example.com";
+  await recordEnrollment(store, fresh, a.product, 1_700_000_000);
+  const freshLearner = { email: fresh, scope: "all" as const, owner: false };
+  stripe = "down";
+  stripeCalls = 0;
+  const down = await pathStudent(store, path, freshLearner);
+  is("Stripe asked, and failing: has and finished unknown", [stripeCalls > 0, down.has, down.finished], [true, null, null]);
+  is("so the path shows nothing as not bought", pathProgress(path, down).courses.every((x) => x.state === "unknown"), true);
+  stripe = "more";
+  const cut = await pathStudent(store, path, { ...freshLearner, email: "cut-student@example.com" });
+  is("a list of purchases cut short (more pages): unknown", [cut.has, cut.finished], [null, null]);
+  stripe = "list";
+  const whole = await pathStudent(store, path, { ...freshLearner, email: "whole-student@example.com" });
+  is("read whole and empty: known, nothing had", [whole.has ? [...whole.has] : null], [[]]);
 
   part("A course gone from the store");
   const gone: LearningPath = { ...path, courses: [a.product, "prodGone0001"] };

@@ -18,7 +18,7 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccou
 import { allowanceUsed } from "@/lib/store-allowance";
 import { suppressCommand } from "@/lib/suppression";
 import { askPurchaseMove, confirmPurchaseMove, readPurchaseMove } from "@/lib/purchase-moves";
-import { applyPurchaseMove, copyMovedPerson, forgetMovedPerson, readMovedIndex } from "@/lib/purchase-move-index";
+import { applyPurchaseMove, copyMovedPerson, forgetMovedPerson, movedRoomSlot, readMovedIndex } from "@/lib/purchase-move-index";
 import { COPY_PLAN } from "@/lib/person-copy";
 import { MOVE_APPLY_COMMANDS, confirmMoveLink } from "@/lib/purchase-move-flow";
 import { PURCHASE_MOVE_DELIVERED } from "@/lib/purchase-move-open";
@@ -61,7 +61,7 @@ redis.run = (c: (string | number)[]) => {
 };
 
 const indexKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:moved:") || k.startsWith("nl:pm:into:")).sort();
-// An empty hash is no key in Redis: the in-memory stand-in may keep one after a read of a missing hash.
+// Redis has no empty hash key; read-created empty hashes are a fixture artifact.
 const indexState = () => indexKeys().map((k) => `${k}=${JSON.stringify(redis.run(["TYPE", k]) === "hash" ? redis.run(["HGETALL", k]) : redis.run(["GET", k]))}`).filter((line) => !line.endsWith("=[]"));
 
 async function main(): Promise<void> {
@@ -76,7 +76,8 @@ async function main(): Promise<void> {
   const moss = (await storeForEmail(OWNER)) as Store;
   const told = () => mails.filter((m) => m.to === OWNER);
   const used = () => allowanceUsed(moss, "email");
-  const roomField = (id: string) => redis.keys().some((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, `pm:${id}`]) === 1);
+  /** Whether the store's data room counts a move from this old address (one slot per old address). */
+  const roomField = (old: string) => redis.keys().some((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, movedRoomSlot(moss.sid, old)]) === 1);
   /** The store's data room in use, as its own record says. */
   const roomTotal = () => {
     const key = redis.keys().find((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, "#"]) === 1 && String(redis.run(["HKEYS", k])).includes("pm:"));
@@ -109,17 +110,15 @@ async function main(): Promise<void> {
   }
 
   part("Moved: the new address has the purchases, the old one no longer, and the creator is told once");
-  let firstId = "";
   {
     const both = await asked("ana.old@example.com", "ana.new@example.com");
-    firstId = both.id;
     const [t0, q0] = [told().length, await used()];
     const result = await applyPurchaseMove(moss, both.id);
     is("moved, and told", result, { state: "moved", told: "sent" });
     is("the old address moved to the new one", await readMovedIndex(moss.sid, "Ana.Old@example.com"), { movedTo: "ana.new@example.com", movedFrom: [] });
     is("the new address holds the old one's purchases", await readMovedIndex(moss.sid, "ana.new@example.com"), { movedTo: null, movedFrom: ["ana.old@example.com"] });
     is("the request is marked moved", typeof (await readPurchaseMove(both.id))?.appliedAt, "number");
-    is("its room taken from the store's data room", roomField(both.id), true);
+    is("its room taken from the store's data room", roomField("ana.old@example.com"), true);
     const notice = told().slice(t0);
     is("one notice to the creator, from the store's emails", [notice.length, (await used()) - q0], [1, 1]);
     is("it names both addresses", [notice[0]?.text.includes("ana.old@example.com"), notice[0]?.text.includes("ana.new@example.com")], [true, true]);
@@ -150,25 +149,76 @@ async function main(): Promise<void> {
     is(`${what}: the creator told once`, told().length - t0, 1);
   }
 
-  part("The index switches at one write: a mark without its line moves nothing");
+  part("The index switches at one step: a line that cannot be written leaves nothing of the move");
   {
     const request = await asked("half.old@example.com", "half.new@example.com");
     odd = { command: "HSET", prefix: "nl:pm:into:", reply: [], times: 1 };
-    await applyPurchaseMove(moss, request.id);
+    is("unknown", (await applyPurchaseMove(moss, request.id)).state, "unknown");
     odd = null;
-    const marked = redis.keys().some((k) => k.startsWith("nl:pm:moved:"));
-    is("the old address's mark is written first", marked, true);
-    is("but alone it moves nothing", [(await readMovedIndex(moss.sid, "half.old@example.com")).movedTo, (await readMovedIndex(moss.sid, "half.new@example.com")).movedFrom], [null, []]);
+    is("no mark is written alone", indexState().some((line) => line.includes("half.new@example.com")), false);
+    is("and nothing moved", [(await readMovedIndex(moss.sid, "half.old@example.com")).movedTo, (await readMovedIndex(moss.sid, "half.new@example.com")).movedFrom], [null, []]);
   }
 
   part("An address already moved elsewhere");
   {
     const again = await asked("ana.old@example.com", "ana.other@example.com");
     const t0 = told().length;
-    const before = indexState();
+    const [before, room] = [indexState(), roomTotal()];
     is("refused", await applyPurchaseMove(moss, again.id), { state: "already-moved", told: null });
-    is("nothing written, nobody told, its room given back", [indexState(), told().length - t0, roomField(again.id)], [before, 0, false]);
+    is("nothing written, nobody told, no room taken for it", [indexState(), told().length - t0, roomTotal()], [before, 0, room]);
     is("the first move stands", (await readMovedIndex(moss.sid, "ana.old@example.com")).movedTo, "ana.new@example.com");
+  }
+
+  part("A move stopped midway leaves no mark alone, and asking again moves it (Claude 3 on #3625, MEDIUM 1)");
+  {
+    const OLD = "stop.old@example.com";
+    const NEW = "stop.new@example.com";
+    const slots = () => {
+      const key = redis.keys().find((k) => redis.run(["TYPE", k]) === "hash" && redis.run(["HEXISTS", k, "#"]) === 1 && String(redis.run(["HKEYS", k])).includes("pm:"));
+      return key ? (redis.run(["HKEYS", key]) as string[]).filter((f) => f.startsWith("pm:")).length : 0;
+    };
+    const slotsBefore = slots();
+    const r1 = await asked(OLD, NEW);
+    const t0 = told().length;
+    odd = { command: "HSET", prefix: "nl:pm:into:", reply: "QUEUED", times: 1 };
+    const first = await applyPurchaseMove(moss, r1.id);
+    odd = null;
+    is("the line not written exactly: unknown, nobody told", [first.state, told().length - t0], ["unknown", 0]);
+    is("nothing of the move is left in the index: no mark alone naming the new address", indexState().some((line) => line.includes(NEW)), false);
+    // The buyer does not open the link again within its day: the request, its confirmations and its claim end.
+    for (const key of redis.keys().filter((k) => k.includes(r1.id))) redis.run(["DEL", key]);
+    const r2 = await asked(OLD, NEW);
+    is("asked again, both confirmed: moved, not \"already moved\"", await applyPurchaseMove(moss, r2.id), { state: "moved", told: "sent" });
+    is("the old address moved to the new one", (await readMovedIndex(moss.sid, OLD)).movedTo, NEW);
+    is("the person's copy says the move that happened", (await copyMovedPerson(moss, OLD)).map((e) => (e as { movedTo?: string }).movedTo), [NEW]);
+    is("one room slot for this move in the store's data room, none left for the stopped request", slots() - slotsBefore, 1);
+  }
+
+  part("Deleting the new address of a move stopped midway leaves it nowhere (Claude 3 on #3625, MEDIUM 2)");
+  {
+    const OLD = "erase.old@example.com";
+    const NEW = "erase.new@example.com";
+    const request = await asked(OLD, NEW);
+    odd = { command: "HSET", prefix: "nl:pm:into:", reply: "QUEUED", times: 1 };
+    is("stopped midway: unknown", (await applyPurchaseMove(moss, request.id)).state, "unknown");
+    odd = null;
+    await redis.pipeline([suppressCommand(moss.listId!, NEW, Math.floor(Date.now() / 1000))]);
+    await forgetMovedPerson(moss, NEW);
+    is("the deleted address is kept nowhere in the index", indexState().some((line) => line.includes(NEW)), false);
+    is("and a later try of the move is refused", (await applyPurchaseMove(moss, request.id)).state, "deleted");
+  }
+
+  part("A line naming a move in another shape is unknown, never \"not moved\" (Claude 3 on #3625, LOW 4)");
+  {
+    odd = { command: "HGET", prefix: "nl:pm:into:", reply: "not a move id", times: 1 };
+    let threw = false;
+    try {
+      await readMovedIndex(moss.sid, "ana.old@example.com");
+    } catch (error) {
+      threw = error instanceof UnknownReplyError;
+    }
+    odd = null;
+    is("throws", threw, true);
   }
 
   part("An address the store deleted after both confirmed");
@@ -212,6 +262,12 @@ async function main(): Promise<void> {
     const commands = seen.filter((k) => k.startsWith("nl:pm:") || k.startsWith("nl:erased:") || k.startsWith("-- marktmorgen:")).length;
     seen = null;
     is(`at most MOVE_APPLY_COMMANDS (${MOVE_APPLY_COMMANDS}), the data room's script billed as four`, commands + 3 <= MOVE_APPLY_COMMANDS, true);
+    // Claude 3 on #3625, LOW 3: a later try of the same move reads its request again after the claim says "done".
+    seen = [];
+    is("a later try of the same move", (await applyPurchaseMove(moss, request.id)).state, "moved");
+    const again = seen.filter((k) => k.startsWith("nl:pm:") || k.startsWith("nl:erased:") || k.startsWith("-- marktmorgen:")).length;
+    seen = null;
+    is(`a later try: at most MOVE_APPLY_COMMANDS (${MOVE_APPLY_COMMANDS}) too, each script's EVAL billed besides what it runs`, again + 3 <= MOVE_APPLY_COMMANDS, true);
   }
 
   part("Read exactly");
@@ -249,7 +305,7 @@ async function main(): Promise<void> {
       { movedTo: null, movedFrom: [] },
       { movedTo: null, movedFrom: [] },
     ]);
-    is("and the room given back", roomField(firstId), false);
+    is("and the room given back", roomField("ana.old@example.com"), false);
     const removedOld = await forgetMovedPerson(moss, "flow.old@example.com");
     is("the old address: its mark and its line", removedOld, 2);
     is("nothing left of that move", (await readMovedIndex(moss.sid, "flow.new@example.com")).movedFrom, []);

@@ -6,12 +6,12 @@
  * What is checked, with a stand-in Stripe account answering by address:
  * after a move, the new address reads what the old one bought and the old
  * one no longer does; a mark without its line moves nothing; an index that
- * cannot be read changes nothing (the old address keeps what it bought, the
- * new one gains nothing from it, and keeps what it bought itself), never
- * "nothing"; the store deleting the move gives the old address its reading
+ * cannot be read gives unknown for either address, never a definite access
+ * or closed answer; the store deleting the move gives the old address its reading
  * back; and at most MAX_MOVED_INTO old addresses are asked about, as the
  * index never holds more for one address.
  */
+import { createHash } from "node:crypto";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { holdsLetter } from "@/lib/letter-access";
 import type { Letter } from "@/lib/letter-rules";
@@ -121,13 +121,13 @@ async function main(): Promise<void> {
   is("no room to read the old address: unknown, never \"holds none\"", await reads("ana.new@example.com"), "unknown");
   odd = null;
 
-  part("An index that cannot be read changes nothing, and is never read as nothing");
+  part("An unreadable index gives unknown, never restored access or a definite denial");
   odd = { command: "GET", prefix: "nl:pm:moved:", reply: 7, times: 1 };
-  is("the old address keeps what it bought", await reads("ana.old@example.com"), true);
+  is("the old address does not regain access on unknown evidence", await reads("ana.old@example.com"), "unknown");
   odd = { command: "HGETALL", prefix: "nl:pm:into:", reply: ["odd"], times: 1 };
-  is("the new address gains nothing from it", await reads("ana.new@example.com"), false);
+  is("the new address is unknown rather than definitively closed", await reads("ana.new@example.com"), "unknown");
   odd = { command: "HGETALL", prefix: "nl:pm:into:", reply: ["odd"], times: 1 };
-  is("and keeps what it bought itself", await reads("ana.new@example.com", knifeLetter), true);
+  is("own purchases do not turn an unreadable move index into known evidence", await reads("ana.new@example.com", knifeLetter), "unknown");
   odd = null;
 
   part("A mark without its line moves nothing");
@@ -160,6 +160,37 @@ async function main(): Promise<void> {
   is("moved in", (await applyPurchaseMove(store, await move("di.old@example.com", "di.mid@example.com"))).state, "moved");
   is("moving it on is refused, so nothing is lost on the way", (await applyPurchaseMove(store, await move("di.mid@example.com", "di.far@example.com"))).state, "holds-moved");
   is("the address it moved to still reads", await reads("di.mid@example.com"), true);
+
+
+  part("A destination that moved away cannot receive another move");
+  is("the destination first moved away", (await applyPurchaseMove(store, await move("exit.mid@example.com", "exit.far@example.com"))).state, "moved");
+  sessions["exit.old@example.com"] = [paid("5", club.product.id)];
+  is("moving into it is refused", (await applyPurchaseMove(store, await move("exit.old@example.com", "exit.mid@example.com"))).state, "destination-moved");
+  is("the original holder still reads after the refusal", await reads("exit.old@example.com"), true);
+
+  part("Concurrent moves cannot overfill one destination");
+  const concurrentInto = "parallel.new@example.com";
+  const concurrentIds: string[] = [];
+  for (let i = 0; i < MAX_MOVED_INTO + 2; i += 1) concurrentIds.push(await move(`parallel.old${i}@example.com`, concurrentInto));
+  const applied = await Promise.all(concurrentIds.map((moveId) => applyPurchaseMove(store, moveId)));
+  is("exactly the existing capacity moves", applied.filter((result) => result.state === "moved").length, MAX_MOVED_INTO);
+  is("both remaining moves are refused", applied.filter((result) => result.state === "too-many").length, 2);
+  const print = (email: string) => createHash("sha256").update(`nimbus-pm-moved:${store.sid}:${email}`).digest("hex").slice(0, 32);
+  is("the destination hash never exceeds its existing capacity", redis.run(["HLEN", `nl:pm:into:${store.sid}:${print(concurrentInto)}`]), MAX_MOVED_INTO);
+  for (let i = 0; i < concurrentIds.length; i += 1) {
+    const old = `parallel.old${i}@example.com`;
+    const mark = redis.run(["GET", `nl:pm:moved:${store.sid}:${print(old)}`]);
+    is(`source ${i} is marked only when its move was accepted`, mark !== null, applied[i].state === "moved");
+  }
+
+  part("An existing over-capacity index is unknown, never silently truncated");
+  const extraId = "f".repeat(32);
+  const extraOld = "legacy.extra@example.com";
+  redis.run(["HSET", `nl:pm:into:${store.sid}:${print(into)}`, extraOld, extraId]);
+  redis.run(["SET", `nl:pm:moved:${store.sid}:${print(extraOld)}`, JSON.stringify({ id: extraId, to: into, at: NOW })]);
+  asked.length = 0;
+  is("the reader refuses to guess from a truncated set", await reads(into), "unknown");
+  is("no old address is queried after overflow is known", asked.length, 0);
 
   done();
 }

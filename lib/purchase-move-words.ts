@@ -67,7 +67,7 @@ export const moveWords = {
     },
     limit: {
       title: "These purchases can't be moved here",
-      body: "One of these addresses already holds purchases moved from other addresses, so this move can't be made. Nothing moved. If you need help, write to the store.",
+      body: "One of these addresses has already moved its purchases or holds purchases moved from other addresses, so this move can't be made. Nothing moved. If you need help, write to the store.",
     },
     elsewhere: { title: "These purchases already moved", body: "They were moved to another address before. Nothing else changes." },
     link: { title: "This link does not work", body: "It may be mistyped or too old. You can ask again from your purchases page." },

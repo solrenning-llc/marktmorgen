@@ -10,7 +10,7 @@
  * - Names are one per store in any case, checked against the list read just before the write: two people saving
  *   the same new name at the same instant may both keep it, and either can be renamed or deleted.
  * - A saved filter never keeps a buyer's address (the email part of a filter): it would outlive the person's
- *   deletion (lib/person-erasure.ts). The product words, the days and the kind name no one.
+ *   deletion (lib/person-erasure.ts). Address-shaped text in the name or product words is refused too.
  * - Rule 24 (CX-123): a list answered in another shape, a key of another kind or a kept filter that is not one is
  *   UnknownReplyError, never "no saved filters"; a write or a deletion is said done only on its exact answer.
  */
@@ -30,6 +30,7 @@ import {
   isFiltered,
   parseSavedFilter,
   savedFilterName,
+  savedFilterHasAddress,
   utf8Bytes,
 } from "@/lib/sales-filter-rules";
 
@@ -82,7 +83,7 @@ function sameName(filters: readonly SavedFilter[], name: string, except = ""): b
 export async function saveSalesFilter(statsId: string, rawName: unknown, filter: SalesFilter, known?: SavedFilter[]): Promise<SaveFilterResult> {
   const name = savedFilterName(rawName);
   if (!name) return { ok: false, reason: "name" };
-  if (filter.email) return { ok: false, reason: "email" };
+  if (filter.email || savedFilterHasAddress(name) || savedFilterHasAddress(filter.product)) return { ok: false, reason: "email" };
   if (!isFiltered(filter)) return { ok: false, reason: "empty" };
   const saved: SavedFilter = { id: randomBytes(6).toString("hex"), name, query: filterQuery(filter) };
   if (utf8Bytes(JSON.stringify(saved)) > SAVED_FILTER_BYTES) return { ok: false, reason: "long" };
@@ -100,6 +101,7 @@ export async function saveSalesFilter(statsId: string, rawName: unknown, filter:
 export async function renameSalesFilter(statsId: string, id: unknown, rawName: unknown, known?: SavedFilter[]): Promise<SaveFilterResult> {
   const name = savedFilterName(rawName);
   if (!name) return { ok: false, reason: "name" };
+  if (savedFilterHasAddress(name)) return { ok: false, reason: "email" };
   const filters = known ?? (await readSavedFilters(statsId));
   const before = typeof id === "string" ? filters.find((f) => f.id === id) : undefined;
   if (!before) return { ok: false, reason: "gone" };

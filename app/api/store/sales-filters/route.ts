@@ -9,7 +9,8 @@ import { readSavedFilters, removeSalesFilter, renameSalesFilter, saveSalesFilter
  * orders (lib/team-roles.ts "orders": the owner, admins and support) list and keep them: a saved filter is a view
  * of the sales list, and the list is theirs to see. Each request is one of the studio's (lib/studio-route.ts).
  *
- * A list that could not be read is said so (503), never answered as none, and nothing is written after it.
+ * A list that could not be read is said so (503), never answered as none; saves and renames then write nothing.
+ * Deletion by validated id does not parse the kept value first, so a damaged entry can still be removed.
  */
 const headers = { "Cache-Control": "private, no-store" };
 const unavailable = () => Response.json({ ok: false, error: "unavailable", message: SAVED_FILTER_REFUSALS.unavailable }, { status: 503, headers });
@@ -45,13 +46,13 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 10);
   if (action !== "save" && action !== "rename" && action !== "remove") return Response.json({ ok: false, error: "unknown" }, { status: 400, headers });
   try {
-    // Read first, so a list that cannot be read changes nothing.
-    const filters = await readSavedFilters(statsId);
     if (action === "remove") {
       const id = text(body.id, 20);
       const removed = await removeSalesFilter(statsId, id);
-      return Response.json({ ok: true, removed, filters: filters.filter((f) => f.id !== id) }, { headers });
+      return Response.json({ ok: true, removed, filters: await readSavedFilters(statsId) }, { headers });
     }
+    // Never overwrite an unreadable list when saving or renaming.
+    const filters = await readSavedFilters(statsId);
     const query = typeof body.query === "string" ? body.query : "";
     // Never cut: an address cut short would keep another filter than the one shown.
     if (action === "save" && query.length > 2_000) return refuse("long");

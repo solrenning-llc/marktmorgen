@@ -24,10 +24,14 @@ import { type Store, addReturningCode, removeReturningCode } from "@/lib/store";
 
 export type MadeReturning = { ok: true; code: ReturningCode } | { ok: false; reason: "taken" | "full" | "minimum" | "stripe" };
 
-/** Whether the creator has a live promotion code with this word: true, false, or null when Stripe's answer is not a list. */
+/**
+ * Whether the creator has a promotion code with this word, live or not: a
+ * switched-off or scheduled one can be switched on later, so its word is
+ * taken too. True, false, or null when Stripe's answer is not a list.
+ */
 async function livePromotionWord(account: string, word: string): Promise<boolean | null> {
   try {
-    const page = await onAccount("GET", account, `/promotion_codes?limit=1&active=true&code=${encodeURIComponent(word)}`, undefined, CODES_API_VERSION);
+    const page = await onAccount("GET", account, `/promotion_codes?limit=1&code=${encodeURIComponent(word)}`, undefined, CODES_API_VERSION);
     if (!page || typeof page !== "object" || !Array.isArray(page.data)) return null;
     return page.data.length > 0;
   } catch {

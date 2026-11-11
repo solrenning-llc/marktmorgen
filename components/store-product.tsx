@@ -922,7 +922,8 @@ export function BuyBox({
       {/* Starts unchecked: one reminder if this checkout is left unpaid, only when asked for here (lib/assistant-reminder.ts). */}
       {assistReminderOffered(store, product) ? <AssistReminderBox id={`r-${place}${product.id}`} lang={store.language} store={store.name} className="mb-4" /> : null}
       {/* Closed and empty: a code only for people who bought here before, checked by the server against the email typed with it (lib/returning-code.ts). */}
-      {returningCodeOffered(store, product) ? <ReturningCodeBox id={`rc-${place}${product.id}`} lang={store.language} className="mb-4" /> : null}
+      {/* Only in the page's own buy box: the field answers the page's address, so a second box (an exit offer) never repeats it. */}
+      {!place && returningCodeOffered(store, product) ? <ReturningCodeBox id={`rc-${place}${product.id}`} lang={store.language} className="mb-4" /> : null}
       {digitalHere || digitalAdded ? <DigitalConsentBox id={`dc-${place}${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain} required={digitalHere} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
       <button type="submit" className="btn st-btn btn-block">
         <span className="bump-off">

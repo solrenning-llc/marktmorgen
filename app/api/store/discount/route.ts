@@ -110,9 +110,12 @@ export async function POST(request: NextRequest) {
       }
     } else if (action === "stopreturn") {
       const word = readCode(text(body.code, 40));
-      // Already gone is already stopped: the list below says so.
+      // Already gone is already stopped (a second click, another tab): the list below says so.
       if (store.returningCodes.some((entry) => entry.code === word) && !(await stopReturningCode(ref, store, word))) {
-        return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+        const now = await storeForEmail(ref);
+        if (!now || now.returningCodes.some((entry) => entry.code === word)) {
+          return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+        }
       }
     } else if (action === "unschedule") {
       const id = text(body.id, 80);

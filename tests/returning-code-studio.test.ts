@@ -32,7 +32,7 @@ import { paidPeriod } from "./billing-period-fixture";
 process.env.STRIPE_SECRET_KEY = "sk_test_returning_studio_only";
 
 const OWNER = "returning.studio@example.com";
-type Sent = { method: string; path: string; body: URLSearchParams };
+type Sent = { method: string; path: string; body: URLSearchParams; query: string };
 const sent: Sent[] = [];
 let livePromotions: string[] = [];
 let promotionList: "list" | "garbled" = "list";
@@ -45,7 +45,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
-  sent.push({ method, path, body });
+  sent.push({ method, path, body, query: url.search });
   const answer = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
   if (method === "GET" && path === "/promotion_codes") {
     if (promotionList === "garbled") return answer({ object: "list" });
@@ -100,6 +100,7 @@ async function main(): Promise<void> {
   sent.length = 0;
   made = await makeReturningCode(OWNER, await store(), asked("SPRING"));
   is("the word of a live promotion code", [made.ok ? "" : made.reason, sent.some((s) => s.path === "/coupons")], ["taken", false]);
+  is("switched-off and scheduled promotion codes are asked about too: no filter on live ones", sent.some((s) => s.method === "GET" && s.path === "/promotion_codes" && s.query.includes("active=")), false);
   promotionList = "garbled";
   made = await makeReturningCode(OWNER, await store(), asked("SUMMER"));
   is("a promotion list Stripe answers in another shape is not 'no such code'", [made.ok ? "" : made.reason, sent.some((s) => s.path === "/coupons")], ["stripe", false]);

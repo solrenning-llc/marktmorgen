@@ -377,7 +377,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
             <>
               <h3 className="mt-6 text-base font-semibold text-ink">For returning buyers only</h3>
               <p className="mt-1 text-sm text-ink-soft">
-                A buyer types the code with the email of an earlier order from your store, on the product&apos;s page. We check that email has bought from you before, then the checkout opens with the code. Stripe&apos;s own code box does not take these codes.
+                A buyer types the code with the email of an earlier order from your store, on the product&apos;s page. If that email paid for an order here before, we email it a link that works once; the link opens the checkout with the code, for that email. Stripe&apos;s own code box does not take these codes.
               </p>
               <ul className="mt-3 space-y-3">
                 {returning.map((entry) => (
@@ -471,7 +471,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                 </label>
                 <p id="discount-returning-help" className="text-sm text-ink-soft">
                   {returningOnly
-                    ? "A buyer types it with the email of an earlier order from your store, in a box on the product's page. We check that email has bought from you before; if not, the code is refused with a plain sentence. It works as soon as you make it, with no minimum and no set times, until you switch it off."
+                    ? "A buyer types it with the email of an earlier order from your store, in a box on the product's page. If that email paid for an order here before (a free trial, a $0 order or a refunded one does not count), we email it a link that works once, and the link opens the checkout with the code. It works as soon as you make it, with no minimum and no set times, until you switch it off."
                     : "Unchecked, anyone can use the code."}
                 </p>
               </fieldset>

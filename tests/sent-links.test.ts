@@ -12,7 +12,8 @@
  *     changed a wrong address): it is "unknown", never the old address;
  *   - a kept change ignored, or one that does not read followed.
  */
-import { LINKS_KEY, followSentLink, signSentLink, verifySentLink } from "@/lib/sent-links";
+import { LINKS_KEY, followSentLink, keepLinkChange, signSentLink, verifySentLink } from "@/lib/sent-links";
+import { MAX_LINK_CHANGES } from "@/lib/sent-link-rules";
 import { sentLinkPath } from "@/lib/sent-link-rules";
 import * as route from "@/app/r/[sid]/[id]/[n]/route";
 import type { NextRequest } from "next/server";
@@ -75,6 +76,31 @@ const query = (n: number, original = GUIDE) => {
   is("a change that does not read: unknown, never the old address", await followSentLink({ sid: SID, id: ID, n: "2", query: query(2), now: 1 }, deps()), { kind: "unknown" });
   redis.run(["HSET", LINKS_KEY(ID), "2", JSON.stringify({ to: GUIDE })]);
   is("a history that is not a list: unknown", await followSentLink({ sid: SID, id: ID, n: "2", query: query(2), now: 1 }, deps()), { kind: "unknown" });
+
+  part("Keeping a change: only the store's own email, room taken first");
+  redis.clear();
+  const email = (listId: string) => JSON.stringify({ id: ID, listId, handle: "clayhouse", subject: "News", body: "Hello", productId: null, notProductId: null, who: "all", narrow: null, status: "sent", createdAt: 1, sendAt: 1, finishedAt: 2, total: 3, sent: 3, note: "", failures: 0, listed: true, tagged: true, test: null });
+  redis.run(["SET", `nl:mail:bc:${ID}`, email("list1")]);
+  const owner = { handle: "clayhouse", sid: SID, listId: "list1" } as Store;
+  let room: { until: number; bytes: number }[] = [];
+  const roomDeps = (ok = true) => ({ take: async (_: Store, change: { until: number; bytes: number }) => { room.push(change); return ok; } });
+  const kept = await keepLinkChange(owner, ID, 2, GUIDE, "https://example.com/guide-v2", 1_000, roomDeps());
+  is("kept", kept, { ok: true, history: [{ to: "https://example.com/guide-v2", at: 1_000 }] });
+  is("then followed", await followSentLink({ sid: SID, id: ID, n: "2", query: query(2), now: 1 }, deps()), { kind: "go", to: "https://example.com/guide-v2" });
+  is("room taken once, for what it keeps, until it goes", room.length === 1 && room[0].bytes >= JSON.stringify(kept.ok ? kept.history : []).length && room[0].until > 1_000, true);
+  is("kept as long as the email", Number(redis.run(["TTL", LINKS_KEY(ID)])) > 300 * 86_400, true);
+  is("the same address again: nothing kept", await keepLinkChange(owner, ID, 2, GUIDE, "https://example.com/guide-v2", 2_000, roomDeps()), { ok: false, problem: "same" });
+  is("not an address", await keepLinkChange(owner, ID, 2, GUIDE, "javascript:x", 2_000, roomDeps()), { ok: false, problem: "address" });
+  room = [];
+  is("another store's email: none, nothing kept", await keepLinkChange({ ...owner, listId: "list2" } as Store, ID, 2, GUIDE, "https://example.com/x", 2_000, roomDeps()), { ok: false, problem: "none" });
+  is("a link number past the most: none", await keepLinkChange(owner, ID, 99, GUIDE, "https://example.com/x", 2_000, roomDeps()), { ok: false, problem: "none" });
+  is("no room taken for them", room, []);
+  is("the room is full: refused, nothing kept", await keepLinkChange(owner, ID, 3, "https://example.com/three", "https://example.com/x", 2_000, roomDeps(false)), { ok: false, problem: "full" });
+  is("nothing kept for that link", redis.run(["HGET", LINKS_KEY(ID), "3"]), null);
+  for (let i = 0; i < MAX_LINK_CHANGES + 3; i += 1) await keepLinkChange(owner, ID, 5, "https://example.com/five", `https://example.com/v${i}`, 3_000 + i, roomDeps());
+  is("at most MAX_LINK_CHANGES kept", JSON.parse(String(redis.run(["HGET", LINKS_KEY(ID), "5"]))).length, MAX_LINK_CHANGES);
+  redis.run(["HSET", LINKS_KEY(ID), "6", "{not json"]);
+  is("a kept history that does not read: unknown, nothing written over it", [await keepLinkChange(owner, ID, 6, GUIDE, "https://example.com/x", 4_000, roomDeps()), redis.run(["HGET", LINKS_KEY(ID), "6"])], [{ ok: false, problem: "unknown" }, "{not json"]);
 
   part("The route");
   is("GET and HEAD only", Object.keys(route).sort(), ["GET", "HEAD"]);

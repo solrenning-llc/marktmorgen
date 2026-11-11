@@ -1311,3 +1311,23 @@ console.log(JSON.stringify({scope:"extracted exact source function bodies, synth
 - Nenhum PR foi marcado "ready for merge queue", pois nenhum dos dez tinha conjunto exato de gates concluído e favorável no snapshot.
 - Nenhum arquivo proibido, preço, limite visível, comissão, PLANS_ON_SALE, OPENING_REQUESTED, stripePlatformEligibilityReady, tax gate, art. 9a, Stripe ou revisão comercial foi alterado.
 - Próxima continuidade: em nova rodada, validar novamente main/MV/fila; com fila >300, seguir revisando heads ainda sem parecer Codex L; com fila <=300, voltar à ordem dos lotes e enviar no máximo um push por PR após auditoria fresca.
+
+
+## Continuidade — 11/11/2026 20h10 Fortaleza — revisão de 10 heads sob ALL-120
+
+- Estado fresco de entrada: fila Actions `377` (>300), main `7b04206e79d142e08472329247876e9e649420e3`, nenhuma issue aberta com título/termo exato `MAIN VERMELHO`. Aplicada ALL-120: revisão/comentários somente; nenhum push, rerun, atualização de ramo, integração, fila ou merge.
+- Dez unidades concluídas, sempre no head exato:
+  - #3806 `105356a56927aeca64d9e9cf23e557c67f6f14a1` — comentário 6809353345; APPROVE de fonte, docs WG14; aggregates ainda queued.
+  - #3805 `b6b4d02b9d32f53184136de32ddc95169d18f162` — comentário 6809354021; APPROVE de fonte, unknown Redis deixa de virar lista vazia; CI queued/in progress.
+  - #3804 `74d093ee205a281eac54af1dbbb70bd85205f6ce` — comentário 6809352885; APPROVE de fonte; Mobile render candidate teve amostra isolada 238.6 ms seguida de 40/190.6 ms, família já tratada em #3642; aggregates pendentes.
+  - #3800 `210abcf57fd77c2fc610d53a8b8360f3eba96c00` — comentário 6809355313; APPROVE de fonte; contador exato recusa estados desconhecidos; CI queued/in progress.
+  - #3799 `37588f7d3ae037c220fdb0b76cadf7e79f3767ba` — comentário 6809354337; CHANGES: Firefox/WebKit falham em `tests/e2e/store-copy.mjs:341` porque o locator ainda exige o nome acessível antigo após o novo escopo por campanha; também real-reader vermelho; outlier Mobile render pertence à família #3642.
+  - #3795 `35fa717b32ff7997c20f5ac6d4e5a6d78a32ae5d` — comentário 6809353731; CHANGES MÉDIO: IDs `mail-move-${i}-up/down` colidem entre múltiplos editores e podem focar o editor errado; falta teste renderizado com dois editores.
+  - #3794 `6470f9fedea804b0cf132eee2f6e1f737700e2d4` — comentário 6809354679; nove aggregates exact-head success, mas docs ainda sobreafirmam #3798 (badge containment ausente no head) e #3795 (MEDIUM ainda aberto); não marcado ready.
+  - #3792 `d2beaaa775d74c9bdb0fa466b5c582affb64e5df` — comentário 6809355031; APPROVE de fonte; LOW não bloqueante de rAF sem cancelamento; um check ainda in progress.
+  - #3791 `561f4e2043ced6ea17c4ef1cc4b14602eb640485` — comentário 6809355911; APPROVE de fonte; zero check-runs no head, portanto não ready.
+  - #3790 `e0da33c81b301570d0c164399f83b35ab34bf363` — comentário 6809355585; APPROVE de fonte após base empilhada #3773; Mobile render com outliers 224.1/234.2 ms e pares 56/48 ms, família #3642; CodeQL queued.
+- Nenhum PR foi marcado `ready for merge queue`: #3794 tinha nove aggregates verdes, porém o próprio registro documental continha duas afirmações ainda inexatas; os demais tinham checks pendentes, ausentes ou falhos e/ou achado aberto.
+- Estado fresco de saída: fila Actions `363` (>300), main ainda `7b04206e79d142e08472329247876e9e649420e3`, nenhuma issue aberta `MAIN VERMELHO`.
+- Nenhum arquivo proibido, preço, limite visível, comissão, PLANS_ON_SALE, OPENING_REQUESTED, stripePlatformEligibilityReady, tax gate, art. 9a, Stripe, termo ou revisão comercial foi alterado.
+- Próxima continuidade: validar novamente main/MV/fila; se >300, seguir em revisão/auditoria sem push; se <=300, retomar os lotes e consolidar no máximo um push por PR após auditoria fresca.

@@ -281,8 +281,10 @@ async function locked<T>(statsId: string, productId: string, work: () => Promise
 
 /** Counts a product's numbers again from its reviews, and keeps them. */
 async function recount(statsId: string, productId: string): Promise<Summary> {
-  const [raw] = await redisPipeline([["HGETALL", productKey(statsId, productId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
+  // Read exactly (rule 24): a reply cut short or of another shape throws before the summary is written, never an
+  // empty-looking list that deleted the product's stars and count.
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a product's reviews");
   const reviews: Review[] = [];
   for (let i = 1; i < flat.length; i += 2) {
     const review = parseReview(flat[i]);

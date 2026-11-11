@@ -319,7 +319,9 @@ export function WaitlistPanel({
       {launch ? (
         <p className="mt-3 text-sm text-ink-soft" role="status">
           {launch.finished
-            ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
+            ? launch.total === 0
+              ? "Launched. Nobody on the waitlist had confirmed, so no email went out."
+              : `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
             : launch.total === 0
               ? // Nobody to email: only the waitlist's deletion is left, done by the next run.
                 "On sale. Nobody on the waitlist had confirmed, and the waitlist is being deleted."

@@ -203,7 +203,7 @@ function main(): void {
     is("runs right after it", runs, 1);
   }
 
-  part("Cancelled, it never runs and stops listening");
+  part("Canceled, it never runs and stops listening");
   {
     const page = fakePage();
     let runs = 0;

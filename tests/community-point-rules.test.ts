@@ -16,6 +16,7 @@ import {
   readPointRulesInput,
   shouldTakeBack,
   takeBack,
+  type PointAction,
 } from "@/lib/community-point-rules";
 import { done, is, part } from "./check";
 
@@ -111,5 +112,18 @@ is(
     "Posts, comments and lessons give at most 10 points a day.",
   ],
 );
+
+part("A stored cap that does not read never raises the cap (Codex G on #3656, LEVE)");
+is("a cap of 2 damaged into text gives nothing more, never the default 10", [parsePointRules({ ...ON, dailyCap: "2" }).dailyCap, pointsToAward({ ...ON, dailyCap: "2" }, { action: "post", byCreator: false, earnedToday: 0, alreadyAwarded: false }).give], [0, 0]);
+is("a fractional cap too", parsePointRules({ ...ON, dailyCap: 2.5 }).dailyCap, 0);
+is("control: no cap stored yet is the default", parsePointRules({ post: 2, comment: 1, lesson: 3 }).dailyCap, DEFAULT_DAILY_CAP);
+
+part("An action that is not one is refused, never read off another field (Codex G on #3656, LEVE)");
+for (const action of ["__proto__", "constructor", "dailyCap", "toString"]) {
+  const odd = action as unknown as PointAction;
+  is(`${action}: no points`, pointsToAward(ON, { action: odd, byCreator: false, earnedToday: 0, alreadyAwarded: false }), { give: 0, why: "unknown" });
+  is(`${action}: never taken back, never a throw`, shouldTakeBack(odd, "deleted"), false);
+  is(`${action}: no key`, factKey(odd, { id: "abc", product: "abcdef" }), null);
+}
 
 done();

@@ -51,6 +51,7 @@ import { resendGroupReceipt, settleGroup } from "@/lib/group-buy";
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
@@ -95,6 +96,23 @@ const SENT_MARK_SECONDS = 40 * 24 * 60 * 60;
 const SENDING_MARK_SECONDS = 15 * 60;
 
 export const confirmationKey = (session: string) => `nl:confirm:${session}`;
+
+/**
+ * A confirmation's "sending" mark, taken exactly (CX-123 rule 24, lib/claim-mark.ts): ours, with the value to let it
+ * go by, "already" when another run holds it, "unknown" when nothing proves either, so nothing is sent on it.
+ */
+async function takeSending(key: string): Promise<{ value: string } | "already" | "unknown"> {
+  const value = claimValue();
+  const claimed = await claimMark(key, SENDING_MARK_SECONDS, value);
+  if (claimed === "ours") return { value };
+  return claimed === "taken" ? "already" : "unknown";
+}
+
+/** Kept as sent, or let go only while it holds this run's own value, so another run's mark is never deleted. */
+async function settleSending(key: string, value: string, sent: boolean): Promise<void> {
+  if (sent) await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
+  else await releaseMark(key, value);
+}
 
 /** A checkout as Stripe lists or returns it, with only the fields read here. */
 export type SessionRecord = {
@@ -590,8 +608,9 @@ async function confirmOnce(
   const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next);
   if (!letter) return "skip";
 
-  const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
-  if (claimed === null) return "already";
+  const claimed = await takeSending(key);
+  if (claimed === "already") return "already";
+  if (claimed === "unknown") return "failed";
 
   let sent = false;
   try {
@@ -606,7 +625,7 @@ async function confirmOnce(
   } finally {
     // Sent: kept, so nobody sends it again. Not sent: let go, so the next
     // pass of the job, or the next open of the thanks page, tries again.
-    await redisPipeline(sent ? [["SET", key, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", key]]);
+    await settleSending(key, claimed.value, sent);
   }
   // A paid order confirmed while the store asks for reviews goes on the list
   // to be asked, once (lib/review-ask.ts). Nothing is asked of a trial that
@@ -629,13 +648,14 @@ async function confirmRequest(store: Store, session: SessionRecord, key: string)
   if (!isSettled(session) || !saleHandles(store).has(meta.store ?? "") || typeof meta.request !== "string") return "skip";
   const marked = await markPaid(store, meta.request, session as PaidSession);
   if (!marked) return "skip";
-  const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
-  if (claimed === null) return "already";
+  const claimed = await takeSending(key);
+  if (claimed === "already") return "already";
+  if (claimed === "unknown") return "failed";
   let sent = false;
   try {
     sent = await sendReceipt({ store, request: marked.request, base: storeBase(store), from: fromStore(store), idempotencyKey: `nimbus-confirm:${String(session.id)}` });
   } finally {
-    await redisPipeline(sent ? [["SET", key, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", key]]);
+    await settleSending(key, claimed.value, sent);
   }
   return sent ? "sent" : "failed";
 }
@@ -690,13 +710,14 @@ async function confirmPreorderOnce(store: Store, session: SessionRecord, key: st
   if (!isSettled(session) || !saleHandles(store).has(meta.store ?? "")) return "skip";
   const product = await productFor(store, meta);
   if (!product) return "skip";
-  const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
-  if (claimed === null) return "already";
+  const claimed = await takeSending(key);
+  if (claimed === "already") return "already";
+  if (claimed === "unknown") return "failed";
   let outcome: Awaited<ReturnType<typeof confirmPreorder>> = "failed";
   try {
     outcome = await confirmPreorder(store, session as Parameters<typeof confirmPreorder>[1], product, preorderDeps(store));
   } finally {
-    await redisPipeline(outcome === "failed" ? [["DEL", key]] : [["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
+    await settleSending(key, claimed.value, outcome !== "failed");
   }
   return outcome === "failed" ? "failed" : outcome === "skip" ? "skip" : "sent";
 }
@@ -803,8 +824,9 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   }
   const letter = offerConfirmationFor(store, offer, key, keys);
   if (!letter) return "skip";
-  const [claimed] = await redisPipeline([["SET", mark, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
-  if (claimed === null) return "already";
+  const claimed = await takeSending(mark);
+  if (claimed === "already") return "already";
+  if (claimed === "unknown") return "failed";
   let sent = false;
   try {
     sent = await sendEmail({ meter: { by: "order" },
@@ -816,7 +838,7 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
       idempotencyKey: `nimbus-confirm:${offer.reference}`,
     });
   } finally {
-    await redisPipeline(sent ? [["SET", mark, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", mark]]);
+    await settleSending(mark, claimed.value, sent);
   }
   // One of the month's orders (lib/orders.ts), by its own payment.
   if (sent) await countOrder(store, `offer:${offer.reference}`, offer.amountCents);

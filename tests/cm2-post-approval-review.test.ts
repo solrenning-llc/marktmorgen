@@ -186,8 +186,10 @@ async function main(): Promise<void> {
   if (!kept.ok) throw new Error("not held");
   redis.advance((KEEP_DAYS + 1) * DAY * 1000);
   attempts = 0;
-  await forgetHeldPerson(id, ada);
-  is("the picture is deleted by the erasure", attempts, 1);
+  // Changed (rule 23, Codex G on #3020, 6751455863): the file store does not answer here, so the erasure now says it
+  // did not finish (the picture's line is kept for the next one) instead of returning as if it had.
+  const unfinished = await forgetHeldPerson(id, ada).then(() => "finished", () => "not finished");
+  is("the picture is deleted by the erasure", [attempts, unfinished], [1, "not finished"]);
 
   part(`Finding 3 (Claude 2): a held post with a picture, and nobody opens the studio for ${KEEP_DAYS + 1} days`);
   redis.clear();
@@ -197,8 +199,11 @@ async function main(): Promise<void> {
   const gone = t0 + (KEEP_DAYS + 1) * DAY;
   attempts = 0;
   await heldQueue(id, gone);
-  await forgetHeldPerson(id, ada);
-  is("the picture is deleted (its record expired, but the picture must not stay forever)", attempts, 1);
+  // Changed (rule 23, as above): the queue's sweep tries it first and, failing, keeps its line, so the erasure tries it
+  // again through that line (two attempts, where the line used to be dropped after the first), and says it did not
+  // finish while the file store does not answer.
+  const tried = await forgetHeldPerson(id, ada).then(() => "finished", () => "not finished");
+  is("the picture is deleted (its record expired, but the picture must not stay forever)", [attempts, tried], [2, "not finished"]);
 
   done();
 }

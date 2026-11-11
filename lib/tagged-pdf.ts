@@ -24,10 +24,18 @@ import {
   PDFString,
 } from "pdf-lib";
 
-/** The structure roles this file writes (ISO 32000-1, 14.8.4). */
-export type TagRole = "H1" | "H2" | "P";
+/** The structure roles drawn text is tagged as (ISO 32000-1, 14.8.4): headings, paragraphs, table cells, list item bodies. */
+export type TagRole = "H1" | "H2" | "P" | "TH" | "TD" | "Lbl" | "LBody";
 
-type Tagged = { role: TagRole; mcid: number; page: number; actualText?: string };
+/** The roles that only hold other elements: a table, its rows, a list and its items (14.8.4.3.3, 14.8.4.3.4). */
+export type GroupRole = "Table" | "TR" | "L" | "LI";
+
+/** Which way a header cell heads (the Table attribute owner's Scope, 14.8.5.7). */
+export type CellScope = "Column" | "Row" | "Both";
+
+type Leaf = { kind: "leaf"; role: TagRole; mcid: number; page: number; actualText?: string; scope?: CellScope };
+type Group = { kind: "group"; role: GroupRole; children: Node[] };
+type Node = Leaf | Group;
 
 function xml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -63,7 +71,10 @@ export function xmpPacket(meta: { title: string; author: string; producer: strin
  * before saving.
  */
 export class PageTagger {
-  private readonly items: Tagged[] = [];
+  /** The document's children, in reading order; `open` is the group being drawn into, innermost last. */
+  private readonly top: Node[] = [];
+  private readonly open: Group[] = [];
+  private readonly leaves: Leaf[] = [];
   private readonly pages: PDFPage[];
   private mcids = 0;
 
@@ -84,20 +95,47 @@ export class PageTagger {
     this.mcids = 0;
   }
 
-  /** Draws something a reader reads, as one element of `role`. `actualText` replaces what is drawn (a shortened line). */
-  text(role: TagRole, draw: () => void, actualText?: string): void {
+  private get here(): Node[] {
+    const group = this.open[this.open.length - 1];
+    return group ? group.children : this.top;
+  }
+
+  /**
+   * Draws something a reader reads, as one element of `role`. `actualText`
+   * replaces what is drawn (a shortened line); `cell.scope` says which way a
+   * header cell (TH) heads, so a reader can name a data cell's headers.
+   */
+  text(role: TagRole, draw: () => void, actualText?: string, cell?: { scope: CellScope }): void {
     const mcid = this.mcids++;
     // An inline property list, `<< /MCID n >>`: pdf-lib writes a dictionary operand as it writes any object.
     const props = this.pdf.context.obj({ MCID: mcid }) as unknown as PDFName;
     this.page.pushOperators(PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [PDFName.of(role), props]));
     draw();
     this.page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
-    this.items.push({ role, mcid, page: this.pages.length - 1, ...(actualText ? { actualText } : {}) });
+    const leaf: Leaf = { kind: "leaf", role, mcid, page: this.pages.length - 1, ...(actualText ? { actualText } : {}), ...(cell ? { scope: cell.scope } : {}) };
+    this.here.push(leaf);
+    this.leaves.push(leaf);
+  }
+
+  /**
+   * Holds what `build` draws in one element of `role`: a table and its rows,
+   * a list and its items. Groups nest (a row inside a table) and may run over
+   * a page turn (`nextPage` inside `build`).
+   */
+  group(role: GroupRole, build: () => void): void {
+    const group: Group = { kind: "group", role, children: [] };
+    this.here.push(group);
+    this.open.push(group);
+    try {
+      build();
+    } finally {
+      this.open.pop();
+    }
   }
 
   /** What the last element is read as, when what was drawn is shorter (a line cut with an ellipsis). */
   retext(full: string): void {
-    const last = this.items[this.items.length - 1];
+    const last = this.leaves[this.leaves.length - 1];
     if (last) last.actualText = full;
   }
 
@@ -113,21 +151,37 @@ export class PageTagger {
     const { context, catalog } = this.pdf;
     const rootRef = context.nextRef();
     const documentRef = context.nextRef();
-    const elements: PDFRef[] = this.items.map((item) =>
-      context.register(
-        context.obj({
-          Type: "StructElem",
-          S: item.role,
-          P: documentRef,
-          Pg: this.pages[item.page].ref,
-          K: item.mcid,
-          ...(item.actualText ? { ActualText: PDFHexString.fromText(item.actualText) } : {}),
-        }),
-      ),
-    );
+    // Each drawn piece's element, kept by leaf, for the parent tree below.
+    const leafRefs = new Map<Leaf, PDFRef>();
+    const write = (node: Node, parent: PDFRef): PDFRef => {
+      const ref = context.nextRef();
+      if (node.kind === "leaf") {
+        leafRefs.set(node, ref);
+        context.assign(
+          ref,
+          context.obj({
+            Type: "StructElem",
+            S: node.role,
+            P: parent,
+            Pg: this.pages[node.page].ref,
+            K: node.mcid,
+            ...(node.actualText ? { ActualText: PDFHexString.fromText(node.actualText) } : {}),
+            ...(node.scope ? { A: { O: "Table", Scope: node.scope } } : {}),
+          }),
+        );
+      } else {
+        const children = node.children.map((child) => write(child, ref));
+        context.assign(ref, context.obj({ Type: "StructElem", S: node.role, P: parent, K: children }));
+      }
+      return ref;
+    };
+    const elements: PDFRef[] = this.top.map((node) => write(node, documentRef));
     context.assign(documentRef, context.obj({ Type: "StructElem", S: "Document", P: rootRef, Lang: PDFString.of(meta.lang), K: elements }));
     // Each page's marked content, by its number: page i's elements in the order of their MCIDs.
-    const nums = this.pages.flatMap((_, i) => [PDFNumber.of(i), context.obj(elements.filter((_, at) => this.items[at].page === i))]);
+    const nums = this.pages.flatMap((_, i) => [
+      PDFNumber.of(i),
+      context.obj(this.leaves.filter((leaf) => leaf.page === i).sort((a, b) => a.mcid - b.mcid).map((leaf) => leafRefs.get(leaf)!)),
+    ]);
     const parentTree = context.register(context.obj({ Nums: nums }));
     context.assign(rootRef, context.obj({ Type: "StructTreeRoot", K: documentRef, ParentTree: parentTree, ParentTreeNextKey: this.pages.length }));
     catalog.set(PDFName.of("StructTreeRoot"), rootRef);

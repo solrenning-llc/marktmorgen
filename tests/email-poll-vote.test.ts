@@ -42,6 +42,7 @@ let taken = 0;
 const deps = (over: Partial<Parameters<typeof votePoll>[1]> = {}) => ({
   loadStore: async (handle: string) => { reads += 1; return handle === "clayhouse" ? shop : null; },
   take: async () => { taken += 1; return true; },
+  admit: async () => true,
   ...over,
 });
 const link = (place: number) => pollLinkPart(ID, place) as string;
@@ -89,6 +90,13 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("no database command for them", calls, 0);
   redis.pipeline = pipeline;
 
+  part("A valid link that exhausts its short window reads no database record");
+  calls = 0;
+  redis.pipeline = (commands) => { calls += 1; return pipeline(commands); };
+  is("refused before the broadcast lookup", await votePoll({ broadcastId: ID, link: link(2), option: 0, now, who: "203.0.113.10" }, deps({ admit: async () => false })), "unknown");
+  is("no read or write after a refused pre-read limit", calls, 0);
+  redis.pipeline = pipeline;
+
   part("Refused after reading the broadcast");
   is("a place past the list", await votePoll({ broadcastId: ID, link: link(10), option: 0, now }, deps()), "invalid");
   is("an answer the poll does not have", await votePoll({ broadcastId: ID, link: link(2), option: 3, now }, deps()), "invalid");
@@ -115,7 +123,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   taken = 0;
   is("after its days", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "closed");
   is("taking back after it closed: closed too", await votePoll({ broadcastId: ID, link: link(2), option: null, now }, deps()), "closed");
-  is("no action of the month taken for it", taken, 0);
+  is("a closed-poll submission is still counted against the store window", taken, 2);
   is("nothing kept", votes(), []);
 
   part("Resting and unknown: nothing kept");

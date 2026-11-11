@@ -1,4 +1,4 @@
-import { limited } from "@/lib/request-guard";
+import { clientAddress, limited } from "@/lib/request-guard";
 import { POLL_ROUTE_WORDS as WORDS, type PollVoteAnswer, votePoll } from "@/lib/email-poll-vote";
 
 /**
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     answer = null;
   }
   const option = answer === "none" ? null : answer !== null && /^\d$/.test(answer) ? Number(answer) : undefined;
-  const result: PollVoteAnswer = option === undefined ? "invalid" : await votePoll({ broadcastId, link, option, now: Date.now() });
+  const result: PollVoteAnswer = option === undefined ? "invalid" : await votePoll({ broadcastId, link, option, now: Date.now(), who: clientAddress(request) });
   const { status, text } = WORDS[result];
   return new Response(text, {
     status,

@@ -34,7 +34,7 @@ export const MAX_POLL_DAYS = 30;
  * the broadcast's record, the store's handle and record, the vote and its
  * expiry. A review ceiling.
  */
-export const POLL_VOTE_COMMANDS = 5;
+export const POLL_VOTE_COMMANDS = 7;
 /**
  * Public requests of the store's month one confirmed answer takes before it
  * is kept: more than its reads (the store's record at 1 MB at the most, the

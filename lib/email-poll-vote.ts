@@ -7,13 +7,13 @@
  *
  * In this order, so that a link that is not someone's costs nothing:
  *   1. the link is checked against the broadcast's id, with no read at all;
- *   2. the broadcast is read: it must keep a poll and have already been
+ *   2. the client short-window counter is taken before the broadcast read;
+ *      past it, nothing from the database is read;
+ *   3. the broadcast is read: it must keep a poll and have already been
  *      sent to the link's place (its first `sent` places, whatever its
  *      status since);
- *   3. the poll must be open (from sendAt, kept in seconds, for its days);
- *   4. the store is read and POLL_VOTE_REQUEST_UNITS of its month's public
- *      requests are taken (lib/buyer-actions.ts takeBuyerRead): past its
- *      figure the store is resting and nothing is kept;
+ *   4. the poll's answer is checked; an open answer or a closed-poll response
+ *      takes POLL_VOTE_REQUEST_UNITS before any store or vote write;
  *   5. the answer is kept, or taken back, under the place (recordVote).
  *
  * Anything that does not read is "unknown", never kept and never refused
@@ -21,6 +21,7 @@
  */
 import { BROADCAST_ID, readBroadcast } from "@/lib/broadcasts";
 import { takeBuyerRead } from "@/lib/buyer-actions";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { checkPollLink } from "@/lib/email-poll-links";
 import { POLL_VOTE_REQUEST_UNITS, pollClosesAt, voteStep } from "@/lib/email-poll-rules";
 import { recordVote } from "@/lib/email-polls";
@@ -31,21 +32,31 @@ export type PollVoteAnswer = "recorded" | "withdrawn" | "closed" | "invalid" | "
 export type PollVoteDeps = {
   loadStore: (handle: string) => Promise<Store | null>;
   take: (store: Store) => Promise<boolean>;
+  admit: (who: string) => Promise<boolean>;
 };
 
-const DEPS: PollVoteDeps = { loadStore: storeForHandle, take: (store) => takeBuyerRead(store, POLL_VOTE_REQUEST_UNITS) };
+const DEPS: PollVoteDeps = {
+  loadStore: storeForHandle,
+  take: (store) => takeBuyerRead(store, POLL_VOTE_REQUEST_UNITS),
+  admit: (who) => withinEssentialLimit("email-poll-vote", who, 60, 60),
+};
 
 const nonnegative = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 
 /** Keeps a recipient's confirmed answer (`option`), or takes it back (`null`). */
 export async function votePoll(
-  input: { broadcastId: string; link: unknown; option: number | null; now: number },
+  input: { broadcastId: string; link: unknown; option: number | null; now: number; who?: string },
   deps: PollVoteDeps = DEPS,
 ): Promise<PollVoteAnswer> {
   const { broadcastId, option, now } = input;
   if (typeof broadcastId !== "string" || !BROADCAST_ID.test(broadcastId)) return "invalid";
   const checked = checkPollLink(broadcastId, input.link);
   if (!checked.ok) return checked.unknown ? "unknown" : "invalid";
+  // Signed-link replays are throttled before any database read, including after close or when the store month is spent.
+  if (input.who) {
+    try { if (!(await deps.admit(input.who))) return "unknown"; }
+    catch { return "unknown"; }
+  }
   let broadcast;
   try {
     broadcast = await readBroadcast(broadcastId);
@@ -60,8 +71,7 @@ export async function votePoll(
   // A broadcast keeps its times in seconds (createBroadcast); the poll's rules count in milliseconds.
   const sentAt = broadcast.sendAt * 1000;
   const step = voteStep({ method: "POST", option, poll: broadcast.poll, sentAt, now, recipient: "valid" });
-  if (step.step === "confirm") return "invalid";
-  if (step.step !== "record" && step.step !== "withdraw") return step.step;
+  if (step.step === "confirm" || step.step === "invalid" || step.step === "unknown") return step.step === "confirm" ? "invalid" : step.step;
   const closesAt = pollClosesAt(sentAt, broadcast.poll.days);
   if (closesAt === null) return "unknown";
   try {
@@ -71,6 +81,7 @@ export async function votePoll(
   } catch {
     return "unknown";
   }
+  if (step.step === "closed") return "closed";
   return recordVote(broadcastId, checked.recipient, step.step === "record" ? step.option : null, closesAt, now);
 }
 

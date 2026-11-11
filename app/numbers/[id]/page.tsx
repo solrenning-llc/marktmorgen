@@ -154,7 +154,7 @@ export default async function NumbersLinkPage({ params, searchParams }: Params) 
               <thead>
                 <tr className="border-b border-line text-xs uppercase tracking-wide text-ink-soft">
                   <th scope="col" className="py-2 font-semibold">Last</th>
-                  <th scope="col" className="py-2 pl-3 text-right font-semibold">Visitors</th>
+                  <th scope="col" className="py-2 pl-3 text-right font-semibold">Daily visitors, added up</th>
                   <th scope="col" className="py-2 pl-3 text-right font-semibold">Page views</th>
                   <th scope="col" className="py-2 pl-3 text-right font-semibold">Checkouts</th>
                   {verified.salesRead ? <th scope="col" className="py-2 pl-3 text-right font-semibold">Sales</th> : null}
@@ -241,7 +241,7 @@ export default async function NumbersLinkPage({ params, searchParams }: Params) 
           ) : null}
 
           <p className="mt-6 text-sm text-ink-soft">
-            {`Counted by Marktmorgen, not typed: visitors and page views on this store's own pages${verified.salesRead ? `; sales${link.money ? ", revenue" : ""} and buyers' countries from the payments on the store's own Stripe account` : ""}. Read on ${longDay(verified.day)}, once a day. No buyer's name or address is in it.`}
+            {`Counted by Marktmorgen, not typed: visitors and page views on this store's own pages. Visitors are counted once a day, so a person who comes back on another day is counted again, and each day's count is an estimate, within about 1%${verified.salesRead ? `; sales${link.money ? ", revenue" : ""} and buyers' countries from the payments on the store's own Stripe account` : ""}. Read on ${longDay(verified.day)}, once a day. No buyer's name or address is in it.`}
           </p>
         </div>
       )}

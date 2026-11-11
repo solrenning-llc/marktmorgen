@@ -59,6 +59,12 @@ function main(): void {
   is("a download that is not whole gives no file", route.includes("if (csv === null) return plain(503"), true);
   is("the file is never cached or indexed", [route.includes('"private, no-store"'), route.includes('"X-Robots-Tag": "noindex"')], [true, true]);
 
+  part("A payout's fee is shown, never dropped (Codex G on #3651, from #3632)");
+  // lib/sale-fees-rules.ts books a payout's or transfer's fee as an account fee (tests/sale-fees-rules.test.ts,
+  // tests/sale-fees-months.test.ts); the page shows the month's account fees as money out.
+  is("the months table has the account fees column", page.includes("outWords(-l.accountFees, l.currency)"), true);
+  is("a payout's 72-cent fee (account fees -72) reads as money out", outWords(-(-72), "usd"), "$0.72");
+
   part("Tables a screen reader and a keyboard can use");
   is("two tables, each with a caption", (page.match(/<caption/g) ?? []).length, 2);
   is("column headers scoped", (page.match(/scope="col"/g) ?? []).length, 15);

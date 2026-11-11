@@ -102,7 +102,8 @@ part("It never takes the focus from anything else");
   const save = make("save");
   active = save;
   k.focusIn(save);
-  k.focusOut(save); // a click on the page's background: left while still on
+  k.pointerDown(); // a click on the page's background: left while still on
+  k.focusOut(save);
   active = body;
   save.disabled = true;
   k.disabledChanged(save);

@@ -751,6 +751,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:dun:report:@lib/payment-recovery-report.ts": { what: "Failed renewals, cached", parts: [capped(256 * KB, "One cached view.")] },
   "nl:dun:card:@lib/payment-recovery.ts": { what: "A card already asked about", parts: [per("own", 60, MARK, "Per card asked about by email.", MAIL("card ask"))] },
   "nl:dun:cards:@lib/payment-recovery.ts": { what: "Where the cards were read to", parts: [capped(KEY, "One a store.")] },
+  "nl:dun:due:@lib/payment-recovery.ts": { what: "Where the past-due memberships were read to", parts: [capped(KEY, "One a store.")] },
   "nl:dun:cursor@lib/payment-recovery.ts": company("Where the recovery job stopped", "One key, the company's job."),
   "nl:pp:@lib/paypal-payouts.ts": { what: "The creator's PayPal app, and its lock", parts: [capped(4 * KB, "One a store.")] },
   "nl:pp:item:@lib/paypal-payouts.ts": short("A PayPal payout item written into the book: up to three partners a sale", "order", 400, 3 * MARK),

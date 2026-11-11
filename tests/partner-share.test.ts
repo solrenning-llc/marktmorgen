@@ -253,8 +253,8 @@ test("nothing is written down until the invitation is opened", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function invitePartner");
   const body = aff.slice(at, aff.indexOf("export async function acceptPartnership"));
-  // Rule 23: the writers are now writeNewAffiliate and changeAffiliate; none of them, nor the old name, may be here.
-  assert.doesNotMatch(body, /writeAffiliate|writeNewAffiliate|changeAffiliate/, "the record is made when they open the link, not when it is sent");
+  // Rule 23: the writers are now makeAffiliate and changeAffiliate; none of them, nor the old names, may be here.
+  assert.doesNotMatch(body, /writeAffiliate|writeNewAffiliate|makeAffiliate|changeAffiliate/, "the record is made when they open the link, not when it is sent");
   // The reason belongs in the comment over it, which is above `at`.
   assert.match(
     aff.slice(Math.max(0, at - 1_200), at),
@@ -276,8 +276,9 @@ test("an invitation arrives already approved, with the share the email stated", 
   const record = body.slice(0, body.indexOf("export async function openAffiliateLink"));
   assert.ok(record.indexOf("partnerShareProblem(") > 0, "accepting re-checks the cap");
   // Rule 23: writeAffiliate became changeAffiliate (a record already there, written over exactly what was read) and
-  // writeNewAffiliate (a record just made). The check still has to come before EACH of them, so this is as strict.
-  for (const writer of ["changeAffiliate(", "writeNewAffiliate("]) {
+  // makeAffiliate (a record just made, with its address, in one script; it replaced writeNewAffiliate). The check
+  // still has to come before EACH of them, so this is as strict.
+  for (const writer of ["changeAffiliate(", "makeAffiliate("]) {
     assert.ok(record.indexOf(writer) > 0, `the record is written by ${writer}`);
     assert.ok(record.indexOf("partnerShareProblem(") < record.indexOf(writer), "before the share is written");
   }

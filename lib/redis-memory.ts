@@ -784,6 +784,21 @@ export class MemoryRedis {
           this.run(["HSET", people, field, next]);
           return 1;
         }
+        // lib/affiliates.ts AFFILIATE_CLAIM: an address and its new affiliate's record written together; the id
+        // already held when the address points at a record that is there.
+        if (key.startsWith("-- marktmorgen:affiliate-claim:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, emails, people, email, id, record] = args;
+          const held = this.run(["HGET", emails, email]);
+          if (typeof held === "string" && this.run(["HEXISTS", people, held]) === 1) return held;
+          this.run(["HSET", emails, email, id]);
+          this.run(["HSET", people, id, record]);
+          return "ok";
+        }
+        // lib/affiliates.ts AFFILIATE_CODE_RELEASE: a code given back only while it still names that id.
+        if (key.startsWith("-- marktmorgen:affiliate-code-release:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, codes, code, id] = args;
+          return this.run(["HGET", codes, code]) === id ? this.run(["HDEL", codes, code]) : 0;
+        }
         // lib/affiliate-codes.ts GIVE_CODE: whether the code is held, its room and the write in one step. A code held
         // is moved and takes no room ({2, 0}); a code not held takes its room (TAKE_DATA, slot "aff:codes") and is
         // written only when that answers {1, total}.

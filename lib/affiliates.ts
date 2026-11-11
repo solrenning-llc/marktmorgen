@@ -752,13 +752,46 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
 }
 
 /**
- * Writes a record just made, under an id nobody else has (a fresh random id, after its address was claimed with
- * HSETNX). Every change to a record already there goes through changeAffiliate instead.
+ * An address claimed for a new affiliate and that affiliate's record, written together in one script, so an
+ * address never points at an id with no record (rules 24 and 30). Before, the address was claimed (HSETNX) and
+ * the record written after: a dropped connection in between, on the code's claim or on the record's HSET, left
+ * the address pointing at nothing, and every later attempt by that person lost the claim, read that id, found no
+ * record and was refused for good. Answers "ok" when written; the id already held when the address points at a
+ * record that is there; an address pointing at an id with no record (left by the old order of writes) is taken.
  */
-async function writeNewAffiliate(store: Store, affiliate: Affiliate): Promise<void> {
-  await redisPipeline([["HSET", peopleKey(store.statsId as string), affiliate.id, JSON.stringify(affiliate)]]);
-  // Found again from their own page across every store (lib/affiliate-hub.ts).
-  await rememberAffiliate(store.sid, affiliate.email);
+export const AFFILIATE_CLAIM = `-- marktmorgen:affiliate-claim:v1
+local held = redis.call("HGET", KEYS[1], ARGV[1])
+if held and redis.call("HEXISTS", KEYS[2], held) == 1 then return held end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+redis.call("HSET", KEYS[2], ARGV[2], ARGV[3])
+return "ok"`;
+
+/** A code claimed for an id that lost its address's claim, given back only while it still names that id. */
+export const AFFILIATE_CODE_RELEASE = `-- marktmorgen:affiliate-code-release:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) end
+return 0`;
+
+/**
+ * A new affiliate for this address, made whole or not at all: the record `build` makes from a fresh id and its
+ * code, written with the address's claim (AFFILIATE_CLAIM). `other` when the address already belongs to a record
+ * (a second press, another link): that id, with the code claimed here given back. An unknown reply throws.
+ */
+async function makeAffiliate(store: Store, email: string, build: (id: string, code: string) => Affiliate): Promise<{ made: Affiliate } | { other: string }> {
+  const statsId = store.statsId as string;
+  const id = randomBytes(6).toString("hex");
+  const code = await claimCode(store, email, id);
+  const affiliate = build(id, code);
+  const reply = repliesFor(await redisPipeline([["EVAL", AFFILIATE_CLAIM, 2, emailsKey(statsId), peopleKey(statsId), email, id, JSON.stringify(affiliate)]]), 1)?.[0];
+  if (reply === "ok") {
+    // Found again from their own page across every store (lib/affiliate-hub.ts).
+    await rememberAffiliate(store.sid, affiliate.email);
+    return { made: affiliate };
+  }
+  if (typeof reply === "string" && AFFILIATE_ID_PATTERN.test(reply) && reply !== id) {
+    await redisPipeline([["EVAL", AFFILIATE_CODE_RELEASE, 1, codesKey(statsId), code, id]]).catch((error) => console.error("an unused affiliate code was not given back", error));
+    return { other: reply };
+  }
+  throw new UnknownReplyError("a new affiliate's claim of their address");
 }
 
 /**
@@ -1210,38 +1243,34 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   if (!affiliate) {
     // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
     if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
-    const id = randomBytes(6).toString("hex");
-    // One application per address, however many links are opened at once.
-    const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), grant.e, id]]);
-    if (Number(won) !== 1) {
-      const [other] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
-      affiliate = typeof other === "string" ? await readAffiliate(store, other) : null;
+    const invited = grant.k === 1;
+    // Checked again now, because the programme or the recruiter may have changed since the email went out.
+    const recruiter = grant.r && !invited ? await readAffiliate(store, grant.r) : null;
+    const by =
+      recruiter && store.affiliates.secondTier > 0 && recruiter.status === "approved" && canonicalEmail(recruiter.email) !== canonicalEmail(grant.e)
+        ? { id: recruiter.id, percent: store.affiliates.secondTier }
+        : null;
+    // One application per address, however many links are opened at once: the address and the record together.
+    const now = Date.now();
+    const made = await makeAffiliate(store, grant.e, (id, code) => ({
+      id,
+      email: grant.e,
+      code,
+      status: invited ? "approved" : "pending",
+      appliedAt: now,
+      decidedAt: invited ? now : 0,
+      note: grant.n,
+      rate: null,
+      paypal: "",
+      share: invited ? grant.p ?? null : null,
+      cleared: null,
+      by,
+    }));
+    if ("other" in made) {
+      affiliate = await readAffiliate(store, made.other);
       if (!affiliate) return { ok: false, reason: "expired" };
     } else {
-      const code = await claimCode(store, grant.e, id);
-      const now = Date.now();
-      const invited = grant.k === 1;
-      // Checked again now, because the programme or the recruiter may have changed since the email went out.
-      const recruiter = grant.r && !invited ? await readAffiliate(store, grant.r) : null;
-      const by =
-        recruiter && store.affiliates.secondTier > 0 && recruiter.status === "approved" && canonicalEmail(recruiter.email) !== canonicalEmail(grant.e)
-          ? { id: recruiter.id, percent: store.affiliates.secondTier }
-          : null;
-      affiliate = {
-        id,
-        email: grant.e,
-        code,
-        status: invited ? "approved" : "pending",
-        appliedAt: now,
-        decidedAt: invited ? now : 0,
-        note: grant.n,
-        rate: null,
-        paypal: "",
-        share: invited ? grant.p ?? null : null,
-        cleared: null,
-        by,
-      };
-      await writeNewAffiliate(store, affiliate);
+      affiliate = made.made;
       created = true;
     }
   }
@@ -1444,20 +1473,18 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
   } else {
     // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
     if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
-    const id = randomBytes(6).toString("hex");
-    const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), email, id]]);
-    if (Number(won) !== 1) {
+    const now = Date.now();
+    const made = await makeAffiliate(store, email, (id, code) =>
+      knownInbox
+        ? { id, email, code, status: "pending", appliedAt: now, decidedAt: 0, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null }
+        : { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null },
+    );
+    if ("other" in made) {
       // The same buyer pressing twice at once: the other press made them.
-      const [other] = await redisPipeline([["HGET", emailsKey(statsId), email]]);
-      affiliate = typeof other === "string" ? await readAffiliate(store, other) : null;
+      affiliate = await readAffiliate(store, made.other);
       if (!affiliate) return { ok: false, reason: "order" };
     } else {
-      const code = await claimCode(store, email, id);
-      const now = Date.now();
-      affiliate = knownInbox
-        ? { id, email, code, status: "pending", appliedAt: now, decidedAt: 0, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null }
-        : { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null };
-      await writeNewAffiliate(store, affiliate);
+      affiliate = made.made;
       created = true;
     }
   }

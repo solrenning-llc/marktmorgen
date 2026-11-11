@@ -81,10 +81,12 @@ export async function saveServer(room: string, server: DiscordServer): Promise<v
  * taken back in Discord, where the bot is no longer.
  */
 export async function forgetServer(room: string, sid: string): Promise<number> {
-  const [ids] = await redisPipeline([["HKEYS", membersKey(room)]]);
-  const people = Array.isArray(ids) ? ids.map(String) : [];
-  const [rows] = await redisPipeline([["HVALS", membersKey(room)]]);
-  const addresses = (Array.isArray(rows) ? rows : []).map((row) => parse<Member>(row)?.e).filter((e): e is string => typeof e === "string");
+  // Read exactly (rule 24): people or rows answered cut short or in another shape throw before anything is deleted,
+  // never an empty list that deleted the people and left their address links and due entries behind.
+  const people = stringList(repliesFor(await redisPipeline([["HKEYS", membersKey(room)]]), 1)?.[0]);
+  const rows = stringList(repliesFor(await redisPipeline([["HVALS", membersKey(room)]]), 1)?.[0]);
+  if (!people || !rows) throw new UnknownReplyError("a Discord server's people");
+  const addresses = rows.map((row) => parse<Member>(row)?.e).filter((e): e is string => typeof e === "string");
   await redisPipeline([
     ["DEL", serverKey(room), productsKey(room), membersKey(room), ...addresses.map((e) => addressKey(room, e))],
     ...(people.length ? [["ZREM", DUE_KEY, ...people.map((id) => `${sid}|${id}`)]] : []),

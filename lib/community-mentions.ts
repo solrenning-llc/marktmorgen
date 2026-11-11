@@ -25,6 +25,7 @@
  * turns a community's notifications into something people switch off.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { CREATOR } from "@/lib/community";
 
 const handlesKey = (id: string) => `nl:cm:${id}:h`;
@@ -165,8 +166,13 @@ export function withMentions(
 /** Lets go of the handle a deleted member held, if it is still theirs (lib/community-erasure.ts). */
 export async function forgetHandle(id: string, handle: string, who: string): Promise<number> {
   if (!handle) return 0;
-  const [owner] = await redisPipeline([["HGET", handlesKey(id), handle]]);
+  // Read exactly (rule 24): only an exact null or another member's id is "not theirs"; anything else throws, so the
+  // erasure is tried again instead of leaving the handle pointing at the deleted member.
+  const read = repliesFor(await redisPipeline([["HGET", handlesKey(id), handle]]), 1);
+  const owner = read?.[0];
+  if (!read || (owner !== null && typeof owner !== "string")) throw new UnknownReplyError("who holds a community handle");
   if (owner !== who) return 0;
-  const [gone] = await redisPipeline([["HDEL", handlesKey(id), handle]]);
-  return Number(gone) || 0;
+  const gone = countOf(repliesFor(await redisPipeline([["HDEL", handlesKey(id), handle]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("a community handle let go");
+  return gone;
 }

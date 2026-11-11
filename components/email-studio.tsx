@@ -2461,6 +2461,13 @@ function Flows({
                     setError(null);
                     const a = await call({ action: "flow-remove", id: f.id });
                     setBusy(false);
+                    if (!a.ok && a.error === "history_unconfirmed") {
+                      // Removed: only its earlier versions were not confirmed deleted, so it is said as done, with that note,
+                      // and the list no longer shows it (Claude 1 on #1927).
+                      toast(message(a));
+                      refreshFlows();
+                      return;
+                    }
                     if (!a.ok) {
                       if (a.error === "flow_write_unconfirmed") onWriteUnconfirmed();
                       setError("Removal of “" + f.name + "” could not be confirmed. Reload to check its current status. " + message(a));

@@ -21,10 +21,15 @@ const ERRORS: Record<string, string> = {
   flow_versions_unavailable: "The earlier versions could not be read just now. This does not mean there are none. Try again in a moment.",
   history_room: "The version in use could not be kept, so nothing was put back and nothing changed. Your store may be out of room for data. Free some room, or try again in a moment.",
 };
+// A version that no longer fits the store as it is now (another workflow took its start, a tag, a form field, a
+// route or the plan changed): trying again gives the same answer, so it says what to do instead (Claude 1 on #1927).
+const NO_LONGER_FITS = "That version no longer fits your store as it is now, so nothing was put back. Edit the workflow instead.";
+for (const reason of ["signed_taken", "paid_request_taken", "tag", "trigger", "name", "placeholder", "route", "steps", "plan", "setup"]) ERRORS[reason] = NO_LONGER_FITS;
 
 /** What the studio said when it would not take the requests this costs (lib/person-tasks.ts, studioRefusal): its own words. */
-const errorOf = (a: MailAnswer, fallback: string) =>
-  (a.error === "studio_used" || a.error === "unavailable") && typeof a.message === "string" && a.message ? a.message : ERRORS[a.error ?? ""] ?? fallback;
+export const versionError = (a: MailAnswer, fallback: string) =>
+  (a.error === "studio_used" || a.error === "unavailable") && typeof a.message === "string" && a.message ? a.message : (Object.hasOwn(ERRORS, a.error ?? "") ? ERRORS[a.error ?? ""] : fallback);
+const errorOf = versionError;
 
 const when = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
@@ -79,11 +84,10 @@ export function WorkflowVersions({ flowId, request, onRestored }: { flowId: stri
       <p className="mt-1 text-ink-soft">
         {`When you save a change to what this workflow does, the version before it is kept here, at most one every ${FLOW_VERSION_PAUSE_SECONDS / 60} minutes while you keep editing: the last ${MAX_FLOW_VERSIONS}, while your store has room. Reading this list and putting a version back use more of your studio requests when the workflow is long. Putting one back keeps it switched on or off as it is now. Who is already in it goes on at the same step number in the version you put back; if that version has fewer steps, their run ends there, as when you remove a step.`}
       </p>
-      {done ? (
-        <p className="notice mt-3" role="status">
-          {done}
-        </p>
-      ) : null}
+      {/* Kept mounted, empty until there is something to say, so a screen reader announces what is put into it. */}
+      <div role="status">
+        {done ? <p className="notice mt-3">{done}</p> : null}
+      </div>
       {error ? (
         <p className="notice notice-error mt-3" role="alert">
           {error}

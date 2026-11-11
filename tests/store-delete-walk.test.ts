@@ -24,6 +24,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { type Store, claimHandle, createStore, ensureListId, ensureStatsId, setPhotoId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { readPhoto, writePhoto } from "@/lib/store-photo";
 import { makeKey, resolveKey } from "@/lib/api-keys";
+import { retryStoreForgets } from "@/lib/store-forget-retry";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -267,6 +268,42 @@ async function main(): Promise<void> {
   is("after the walk, its API key no longer answers and no API key lookup is left", [await resolveKey(twiceKey.key), (await allKeys()).filter((key) => key.startsWith("nl:api:"))], [null, []]);
   is("after the walk, every key named by its ids is gone and it left the line", [await erasableBy(idsOf(twiceStore)), await inBatch(twiceRef)], [[], null]);
   is("after the walk, its address is held back for its 30 days and it no longer counts among its owner's stores", [await handleHold("keepstwice"), await stillCounted(twiceStore.sid)], [{ released: true, expires: true }, false]);
+
+  part("the forgets at the walk's admission fail too: the entry waits, so its API key's lookup is never stranded (reviewer C3's LEVE on #3670 at 09fd831e33)");
+  redis.clear();
+  await claimHandle(OWNER, "keepshome", "Keeps Home", "");
+  const thrice = await createStore(OWNER, "keepsthrice", "Keeps Thrice", "");
+  if (!thrice.ok) throw new Error("no thrice store");
+  const thriceStore = await furnished(storeRef(thrice.store));
+  const thriceRef = storeRef(thriceStore);
+  const thriceKey = await makeKey(thriceStore.sid, "Synthetic key");
+  if (!thriceKey.ok) throw new Error("no key");
+  // The same double fault at the delete as above, so nothing was forgotten there.
+  landGarbled = (command) => {
+    if (!(command[0] === "EVAL" && /DEL/.test(String(command[1])) && String(command[3] ?? "").startsWith("nl:store:lock:") && String(command[4] ?? "").startsWith("nl:store:owner:"))) return undefined;
+    landGarbled = undefined;
+    garble = (read) => (read[0] === "GET" && String(read[1]).startsWith("nl:store:owner:") ? ["QUEUED"] : undefined);
+    return ["garbled"];
+  };
+  is("the studio says it went wrong", await deleteFromStudio(OWNER, thriceStore), "error");
+  landGarbled = undefined;
+  // Then the walk's own read of its API keys' list answers once in a shape no HGETALL answers.
+  let keysGarbled = false;
+  garble = (read) => {
+    if (keysGarbled || !(read[0] === "HGETALL" && read[1] === `nl:api:keys:${thriceStore.sid}`)) return undefined;
+    keysGarbled = true;
+    return ["QUEUED"];
+  };
+  const firstWalk = await eraseClosed(deadline(), finishClosed, Date.now());
+  garble = undefined;
+  is("that read was in fact garbled", keysGarbled, true);
+  is("the run is not done and the store still waits in the line, not walked", [firstWalk.done, typeof (await inBatch(thriceRef))], [false, "string"]);
+  is("its API keys' list, the only way to its lookups, is still there", (await allKeys()).includes(`nl:api:keys:${thriceStore.sid}`), true);
+  // The daily job's retry and the next walk, in either order, then forget everything.
+  await retryStoreForgets(deadline(), Date.now() + HOUR);
+  await eraseClosed(deadline(), finishClosed, Date.now() + 21 * HOUR);
+  is("after the retry and the next walk, its API key no longer answers and no API key lookup is left", [await resolveKey(thriceKey.key), (await allKeys()).filter((key) => key.startsWith("nl:api:"))], [null, []]);
+  is("after the next walk, every key named by its ids is gone and it left the line", [await erasableBy(idsOf(thriceStore)), await inBatch(thriceRef)], [[], null]);
 
   part("the studio's notice for a delete with a last step not confirmed claims only what is known (reviewer C3 on #3670, VR item 2)");
   const studioPage = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");

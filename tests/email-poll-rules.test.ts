@@ -18,7 +18,7 @@ import {
   MIN_POLL_OPTIONS,
   POLL_DEFAULT_DAYS,
   pollClosesAt,
-  pollEmailLines,
+  pollEmailBlock,
   pollState,
   readPollInput,
   tallyPoll,
@@ -84,7 +84,7 @@ is("a list that could not be read: unknown, never zero", tallyPoll(2, null), { k
 is("results never name anyone", Object.keys(tallyPoll(2, ["1"]) as object).sort(), ["counts", "known", "votes"]);
 
 part("In the email");
-const lines = pollEmailLines(good, (i) => `https://marktmorgen.com/v/tok?o=${i}`, SENT);
+const lines = pollEmailBlock(good, (i) => `https://marktmorgen.com/v/tok?o=${i}`, SENT, "en").text.split("\n");
 is("the question first", lines[0], "Which course should I make next?");
 is("each answer is its own link, its words the link's text", lines.slice(1, 4), [
   "Glazing basics: https://marktmorgen.com/v/tok?o=0",
@@ -94,5 +94,9 @@ is("each answer is its own link, its words the link's text", lines.slice(1, 4), 
 is("says opening a link is not a vote", lines.some((l) => /counted only when you press Confirm/.test(l)), true);
 is("says when it closes", lines.some((l) => l.includes("December 8, 2026")), true);
 is("says nobody sees who answered what", lines.some((l) => /only the totals/.test(l)), true);
+const block = pollEmailBlock({ ...good, question: "Glaze <b>or</b> \"fire\"?" }, (i) => `https://marktmorgen.com/v?a=${i}&k=1`, SENT, "de");
+is("in the HTML, the creator's words escaped", block.html.includes("Glaze &lt;b&gt;or&lt;/b&gt; &quot;fire&quot;?"), true);
+is("in the HTML, each link's ampersand escaped", block.html.includes('href="https://marktmorgen.com/v?a=0&amp;k=1"'), true);
+is("in the store's language", block.text.includes("Bestätigen"), true);
 
 done();

@@ -4,6 +4,7 @@
  *
  *   nl:course:<course>:task:<lesson>              the prompt and its switches
  *   nl:course:<course>:task:<lesson>:sub:<who>    one student's work, and what came back
+ *   nl:course:<course>:task:<lesson>:sub:<who>:lock  one hand-in of that work at a time, a minute at most
  *   nl:course:<course>:task:<lesson>:files        every file handed in for it, and its size, to delete with it
  *   nl:course:<course>:tasks:waiting              work waiting for the creator, oldest first
  *   nl:course:<course>:tasks:all                  all the work handed in, by when it last was
@@ -20,6 +21,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { withLock } from "@/lib/redis-lock";
 import { signedOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
@@ -220,12 +222,17 @@ function storedSubmission(raw: string): Submission | null {
  * (CX-123 rule 24; Claude 4's audit), so approved work is never taken for nothing handed in and handed in over.
  */
 export async function submissionOf(courseId: string, lessonId: string, who: string): Promise<Submission | null> {
-  if (!isRedisConfigured() || !WHO.test(who) || !ITEM_ID_PATTERN.test(lessonId)) return null;
+  return (await readSubmission(courseId, lessonId, who)).found;
+}
+
+/** The work as read, and its exact text ("" for none), for a write made only over that same text (HAND_IN_WRITE_IF). */
+async function readSubmission(courseId: string, lessonId: string, who: string): Promise<{ found: Submission | null; raw: string }> {
+  if (!isRedisConfigured() || !WHO.test(who) || !ITEM_ID_PATTERN.test(lessonId)) return { found: null, raw: "" };
   const reply = repliesFor(await redisPipeline([["GET", subKey(courseId, lessonId, who)]]), 1)?.[0];
-  if (reply === null) return null;
+  if (reply === null) return { found: null, raw: "" };
   const found = typeof reply === "string" ? storedSubmission(reply) : null;
-  if (!found) throw new UnknownReplyError("one student's work on an assignment");
-  return found;
+  if (!found || typeof reply !== "string") throw new UnknownReplyError("one student's work on an assignment");
+  return { found, raw: reply };
 }
 
 /** A student's record that is there but does not read as handIn wrote it: kept, and said as not read. */
@@ -363,12 +370,53 @@ export async function releaseBytes(room: string, bytes: number): Promise<boolean
   return true;
 }
 
+/** How long one hand-in holds its work's lock at most, and how long the next one waits for it. */
+const HAND_IN_LOCK_SECONDS = 60;
+const HAND_IN_WAIT_MS = 5_000;
+
+/**
+ * One hand-in of one student's work on one lesson at a time (CX-123 rule 24): two at once would each read the same
+ * earlier work, each answer its file as the one replaced, and the file one of them handed in would stay stored with
+ * no work keeping it (freedBytes keeps the room from coming back twice, not that orphan). The route runs everything
+ * from reading the earlier work to deleting the file it replaced inside this. A lock still taken after the wait
+ * throws LockBusyError before anything is read or taken, so the student can simply hand in again.
+ */
+export function oneHandInAtATime<T>(courseId: string, lessonId: string, who: string, work: () => Promise<T>): Promise<T> {
+  return withLock(`${subKey(courseId, lessonId, who)}:lock`, HAND_IN_LOCK_SECONDS, HAND_IN_WAIT_MS, () => work());
+}
+
 /**
  * What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete; and
  * `freedBytes`, that file's bytes when this hand-in took it out of the files' hash, for the caller to give back to the
  * store's task room (0 when another path, a drop of the assignment, removed it first and gave them back).
  */
 export type HandIn = { state: TaskState; replaced: HandedFile | null; freedBytes: number };
+
+/**
+ * Another hand-in of the same work was written between this one's read and its write (its lease ran out while it
+ * waited; Codex P and Codex N on #3135): nothing of this one was written, and the work keeps the other's.
+ */
+export class HandInChangedError extends Error {
+  constructor() {
+    super("this work was handed in again meanwhile");
+    this.name = "HandInChangedError";
+  }
+}
+
+/**
+ * The work written only over the one it was read as (KEYS: the work, the lesson's files, the course's waiting list,
+ * its list of all work; ARGV: the work as read or "" for none, the new work, the file's path or "", its bytes, "1"
+ * when a person reads it, when, the lists' member). 1 when written, 0 when the work changed since and nothing was
+ * written; so the file it replaced is answered, deleted and given back by one hand-in only.
+ */
+export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v1
+local now = redis.call('GET', KEYS[1]) or ''
+if now ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+if ARGV[3] ~= '' then redis.call('HSET', KEYS[2], ARGV[3], ARGV[4]) end
+if ARGV[5] == '1' then redis.call('ZADD', KEYS[3], ARGV[6], ARGV[7]) else redis.call('ZREM', KEYS[3], ARGV[7]) end
+redis.call('ZADD', KEYS[4], ARGV[6], ARGV[7])
+return 1`;
 
 /**
  * A student hands their work in, or hands it in again. What they handed in
@@ -394,7 +442,8 @@ export async function handIn(input: {
 }): Promise<HandIn> {
   const { courseId, lessonId, who, task } = input;
   const at = input.now ?? Math.floor(Date.now() / 1000);
-  const before = await submissionOf(courseId, lessonId, who);
+  const read = await readSubmission(courseId, lessonId, who);
+  const before = read.found;
   const state: TaskState = task.review ? "waiting" : "approved";
   const kept: Submission = {
     text: input.text.replace(/\r\n?/g, "\n").trim().slice(0, MAX_ANSWER_TEXT),
@@ -410,12 +459,32 @@ export async function handIn(input: {
   const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (input.file ? ENTRY_BYTES : 0);
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
   input.writing?.();
-  await redisPipeline([
-    ["SET", subKey(courseId, lessonId, who), JSON.stringify(kept)],
-    ...(input.file ? [["HSET", filesKey(courseId, lessonId), input.file.path, input.file.bytes]] : []),
-    task.review ? ["ZADD", waitingKey(courseId), at, member] : ["ZREM", waitingKey(courseId), member],
-    ["ZADD", allKey(courseId), at, member],
-  ]);
+  // Written only over the work read above (HAND_IN_WRITE_IF): a hand-in whose lease ran out while another replaced the
+  // work writes nothing, so the earlier file is answered as replaced, deleted and given back by one hand-in only, and
+  // the successor's work is never written over. Its own taking for the record stays counted, which only refuses sooner.
+  const wrote = repliesFor(
+    await redisPipeline([
+      [
+        "EVAL",
+        HAND_IN_WRITE_IF,
+        4,
+        subKey(courseId, lessonId, who),
+        filesKey(courseId, lessonId),
+        waitingKey(courseId),
+        allKey(courseId),
+        read.raw,
+        JSON.stringify(kept),
+        input.file?.path ?? "",
+        input.file?.bytes ?? 0,
+        task.review ? "1" : "0",
+        at,
+        member,
+      ],
+    ]),
+    1,
+  )?.[0];
+  if (wrote === 0) throw new HandInChangedError();
+  if (wrote !== 1) throw new UnknownReplyError("whether a hand-in was written");
   if (grown < 0) await giveData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: -grown }]);
   if (!task.review) await finish(courseId, lessonId, who, input.email, input.data);
   const replaced = before?.file && before.file.path !== input.file?.path ? before.file : null;

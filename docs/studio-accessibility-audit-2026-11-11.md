@@ -42,6 +42,11 @@ On 11 November 2026, every one of these is in the state **tested in a PR**. None
 | #3791 | 2.4.3, 4.1.3 | "The order of your page": the end buttons use `aria-disabled` and say "already first/last", and each move is announced. |
 | #3792 | 2.4.3, 4.1.3 | The same for the Move buttons in the bundle, collection and ClickFunnels editors. |
 | #3793 | 2.4.3 | A quiz's "Add a question" moves the focus to the new question. |
+| #3795 | 2.4.3, 4.1.3 | The same for the email designer's Move up/down buttons. |
+| #3796 | 2.5.5 | The private podcast page's "Get your own feed, as a buyer does" went from 238 × 20 px to 238 × 44 px. |
+| #3797 | 1.4.10 | `/studio/blog` no longer scrolls sideways at 320 px: the blog's address in the opening sentence wraps (page width 394 px, 482 px with wide text spacing, to 320 px). |
+| #3798 | 1.4.12, 1.4.10 | The funnel editor's "The path" row wraps, and its product badge never grows past the row, so a long title and a four-digit price stay inside 320 px (369 px before, with a reviewer's long-title case). |
+| #3799 | 2.4.6, 4.1.2 | Each of the 14 "See the journey and what you need" buttons in the campaign gallery names its campaign for assistive technology. |
 
 ## Failures found and left to the files' owners
 
@@ -55,14 +60,17 @@ These are in files that other agents' open PRs hold. Each was reported in the ag
   - the product card's "Edit" (27 px wide);
   - checkout extras, the checkout questions, the course toggle, the product update box, "Change my address", "Add your profiles", "How Path works" and "Download an example file";
   - in the course editor: "See it as a student does", "Move module up/down" and "Remove module".
+- `/studio/outreach` scrolls sideways at 320 px (339 px; 415 px with wide text spacing): the store's address in "None yet. Each one ends with your name, …" does not wrap (`components/outreach-studio.tsx`, held by #3549).
+- 2.4.8 Location: `/studio/totals`, `/studio/team`, `/studio/tax`, `/studio/reviews`, `/studio/requests`, `/studio/invoices` and `/studio/paused` show no trail and no `aria-current="page"`. #3483 adds the studio trail to 30 other pages, not these seven.
 - The checkbox on `/studio/inbox` (13 px; its label is 27 px tall).
 - Adding a question or a result in `/studio/forms`, and adding a lesson or a module in a course, leaves the focus on the button and announces nothing.
 - A course quiz's "Add a quiz" replaces the button with the quiz editor, and the focus falls to the body. #3790 should hand it to the editor on a studio page, but that was not checked inside a course page.
-- The same Move up/down pattern that #3791 and #3792 fix is still present in other editors: the end buttons are turned off (`disabled`), so the focus falls to the body when an item reaches an end, and no move is announced. They are `components/faq-editor.tsx`, `components/link-editor.tsx`, `components/site-pages-editor.tsx`, `components/product-editor.tsx` (a product's prices), `components/mail-designer.tsx`, `components/socials-editor.tsx`, `components/page-funnel-editor.tsx` (a funnel's steps) and `components/forms-editor.tsx`. Several of these files are held by other open PRs. `lib/move-words.ts` and `components/said-line.tsx` from #3792 are there to reuse.
+- The same Move up/down pattern that #3791 and #3792 fix is still present in other editors: the end buttons are turned off (`disabled`), so the focus falls to the body when an item reaches an end, and no move is announced. They are `components/faq-editor.tsx`, `components/link-editor.tsx`, `components/site-pages-editor.tsx`, `components/product-editor.tsx` (a product's prices), `components/mail-designer.tsx` (fixed in #3795), `components/socials-editor.tsx`, `components/page-funnel-editor.tsx` (a funnel's steps) and `components/forms-editor.tsx`. Several of these files are held by other open PRs. `lib/move-words.ts` and `components/said-line.tsx` from #3792 are there to reuse.
 
 ## Proposed, not yet done
 
 - **1.4.8 line length.** On `/studio`, 30 of 128 paragraphs of running text average more than 80 characters per line (up to 110). On `/studio/email` it is 2 of 4 (up to 152), and on `/studio/team` 2 of 5 (up to 95). The public pages and the store already cap the line length; the studio does not. The cap needs the same careful exceptions as the store's, so it was proposed as its own unit.
+- **Per-product button names.** On `/studio`, each product's "Edit", "Remove", "Save" and similar buttons have the same name for every product, inside a list item with no name of its own (3 "Edit" buttons with the seed). Their file, `components/product-editor.tsx`, is in three open PRs of this audit (#3771, #3782, #3783), so this waits for them.
 - **3.1.3 / 3.1.4.** The studio has no glossary and almost no `<abbr>`, while its text uses abbreviations such as API, HMAC, CSV, JSON, UTC, VAT, CVC, RSVP, CRM, VPN and SVG. Where a glossary should live is a product decision.
 
 ## Checked, no failure found in what was checked
@@ -72,7 +80,9 @@ These are in files that other agents' open PRs hold. Each was reported in the ag
 - 2.2.6: the session lasts 30 days.
 - 2.5.7: dragging blocks in the page editor has Move up/down buttons.
 - 3.3.6 in the page editor: removing a block is announced and can be undone.
-- 1.4.10 and 1.4.12: no horizontal scroll and no clipped text at 320 px with wide text spacing, on nine main pages.
+- 1.4.10 and 1.4.12: on 43 studio pages at 320 px, with every disclosure and toggle open, with and without wide text spacing, and again with three products renamed to long titles (60–66 characters): no horizontal scroll and no clipped text except `/studio/blog` (#3797), `/studio/funnels` (#3798) and `/studio/outreach` (above).
+- Forced colors (Windows high contrast, emulated in Chromium): on six main pages, 569 Tab stops, every focused control keeps a visible outline.
+- Status messages: the confirmation toasts are announced from a `role="status"` region that stays in the page (`components/toast.tsx`).
 - ATAG / AX274 item 6:
   - the page coach asks for a description for every picture and for a clear purpose on every button;
   - block headings are levelled by the code, so a creator cannot put them out of order;

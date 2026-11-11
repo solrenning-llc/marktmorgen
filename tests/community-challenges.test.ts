@@ -349,6 +349,8 @@ async function main(): Promise<void> {
 
   part("A check-in on the last day promises no tomorrow (Claude 1's LOW on #3452, VR item 2)");
   const tomorrow: Record<string, RegExp> = { en: /tomorrow/i, es: /mañana/i, fr: /demain/i, de: /morgen/i, it: /domani/i, nl: /morgen/i, pt: /amanhã/i };
+  const comeBack: Record<string, RegExp> = { en: /each day/i, es: /cada día/i, fr: /chaque jour/i, de: /jeden Tag/i, it: /ogni giorno/i, nl: /elke dag/i, pt: /todos os dias/i };
+  is("joining, in every language, promises no day past the last (Revisor 2's LOW on #3452)", Object.entries(CHALLENGE_WORDS).filter(([code, w]) => comeBack[code]?.test(w.notices.joined.text) ?? true).map(([code]) => code), []);
   is("the check-in notice, in every language, says it is done and nothing about tomorrow", Object.entries(CHALLENGE_WORDS).filter(([code, w]) => tomorrow[code]?.test(w.notices.checked.text) ?? true).map(([code]) => code), []);
   done();
 }

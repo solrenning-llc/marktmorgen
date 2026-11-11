@@ -668,12 +668,6 @@ function readCurrencyCode(raw: unknown): string {
 }
 
 /** A Redis hash reply, as pairs. */
-function pairs(reply: unknown): [string, string][] {
-  const list = Array.isArray(reply) ? reply.map(String) : [];
-  const out: [string, string][] = [];
-  for (let i = 0; i + 1 < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  return out;
-}
 
 /**
  * A HGETALL reply as pairs, read exactly: one reply for the one command, a list of strings with an even count, or
@@ -681,11 +675,25 @@ function pairs(reply: unknown): [string, string][] {
  * cut short or of another shape is never "nobody".
  */
 function hashPairsExact(replies: unknown, what: string): [string, string][] {
-  const list = stringList(repliesFor(replies, 1)?.[0]);
-  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
-  const out: [string, string][] = [];
-  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  return out;
+  return hashesExact(replies, 1, what)[0];
+}
+
+/**
+ * Several HGETALL replies as pairs, each read exactly as hashPairsExact reads one: one reply a command, each a list
+ * of strings with an even count, or UnknownReplyError. The book's reads (readBook, idleSweep) used to take a reply of
+ * another shape for an empty hash, so a payouts hash that did not read showed every payout ever made as owed again,
+ * and a sales hash that did not read made an affiliate look idle (rule 24 sweep of Claude 4, cloud F).
+ */
+function hashesExact(replies: unknown, count: number, what: string): [string, string][][] {
+  const all = repliesFor(replies, count);
+  if (!all) throw new UnknownReplyError(what);
+  return all.map((reply) => {
+    const list = stringList(reply);
+    if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+    const out: [string, string][] = [];
+    for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
+    return out;
+  });
 }
 
 /**
@@ -2886,18 +2894,23 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
-  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", clicksKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-    ["HGETALL", sharesKey(statsId)],
-    ["HGETALL", paidClicksKey(statsId)],
-    // Confirmed leads (lib/affiliate-leads.ts), all of them: the caps and the budget are counted across the program.
-    ["HGETALL", leadsKey(statsId)],
-  ]);
+  // Each hash read exactly: a reply that does not read throws, and nothing is shown as owed or paid on it.
+  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = hashesExact(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", clicksKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+      ["HGETALL", sharesKey(statsId)],
+      ["HGETALL", paidClicksKey(statsId)],
+      // Confirmed leads (lib/affiliate-leads.ts), all of them: the caps and the budget are counted across the program.
+      ["HGETALL", leadsKey(statsId)],
+    ]),
+    7,
+    "an affiliate program's book",
+  );
   // Everybody, for the checks that compare one affiliate with the others.
-  const everyone = pairs(people)
+  const everyone = people
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null);
   const affiliates = everyone.filter((a) => !only || a.id === only);
@@ -2905,16 +2918,16 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // those of the people who joined through their invitation link.
   const recruits = new Set(everyone.filter((a) => only && a.by?.id === only).map((a) => a.id));
   const mine = (aff: string) => !only || aff === only || recruits.has(aff);
-  const clickCount = new Map(pairs(clicks).map(([id, n]) => [id, Number(n) || 0]));
-  const paidCount = new Map(pairs(paidClicks).map(([id, n]) => [id, Number(n) || 0]));
-  const referrals = pairs(sales)
+  const clickCount = new Map(clicks.map(([id, n]) => [id, Number(n) || 0]));
+  const paidCount = new Map(paidClicks.map(([id, n]) => [id, Number(n) || 0]));
+  const referrals = sales
     .map(([, raw]) => parseReferral(raw))
     .filter((r): r is Referral => r !== null && mine(r.aff));
   // A partner's standing share of a sale reads as one more Referral, credited
   // "partner" (lib/partner-share.ts). Keeping the shape means the payouts, the
   // batches, the spreadsheet and the partner's own page all work unchanged,
   // and one sale can produce several of these alongside a commission.
-  const partnerLines: Referral[] = pairs(shares)
+  const partnerLines: Referral[] = shares
     .map(([, raw]) => parsePartnerEarning(raw))
     .filter((e): e is PartnerEarning => e !== null && (!only || e.aff === only))
     .map((e) => ({
@@ -2931,7 +2944,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       self: e.self,
       how: "partner" as const,
     }));
-  const paid = pairs(payouts)
+  const paid = payouts
     .map(([, raw]) => parsePayout(raw))
     .filter((p): p is Payout => p !== null && (!only || p.aff === only))
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.at - a.at);
@@ -2950,7 +2963,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     }
   }
   const everything = [...referrals, ...partnerLines, ...recurringLines];
-  const leads = pairs(leadsReply)
+  const leads = leadsReply
     .map(([, raw]) => parseLead(raw))
     .filter((l): l is NonNullable<typeof l> => l !== null);
   // A booking's lead is reversed by a refund in full of its booking, read with the sales' refunds.
@@ -3584,13 +3597,18 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   if (days === 0 || !affiliatesOn(store) || !idleRemovalAllowed(store.affiliates)) return done;
   const statsId = store.statsId as string;
   const now = Math.floor(nowMs / 1000);
-  const [peopleReply, salesReply, leadsReply, payoutsReply] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", leadsKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-  ]);
-  const everyone = pairs(peopleReply)
+  // Read exactly: a sales or payouts hash that does not read never makes an affiliate look idle (throws instead).
+  const [peopleReply, salesReply, leadsReply, payoutsReply] = hashesExact(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", leadsKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+    ]),
+    4,
+    "an affiliate program's book",
+  );
+  const everyone = peopleReply
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null);
   const inviter = new Map(everyone.filter((a) => a.by).map((a) => [a.id, a.by as { id: string; percent: number }]));
@@ -3600,7 +3618,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   const active = (id: string, at: number) => lastActive.set(id, Math.max(lastActive.get(id) ?? 0, at));
   const earn = (id: string, cents: number) => owedHigh.set(id, (owedHigh.get(id) ?? 0) + Math.max(0, Math.ceil(cents)));
   const salesByMonth = new Map<string, number>();
-  for (const [, raw] of pairs(salesReply)) {
+  for (const [, raw] of salesReply) {
     const sale = parseReferral(raw);
     if (!sale || sale.self) continue;
     active(sale.aff, sale.at);
@@ -3621,7 +3639,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     const aff = month.slice(0, month.indexOf(":"));
     for (const goal of store.affiliates.bonuses) if (count >= goal.sales) earn(aff, goal.cents);
   }
-  for (const [, raw] of pairs(leadsReply)) {
+  for (const [, raw] of leadsReply) {
     const lead = parseLead(raw);
     if (!lead) continue;
     active(lead.aff, lead.at);
@@ -3629,7 +3647,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     if (lead.currency !== store.currency) foreign.add(lead.aff);
   }
   const paid = new Map<string, number>();
-  for (const [, raw] of pairs(payoutsReply)) {
+  for (const [, raw] of payoutsReply) {
     const payout = parsePayout(raw);
     if (payout && payout.currency === store.currency) paid.set(payout.aff, (paid.get(payout.aff) ?? 0) + payout.cents);
   }

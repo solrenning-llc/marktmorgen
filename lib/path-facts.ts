@@ -113,7 +113,9 @@ export function moneyFrom(sold: Sold[], refunds: { cents: number; currency: stri
     const fromUnnamed = Math.max(0, own(unnamed).reduce((n, s) => n + s.cents, 0) - unmatched);
     cents = fromNamed + fromUnnamed;
   }
-  return { at, test, real: keptNamed + keptUnnamed, cents, currency };
+  // Refunds not known: any sale may have been refunded in full, so none is counted as kept. The first level is reached
+  // on the count alone and a level reached is never lowered, so an unknown here must not move it (Claude 1's MEDIUM on #3443).
+  return { at, test, real: refunds === null ? 0 : keptNamed + keptUnnamed, cents, currency };
 }
 
 /**

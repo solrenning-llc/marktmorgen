@@ -83,6 +83,15 @@ is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, 
   const tailAddress = cleanJoinAnswer(on, { v: 1, choice: "other", comment: `${"https://x.example/a ".repeat(120)}${"b".repeat(5)} me@x.com ok` }) as { answer: { comment: string } };
   is("an address past many links is still taken out, never left half", /@/.test(tailAddress.answer.comment), false);
 }
+{
+  // A phone or a social handle typed in the comment is a way to reach a person with no owner the erasure can find
+  // (Claude 3 on #3652): taken out like links and addresses.
+  const clean = (comment: string) => (cleanJoinAnswer(on, { v: 1, choice: "other", comment }) as { answer: { comment: string } }).answer.comment;
+  is("a phone with a country code and spaces is taken out", clean("call me at +1 415 555 0100 please"), "call me at please");
+  is("with hyphens and brackets too", clean("my number (415) 555-0100 thanks"), "my number thanks");
+  is("a social handle is taken out", clean("find me @potter_jane on there"), "find me on there");
+  is("control: a plain number stays", clean("I want 3 courses by 2027"), "I want 3 courses by 2027");
+}
 is("a comment that is not text is none", (cleanJoinAnswer(on, { v: 1, choice: "learn", comment: 5 }) as { answer: { comment: string } }).answer.comment, "");
 is("a choice that is not offered", cleanJoinAnswer(on, { v: 1, choice: "bogus", comment: "" }), { ok: false, problem: "choice" });
 is("a ready choice the creator dropped", cleanJoinAnswer(editJoinSurvey(on, { hopes: ["learn"] }), { v: 2, choice: "community", comment: "" }), { ok: false, problem: "choice" });

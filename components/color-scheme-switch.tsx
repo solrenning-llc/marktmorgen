@@ -19,7 +19,10 @@ function subscribe(onChange: () => void): () => void {
   listeners.add(onChange);
   // Another tab changing the choice changes it here too.
   const onStorage = (e: StorageEvent) => {
-    if (e.key === COLOR_SCHEME_KEY) onChange();
+    if (e.key !== COLOR_SCHEME_KEY) return;
+    // Drawn here too, so the checked radio and the page never disagree.
+    followStoredChoice();
+    onChange();
   };
   window.addEventListener("storage", onStorage);
   return () => {
@@ -42,6 +45,11 @@ function apply(choice: ColorSchemeChoice): void {
   const root = document.documentElement;
   if (isDark(choice, deviceDark)) root.setAttribute("data-color-scheme", "dark");
   else root.removeAttribute("data-color-scheme");
+}
+
+/** Draw the page as the kept choice says (another tab changed it). Exported for tests/dark-scheme-switch.test.ts. */
+export function followStoredChoice(): void {
+  apply(stored());
 }
 
 /** Keep the choice in this browser and draw the page with it. Exported for tests/dark-scheme-switch.test.ts. */

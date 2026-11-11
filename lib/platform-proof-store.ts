@@ -46,11 +46,6 @@ async function readKept(): Promise<{ snapshot: PlatformProofSnapshot; validDays:
   }
 }
 
-/** The kept snapshot, or null when there is none or it cannot be read exactly. */
-export async function readPlatformProof(): Promise<PlatformProofSnapshot | null> {
-  return (await readKept())?.snapshot ?? null;
-}
-
 /**
  * The kept snapshot with the window it was written for (Claude 1 on #3509), so a reader never picks another one:
  * null when there is none, it cannot be read exactly, or it was kept without its window (never a window guessed).

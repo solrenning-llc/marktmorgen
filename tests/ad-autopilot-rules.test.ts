@@ -3,7 +3,8 @@
  * limits, judges a campaign only once measured enough, never reads an
  * unknown as no sale, and never touches a campaign outside what it may.
  */
-import { AUTOPILOT_KIND, JUDGE_AFTER_TIMES, RAISE_PERCENT, autopilotChanges, checkRules, type AdPlatform, type AutopilotRules, type CampaignNow } from "@/lib/ad-autopilot-rules";
+import { AUTOPILOT_KIND, JUDGE_AFTER_TIMES, RAISE_PERCENT, autopilotChanges, checkRules, type AutopilotRules, type CampaignNow } from "@/lib/ad-autopilot-rules";
+import type { AdPlatform } from "@/lib/ad-campaign-plan";
 import { done, is, part } from "./check";
 
 const TODAY = Date.UTC(2026, 10, 2) / 86_400_000; // a Monday

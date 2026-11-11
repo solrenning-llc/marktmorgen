@@ -34,7 +34,7 @@ import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
@@ -989,8 +989,10 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
     if (meter) {
       // The whole record of the address is read at once: its entries are counted first, and paid for before it is read.
       await meter.take(ORDERS_IMPORTED_COMMANDS);
-      const [entries] = await redisPipeline([["HLEN", importedKey(store.statsId, email)]]);
-      await meter.take((Number(entries) || 0) * ORDERS_IMPORTED_ENTRY_COMMANDS);
+      // An unreadable count is unknown, never zero (rule 24): the record is not read unpaid.
+      const entries = countOf(repliesFor(await redisPipeline([["HLEN", importedKey(store.statsId, email)]]), 1)?.[0]);
+      if (entries === null) throw new UnknownReplyError("HLEN of an address's imported purchases");
+      await meter.take(entries * ORDERS_IMPORTED_ENTRY_COMMANDS);
     }
     for (const given of await importedFor(store, email)) {
       const purchase = await purchaseFromImported(store, store.statsId, email, given, find, meter, false);
@@ -1549,11 +1551,14 @@ async function lookUp(
     if (!store.pastBuyers || !store.statsId) return null;
     const key = importedKey(store.statsId, email);
     // Its ids are read to know which one the reference names (each id a command at the most), then that entry alone.
-    const [count] = await redisPipeline([["HLEN", key]]);
-    await meter.take(Number(count) || 0);
-    const [keys] = await redisPipeline([["HKEYS", key]]);
+    // Unreadable replies are unknown, never zero ids nor "no such purchase" (rule 24).
+    const count = countOf(repliesFor(await redisPipeline([["HLEN", key]]), 1)?.[0]);
+    if (count === null) throw new UnknownReplyError("HLEN of an address's imported purchases");
+    await meter.take(count);
+    const keys = stringList(repliesFor(await redisPipeline([["HKEYS", key]]), 1)?.[0]);
+    if (keys === null) throw new UnknownReplyError("HKEYS of an address's imported purchases");
     const statsId = store.statsId;
-    const productId = (Array.isArray(keys) ? keys.map(String) : []).find((id) => importedReference(statsId, email, id) === reference);
+    const productId = keys.find((id) => importedReference(statsId, email, id) === reference);
     if (!productId) return null;
     const [raw] = await redisPipeline([["HGET", key, productId]]);
     const [given] = importedFrom([productId, raw]);

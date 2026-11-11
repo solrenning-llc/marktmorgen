@@ -54,6 +54,11 @@ part("A. Figures and deals in words are held to the facts, and a figure to what 
   for (const said of ["Get 12 lessons for $49.", "Refunds within 14 days.", "The price is $49."]) {
     is(`what the store published still shows: "${said}"`, heldToFacts(said, course), true);
   }
+  // Added with the fix: a word that makes the figure the price keeps it one, even where the facts count that value;
+  // a count beside a price is held by a fact that counts the same value, in whatever store language the reply is in.
+  is(`"12 total" is a price, not the facts' 12 lessons`, heldToFacts("The price is 12 total.", course), false);
+  is("a count beside a price, in another store language than the facts", heldToFacts("Es kostet 49 Dollar und hat 12 Lektionen.", course), true);
+  is("but never a count the facts hold only as days", heldToFacts("Es kostet 49 Dollar und hat 14 Lektionen.", course), false);
 }
 is("a price in words that is not the store's ($20 vs $27)", heldToFacts("It costs twenty dollars.", facts), false);
 is("a refund window in words that is not the store's (30 vs 14 days)", heldToFacts("You can get a refund within thirty days, no questions asked.", facts), false);

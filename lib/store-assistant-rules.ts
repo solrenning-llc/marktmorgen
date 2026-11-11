@@ -760,9 +760,22 @@ function rateOf(tail: string): string | null {
  * number with no unit and no thing it counts is a price.
  */
 const SENTENCE_MONEY = new RegExp(
-  `${MONEY_CUE}|(?<!\\p{L})(?:cost\\p{L}*|cuest\\p{L}*|cout\\p{L}*|kost\\p{L}*|cust\\p{L}*|vale|vaut|only|now|today|just|sale|offer|solo|solamente|ahora|hoy|oferta|seulement|maintenant|aujourd'hui|offre|nur|jetzt|heute|angebot|ora|oggi|offerta|alleen|nu|vandaag|aanbieding|somente|apenas|agora|hoje)(?!\\p{L})`,
+  `${MONEY_CUE}|(?<!\\p{L})(?:cost\\p{L}*|cuest\\p{L}*|cout\\p{L}*|kost\\p{L}*|cust\\p{L}*|vale|vaut|only|now|today|just|sale|offer|solo|solamente|ahora|hoy|oferta|seulement|maintenant|aujourd'hui|offre|nur|jetzt|heute|angebot|ora|oggi|offerta|alleen|nu|vandaag|aanbieding|somente|apenas|agora|hoje|tax|taxes|vat|impuestos?|iva|tva|steuer\\p{L}*|mwst|tasse|imposte|btw|impostos?)(?!\\p{L})`,
   "u",
 );
+/**
+ * Words that, right after a number in a sentence about a price, make it the price, not a count of something: "14 total",
+ * "14 flat", "14 today", "14 each" (Claude 3's focal on #3484), in the store languages, folded as foldedText folds them.
+ */
+const PRICE_TAIL = new Set([
+  "total", "totals", "flat", "today", "now", "only", "each", "net", "gross", "overall", "altogether", "upfront",
+  "hoy", "ahora", "solo", "cada", "neto", "bruto",
+  "aujourd", "maintenant", "seulement", "chacun", "chacune", "brut",
+  "insgesamt", "gesamt", "pauschal", "heute", "jetzt", "nur", "netto", "brutto", "je",
+  "totale", "totali", "oggi", "ora", "ciascuno", "lordo",
+  "totaal", "vandaag", "nu", "alleen",
+  "hoje", "agora", "so", "liquido",
+]);
 /** Words that put a price right before a number: "for 14", "pour 14", "por 14". */
 const PRICE_BEFORE = /(?<!\p{L})(?:for|por|pour|fur|voor|para|per)\s*$/u;
 /** The sentence a figure is in, at most 200 signs each side: from the last sentence end before it to the next after it (a dot inside a number is none). */
@@ -806,9 +819,18 @@ function figureKind(folded: string, start: number, end: number): string {
   if (money) return rate ? `${money}/${rate}` : money;
   if (rate) return `money:?/${rate}`;
   const next = /^\s*(\p{L}+)/u.exec(tail)?.[1];
-  if (next && !STORE_LANGUAGE_WORDS.has(next)) return "plain";
-  return SENTENCE_MONEY.test(sentenceOf(folded, start, end)) || PRICE_BEFORE.test(folded.slice(Math.max(0, start - 8), start)) ? "money:?" : "plain";
+  const priced = SENTENCE_MONEY.test(sentenceOf(folded, start, end)) || PRICE_BEFORE.test(folded.slice(Math.max(0, start - 8), start));
+  // In a sentence about a price, a word that makes the figure the price ("14 total", "14 flat") keeps it one; any other
+  // word it counts makes it a count ("count:lessons"), held only by a fact that is a count of the same value, never by
+  // a fact of another unit (Claude 3's focal on #3484: "The price is 14 total." was shown on "Refunds within 14 days").
+  // The word itself is not matched: the facts may be in one store language and the reply in another ("10 lessons",
+  // "zehn Lektionen").
+  if (priced && next && PRICE_TAIL.has(next)) return "money:?";
+  if (next && !STORE_LANGUAGE_WORDS.has(next)) return priced ? `count:${next}` : `plain:${next}`;
+  return priced ? "money:?" : "plain";
 }
+/** A count with nothing said of what it counts, or of the word after it outside a sentence about a price. */
+const isPlain = (kind: string) => kind === "plain" || kind.startsWith("plain:");
 /**
  * Whether a fact of one kind holds a reply's figure of another: a plain
  * reply figure any fact of its value; otherwise the same kind, a price of
@@ -817,7 +839,9 @@ function figureKind(folded: string, start: number, end: number): string {
  * have ("$49 per lesson" for "$49").
  */
 function kindHolds(reply: string, fact: string): boolean {
-  if (reply === "plain") return true;
+  if (isPlain(reply)) return true;
+  // A count in a sentence about a price: only a fact that is a count too, never a price, a time or a percent.
+  if (reply.startsWith("count:")) return isPlain(fact) || fact.startsWith("count:");
   const [replyBase, replyRate] = reply.split("/");
   const [factBase, factRate] = fact.split("/");
   if (replyRate !== undefined && replyRate !== factRate) return false;
@@ -846,7 +870,7 @@ function figuresIn(folded: string): Figure[] {
       end = m.index + m[0].lastIndexOf("cent");
     }
     const kind = figureKind(folded, m.index, end);
-    if (tokens && tokens.length === 1 && kind === "plain" && (PIECE_VALUES[tokens[0]] === 1 || AMBIGUOUS_PIECES.has(tokens[0]))) continue;
+    if (tokens && tokens.length === 1 && (isPlain(kind) || kind.startsWith("count:")) && (PIECE_VALUES[tokens[0]] === 1 || AMBIGUOUS_PIECES.has(tokens[0]))) continue;
     const value = tokens ? numberValue(tokens) : null;
     figures.push({ forms: [value === null ? "?" : String(value)], kind });
   }
@@ -888,7 +912,7 @@ function figuresOf(text: string): Figure[] {
     for (const m of lower.matchAll(ROMAN_LOWER)) {
       if (!m[0] || NOT_ROMAN.has(m[0].toUpperCase()) || NOT_ROMAN_LOWER.has(m[0])) continue;
       const kind = figureKind(lower, m.index, m.index + m[0].length);
-      if (kind === "plain" || kind === "percent" || kind.startsWith("money:?")) continue;
+      if (isPlain(kind) || kind.startsWith("count:") || kind === "percent" || kind.startsWith("money:?")) continue;
       figures.push({ forms: [String(romanValue(m[0].toUpperCase()))], kind });
     }
   }

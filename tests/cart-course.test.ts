@@ -26,8 +26,10 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "owner@example.com";
 let listed: Record<string, unknown>[] = [];
 let one: Record<string, unknown> | null = null;
+let stripeReads = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
+  if (url.hostname === "api.stripe.com") stripeReads += 1;
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   const answer = (body: unknown) => new Response(JSON.stringify(body));
@@ -134,9 +136,11 @@ async function main(): Promise<void> {
       on("unknown");
       is("an unreadable count still opens the course page, saying the link could not go", await start(paid, course.product.id), [303, `/@harbor/course/${course.product.id}?link=error`]);
       on("full");
+      const before = stripeReads;
       is("past the order's limit it goes back to the store, as before", await start(paid, course.product.id), [303, "/@harbor"]);
+      is("and stops before the order is read from Stripe or the enrollment written (Revisor 2 LEVE)", stripeReads - before, 0);
       on("unknown");
-      is("an order with no address to email never reads the counter", await start(noEmail, course.product.id), [303, `/@harbor/course/${course.product.id}?link=ask`]);
+      is("an unreadable count never blocks an order with no address to email", await start(noEmail, course.product.id), [303, `/@harbor/course/${course.product.id}?link=ask`]);
     } finally {
       redis.pipeline = real;
     }

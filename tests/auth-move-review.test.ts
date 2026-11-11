@@ -130,7 +130,7 @@ async function move(
     // What a session of the old address would get by naming the store (?store=), as the studio reads it (finding HIGH).
     oldOpens: sid ? (await resolveAccess(from, { pinned: sid }, null)).ok : false,
     all, fromKey, sid, members,
-    log: sid ? (await readLog(sid)).map((line) => line.what) : [],
+    log: sid ? (await readLog(sid))?.map((line) => line.what) ?? null : [],
     fromTeams: sid ? (await memberStores(from)).length : 0,
     mails: [...mails],
     location,

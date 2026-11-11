@@ -35,6 +35,7 @@ import { LINK_PROBLEMS, type LinkProblem } from "@/lib/product-link";
 import { useStudioHref } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { CourseTemplatePicker } from "@/components/course-template-picker";
+import { CourseImportBox } from "@/components/course-import-box";
 import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits, type CourseTemplate } from "@/lib/course-templates";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
@@ -307,6 +308,19 @@ export function CourseEditor({
       {error ? (
         <p className="notice notice-error" role="alert">{error}</p>
       ) : null}
+
+      {/* A course outline the creator already wrote (260 [KJ5]): on a new course only, as the structures; its list of files to upload stays after the import. */}
+      <CourseImportBox
+        productId={productId}
+        show={templateFits(course).ok && templateFits(initial).ok}
+        busy={busy}
+        onImported={(kept) => {
+          setCourse(kept);
+          setSkipTemplates(true);
+          toast("Your outline is in the course.");
+          router.refresh();
+        }}
+      />
 
       {/* Both the course as this page holds it and as the server last drew it: a certificate or a start date set further down changes only the second. */}
       {!skipTemplates && templateFits(course).ok && templateFits(initial).ok ? (

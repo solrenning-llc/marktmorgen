@@ -90,8 +90,16 @@ export function readNextStep(
  * Refused, never removed: the words are the creator's (reviews of #3523, MEDIUM). Only the joiners that build an emoji
  * or spell a word (ZWNJ U+200C, ZWJ U+200D) and the plain direction marks (LRM U+200E, RLM U+200F, ALM U+061C) are
  * kept, as lib/preheader.ts keeps them, and are taken out for the checks.
+ *
+ * Also every other default-ignorable code point that is not a mark, and every unassigned one (third review of #3523,
+ * MEDIUM): a browser draws nothing for them either, so U+2065 or a Hangul filler (U+115F, U+1160, U+3164, U+FFA0)
+ * would split "now" past the word checks. Marks (variation selectors, U+034F) stay allowed: the accent pass below
+ * removes them before the checks, and an emoji needs its variation selector.
+ *
+ * Known limit (the LEVE of the same review): letters of another script that look Latin (a Cyrillic "o" inside "now")
+ * are not folded, so such a word is not caught by the checks. Closing that needs a confusables table; not done here.
  */
-const HIDDEN = /(?![\u200c\u200d\u200e\u200f\u061c])\p{Cf}/u;
+const HIDDEN = /(?![\u200c\u200d\u200e\u200f\u061c])(?:\p{Cf}|\p{Cn}|(?!\p{M})\p{DI})/u;
 
 /**
  * The line as the checks read it, twice: with compatibility forms folded (fullwidth letters, ligatures) and the joiners

@@ -36,6 +36,7 @@ import { CourseNextStep } from "@/components/course-next-step";
 import { CourseNextStepCard } from "@/components/course-next-step-card";
 import { NEXT_STEP_NO_SECONDS, nextStepCookie, nextStepFor } from "@/lib/course-next-step";
 import { MAX_NEXT_STEP_LINE, NEXT_STEP_PROBLEMS } from "@/lib/course-next-step-rules";
+import { ownKey } from "@/lib/paypal-sales";
 
 const OWNER = "nextstep-owner@example.test";
 const STUDENT = "nextstep-student@example.test";
@@ -43,7 +44,7 @@ const ACCOUNT = "acct_1TestNextStep01";
 const NOW = Math.floor(Date.now() / 1000);
 
 /** What the stand-in Stripe answers for the student's checkouts: the products bought, or a failure. */
-let bought: string[] | "fail" = [];
+let bought: string[] | "fail" | "malformed" = [];
 let stripeCalls = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -53,6 +54,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   assert.equal(init?.method ?? "GET", "GET", "nothing is written to the creator's Stripe account");
   stripeCalls += 1;
   if (bought === "fail") return answer({ error: { type: "api_error", message: "synthetic failure" } }, 500);
+  // A 200 that is not a list (no object, no data, no has_more): unknown, never "owns nothing" (focal on #3530, MEDIUM).
+  if (bought === "malformed") return answer({});
   if (url.pathname === "/v1/checkout/sessions") {
     const data = bought.map((product, i) => ({
       object: "checkout.session",
@@ -151,6 +154,23 @@ test("the studio's field: labelled, its count said, the product list the store's
   assert.ok(html.includes(`10 of ${MAX_NEXT_STEP_LINE} characters`), "the count, in words");
   const field = readFileSync("components/course-next-step.tsx", "utf8");
   assert.ok(!field.includes("course-next-step-rules\""), "the page loads none of the rules' word lists");
+});
+
+test("a product bought with PayPal is never suggested again, and a Stripe answer that is not a list shows no card (focal on #3530, two MEDIUM)", async () => {
+  const { course, advanced, post } = await shop();
+  const store = () => storeForEmail(OWNER).then((s) => s!);
+  assert.equal((await post({ id: course, action: "next-step", productId: advanced, line: "Go deeper." })).body.ok, true);
+  const courseId = (await readListing(await store(), course))!.course!.id;
+  const at = async () => nextStepFor({ store: await store(), course: (await readCourse(courseId))!, courseProductId: course, email: STUDENT, dismissed: false });
+  assert.equal((await at())?.id, advanced, "without it, the card shows");
+
+  bought = "malformed";
+  assert.equal(await at(), null, "a 200 {} from Stripe is unknown: no card");
+  bought = [];
+
+  const statsId = (await store()).statsId!;
+  await redis.pipeline([["SADD", ownKey(statsId, STUDENT, advanced), "PAYPALORDER1"]]);
+  assert.equal(await at(), null, "bought through PayPal: no card");
 });
 
 test("on the course's page the card shows only to a student without the product, and nothing is read from Stripe when it would not show", async () => {
@@ -254,4 +274,16 @@ test("No thanks is kept by the server for a year, on both addresses of the cours
   }
   const elsewhere = await post(good, { origin: "https://evil.example", accept: "application/json" });
   assert.deepEqual([elsewhere.status, elsewhere.headers.get("set-cookie")], [403, null], "not from another site");
+});
+
+test("the PayPal reads are paid inside the reading's own public requests (rule MR: the ceiling before the spend)", async () => {
+  const { NEXT_OFFER_REQUEST_UNITS } = await import("@/lib/next-offer-rules");
+  const { MAX_BUNDLE_ITEMS } = await import("@/lib/bundle-rules");
+  const { COMMAND, NEXT_OFFER_READ } = await import("./plan-cost-registry");
+  const { laterPageCost } = await import("./traffic-cost");
+  // ownedBeforeCart's reading (NEXT_OFFER_READ) and one SCARD for the product and each product of a bundle at most.
+  const most = NEXT_OFFER_READ + (1 + MAX_BUNDLE_ITEMS) * COMMAND;
+  assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= most, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${most}`);
+  const source = readFileSync("lib/course-next-step.ts", "utf8");
+  assert.ok(source.indexOf("ownedBeforeCart(store, input.email)") < source.indexOf("paypalOwned(store, input.email"), "read only after the requests are taken");
 });

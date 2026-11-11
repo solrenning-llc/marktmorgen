@@ -354,6 +354,38 @@ async function main(): Promise<void> {
 
   // LEVE 5: the watch keeps an order whose status is not known here until its paid record ends, so the storage
   // registry's days for the watch list are the cost line's, not PayPal's 180.
+  // Claude 1's LOW (6799089393), from Claude 2 and Claude 6: `await later()` had no guard, so a Redis error putting a
+  // pending order at the back of its list threw out of watchPayPal and the run skipped the store's refund watch.
+  part("A pending order that cannot be put back in line never stops the refund watch");
+  {
+    const slowOpen = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!slowOpen.ok) throw new Error("no order");
+    captureWith = (o) => ({ status: 201, body: completed(o, "49.00", "PENDING", "slower@example.com") });
+    await captureOrder(store, slowOpen.order);
+    orders.set(slowOpen.order, completed(slowOpen.order, "49.00", "PENDING", "slower@example.com"));
+    const gone = await buy("lineback@example.com");
+    captures.set(gone.capture, "REVERSED");
+    await dueNow(gone.order);
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "ZADD" && c[2] === "XX" && String(c[1]).startsWith("nl:ppsell:pending:"))) throw new Error("synthetic: Redis went away");
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const logged = console.error;
+    console.error = () => undefined;
+    let threw = false;
+    let revoked = -1;
+    try {
+      revoked = (await watchPayPal(store, Date.now() + 10_000, on)).revoked;
+    } catch {
+      threw = true;
+    } finally {
+      redis.pipeline = real;
+      console.error = logged;
+    }
+    is("the sweep goes on, and the reversed payment is still taken back", [threw, revoked, await held("lineback@example.com")], [false, 1, 0]);
+  }
+
   part("The storage registry keeps the watch list as long as the watch does");
   {
     const family = FAMILIES["nl:ppsell:watch:@lib/paypal-sales.ts"];

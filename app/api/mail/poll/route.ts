@@ -1,5 +1,5 @@
 import { limited } from "@/lib/request-guard";
-import { type PollVoteAnswer, votePoll } from "@/lib/email-poll-vote";
+import { POLL_ROUTE_WORDS as WORDS, type PollVoteAnswer, votePoll } from "@/lib/email-poll-vote";
 
 /**
  * A press of Confirm (or of "Take back my answer") on a poll's page (125
@@ -11,14 +11,6 @@ import { type PollVoteAnswer, votePoll } from "@/lib/email-poll-vote";
  * Nothing sends a poll yet, so no link leads here; the page that asks for
  * the press comes with the next unit.
  */
-const WORDS: Record<PollVoteAnswer, { status: number; text: string }> = {
-  recorded: { status: 200, text: "Your answer is counted. You can change it or take it back from the same link while the poll is open." },
-  withdrawn: { status: 200, text: "Your answer is taken back. Nothing of yours is counted in this poll." },
-  closed: { status: 410, text: "This poll has closed, so answers can no longer be changed." },
-  invalid: { status: 404, text: "This poll link is not one we know. Nothing was counted." },
-  resting: { status: 503, text: "This store cannot take answers this month. Nothing was counted." },
-  unknown: { status: 503, text: "We could not save that just now. Nothing was counted. Please try again in a minute." },
-};
 
 export async function POST(request: Request) {
   const query = new URL(request.url).searchParams;

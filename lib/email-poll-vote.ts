@@ -73,3 +73,14 @@ export async function votePoll(
   }
   return recordVote(broadcastId, checked.recipient, step.step === "record" ? step.option : null, closesAt, now);
 }
+
+/** What the poll route answers when no page asked (app/api/mail/poll/route.ts). */
+export const POLL_ROUTE_WORDS: Record<PollVoteAnswer, { status: number; text: string }> = {
+  recorded: { status: 200, text: "Your answer is counted. You can change it or take it back from the same link while the poll is open." },
+  withdrawn: { status: 200, text: "Your answer is taken back. Nothing of yours is counted in this poll." },
+  closed: { status: 410, text: "This poll has closed, so answers can no longer be changed." },
+  invalid: { status: 404, text: "This poll link is not one we know. Nothing was counted." },
+  // takePublicRequest says no both past the figure and when it could not count: "just now", never "this month".
+  resting: { status: 503, text: "This store cannot take answers just now. Nothing was counted." },
+  unknown: { status: 503, text: "We could not save that just now. Nothing was counted. Please try again in a minute." },
+};

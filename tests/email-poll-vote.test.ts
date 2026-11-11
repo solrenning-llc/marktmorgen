@@ -16,7 +16,7 @@
  */
 import { BroadcastsUnreadable, readBroadcast } from "@/lib/broadcasts";
 import { pollLinkPart } from "@/lib/email-poll-links";
-import { votePoll } from "@/lib/email-poll-vote";
+import { POLL_ROUTE_WORDS, votePoll } from "@/lib/email-poll-vote";
 import * as route from "@/app/api/mail/poll/route";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -150,7 +150,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("a link that is not that recipient's: refused", bad.status, 404);
   is("not cached", bad.headers.get("Cache-Control"), "no-store");
   // takePublicRequest answers false both past the month's figure and when the count could not be read (review, LOW 7).
-  is("resting never claims the month is spent", /this month/.test(String(route.WORDS?.resting?.text ?? "this month")), false);
+  is("resting never claims the month is spent", /this month/.test(POLL_ROUTE_WORDS.resting.text), false);
   is("nothing kept by the route", votes(), []);
 
   done();

@@ -111,7 +111,8 @@ export function newPathId(random: () => number = Math.random): string {
  * as a whole, saying which path and why, rather than cut down, so the studio
  * never says "saved" about something that was not kept. An existing path
  * keeps its id; a new one (no id, or one this store does not have) is given
- * one this store never had in its list.
+ * one no path of the current list has. A deleted path's id is not kept, so
+ * whatever is later keyed by a path's id must not outlive its path.
  */
 export function readPathsInput(
   raw: unknown,
@@ -130,7 +131,8 @@ export function readPathsInput(
     let id = current.some((p) => p.id === asked) && !out.some((p) => p.id === asked) ? asked : "";
     for (let tries = 0; !id && tries < 20; tries += 1) {
       const fresh = newPathId(random);
-      if (!out.some((p) => p.id === fresh) && !current.some((p) => p.id === fresh)) id = fresh;
+      // Only an id that reads back (review, LEVE 2): an odd random never gives one the stored list would refuse.
+      if (PATH_ID.test(fresh) && !out.some((p) => p.id === fresh) && !current.some((p) => p.id === fresh)) id = fresh;
     }
     if (!id) return { ok: false, problem: "list", index };
     out.push({ id, ...read.path });

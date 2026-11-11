@@ -15,7 +15,7 @@
  * overwritten (rule 24).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Held, LockBusyError, releaseLock, setIfHeldOnly, takeLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, holdLock, releaseLock, setIfHeldOnly, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { MAX_PATHS, type PathsProblem, type StoredPath, parseStoredPaths, readPathsInput } from "@/lib/learning-path-rules";
@@ -96,14 +96,19 @@ export async function savePaths(store: DataStore & { statsId: string }, raw: unk
     const json = JSON.stringify(read.paths);
     const size = dataBytes([json], 1);
     const kept = current.json ? dataBytes([current.json], 1) : 0;
-    const taken = await takeData(store, [{ slot: PATHS_SLOT, bytes: size, set: true }], now);
+    // The slot is never below what is stored (review, ALTO 1 and 2): before the write it is set to the larger of the
+    // kept list and the new one, so a lost answer, a stall or a lock that runs out leaves it counting at least what
+    // is there; nothing set later by a save that lost its lock can bring another save's count down.
+    const taken = await takeData(store, [{ slot: PATHS_SLOT, bytes: Math.max(size, kept), set: true }], now);
     if (!taken.ok) return taken.reason === "full" ? { state: "full", message: taken.message } : { state: "unknown" };
     // Written only while this save still holds the lock, in one script (lib/redis-lock.ts): a save whose lock ran out
     // never writes over another's list. Anything but the exact 1 (the lock lost, or an answer not read) is not said as
-    // saved, and the slot keeps the larger of the two lists, so what the store keeps is never counted as less than it is.
-    if (await setIfHeldOnly(held, pathsKey(store.statsId), json)) return { state: "saved", paths: read.paths };
-    if (kept > size) await giveData(store, [{ slot: PATHS_SLOT, bytes: kept, set: true }], now);
-    return { state: "unknown" };
+    // saved, and the slot stays at the larger size.
+    if (!(await setIfHeldOnly(held, pathsKey(store.statsId), json))) return { state: "unknown" };
+    // A smaller list, written: the slot comes down to it only while the lock is still ours, so no other save has taken
+    // its own count since. Should the lock run out in between, the next save sets the slot from what is stored again.
+    if (size < kept && (await holdLock(held))) await giveData(store, [{ slot: PATHS_SLOT, bytes: size, set: true }], now);
+    return { state: "saved", paths: read.paths };
   } finally {
     await releaseLock(held).catch(() => undefined);
   }

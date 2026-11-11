@@ -23,6 +23,11 @@ is("no signals", suggestedSendHour([], "UTC", NOW), null);
 is("fewer than three known signals", suggestedSendHour([at(1), at(25)], "UTC", NOW), null);
 is("an unreadable collection", suggestedSendHour(null as never, "UTC", NOW), null);
 is("an unknown time zone", suggestedSendHour([at(1), at(25), at(49)], "Unknown/Zone", NOW), null);
+// C2 review 6759467753: missing zone evidence must never select the host zone.
+is("a missing time zone stays unknown", suggestedSendHour([at(1), at(25), at(49)], undefined as never, NOW), null);
+is("an empty time zone stays unknown", suggestedSendHour([at(1), at(25), at(49)], "", NOW), null);
+is("a blank time zone stays unknown", suggestedSendHour([at(1), at(25), at(49)], "   ", NOW), null);
+is("a null time zone stays unknown", suggestedSendHour([at(1), at(25), at(49)], null as never, NOW), null);
 is("an unknown clock", suggestedSendHour([at(1), at(25), at(49)], "UTC", Number.NaN), null);
 
 part("Only consented link use and purchases count");

@@ -98,9 +98,39 @@ void (async () => {
   is("the store's list was written before the record, so it can be found", (await real([["ZCARD", list]]))[0], 1);
   is("the same sale kept again writes the record, without taking room twice", await keepMadeOrder(SHOP, { sale: sale(10), email: ANN, order }, NOW), "kept");
   reset();
-  redis.pipeline = (async (commands: Commands) => (commands[0][0] === "ZADD" ? [1, 0] : real(commands))) as Pipeline;
+  redis.pipeline = (async (commands: Commands) => (commands[0][0] === "ZADD" ? [1, 0] : commands[0][0] === "EVAL" ? ["OK"] : real(commands))) as Pipeline;
   is("a list write that does not answer as it should", await keepMadeOrder(SHOP, { sale: sale(11), email: ANN, order }, NOW), "unknown");
   is("then no record is written", (await keys(`nl:mto:o:${STATS}:*`)).length, 0);
+
+  part("The cap holds when keeps run at the same time");
+  reset();
+  await real([["ZADD", list, ...Array.from({ length: MAX_KEPT_ORDERS - 1 }, (_, i) => [PAID + KEEP_SECONDS, `${String(i).padStart(32, "0")}`]).flat()]]);
+  const together = await Promise.all([20, 21, 22, 23, 24].map((i) => keepMadeOrder(SHOP, { sale: sale(i), email: ANN, order }, NOW)));
+  is("one place left: one kept, the others full", [together.filter((r) => r === "kept").length, together.filter((r) => r === "full").length], [1, 4]);
+  is("the list never passes the cap", (await real([["ZCARD", list]]))[0], MAX_KEPT_ORDERS);
+  is("only the kept one has a record", (await keys(`nl:mto:o:${STATS}:*`)).length, 1);
+  is("Ann's copy finds her record", (await madeOrdersOf(SHOP, ANN, NOW)).length, 1);
+  is("and her erasure deletes it", await forgetMadeOrdersPerson(SHOP, ANN, NOW), 1);
+  is("nothing of hers is left", (await keys(`nl:mto:o:${STATS}:*`)).length, 0);
+  reset();
+  await real([["SET", list, "not a list"]]);
+  is("a list key of another kind is unknown", await keepMadeOrder(SHOP, { sale: sale(25), email: ANN, order }, NOW), "unknown");
+  is("and no record is written on it", (await keys(`nl:mto:o:${STATS}:*`)).length, 0);
+
+  part("A list longer than the cap is never read as complete");
+  reset();
+  await real([["ZADD", list, ...Array.from({ length: MAX_KEPT_ORDERS + 1 }, (_, i) => [PAID + KEEP_SECONDS, `${String(i).padStart(32, "0")}`]).flat()]]);
+  const throws = async (run: () => Promise<unknown>) => {
+    try {
+      await run();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  is("the queue throws", await throws(() => readMadeOrders(SHOP, NOW)), true);
+  is("the copy throws, never a copy missing records", await throws(() => madeOrdersOf(SHOP, ANN, NOW)), true);
+  is("the erasure throws, never done with records left", await throws(() => forgetMadeOrdersPerson(SHOP, ANN, NOW)), true);
 
   part("A record that does not read is never absent");
   reset();

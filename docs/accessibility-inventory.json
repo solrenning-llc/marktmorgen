@@ -1379,6 +1379,7 @@
     "components/email-code-form.tsx",
     "components/email-field.tsx",
     "components/email-input.tsx",
+    "components/email-poll-view.tsx",
     "components/email-studio.tsx",
     "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",

@@ -201,7 +201,12 @@ export async function openCardUpdate(store: Store, token: string, origin: string
   }
 }
 
-export type CardFinish = "updated" | "paid" | "declined" | "canceled" | "error";
+/**
+ * What finishing a card update came to. "unsure": Stripe answered the card's setting with something that is not
+ * this membership with the card asked for (rules 24 and 30), so the card may or may not be set: never said set,
+ * nothing is paid with it, and the page stays open for the daily job to finish it.
+ */
+export type CardFinish = "updated" | "paid" | "declined" | "canceled" | "unsure" | "error";
 
 /**
  * After Stripe's page: the card it saved becomes the one this membership is
@@ -232,17 +237,23 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
     const sub = await subFor(store, account, customer, subscription);
     if (!sub || OVER.has(String(sub.status))) return "error";
 
-    await onAccount("POST", account, `/subscriptions/${subscription}`, new URLSearchParams({ default_payment_method: method }));
+    const set = await onAccount("POST", account, `/subscriptions/${subscription}`, new URLSearchParams({ default_payment_method: method }));
+    // Only this membership's own reply, with the card asked for, says the card is set (Claude 6 on #3639).
+    if (!isOwnReply(set, subscription) || (set as { default_payment_method?: unknown }).default_payment_method !== method) return "unsure";
     await redisPipeline([["DEL", openKey(account, subscription)]]).catch(() => {});
 
     const invoice = owes(sub);
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
     if (!invoiceId) return "updated";
     try {
-      await onAccount("POST", account, `/invoices/${invoiceId}/pay`, new URLSearchParams({ payment_method: method }), undefined, `nimbus-card-pay:${invoiceId}:${method}`);
-      return "paid";
+      const paid = await onAccount("POST", account, `/invoices/${invoiceId}/pay`, new URLSearchParams({ payment_method: method }), undefined, `nimbus-card-pay:${invoiceId}:${method}`);
+      // "Paid" only from this invoice's own reply saying so; any other answer leaves the card set and says no more.
+      return isOwnReply(paid, invoiceId) && (paid as { status?: unknown }).status === "paid" ? "paid" : "updated";
     } catch (error) {
-      if (error instanceof StripeError && (error.status === 402 || error.status === 400)) return "declined";
+      // 402 is the card refused. A 400 is a request Stripe would not take (an invoice no longer payable): the card
+      // is set, and nothing says it was declined (Claude 6 on #3639).
+      if (error instanceof StripeError && error.status === 402) return "declined";
+      if (error instanceof StripeError && error.status === 400) return "updated";
       throw error;
     }
   } catch (error) {

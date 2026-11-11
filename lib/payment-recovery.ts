@@ -439,7 +439,8 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const pending = open[0];
     if (typeof pending === "string") {
       const finished = await finishCardUpdate(store, pending);
-      if (finished === "updated" || finished === "paid" || finished === "declined") continue;
+      // Unsure whether the card was set: no notice on a guess either way; the page stays open and is finished again.
+      if (finished === "updated" || finished === "paid" || finished === "declined" || finished === "unsure") continue;
     }
     const key = cardKey(account, subId, card.id);
     const value = claimValue();

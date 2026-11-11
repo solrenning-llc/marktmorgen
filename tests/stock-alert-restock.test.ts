@@ -17,6 +17,7 @@ import { stockLeft } from "@/lib/stock";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { sendBatch, type BatchMessage, type EmailMeter } from "@/lib/email";
 import { STOCK_ALERT_WORDS } from "@/lib/buyer-words/stock-alert";
+import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -342,6 +343,74 @@ async function main(): Promise<void> {
     is("written to once only", batches.slice(lostFrom).flatMap((b) => b.batch.flatMap((m) => m.to)), ["kit@example.com"]);
   } finally {
     batchAnswer = 200;
+    Date.now = realNow;
+  }
+
+  part("A batch Amazon (SES) took in part, with no answer through the runtime's fetch, is settled, never written twice (Claude 1 on #3620, 6802175503)");
+  // SES sends with the global fetch, not the one handed to sendBatch, so only its durable markers say it took someone:
+  // the same key lib/ses.ts writes for each recipient it took (nl:ses:did:<sha256(batch key + newline + address)>).
+  const sesDid = (batchKey: string, to: string) => `nl:ses:did:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
+  /** As sendBatch through SES: takes the first address (its marker written), then the rest stays unsent: "retry". */
+  const sesPartly = () => {
+    const calls: { messages: BatchMessage[]; key: string }[] = [];
+    const send = (async (messages: BatchMessage[], key: string) => {
+      calls.push({ messages, key });
+      const pending = messages.filter((m) => redis.run(["GET", sesDid(key, m.to)]) === null);
+      if (pending.length) redis.run(["SET", sesDid(key, pending[0].to), "1", "EX", 2 * 86_400]);
+      return "retry" as const;
+    }) as typeof sendBatch;
+    return { calls, send };
+  };
+  redis.run(["DEL", listKey, `nl:sa:${sid}:${pid}:job`]);
+  await place("dee@example.com");
+  await place("eli@example.com");
+  makeDue();
+  const partly = sesPartly();
+  await runRestocks(Date.now() + 30_000, { ...real, send: partly.send });
+  is("tried once: SES took dee, then stopped", partly.calls.length, 1);
+  const job = () => JSON.parse(String(redis.run(["GET", `nl:sa:${sid}:${pid}:job`]) ?? "{}")) as { unknownSince?: number };
+  is("SES's own marker is evidence the batch may be taken: written down with when", typeof job().unknownSince, "number");
+  try {
+    Date.now = () => realNow() + 21 * 3_600_000;
+    makeDue();
+    const after = sender("retry");
+    await runRestocks(Date.now() + 30_000, { ...real, send: after.send });
+    is("21 hours on: settled as sent, never tried under a new key", after.calls.every((c) => c.key === partly.calls[0].key), true);
+    is("the addresses leave the list", [redis.run(["HEXISTS", listKey, "dee@example.com"]), redis.run(["HEXISTS", listKey, "eli@example.com"])], [0, 0]);
+    Date.now = () => realNow() + 26 * 3_600_000;
+    makeDue();
+    const nextDay = sender("sent");
+    await runRestocks(Date.now() + 30_000, { ...real, send: nextDay.send });
+    is("a day later: dee is never written to a second time", nextDay.calls.flatMap((c) => c.messages.map((m) => m.to)), []);
+  } finally {
+    Date.now = realNow;
+  }
+
+  part("The note that a batch may be taken, its write's reply lost: written on the next run, never forgotten");
+  redis.run(["DEL", listKey, `nl:sa:${sid}:${pid}:job`]);
+  await place("fin@example.com");
+  await place("gil@example.com");
+  makeDue();
+  const partlyAgain = sesPartly();
+  let dropOne = true;
+  redis.run = (c: (string | number)[]) => {
+    if (dropOne && String(c[0]).toUpperCase() === "SET" && String(c[1]).endsWith(":job") && String(c[2]).includes("unknownSince")) {
+      dropOne = false;
+      return "garbage";
+    }
+    return run(c);
+  };
+  try {
+    await runRestocks(Date.now() + 30_000, { ...real, send: partlyAgain.send });
+    is("the write's reply came back out of shape", dropOne, false);
+    redis.run = run;
+    is("so the note is not there yet", job().unknownSince, undefined);
+    Date.now = () => realNow() + 3_600_000;
+    makeDue();
+    await runRestocks(Date.now() + 30_000, { ...real, send: sesPartly().send });
+    is("the next run sees SES's markers and writes the note", typeof job().unknownSince, "number");
+  } finally {
+    redis.run = run;
     Date.now = realNow;
   }
 

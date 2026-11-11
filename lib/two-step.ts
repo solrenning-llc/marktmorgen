@@ -632,28 +632,48 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
   const sessions = stringList(members);
   if (!sessions) {
     console.error("logging out the sessions let in without a second step failed", new UnknownReplyError("the locked sessions"));
-    // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
-    // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
-    const [, listed] = await redisPipeline([
-      ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
-      // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
-      ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
-      ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
-    ]);
-    // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
-    // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
-    // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
-    if (listed !== 1) {
-      console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
-      const month = new Date(now).toISOString().slice(0, 7);
-      await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
-    }
+    await keepLocked(email, now);
     return false;
   }
-  for (const session of sessions) await endSession(session);
+  // Each logout read as endSession answers it (CX-123 rule 24): only one confirmed loses its lock and its place in
+  // the list. One not confirmed (a delete answering in another shape, or a failure) may still be open: its lock and
+  // its place stay, and the account is kept locked as when the list cannot be read, so it stays locked past its day
+  // and the owner is never told it was logged out.
+  const open: string[] = [];
+  for (const session of sessions) if ((await endSession(session)) !== true) open.push(session);
+  if (open.length) {
+    const ended = sessions.filter((session) => !open.includes(session));
+    if (ended.length) await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]);
+    await keepLocked(email, now);
+    return false;
+  }
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
   // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
   return true;
+}
+
+/**
+ * Keeps an account's locked sessions locked when they could not all be logged out (endLocked): the list is kept
+ * and the account is marked with the moment, so that every locked session opened before it stays locked until it
+ * ends, past its day too (lockedUntil, keptListed).
+ */
+async function keepLocked(email: string, now: number): Promise<void> {
+  // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
+  // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
+  const [, listed] = await redisPipeline([
+    ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
+    // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
+    ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
+    ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
+  ]);
+  // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
+  // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
+  // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
+  if (listed !== 1) {
+    console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
+    const month = new Date(now).toISOString().slice(0, 7);
+    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
+  }
 }
 
 /**

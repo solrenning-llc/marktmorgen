@@ -251,6 +251,14 @@ async function main(): Promise<void> {
   r = await post({ rtoken: "f".repeat(64) }, "198.51.100.15");
   is("a link nobody was sent: 'link'", [r.location, r.session], [back("link"), null]);
 
+  part("Two uses of one link at once: one checkout with the code, never two");
+  // Review 6803880536 and Claude 1's review 6799154613 (LOW then MEDIUM): redemption read the link without claiming it.
+  const twice = await linkFor(PAST, productId);
+  const openedBefore = opened.length;
+  const both = await Promise.all([post({ rtoken: twice }, "198.51.100.30"), post({ rtoken: twice }, "198.51.100.31")]);
+  is("only one checkout is opened, with the coupon", [opened.length - openedBefore, opened.at(-1)?.get("discounts[0][coupon]")], [1, VIP.coupon]);
+  is("one goes on to Stripe, the other back to the field as busy", both.map((x) => x.location).sort(), [back("busy"), "https://checkout.stripe.com/c/pay/test"].sort());
+
   part("A link is for its product, and for a code still running");
   const second = await linkFor(PAST, productId);
   r = await post({ rtoken: second, product: otherId }, "198.51.100.17");

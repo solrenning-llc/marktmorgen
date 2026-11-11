@@ -29,10 +29,21 @@ import { done, is, part } from "./check";
 
 type Sent = { to: string | string[]; subject: string; text: string; html: string; headers?: Record<string, string> };
 const mails: Sent[] = [];
+/** Keys the stand-in service already answered, as Resend keeps them: a repeat is answered, never sent again. */
+const seenKeys = new Set<string>();
+/** The next send is taken, then its answer is lost on the way (a timeout after the service accepted it). */
+let loseNext = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com" && url.pathname === "/emails") {
+    const key = new Headers(init?.headers).get("Idempotency-Key");
+    if (key && seenKeys.has(key)) return new Response(JSON.stringify({ id: "email_1" }));
+    if (key) seenKeys.add(key);
     mails.push(JSON.parse(String(init?.body)) as Sent);
+    if (loseNext) {
+      loseNext = false;
+      throw new TypeError("fetch failed");
+    }
     return new Response(JSON.stringify({ id: "email_1" }));
   }
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }));
@@ -105,6 +116,23 @@ async function main(): Promise<void> {
   is("now due for the restock job", redis.run(["ZCARD", STOCK_ALERT_DUE]), 1);
   is("a made-up link", statusOf(await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: "0".repeat(48) }))), "expired");
   is("the stop link cannot confirm", statusOf(await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: leave }))), "expired");
+
+  part("A confirmation the service took, its answer lost: the place is kept and asking again sends nothing twice (Codex G on #3620)");
+  {
+    const before = mails.length;
+    loseNext = true;
+    const lost = await ask("lost@example.com", "7.7.5.1");
+    is("said not sent, as it may not have gone", statusOf(lost), "unsent");
+    is("the service did take it", mails.length - before, 1);
+    is("the new place is kept, never taken back on an unknown", typeof redis.run(["HGET", listKey, "lost@example.com"]), "string");
+    const link = tokenIn(mails[mails.length - 1].text, "token");
+    const pressed = await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: link }, "7.7.5.1"));
+    is("the link in the email that went still confirms", statusOf(pressed), "confirmed");
+    const again = await ask("lost@example.com", "7.7.5.2");
+    is("asking again the same day: answered as sent", statusOf(again), "sent");
+    is("and no second email is written to them", mails.length - before, 1);
+  }
+
 
   part("The stop link, honored at once");
   const crossLeave = await leaveRoute(request("/api/store/stock-alert/leave", { handle: "harbor", token: leave }, "7.7.7.7", "cross-site"));

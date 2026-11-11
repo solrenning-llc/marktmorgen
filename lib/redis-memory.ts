@@ -622,6 +622,17 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/tier-benefits.ts BENEFIT_MARK: one person's benefit marks written only while they are not on the store's
+        // list of the deleted; -1 when they are, otherwise each HSETNX's reply and the SADD's.
+        if (key.startsWith("-- marktmorgen:benefit-mark:v1\n") && args[0] === "3" && args.length >= 8 && (args.length - 6) % 2 === 0) {
+          const [, marks, who, erased, print, person, ...pairs] = args;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          const out: unknown[] = [];
+          for (let i = 0; i < pairs.length; i += 2) out.push(this.run(["HSETNX", marks, pairs[i], pairs[i + 1]]));
+          out.push(this.run(["SADD", who, person]));
+          return out;
+        }
         // lib/store-readings.ts, READING_COPY: a reading kept only when nobody it names was deleted from the store;
         // the places of those who were answered, and the copy gone.
         if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {

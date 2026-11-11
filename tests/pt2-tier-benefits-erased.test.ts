@@ -81,7 +81,8 @@ async function main(): Promise<void> {
     duringRead = () => erase(ANN);
     const given = await giveBenefit(store, "team@example.com", benefit, [{ sub: "sub_active00001", period: "once" }, { sub: "sub_other000001", period: "once" }], NOW * 1000);
     is("the other member is marked; the deleted one is not", given, { ok: true, given: 1, already: 0, notOwed: 1, unknown: 0 });
-    const [marks, listed] = await redis.pipeline([["EXISTS", `nl:tben:given:${store.statsId}:${annKey}`], ["SISMEMBER", `nl:tben:who:${store.statsId}`, annKey]]);
+    // HLEN, not EXISTS: the stand-in keeps an empty hash for a key that was only read; Redis keeps nothing.
+    const [marks, listed] = await redis.pipeline([["HLEN", `nl:tben:given:${store.statsId}:${annKey}`], ["SISMEMBER", `nl:tben:who:${store.statsId}`, annKey]]);
     is("nothing is written again about the deleted person after their erasure finished", [marks, listed], [0, 0]);
   }
   done();

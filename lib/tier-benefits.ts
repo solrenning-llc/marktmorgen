@@ -31,7 +31,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
-import { type Store, saleHandles } from "@/lib/store";
+import { type Store, ensureListId, saleHandles } from "@/lib/store";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { readListings } from "@/lib/catalog";
 import { productOfSub } from "@/lib/tier-rules";
 import { type PauseSub, pausedNow } from "@/lib/membership-pause-rules";
@@ -284,7 +285,8 @@ export async function benefitsDue(store: Store, now = Date.now()): Promise<DueVi
 
 export type GiveResult =
   | { ok: true; given: number; already: number; notOwed: number; unknown: number }
-  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "full" | "room"; message?: string };
+  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "full" | "room" | "unknown"; message?: string };
+
 
 /**
  * Marks one benefit given to the members named, each read again first: only
@@ -323,32 +325,69 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
     }
   }
   if (!writes.length) return result;
+  // The store's list of the deleted: a store without one when the page was read is read again, since an erasure gives
+  // it one before it writes the print (lib/person-erasure.ts). Not known: nothing is written.
+  const listId = store.listId ?? (await ensureListId(store.email).catch(() => null))?.listId ?? null;
+  if (!listId) return { ok: false, reason: "unknown" };
   const people = [...new Set(writes.map((w) => w.row.person))];
   // Each person's place in the list is counted before it is known whether it is already there; given back below when it was.
   const bytes = writes.reduce((sum, w) => sum + w.bytes, 0) + people.reduce((sum, p) => sum + whoBytes(p), 0);
   // Its room first; nothing is written when it does not fit or cannot be counted.
   const taken = await takeData(store, [{ slot: SLOT, bytes }], now);
   if (!taken.ok) return taken.reason === "full" ? { ok: false, reason: "full", message: taken.message } : { ok: false, reason: "room" };
-  const commands: (string | number)[][] = writes.map((w) => ["HSETNX", marksKey(statsId, w.row.person), w.field, givenJson(mark)]);
-  for (const person of people) commands.push(["SADD", whoKey(statsId), person]);
+  const byPerson = people.map((person) => ({ person, writes: writes.filter((w) => w.row.person === person) }));
+  const commands: (string | number)[][] = byPerson.map(({ person, writes: own }) => [
+    "EVAL",
+    BENEFIT_MARK,
+    3,
+    marksKey(statsId, person),
+    whoKey(statsId),
+    suppressedKey(listId),
+    suppressionPrint(listId, own[0].row.email),
+    person,
+    ...own.flatMap((w) => [w.field, givenJson(mark)]),
+  ]);
   const replies = repliesFor(await redisPipeline(commands).catch(() => null), commands.length);
   let giveBack = 0;
-  writes.forEach((w, i) => {
-    const reply = replies ? countOf(replies[i]) : null;
-    if (reply === 1) result.given += 1;
-    else if (reply === 0) {
-      // Marked by someone else in the meantime: theirs is kept, and so is its room.
-      result.already += 1;
-      giveBack += w.bytes;
-    } else result.unknown += 1;
-  });
-  // Already in the list: its place was counted when it was added. An unknown reply keeps its room (errs fuller, never short).
-  people.forEach((p, i) => {
-    if (replies && countOf(replies[writes.length + i]) === 0) giveBack += whoBytes(p);
+  byPerson.forEach(({ person, writes: own }, i) => {
+    const reply: unknown = replies ? replies[i] : null;
+    if (reply === -1) {
+      // Deleted from the store since the page was read: nothing written, nothing owed to them here, and their room back.
+      result.notOwed += own.length;
+      giveBack += own.reduce((sum, w) => sum + w.bytes, 0) + whoBytes(person);
+      return;
+    }
+    const each = Array.isArray(reply) && reply.length === own.length + 1 ? reply.map(countOf) : null;
+    own.forEach((w, j) => {
+      const n = each ? each[j] : null;
+      if (n === 1) result.given += 1;
+      else if (n === 0) {
+        // Marked by someone else in the meantime: theirs is kept, and so is its room.
+        result.already += 1;
+        giveBack += w.bytes;
+      } else result.unknown += 1;
+    });
+    // Already in the list: its place was counted when it was added. An unknown reply keeps its room (errs fuller, never short).
+    if (each && each[own.length] === 0) giveBack += whoBytes(person);
   });
   if (giveBack) await giveData(store, [{ slot: SLOT, bytes: giveBack }], now);
   return result;
 }
+
+/**
+ * One person's marks written only while they are not on the store's list of the deleted (Codex G on #3014): a person's
+ * erasure writes their print (lib/suppression.ts) before it deletes their marks, so a mark written in the same step as
+ * this look is either deleted by that erasure or refused here, never left behind it. KEYS[1] their marks, KEYS[2] the
+ * list of people with marks, KEYS[3] the store's prints; ARGV[1] their print, ARGV[2] the person, ARGV[3..] field and
+ * mark pairs. -1 when they were deleted (nothing written); otherwise each HSETNX's reply, then the SADD's.
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const BENEFIT_MARK = `-- marktmorgen:benefit-mark:v1
+if redis.call("HEXISTS", KEYS[3], ARGV[1]) == 1 then return -1 end
+local out = {}
+for i = 3, #ARGV, 2 do out[#out + 1] = redis.call("HSETNX", KEYS[1], ARGV[i], ARGV[i + 1]) end
+out[#out + 1] = redis.call("SADD", KEYS[2], ARGV[2])
+return out`;
 
 /** Takes one mark back, for a row owed right now; says whether there was one. */
 export async function undoGiven(store: Store, benefit: unknown, sub: unknown, period: unknown, now = Date.now()): Promise<{ ok: true; undone: boolean } | { ok: false; reason: "missing" | "not_owed" | "benefits" | "stripe" | "unknown" }> {

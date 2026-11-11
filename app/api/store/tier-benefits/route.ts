@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
       stripe: [unread, 502],
       full: [done.message ?? "Your store's data room is full, so nothing was marked.", 409],
       room: ["Your store's data room could not be counted just now, so nothing was marked. Try again in a minute.", 502],
+      unknown: ["Nothing was marked just now. Try again in a minute.", 502],
     };
     return refuse(done.reason, words[done.reason][0], words[done.reason][1]);
   }

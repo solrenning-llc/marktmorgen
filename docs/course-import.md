@@ -1,14 +1,38 @@
-# Creator-supplied course preview — 260 [KJ5], unit 1
+# Creator-supplied course import — 260 [KJ5], units 1 to 4
 
-Status: built for testing in a branch; no route, studio control, upload, stored
-course, vendor export adapter or published migration flow. Item 260 remains in
-progress. Item 120 [F2-IMPORTS] still needs real, non-personal export evidence.
+Status: tested in branches, not merged or published. Units 2 to 4 (Claude 4,
+11 November 2026) add the save path for a creator's own outline: applying it
+to a new course (`lib/course-import-apply.ts`), writing its lesson texts at
+once (`saveNewBodies` in `lib/course.ts`), the route
+`app/api/store/course/import` and the studio box
+(`components/course-import-box.tsx`). Still missing: uploading the outline's
+videos and files (they are listed for the creator to upload through the
+existing uploads), any vendor export adapter and a published migration flow.
+Item 120 [F2-IMPORTS] still needs real, non-personal export evidence.
 
-The concrete problem is rebuilding a creator's existing course without losing
-its module order, lesson text or references to their own files. This unit reads
-an explicit creator-authored outline for a future preview. Its business purpose
-is reducing migration work for creators considering a paid Marktmorgen plan;
-conversion and retention have not been measured. It does not establish profit.
+## Saving an outline (units 2 to 4)
+
+- **Only a new course.** The outline is applied through the course's own
+  edits, as the ready structures are, and only to a course exactly as it is
+  made (`templateFits`); a course the creator touched is refused (`not_new`).
+- **Nothing changed silently.** Where the editor's own cleaning would keep
+  a title or text differently (extra spaces, line ends), the place is listed
+  in the preview before anything is saved.
+- **Preview, then confirm.** The route checks the outline on the server for
+  both; a preview writes nothing, and saving needs `confirm: true`, sent only
+  by the box's Import button.
+- **Paid before the work.** The outline's size takes one studio request for
+  each 50,000 characters past the first before it is read; saving takes one
+  more for each lesson (its text, one write) and one for the outline, before
+  anything is written (`importUnits`, on the studio line of
+  `tests/plan-cost-registry.ts`). The route reads at most 4,000,000 bytes.
+- **Whole or nothing.** Under the course's lock, the texts are written
+  first, their room taken in one step and each only where no text is kept
+  yet; then the outline in one write. If that write fails, the texts are
+  taken back. A full store gets nothing written.
+- **Media.** Videos and files are never fetched or uploaded here: after the
+  import the box lists them by lesson. Their storage and video-hour rights
+  are checked by the existing uploads, as for any lesson.
 
 ## Official export evidence
 

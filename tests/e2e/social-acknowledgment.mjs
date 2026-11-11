@@ -43,6 +43,26 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
   {name:"null snapshot",body:()=>({ok:true,socials:null})},
   {name:"matching empty profiles",body:value=>({ok:true,socials:value}),confirmed:true},
  ];
+ // The profile-panel button is server-rendered. Before React attaches its
+ // handler, it must say that it is unavailable and a real click must not claim
+ // to have opened anything. This no-script page has no timing assumption.
+ const beforeReady=await browser.newContext({viewport:{width:390,height:900},javaScriptEnabled:false});
+ try{
+  await beforeReady.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
+  const initial=await beforeReady.newPage();let writes=0;
+  await initial.route("**/api/**",async route=>{
+   if(route.request().method()!=="GET")writes++;
+   await route.abort("blockedbyclient");
+  });
+  await initial.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
+  const control=initial.getByRole("button",{name:"Loading…",exact:true});
+  await control.waitFor({state:"attached"});
+  is("profile control says its handler is unavailable before hydration",await control.getAttribute("aria-disabled"),"true");
+  is("profile control visibly reports preparation before hydration",(await control.innerText()).trim(),"Loading…");
+  await control.dispatchEvent("click");
+  is("profile panel stays closed before hydration",await initial.locator("form[data-socials-editor]").count(),0);
+  is("profile pre-hydration click starts no API write",writes,0);
+ }finally{await beforeReady.close();}
  for(const width of [390,1280])for(const mode of ["profiles","remove"]){
   const context=await browser.newContext({viewport:{width,height:900}});
   try{
@@ -56,6 +76,9 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     await route.fulfill({status:work.scenario.status??200,contentType:"application/json",body:work.scenario.raw??JSON.stringify(work.scenario.body(value))});
    });
    await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"networkidle",timeout:60000});
+   // At 390 the leave guard's cleanup is held back 300 ms, as WebKit can run it after the form is gone (#2808, job
+   // 128017854896): React removes the form first and runs useLeaveGuard's effect cleanup later. At 1280 it runs as is.
+   if(width===390)await page.evaluate(()=>{const remove=window.removeEventListener.bind(window);window.removeEventListener=(type,listener,options)=>{if(type!=="beforeunload")return remove(type,listener,options);setTimeout(()=>remove(type,listener,options),300);};});
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    await page.getByRole("button",{name:/^(Add|Edit) your profiles$/}).click();
    const form=page.locator("form[data-socials-editor]");await form.waitFor({state:"visible"});
@@ -85,6 +108,10 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     if(scenario.confirmed){
      await page.locator(".nb-toast-region [role=status]").getByText(success,{exact:true}).waitFor({state:"attached"});
      is("confirmed profile editor closes "+name,await form.count(),0);
+     // React removes the form before it runs useLeaveGuard's effect cleanup, so the protection is released a moment
+     // after the form is gone (WebKit, #2808 job 128017854896). Wait until a fresh beforeunload is no longer held back,
+     // within Playwright's usual timeout; a protection that is never released still fails here.
+     await page.waitForFunction(()=>window.dispatchEvent(new Event("beforeunload",{cancelable:true})));
      is("confirmed profiles release unload protection "+name,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
     }else{
      const alert=form.getByRole("alert");await alert.waitFor();

@@ -7,6 +7,8 @@ import {checkHelpSearchAvailability} from "./help-search-availability.mjs";
 const root=resolve(".");
 const require=createRequire(join(root,"package.json"));
 const engine=process.env.E2E_BROWSER??"chromium";
+// WCAG 1.4.12 text spacing, applied the same way to the keyboard document and to the audit document.
+const TEXT_SPACING="*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}";
 if(!["chromium","firefox","webkit"].includes(engine))throw Error("Unsupported engine "+engine);
 const driver=require("playwright-core")[engine];
 const axe=readFileSync(require.resolve("axe-core/axe.min.js"),"utf8");
@@ -41,7 +43,7 @@ try{
    page.on("pageerror",error=>errors.push(String(error)));
    await context.route("**/*",route=>{const r=route.request(),url=new URL(r.url());if(!["GET","HEAD"].includes(r.method())){writes++;return route.abort();}if(url.origin!==origin){foreign++;return route.abort();}return route.continue();});
    const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});await restoreDarkAfterNavigation();if(response.status()!==200)throw Error("HTTP "+response.status());
-   if(mode==="text-spacing")await page.addStyleTag({content:"*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}"});
+   if(mode==="text-spacing")await page.addStyleTag({content:TEXT_SPACING});
    if(mode==="forced-colors"){
     const active=await page.evaluate(()=>matchMedia("(forced-colors: active)").matches);
     if(!active)gaps.push({path,width,mode,reason:"Engine did not activate forced-colors media after emulation request; real OS/device validation remains open."});
@@ -80,30 +82,18 @@ try{
     }
     if(!focused)throw Error("No keyboard target reached");
    }
-   // Keyboard proof above retains its real scrolled positions. Whole-document
-   // target geometry is evaluated at a stable origin, like the Studio/action matrices.
-   // Native focus may still be animating a smooth scroll in Chromium.
-   // Wait for the real keyboard scroll to finish before requesting audit origin.
-   await page.evaluate(()=>{document.activeElement?.blur?.();});
-   try{await page.waitForFunction(()=>{
-    const key=scrollX+","+scrollY,previous=window.__publicKeyboardScroll;
-    if(!previous||previous.key!==key){window.__publicKeyboardScroll={key,since:performance.now()};return false;}
-    return performance.now()-previous.since>=200;
-   },undefined,{timeout:10000});}catch(error){console.error("PUBLIC_SCROLL_DIAGNOSTIC:"+JSON.stringify({engine,path,width,stage:"keyboard-settlement",...await page.evaluate(()=>({x:scrollX,y:scrollY,state:window.__publicKeyboardScroll,active:document.activeElement?.tagName}))}));throw error;}
-   await page.evaluate(()=>{
-    delete window.__publicKeyboardScroll;
-    const root=document.documentElement;
-    window.__publicScrollStyle={value:root.style.getPropertyValue("scroll-behavior"),priority:root.style.getPropertyPriority("scroll-behavior")};
-    // Firefox may retain CSS smooth scrolling despite an "instant" request.
-    // Keyboard proof is already complete; only normalize whole-document audit geometry.
-    root.style.setProperty("scroll-behavior","auto","important");
-    window.scrollTo({top:0,left:0,behavior:"auto"});
-   });
-   try{await page.waitForFunction(()=>{
-    if(scrollX!==0||scrollY!==0){delete window.__publicOriginSince;return false;}
-    window.__publicOriginSince??=performance.now();return performance.now()-window.__publicOriginSince>=200;
-   },undefined,{timeout:10000});}catch(error){console.error("PUBLIC_SCROLL_DIAGNOSTIC:"+JSON.stringify({engine,path,width,stage:"audit-origin",...await page.evaluate(()=>({x:scrollX,y:scrollY,originSince:window.__publicOriginSince,active:document.activeElement?.tagName,scrollBehavior:getComputedStyle(document.documentElement).scrollBehavior}))}));throw error;}
-   await page.evaluate(()=>{delete window.__publicOriginSince;});
+   // The axe audit measures whole-document target geometry from the origin. In Firefox a
+   // page can go back to where the keyboard's smooth scroll left it after any scroll request:
+   // on #2818, scrollTo(0,0), behavior "instant" and documentElement.scrollTop=0 were each
+   // undone about 16 ms later, even 10 s after the Tab, with no focus change and no site
+   // code scrolling (C4-20261106-2310-C6-135). So, always, for every engine and case, the
+   // audit opens the same URL again in the same context and mode and measures that new
+   // document, which starts at (0,0). The keyboard proof above is unchanged.
+   await page.goto("about:blank");
+   const fresh=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});await restoreDarkAfterNavigation();if(fresh.status()!==200)throw Error("HTTP "+fresh.status());
+   if(mode==="text-spacing")await page.addStyleTag({content:TEXT_SPACING});
+   const start=await page.evaluate(()=>({x:scrollX,y:scrollY}));
+   if(start.x!==0||start.y!==0)throw Error("Audit document did not start at the origin "+JSON.stringify(start));
    if(mode==="dark"&&!await page.evaluate(()=>matchMedia("(prefers-color-scheme: dark)").matches))throw Error("Dark color-scheme request not honored");
    await page.addScriptTag({content:axe});
    const report=await page.evaluate(async()=>{

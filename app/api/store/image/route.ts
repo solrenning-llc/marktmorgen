@@ -20,6 +20,7 @@ import {
   MAX_IMAGE_BYTES,
   type ProductImage,
   type SmallCopy,
+  TONE_PATTERN,
   imagePaths,
   isDisplayStyle,
   ownsImagePath,
@@ -122,6 +123,12 @@ export async function POST(request: NextRequest) {
         await dropFresh([path, smallPath]);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
+      // The picture's color (Encanto 5b): absent, or exactly #rrggbb. Anything else refuses the picture and writes
+      // nothing (C4-20261106-0700-C5-27, condition 1; Codex K2 on #2790).
+      if (body.tone !== undefined && !(typeof body.tone === "string" && TONE_PATTERN.test(body.tone))) {
+        await dropFresh([path, smallPath]);
+        return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      }
 
       // The smaller copy for phones, checked exactly as the picture was.
       let small: SmallCopy | null = null;
@@ -146,7 +153,9 @@ export async function POST(request: NextRequest) {
           await dropFresh([smallPath]);
         }
       }
-      image = { path, width, height, alt, bytes: found.size, small };
+      // Checked above: exact, or none.
+      const tone = typeof body.tone === "string" ? body.tone : null;
+      image = { path, width, height, alt, bytes: found.size, small, ...(tone ? { tone } : {}) };
       // Copied to the pictures' own bucket when it is on (313 [CV1] unit 4b); off, nothing is read. A failed copy
       // never refuses the picture: it is kept where it always was, unmarked.
       const mirrored = await copyAttachedPicture(imagePaths(image)).catch(() => false);

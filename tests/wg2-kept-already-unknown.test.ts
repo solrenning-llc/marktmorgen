@@ -48,6 +48,25 @@ async function main(): Promise<void> {
   is("the customers without has_more", await ask(), "threw");
   customers = { object: "list", data: Array.from({ length: 11 }, (_, n) => ({ id: `cus_kept0000${String(n).padStart(2, "0")}` })), has_more: false };
   is("more customers than were asked for", await ask(), "threw");
+  part("A row that does not read is unknown, never \"not kept\" (Codex CX1's MEDIUM on #3598)");
+  customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
+  const row = async (sub: unknown) => {
+    subscriptions = { object: "list", data: [sub], has_more: false };
+    return ask();
+  };
+  is("a status Stripe has no name for", await row({ status: "not-a-stripe-status", metadata: { product: "club000001" } }), "threw");
+  is("an active row with no metadata", await row({ status: "active" }), "threw");
+  is("an active row with null metadata", await row({ status: "active", metadata: null }), "threw");
+  is("an active row with a numeric product", await row({ status: "active", metadata: { product: 17 } }), "threw");
+  is("a row that is not an object", await row("sub_kept000001"), "threw");
+  subscriptions = { object: "list", data: [], has_more: false };
+  customers = { object: "list", data: [{ object: "customer" }], has_more: false };
+  is("a customer row with no id", await ask(), "threw");
+  part("Rows that read, of another kind: not kept");
+  customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
+  is("a canceled membership to the product", await row({ status: "canceled", metadata: { product: "club000001" } }), false);
+  is("a live membership to another product", await row({ status: "active", metadata: { product: "other000001" } }), false);
+  is("a live row with empty metadata", await row({ status: "active", metadata: {} }), false);
   part("Controls, still");
   customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
   subscriptions = { object: "list", data: [{ status: "active", metadata: { product: "club000001" } }], has_more: false };

@@ -102,11 +102,12 @@ import {
   RECURRING_ALWAYS,
   readViaCookie,
 } from "@/lib/affiliate-setting";
-import { type Card, productIds, readCardsFor } from "@/lib/catalog";
+import { type Card, productIds, readCardsFor, readListings } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
+import { NO_TERMS, type PartnerTerms, type WaitingChange, changeNeeds, changeOpen, readTerms, settleTerms, stepOf, withStep } from "@/lib/partner-terms-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
@@ -210,6 +211,12 @@ export type Affiliate = {
    * sale and no lead (630 [HN6](3), idleSweep), in seconds; 0 if never.
    */
   warned?: number;
+  /**
+   * A change to `share` waiting for the partner's yes, and the agreement's
+   * history (630 [HN6](39); lib/partner-terms-rules.ts). Absent when there is
+   * neither, which is everybody before that item.
+   */
+  terms?: PartnerTerms;
 };
 
 /**
@@ -358,6 +365,10 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         const percent = Number(by.percent);
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
+      ...(() => {
+        const terms = readTerms(value.terms);
+        return terms.change || terms.history.length ? { terms } : {};
+      })(),
       warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
     };
   } catch {
@@ -418,6 +429,162 @@ export async function setAffiliateRate(store: Store, id: string, rate: number | 
  */
 export async function setPartnerShare(store: Store, id: string, share: PartnerShare | null): Promise<Affiliate | null> {
   return (await changeAffiliate(store, id, (affiliate) => ({ ...affiliate, share })))?.next ?? null;
+}
+
+export type ShareProposal =
+  | { ok: true; state: "started" | "same" | "applied" | "waiting" }
+  | { ok: false; reason: "unknown" }
+  /** A share that would start at once does not fit what its products promise (partnerShareProblem). Nothing was written. */
+  | { ok: false; reason: "cap"; problem: ShareProblem };
+
+/**
+ * The creator setting, changing or ending a partner's share under the rules of lib/partner-terms-rules.ts (630
+ * [HN6](39), rewritten on this program's partner lock from #1924): a new share starts at once; ending one that runs
+ * until revoked applies at once; every other change waits for the partner's yes (answerShareChange) and the share in
+ * force stays as it is until then. Saving the share in force again withdraws a waiting change.
+ *
+ * Under the partner lock, as every write of a standing share is: a share that starts counting now (an approved
+ * partner given one where they held none) is checked against the cap first (partnerShareProblem, against the people
+ * read exactly now) and written only if it is still the share checked. Unknown reply: UnknownReplyError; the lock not
+ * held: LockBusyError; nothing written either way. `nowSeconds` is the time of the save.
+ */
+export async function proposePartnerShare(store: Store, id: string, next: PartnerShare | null, nowSeconds: number, charge: Charge = PAID): Promise<ShareProposal> {
+  const unknown: ShareProposal = { ok: false, reason: "unknown" };
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) return unknown;
+  return withPartnerLock(store, async (held) => {
+    const found = await readAffiliate(store, id);
+    if (!found) return unknown;
+    const plan = proposed(found, next, nowSeconds);
+    const starts = found.status === "approved" && found.share === null && plan.next.share !== null;
+    if (starts && plan.next.share) {
+      const problem = await partnerShareProblem(store, plan.next.share, id, charge);
+      if (problem) return { ok: false, reason: "cap", problem };
+      if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before a partner's share was written");
+    }
+    let out: ShareProposal = unknown;
+    const written = await changeAffiliate(store, id, (now) => {
+      const again = proposed(now, next, nowSeconds);
+      // The share checked against the cap is the one written: under the lock no other save of a share runs.
+      if (starts && JSON.stringify(again.next.share) !== JSON.stringify(plan.next.share)) {
+        throw new LockBusyError("a partner's record changed while their share was written");
+      }
+      out = again.out;
+      return again.next;
+    });
+    return written ? out : unknown;
+  });
+}
+
+/** What a proposal makes of the record as it stands. */
+function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: number): { next: Affiliate; out: ShareProposal } {
+  const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
+  const current = affiliate.share;
+  let share = current;
+  let kept: PartnerTerms;
+  let state: "started" | "same" | "applied" | "waiting";
+  if (current === null) {
+    if (next === null) {
+      kept = { ...terms, change: null };
+      state = "same";
+    } else {
+      share = next;
+      kept = { change: null, history: withStep(terms.history, stepOf("started", "creator", next, nowSeconds)) };
+      state = "started";
+    }
+  } else {
+    const needs = changeNeeds(current, next, nowSeconds);
+    if (needs === "same") {
+      kept = terms.change ? { change: null, history: withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) } : terms;
+      state = "same";
+    } else if (needs === "now") {
+      share = next;
+      kept = { change: null, history: withStep(terms.history, stepOf(next === null ? "revoked" : "changed", "creator", next, nowSeconds)) };
+      state = "applied";
+    } else {
+      kept = { change: { share: next, asked: nowSeconds }, history: withStep(terms.history, stepOf("asked", "creator", next, nowSeconds)) };
+      state = "waiting";
+    }
+  }
+  return { next: withTerms({ ...affiliate, share }, kept), out: { ok: true, state } };
+}
+
+/** A partner's answer: "busy" is not used here (the partner lock serializes answers and saves); kept for the route's words. */
+export type ShareAnswer = { ok: true; state: "changed" | "declined" } | { ok: false; reason: "none" | "cap" | "busy" };
+
+/**
+ * Which waiting change a partner read: a digest of the share it proposes and when it was asked. The partner's page
+ * sends it with the answer, so a yes (or a no) only ever applies to the very change the partner was shown, never to
+ * one the store put in its place after the page was opened.
+ */
+export function changeIdentity(change: WaitingChange): string {
+  const share = change.share ? { percent: change.share.percent, products: [...change.share.products].sort(), until: change.share.until ?? null } : null;
+  return createHash("sha256").update(JSON.stringify({ asked: change.asked, share })).digest("hex").slice(0, 32);
+}
+
+/**
+ * The partner answering a change the creator asked for, under this program's partner lock. Yes applies it after
+ * `allowed` checks the cap again with what the products promise now (the route passes partnerShareProblem); no keeps
+ * the share in force. `seen` is the changeIdentity of the change the partner read: when the change waiting now is
+ * another one, or it lapsed, or the partner is no longer approved, nothing is applied and the answer is "none".
+ * Nothing already earned moves either way. Unknown reply: UnknownReplyError; the lock not held: LockBusyError.
+ */
+export async function answerShareChange(
+  store: Store,
+  id: string,
+  yes: boolean,
+  seen: string,
+  nowSeconds: number,
+  allowed: (share: PartnerShare) => Promise<boolean>,
+): Promise<ShareAnswer> {
+  const none: ShareAnswer = { ok: false, reason: "none" };
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) return none;
+  return withPartnerLock(store, async (held) => {
+    const found = await readAffiliate(store, id);
+    if (!found || found.status !== "approved") return none;
+    const change = settleTerms(found.terms ?? NO_TERMS, nowSeconds).change;
+    const answerable = change !== null && changeOpen(change, nowSeconds) && seen === changeIdentity(change);
+    if (answerable && yes && change.share !== null) {
+      if (!(await allowed(change.share))) return { ok: false, reason: "cap" };
+      if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before a partner's answer was written");
+    }
+    let out: ShareAnswer = none;
+    await changeAffiliate(store, id, (now) => {
+      out = none;
+      if (now.status !== "approved") return null;
+      const terms = settleTerms(now.terms ?? NO_TERMS, nowSeconds);
+      const waiting = terms.change;
+      if (waiting === null || !changeOpen(waiting, nowSeconds) || seen !== changeIdentity(waiting) || !answerable) {
+        // A change that lapsed is written down as lapsed; nothing else moves.
+        return now.terms && JSON.stringify(terms) !== JSON.stringify(now.terms) ? withTerms(now, terms) : null;
+      }
+      if (!yes) {
+        out = { ok: true, state: "declined" };
+        return withTerms(now, { change: null, history: withStep(terms.history, stepOf("declined", "partner", waiting.share, nowSeconds)) });
+      }
+      out = { ok: true, state: "changed" };
+      return withTerms({ ...now, share: waiting.share }, { change: null, history: withStep(terms.history, stepOf("changed", "partner", waiting.share, nowSeconds)) });
+    });
+    return out;
+  });
+}
+
+/**
+ * For the partner's own page: the time it is read at, the change to their share still waiting for their answer (null
+ * when none, or when it lapsed), and that change's products by name.
+ */
+export async function partnerChangeFor(store: Store, affiliate: Affiliate | null): Promise<{ nowSeconds: number; change: WaitingChange | null; titles: string[] }> {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const waiting = affiliate?.terms?.change ?? null;
+  const change = waiting && changeOpen(waiting, nowSeconds) ? waiting : null;
+  const titles = change?.share ? (await readListings(store, change.share.products)).filter((p) => p.priceCents > 0).map((p) => p.title) : [];
+  return { nowSeconds, change, titles };
+}
+
+/** A record with these terms, or without the field when there is nothing to keep. */
+function withTerms(affiliate: Affiliate, terms: PartnerTerms): Affiliate {
+  const { terms: _old, ...rest } = affiliate;
+  void _old;
+  return terms.change || terms.history.length ? { ...rest, terms } : rest;
 }
 
 /** Everybody in this programme who holds a standing share of something. */

@@ -11,7 +11,7 @@ import { aboutBlocks, readAbout } from "@/lib/product-about";
 import { ProductAbout } from "@/components/product-about-view";
 import { lookStyle } from "@/lib/store-look";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { formatMoney } from "@/lib/money";
+import { PriceTag } from "@/components/store-product";
 
 /**
  * A draft product's private preview (754 [STN1], unit 4b; lib/draft-preview.ts):
@@ -44,7 +44,8 @@ export default async function DraftPreviewPage({ params }: Params) {
     return (
       <main id="content" className="container-page py-16">
         <h1 className="t-h2">Private preview</h1>
-        <p className="mt-4 text-ink" role="alert">
+        {/* Plain text: it is drawn with the page, so it is the page's answer, not a live update (reviewer 2 on #3440, LOW 3). */}
+        <p className="mt-4 text-ink">
           We could not check this preview link just now. Reload the page in a minute.
         </p>
       </main>
@@ -57,7 +58,8 @@ export default async function DraftPreviewPage({ params }: Params) {
     return (
       <main id="content" className="container-page py-16">
         <h1 className="t-h2">Private preview</h1>
-        <p className="mt-4 text-ink" role="alert">
+        {/* Plain text: it is drawn with the page, so it is the page's answer, not a live update (reviewer 2 on #3440, LOW 3). */}
+        <p className="mt-4 text-ink">
           We could not check this preview link just now. Reload the page in a minute.
         </p>
       </main>
@@ -76,25 +78,31 @@ export default async function DraftPreviewPage({ params }: Params) {
   const until = new Date(preview.expiresAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   return (
     <div className={`st-page st-theme-${store.look.theme} min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
-      <div role="note" className="border-b-2 border-ink bg-white px-4 py-3 text-center text-sm text-ink">
-        <strong>Private preview.</strong>{" "}
-        {product.hidden
-          ? `This is not on sale yet. Only people with this link can see it, until ${until} (UTC).`
-          : "This is on the store now."}{" "}
-        {product.hidden ? null : (
-          <Link href={`/@${store.handle}/p/${product.id}`} className="underline underline-offset-4">
-            See it on the store
-          </Link>
-        )}
-      </div>
+      {/* The band sits in the page's header landmark, so no content is outside a landmark (reviewer 2 on #3440, LOW 1). */}
+      <header>
+        <div role="note" className="border-b-2 border-ink bg-white px-4 py-3 text-center text-sm text-ink">
+          <strong>Private preview.</strong>{" "}
+          {product.hidden
+            ? `This is not on sale yet. Only people with this link can see it, until ${until} (UTC).`
+            : "This is on the store now."}{" "}
+          {product.hidden ? null : (
+            <Link href={`/@${store.handle}/p/${product.id}`} className="underline underline-offset-4">
+              See it on the store
+            </Link>
+          )}
+        </div>
+      </header>
       <main id="content" className="mx-auto max-w-2xl px-4 pb-16 pt-8" lang={LANGUAGES[language]?.locale ?? "en-US"}>
         <div className="st-card p-6 sm:p-8">
           <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{product.title}</h1>
           {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
-          <p className="mt-4 font-semibold">{product.priceCents > 0 ? formatMoney(product.priceCents, store.currency) : "Free"}</p>
+          {/* The product page's own price, in the store's language: "every month", "+", "From", its word for free (reviewer 2 on #3440). */}
+          <p className="mt-4 font-semibold">
+            <PriceTag store={store} product={product} />
+          </p>
           {about.trim() ? <ProductAbout blocks={aboutBlocks(about)} language={language} /> : null}
           {aboutUnread ? (
-            <p className="mt-4 text-ink" role="status">
+            <p className="mt-4 text-ink">
               The description could not be loaded just now. Reload the page in a minute to see it.
             </p>
           ) : null}

@@ -85,7 +85,8 @@ export function DraftPreviewLink({ productId, handle }: { productId: string; han
       </div>
       {link ? (
         <div className="flex flex-wrap items-center gap-2">
-          <label className="sr-only" htmlFor={`${statusId}-url`}>
+          {/* A visible label, not one for screen readers only (reviewer 2 on #3440, LOW 2). */}
+          <label className="w-full text-sm font-semibold text-ink" htmlFor={`${statusId}-url`}>
             Private preview link
           </label>
           <input id={`${statusId}-url`} className="field min-w-0 flex-1" readOnly value={link.url} onFocus={(event) => event.currentTarget.select()} />

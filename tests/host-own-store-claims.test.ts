@@ -10,7 +10,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccoun
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, releaseOwnHold, slotsForMove, slotsForProduct } from "@/lib/calls";
-import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import type { CallSetup } from "@/lib/call-setup";
 import { putMember } from "@/lib/team";
 import type { TeamHost } from "@/lib/team-scheduling-rules";
 import { CLAIM_MARGIN_MS, claimsKey, hostId, readClaims } from "@/lib/host-claims";
@@ -18,10 +18,10 @@ import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { writeTeam } from "@/lib/team-booking";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
 let sessions = 0;
 /** The completed checkouts Stripe lists, as the test makes them paid or refunded. */
 const listed: Record<string, unknown>[] = [];
@@ -45,16 +45,6 @@ const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
 const weekly = { kind: "weekly", minutes: 60, tz: NY, weekly: WEEKDAYS, noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] } as unknown as CallSetup;
 const host = (email: string): TeamHost => ({ email, tz: NY, weekly: WEEKDAYS, bufferMinutes: 0, noticeHours: 1, dailyCap: 4 });
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(new Date(Date.now() + d * DAY));
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 async function storeWithCall(email: string, handle: string, account: string, setup: CallSetup = weekly) {
   await claimHandle(email, handle, `${handle} studio`, "");

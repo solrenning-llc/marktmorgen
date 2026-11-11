@@ -36,7 +36,13 @@ export async function POST(request: NextRequest) {
   const { store, body, role, email } = guarded;
   const action = text(body.action, 10);
   const session = request.cookies.get(SESSION_COOKIE)?.value;
-  const keys = () => shownKeys(store, email, role);
+  // The list after a change that was made: a list that cannot be read is sent as null, and the studio says it
+  // could not read the keys (audit SG2, finding 23). The change itself is never answered as failed for it.
+  const keys = () =>
+    shownKeys(store, email, role).catch((error: unknown) => {
+      console.error("reading the API keys after a change failed", error);
+      return null;
+    });
 
   try {
     if (action === "make") {

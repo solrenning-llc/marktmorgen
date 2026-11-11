@@ -3,8 +3,8 @@
  * lib/cart-checkout.ts, lib/cart-shipping.ts, app/api/store/cart; added 2
  * November 2026). Checked, with Stripe mocked:
  *
- *   - a product the creator ships goes in a cart, at one price and not
- *     limited; a limited one or one with sizes does not, yet;
+ *   - a product the creator ships goes in a cart, at one price, limited or
+ *     not; one with sizes does not, yet;
  *   - the checkout asks Stripe for an address only in the countries they
  *     all ship to, adds each one's shipping on one line, says when it ships
  *     only when that is one line, marks the order as shipped, and with
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
 
   part("What goes in a cart");
   is("a product the creator ships, at one price", cartable(physical("box", ["US"], 500)), true);
-  is("not yet one that is limited or has sizes", [cartable(physical("box", ["US"], 500) && { ...physical("box", ["US"], 500), stock: 5 }), cartable({ ...physical("box", ["US"], 500), options: [{}] } as never)], [false, false]);
+  is("a limited one too, its unit held at checkout (unit 3); not yet one with sizes", [cartable({ ...physical("box", ["US"], 500), stock: 5 }), cartable({ ...physical("box", ["US"], 500), options: [{}] } as never)], [true, false]);
   is("shipped and online products together are told apart", [shipsWithOnline([product("a"), physical("b", ["US"], 1)]), shipsWithOnline([physical("a", ["US"], 1), physical("b", ["US"], 1)]), shipsWithOnline([product("a"), product("b")])], [true, false, false]);
   is("the shipped ones first, each group in the cart's order", shippedFirst([product("a"), physical("b", ["US"], 1), product("c"), physical("d", ["US"], 1)]).map((p) => p.id), ["b", "d", "a", "c"]);
   is("a line about when it ships only when there is one to say", [sharedShipNote(["Ships in 3 days"]), sharedShipNote(["Ships in 3 days", "Ships in 3 days "]), sharedShipNote(["Ships in 3 days", ""]), sharedShipNote(["A", "B"])], ["Ships in 3 days", "Ships in 3 days", "", ""]);

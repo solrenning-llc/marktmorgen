@@ -1,8 +1,11 @@
 import { commercialProfitMix, commercialProfitMixData, COMMERCIAL_PROFIT_SOURCES, type CommercialProfitMixInput } from "./commercial-margin";
 import { canonicalFinancialSnapshot } from "./contract-funding-rules";
+import { storeForgetLine, type StoreForgetMonth } from "./store-forget-retry";
+import { keptStarLine } from "./two-step";
 
 /** MR, owner27 October2026: a measured company target, never a sales gate. */
 export const COMPANY_NET_MARGIN_TARGET_BPS = 6_000;
+export const COMPANY_OPERATIONAL_OBSERVATION_MAX_CHARS = 4_096;
 export type CompanyMonthlyMarginReport = {
   schema: 1;
   month: string | null;
@@ -65,6 +68,45 @@ export function lastCompleteCompanyMonth(now: number): string | null {
 }
 const safe = (n: bigint): number | null =>
   n < BigInt(Number.MIN_SAFE_INTEGER) || n > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(n);
+
+const exactKeys = (value: object, expected: readonly string[]): boolean => {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every(key => Object.hasOwn(value, key));
+};
+const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+function operationalExceptionLines(serialized: string | null, month: string): string[] {
+  let storeForget: StoreForgetMonth | null = null;
+  let keptStarTimes: number | null = null;
+  if (typeof serialized === "string" && serialized.length <= COMPANY_OPERATIONAL_OBSERVATION_MAX_CHARS) {
+    try {
+      const value: unknown = JSON.parse(serialized);
+      if (
+        value !== null && typeof value === "object" && !Array.isArray(value) &&
+        JSON.stringify(value) === serialized &&
+        exactKeys(value, ["schema", "month", "storeForget", "keptStarTimes"]) &&
+        Reflect.get(value, "schema") === 1 && Reflect.get(value, "month") === month
+      ) {
+        const suppliedStore = Reflect.get(value, "storeForget");
+        const suppliedStar = Reflect.get(value, "keptStarTimes");
+        const validStore = suppliedStore === null || (
+          suppliedStore !== null && typeof suppliedStore === "object" && !Array.isArray(suppliedStore) &&
+          exactKeys(suppliedStore, ["month", "queued", "done", "gaveUp", "waitingNow", "keptNow"]) &&
+          Reflect.get(suppliedStore, "month") === month &&
+          ["queued", "done", "gaveUp", "waitingNow", "keptNow"].every(key => count(Reflect.get(suppliedStore, key)))
+        );
+        const validStar = suppliedStar === null || count(suppliedStar);
+        if (validStore && validStar) {
+          storeForget = suppliedStore as StoreForgetMonth | null;
+          keptStarTimes = suppliedStar as number | null;
+        }
+      }
+    } catch {
+      // A malformed observation is unknown, never an empty or zero observation.
+    }
+  }
+  return [storeForgetLine(storeForget), keptStarLine(month, keptStarTimes)].filter(Boolean);
+}
 
 /**
  * Reuses the actual commercial profit accounting boundary and all nine sources.
@@ -135,6 +177,7 @@ export function companyMonthlyMarginPresentation(
   input: CommercialProfitMixInput | null,
   now = Date.now(),
   held: unknown = null,
+  operations?: string | null,
 ): CompanyMonthlyMarginPresentation | null {
   const report = companyMonthlyMarginReport(input, now, held);
   if (
@@ -162,6 +205,10 @@ export function companyMonthlyMarginPresentation(
   const heldLine = report.heldStores === null || report.heldStoresPeak === null
     ? "Lojas retidas para recuperação: desconhecido (não zero)."
     : `Lojas retidas para recuperação: ${report.heldStores} no fim do mês; pico mensal ${report.heldStoresPeak}.`;
+  // The pure presentation never invokes the paid Redis readers. Once a caller
+  // explicitly supplies this source, missing or invalid evidence is visible as
+  // unknown; omission preserves the earlier presentation until a funded caller exists.
+  const operationalLines = operations === undefined ? [] : operationalExceptionLines(operations, report.month);
 
   return Object.freeze({
     schema: 1,
@@ -184,6 +231,7 @@ export function companyMonthlyMarginPresentation(
       marginLine,
       targetLine,
       heldLine,
+      ...operationalLines,
       "Somente informativo: este relatório não abre vendas nem altera preço, limite, comissão, sinalizador ou trava.",
     ].join("\n"),
   });

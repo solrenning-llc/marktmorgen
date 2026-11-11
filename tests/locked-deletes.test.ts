@@ -77,6 +77,7 @@ import { POST as rcommunity_manage } from "@/app/api/store/community/manage/rout
 import { POST as rcourse } from "@/app/api/store/course/route";
 import { POST as rcrm } from "@/app/api/store/crm/route";
 import { POST as rfile_attach } from "@/app/api/store/file/attach/route";
+import { POST as rcreator_card } from "@/app/api/store/creator-card/route";
 import { POST as rforms } from "@/app/api/store/forms/route";
 import { POST as rresend } from "@/app/api/store/resend/route";
 import { POST as rwaitlist } from "@/app/api/store/waitlist/route";
@@ -132,6 +133,7 @@ const ROUTES: Record<string, Handler> = {
   "course": rcourse as Handler,
   "crm": rcrm as Handler,
   "file/attach": rfile_attach as Handler,
+  "creator-card": rcreator_card as Handler,
   "forms": rforms as Handler,
   "image": rimage as Handler,
   "keys": rkeys as Handler,
@@ -341,6 +343,7 @@ async function main(): Promise<void> {
   is("removing the store photo is refused", await answer(await photo(json("/api/store/photo", locked, { remove: true }))), LOCKED);
   is("a new store photo over it is refused", await answer(await photo(json("/api/store/photo", locked, { photo: "data:image/png;base64,AAAA" }))), LOCKED);
   const pageRoutes: [string, Record<string, unknown>][] = [
+    ["creator-card", { action: "remove" }],
     ["forms", { action: "remove", id: "x" }],
     ["site-page", { action: "remove", id: "pagepage01" }],
     ["saved-blocks", { action: "remove", id: "x" }],
@@ -419,6 +422,7 @@ async function main(): Promise<void> {
     "api-keys": ["need:export"],
     "answers": ["act:page:clear"],
     "assistant": ["not:a buyer deleting their own conversation with the assistant"],
+    "assistant-memory": ["need:settings"],
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
@@ -431,10 +435,12 @@ async function main(): Promise<void> {
     "community/rsvp": ["not:a member taking back their own place at an event"],
     "course": ["act:products:lesson-remove", "act:products:module-remove", "act:products:media-remove", "act:products:task-remove", "act:products:quiz-remove", "act:products:withdraw", "act:products:cm-delete", "lockedFor"],
     "course/comment": ["lockedFor"],
+    "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
-    "creator-card": ["need:settings"],
+    "creator-card": ["act:page:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],
+    "discount": ["need:settings"],
     "file/attach": ["act:products:detach", "lockedFor"],
     "forms": ["act:page:remove"],
     "free/download": ["not:a buyer asking for a free product, put on the list by their own request"],
@@ -526,6 +532,7 @@ async function main(): Promise<void> {
     "assistant": "not:a buyer's own conversation with the store's assistant",
     "blog": { delete: "act:page" },
     "bundle": { clear: "act:products", create: "open:adds", save: "open:edits" },
+    "assistant-memory": "need:settings",
     "calendar": "need:settings",
     "community": {
       comment: "open:adds", delete: "lockedFor", "delete-comment": "lockedFor", edit: "open:edits", "edit-comment": "open:edits",
@@ -552,12 +559,13 @@ async function main(): Promise<void> {
       template: "open:adds", withdraw: "act:products",
     },
     "course/comment": { delete: "lockedFor", hide: "open:reversible", show: "open:reversible" },
-    "creator-card": "need:settings",
+    "creator-card": { remove: "act:page", save: "open:edits" },
     "crm": {
       deal: "open:edits", fields: "lockedFor", pipeline: "open:edits", stages: "open:edits", undeal: "act:orders", value: "open:edits",
       unpipeline: "act:orders",
     },
     "discord": "need:settings",
+    "discount": "need:settings",
     "free/download": "not:a buyer asking for a free product, put on the list by their own request",
     "forms": { remove: "act:page" },
     "funnel-share": {
@@ -570,7 +578,7 @@ async function main(): Promise<void> {
     "join/confirm": "not:a person confirming their own sign-up to the list",
     "keys": { clear: "act:products", off: "open:reversible", revoke: "open:reversible", setup: "open:edits", upload: "open:adds" },
     "link-image": { attach: "lockedFor", remove: "act:page" },
-    "links": { add: "open:adds", edit: "lockedFor", remove: "act:page" },
+    "links": { add: "open:adds", archive: "open:reversible", edit: "lockedFor", remove: "act:page", unarchive: "open:reversible" },
     "mail": {
       broadcast: "need:send", cancel: "need:send", copy: "open:adds", count: "open:reads", "draft-remove": "act:draft", "draft-save": "open:edits",
       flow: "need:send", "flow-activate": "need:send", "flow-forget": "need:send", "flow-import": "need:send", "flow-remove": "need:send",

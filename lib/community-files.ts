@@ -13,9 +13,10 @@
  *                            post, a mark that it was taken, kept as long as the post keeps
  *                            it (taken from the store's data room with the post, PICTURE_MARK_BYTES)
  *   nl:cimg:n:<folder>       pictures the community keeps, doors not yet used included
- *   nl:cimg:doors            doors given and not yet used in a post, by when
+ *   nl:cimg:doors            doors given and not yet used in a post, by when; and, as
+ *                            ?<path>#<nonce>, a door whose note could not be confirmed
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isProxy } from "node:util/types";
 import { del, get, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -90,6 +91,14 @@ const SWEEP_MARGIN_SECONDS = 60 * 60;
 
 const countKey = (folder: string) => `nl:cimg:n:${folder}`;
 const DOORS_KEY = "nl:cimg:doors";
+/**
+ * A door whose note could not be confirmed (openCommunityDoor), listed on the doors' list beside the paths: no door
+ * was given for it, so no file was sent through it, and the sweep only gives its place back, never deletes a file.
+ * One for each request, so two such requests for one path give two places back. It sorts before every path at the
+ * same time ("?" before "c"), so the sweep always reads it before the path its note may have listed.
+ */
+const doubtOf = (path: string) => `?${path}#${randomBytes(8).toString("hex")}`;
+const doubtPath = (member: string) => (member.startsWith("?") && member.includes("#") ? member.slice(1, member.lastIndexOf("#")) : "");
 /** The community's folder a picture's path is in: community/<folder>/<file>. */
 const folderOf = (path: string) => (/^community\/([0-9a-f]{24})\//.exec(path) ?? [])[1] ?? "";
 
@@ -187,6 +196,34 @@ export async function noteCommunityUpload(path: string, author: string, now = Da
 }
 
 /**
+ * Notes a door for a picture's path before it is given (app/api/store/community/upload): true only when it is
+ * noted for this member and listed for the sweep, so a file sent through it is deleted, and its place given back, if
+ * it is never put in a post. The caller has taken the door's place (takePicturePlace) and gives no door otherwise.
+ *
+ * - The path already had a door: that one keeps its own place and listing; the place taken for this one goes back.
+ * - The note answered in another shape, or threw: its doubt is listed (doubtOf), read exactly, so the sweep gives
+ *   this request's place back once, a day on, unless the note's own listing of the path is there to give it back;
+ *   never given back here, where that listing may already be there as well (NOTE_PICTURE writes the note and the
+ *   listing together, or neither). The path itself is never listed here: it may be a picture already in a post (its
+ *   door used, and no longer listed), which the sweep would delete (Codex Z on #3305). A doubt that cannot be
+ *   confirmed either leaves the place counted: never fewer than kept. The note's error is thrown on, so no door is
+ *   given.
+ */
+export async function openCommunityDoor(path: string, author: string, now = Date.now()): Promise<boolean> {
+  let noted: boolean;
+  try {
+    noted = await noteCommunityUpload(path, author, now);
+  } catch (error) {
+    console.error("could not confirm a community picture's door; none given", error);
+    const answered = await redisPipeline([["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), doubtOf(path)]]).then((replies) => repliesFor(replies, 1), () => null);
+    if (!answered || countOf(answered[0]) !== 1) console.error("could not list an unconfirmed community picture door for the sweep; its place stays counted");
+    throw error;
+  }
+  if (!noted) await givePicturePlace(path);
+  return noted;
+}
+
+/**
  * The take, in one step (pre-review of 9 November 2026: done in two, a sweep reading the note between them found it
  * gone and deleted the picture the post was taking). Only the member whose note it is takes it: the note becomes
  * the picture's mark, kept with no end (TAKEN), and the path comes off the sweep's list, together; 1. Any other
@@ -243,11 +280,6 @@ export async function untakeCommunityUpload(path: string, author: string, now = 
   await redisPipeline([["EVAL", UNTAKE_PICTURE, 2, uploadKey(path), DOORS_KEY, markOf(author), author, UPLOAD_TTL_SECONDS, Math.floor(now / 1000), path]]);
 }
 
-/** Gives back the place a door took when the door is not given after all. Best effort: never throws. */
-export async function giveDoorPlaceBack(path: string): Promise<void> {
-  await givePicturePlace(path);
-}
-
 /** Deletes a picture a post no longer needs, and gives its place back. Best effort: never throws. */
 export async function dropCommunityImage(path: string | undefined | null): Promise<void> {
   if (!path) return;
@@ -263,6 +295,19 @@ export async function dropCommunityImage(path: string | undefined | null): Promi
   } catch (error) {
     console.error("could not delete a community picture", error);
   }
+}
+
+/**
+ * Gives back the place of a request whose note could not be confirmed (doubtOf), once its doubt is off the list:
+ * only when the path is confirmed not listed (ZSCORE null), since a listed path gives the place back itself when it
+ * is swept. Nothing is deleted: no door was given for it. A read in another shape leaves the place counted.
+ */
+async function giveDoubtedPlace(path: string): Promise<void> {
+  const answered = await redisPipeline([["ZSCORE", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);
+  const score = answered ? answered[0] : undefined;
+  if (score === null) return givePicturePlace(path);
+  if (typeof score === "string" && /^\d+$/.test(score)) return;
+  console.error("could not tell whether an unconfirmed community picture door is listed; its place stays counted");
 }
 
 /**
@@ -286,6 +331,17 @@ export async function sweepCommunityUploads(now = Date.now(), limit = 300): Prom
     const answered = await redisPipeline([["ZREM", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);
     const removed = answered ? countOf(answered[0]) : null;
     if (removed === 0) continue;
+    const doubted = doubtPath(path);
+    if (doubted) {
+      // A door whose note could not be confirmed: never re-listed when its removal is unknown, and the run stops here,
+      // before the path its note may have listed (sorted after it) gives a place back: the next run reads it first.
+      if (removed !== 1) {
+        console.error("could not tell whether an unconfirmed community picture door was taken off the list; the sweep stops here");
+        return swept;
+      }
+      await giveDoubtedPlace(doubted);
+      continue;
+    }
     if (removed !== 1) {
       // It may have been taken off the list: put back, so a later sweep deletes it and gives its place back once.
       // Its door ran out a day ago (UPLOAD_TTL_SECONDS), so nobody can have put it in a post since.

@@ -6,7 +6,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { within } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
-import { giveDoorPlaceBack, noteCommunityUpload, takePicturePlace } from "@/lib/community-files";
+import { openCommunityDoor, takePicturePlace } from "@/lib/community-files";
 import { takeBuyerAction } from "@/lib/buyer-actions";
 import { picturesLimitFor } from "@/lib/community-picture-rules";
 import { ownsCommunityImage } from "@/lib/community-image";
@@ -69,13 +69,11 @@ export async function POST(request: NextRequest) {
         if (there === null) throw new Error("could not check whether a community picture name is free");
         if (!(await takePicturePlace(pathname, picturesLimitFor(store)))) throw new Error("pictures");
 
-        // Only the member given this door may put the picture in a post. A name that already has a note (another door
-        // still open, or a picture a post took, lib/community-files.ts) opens nothing, and its place goes back; a note
-        // that cannot be read throws, and no door is given.
-        if (!(await noteCommunityUpload(pathname, viewer.key))) {
-          await giveDoorPlaceBack(pathname);
-          throw new Error("invalid");
-        }
+        // Only the member given this door may put the picture in a post, and only a door noted for them and listed
+        // for the sweep is given (CX-123 rule 24). A name that already has a note (another door still open, or a
+        // picture a post took, lib/community-files.ts) opens nothing, and its place goes back; a note that cannot be
+        // confirmed throws (lib/community-files.ts openCommunityDoor), and no door is given.
+        if (!(await openCommunityDoor(pathname, viewer.key))) throw new Error("invalid");
 
         const rules = {
           allowedContentTypes: [...IMAGE_CONTENT_TYPES],

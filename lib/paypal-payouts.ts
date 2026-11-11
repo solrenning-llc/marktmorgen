@@ -32,7 +32,7 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { type Book, addPayout, payAddress, payoutReferences, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
@@ -453,8 +453,6 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   const auth = await bearer(store).catch(() => null);
   if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
   const day = new Date().toISOString().slice(0, 10);
-  /** The references already written in the book, read once, only when PayPal reports an item paid. */
-  let recorded: Set<string> | undefined;
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a
     // day, and its people stay on their way whatever comes back (decision C1-20261105-1830-C5-1, option A).
@@ -488,32 +486,9 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        // Written in the book once per PayPal item, and the line leaves the batch only when that is known (rule 24).
-        // A payout already in the book under this item's reference (an earlier run's write that landed although it
-        // answered badly) is never written again; the book's payments are read exactly, once a run, from Redis only. Otherwise the item's mark is taken first: a mark answered in
-        // another shape is read back (claimMark), never taken as fresh; "taken" means another run holds it, so the
-        // line stays on its way; "unknown" stops the run with the line kept. When the payout's own write then fails,
-        // the mark is let go and the line kept, so a later run writes it, or finds it written, instead of dropping
-        // a line the book still owes and paying the affiliate again on the next batch.
-        const reference = `PayPal ${got.item}`;
-        recorded ??= await payoutReferences(store);
-        if (recorded.has(reference)) continue;
-        const key = itemKey(got.item);
-        const value = claimValue();
-        const claimed = await claimMark(key, 400 * 86_400, value);
-        if (claimed === "unknown") throw new UnknownReplyError("a PayPal item's mark");
-        if (claimed === "taken") {
-          still.push(line);
-          continue;
-        }
-        try {
-          await addPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference });
-        } catch (error) {
-          await releaseMark(key, value);
-          throw error;
-        }
-        recorded.add(reference);
-        out.paid += 1;
+        const settled = await settlePaidItem(store, got.item, line, sent.currency, day);
+        if (settled === "waiting") still.push(line);
+        else if (settled === "written") out.paid += 1;
       } else if (NOT_PAID.has(status)) {
         out.released += 1;
       } else {
@@ -529,6 +504,57 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   }
   if (!out.waiting) await redisPipeline([["SREM", STORES, store.sid]]);
   return out;
+}
+
+/** How long a run may hold a PayPal item's mark before another run takes it over: settling one store takes seconds. */
+const ITEM_MARK_STALE_MS = 60 * 60 * 1000;
+
+/**
+ * One line PayPal reports paid, written in the affiliate book once per PayPal item (rule 24); never throws.
+ *
+ * - "found": a payout under this item's reference ("PayPal <item>") is already in the book, read exactly from Redis
+ *   (payoutReferences), so nothing is written and the line leaves the batch;
+ * - "written": this run took the item's mark (claimMark: only "OK", or this run's own value read back), read the book
+ *   again under it, and wrote the payout;
+ * - "waiting": anything not known (a mark held by another run, a mark or a book that does not read, a write that
+ *   failed): the line stays on its way, so the affiliate is never paid again by a later batch while the book still
+ *   says "owed", and the other lines of the store are settled all the same.
+ *
+ * A failed write lets its mark go, so a later run writes the payout or finds it written by its reference. A mark held
+ * longer than any run (ITEM_MARK_STALE_MS; or one written before marks carried their time) with no payout in the book
+ * is a run that stopped between the two: it is taken over with an exact compare-and-delete (releaseMark), so of two
+ * runs taking it over only one gets it.
+ */
+async function settlePaidItem(store: Store, item: string, line: Sent, currency: string, day: string): Promise<"found" | "written" | "waiting"> {
+  const reference = `PayPal ${item}`;
+  const key = itemKey(item);
+  try {
+    if ((await payoutReferences(store)).has(reference)) return "found";
+    let value = claimValue();
+    let claimed = await claimMark(key, 400 * 86_400, value);
+    if (claimed === "taken") {
+      const held = repliesFor(await redisPipeline([["GET", key]]), 1)?.[0];
+      if (typeof held !== "string") return "waiting";
+      const since = /^(\d{13})\.\d{9}$/.exec(held)?.[1];
+      if (since !== undefined && Date.now() - Number(since) < ITEM_MARK_STALE_MS) return "waiting";
+      await releaseMark(key, held);
+      value = claimValue();
+      claimed = await claimMark(key, 400 * 86_400, value);
+    }
+    if (claimed !== "ours") return "waiting";
+    try {
+      // Read again under the mark: a run that wrote it, though its write answered badly, let the mark go after.
+      if ((await payoutReferences(store)).has(reference)) return "found";
+      await addPayout(store, { aff: line.a, cents: line.c, currency, date: day, reference });
+      return "written";
+    } catch (error) {
+      await releaseMark(key, value);
+      throw error;
+    }
+  } catch (error) {
+    console.error("a PayPal payment could not be written in the book; it stays on its way", error);
+    return "waiting";
+  }
 }
 
 /** Marks a batch whose answer is not known for the creator's own check, once, and counts it. */

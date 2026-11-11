@@ -32,6 +32,7 @@ export const KEY_PAUSED_WORDS: Readonly<Record<PauseWhy, string>> = {
   left: "This key is paused for good: it was made by someone who is no longer on the store's team. The store's owner can revoke it under API keys in the studio and make a new one.",
   role: "This key is paused: the role of the person who made it no longer allows it. The store's owner can turn it back on under API keys in the studio.",
   unmatched: "This key is paused: it could not be linked to anyone on the store's team, most likely because the server's secret changed. The store's owner can check whose key it is under API keys in the studio (its name and when it was last used help), then turn it back on for that person, or revoke it.",
+  unknown: "This key is refused for now: its state on the store could not be read. Try again in a moment. If this keeps happening, the store's owner can revoke it under API keys in the studio and make a new one.",
   unrecorded: "This key is paused: nobody is recorded as its maker (keys made before November 4, 2026), and after a change on the store's team (someone leaving, a role changed, or two-step login asked of everyone) such a key waits for the owner. The store's owner can turn it back on under API keys in the studio.",
 };
 
@@ -168,9 +169,11 @@ async function apiKeyed(
     const held = await hold(store);
     if (held) return held;
   }
-  // Read-only API/MCP work needs its paid resource month. Writing includes
-  // access revocation and needs its own retained-cleanup classification.
-  if (purpose === "read" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
+  // Read-only API/MCP work, and an agent's preparation of a change (it reads
+  // the store and writes a proposal), need their paid resource month (Claude 5
+  // on #1856, CX72). Writing includes access revocation and needs its own
+  // retained-cleanup classification.
+  if (purpose !== "write" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
     return apiError(429, "unavailable", "The store could not answer just now. Try again in a moment.");
   }
   // Each request is one of the store's window (lib/store-allowance-rules.ts), taken before any work.

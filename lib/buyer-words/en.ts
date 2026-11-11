@@ -206,6 +206,15 @@ export const en = {
     `Once it goes live, payment is taken by Stripe on ${store}'s own account: Marktmorgen never holds the money and takes none of it.`,
   paidBy: (takers: string, store: string) =>
     `Payment is taken by ${takers} on ${store}'s own account. Marktmorgen never holds the money and takes none of it.`,
+  /**
+   * Who answers for what, said before paying (Directive 2011/83/EU art. 6a(1)(d)); it repeats the Terms, section 3
+   * ("Marktmorgen is not a party to it"), and the Refund Policy, section 7, and says no more: payment itself is on
+   * Stripe's or PayPal's own page, so Marktmorgen hosts only the store's pages. "Not a party to the sale" is the
+   * contract; it leaves room for the role EU VAT art. 9a gives Marktmorgen for tax (docs/eu-vat-article-9a.md),
+   * where this sentence is reviewed again once 9a is built. Drawn by components/who-answers.tsx.
+   */
+  whoAnswers: (store: string) =>
+    `${store} is the seller and is responsible for what you buy, for refunds and for any right you have to cancel. Marktmorgen hosts the store's pages and is not a party to the sale.`,
   noPaymentsTitle: "This store cannot take payments yet.",
   noPaymentsBody: (store: string) => `The prices above are real, but nothing here can charge a card. To buy, write to ${store} directly.`,
   noPaymentsBodyOne: (store: string) => `The price above is real, but nothing here can charge a card. To buy, write to ${store} directly.`,
@@ -216,6 +225,7 @@ export const en = {
     busy: { title: "Someone else is buying that right now", body: "Nothing was charged. Press buy again in a moment." },
     slow: { title: "That was a lot of tries in a few minutes", body: "Nothing was charged. Wait a few minutes, then press buy again." },
     error: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a moment." },
+    nocharges: { title: "This store can't take card payments right now", body: "Nothing was charged. Trying again won't work until the store fixes this." },
     paused: { title: "This store isn't taking new orders right now", body: "Nothing was charged. New orders open again at the start of next month, or sooner." },
     "paypal-declined": {
       title: "PayPal did not take the payment",
@@ -333,9 +343,19 @@ export const en = {
 
   // ---- The card on the creator's own website ---------------------------------------------
   noLongerOnSale: "This product is no longer on sale.",
+  /** A product that could not be read just now (CX-123 rule 24): never said to be off sale. */
+  cardUnread: "This product could not be loaded just now. Try again in a moment.",
+  /** Whether it can be bought could not be read just now, so no buy button is drawn. */
+  cardBuyUnread: "Buying is not available just now. Try again in a moment.",
   seeStore: (store: string) => `See ${store}`,
   cardTestMode: "Test mode: no real card is charged.",
   cardCheckout: "Secure checkout by Stripe, in a new tab.",
+  /**
+   * The card in a frame whose button goes straight to paying (a shipped product) has no room for whoAnswers; this
+   * short sentence says the same of the seller and no more (the Terms, section 3). Its title leads to the product's
+   * page, where the whole sentence is.
+   */
+  cardSoldBy: (store: string) => `Sold by ${store}, who is responsible for it.`,
   cardOpens: (store: string) => `Opens on ${store}'s store, in a new tab.`,
 
   // ---- Email cards (lib/mail-product-price.ts) -------------------------------------------

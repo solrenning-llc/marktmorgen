@@ -3,7 +3,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { can } from "@/lib/team-roles";
 import { readForm, readResponses } from "@/lib/form-store";
 import { FORM_ID } from "@/lib/forms";
-import { readPipelines, readStages } from "@/lib/crm";
+import { CrmSchemaReadUnavailable, readPipelines, readStages } from "@/lib/crm";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage } from "@/lib/pipeline-access-rules";
 import { readPipelineAccess } from "@/lib/pipeline-access";
 import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, parseDeal, readFollowUp } from "@/lib/crm-rules";
@@ -57,6 +57,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, state: result.state, deal: result.deal });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full", message: error.message }, { status: 409 });
+    // The store's stages could not be read: nothing was converted (lib/crm.ts readStages).
+    if (error instanceof CrmSchemaReadUnavailable) return refuse("crm_schema_read_unavailable", 503);
     console.error("Converting form response could not be confirmed", error);
     return refuse("conversion_unconfirmed", 502);
   }

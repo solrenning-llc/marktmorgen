@@ -355,7 +355,8 @@ async function swapEntry(ref: string, read: string, next: string): Promise<boole
  * reviewer C3 on #3670): its addresses held back and its places released (settleDeletedStore), which a delete that
  * answered `unsure` never tried again; and its webhooks, API keys and assistant notes forgotten (forgetBoth), which a
  * delete whose record went with a reply lost, and whose read after it failed too, never forgot, while its API key's
- * lookup (family "prepare") is not erased by the walk. A forget that fails goes in the line the daily job tries again
+ * lookup (family "prepare") is not erased by the walk. A forget that fails leaves the entry waiting, since the walk
+ * erases the API keys' list that leads to the lookups, and goes in the line the daily job tries again
  * (queueStoreForget). Each step can run again; one not confirmed leaves the entry waiting and the run unsure.
  */
 async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, string>, now: number, deadline: number): Promise<{ admitted: number; sure: boolean }> {
@@ -396,14 +397,17 @@ async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, str
       try {
         await forgetBoth(entry.statsId ?? null, entry.sid);
       } catch (error) {
-        console.error("forgetting a deleted store's webhooks, keys and assistant notes at its walk failed; put in line to try again", error);
+        // Not admitted: the walk would erase the API keys' list (nl:api:keys:<sid>), the only way to their lookups,
+        // and a later try would then find none to forget (reviewer C3's LEVE on #3670). The entry waits for the next
+        // run's try; the daily job's line tries meanwhile, while the list still stands.
+        console.error("forgetting a deleted store's webhooks, keys and assistant notes at its walk failed; its walk waits, and it is put in line to try again", error);
+        sure = false;
         try {
           await queueStoreForget(entry.statsId ?? null, entry.sid);
         } catch (queued) {
-          console.error("putting a deleted store's webhooks, keys and assistant notes in line failed; its walk waits", queued);
-          sure = false;
-          continue;
+          console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued);
         }
+        continue;
       }
       const walkable: Batched = { ...entry };
       delete walkable.queued;

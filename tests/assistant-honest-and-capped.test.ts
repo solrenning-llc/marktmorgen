@@ -178,8 +178,8 @@ is("control: a store's own rate may be repeated", heldToFacts("You can pay in 3 
 
 part("E. What goes to the model: an address in words, a capitalized domain");
 is("'jane.doe at example dot com'", forAi("jane.doe at example dot com").includes("jane.doe"), false);
-is("'MySite.com/deal'", forAi("See MySite.com/deal").includes("MySite.com"), false);
-is("'Evil.Com'", forAi("Go to Evil.Com now").includes("Evil.Com"), false);
+is("'MySite.com/deal'", /MySite\.com/.test(forAi("See MySite.com/deal")), false);
+is("'Evil.Com'", /Evil\.Com/.test(forAi("Go to Evil.Com now")), false);
 is("control: 'great.It helps' stays", forAi("It was great.It helps."), "It was great.It helps.");
 
 let next: { status: string; reply: string } = { status: "unknown", reply: "" };
@@ -282,8 +282,8 @@ async function main(): Promise<void> {
   is("what the read took is spent from the pool, and nothing stays held", [Number(unreadSpent ?? 0), Number(unreadHeld ?? 0)], [assistantMessageExtraMicroUsd(), 0]);
 
   part("D. Light: what goes to the model, an error body, the cart's reminder box");
-  is("a bare domain typed by the buyer does not reach the model", forAi("See mysite.com/deal for it").includes("mysite.com"), false);
-  is("nor an address written with a full-width at sign", forAi("I am jane\uFF20example.com").includes("example.com"), false);
+  is("a bare domain typed by the buyer does not reach the model", /mysite\.com/.test(forAi("See mysite.com/deal for it")), false);
+  is("nor an address written with a full-width at sign", /example\.com/.test(forAi("I am jane\uFF20example.com")), false);
   is("while ordinary words and file names stay", forAi("Is it a PDF or a .docx file? Version 2.0."), "Is it a PDF or a .docx file? Version 2.0.");
   huge = true;
   const failed = await postToModel("{}", 5_000);

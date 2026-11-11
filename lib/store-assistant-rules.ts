@@ -709,7 +709,7 @@ const CURRENCY_WORDS: [string, RegExp][] = [
   ["cent", /^(?:cents?|centavos?|centimos?|centimes?|centesimi|centesimo|penny|pennies|pence)(?![\p{L}\p{N}])/u],
   ["dollar", /^(?:dollars?|dollari|dollaro|bucks|usd|cad|aud|dolares|dolar)(?![\p{L}\p{N}])/u],
   ["euro", /^(?:euros?|eur)(?![\p{L}\p{N}])/u],
-  ["pound", /^(?:pounds?|gbp|pfund|sterlin[ae]|sterling|libras?)(?![\p{L}\p{N}])/u],
+  ["pound", /^(?:pounds?|quids?|gbp|pfund|sterlin[ae]|sterling|libras?)(?![\p{L}\p{N}])/u],
   ["real", /^(?:reais|real|brl)(?![\p{L}\p{N}])/u],
   ["franc", /^(?:francs?|franken|franchi|franco|chf)(?![\p{L}\p{N}])/u],
 ];
@@ -756,11 +756,15 @@ function rateOf(tail: string): string | null {
 }
 /**
  * Words of a price, a payment or an offer in a sentence (MONEY_CUE, and
- * "costs", "only", "now", "today" and theirs in the store languages): there, a
- * number with no unit and no thing it counts is a price.
+ * "costs", "only", "now", "today", "total", "charged", "billed", the forms of
+ * "pay" in Spanish, Italian and Portuguese, and theirs in the store
+ * languages): there, a number with no unit and no thing it counts is a price.
+ * "total", "charge", "bill" and "pagas"/"paghi" came with Claude 4's focal
+ * (6798863884) and Claude 3's LOW on #3484; "page" and "pagina" are not forms
+ * of "pay".
  */
 const SENTENCE_MONEY = new RegExp(
-  `${MONEY_CUE}|(?<!\\p{L})(?:cost\\p{L}*|cuest\\p{L}*|cout\\p{L}*|kost\\p{L}*|cust\\p{L}*|vale|vaut|only|now|today|just|sale|offer|solo|solamente|ahora|hoy|oferta|seulement|maintenant|aujourd'hui|offre|nur|jetzt|heute|angebot|ora|oggi|offerta|alleen|nu|vandaag|aanbieding|somente|apenas|agora|hoje|tax|taxes|vat|impuestos?|iva|tva|steuer\\p{L}*|mwst|tasse|imposte|btw|impostos?)(?!\\p{L})`,
+  `${MONEY_CUE}|(?<!\\p{L})(?:total(?:s|e|i|es)?|totaal|gesamt\\p{L}*|insgesamt|charg\\p{L}*|bill(?:s|ed|ing)?|pag(?:a|as|amos|ais|an|ar|ara\\p{L}*|ando|ad[oa]s?|aste|aron|ou|ue|ues|uemos|uen|hi|hiamo|hiate|hino|are|ate|ano|ato|ata|her\\p{L}*)|cobr\\p{L}*|factur\\p{L}*|addebit\\p{L}*|berechn\\p{L}*|cost\\p{L}*|cuest\\p{L}*|cout\\p{L}*|kost\\p{L}*|cust\\p{L}*|vale|vaut|only|now|today|just|sale|offer|solo|solamente|ahora|hoy|oferta|seulement|maintenant|aujourd'hui|offre|nur|jetzt|heute|angebot|ora|oggi|offerta|alleen|nu|vandaag|aanbieding|somente|apenas|agora|hoje|tax|taxes|vat|impuestos?|iva|tva|steuer\\p{L}*|mwst|tasse|imposte|btw|impostos?)(?!\\p{L})`,
   "u",
 );
 /**
@@ -833,13 +837,18 @@ function figureKind(folded: string, start: number, end: number): string {
 /** A count with nothing said of what it counts, or of the word after it outside a sentence about a price. */
 const isPlain = (kind: string) => kind === "plain" || kind.startsWith("plain:");
 /**
- * Whether a fact of one kind holds a reply's figure of another: a plain
- * reply figure any fact of its value; otherwise the same kind, a price of
+ * Whether a fact of one kind holds a reply's figure of another: a bare
+ * reply figure only a count of its value, a plain reply figure that names
+ * what it counts any fact of its value; otherwise the same kind, a price of
  * no known currency ("money:?") any price, a figure with no rate the same
  * figure with one ("$9" for "$9 a month"), never a rate the fact does not
  * have ("$49 per lesson" for "$49").
  */
 function kindHolds(reply: string, fact: string): boolean {
+  // A bare number, with no unit and nothing it counts after it ("It's 14.", "You will be charged 14."), is held only by
+  // a fact that is a count: never by a day, a price or a percent, whatever word of paying the sentence used (Claude 1's
+  // review 6799181835 of #3484: a word list cannot be complete, and the 14-day refund window let each of them through).
+  if (reply === "plain") return isPlain(fact) || fact.startsWith("count:");
   if (isPlain(reply)) return true;
   // A count in a sentence about a price: only a fact that is a count too, never a price, a time or a percent.
   if (reply.startsWith("count:")) return isPlain(fact) || fact.startsWith("count:");

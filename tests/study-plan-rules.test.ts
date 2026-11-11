@@ -63,7 +63,16 @@ const titles = new Map([["l1", "Wedging clay"], ["l2", "Centering"], ["l3", "Tri
 const words = planWords(plan, titles);
 is("week by week", words.slice(0, 3), ["Week 1: Pricing, Your first sale, Wedging clay.", "Week 2: Centering.", "Week 3: Trimming."]);
 is("a suggestion, never a promise", words.at(-1), "A suggested order for about 3 weeks at your pace. It is not a promise of any result; go at the speed that suits you.");
-is("unknown says so", planWords({ known: false }, titles), ["A plan could not be made just now: a lesson's length or what you have could not be read. Every lesson is still open to you as usual."]);
+is("unknown says so, and promises no access it did not read (Claude 3 on #3675, LEVE)", planWords({ known: false }, titles), ["A plan could not be made just now: a lesson's length or what you have could not be read. Nothing in your course changed."]);
+is("no lessons: says so, never \"about 0 weeks\"", planWords({ known: true, weeks: [], review: [], lessons: 0 }, titles), ["There are no lessons to put in order yet."]);
+const advanced = planWords(studyPlan(course, setup, { goal: "g2", level: "advanced", minutes: 1200 }, all), titles);
+is("an advanced student's review lessons are named once, marked as a review, never listed twice", [advanced[0], advanced.some((l) => l.startsWith("At the end"))], ["Week 1: Trimming, Pricing, Your first sale, Wedging clay (a review), Centering (a review).", false]);
+
+part("Answers and courses read again by the plan itself (Claude 3 on #3675, LEVE)");
+for (const minutes of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, MIN_WEEK_MINUTES - 1, MAX_WEEK_MINUTES + 1]) {
+  is(`minutes ${minutes}: no plan, never one lesson a week or all in one`, studyPlan(course, setup, { goal: "g1", level: "new", minutes }, all), { known: false });
+}
+is("a lesson id in two modules is planned once", studyPlan({ modules: [{ id: "m1", lessons: [{ id: "x", minutes: 10 }] }, { id: "m2", lessons: [{ id: "x", minutes: 10 }] }] }, { goals: [{ id: "g", label: "x", first: [] }], basics: [] }, { goal: "g", level: "new", minutes: 60 }, new Set(["x"])), { known: true, weeks: [["x"]], review: [], lessons: 1 });
 is("no words promise a result", words.join(" ").match(/guarantee|will (?:sell|earn|master)|results? in/i), null);
 
 done();

@@ -20,6 +20,7 @@ import {
 import { MAX_WAIT_MINUTES } from "@/lib/quiz-bank-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
 import { AiAssist } from "@/components/ai-assist";
 import { DEFAULT_QUIZ_DRAFT, type DraftedQuestion, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 
@@ -431,7 +432,15 @@ export function QuizEditor({
         })}
       </ol>
       {draft.questions.length < MAX_QUESTIONS ? (
-        <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => setDraft({ ...draft, questions: [...draft.questions, blankQuestion()] })}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm mt-3"
+          onClick={() => {
+            const next = draft.questions.length;
+            setDraft({ ...draft, questions: [...draft.questions, blankQuestion()] });
+            focusWhenDrawn(() => document.getElementById(`${prefix}-q${next}-text`), browserFrames());
+          }}
+        >
           Add a question
         </button>
       ) : (

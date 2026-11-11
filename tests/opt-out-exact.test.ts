@@ -22,7 +22,8 @@
  * 61c3662c: claimWeek firing twice, weeklyOff ignoring the stop, claimMonth and
  * the busy-day claim).
  */
-import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
+import { mock } from "node:test";
+import { MAX_PAYDAY, NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { sendPaydayEmails } from "@/lib/affiliate-payday";
 import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -32,6 +33,13 @@ import { setSubscription } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// One moment for the whole run, on a day a payday can be (1 to MAX_PAYDAY): the payday below is today's date, and
+// on every 29th, 30th and 31st (UTC) no payday was kept and no email went; and a run crossing 00:00 UTC between two
+// reads of the clock inside one send or one claim refused it. Only Date is stopped; timers and performance.now() run.
+const start = new Date();
+if (start.getUTCDate() > MAX_PAYDAY) start.setUTCDate(MAX_PAYDAY);
+mock.timers.enable({ apis: ["Date"], now: start.getTime() });
 
 process.env.STRIPE_SECRET_KEY = "sk_test_opt_out_exact_only";
 process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";

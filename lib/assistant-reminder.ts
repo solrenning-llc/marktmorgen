@@ -4,7 +4,7 @@
  *
  *   nl:assist:remind:<checkout id>   the buyer's yes for that checkout: their address, the sentence they checked, its version and when; ASSIST_REMIND_KEEP_SECONDS
  *   nl:assist:remindwho:<statsId>:<hash>  the checkouts one address said yes on, a one-way hash of the address, for erasure; ASSIST_REMIND_KEEP_SECONDS
- *   nl:assist:remindq                reminders waiting, by when each is due (one sorted set; each member the store, its handle and the checkout, never an address)
+ *   nl:assist:remindq                reminders waiting, by when each is due (one sorted set; each member the store, its handle, the checkout, its hour and, once put back after a failed send, its tries again; never an address)
  *
  * The yes is written when the checkout opens (app/api/store/checkout,
  * app/api/store/cart), only when the buyer checked the box and typed an
@@ -23,12 +23,12 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { isSenderConfigured } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
-import { onAccount } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isHouseStore } from "@/lib/house-store";
 import { canSellProduct } from "@/lib/store-checkout";
 import { isFree } from "@/lib/store-field-rules";
 import { takeBuyerRead } from "@/lib/buyer-actions";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { deliveryWords } from "@/lib/answers";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
@@ -36,6 +36,7 @@ import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
 import { pool } from "@/lib/store-assistant";
 import { type RemindOutcome, remindAssisted } from "@/lib/checkout-recovery";
+import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
 import type { SessionRecord } from "@/lib/purchase-email";
 import type { Listing, Store } from "@/lib/store";
 import { LANGUAGES } from "@/lib/store-language";
@@ -276,10 +277,11 @@ function stillSends(store: Store): boolean {
   return store.assistReminder.on && store.recovery.address !== "" && !store.suspended && Boolean(store.statsId) && Boolean(store.stripeAccountId) && isSenderConfigured();
 }
 
-/** Whether the store's own emails have room for one more this window: read before the model is asked; taken when it is sent. */
+/** Whether the store's own emails have room for one more this window: read before the model is asked; taken when it is sent. A count that cannot be read is no room (rule 24). */
 async function emailRoom(store: Store, now: number): Promise<boolean> {
   const limit = allowanceFor(store, "email", now / 1000);
-  return Number.isSafeInteger(limit) && limit - (await allowanceUsed(store, "email", now)) >= 1;
+  const used = await allowanceUsedExact(store, "email", now);
+  return Number.isSafeInteger(limit) && used !== null && limit - used >= 1;
 }
 
 const dayWords = (store: Store, ms: number) =>
@@ -290,9 +292,15 @@ const dayWords = (store: Store, ms: number) =>
  * come. Skips without a word for each thing that stands in front of it: no
  * consent kept (erased, or gone with its week), switched off or no postal
  * address, the store's requests or emails used, the checkout paid or not
- * found, or every rule of lib/checkout-recovery.ts's deliver.
+ * found, or every rule of lib/checkout-recovery.ts's deliver. "failed" when
+ * the store has no email room, or the email service was asked and did not
+ * take it: never tried again (lib/reminder-retry.ts). "retry" when Stripe
+ * did not answer the checkout's read for a reason that may pass, before
+ * the email service was asked: the job tries it again. `ai` false (a try
+ * again) sends the fixed reminder without asking the model, so one checkout
+ * never asks it twice.
  */
-export async function remindFromConsent(store: Store, session: string, now = Date.now()): Promise<RemindOutcome | "open"> {
+export async function remindFromConsent(store: Store, session: string, now = Date.now(), ai = true): Promise<RemindOutcome | "open" | "retry"> {
   if (!SESSION.test(session) || !isRedisConfigured()) return "skip";
   const key = assistRemindKey(session);
   const [raw, ttl] = await redisPipeline([["GET", key], ["TTL", key]]);
@@ -306,7 +314,9 @@ export async function remindFromConsent(store: Store, session: string, now = Dat
     record = (await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions/${encodeURIComponent(session)}`)) as SessionRecord;
   } catch (error) {
     console.error("reading a checkout for its reminder failed", error);
-    return "skip";
+    // Stripe said no to this checkout (not found, not this account's): nothing to send. No answer, or one it may
+    // change (busy, its own error), is a try that failed on the way, before any email: tried again by the job.
+    return error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 429 ? "skip" : "retry";
   }
   if (record.status === "complete") return "skip";
   const seconds = now / 1000;
@@ -329,17 +339,41 @@ export async function remindFromConsent(store: Store, session: string, now = Dat
   return remindAssisted(store, record, {
     email: consent.e,
     why: words.why(consent.t, dayWords(store, consent.at)),
-    note: (products) => assistReminderNote(store, products, now),
+    ...(ai ? { note: (products: Listing[]) => assistReminderNote(store, products, now) } : {}),
   }, seconds);
+}
+
+/**
+ * Puts a reminder whose send failed back in the queue, for a later try
+ * (lib/reminder-retry.ts): a few times at the most, never when the try would
+ * land past its six hours, with the same checkout and hour, so the one
+ * reminder of that checkout (the shared nl:recover:sent: mark) and its consent
+ * still decide. Whether it went back.
+ */
+async function again(statsId: string, handle: string, session: string, at: number, tries: number, nowSeconds: number): Promise<boolean> {
+  const next = nowSeconds + reminderRetryAfter(tries);
+  if (tries >= REMINDER_RETRIES || next - at > ASSIST_REMIND_STALE_SECONDS) return false;
+  try {
+    const [added] = await redisPipeline([["ZADD", QUEUE, next, JSON.stringify([statsId, handle, session, at, tries + 1])]]);
+    // 1 put back; 0 one just like it already waits. Anything else is unknown: not counted as put back.
+    if (added === 1 || added === 0) return true;
+    console.error("putting a Store assistant checkout reminder back answered in no known shape", handle);
+  } catch (error) {
+    console.error("putting a Store assistant checkout reminder back failed", handle, error);
+  }
+  return false;
 }
 
 /**
  * Sends every reminder that is due. For the five-minute job. Each is taken
  * off the queue before anything is sent, so two runs never send the same
- * one; one that could not be sent is not put back.
+ * one. One that is no longer to be sent is dropped, and so is one the email
+ * service was asked for and did not take; one that failed on the way, before
+ * the email service was asked, is put back for a later try (again), which
+ * never asks the model.
  */
-export async function sendAssistReminders(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<{ sent: number; skipped: number }> {
-  const counts = { sent: 0, skipped: 0 };
+export async function sendAssistReminders(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<{ sent: number; skipped: number; retried: number }> {
+  const counts = { sent: 0, skipped: 0, retried: 0 };
   if (!isRedisConfigured()) return counts;
   const now = Date.now();
   const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, Math.floor(now / 1000), "LIMIT", 0, 100]]);
@@ -353,21 +387,25 @@ export async function sendAssistReminders(load: (handle: string) => Promise<Stor
     } catch {
       // A member of no known shape is dropped.
     }
-    const [statsId, handle, session, at] = Array.isArray(parsed) ? parsed : [];
+    const [statsId, handle, session, at, tried] = Array.isArray(parsed) ? parsed : [];
     if (typeof statsId !== "string" || typeof handle !== "string" || typeof session !== "string" || typeof at !== "number" || now / 1000 - at > ASSIST_REMIND_STALE_SECONDS) {
       counts.skipped += 1;
       continue;
     }
+    const tries = retriesOf(tried);
+    let outcome: RemindOutcome | "open" | "retry";
     try {
       const store = await load(handle);
       // The store the yes was given on, and not another that has since taken its address.
-      const outcome = store && store.statsId === statsId ? await remindFromConsent(store, session, Date.now()) : "skip";
-      if (outcome === "sent") counts.sent += 1;
-      else counts.skipped += 1;
+      outcome = store && store.statsId === statsId ? await remindFromConsent(store, session, Date.now(), tries === 0) : "skip";
     } catch (error) {
       console.error("sending a Store assistant checkout reminder failed", handle, error);
-      counts.skipped += 1;
+      outcome = "retry";
     }
+    if (outcome === "sent") counts.sent += 1;
+    // "failed" (no email room, or the email service asked and not taking it) is never tried again (lib/reminder-retry.ts).
+    else if (outcome === "retry" && (await again(statsId, handle, session, at, tries, Math.floor(now / 1000)))) counts.retried += 1;
+    else counts.skipped += 1;
   }
   return counts;
 }

@@ -381,7 +381,7 @@ export type CreateResult =
   // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
   // `startsNow`: it is due already, so the request that wrote it starts it (the scheduled job takes up the rest).
   | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined; startsNow: boolean }
-  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" }
+  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" | "poll" }
   // Its readings of the buyers could not be held (lib/store-allowance.ts holdAllowanceAt): the sentence says why.
   | { ok: false; reason: "studio_used"; message: string };
 
@@ -416,7 +416,7 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
  */
 export async function createBroadcast(
   store: Store,
-  input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown },
+  input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown; poll?: unknown },
   count?: (units: number) => Promise<boolean>,
 ): Promise<CreateResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
@@ -427,6 +427,9 @@ export async function createBroadcast(
   if (!body) return { ok: false, reason: "body" };
   // A template's part left to write is a direction, never words sent in the creator's name (lib/mail-body.ts).
   if (hasPlaceholder(subject) || hasPlaceholder(body)) return { ok: false, reason: "placeholder" };
+  // A poll answered by a click (125 [F2-EMAIL-POLLS]): absent for none; one that does not read refuses the email, nothing written.
+  const pollAsked = input.poll === undefined ? null : readPollInput(input.poll);
+  if (pollAsked && !pollAsked.ok) return { ok: false, reason: "poll" };
   const productId = typeof input.productId === "string" && input.productId ? input.productId : null;
   if (productId && !hasProduct(store, productId)) return { ok: false, reason: "product" };
   const notProductId = typeof input.notProductId === "string" && input.notProductId ? input.notProductId : null;
@@ -490,6 +493,7 @@ export async function createBroadcast(
     listed: false,
     tagged: true,
     test,
+    ...(pollAsked?.ok ? { poll: pollAsked.poll } : {}),
   };
   // What the scheduled job's readings of the buyers will cost at the most, held in the month it goes out, before
   // anything is written. Given back if its room in the data room is not there (below), so a refusal holds nothing.

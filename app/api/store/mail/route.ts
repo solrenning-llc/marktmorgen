@@ -261,6 +261,8 @@ export async function POST(request: NextRequest) {
         who: text(body.who, 10),
         narrow: body.narrow,
         label: text(body.label, 80),
+        // A poll answered by a click (125 [F2-EMAIL-POLLS]): read and checked by createBroadcast; absent for none.
+        ...(body.poll === undefined ? {} : { poll: body.poll }),
         sendAt: typeof body.sendAt === "number" ? body.sendAt : undefined,
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).

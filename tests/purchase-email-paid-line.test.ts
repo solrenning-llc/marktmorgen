@@ -132,7 +132,10 @@ async function main(): Promise<void> {
   is("no order counted", redis.run(["GET", seenKey(`checkout:${sessionId}`)]), null);
   is("read again with its amount: sent", await confirmPurchase(store, sessionId, { ...oneTime, id: sessionId } as never), "sent");
   is("one email, with what was paid", emails.map((e) => e.text.split("\n").find((l) => l.startsWith("Paid:"))), ["Paid: $49"]);
-  is("the order counted once", redis.run(["GET", seenKey(`checkout:${sessionId}`)]), "1");
+  // Its mark is the settlement receipt (lib/orders.ts, COMMIT_ORDER_CONFIRMATION), and one order is counted.
+  is("the order counted once", [/^oc1:[0-9a-f]{64}$/.test(String(redis.run(["GET", seenKey(`checkout:${sessionId}`)]))),
+    redis.keys().filter((k) => /^nl:orders:(n|pending):/.test(k)).reduce((n, k) => n + Number(redis.run(["GET", k])), 0)], [true, 1]);
+  is("read once more: nothing more", [await confirmPurchase(store, sessionId, { ...oneTime, id: sessionId } as never), emails.length], ["already", 1]);
 
   done();
 }

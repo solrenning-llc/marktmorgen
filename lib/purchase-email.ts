@@ -623,11 +623,13 @@ async function confirmOnce(
 }
 
 async function accountPaidCheckout(store: Store, session: SessionRecord, items: number): Promise<"committed" | "already" | "unknown"> {
-  // Missing payment amounts cannot prove a share-covered order, so count one
-  // conservatively. This accepts the same explicit zero as isSettled for a
-  // fully discounted checkout.
-  const paid = Number.isSafeInteger(session.amount_total) && Number(session.amount_total) >= 0
-    ? Number(session.amount_total) : null;
+  // An amount that does not read is not written as a value (CX-123 rule 24):
+  // nothing is counted and the try fails, so the next run reads the checkout
+  // again. Counting it then as one order would seal a receipt the readable
+  // amount can never match, and the paid buyer would never be confirmed.
+  // This accepts the same explicit zero as isSettled for a fully discounted checkout.
+  if (!Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0) return "unknown";
+  const paid = Number(session.amount_total);
   const createdAtMs = typeof session.created === "number" && Number.isSafeInteger(session.created) ? session.created * 1000 : NaN;
   return countLegacyCheckoutForConfirmation(store, `checkout:${session.id}`, paid, Date.now(), {
     hour: session.metadata?.[ADMITTED_FIELD], items, createdAtMs,

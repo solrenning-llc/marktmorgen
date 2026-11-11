@@ -37,10 +37,12 @@
  * somebody, a pre-order, a PayPal purchase; not what a creator brings over
  * from another platform or gives through the API.
  */
-import { storeForId } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -58,20 +60,42 @@ const LIBRARY_SALT = "nimbus-lib";
 const libraryKeys = (email: string) => personKeys(LIBRARY, LIBRARY_SALT, email);
 const linkKey = (token: string) => `nl:lib:link:${sha(`nimbus-lib-link:${token}`).slice(0, 40)}`;
 
-const ids = (reply: unknown) => (Array.isArray(reply) ? reply.filter((id): id is string => typeof id === "string" && STORE_ID.test(id)) : []);
+/**
+ * The store ids in one SUNION reply, read in its exact shape (CX-123 rule 24): a list of strings, an exact empty one
+ * staying "none"; anything else throws UnknownReplyError, never "no stores". A member that cannot be a store's id is
+ * left out, as before: it is not a store.
+ */
+const ids = (reply: unknown, what = "a library's stores") => {
+  const all = stringList(reply);
+  if (!all) throw new UnknownReplyError(what);
+  return all.filter((id) => STORE_ID.test(id));
+};
 
-/** The ids of every store an address bought from or joined itself, at most MAX_LIBRARY_STORES: one command, whatever the quarters. */
+/**
+ * The ids of every store an address bought from or joined itself, at most MAX_LIBRARY_STORES: one command, whatever
+ * the quarters. A reply out of shape throws UnknownReplyError: the deletion ask for every store (lib/erasure-request.ts)
+ * and the person's copy (lib/person-copy.ts) then fail, never go on as if no store knew the address.
+ */
 export async function storesKnownFor(email: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [all] = await redisPipeline([["SUNION", ...libraryKeys(email), ...joinedKeys(email)]]);
-  return [...new Set(ids(all))].slice(0, MAX_LIBRARY_STORES);
+  const replies = repliesFor(await redisPipeline([["SUNION", ...libraryKeys(email), ...joinedKeys(email)]]), 1);
+  if (!replies) throw new UnknownReplyError("the stores that know an address");
+  return [...new Set(ids(replies[0], "the stores that know an address"))].slice(0, MAX_LIBRARY_STORES);
 }
 
-/** Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it can be in. */
+/**
+ * Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it
+ * can be in. Each SREM reply is read in its exact shape (rule 24): 0 or 1, one per command. Anything else throws
+ * UnknownReplyError, so the erasure says this part could not finish and can be asked again, never "erased, 0 records"
+ * with the address still linked to the store.
+ */
 export async function forgetLibraryPerson(sid: string, email: string): Promise<number> {
   if (!STORE_ID.test(sid) || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline([...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]));
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const commands = [...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const counts = replies?.map(countOf);
+  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("forgetting a library's store");
+  return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }
 
 /**
@@ -89,11 +113,16 @@ export async function rememberBuyers(sid: string, emails: string[]): Promise<voi
   }
 }
 
-/** The ids of the stores an address bought from, closed ones among them until they run out (a closed store no longer resolves). */
+/**
+ * The ids of the stores an address bought from, closed ones among them until they run out (a closed store no longer
+ * resolves). Read in its exact shape (CX-123 rule 24): one list of strings, or UnknownReplyError, never "none".
+ */
 export async function storesBoughtFrom(email: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [all] = await redisPipeline([["SUNION", ...libraryKeys(email)]]);
-  return [...new Set(ids(all))].slice(0, MAX_LIBRARY_STORES);
+  const replies = repliesFor(await redisPipeline([["SUNION", ...libraryKeys(email)]]), 1);
+  const all = replies ? stringList(replies[0]) : null;
+  if (!all) throw new UnknownReplyError("a library's stores");
+  return [...new Set(all.filter((id) => STORE_ID.test(id)))].slice(0, MAX_LIBRARY_STORES);
 }
 
 export type LibraryRequest = "sent" | "email" | "limited" | "error";
@@ -111,17 +140,24 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!(await withinEssentialLimit("library-address", sha(email), 5, 3_600))) return "limited";
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
-  let charged: Awaited<ReturnType<typeof storeForId>> = null;
+  let charged: Store | null = null;
+  // A store whose record could not be read, or answered out of shape, is not a closed one (CX-123 rule 24): when none
+  // read and one did not, nothing was sent, so the page never says a link is on its way (Claude 5 and Codex J on #2910).
+  let unread = 0;
   for (const sid of await storesBoughtFrom(email)) {
-    const store = await storeForId(sid).catch(() => null);
-    if (!store) continue;
+    const store = await storeForIdExactly(sid).catch(() => "unknown" as const);
+    if (store === "unknown") unread += 1;
+    if (store === "unknown" || store === "none") continue;
     stores.push(sid);
     charged ??= store;
   }
-  if (!stores.length) return "sent";
+  if (!stores.length) return unread ? "error" : "sent";
   if (!charged) return "error";
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
+  // The grant is the link: only a SET answered exactly "OK" is one (CX-123 rule 24). Any other reply sends nothing and
+  // takes no store email, so nobody is emailed a link that does not open; the route answers "error".
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a library link's grant");
   const link = `${input.origin}/library?token=${token}`;
   // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
   const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
@@ -141,9 +177,15 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   return sent ? "sent" : "error";
 }
 
-/** The address a live library link was sent to, or null. */
+/**
+ * The address a live library link was sent to, or null when the link is confirmed gone. Read in its exact shape
+ * (CX-123 rule 24): any other reply throws UnknownReplyError, never "expired" (Claude 5 on #2910).
+ */
 export async function libraryOwner(token: string): Promise<string | null> {
   if (!LIBRARY_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [email] = await redisPipeline([["GET", linkKey(token)]]);
-  return typeof email === "string" && email ? email : null;
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+  const email = replies ? replies[0] : undefined;
+  if (email === null) return null;
+  if (typeof email !== "string" || !email) throw new UnknownReplyError("a library link's address");
+  return email;
 }

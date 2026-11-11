@@ -22,7 +22,7 @@ export function MorningLogo() {
 
 /**
  * The way past the menu, the line said while plans are not on sale
- * (lib/opening.ts), and the menu: Pricing, Log in and Start free.
+ * (lib/opening.ts), and the menu: Pricing, Log in and Start your store.
  * `current` marks the page the visitor is on (2.4.8).
  */
 export function MorningHeader({ current }: { current?: "/pricing" }) {
@@ -31,10 +31,14 @@ export function MorningHeader({ current }: { current?: "/pricing" }) {
       <a href="#content" className="hm-skip">Skip to the page content</a>
       {PLANS_ON_SALE ? null : (
         <div className="hm-topbar" data-preview-bar="">
-          <p>
-            {PREVIEW_LINE}{" "}
-            <a href={PREVIEW_LINK.href}>{PREVIEW_LINK.label}</a>
-          </p>
+          {/* Native disclosure: one complete notice, including without client code. */}
+          <details className="hm-preview">
+            <summary id="hm-preview-toggle" className="hm-preview-compact">Still being built. Plans closed.</summary>
+            <p id="hm-preview-detail" className="hm-preview-full">
+              {PREVIEW_LINE}{" "}
+              <a href={PREVIEW_LINK.href}>{PREVIEW_LINK.label}</a>
+            </p>
+          </details>
         </div>
       )}
       <header className="hm-top">
@@ -44,7 +48,7 @@ export function MorningHeader({ current }: { current?: "/pricing" }) {
             <ul className="hm-nav-links">
               <li><a href="/pricing" className="hm-nav-link" aria-current={current === "/pricing" ? "page" : undefined}>Pricing</a></li>
               <li><a href="/signin?to=login" className="hm-nav-link">Log in</a></li>
-              <li><a href="/signin" className="hm-nav-cta">Start free</a></li>
+              <li><a href="/signin" className="hm-nav-cta">Start your store</a></li>
             </ul>
           </nav>
         </div>

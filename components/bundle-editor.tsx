@@ -294,7 +294,7 @@ export function BundleEditor({
                     onClick={() => move(i, -1)}
                     disabled={i === 0}
                     aria-label={`Move ${p.title} up`}
-                    className="grid h-9 w-9 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30"
+                    className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30"
                   >
                     <Icon name="chevron-down" size={16} className="rotate-180" />
                   </button>
@@ -303,7 +303,7 @@ export function BundleEditor({
                     onClick={() => move(i, 1)}
                     disabled={i === items.length - 1}
                     aria-label={`Move ${p.title} down`}
-                    className="grid h-9 w-9 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30"
+                    className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30"
                   >
                     <Icon name="chevron-down" size={16} />
                   </button>
@@ -311,7 +311,7 @@ export function BundleEditor({
                     type="button"
                     onClick={() => setItems((current) => current.filter((x) => x.id !== p.id))}
                     aria-label={`Take ${p.title} out`}
-                    className="grid h-9 w-9 place-items-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+                    className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                   >
                     <Icon name="close" size={16} />
                   </button>

@@ -1,6 +1,7 @@
+import { realpathSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 async function files(dir) {
@@ -39,7 +40,12 @@ export async function checkKeptOut(root) {
  }
  return failures;
 }
-if(typeof process !== 'undefined' && process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
+/** Whether node was asked to run this file: compared as real paths, so a link matches and an import does not. */
+function isProgram(){
+ try{return typeof process!=='undefined'&&Boolean(process.argv[1])&&realpathSync(fileURLToPath(import.meta.url))===realpathSync(process.argv[1]);}
+ catch{return false;}
+}
+if(isProgram()){
  const result=await checkClientBundles(resolve(dirname(fileURLToPath(import.meta.url)),'..'));
  console.log(JSON.stringify(result,null,2));
  if(result.failed)process.exitCode=1;

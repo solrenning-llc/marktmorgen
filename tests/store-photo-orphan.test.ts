@@ -232,6 +232,33 @@ async function main(): Promise<void> {
   );
   is("told to try again; the record read twice, both unknown", [again.status, reads], [500, 2]);
   is("the photo stays, named in the record as waiting", [photoKeys().length, ((await storeForEmail(OWNER))?.photoLeft ?? []).length], [1, 1]);
+
+  part("Rule 24: a re-read answered in another shape is unknown, never \"store gone\" (Claude 3 on #3614)");
+  redis.clear();
+  await claimHandle(OWNER, "photoshop", "Photo Shop", "");
+  await ensureStatsId(OWNER);
+  let wroteOdd = false;
+  let oddReads = 0;
+  fault = (commands) => {
+    if (touches(commands, "SET", PHOTO)) wroteOdd = true;
+    else if (wroteOdd && touches(commands, "GET", "nl:store:owner:")) {
+      oddReads += 1;
+      if (oddReads >= 2) fault = null;
+      return oddReads === 1 ? "throw" : "odd";
+    }
+    return null;
+  };
+  const sessionOdd = await openSession(OWNER);
+  const odd = await photoRoute(
+    new NextRequest(`${ORIGIN}/api/store/photo`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${sessionOdd}` },
+      body: JSON.stringify({ photo: `data:image/png;base64,${PNG}` }),
+    }),
+  );
+  is("told to try again; the re-read answered QUEUED", [odd.status, oddReads], [500, 2]);
+  is("the record is still there", (await storeForEmail(OWNER)) !== null, true);
+  is("the photo is never deleted on that answer: it stays named as waiting", [photoKeys().length, ((await storeForEmail(OWNER))?.photoLeft ?? []).length], [1, 1]);
   done();
 }
 

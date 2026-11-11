@@ -19,7 +19,8 @@ import { holdsProductsOrThrow } from "@/lib/community-access";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { emailKey, storeKey } from "@/lib/learn";
-import { type Store, storeForId } from "@/lib/store";
+import type { Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { giveRole, putMember, removeMember, takeRole } from "@/lib/discord";
 import { KICK_TRIES, rolesDiff, rolesFor } from "@/lib/discord-rules";
 import {
@@ -111,8 +112,14 @@ export type Checked = "kept" | "changed" | "ended" | "gone" | "later";
 
 /** Checks one person again, and gives or takes back roles to match what they hold now. */
 export async function checkMember(sid: string, userId: string, now = Date.now()): Promise<Checked> {
-  const store = await storeForId(sid).catch(() => null);
-  if (!store) return "gone";
+  // A store read that fails is unknown, never "gone" (CX-123 rule 24): the person was already taken off the line
+  // (dueMembers), so "gone" on an error would drop them for good and a later cancellation or refund would never take
+  // their paid roles back. The error goes up to sweepDiscord, which puts them back in line for the next run. The store
+  // is read exactly (lib/store-exact.ts): only a confirmed absent id key is "gone"; a reply of another shape, or a key
+  // leading to a record that cannot be read, throws like a failed request.
+  const store = await storeForIdExactly(sid);
+  if (store === "unknown") throw new UnknownReplyError(`the store ${sid} for the Discord check`);
+  if (store === "none") return "gone";
   const room = storeKey(store);
   // Read exactly: an unknown server, member or roles read throws (sweepDiscord keeps the person in line), never read
   // as "gone" (dropped from the checks, roles never taken back) or "no product gives a role" (a paying buyer's roles taken).

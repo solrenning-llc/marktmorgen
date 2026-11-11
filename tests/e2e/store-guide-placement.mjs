@@ -5,7 +5,7 @@ export async function checkGuidePlacement({browser,LOCAL,fixture,axeSource,is}){
  for(const viewport of [{width:390,height:844},{width:1280,height:720}]){
   const context=await browser.newContext({viewport,serviceWorkers:"block"});
   try{
-   const page=await context.newPage();let calls=0;const otherWrites=[];const first=fixture.products[0];
+   const page=await context.newPage();let calls=0;const otherWrites=[],hits=[];const first=fixture.products[0];
    await page.route("**/api/**",async route=>{
     const request=route.request(),url=new URL(request.url());
     if(url.origin===local.origin&&url.pathname==="/api/store/guide"&&request.method()==="POST"){
@@ -13,6 +13,8 @@ export async function checkGuidePlacement({browser,LOCAL,fixture,axeSource,is}){
      is("ME1 guide keeps store handle "+viewport.width,body.handle,fixture.handle);
      return route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true,picks:body.goal==="a trip to the moon"?[]:[{title:first.title,href:"/@"+fixture.handle+"/p/"+first.id,price:"$10",why:"A synthetic catalog match."}]})});
     }
+    // The page's visit count goes by fetch, through the host's browser check (components/store-beacon.tsx): kept here, never written.
+    if(url.origin===local.origin&&url.pathname==="/api/store/hit"&&request.method()==="POST"){let body=null;try{body=request.postDataJSON();}catch{}hits.push(body);return route.fulfill({status:204,body:""});}
     if(!["GET","HEAD"].includes(request.method())){otherWrites.push(request.method()+" "+url.pathname);return route.abort();}
     return route.continue();
    });
@@ -45,10 +47,10 @@ export async function checkGuidePlacement({browser,LOCAL,fixture,axeSource,is}){
    await guide.getByText(/nothing Guide placement fixture sells fits that yet/).waitFor();
    is("ME1 guide no-match removes old recommendation "+viewport.width,await guide.locator(".st-guide-pick").count(),0);
    is("ME1 guide two synthetic replies "+viewport.width,calls,2);
-   await page.waitForFunction(()=>window.__guideBeacons.length>0&&window.__guideBeacons.every(entry=>entry.settled));
+   for(let wait=0;wait<100&&!hits.length;wait++)await page.waitForTimeout(100);
+   await page.waitForFunction(()=>window.__guideBeacons.every(entry=>entry.settled));
    const beacons=await page.evaluate(()=>window.__guideBeacons);
-   const visits=beacons.filter(entry=>entry.url==="/api/store/hit");
-   is("ME1 guide one existing visit beacon "+viewport.width,visits.map(entry=>({handle:entry.body?.h,kind:entry.body?.k,error:entry.error})),[{handle:fixture.handle,kind:"v",error:""}]);
+   is("ME1 guide one existing visit count "+viewport.width,hits.map(body=>({handle:body?.h,kind:body?.k})),[{handle:fixture.handle,kind:"v"}]);
    const unexpected=beacons.filter(entry=>entry.url!=="/api/store/hit"&&(entry.url!=="/api/store/read"||entry.error||entry.body?.k!=="s"||typeof entry.body?.t!=="string"||!Number.isInteger(entry.body?.n)||entry.body.n<0));
    is("ME1 guide no unexpected beacon "+viewport.width,unexpected,[]);
    is("ME1 guide no unhandled writes "+viewport.width,otherWrites,[]);

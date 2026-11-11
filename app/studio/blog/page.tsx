@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
@@ -40,7 +41,8 @@ export default async function StudioBlogPage({ searchParams }: Params) {
   const [posts, open, left] = await Promise.all([
     allPosts(store.statsId).catch(() => null),
     editing && editing !== "new" ? readPost(store.statsId, editing).catch(() => undefined) : Promise.resolve(null),
-    aiAvailableFor(store) ? aiLeft(store).catch(() => 0) : Promise.resolve(0),
+    // An allowance that could not be read is null, said in words by the AI boxes, never shown as 0 (rule 24, VR item 2).
+    aiAvailableFor(store) ? aiLeft(store).catch(() => null) : Promise.resolve(0),
   ]);
   const back = studioPath(store, "", "blog");
   const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ id: p.id, title: p.title }));
@@ -52,7 +54,7 @@ export default async function StudioBlogPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Blog</p>
+          <StudioTrail store={store} here="Blog" />
           <h1 className="t-h2 mt-3">Posts on your store&apos;s address</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`What you know, at marktmorgen.com/@${store.handle}/blog, where search engines find it and a post can end on one of your products. Each has its own address, its own title and description for search, and the blog has a feed readers and newsletter tools can follow.`}
@@ -97,7 +99,7 @@ export default async function StudioBlogPage({ searchParams }: Params) {
               {open === undefined ? (
                 <p role="status" className="text-ink-soft">This post couldn&apos;t be loaded. Reload to try again.</p>
               ) : writing ? (
-                <AiOn value={aiAvailableFor(store) ? { on: true, left } : { on: false, left: 0 }}>
+                <AiOn value={!aiAvailableFor(store) ? { on: false, left: 0 } : left === null ? { on: true, left: 0, known: false } : { on: true, left }}>
                   <BlogEditor
                     key={open?.id ?? "new"}
                     post={open ? { id: open.id, title: open.title, body: open.body, product: open.product, draft: open.draft, href: open.draft ? null : live(open.id, open.title) } : { id: null, title: "", body: "", product: null, draft: true, href: null }}

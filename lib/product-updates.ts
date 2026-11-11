@@ -34,9 +34,11 @@
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
-import { normaliseEmail } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -50,7 +52,7 @@ import { type Listing, type Store, saleHandles, storeForHandle } from "@/lib/sto
 import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers } from "@/lib/product-updates-rules";
 import { noteForErasure } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
-import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { suppressedCommand } from "@/lib/suppression";
 import { BUYER_LEDGER_UNITS, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { paypalKept } from "@/lib/paypal-sales";
 import { countUnits } from "@/lib/person-agenda-read";
@@ -148,11 +150,28 @@ export function updateReadUnits(store: Pick<Store, "stripeAccountId" | "paypalSe
   return (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
 }
 
-/** When this product's buyers may next be told, in seconds; 0 when they may now. */
+/**
+ * The time written by a claim: a whole number of seconds, then a point and the
+ * nine random digits that make the claim this press's own (claimValue); or the
+ * whole seconds alone, as claims written before that still read.
+ */
+const SECONDS_TEXT = /^(0|[1-9][0-9]*)(?:\.[0-9]{9})?$/;
+
+/**
+ * When this product's buyers may next be told, in seconds; 0 when they may now.
+ * Only a confirmed absent key means "now" (CX-123 rule 24): any other reply
+ * than the seconds a claim wrote throws UnknownReplyError, so nothing is read
+ * or sent on it.
+ */
 export async function nextUpdateAt(store: Store, productId: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [last] = await redisPipeline([["GET", lastKey(store.statsId, productId)]]);
-  const at = Number(last) || 0;
+  const reply = repliesFor(await redisPipeline([["GET", lastKey(store.statsId, productId)]]), 1);
+  if (!reply) throw new UnknownReplyError("the last product update time");
+  const last = reply[0];
+  if (last === null) return 0;
+  const seconds = typeof last === "string" ? SECONDS_TEXT.exec(last)?.[1] : undefined;
+  const at = seconds === undefined ? NaN : Number(seconds);
+  if (!Number.isSafeInteger(at)) throw new UnknownReplyError("the last product update time");
   return at ? at + UPDATE_GAP_SECONDS : 0;
 }
 
@@ -175,9 +194,19 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   }
   const buyers = buyersFrom(rows, saleHandles(store), product.id).slice(0, MAX_UPDATE_RECIPIENTS);
   if (buyers.length === 0) return { ok: false, reason: "none" };
-  // Taken before anything is written, so two presses make one send.
-  const [claimed] = await redisPipeline([["SET", lastKey(store.statsId, product.id), String(nowSeconds), "NX", "EX", UPDATE_GAP_SECONDS]]);
-  if (claimed === null) return { ok: false, reason: "soon", until: (await nextUpdateAt(store, product.id)) || nowSeconds + UPDATE_GAP_SECONDS };
+  // Taken before anything is written, so two presses make one send, with a
+  // value only this press writes (lib/claim-mark.ts): a reply in no known shape
+  // is read back, and a claim still unknown writes no job and is let go, only
+  // if it holds this press's value, so a claim that landed never holds the gap
+  // for 7 days with nothing sent (rule 24; Claude 2 on #3235).
+  const claimKey = lastKey(store.statsId, product.id);
+  const mine = claimValue(nowSeconds);
+  const claim = await claimMark(claimKey, UPDATE_GAP_SECONDS, mine);
+  if (claim === "unknown") {
+    await releaseMark(claimKey, mine);
+    throw new UnknownReplyError("the product update claim");
+  }
+  if (claim === "taken") return { ok: false, reason: "soon", until: (await nextUpdateAt(store, product.id)) || nowSeconds + UPDATE_GAP_SECONDS };
   const job: UpdateJob = {
     id: randomBytes(12).toString("hex"),
     handle: store.handle,
@@ -201,20 +230,89 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
     ["SET", latestKey(store.statsId, product.id), job.id, "EX", KEEP_SECONDS],
     ["SADD", QUEUE, job.id],
   );
-  await redisPipeline(commands);
+  const written = await redisPipeline(commands).catch(() => null);
+  if (!jobWritten(written, commands)) {
+    // Some of it may have landed: the job is taken back before the claim is let go, so a retry never sends twice;
+    // while a send of it may be under way, the claim is kept (Claude 2 on #3235, LOW 1).
+    if (await takeBack(job.id)) {
+      await releaseMark(latestKey(store.statsId, product.id), job.id);
+      await releaseMark(claimKey, mine);
+    }
+    throw new UnknownReplyError("the product update job");
+  }
   return { ok: true, job };
+}
+
+/**
+ * The job's pipeline answered exactly as it was written (rule 24): DEL 0 or 1, each RPUSH the list's length so far,
+ * EXPIRE 1, both SETs "OK", SADD 1 (a new random id).
+ */
+function jobWritten(reply: unknown, commands: (string | number)[][]): boolean {
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(reply, commands.length);
+  } catch {
+    return false;
+  }
+  if (!replies) return false;
+  let length = 0;
+  return commands.every((command, i) => {
+    const got = replies[i];
+    switch (command[0]) {
+      case "DEL": return got === 0 || got === 1;
+      case "RPUSH": length += command.length - 2; return got === length;
+      case "EXPIRE": return got === 1;
+      case "SET": return got === "OK";
+      case "SADD": return got === 1;
+      default: return false;
+    }
+  });
+}
+
+/**
+ * Takes back a job whose writes could not be confirmed: under its own send lock, so no send of it is under way, it
+ * leaves the queue and its record and addresses are deleted. True only when each step answered exactly; then nothing
+ * of it can go out. The lock is left to run out (90 s), so a run still holding the id finds no job and sends nothing.
+ */
+async function takeBack(id: string): Promise<boolean> {
+  try {
+    const lock = repliesFor(await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]), 1);
+    if (!lock || lock[0] !== "OK") return false;
+    const gone = repliesFor(await redisPipeline([["SREM", QUEUE, id], ["DEL", jobKey(id), toKey(id)]]), 2);
+    return !!gone && (gone[0] === 0 || gone[0] === 1) && (gone[1] === 0 || gone[1] === 1 || gone[1] === 2);
+  } catch {
+    return false;
+  }
 }
 
 export async function readUpdateJob(id: string): Promise<UpdateJob | null> {
   if (!JOB_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
-  if (typeof raw !== "string") return null;
+  const reply = await redisPipeline([["GET", jobKey(id)]]);
+  const unknown = () => new Error("This update could not be checked. Try again.");
+  if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) throw unknown();
+  const raw = reply[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw unknown();
+  let value: unknown;
   try {
-    const job = JSON.parse(raw) as UpdateJob;
-    return JOB_ID.test(job.id) ? job : null;
+    value = JSON.parse(raw);
   } catch {
-    return null;
+    throw unknown();
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw unknown();
+  const job = value as Record<string, unknown>;
+  for (const field of ["id", "handle", "statsId", "product", "title", "words", "status", "note"]) {
+    if (!Object.hasOwn(job, field) || typeof job[field] !== "string") throw unknown();
+  }
+  for (const field of ["total", "done", "sent", "failures", "createdAt"]) {
+    if (!Object.hasOwn(job, field) || typeof job[field] !== "number" ||
+        !Number.isSafeInteger(job[field]) || job[field] < 0) throw unknown();
+  }
+  if (job.id !== id || !job.handle || !job.statsId || !job.product ||
+      !["sending", "waiting", "sent", "failed"].includes(job.status as string) ||
+      (job.total as number) === 0 || (job.total as number) > MAX_UPDATE_RECIPIENTS ||
+      (job.done as number) > (job.total as number) || (job.sent as number) > (job.done as number)) throw unknown();
+  return value as UpdateJob;
 }
 
 /** The last update sent about this product in the past two months, for the studio to show; null when none. */
@@ -257,10 +355,15 @@ async function stopLink(store: Store, email: string): Promise<string> {
  * places at once: only one holds the send at a time.
  */
 export async function advanceUpdate(id: string, load: (handle: string) => Promise<Store | null>, deadline: number): Promise<UpdateJob | null> {
-  const [got] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
-  if (got === null) return null;
+  // Held only on an exact "OK" (rule 24): any other reply leaves the send for
+  // the next run and lets go of nothing, since the lock may not be ours.
+  const got = repliesFor(await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]), 1);
+  if (!got || got[0] !== "OK") return null;
   try {
-    let job = await readUpdateJob(id);
+    // Unknown evidence must not dequeue a real job or overwrite its payload.
+    // Keep it for the next automatic read; only a confirmed null is absent.
+    let job: UpdateJob | null;
+    try { job = await readUpdateJob(id); } catch { return null; }
     if (!job || job.status === "sent" || job.status === "failed") {
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;
@@ -283,10 +386,19 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
     const text = updateText(store, job.title, job.words);
     const fromName = store.mail?.fromName || store.name;
     while (job.done < job.total && Date.now() < deadline) {
-      const [chunk] = await redisPipeline([["LRANGE", toKey(id), job.done, job.done + BATCH_SIZE - 1]]);
-      const emails = Array.isArray(chunk) ? (chunk as string[]) : [];
-      if (!emails.length) {
-        job = { ...job, done: job.total };
+      const reply = await redisPipeline([["LRANGE", toKey(id), job.done, job.done + BATCH_SIZE - 1]]).catch(() => null);
+      const emails = checkedUpdateChunk(reply, Math.min(BATCH_SIZE, job.total - job.done));
+      if (emails === null) {
+        // An empty LRANGE is also what Redis returns after the bounded
+        // recipient list expires. Only exact, separate proof that the key is
+        // absent makes that terminal; malformed or unavailable evidence
+        // remains retryable and never permits mail.
+        const exists = checkedUpdateListPresence(
+          await redisPipeline([["EXISTS", toKey(id)]]).catch(() => null),
+        );
+        job = exists === false
+          ? { ...job, status: "failed", note: "The recipient list expired. Nothing more was sent." }
+          : { ...job, status: "waiting", note: "The recipients could not be checked just now. Nothing more was sent. We will try again." };
         break;
       }
       // Nobody who pressed stop here, or left the creator's list.
@@ -297,8 +409,12 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           store.listId ? ["HGET", leadsKey(store.listId), email] : ["EXISTS", "nl:none"],
           suppressedCommand(store.listId, email),
         ]),
-      );
-      const recipients = emails.filter((_, i) => Number(checks[i * 3]) !== 1 && !(store.listId && parseContact(checks[i * 3 + 1])?.unsub) && !wasSuppressed(checks[i * 3 + 2]));
+      ).catch(() => null);
+      const recipients = checkedUpdateRecipients(emails, checks, Boolean(store.listId));
+      if (recipients === null) {
+        job = { ...job, status: "waiting", note: "The recipients could not be checked just now. Nothing more was sent. We will try again." };
+        break;
+      }
       if (recipients.length) {
         const reserved = await reserve(store, recipients.length);
         if (reserved !== "ok") {
@@ -354,6 +470,54 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
   } finally {
     await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
   }
+}
+
+/** Exact evidence that the bounded recipient list still exists. */
+function checkedUpdateListPresence(reply: unknown): boolean | null {
+  if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) return null;
+  if (reply[0] === 1) return true;
+  if (reply[0] === 0) return false;
+  return null;
+}
+
+/** An unfinished job has exactly this many recipients in its next bounded page. */
+function checkedUpdateChunk(reply: unknown, expected: number): string[] | null {
+  if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0) ||
+      !Number.isSafeInteger(expected) || expected <= 0 || !Array.isArray(reply[0]) || reply[0].length !== expected) return null;
+  const chunk: unknown[] = reply[0];
+  for (let i = 0; i < expected; i++) {
+    const email = chunk[i];
+    if (!Object.hasOwn(chunk, i) || typeof email !== "string" || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return null;
+  }
+  return chunk as string[];
+}
+
+/** Every opt-out and erasure slot must be confirmed before any recipient is admitted. */
+function checkedUpdateRecipients(emails: string[], checks: unknown, hasList: boolean): string[] | null {
+  if (!Array.isArray(checks) || checks.length !== emails.length * 3) return null;
+  const recipients: string[] = [];
+  for (let i = 0; i < emails.length; i++) {
+    for (let j = 0; j < 3; j++) if (!Object.hasOwn(checks, i * 3 + j)) return null;
+    const [off, raw, erased] = checks.slice(i * 3, i * 3 + 3);
+    if ((off !== 0 && off !== 1) || (erased !== 0 && erased !== 1)) return null;
+    let unsubscribed = false;
+    if (hasList) {
+      if (raw !== null) {
+        if (typeof raw !== "string") return null;
+        try {
+          const value: unknown = JSON.parse(raw);
+          // Older contacts may lack unsub; any present value must be boolean.
+          if (!value || typeof value !== "object" || Array.isArray(value) ||
+              ("unsub" in value && typeof value.unsub !== "boolean")) return null;
+        } catch { return null; }
+        const contact = parseContact(raw);
+        if (!contact) return null;
+        unsubscribed = contact.unsub;
+      }
+    } else if (raw !== 0 && raw !== 1) return null;
+    if (off === 0 && !unsubscribed && erased === 0) recipients.push(emails[i]);
+  }
+  return recipients;
 }
 
 /** Moves every waiting update on. For the mail job. */

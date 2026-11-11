@@ -20,12 +20,18 @@ const before = (src: string, words: string) => {
   const at = src.indexOf(words);
   if (at < 0) return "";
   const open = src.lastIndexOf("<", at);
-  return /className=(?:"([^"]*)"|\{`([^`]*)`\}|\{(\w+)\})/.exec(src.slice(open, at))?.slice(1).find(Boolean) ?? "";
+  const found = /className=(?:"([^"]*)"|\{`([^`]*)`\}|\{(\w+)\})/.exec(src.slice(open, at));
+  if (!found) return "";
+  return found[3] ? constant(src, found[3]) : (found[1] ?? found[2] ?? "");
 };
 
 const shipping = read("components/shipping-editor.tsx");
 is("shipping: its quiet link style is a 44px target", tall(constant(shipping, "link")), true);
 is("shipping: the opener on a line of its own is not forced back to a plain block", shipping.includes("className={`block ${link}`}"), false);
+// Claude 3's LOW on this PR: `flex ${link}` put flex and inline-flex on one button, leaving its display to the
+// stylesheet's order. The opener has one display of its own: a full-width row.
+const opener = before(shipping, 'ready ? "Ship it: a physical product, sent by you"');
+is("shipping: the opener has one display, a 44px full-width row", tall(opener) && /\bflex\b/.test(opener) && !/\binline-flex\b/.test(opener), true);
 
 const keys = read("components/licence-key-editor.tsx");
 is("license keys: its quiet button style is a 44px target", tall(constant(keys, "quiet")), true);

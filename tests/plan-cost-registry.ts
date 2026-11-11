@@ -884,6 +884,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/studio-allowance-rules.ts", names: ["ESSENTIAL_NEEDS", "ESSENTIAL_PER_DAY"] },
       { file: "app/api/billing/checkout/route.ts", names: ["creatorFrom(request, \"billing\")", "findStoreSubscriptions(store)"] },
       { file: "app/api/store/stores/route.ts", names: ["creatorFrom(request, \"delete\")", "findStoreSubscriptions(store)"] },
+      // 601 [KB22] U5: the plan's invoices are one invoice List inside one billing request of the day (PLAN_INVOICES_READ).
+      { file: "lib/plan-invoices.ts", names: ["takeInvoicesRead", "onPlatformAt(STRIPE_LIST_VERSION, \"GET\", `/invoices?${query}`)"] },
       { file: "lib/plan-closing.ts", names: ["observeStoreSubscriptions(store)", "refuseLatePlans"] },
       { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
     ],
@@ -1128,8 +1130,12 @@ export const COST_LINES: CostLine[] = [
     id: "embed",
     feature: "Selling from any website (#518)",
     monthlyUsd: ALL_TIERS_SAME(0),
-    sources: [{ file: "lib/embed-open.ts", names: ["isResting", "recordVisit", "OPENS_PER_TEN_MINUTES"] }],
-    basis: "Page views load nothing from us; an open of a card counts as a visit and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
+    sources: [
+      { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES"] },
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon"] },
+      { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
+    ],
+    basis: "Page views load nothing from us; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
   },
   {
     id: "public-requests",
@@ -1225,6 +1231,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
+      // The invoices of a store's own plan take one billing request of the day (the essential counter) before Stripe is asked, none without a plan subscription (601 [KB22] U5).
+      { file: "lib/plan-invoices.ts", names: ["PLAN_INVOICES_PER_DAY", "PLAN_INVOICES_SHOWN", "takeEssentialBelow(store, PLAN_INVOICES_PER_DAY)", "await take()"] },
+      { file: "lib/studio-route.ts", names: ["takeEssential", "takeEssentialBelow", 'essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400)'] },
       { file: "lib/path-atomic.ts", names: ["WRITE_PATH", "FORGET_PATH", "PATH_DATA_CHANGE"] },
       { file: "lib/path-growth-facts.ts", names: ["PATH_GROWTH_READ_UNITS", "PATH_GROWTH_PRODUCTS", "PATH_GROWTH_CAMPAIGNS", "PATH_GROWTH_REVIEWS", "await charge(PATH_GROWTH_READ_UNITS)"] },
       { file: "lib/path-board-rules.ts", names: ["PATH_BOARD_ROOM_BYTES", "PATH_BOARD_ROWS", "PATH_BOARD_JOIN_UNITS"] },
@@ -1626,6 +1635,18 @@ export const ADD_ON_LINES: AddOnLine[] = [
   },
 ];
 
+/**
+ * The PayPal watch's two list reads (lib/paypal-sales.ts, watchPayPal, swept by lib/checkout-sweep.ts through
+ * lib/paypal-delivery.ts, sweepPayPal; Claude 5 on #2909), in Redis commands, held to what the real sweep sends by
+ * tests/paypal-watch-cost.test.ts:
+ * - rangeReadsPerStoreRun: each sweep of a store with PayPal reads its pending payments and its orders due a refund
+ *   look, one ZRANGEBYSCORE each, due orders or not (one only when the run's deadline passes during the first list);
+ * - ordersPerRangeRead: each read asks for at most PAYPAL_WATCH_BATCH orders (lib/paypal-sales.ts), so one sweep looks
+ *   at no more than that many of each list.
+ * Why they are the five-minute job's, not a plan's: NOT_A_COST.PAYPAL_WATCH_BATCH.
+ */
+export const PAYPAL_WATCH_RANGES = { rangeReadsPerStoreRun: 2, ordersPerRangeRead: 25 } as const;
+
 /** Per-use costs that no monthly figure bounds yet: not in worstCost, so nothing here is certified. */
 export type OpenItem = { id: string; what: string; names?: string[] };
 export const OPEN: OpenItem[] = [];
@@ -1657,7 +1678,7 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURES_PER_MINUTE: "A pace on the pictures a function answers (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses, and what it lets through is the CDN's picture of line visits.",
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
-  MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
+  MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones on a store with reminders or a list, never the open ones. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
   DEMO_SESSIONS_PER_DAY: "Sessions the whole site may open in a day, the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
@@ -1668,6 +1689,7 @@ export const NOT_A_COST: Record<string, string> = {
   DEMO_REFUSALS_PER_ADDRESS_PER_DAY: "Refused demo requests one address or network may count in a day, each counted for the whole site only inside it, so one address cannot spend the day's DEMO_REFUSALS_PER_DAY: a pace that only refuses, inside the day's counted refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_REFUSALS_PER_SESSION: "Refused actions one live demo session may count in its own record, whoever shares its address, past which its next actions are answered after one read and write nothing: priced with each day's openings in the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_REFUSAL_WORST_COMMANDS: "The commands one refused demo request sends at the most, priced with the refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  PAYPAL_WATCH_BATCH: "PayPal orders the five-minute job's sweep of a store with PayPal reads from each of its two lists in one run (lib/paypal-sales.ts, watchPayPal; Claude 5 on #2909): one ZRANGEBYSCORE of the pending payments and one of the orders due a refund look, each with LIMIT 0 PAYPAL_WATCH_BATCH, so 2 commands a store a run, due orders or not, and each reply at most PAYPAL_WATCH_BATCH order ids (at most 36 characters each); a store is swept at most once a run (lib/checkout-sweep.ts walks the list of stores once, stops at its end or the run's deadline, and skips a store already swept that run when SCAN hands its key back on another page), so at most 2 x 288 runs a UTC day x 32 UTC days = 18,432 of these reads a store a billing month (PAYPAL_WATCH_RANGES, held by tests/paypal-watch-cost.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance. Not stated here: the commands and PayPal calls of each order read (at most PAYPAL_WATCH_BATCH of each list a run), which are bounded in number by the batch but not yet counted command by command. Like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   LOST_DISPUTE_PAGES: "Pages of Stripe's closing events (GET /events, up to 100 each) read per store per run by each of the five five-minute jobs that take things back after a lost dispute (lib/refunds.ts, lostDisputesSince; lib/licence-keys.ts, lib/call-meetings.ts, lib/review-proof.ts, and the checkout sweep's gifts and pre-orders, lib/gifts.ts and lib/preorders.ts, asked only of a store that ever sold one), so at most 5 x LOST_DISPUTE_PAGES calls a store every five minutes, inside each run's deadline and with no other call per dispute: a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call. Each lost dispute read becomes one row, handled once (its event id kept as read), with the store commands a refund row of the same job takes (SISMEMBER, SADD and EXPIRE of the read set, or for gifts and pre-orders the SISMEMBER and SADD of the read set, the GET of the payment's gift or pre-order and the read of that gift or pre-order and of what it gave (GET or HGET), each reply read in its exact shape so a row left unknown is read again next run, at most once a row a run, and the closing write: the key revoked, the meeting ended, the review marked, the gift or pre-order taken back as for a full refund; for a call refunded in full, the calendar feed's changed mark too: SET, INCRBY and EXPIRE, lib/call-records.ts, markBookingsChanged, at most REFUND_LOOKUPS a store a run), at most 100 x LOST_DISPUTE_PAGES rows a job a run, inside the same schedule and deadline as the refund rows. When there are more than a run may read, the job keeps its place in one key (GET at the start, then, once every row read is handled, one SMISMEMBER of the read set and SET or DEL: 3 commands a run, lib/refunds.ts, lostCursorKey and confirmLostRead; a run that could not handle every row writes nothing) and the next run reads on from there.",
   GIVEN_UP_LINES_PER_DAY: "A cap on the lines passed-over Stripe events leave for each endpoint of a store a day, at most MAX_ENDPOINTS endpoints a store a day, past which one summary line an endpoint counts the rest (lib/webhooks.ts, markGivenUp): no endpoint is called and no delivery taken; what the lines keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:evt:), and the job that writes them is the five-minute schedule's (a company fixed cost).",
   SKIPPED_LINES_PER_DAY: "A cap on the lines a store's log gets in a UTC day for messages not kept (too large to keep, or made with the month's webhook deliveries used), each reason on its own, past which one summary line an endpoint counts the rest (lib/webhooks.ts, skippedLines): no endpoint is called and no delivery taken; what the lines and the day's counts keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:wait:).",
@@ -1849,3 +1871,17 @@ export const API_SALES_READ = CALL + 1 * CPU_SECOND + (STRIPE_TIMEOUT_MS / 1000 
 
 /** Additional Path growth reading: at most eight 256 KB products, three 80 KB campaigns, three bounded reviews and their indexes. Fifty commands and 3 MB include admission overhead; reserved separately before reading. No provider call. */
 export const PATH_GROWTH_READ = request("write", 50, 3_000_000);
+
+/**
+ * One reading of a store's own plan invoices (601 [KB22] U5, lib/plan-invoices.ts), past the page's own
+ * STUDIO_PAGE_UNITS: one GET of Stripe's invoice list waited on for its whole ceiling (STRIPE_TIMEOUT_MS) at 2 GB,
+ * a CPU second and four megabytes of reading (PLAN_INVOICES_SHOWN invoices with their lines; the body is not capped
+ * in bytes, but its download and parse run inside the same STRIPE_TIMEOUT_MS, lib/billing.ts onPlatform), and 64 KB
+ * more sent on to the browser. Taken as one of the store's ESSENTIAL_PER_DAY requests of the day, only while fewer
+ * than PLAN_INVOICES_PER_DAY were taken, before Stripe is asked (the counter countStudio keeps for "billing"), each priced in the studio line as a
+ * heavy request and in platform-subscription-search as two Stripe GETs; tests/plan-cost-registry.test.ts holds this
+ * under that, with room, so it adds nothing to either line. The wait is priced at the dearer of the model's
+ * memory second and PLATFORM_SUBSCRIPTION_SEARCH's highest regional
+ * rate; Stripe's tariff for the GET stays unknown, as there: not certified zero.
+ */
+export const PLAN_INVOICES_READ = CALL + 1 * CPU_SECOND + Math.max((STRIPE_TIMEOUT_MS / 1000) * MEMORY_SECOND, PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet) + perMegabyte(4_000_000) + 65_536 * ORIGIN_PER_BYTE;

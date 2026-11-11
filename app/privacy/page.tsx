@@ -1800,9 +1800,10 @@ export default function PrivacyPage() {
             serves the site, stores the files, pictures and videos creators
             upload (Vercel Blob) and, when a creator adds their own domain,
             receives that domain&apos;s name to check its records and issue its
-            certificate, and, when a login link is asked for, checks that a
-            person&apos;s browser sent the request rather than a program, by
-            reading the browser&apos;s answer to a small challenge;
+            certificate, and, when a login link is asked for or a store&apos;s
+            page counts its visit, checks that a person&apos;s browser sent the
+            request rather than a program, by reading the browser&apos;s answer
+            to a small challenge;
           </li>
           <li>
             <strong className="text-black">Resend</strong>, our email

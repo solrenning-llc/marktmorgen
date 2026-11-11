@@ -1,6 +1,6 @@
 import { advanceAnnouncement, type AnnouncementJob } from "@/lib/community-mail";
 import { advanceEventJob, type EventMailJob } from "@/lib/community-event-mail";
-import { commandsSeen, db, event, members, reset, sent, setReadReply, store } from "./community-mail-read-world";
+import { commandsSeen, db, event, members, released, reserved, reset, sent, setReadReply, setTokenWriteFails, store } from "./community-mail-read-world";
 import { done, is, part } from "./check";
 
 const id = "e".repeat(24);
@@ -73,6 +73,55 @@ async function main(): Promise<void> {
     setReadReply(() => [Object.freeze([...keys])]);
     const tail = await advance(id, async () => store, Date.now() + 10_000);
     is("confirmed final short batch preserves earlier progress", [tail?.status, tail?.done, tail?.sent, sent.length], ["sent", 3, 3, 1]);
+  }
+  part("announcement: a stop link that could not be kept is never sent, and the send stays pending");
+  {
+    reset();
+    const job = { id, community: store.community!.id, handle: store.handle, post: "f".repeat(12),
+      subject: "Synthetic announcement", body: "Synthetic body", total: 2, done: 0, sent: 0, status: "sending", note: "", failures: 0,
+    } as AnnouncementJob;
+    db.run(["SET", "nl:cm:mail:" + id, JSON.stringify(job)]);
+    db.run(["RPUSH", "nl:cm:mail:" + id + ":to", ...keys]);
+    db.run(["SADD", "nl:cm:mailq", id]);
+    const kept = members[0].t;
+    members[0].t = "";
+    setTokenWriteFails(true);
+    let result: Awaited<ReturnType<typeof advanceAnnouncement>> | "thrown" = null;
+    try { result = await advanceAnnouncement(id, async () => store, Date.now() + 10_000); } catch { result = "thrown"; }
+    const saved = JSON.parse(String(db.run(["GET", "nl:cm:mail:" + id])));
+    // Nothing of the store's email room stays held: whatever was reserved for this batch was given back (merge with
+    // #3140, which keeps every stop link before it reserves anything, so here nothing is reserved at all).
+    const held = reserved.reduce((a, b) => a + b, 0) - released.reduce((a, b) => a + b, 0);
+    is("nothing sent, no progress, nothing of the reservation held", [sent.length, saved.done, saved.sent, held], [0, 0, 0, 0]);
+    is("said as still pending, never thrown out of the mail job", result !== "thrown" && [result?.status, /couldn.t save/i.test(result?.note ?? "")], ["waiting", true]);
+    is("the list and the pending queue survive", [db.run(["LRANGE", "nl:cm:mail:" + id + ":to", 0, -1]), db.run(["SMEMBERS", "nl:cm:mailq"])], [keys, [id]]);
+    setTokenWriteFails(false);
+    const resumed = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+    is("once the token is kept, the same batch goes out", [resumed?.status, resumed?.sent, sent.length], ["sent", 2, 1]);
+    members[0].t = kept;
+  }
+  part("event reminder: a stop link that could not be kept is never sent, and the send stays pending");
+  {
+    reset();
+    const job = { id, community: store.community!.id, handle: store.handle, event: event.id, kind: "24",
+      start: event.start, was: 0, wasMinutes: 0, total: 2, done: 0, sent: 0, status: "sending", note: "", failures: 0,
+    } as EventMailJob;
+    db.run(["SET", "nl:cm:evmail:" + id, JSON.stringify(job)]);
+    db.run(["RPUSH", "nl:cm:evmail:" + id + ":to", ...keys]);
+    db.run(["SADD", "nl:cm:evmailq", id]);
+    const kept = members[1].t;
+    members[1].t = "";
+    setTokenWriteFails(true);
+    let result: Awaited<ReturnType<typeof advanceEventJob>> | "thrown" = null;
+    try { result = await advanceEventJob(id, async () => store, Date.now() + 10_000); } catch { result = "thrown"; }
+    const saved = JSON.parse(String(db.run(["GET", "nl:cm:evmail:" + id])));
+    is("nothing sent, no progress", [sent.length, saved.done, saved.sent], [0, 0, 0]);
+    is("said as still pending, never thrown out of the mail job", result !== "thrown" && [result?.status, /couldn.t save/i.test(result?.note ?? "")], ["sending", true]);
+    is("the list survives", db.run(["LRANGE", "nl:cm:evmail:" + id + ":to", 0, -1]), keys);
+    setTokenWriteFails(false);
+    const resumed = await advanceEventJob(id, async () => store, Date.now() + 10_000);
+    is("once the token is kept, the same batch goes out", [resumed?.status, resumed?.sent, sent.length], ["sent", 2, 1]);
+    members[1].t = kept;
   }
   done();
 }

@@ -36,6 +36,8 @@ import { deriveKey } from "@/lib/secret-box";
 import { normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -45,6 +47,7 @@ import { mintReviewLink, provePurchase } from "@/lib/review-proof";
 import { readReview, reviewId } from "@/lib/reviews";
 import { REVIEW_SITES, parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { type Store, storeForHandle } from "@/lib/store";
+import { storeOrGone } from "@/lib/store-gone";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -227,7 +230,7 @@ export function afterSent(
   ];
 }
 
-type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again" };
+type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim?: string };
 
 /**
  * Sends the review requests that are due, until the deadline or fifty
@@ -261,14 +264,33 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    if (!stores.has(entry.handle)) stores.set(entry.handle, await load(entry.handle).catch(() => null));
+    // Only an exact nil (or a released name) at the store's address is "no store" (CX-123 rule 24, lib/store-gone.ts). A
+    // read that threw or answered in another shape is not known: the order waits, as it does when Stripe cannot be read,
+    // and the failure is not kept for the run, so the store's other orders are read again.
+    if (!stores.has(entry.handle)) {
+      const loaded = await storeOrGone(load, entry.handle).then(
+        (found) => ({ found }),
+        (error: unknown) => {
+          console.error("reading a store for a review request failed", error);
+          return null;
+        },
+      );
+      if (!loaded) {
+        await later(member, nowSeconds + RETRY_SECONDS.stripe);
+        continue;
+      }
+      stores.set(entry.handle, loaded.found);
+    }
     const store = stores.get(entry.handle) ?? null;
     if (!store || store.statsId !== entry.statsId || !store.reviewAsk.days) {
       await drop(member);
       continue;
     }
     // Asked already: only the one reminder may follow, when the creator chose it; anything else is done.
-    const [mark] = await redisPipeline([["GET", sentKey(entry.reference)]]);
+    // Read exactly (CX-123 rule 24, L9): one reply, nil or text. Anything else is unknown and waits, never "not asked".
+    const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) continue;
+    const mark = read[0];
     const stage = askStage(mark, store.reviewAsk.again);
     if (!stage) {
       await drop(member);
@@ -322,15 +344,25 @@ export async function sendReviewRequests(
     }
     // Claimed before anything is sent, so two runs never send one email twice: the first by its mark,
     // the reminder by taking the order off the list (only one run takes it).
-    if (stage === "first") {
-      const [claimed] = await redisPipeline([["SET", sentKey(entry.reference), "sending", "NX", "EX", SENT_MARK_SECONDS]]);
-      if (claimed === null) {
+    // Ours only on OK or our own value read back (lib/claim-mark.ts); its value still reads as "being sent" to
+    // askStage. Taken by another run: dropped as before. Not known: let go if ours, left for the next run, nothing sent.
+    const claim = stage === "first" ? `sending:${claimValue()}` : undefined;
+    if (claim) {
+      const claimed = await claimMark(sentKey(entry.reference), SENT_MARK_SECONDS, claim);
+      if (claimed === "taken") {
         await drop(member);
         continue;
       }
+      if (claimed === "unknown") {
+        // It may have landed, and its "sending:" value would make the next run drop the order (askStage) though
+        // nothing was sent (Claude 5 on #2722). Nothing is sent on it, so it is let go if it still holds our own
+        // value (never another run's), and the order, still due, is asked again by the next run.
+        await releaseMark(sentKey(entry.reference), claim);
+        continue;
+      }
     } else {
-      const [taken] = await redisPipeline([["ZREM", ASK_DUE_KEY, member]]);
-      if (Number(taken) !== 1) continue;
+      const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
+      if (!taken || countOf(taken[0]) !== 1) continue;
     }
     const token = await mintReviewLink(store, entry.reference, email);
     const stop = await stopLink(store, email);
@@ -353,6 +385,7 @@ export async function sendReviewRequests(
       entry,
       member,
       stage,
+      claim,
       message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
     });
     groups.set(entry.handle, group);
@@ -363,10 +396,9 @@ export async function sendReviewRequests(
     const unclaim = async (at: number | null) => {
       const firsts = ready.filter((item) => item.stage === "first");
       const agains = ready.filter((item) => item.stage === "again");
-      await redisPipeline([
-        ...firsts.map((item) => ["DEL", sentKey(item.entry.reference)]),
-        ...(at === null ? [] : agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member])),
-      ]);
+      // Only this run's own first marks are let go (releaseMark), never one another run holds now.
+      for (const item of firsts) if (item.claim) await releaseMark(sentKey(item.entry.reference), item.claim);
+      if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };

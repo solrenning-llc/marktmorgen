@@ -28,6 +28,7 @@
  * thinner still — who did what, and where to go, never the words.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { pushMembers } from "@/lib/community-push";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -108,8 +109,10 @@ export async function tell(
     // oldest go, and none of its own room changes hands for it (each is
     // counted at the most a notice weighs). With no room left, nothing is
     // filed: what it is about was written, and that is what matters.
-    const sizes = await redisPipeline(who.map((one) => ["ZCARD", listKey(id, one)]));
-    const growing = sizes.filter((n) => Number(n) < MAX_NOTICES).length;
+    // Rule 24: a size in an unknown shape files nothing, so no list grows without its room.
+    const sizes = repliesFor(await redisPipeline(who.map((one) => ["ZCARD", listKey(id, one)])), who.length)?.map(countOf);
+    if (!sizes || sizes.some((n) => n === null)) throw new UnknownReplyError("a community notice list's size");
+    const growing = sizes.filter((n) => n !== null && n < MAX_NOTICES).length;
     const taken = growing ? await takeData(room, [{ slot: NOTICES_SLOT, bytes: growing * NOTICE_BYTES }]) : { ok: true as const };
     if (taken.ok) {
       await redisPipeline(
@@ -186,8 +189,20 @@ export async function forgetNoticesPerson(id: string, who: string): Promise<numb
   return gone.value;
 }
 
-/** Every notice one member has, newest first, for the copy of their data (619 [SZ3]); only reads, never marks them seen. */
+/**
+ * Every notice one member has, newest first, for the copy of their data (619 [SZ3]); only reads, never marks them seen.
+ * Read in its exact shape (CX-123 rule 24): a reply of another shape, or a kept notice that does not read, throws
+ * UnknownReplyError, and copyPerson fails the whole copy rather than hand it over as complete without them. Only an
+ * empty list (no key) is "no notices". The member's own list and badge (noticesFor, unreadCount) stay as they are:
+ * they show, and decide nothing.
+ */
 export async function allNoticesOf(id: string, who: string): Promise<Notice[]> {
-  const [raw] = await redisPipeline([["ZREVRANGE", listKey(id, who), 0, MAX_NOTICES - 1]]);
-  return (Array.isArray(raw) ? raw : []).map(parse).filter((n): n is Notice => n !== null);
+  const replies = repliesFor(await redisPipeline([["ZREVRANGE", listKey(id, who), 0, MAX_NOTICES - 1]]), 1);
+  const rows = replies ? stringList(replies[0]) : null;
+  if (!rows) throw new UnknownReplyError("a member's community notices");
+  return rows.map((row) => {
+    const notice = parse(row);
+    if (!notice) throw new UnknownReplyError("a kept community notice");
+    return notice;
+  });
 }

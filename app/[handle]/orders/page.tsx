@@ -1,4 +1,5 @@
 import { EmailField } from "@/components/email-field";
+import { EmptyState } from "@/components/empty-state";
 import { placeLine } from "@/lib/call-place";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { isDiscordConfigured } from "@/lib/discord";
@@ -13,6 +14,8 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { windowOf, withConfirmations } from "@/lib/withdrawal";
+import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
 import { type Extras, askBundle, askOlder, cardOf, extrasFor, ordersShared } from "@/lib/purchase-cards";
@@ -70,16 +73,27 @@ function zoneName(ms: number, tz: string, locale: string): string {
 /**
  * A call still to come: when, in the buyer's own time zone, where to join,
  * and the calendar file and the way to move it, as in the booking email.
+ *
+ * Each of its links is named by the call it is for (WCAG 2.4.9, technique
+ * ARIA7): the link's own words first, as WCAG 2.5.3 asks of a visible label,
+ * then the card's heading, then its time when the buyer booked the same
+ * product more than once, so "Add it to your calendar" is read as "Add it to
+ * your calendar Coaching call" and a list of the page's links tells every
+ * call apart. By reference, not by repeating
+ * the title in each link: a title of MAX_TITLE_LENGTH at the costliest
+ * character, three times more in each of MAX_LISTED calls, would outgrow
+ * ORDERS_PAGE_BYTES (tests/orders-page-bounds.test.ts).
  */
-function BookedCallCard({ call, store, words }: { call: BookedCall; store: Store; words: OrdersWords }) {
+function BookedCallCard({ call, store, words, id, sameTitle }: { call: BookedCall; store: Store; words: OrdersWords; id: string; sameTitle: boolean }) {
   const video = isVideoRoom(call.room);
   const minutes = Math.round((call.end - call.start) / 60_000);
   const locale = speech(store).lang.locale;
+  const named = (link: string) => ({ id: `${id}${link}`, "aria-labelledby": `${id}${link} ${id}${sameTitle ? ` ${id}w` : ""}` });
   return (
     <li className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
       {/* A heading under "Booked calls", so the list is walked call by call (WCAG 2.4.10). */}
-      <h3 className="font-semibold">{call.title}</h3>
-      <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
+      <h3 id={id} className="font-semibold">{call.title}</h3>
+      <p id={sameTitle ? `${id}w` : undefined} className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
         {readableTime(call.start, call.buyerTz, locale)}
       </p>
       <p className="st-muted text-sm">{words.callLength(zoneName(call.start, call.buyerTz, locale), minutes)}</p>
@@ -88,19 +102,19 @@ function BookedCallCard({ call, store, words }: { call: BookedCall; store: Store
           /* In person (lib/call-place.ts): where, as text, and no link. */
           <p className="text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(call.setup.place))}</p>
         ) : call.room ? (
-          <a href={call.room} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn btn-block">
+          <a href={call.room} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn btn-block" {...named("j")}>
             {words.roomLabels[roomKind(call.room)]}
           <NewTab language={store.language} /></a>
         ) : (
           <p className="st-muted text-sm">{words.linkBeforeCall(store.name)}</p>
         )}
         {video ? <p className="st-muted text-xs leading-relaxed">{words.videoRoomNote}</p> : null}
-        <a href={icsLink("", store, call.session)} className="btn btn-secondary btn-block">
+        <a href={icsLink("", store, call.session)} className="btn btn-secondary btn-block" {...named("a")}>
           {words.addToCalendar}
         </a>
         {canMove(call.setup, call.start, call.moves) ? (
           <p className="text-center text-sm">
-            <a href={moveLink("", store, call.productId, call.session)} className="st-footer-link inline-flex min-h-11 items-center font-semibold">
+            <a href={moveLink("", store, call.productId, call.session)} className="st-footer-link inline-flex min-h-11 items-center font-semibold" {...named("m")}>
               {words.moveCall}
             </a>
           </p>
@@ -163,8 +177,9 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   // them a batch at a time (components/older-purchases.tsx), from where `older.cursor` says.
   let older: ReturnType<typeof olderOf> = { cursor: null, count: 0, added: false };
   let discordProducts: Set<string> | null = null;
-  // What the purchases need besides themselves: podcast feeds, license keys and what can be reviewed (lib/purchase-cards.ts).
-  let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set() };
+  // What the purchases need besides themselves: podcast feeds, license keys, what can be reviewed and how far the buyer is
+  // in each course (lib/purchase-cards.ts).
+  let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set(), progress: new Map() };
   if (email && meter) {
     try {
       // Waited on ORDERS_READ_MS at the most (lib/buyer-orders.ts, withinOpening): past it nothing more is read and the
@@ -172,7 +187,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
       const reading = (async () => {
         // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
         // a failure nobody expected is said as "could not be read", never as nothing waiting.
-        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
+        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter).then((listed) => withConfirmations(listed, meter)), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
 
         // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
         const discord = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
@@ -248,14 +263,14 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                     {words.bookedCalls(calls.length)}
                   </h2>
                   <ul className="mt-4 space-y-4">
-                    {calls.map((call) => (
-                      <BookedCallCard key={call.session} call={call} store={store} words={words} />
+                    {calls.map((call, i) => (
+                      <BookedCallCard key={call.session} call={call} store={store} words={words} id={`bc${i}`} sameTitle={calls.some((other) => other !== call && other.title === call.title)} />
                     ))}
                   </ul>
                 </section>
               ) : null}
               {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 && !older.cursor ? (
-                <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
+                <EmptyState title={words.nothingToOpenTitle} body={words.nothingToOpen(store.name)} className="mt-6" />
               ) : (
                 <>
                   <p className="st-muted mt-4 leading-relaxed">{words.everythingSold(store.name)}</p>
@@ -283,6 +298,15 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                     ) : null}
                     {older.cursor ? <OlderPurchases older={older.cursor} left={words.olderNotChecked(older.count, older.added)} /> : null}
                   </OrdersSharedProvider>
+                  {/* The EU withdrawal function (lib/withdrawal.ts, 588 [KB9]): one link, the same size whatever the list holds (a line
+                      per purchase would outgrow ORDERS_PAGE_BYTES), to the page that lists the purchases still inside their period. */}
+                  {purchases.some((purchase) => windowOf(purchase).open) ? (
+                    <p className="mt-7">
+                      <Link href={`/@${store.handle}/orders/withdraw?${new URLSearchParams({ token })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+                        {withdrawalWords(store.language).withdrawLink}
+                      </Link>
+                    </p>
+                  ) : null}
                   <p className="st-muted mt-6 text-sm">{words.worksFor24}</p>
                 </>
               )}

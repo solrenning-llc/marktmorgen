@@ -16,8 +16,11 @@
  *     to MAX_ACTION_POINTS; a community that never opens the setting keeps
  *     exactly today's rule.
  *   - One award per fact (a post, a comment, a lesson of a product), keyed by
- *     factKey: posting, deleting and posting again, or marking a lesson
- *     finished twice, never makes points twice.
+ *     factKey: marking a lesson finished twice, or a post or comment sent
+ *     again, never makes points twice. A post posted again after a delete
+ *     is a new fact; what keeps that from paying twice is the take-back on
+ *     every removal (below), which the next unit must make on every
+ *     "deleted" and "removed", together with the day's count.
  *   - A daily cap per member on what these actions make (likes stay as they
  *     are), so a flood of short posts is not a way up the board.
  *   - The creator collects no points: the board is for members.
@@ -43,12 +46,13 @@ export type PointRules = { post: number; comment: number; lesson: number; dailyC
 export const NO_ACTION_POINTS: PointRules = Object.freeze({ post: 0, comment: 0, lesson: 0, dailyCap: DEFAULT_DAILY_CAP }) as PointRules;
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
+const isAction = (action: unknown): action is PointAction => typeof action === "string" && (POINT_ACTIONS as readonly string[]).includes(action);
 const PRODUCT = /^[a-z0-9]{6,40}$/;
 
 const inRange = (value: unknown, low: number, high: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= low && value <= high;
 
-/** What was stored, made safe: a field out of bounds goes back to its own default, never to more. */
+/** What was stored, made safe: a field out of bounds gives nothing (points 0, cap 0), never more; no cap stored is the default. */
 export function parsePointRules(raw: unknown): PointRules {
   let value: unknown = raw;
   if (typeof raw === "string") {
@@ -65,7 +69,9 @@ export function parsePointRules(raw: unknown): PointRules {
     post: points(v.post),
     comment: points(v.comment),
     lesson: points(v.lesson),
-    dailyCap: inRange(v.dailyCap, 1, MAX_DAILY_POINTS) ? v.dailyCap : DEFAULT_DAILY_CAP,
+    // No cap stored yet is the default; a stored cap that does not read is 0, so nothing more is given, never a
+    // bigger cap than the creator chose (Codex G on #3656).
+    dailyCap: v.dailyCap === undefined ? DEFAULT_DAILY_CAP : inRange(v.dailyCap, 1, MAX_DAILY_POINTS) ? v.dailyCap : 0,
   };
 }
 
@@ -82,7 +88,7 @@ export function readPointRulesInput(raw: unknown): { ok: true; rules: PointRules
 
 /** The one key a fact is awarded under; null when an id is not one, and then nothing is awarded. */
 export function factKey(action: PointAction, ids: { id: string; product?: string }): string | null {
-  if (!ID.test(ids.id)) return null;
+  if (!isAction(action) || !ID.test(ids.id)) return null;
   if (action === "post") return `p:${ids.id}`;
   if (action === "comment") return `c:${ids.id}`;
   if (typeof ids.product !== "string" || !PRODUCT.test(ids.product)) return null;
@@ -100,6 +106,8 @@ export function pointsToAward(
   rules: unknown,
   ask: { action: PointAction; byCreator: boolean; earnedToday: number; alreadyAwarded: boolean | null },
 ): { give: number; why: AwardWhy } {
+  // An action that is not one is refused, never read off another field of the rules (Codex G on #3656).
+  if (!isAction(ask.action)) return { give: 0, why: "unknown" };
   const safe = parsePointRules(rules);
   const value = safe[ask.action];
   if (value === 0) return { give: 0, why: "off" };
@@ -120,7 +128,7 @@ const TAKEN_BACK_WHEN: Record<PointAction, readonly string[]> = {
 };
 
 export function shouldTakeBack(action: PointAction, reason: string): boolean {
-  return TAKEN_BACK_WHEN[action].includes(reason);
+  return isAction(action) && TAKEN_BACK_WHEN[action].includes(reason);
 }
 
 /**
@@ -140,6 +148,8 @@ const pts = (n: number) => `${n} ${n === 1 ? "point" : "points"}`;
 export function pointRulesWords(rules: unknown): string[] {
   const safe = parsePointRules(rules);
   const lines = ["A like on your post or comment from someone else: 1 point."];
+  // A cap that does not read gives nothing: no line promises points that would not come.
+  if (!safe.dailyCap) return lines;
   if (safe.post) lines.push(`A new post: ${pts(safe.post)}.`);
   if (safe.comment) lines.push(`A comment: ${pts(safe.comment)}.`);
   if (safe.lesson) lines.push(`A lesson you finish: ${pts(safe.lesson)}.`);

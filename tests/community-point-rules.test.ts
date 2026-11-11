@@ -31,9 +31,9 @@ is("the bounds", [MAX_ACTION_POINTS, MAX_DAILY_POINTS, DEFAULT_DAILY_CAP], [5, 5
 part("What the creator chose, read back");
 is("kept as saved, from an object or from its JSON", [parsePointRules(ON), parsePointRules(JSON.stringify(ON))], [ON, ON]);
 is(
-  "a field out of bounds goes back to its own default, never to more",
+  "a field out of bounds gives nothing, never more (a cap that does not read is 0, Codex G on #3656)",
   parsePointRules({ post: 9, comment: -1, lesson: 2.5, dailyCap: 500 }),
-  { post: 0, comment: 0, lesson: 0, dailyCap: DEFAULT_DAILY_CAP },
+  { post: 0, comment: 0, lesson: 0, dailyCap: 0 },
 );
 is(
   "the studio's form: whole numbers in bounds, from numbers or digits",
@@ -116,6 +116,7 @@ is(
 part("A stored cap that does not read never raises the cap (Codex G on #3656, LEVE)");
 is("a cap of 2 damaged into text gives nothing more, never the default 10", [parsePointRules({ ...ON, dailyCap: "2" }).dailyCap, pointsToAward({ ...ON, dailyCap: "2" }, { action: "post", byCreator: false, earnedToday: 0, alreadyAwarded: false }).give], [0, 0]);
 is("a fractional cap too", parsePointRules({ ...ON, dailyCap: 2.5 }).dailyCap, 0);
+is("and the leaderboard promises no points the cap would never give", pointRulesWords({ ...ON, dailyCap: "2" }), ["A like on your post or comment from someone else: 1 point."]);
 is("control: no cap stored yet is the default", parsePointRules({ post: 2, comment: 1, lesson: 3 }).dailyCap, DEFAULT_DAILY_CAP);
 
 part("An action that is not one is refused, never read off another field (Codex G on #3656, LEVE)");

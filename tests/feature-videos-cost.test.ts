@@ -45,7 +45,7 @@ is("a month at the play ceiling", cost.deliveryMonthUsd, (MONTHLY_PLAY_CEILING *
 is("kept in the most regions the service offers", MAX_REPLICATION_REGIONS, 8);
 
 part("The ceiling bounds the month");
-is("the month never passes storage plus delivery at the ceiling", cost.monthCeilingUsd, cost.storageMonthUsd + cost.deliveryMonthUsd);
+is("the month at most is storage, delivery at the ceiling and the counter", cost.monthCeilingUsd, cost.storageMonthUsd + cost.deliveryMonthUsd + cost.counterMonthUsd);
 is("one more play than the ceiling is not delivered", cost.playsDeliveredAt(MONTHLY_PLAY_CEILING + 1), MONTHLY_PLAY_CEILING);
 
 part("The record");

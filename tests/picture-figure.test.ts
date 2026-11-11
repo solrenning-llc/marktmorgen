@@ -36,7 +36,7 @@ const unpaid = { subscriptionActive: false, trialEnds: 0, planEndedAt: "" } as n
 
   part("A place taken before a picture is kept");
   redis.clear();
-  const folder = "f0123456789abcdef0123456789abcd";
+  const folder = "0123456789abcdef01234567";
   is("within the figure: taken", await takePictureBytes(folder, 600, 1_000), true);
   is("and counted", Number(redis.run(["GET", PICTURES_BYTES_KEY(folder)])), 600);
   is("past the figure: refused", await takePictureBytes(folder, 500, 1_000), false);

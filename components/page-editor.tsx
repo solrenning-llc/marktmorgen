@@ -23,7 +23,7 @@ import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
 import { PageStylePicker } from "@/components/page-style-picker";
 import { BlockPicker } from "@/components/block-picker";
-import { addedSaying, chosenSaying, insertAt, insertionPlaces, offeredKinds, placeWords } from "@/lib/block-insert";
+import { addedSaying, chosenSaying, focusAfterRemoval, insertAt, insertionPlaces, itemAddId, itemFocusAfterRemoval, itemRemoveId, movedSaying, noStepSaying, offeredKinds, placeWords, removedSaying, stepSaying, stuckSaying, whyStuck, type StepBlock } from "@/lib/block-insert";
 import { browserFrames, focusWhenDrawn, groupEntry } from "@/lib/focus-when-drawn";
 import { SharePanel } from "@/components/share-panel";
 import { useLeaveGuard } from "@/components/leave-guard";
@@ -80,6 +80,7 @@ import {
   BLOCK_SHOWS,
   MAX_PICKED_REVIEWS,
   HERO_LAYOUTS,
+  SPACE_SIZES,
   MAX_PRODUCT_NOTE,
   MAX_QUOTES,
   MAX_QUOTE,
@@ -120,6 +121,7 @@ import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { serverNote } from "@/lib/server-note";
 import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
 import { SidePanelSwitch, useSidePanel } from "@/components/side-panel-switch";
 import { COMPUTER_BODY_MAX, type PreviewScreen, screenFor } from "@/lib/preview-screen";
@@ -148,13 +150,15 @@ import {
 // Started provider attempts stay counted even when their reply is unusable (lib/ai.ts).
 const HEADLINE_UNCONFIRMED_NOTE = "A replacement headline was not confirmed. Your current draft was kept. Started attempts count toward your monthly writing allowance. Check your allowance before trying again.";
 
-const MESSAGES: Record<string, string> = {
+/** What the editor says when the page could not be saved, by the refusal's code (exported for its test). */
+export const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   too_many: `A page can have up to ${MAX_BLOCKS} blocks.`,
   hero_first: "The hero can only be the first block: it carries the page's main headline.",
   two_reviews: "Reviews can sit in one place on the page. Remove the second block of them.",
   video: "That video address is not one we can play. Paste a YouTube, Vimeo or Loom link.",
-  pictures: `A picture on the page could not be kept. A page holds up to ${MAX_PAGE_PICTURES} pictures, each shown once: remove the one that was added twice, or add it again.`,
+  // Also a new picture whose upload is no longer known (more than a day old, or one used elsewhere): lib/sales-page-store.ts.
+  pictures: `A picture on the page could not be kept. Add the picture again from your device, then save. A page holds up to ${MAX_PAGE_PICTURES} pictures, and each one is shown once, so remove any picture that is there twice.`,
   countdown: "Give the countdown the moment it runs to, no more than a year away, or remove the block.",
   quote_length: `A quotation exceeds the ${MAX_QUOTE}-character limit. Use a shorter, complete quotation from the source or remove it. Nothing was saved.`,
   quote_link: "Each thing said elsewhere needs the full https address of where it was said, so visitors can check it. Add it, or remove that one.",
@@ -168,10 +172,40 @@ const MESSAGES: Record<string, string> = {
   unknown: "That product is no longer in your store. Reload the page.",
   store_full: "Your store is full. Remove something before adding more.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  // This tab still holds the page being edited: logging in here would leave it (WCAG 2.2.5).
+  signed_out: "Your session ended. Your changes are still here, not saved yet: log in again in a new tab, then come back to this tab and press Save the page.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
+
+/** A Clear refused because the session ended: Clear is offered only with nothing unsaved, when Save the page is off, so it says to press its own Yes again. */
+export const SIGNED_OUT_CLEARING = "Your session ended, so the page was not cleared. Log in again in a new tab, then come back to this tab and press Yes, clear it again.";
+
+/** The words for a refusal from the server, for a save or, `clearing`, for Clear. */
+export function refusalWords(error: string | undefined, clearing: boolean): string {
+  if (error === "signed_out" && clearing) return SIGNED_OUT_CLEARING;
+  return MESSAGES[error ?? ""] ?? MESSAGES.server_error;
+}
+
+/**
+ * A refusal, said at once; a session that ended links to the log-in page in a new tab, so this tab keeps the page.
+ * Its words already say so to everyone, so it carries no <NewTab />, which would say it a second time.
+ */
+export function ErrorNotice({ error }: { error: string }) {
+  return (
+    <p className="notice notice-error mt-4" role="alert">
+      {error}
+      {error === MESSAGES.signed_out || error === SIGNED_OUT_CLEARING ? (
+        <>
+          {" "}
+          <a href="/signin" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold underline underline-offset-4">
+            Log in again in a new tab
+          </a>
+        </>
+      ) : null}
+    </p>
+  );
+}
 
 /** A moment in seconds as the date-and-time field holds it, in the creator's own time zone. */
 function toLocalField(seconds: number): string {
@@ -191,7 +225,7 @@ function fromLocalField(value: string): number {
 const MIN_DEPTH_VISITORS = 30;
 
 // A booking block (552 [BB1]) is not in the gallery yet, so its name is given here.
-const kindLabel = (kind: BlockKind) => (kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
+export const kindLabel = (kind: BlockKind) => (kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
 
 export type EditorProduct = {
   id: string;
@@ -252,6 +286,7 @@ export function PageEditor({
   folder,
   lang = "en",
   facts = {},
+  factsUnread = [],
   traffic = null,
   outline = [],
   asked = [],
@@ -285,6 +320,8 @@ export function PageEditor({
   lang?: LanguageCode;
   /** The numbers the store has counted for this product (lib/page-facts.ts). */
   facts?: PageFacts;
+  /** The numbers whose read did not come back (lib/page-facts-read.ts): said as not read, never as not shown. */
+  factsUnread?: readonly FactKey[];
   /** Its page's last 30 days: times it was opened, checkouts started. */
   traffic?: { views: number; checkouts: number } | null;
   /** A course's modules and lessons, by title, to fill "What's inside" from (lib/course-outline-items.ts). */
@@ -459,12 +496,20 @@ export function PageEditor({
     const from = direction === "back" ? h.past : h.future;
     const to = direction === "back" ? h.future : h.past;
     const step = from.pop();
-    if (!step) return;
-    to.push(h.last);
+    // The buttons stay focusable with nothing left that way (WCAG 2.4.3), so a press, or Ctrl+Z, says so.
+    if (!step) {
+      setSaid(noStepSaying(direction));
+      return;
+    }
+    const was = h.last;
+    to.push(was);
     h.last = step;
     setDrafts(step.drafts);
     setStyle(step.style);
     setStepsLeft({ back: h.past.length, forward: h.future.length });
+    // What came back or went is said, for a screen reader that cannot see the page change (WCAG 4.1.3).
+    const seen = (all: Draft[]): StepBlock[] => all.map((d) => ({ id: d.block.id, label: kindLabel(d.block.kind), draft: d }));
+    setSaid(stepSaying(direction, seen(was.drafts), seen(step.drafts), was.style !== step.style, from.length));
   }
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -496,7 +541,13 @@ export function PageEditor({
   const [chosenKind, setChosenKind] = useState<BlockKind | null>(null);
   const [draggingKind, setDraggingKind] = useState<BlockKind | null>(null);
   const [overPlace, setOverPlace] = useState<number | null>(null);
-  const [said, setSaid] = useState("");
+  // The same words said twice are said again, a space apart, so the live region always speaks (as RowEditor's).
+  const [said, setSaidNow] = useState("");
+  const again = useRef(false);
+  const setSaid = (text: string) => {
+    again.current = !again.current;
+    setSaidNow(text ? `${text}${again.current ? "\u00a0" : ""}` : "");
+  };
   const focusNew = useRef<string | null>(null);
   // Places held in a row for a picture still being sent there, by the row's id (lib/row-edit-rules.ts, RowHeld):
   // kept here, not in the row's editor, so closing and reopening the row while it is sent never frees them.
@@ -635,6 +686,20 @@ export function PageEditor({
     },
     [],
   );
+  // The screen turned wide while a place waits for a block: a press that came before the screen was measured, or a
+  // window made wider. The picker under the blocks is no longer drawn there, so the column beside them shows the
+  // blocks to add rather than the page, and the focus, when it went with the picker, goes to its search. Only on that
+  // turn, so "Preview" pressed while a place waits is kept.
+  const wasBeside = useRef(false);
+  useEffect(() => {
+    const turned = sideBySide && !wasBeside.current;
+    wasBeside.current = sideBySide;
+    if (!turned || picking === null) return;
+    showSidePanel("add");
+    if (document.activeElement && document.activeElement !== document.body) return;
+    stopFocusMenu.current?.();
+    stopFocusMenu.current = focusWhenDrawn(() => document.getElementById("menu-block-find"), browserFrames());
+  }, [sideBySide, picking, showSidePanel]);
 
   /** "Add here" at a place: the card chosen goes there, or the place waits for a card (in the side menu, or the gallery opened here). */
   function addHere(at: number) {
@@ -705,14 +770,24 @@ export function PageEditor({
   }
 
   function move(index: number, by: -1 | 1) {
+    const to = index + by;
+    const moving = drafts[index];
+    if (!moving) return;
+    // A press where the block cannot go says why, rather than nothing (WCAG 4.1.3).
+    const stuck = whyStuck(index, by, drafts.length, (i) => drafts[i].block.kind === "hero");
+    if (stuck) {
+      setSaid(stuckSaying(kindLabel(moving.block.kind), stuck, kindLabel("hero")));
+      return;
+    }
     setDrafts((all) => {
-      const to = index + by;
       if (to < 0 || to >= all.length) return all;
       if (all[index].block.kind === "hero" || all[to].block.kind === "hero") return all;
       const copy = [...all];
       [copy[index], copy[to]] = [copy[to], copy[index]];
       return copy;
     });
+    // The focus stays on the button pressed, which moves with its block; the place it reached is said (WCAG 4.1.3).
+    setSaid(movedSaying(kindLabel(moving.block.kind), to, drafts.length));
   }
 
   /** Dropping one block on another puts it in that place; the hero stays on top. */
@@ -772,8 +847,25 @@ export function PageEditor({
     });
   }
 
+  /**
+   * A block taken off the page, one step of Undo. Its row goes with the focus in it, so the focus moves to the
+   * block now in its place, or the one before it, or to the place to add one when none is left (WCAG 2.4.3),
+   * and what happened is said, with how to bring it back (WCAG 3.3.6, 4.1.3).
+   */
   function remove(index: number) {
+    const gone = drafts[index];
+    if (!gone) return;
+    const left = drafts.filter((_, i) => i !== index);
+    const next = focusAfterRemoval(index, left.length);
+    const nextId = next === null ? null : left[next].block.id;
     setDrafts((all) => all.filter((_, i) => i !== index));
+    setSaid(removedSaying(kindLabel(gone.block.kind), index));
+    stopFocusNew.current?.();
+    stopFocusNew.current = focusWhenDrawn(() => {
+      if (nextId !== null) return document.querySelector<HTMLElement>(`button[aria-controls="panel-${CSS.escape(nextId)}"]`);
+      // The row is gone once the list is drawn again; until then the place to add a block may still be the old one.
+      return document.getElementById(`row-${CSS.escape(gone.block.id)}`) ? null : document.querySelector<HTMLElement>("[data-place]");
+    }, browserFrames());
   }
 
   /**
@@ -845,22 +937,30 @@ export function PageEditor({
   const [versionNote, setVersionNote] = useState<string | null>(null);
   async function loadVersions() {
     setVersionNote(null);
+    let refused: unknown = null;
     try {
       const response = await fetch(`/api/store/page-versions?id=${encodeURIComponent(pageKey)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; versions?: { index: number; at: number; blocks: number; headline: string }[] };
-      if (!data.ok || !data.versions) throw new Error("unread");
+      if (!data.ok || !data.versions) {
+        refused = data;
+        throw new Error("unread");
+      }
       setVersions(data.versions);
     } catch {
       setVersions(null);
-      setVersionNote("The earlier versions could not be read just now. Try again in a moment.");
+      setVersionNote(serverNote(refused, "The earlier versions could not be read just now. Try again in a moment."));
     }
   }
   async function bringBack(index: number) {
     setVersionNote(null);
+    let refused: unknown = null;
     try {
       const response = await fetch(`/api/store/page-versions?id=${encodeURIComponent(pageKey)}&n=${index}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; at?: number; page?: SalesPage; dropped?: number };
-      if (!data.ok || !data.page) throw new Error("unread");
+      if (!data.ok || !data.page) {
+        refused = data;
+        throw new Error("unread");
+      }
       const page = data.page;
       putVersions(page, false);
       setSeoTitle(page.seoTitle);
@@ -878,7 +978,7 @@ export function PageEditor({
         `Loaded the version from ${whenSaved(data.at ?? 0)}. Press Save to put it back live${dropped ? `; ${dropped === 1 ? "one picture was" : `${dropped} pictures were`} deleted since, so add ${dropped === 1 ? "it" : "them"} again if you want ${dropped === 1 ? "it" : "them"}` : ""}.`,
       );
     } catch {
-      setVersionNote("That version could not be read just now. Try again in a moment.");
+      setVersionNote(serverNote(refused, "That version could not be read just now. Try again in a moment."));
     }
   }
 
@@ -905,7 +1005,7 @@ export function PageEditor({
       const response = await fetch(`/api/store/page?id=${encodeURIComponent(copyFrom)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; blocks?: PageBlock[]; picturesLeft?: number; style?: PageStyle };
       if (!data.ok || !data.blocks?.length) {
-        setCopyNote("That page could not be read just now. Try again in a moment.");
+        setCopyNote(serverNote(data, "That page could not be read just now. Try again in a moment."));
         return;
       }
       const blocks = data.blocks;
@@ -1011,6 +1111,7 @@ export function PageEditor({
           setOther(null);
           setOnB(false);
           setOpen(null);
+          focusAfterClear();
         } else if (data.page && unchangedSince(page)) {
           putVersions(data.page, onB);
           if (data.page.test) setTestHeadline(data.page.test.headline);
@@ -1022,12 +1123,36 @@ export function PageEditor({
         if (versions !== null) void loadVersions();
         return;
       }
-      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
     } catch {
       setError(MESSAGES.server_error);
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Clearing the page, from its Yes button, which keeps the focus while it clears (WCAG 2.4.3): a press while busy does nothing. */
+  function clearNow() {
+    if (busy) return;
+    void send(null, "Page cleared.");
+  }
+
+  /**
+   * The question about clearing goes with the page cleared, and the focus in it (WCAG 2.4.3): to Add a block once
+   * no block is drawn, or to the editor's heading where none is drawn (the preview).
+   */
+  function focusAfterClear() {
+    stopFocusNew.current?.();
+    stopFocusNew.current = focusWhenDrawn(() => {
+      if (document.querySelector('[id^="row-"]')) return null;
+      return document.querySelector<HTMLElement>('[data-place="0"]') ?? document.getElementById("page-title");
+    }, browserFrames());
+  }
+
+  /** Save, from a button that keeps the focus while it saves and after (WCAG 2.4.3): a press while it cannot save does nothing. */
+  function saveNow() {
+    if (busy || !dirty) return;
+    void send(pageToSend(), "Page saved.");
   }
 
   const ctx: BlockContext = {
@@ -1538,6 +1663,7 @@ export function PageEditor({
               folder={folder}
               items={block.items}
               room={Math.min(MAX_PICTURES, MAX_PAGE_PICTURES - elsewhere - onlyInOther)}
+              away={`${base}-h`}
               onChange={(items) => change(index, { items })}
             />
           </div>
@@ -1591,6 +1717,7 @@ export function PageEditor({
               folder={folder}
               items={block.picture ? [block.picture] : []}
               room={Math.max(0, Math.min(1, MAX_PAGE_PICTURES - elsewhere - onlyInOther))}
+              away={`${base}-h`}
               onChange={(items) => change(index, { picture: items[0] ?? null })}
             />
             <fieldset>
@@ -1789,6 +1916,31 @@ export function PageEditor({
           />
         );
       }
+      case "divider":
+        return <p className="text-sm text-ink-soft">A thin line across your page, in your store&apos;s colors. Nothing to fill in: move it to where one part ends and the next begins.</p>;
+      case "space":
+        return (
+          <fieldset>
+            <legend className="field-label">How much room</legend>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {SPACE_SIZES.map((option) => {
+                const on = block.size === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => change(index, { size: option.value })}
+                    className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold ring-1 transition-colors motion-reduce:transition-none ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "bg-white text-ink-soft ring-line hover:text-ink"}`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-ink-soft">Empty room between two parts of your page. Nothing to fill in.</p>
+          </fieldset>
+        );
       case "booking":
         return (
           <p className="text-sm text-ink-soft">
@@ -1821,7 +1973,7 @@ export function PageEditor({
                       <span>
                         <span className="block font-semibold text-ink">
                           {fact.label}
-                          <span className="ml-2 font-normal text-ink-soft">{now ? `now: ${now.value} ${now.label}` : "not shown yet"}</span>
+                          <span className="ml-2 font-normal text-ink-soft">{now ? `now: ${now.value} ${now.label}` : factsUnread.includes(fact.key) ? "could not be read just now" : "not shown yet"}</span>
                         </span>
                         <span className="block text-xs text-ink-soft">{fact.hint}</span>
                       </span>
@@ -1938,13 +2090,18 @@ export function PageEditor({
         const titled = heading && heading.kind === "heading" ? `${heading.text} · ` : "";
         return `${titled}${block.columns.length} ${block.columns.length === 1 ? "column" : "columns"} · ${parts} ${parts === 1 ? "part" : "parts"}`;
       }
+      case "divider":
+        return "A line across the page";
+      case "space":
+        return `${SPACE_SIZES.find((s) => s.value === block.size)?.label ?? "Medium"} room`;
       case "booking": {
         const chosen = featurable.find((p) => p.id === block.product);
         return `${block.heading ? `${block.heading} · ` : ""}${chosen ? chosen.card.title : "A call from your store"}`;
       }
       case "facts": {
         const live = block.show.filter((key) => facts[key]).length;
-        return `${block.heading ? `${block.heading} · ` : ""}${live} ${live === 1 ? "number" : "numbers"} shown now`;
+        const unread = block.show.filter((key) => !facts[key] && factsUnread.includes(key)).length;
+        return `${block.heading ? `${block.heading} · ` : ""}${live} ${live === 1 ? "number" : "numbers"} shown now${unread ? `, ${unread} could not be read just now` : ""}`;
       }
     }
   };
@@ -1955,7 +2112,7 @@ export function PageEditor({
     <section aria-labelledby="page-title" className="card min-w-0 p-5 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 id="page-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+          <h2 id="page-title" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">
             {site ? product.title : `${kind} for ${product.title}`}
           </h2>
           <p className="mt-1 text-sm text-ink-soft">
@@ -1979,9 +2136,10 @@ export function PageEditor({
               type="button"
               aria-pressed={view === v}
               onClick={() => setView(v)}
-              className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold transition-colors ${view === v ? "bg-white text-ink shadow-sm ring-1 ring-line" : "text-ink-soft hover:text-ink"}`}
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors ${view === v ? "bg-white text-ink shadow-sm ring-1 ring-line" : "text-ink-soft hover:text-ink"}`}
             >
               {v === "build" ? "Build" : "Preview"}
+              {view === v ? <Icon name="check" size={16} /> : null}
             </button>
           ))}
         </div>
@@ -1990,10 +2148,10 @@ export function PageEditor({
             id="undo-step"
             type="button"
             onClick={() => stepTo("back")}
-            disabled={stepsLeft.back === 0 && !dirty}
+            aria-disabled={(stepsLeft.back === 0 && !dirty) || undefined}
             title="Undo (Ctrl+Z)"
             aria-label="Undo the last change"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink disabled:opacity-35"
+            className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink"
           >
             <Icon name="undo" size={18} />
           </button>
@@ -2001,10 +2159,10 @@ export function PageEditor({
             id="redo-step"
             type="button"
             onClick={() => stepTo("forward")}
-            disabled={stepsLeft.forward === 0}
+            aria-disabled={stepsLeft.forward === 0 || undefined}
             title="Redo (Ctrl+Shift+Z)"
             aria-label="Redo"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink disabled:opacity-35"
+            className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink"
           >
             <Icon name="redo" size={18} />
           </button>
@@ -2056,7 +2214,10 @@ export function PageEditor({
         // On a wide screen the page is drawn beside the blocks as they are edited, in one column it shares with
         // the side menu of blocks to add, switched at its top (375 [TB1]; two columns of their own left the
         // blocks 182 pixels at 1280, lib/side-panel.ts); on a narrow screen the gallery opens where a place is pressed.
-        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_25.5rem] items-start gap-5" : ""}>
+        // The two columns come from the style sheet at the same width the script reads (min-width: 1280px), so the
+        // first paint already has the narrow column of blocks; drawn by the script alone, the column went from 856
+        // to 426 pixels once it ran, and what was under it moved (a layout shift of 0.0895 on a slow network).
+        <div className="min-[1280px]:grid min-[1280px]:grid-cols-[minmax(0,1fr)_25.5rem] min-[1280px]:items-start min-[1280px]:gap-5">
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
@@ -2140,6 +2301,7 @@ export function PageEditor({
               picture={Boolean(product.picture)}
               pictureAlt={product.picture?.alt ?? ""}
               facts={facts}
+              factsUnread={factsUnread}
               // The version being edited: what the coach adds goes into it. The other version, never this one twice,
               // is the second one, whose pictures are counted too (independent review, 31/10/2026).
               page={{ ...pageToSend(), blocks: drafts.map((d) => d.block), variant: other ? { id: "", blocks: other.map((d) => d.block) } : null }}
@@ -2311,7 +2473,7 @@ export function PageEditor({
                   }}
                 >
                   <div className={`rounded-2xl border bg-white transition-shadow ${over === index && dragged !== null && dragged !== index && !locked ? "border-violet-brand ring-2 ring-violet-brand/30" : "border-line"} ${dragged === index ? "opacity-60" : ""}`}>
-                  <div className="flex items-center gap-2 p-2 pl-3 sm:gap-3">
+                  <div className="flex flex-wrap items-center gap-2 p-2 pl-3 sm:gap-3">
                     {/* The handle: dragged with a mouse to put the block somewhere else. The arrows beside it do the same from a keyboard or a phone. */}
                     <span
                       className={`grid h-9 w-9 shrink-0 place-items-center rounded-full bg-lilac text-violet-deep ${locked ? "" : "cursor-grab active:cursor-grabbing"}`}
@@ -2337,7 +2499,7 @@ export function PageEditor({
                       aria-expanded={isOpen}
                       aria-controls={`panel-${block.id}`}
                       onClick={() => setOpen(isOpen ? null : block.id)}
-                      className="flex min-h-[44px] min-w-0 flex-1 flex-col items-start justify-center text-left"
+                      className="flex min-h-[44px] min-w-[9rem] flex-1 flex-col items-start justify-center text-left"
                     >
                       <span className="text-sm font-semibold text-ink">{`${index + 1}. ${kindLabel(block.kind)}`}</span>
                       <span className="w-full truncate text-xs text-ink-soft">
@@ -2349,12 +2511,12 @@ export function PageEditor({
                           : ""}
                       </span>
                     </button>
-                    <div className="flex shrink-0 items-center">
+                    <div className="ml-auto flex shrink-0 items-center">
                       <button
                         type="button"
                         onClick={() => move(index, -1)}
-                        disabled={locked || index === 0 || (index === 1 && hasHero)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        aria-disabled={locked || index === 0 || (index === 1 && hasHero) || undefined}
+                        className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                         aria-label={`Move block ${index + 1} up`}
                       >
                         <Icon name="chevron-down" size={18} className="rotate-180" />
@@ -2362,8 +2524,8 @@ export function PageEditor({
                       <button
                         type="button"
                         onClick={() => move(index, 1)}
-                        disabled={locked || index === drafts.length - 1}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        aria-disabled={locked || index === drafts.length - 1 || undefined}
+                        className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                         aria-label={`Move block ${index + 1} down`}
                       >
                         <Icon name="chevron-down" size={18} />
@@ -2372,8 +2534,8 @@ export function PageEditor({
                         <button
                           type="button"
                           onClick={() => duplicate(index)}
-                          disabled={drafts.length >= MAX_BLOCKS}
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                          aria-disabled={drafts.length >= MAX_BLOCKS || undefined}
+                          className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                           aria-label={`Duplicate block ${index + 1}, ${kindLabel(block.kind)}`}
                         >
                           <Icon name="copy" size={17} />
@@ -2382,7 +2544,7 @@ export function PageEditor({
                       <button
                         type="button"
                         onClick={() => remove(index)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
                         aria-label={`Remove block ${index + 1}, ${kindLabel(block.kind)}`}
                       >
                         <Icon name="trash" size={17} />
@@ -2416,9 +2578,10 @@ export function PageEditor({
                                       }),
                                     )
                                   }
-                                  className={`inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold ring-1 ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`}
+                                  className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold ring-1 ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`}
                                 >
                                   {option.label}
+                                  {on ? <Icon name="check" size={16} /> : null}
                                 </button>
                               );
                             })}
@@ -2469,7 +2632,7 @@ export function PageEditor({
           </div>
 
           {/* On a wide screen the saved sections lead the side menu instead. */}
-          {sideBySide ? null : savedSections}
+          {sideBySide ? null : <div className="min-[1280px]:hidden">{savedSections}</div>}
 
           <div className="mt-6 rounded-2xl bg-paper p-4 ring-1 ring-line sm:p-5">
             <p className="field-label">Page style</p>
@@ -2502,7 +2665,7 @@ export function PageEditor({
               if (event.currentTarget.open) void loadVersions();
             }}
           >
-            <summary className="cursor-pointer text-sm font-semibold text-ink">
+            <summary className="-my-3 cursor-pointer py-3 text-sm font-semibold text-ink">
               <span className="inline-flex items-center gap-2">
                 <Icon name="history" size={17} />
                 Earlier versions
@@ -2539,7 +2702,7 @@ export function PageEditor({
           </details>
 
           <details className="mt-6 rounded-2xl bg-paper p-4 ring-1 ring-line sm:p-5">
-            <summary className="cursor-pointer text-sm font-semibold text-ink">Search and sharing</summary>
+            <summary className="-my-3 cursor-pointer py-3 text-sm font-semibold text-ink">Search and sharing</summary>
             <div className="mt-4 space-y-4">
               {field(
                 "seo-title",
@@ -2626,11 +2789,7 @@ export function PageEditor({
         </div>
       )}
 
-      {error ? (
-        <p className="notice notice-error mt-4" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <ErrorNotice error={error} /> : null}
 
       {drafts.length > 0 ? (
         <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl bg-paper p-4 ring-1 ring-line">
@@ -2673,7 +2832,7 @@ export function PageEditor({
       ) : null}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => send(pageToSend(), "Page saved.")} aria-busy={busy} disabled={busy || !dirty} className="btn btn-primary">
+        <button type="button" onClick={saveNow} aria-busy={busy} aria-disabled={busy || !dirty || undefined} className="btn btn-primary">
           {busy ? "Saving…" : "Save the page"}
         </button>
         {dirty ? (
@@ -2701,7 +2860,7 @@ export function PageEditor({
           confirmClear ? (
             <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
               Back to the plain page?
-              <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => send(null, "Page cleared.")}>
+              <button type="button" className="btn btn-danger btn-sm" aria-disabled={busy || undefined} onClick={clearNow}>
                 Yes, clear it
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
@@ -3056,15 +3215,38 @@ function RowEditor({
             </p>
           </div>
         );
-      case "video": {
+      case "video":
+      case "video-window": {
         const text = typed.get(element) ?? videoAddress(element.video);
         const recognised = readVideo(text);
+        const inWindow = element.kind === "video-window";
+        // In a window, the button's words come first: they are what the part still needs when it is added.
+        const addressId = inWindow ? `${id}-v` : `${id}-a`;
         return (
           <div className="space-y-3">
+            {inWindow ? (
+              <div>
+                {label(`${id}-a`, "Button words", counter(element.label, MAX_CTA_LABEL))}
+                <input
+                  id={`${id}-a`}
+                  className="field"
+                  maxLength={MAX_CTA_LABEL}
+                  value={element.label}
+                  placeholder="Watch the walkthrough"
+                  aria-describedby={problem ? `${id}-bh ${problemId}` : `${id}-bh`}
+                  aria-invalid={problem ? true : undefined}
+                  onChange={(e) => replace(element, { ...element, label: e.target.value })}
+                />
+                <p id={`${id}-bh`} className="mt-1 text-xs text-ink-soft">
+                  What the button says. The page adds a word saying it is a video, in the page&apos;s language, after your words, and the video opens in a window over the page when a visitor presses it.
+                </p>
+                {shown}
+              </div>
+            ) : null}
             <div>
-              {label(`${id}-a`, "Video address")}
+              {label(addressId, "Video address")}
               <input
-                id={`${id}-a`}
+                id={addressId}
                 className="field"
                 inputMode="url"
                 value={text}
@@ -3082,14 +3264,18 @@ function RowEditor({
               />
               <p id={`${id}-vh`} className={`mt-1 text-xs ${recognised ? "text-ink-soft" : "font-semibold text-danger"}`}>
                 {recognised
-                  ? `${PROVIDER_NAMES[recognised.provider]} video recognized. It loads only when a visitor presses play.`
+                  ? `${PROVIDER_NAMES[recognised.provider]} video recognized. It loads only when a visitor ${inWindow ? "presses the button" : "presses play"}.`
                   : `Not a video we can play. Paste a link from YouTube, Vimeo or Loom. Until then the page keeps the ${PROVIDER_NAMES[element.video.provider]} video it had.`}
               </p>
             </div>
             <div>
               {label(`${id}-t`, "Video title (optional)", counter(element.title, MAX_HEADING))}
               <input id={`${id}-t`} className="field" maxLength={MAX_HEADING} value={element.title} aria-describedby={`${id}-th`} onChange={(e) => replace(element, { ...element, title: e.target.value })} />
-              <p id={`${id}-th`} className="mt-1 text-xs text-ink-soft">Read out to people using a screen reader before the video plays. Left empty, the product&apos;s name is used.</p>
+              <p id={`${id}-th`} className="mt-1 text-xs text-ink-soft">
+                {inWindow
+                  ? "The window's title, read out to people using a screen reader when it opens. Left empty, the button's words are used."
+                  : "Read out to people using a screen reader before the video plays. Left empty, the product's name is used."}
+              </p>
             </div>
           </div>
         );
@@ -3102,12 +3288,13 @@ function RowEditor({
     const kind = addKind[column] ?? "heading";
     const why = addRefusal(columns, column, sending);
     const typedVideo = addVideo[column] ?? "";
-    const video = kind === "video" ? readVideo(typedVideo) : null;
+    const byAddress = kind === "video" || kind === "video-window";
+    const video = byAddress ? readVideo(typedVideo) : null;
     const reason = why
       ? ROW_EDIT_WHY[why]
       : kind === "image" && pictureRoom - sending.reduce((n, count) => n + count, 0) <= 0
         ? `This page already shows ${MAX_PAGE_PICTURES} pictures, the most a page shows. Remove one first.`
-        : kind === "video" && !video
+        : byAddress && !video
           ? "Paste the video's address first: a link from YouTube, Vimeo or Loom."
           : "";
     const reasonId = `${id}-why`;
@@ -3116,8 +3303,8 @@ function RowEditor({
         setSaid(reason);
         return;
       }
-      if (kind === "video" && video) {
-        add(column, { kind: "video", video, title: "" });
+      if (byAddress && video) {
+        add(column, kind === "video-window" ? { kind: "video-window", video, title: "", label: "" } : { kind: "video", video, title: "" });
         setAddVideo((all) => all.map((v, i) => (i === column ? "" : v)));
         return;
       }
@@ -3127,8 +3314,8 @@ function RowEditor({
     return (
       <div className="mt-3 space-y-2 rounded-xl bg-white p-3 ring-1 ring-line">
         <div className="flex flex-wrap items-end gap-2">
-          {/* Never narrower than its longest choice ("Smaller heading"): in a narrow column the Add button goes below it instead. */}
-          <div className="min-w-[min(13rem,100%)] flex-1">
+          {/* Never narrower than its longest choice ("Video in a window"): in a narrow column the Add button goes below it instead. */}
+          <div className="min-w-[min(14rem,100%)] flex-1">
             <label htmlFor={id} className="field-label">{`Add to column ${column + 1}`}</label>
             <select id={id} className="field" value={kind} aria-describedby={reasonId} onChange={(e) => setAddKind((all) => all.map((k, i) => (i === column ? (e.target.value as RowElementKind) : k)))}>
               {ROW_ELEMENT_KINDS.map((k) => (
@@ -3145,7 +3332,7 @@ function RowEditor({
             </button>
           )}
         </div>
-        {kind === "video" && !why ? (
+        {byAddress && !why ? (
           <div>
             <label htmlFor={`${id}-v`} className="field-label">
               Video address
@@ -3296,6 +3483,17 @@ function RowEditor({
   );
 }
 
+/**
+ * An item taken out of a block's list: its Remove button goes with the focus in it, so the focus goes to the item
+ * now in its place, or the one before it, or the list's Add button when none is left, once the list is drawn
+ * again (WCAG 2.4.3; lib/block-insert.ts, itemFocusAfterRemoval), or to `away` when no Add button is drawn.
+ */
+function focusItemAfterRemoval(base: string, at: number, count: number, away?: string) {
+  const { focus, gone } = itemFocusAfterRemoval(base, at, count);
+  // `away`: where it goes when that Add button is not drawn either (a pictures list with no room left on the page).
+  focusWhenDrawn(() => (document.getElementById(gone) ? null : document.getElementById(focus) ?? (away ? document.getElementById(away) : null)), browserFrames());
+}
+
 /** A list of one-line points. */
 /** The rows of a comparison: what is compared, and a cell for each column, with a tick and a cross a press away. */
 /** Things said elsewhere: the words, who said them, and where (lib/sales-page.ts, QuotesBlock). */
@@ -3314,8 +3512,12 @@ function QuotesEditor({ base, items, onChange }: { base: string; items: Quote[];
               <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">{`Said elsewhere ${i + 1}`}</p>
               <button
                 type="button"
-                onClick={() => onChange(items.filter((_, j) => j !== i))}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+                id={itemRemoveId(base, i)}
+                onClick={() => {
+                  onChange(items.filter((_, j) => j !== i));
+                  focusItemAfterRemoval(base, i, items.length);
+                }}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                 aria-label={`Remove what was said elsewhere ${i + 1}`}
               >
                 <Icon name="close" size={15} />
@@ -3377,7 +3579,7 @@ function QuotesEditor({ base, items, onChange }: { base: string; items: Quote[];
         );
       })}
       {items.length < MAX_QUOTES ? (
-        <button type="button" onClick={() => onChange([...items, { text: "", name: "", url: "" }])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...items, { text: "", name: "", url: "" }])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`Add one (${items.length} of ${MAX_QUOTES})`}
         </button>
@@ -3408,7 +3610,7 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
             type="button"
             aria-pressed={value === CELL_YES}
             onClick={() => set(i, { [side]: value === CELL_YES ? "" : CELL_YES })}
-            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_YES ? "bg-mint-soft text-mint-deep" : "text-ink-soft hover:bg-paper"}`}
+            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_YES ? "bg-mint-soft text-mint-deep" : "text-ink-soft hover:bg-paper"}`}
             aria-label={`A check mark in ${label.toLowerCase()}`}
           >
             <Icon name="check" size={16} />
@@ -3417,7 +3619,7 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
             type="button"
             aria-pressed={value === CELL_NO}
             onClick={() => set(i, { [side]: value === CELL_NO ? "" : CELL_NO })}
-            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_NO ? "bg-danger-soft text-danger" : "text-ink-soft hover:bg-paper"}`}
+            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_NO ? "bg-danger-soft text-danger" : "text-ink-soft hover:bg-paper"}`}
             aria-label={`A cross in ${label.toLowerCase()}`}
           >
             <Icon name="close" size={16} />
@@ -3434,8 +3636,12 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">{`Row ${i + 1}`}</p>
             <button
               type="button"
-              onClick={() => onChange(rows.filter((_, j) => j !== i))}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+              id={itemRemoveId(base, i)}
+              onClick={() => {
+                onChange(rows.filter((_, j) => j !== i));
+                focusItemAfterRemoval(base, i, rows.length);
+              }}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
               aria-label={`Remove row ${i + 1}`}
             >
               <Icon name="close" size={15} />
@@ -3457,7 +3663,7 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
         </div>
       ))}
       {rows.length < MAX_COMPARE_ROWS ? (
-        <button type="button" onClick={() => onChange([...rows, { label: "", a: CELL_YES, b: CELL_NO }])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...rows, { label: "", a: CELL_YES, b: CELL_NO }])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`Add a row (${rows.length} of ${MAX_COMPARE_ROWS})`}
         </button>
@@ -3495,8 +3701,12 @@ function ListEditor({
           />
           <button
             type="button"
-            onClick={() => onChange(items.filter((_, j) => j !== i))}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+            id={itemRemoveId(base, i)}
+            onClick={() => {
+              onChange(items.filter((_, j) => j !== i));
+              focusItemAfterRemoval(base, i, items.length);
+            }}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
             aria-label={`Remove ${label.toLowerCase()} ${i + 1}`}
           >
             <Icon name="close" size={16} />
@@ -3504,7 +3714,7 @@ function ListEditor({
         </div>
       ))}
       {items.length < max ? (
-        <button type="button" onClick={() => onChange([...items, ""])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...items, ""])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`Add a ${label.toLowerCase()} (${items.length} of ${max})`}
         </button>
@@ -3545,8 +3755,12 @@ function PairEditor({
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">{`${first.label} ${i + 1}`}</p>
             <button
               type="button"
-              onClick={() => onChange(items.filter((_, j) => j !== i))}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+              id={itemRemoveId(base, i)}
+              onClick={() => {
+                onChange(items.filter((_, j) => j !== i));
+                focusItemAfterRemoval(base, i, items.length);
+              }}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
               aria-label={`Remove ${first.label.toLowerCase()} ${i + 1}`}
             >
               <Icon name="close" size={16} />
@@ -3567,7 +3781,7 @@ function PairEditor({
         </div>
       ))}
       {items.length < max ? (
-        <button type="button" onClick={() => onChange([...items, ["", ""]])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...items, ["", ""]])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`${addLabel} (${items.length} of ${max})`}
         </button>
@@ -3741,6 +3955,7 @@ function PicturesEditor({
   invalid = false,
   single = false,
   onSending,
+  away,
 }: {
   base: string;
   productId: string;
@@ -3762,6 +3977,11 @@ function PicturesEditor({
   single?: boolean;
   /** How many pictures it is sending now, told when sending starts and once more (0) when it ends, after onChange. */
   onSending?: (count: number) => void;
+  /**
+   * The id of the field the focus goes to when the last picture is removed and no Add button is drawn, the page
+   * having no room left for another (WCAG 2.4.3): the block's heading field.
+   */
+  away?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(0);
@@ -3883,13 +4103,22 @@ function PicturesEditor({
           </div>
           {single ? null : (
           <div className="flex shrink-0 flex-col items-center">
-            <button type="button" onClick={() => swap(i, -1)} disabled={i === 0} className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink disabled:opacity-30" aria-label={`Move picture ${i + 1} earlier`}>
+            <button type="button" onClick={() => swap(i, -1)} aria-disabled={i === 0 || undefined} className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink" aria-label={`Move picture ${i + 1} earlier`}>
               <Icon name="chevron-down" size={16} className="rotate-180" />
             </button>
-            <button type="button" onClick={() => swap(i, 1)} disabled={i === items.length - 1} className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink disabled:opacity-30" aria-label={`Move picture ${i + 1} later`}>
+            <button type="button" onClick={() => swap(i, 1)} aria-disabled={i === items.length - 1 || undefined} className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink" aria-label={`Move picture ${i + 1} later`}>
               <Icon name="chevron-down" size={16} />
             </button>
-            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove picture ${i + 1}`}>
+            <button
+              type="button"
+              id={itemRemoveId(base, i)}
+              onClick={() => {
+                onChange(items.filter((_, j) => j !== i));
+                focusItemAfterRemoval(base, i, items.length, away);
+              }}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+              aria-label={`Remove picture ${i + 1}`}
+            >
               <Icon name="close" size={16} />
             </button>
           </div>
@@ -3897,7 +4126,9 @@ function PicturesEditor({
         </div>
       ))}
       {left > 0 ? (
-        <button type="button" onClick={() => input.current?.click()} disabled={busy > 0} aria-busy={busy > 0} className="btn btn-secondary btn-sm">
+        // Off while it sends, but kept focusable (aria-disabled, drawn off by .btn[aria-disabled]): the focus sent here after
+        // a removal, or resting here as the send starts, never falls to the page's body (WCAG 2.4.3).
+        <button type="button" id={itemAddId(base)} onClick={() => (busy > 0 ? undefined : input.current?.click())} aria-disabled={busy > 0 || undefined} aria-busy={busy > 0} className="btn btn-secondary btn-sm">
           <Icon name="camera" size={15} />
           {busy > 0 ? `Sending ${busy} ${busy === 1 ? "picture" : "pictures"}…` : (words?.add ?? `Add pictures (${items.length} of ${room})`)}
         </button>

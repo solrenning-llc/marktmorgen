@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   await setRequireTwoStep(store, false, OWNER);
   await redis.pipeline([["DEL", `nl:pk:${sha(`nimbus-passkeys:${BEN}`).slice(0, 40)}`]]);
   is("a member without a second step opens it again", await open(BEN), "open");
-  const lines = (await readLog(store.sid)).map((l) => `${l.who}: ${l.what}`);
+  const lines = ((await readLog(store.sid)) ?? []).map((l) => `${l.who}: ${l.what}`);
   is("both switches are in the activity log", [lines.includes(`${OWNER}: Required two-step sign-in for the team`), lines.includes(`${OWNER}: Stopped requiring two-step sign-in for the team`)], [true, true]);
 
   done();

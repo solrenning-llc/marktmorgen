@@ -1,4 +1,5 @@
 import {EVERGREEN_GUIDES,DIGITAL_FILE_GUIDE_EXTRA,DIGITAL_FILE_GUIDE_FAQ} from "@/lib/evergreen-guides";
+import { COMMUNITY_PLATFORM_GUIDE } from "@/lib/community-platform-guide";
 /**
  * The whole blog lives here: categories, posts and the blocks each post is
  * built from. Nothing is fetched at run time, so a post page is a static file.
@@ -48,6 +49,7 @@ export const BLOG_CATEGORIES = [
 ] as const;
 
 const BASE_BLOG_POSTS: BlogPost[] = [
+COMMUNITY_PLATFORM_GUIDE,
 ...EVERGREEN_GUIDES,
 {
   "slug": "how-much-kajabi-costs-in-2026",
@@ -433,7 +435,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
     date: "2026-09-18",
     readMinutes: 6,
     excerpt:
-      "The whole path, from the file on your laptop to the money in your bank: what to make, what to charge, what the page needs to say, and what has to happen the second someone pays.",
+      "Prepare a digital file offer: what to make, what to charge, what the page needs to say, and what a buyer needs after a confirmed payment.",
     kicker: "Start here",
     from: "#6c3bff",
     to: "#ff3d8a",
@@ -480,14 +482,14 @@ const BASE_BLOG_POSTS: BlogPost[] = [
         type: "p",
         text: "Whatever you use to collect the money, check two things before you launch: that Apple Pay and Google Pay appear on a phone, and that the price shown on the product is the price charged at the end. A surprise fee at the last screen is the most expensive kind of surprise.",
       },
-      { type: "h2", text: "5. Deliver in the same second" },
+      { type: "h2", text: "5. Make delivery clear" },
       {
         type: "p",
-        text: "The moment after payment is the whole relationship. If the file appears immediately, you are a business. If it arrives in an email twenty minutes later, you are a person who might have forgotten.",
+        text: "Give the buyer a clear route back to what they bought. Distinguish payment still processing, a confirmed purchase and an expired download link. Describe the access you provide without promising a download within a fixed number of seconds.",
       },
       {
         type: "note",
-        text: "Test your own checkout with a real card before you send a single person to it. Buy your own product. Read the confirmation. Download the file on a phone, on mobile data, not on your home Wi-Fi. Most broken stores were never bought from by their owner.",
+        text: "Rehearse in test mode with a test card and synthetic buyer details. Do not use a real payment as a test. Read the confirmation and check the file on a phone. Check the page for a payment still processing and the message for an expired download link too.",
       },
       { type: "h2", text: "What to do this week" },
       {
@@ -507,7 +509,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
           },
           {
             title: "Friday",
-            text: "Buy it yourself. Fix whatever annoyed you. Then put the link in your bio and tell people what you made.",
+            text: "Rehearse the checkout in test mode with a test card. Fix whatever annoyed you. Then put the link in your bio and tell people what you made.",
           },
         ],
       },
@@ -869,7 +871,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
       { type: "h2", text: "What Marktmorgen is" },
       {
         type: "p",
-        text: "Marktmorgen is a store page for selling files, courses, memberships, communities and calls, and it is early. At its core are three things: a colorful page, price options on a product, and the file in the buyer's hands the second the payment clears.",
+        text: "Marktmorgen is a store page for selling files, courses, memberships, communities and calls, and it is early. At its core are three things: a colorful page, price options on a product, and download access checked against the buyer's payment.",
       },
       { type: "h2", text: "The one thing we do differently" },
       {

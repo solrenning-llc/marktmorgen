@@ -7,8 +7,8 @@ import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { can } from "@/lib/team-roles";
-import { readNumbers } from "@/lib/stats-report";
-import { membershipNumbers } from "@/lib/membership-numbers";
+import { ReadingsUsed, keptMembers, keptNumbers, readingsBackAt } from "@/lib/store-readings";
+import { UtcAndLocal } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 import { LEFT_WORDS, type Money, type StoreFigures, type StoreRead, TOTAL_WINDOWS, sumStores } from "@/lib/account-totals";
 import type { Store } from "@/lib/store";
@@ -24,7 +24,15 @@ const WINDOW_NAMES = { d7: "Last 7 days", d30: "Last 30 days", d90: "Last 90 day
 const count = (n: number) => n.toLocaleString("en-US");
 const moneyLines = (lines: Money[]) => (lines.length ? lines.map((m) => formatMoney(m.cents, m.currency)).join(" + ") : formatMoney(0, "USD"));
 
-/** One store's figures, read the way its own studio reads them, inside its own allowance. */
+/**
+ * One store's figures, read the way its own studio reads them, inside its own
+ * allowance: a page of each other store's studio (STUDIO_PAGE_UNITS, as the
+ * Terms say; this page's own store was counted by studioView). Its visits,
+ * sales, renewals, refunds, disputes and memberships come from its kept
+ * readings, read again from its counts and its Stripe account only from the
+ * store's own daily budget (lib/store-readings.ts; owner's decision of 4
+ * November 2026, inbox C4-18), never more of the studio's requests.
+ */
 async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean): Promise<StoreRead> {
   if (!mayRead) return { state: "no_access" };
   if (!alreadyCounted) {
@@ -33,9 +41,11 @@ async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean
     if (!counted.ok) return { state: "paused" };
   }
   try {
-    const [data, club] = await Promise.all([readNumbers(store), membershipNumbers(store).catch(() => null)]);
+    const [data, club] = await Promise.all([keptNumbers(store), keptMembers(store).catch(() => null)]);
     return { state: "ok", data, members: club ? { currency: club.currency, paying: club.paying, trialing: club.trialing, mrr: club.mrr } : null };
   } catch (error) {
+    // Said as what it is: read as often as the day allows, never as an error or as no numbers (inbox C4-33).
+    if (error instanceof ReadingsUsed) return { state: "used" };
     console.error("reading one store's numbers for the totals failed", error);
     return { state: "error" };
   }
@@ -92,7 +102,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
               ) : null}
               {!totals.salesWhole ? (
                 <p className="notice notice-info mt-4" role="status">
-                  Some sales could not be read in full just now, so the sales and money below may be lower than they are. Reload the page in a moment.
+                  Some sales could not be read in full, so the sales and money below may be lower than they are. Each store&apos;s studio home says when its numbers were last read and when they are read again.
                 </p>
               ) : null}
               <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8">
@@ -150,7 +160,16 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
                       {f.read.state === "ok" && f.read.data ? (
                         <span className="tabular-nums text-ink-soft">{`${count(f.read.data.totals.d30.sales)} sales, ${formatMoney(f.read.data.totals.d30.cents, f.read.data.currency)} in the last 30 days`}</span>
                       ) : (
-                        <span className="text-ink-soft">{LEFT_WORDS[f.read.state === "ok" ? "no_numbers" : f.read.state]}</span>
+                        <span className="text-ink-soft">
+                          {f.read.state === "used" ? (
+                            <>
+                              {LEFT_WORDS.used.replace(/ 00:00 UTC$/, " ")}
+                              <UtcAndLocal ms={readingsBackAt()} />
+                            </>
+                          ) : (
+                            LEFT_WORDS[f.read.state === "ok" ? "no_numbers" : f.read.state]
+                          )}
+                        </span>
                       )}
                     </li>
                   ))}

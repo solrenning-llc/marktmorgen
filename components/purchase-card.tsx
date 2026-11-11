@@ -16,6 +16,12 @@ export type CardDelivery = {
   keptOn: string | null;
 };
 
+/**
+ * How far the buyer is in a course (560 [AS1]): the words, said under the course's button and describing it, and the
+ * share done for the bar beside them; null when the progress could not be read, which the words then say.
+ */
+export type CardProgress = { id: string; text: string; percent: number | null };
+
 /** A license key on the card, already in the store's language. */
 export type CardKey = { slot: string; title?: string; label: string; value: string | null; revoked: boolean; waiting: boolean };
 
@@ -34,11 +40,12 @@ export type PurchaseCardModel = {
   preorderLine: string | null;
   ended: { note: string; renew: CardLink } | null;
   course: CardLink | null;
+  progress: CardProgress | null;
   package: CardLink | { text: string } | null;
   podcast: CardLink | null;
   alsoIn: string | null;
   main: CardDelivery | null;
-  added: { key: string; course: CardLink | null; delivery: CardDelivery | null }[];
+  added: { key: string; course: CardLink | null; progress: CardProgress | null; delivery: CardDelivery | null }[];
   importedNote: string | null;
   /** Each bundle on the order: which one ("main" or the key it was ticked under), its heading and its button's name. */
   bundles: { item: string; heading: string; label: string }[];
@@ -66,15 +73,40 @@ function Delivery({ delivery, language }: { delivery: CardDelivery; language: un
 }
 
 /**
+ * A course's button and, under it, how far the buyer is (560 [AS1]): the words carry it, and describe the button, so a
+ * screen reader says them with the course they are for; the bar shows the same share and is hidden from it.
+ */
+function CourseLink({ course, progress }: { course: CardLink; progress: CardProgress | null }) {
+  return (
+    <>
+      <Link href={course.href} className="btn st-btn btn-block" aria-describedby={progress?.id}>
+        {course.label}
+      </Link>
+      {progress ? (
+        <div data-course-progress="">
+          <p id={progress.id} className="st-muted text-sm">{progress.text}</p>
+          {progress.percent === null ? null : (
+            <div className="cm-progress mt-2" aria-hidden="true">
+              <span style={{ width: `${progress.percent}%` }} />
+            </div>
+          )}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * One purchase on the list: what it is, when it was bought, and every way to
  * open it again. Drawn inside the list's OrdersSharedProvider, whose words its
  * bundles and keys take.
  */
-export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardModel; language: unknown; titleRef?: (node: HTMLParagraphElement | null) => void }) {
+export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardModel; language: unknown; titleRef?: (node: HTMLHeadingElement | null) => void }) {
   const key = (found: CardKey) => <OrdersKey key={found.slot} title={found.title} label={found.label} value={found.value} revoked={found.revoked} waiting={found.waiting} />;
   return (
     <li className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
-      <p className="font-semibold" ref={titleRef} tabIndex={titleRef ? -1 : undefined}>{card.title}</p>
+      {/* A heading under the page's h1, so the list is walked purchase by purchase (WCAG 2.4.10). */}
+      <h2 className="font-semibold" ref={titleRef} tabIndex={titleRef ? -1 : undefined}>{card.title}</h2>
       <p className="st-muted mt-1 text-sm">{card.meta}</p>
       <div className="mt-4 space-y-3">
         {card.preorderLine ? <p className="st-muted text-sm">{card.preorderLine}</p> : null}
@@ -86,11 +118,7 @@ export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardM
             </Link>
           </>
         ) : null}
-        {card.course ? (
-          <Link href={card.course.href} className="btn st-btn btn-block">
-            {card.course.label}
-          </Link>
-        ) : null}
+        {card.course ? <CourseLink course={card.course} progress={card.progress} /> : null}
         {card.package ? (
           "href" in card.package ? (
             <Link href={card.package.href} className="btn st-btn btn-block">
@@ -111,11 +139,7 @@ export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardM
         {card.added.map((added) => (
           <Fragment key={added.key}>
             {/* A course anywhere in a cart opens on its own page, named, as the first one does (lib/order-courses.ts). */}
-            {added.course ? (
-              <Link href={added.course.href} className="btn st-btn btn-block">
-                {added.course.label}
-              </Link>
-            ) : null}
+            {added.course ? <CourseLink course={added.course} progress={added.progress} /> : null}
             {added.delivery ? <Delivery delivery={added.delivery} language={language} /> : null}
           </Fragment>
         ))}
@@ -127,7 +151,7 @@ export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardM
       {card.keys.map(key)}
       {card.review ? (
         <p className="mt-4 text-sm">
-          <Link prefetch={false} href={card.review.href} className="st-footer-link font-semibold underline underline-offset-4">
+          <Link prefetch={false} href={card.review.href} className="st-footer-link inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
             {card.review.label}
           </Link>
         </p>

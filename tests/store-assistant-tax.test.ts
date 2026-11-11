@@ -72,20 +72,24 @@ test("wrong scenario, stale period, missing FX or missing annual book never beco
   }
 });
 
-test("fiscal input is captured once without getters, hidden fields or mutable follow-up reads",()=>{
+test("plain fiscal input stays detached while computed, hidden and proxied evidence is refused",()=>{
   let getters=0,reads=0;const valid=assistantTaxFixture();
   const getter=Object.defineProperty({...valid},"taxReview",{get(){getters++;return valid.taxReview;}});
   assert.equal(assistantMonthWorst(700,getter,now).review.taxesCeilingCents,null);assert.equal(getters,0);
   const hidden=Object.defineProperty({...valid},"taxContext",{value:valid.taxContext,enumerable:false});
   assert.equal(assistantMeetsFloor(700,hidden,now),false);
+  const capturedPlain=assistantMonthWorst(700,valid,now);
+  assert.equal(assessCustomerWorstCase(capturedPlain.review).approved,true);
   const source=new Proxy(valid,{getOwnPropertyDescriptor(target,key){
     if(key==="taxContext") {reads++;return Reflect.getOwnPropertyDescriptor(reads===1?target:{...target,taxContext:null},key);}
     return Reflect.getOwnPropertyDescriptor(target,key);
   }});
   const month=assistantMonthWorst(700,source,now);
-  assert.equal(reads,1);assert.equal(assessCustomerWorstCase(month.review).approved,true);
+  assert.equal(reads,1);assert.equal(assessCustomerWorstCase(month.review).approved,false);
+  assert.equal(month.review.taxesCeilingCents,null);assert.equal(month.allowedCents,null);
   valid.taxReview!.books[0].annualProfitCents=0;valid.taxContext!.through="2030-01-01";
-  assert.equal(assessCustomerWorstCase(month.review).approved,true);
+  assert.equal(assessCustomerWorstCase(month.review).approved,false);
+  assert.equal(assessCustomerWorstCase(capturedPlain.review).approved,true);
 });
 
 test("invalid or overflowing usage cannot approve a month",()=>{

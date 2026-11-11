@@ -15,7 +15,8 @@
  * refund does.
  *
  * Only the types named here are read. Payouts, transfers and top-ups are
- * named as money that is no sale and no fee; every other type, and every
+ * named as money that is no sale (a fee Stripe charged on one is a Stripe fee
+ * on the account); every other type, and every
  * adjustment that is not a dispute, cannot be read, so the report is
  * unavailable rather than missing money (rule 24).
  *
@@ -143,7 +144,9 @@ export function readFeeLine(raw: unknown): FeeLine | "other" | null {
   } else if (ACCOUNT_FEE_TYPES.has(type)) {
     return { id, kind: ACCOUNT_FEE_TYPES.get(type)!, sale: null, at: created, currency, amount, stripeFee, feeTax, applicationFee, otherFee, net };
   } else if (NO_SALE_TYPES.has(type)) {
-    return "other";
+    // No sale money; a fee Stripe charged on it (an Instant Payout's) is a Stripe fee on the account, never dropped.
+    if (fee === 0) return "other";
+    return { id, kind: "stripe_fee", sale: null, at: created, currency, amount: -fee, stripeFee: 0, feeTax: 0, applicationFee: 0, otherFee: 0, net: -fee };
   } else {
     return null;
   }
@@ -187,6 +190,13 @@ export function saleFees(raws: readonly unknown[], reading: { complete: boolean 
   if (!Array.isArray(raws)) return { available: false, why: "unreadable" };
   if (reading?.complete !== true) return { available: false, why: "incomplete" };
   if (raws.length > MAX_FEE_LINES) return { available: false, why: "too_large" };
+  // Every sum stays a whole number a double holds exactly; past that it is unavailable, never rounded.
+  let inexact = false;
+  const add = (a: number, b: number): number => {
+    const sum = a + b;
+    if (!Number.isSafeInteger(sum)) inexact = true;
+    return sum;
+  };
 
   const ids = new Set<string>();
   const rows = new Map<string, SaleRow & { netSum: number }>();
@@ -200,8 +210,8 @@ export function saleFees(raws: readonly unknown[], reading: { complete: boolean 
 
     if (line.sale === null) {
       const fees = account.get(line.currency) ?? { currency: line.currency, taxFees: 0, stripeFees: 0 };
-      if (line.kind === "tax_fee") fees.taxFees += line.net;
-      else fees.stripeFees += line.net;
+      if (line.kind === "tax_fee") fees.taxFees = add(fees.taxFees, line.net);
+      else fees.stripeFees = add(fees.stripeFees, line.net);
       account.set(line.currency, fees);
       continue;
     }
@@ -217,17 +227,19 @@ export function saleFees(raws: readonly unknown[], reading: { complete: boolean 
       row.at = line.at;
       row.gross = line.amount;
     } else if (line.kind === "refund") {
-      row.refunds += line.amount;
+      row.refunds = add(row.refunds, line.amount);
     } else {
-      row.disputes += line.amount;
+      row.disputes = add(row.disputes, line.amount);
     }
-    row.stripeFee += line.stripeFee;
-    row.feeTax += line.feeTax;
-    row.applicationFee += line.applicationFee;
-    row.otherFee += line.otherFee;
-    row.netSum += line.net;
+    row.stripeFee = add(row.stripeFee, line.stripeFee);
+    row.feeTax = add(row.feeTax, line.feeTax);
+    row.applicationFee = add(row.applicationFee, line.applicationFee);
+    row.otherFee = add(row.otherFee, line.otherFee);
+    row.netSum = add(row.netSum, line.net);
     rows.set(key, row);
+    if (inexact) return { available: false, why: "unreadable" };
   }
+  if (inexact) return { available: false, why: "unreadable" };
 
   const out: SaleRow[] = [...rows.values()].map(({ netSum, ...row }) => ({ ...row, net: row.saleRead ? netSum : null }));
   out.sort((a, b) => (b.at ?? -1) - (a.at ?? -1) || (a.sale < b.sale ? -1 : a.sale > b.sale ? 1 : 0) || (a.currency < b.currency ? -1 : 1));

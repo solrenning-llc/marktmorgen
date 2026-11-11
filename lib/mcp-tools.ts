@@ -46,8 +46,10 @@ import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
   EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
-  COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
+  COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork, BUNDLE_CHOICES_MOST, IMPORTS_MOST, bundleChoicesWork, importsWork,
 } from "@/lib/api-read-rules";
+import { PICKER_PAGE, bundleChoicesPage, choiceCursor, choiceQuery } from "@/lib/bundle-choices";
+import { storeImportsRead } from "@/lib/imports";
 import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
 import { pathsBytes, readPaths } from "@/lib/next-bought";
@@ -738,6 +740,79 @@ export async function savedBlocksTool(store: Store, hold: Hold) {
   const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
   const refused = await settle(settledUnits(atLeast(savedBlocksWork(read.sections.length), { bytes: COUNT_REPLY_BYTES + read.bytes, sent }), most));
   return refused ?? value;
+}
+
+/**
+ * The products a bundle can be made of (631 [AA1] (a)): the same rule, order
+ * and reasons as the creator's own picker in /studio/bundles
+ * (lib/bundle-choices.ts), so an agent preparing a bundle never offers what
+ * the store would refuse, a page at a time. Prices in the smallest unit of
+ * the store's currency.
+ */
+export async function bundleChoicesTool(store: Store, args: Record<string, unknown>, hold: Hold): Promise<Response | { found: true; value: unknown } | { found: false; error: string }> {
+  // Set aside at its most before anything is read: a whole stretch of cached names and a whole page of listings (Codex G2
+  // on #1933). Settled at the larger of that ceiling for what was read and what was really read and sent, before it is sent.
+  const most = apiReadUnits(BUNDLE_CHOICES_MOST);
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  const owner = typeof args.bundle === "string" ? args.bundle.slice(0, 40) : "";
+  // A page at a time, each inside what it is paid for (Codex A3, #1933): never the whole catalog in one call.
+  const page = await bundleChoicesPage(store, { owner, query: choiceQuery(args.search), after: choiceCursor(args.cursor) });
+  // Read but not known: how much was read is not known either, so all that was set aside is kept; never a page with
+  // products left out (Codex G2, #1933).
+  if (!page.known) return (await settle(most)) ?? { found: false as const, error: "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment." };
+  const value = {
+    note: `Products that may go in a bundle, in the creator's order, ${PICKER_PAGE} a page, each with can_go_in, and why_not saying why it cannot. To read the next page, call again with cursor set to next_cursor; next_cursor is null on the last page. matches counts the products not ruled out by their kind (null with a search, which looks through the products a stretch at a time, so a page may hold fewer than 20 or none and still have a next_cursor); unsearched counts the products in that stretch whose name is not ready to search yet: list without a search to see them. price is in the smallest unit of the store's currency. hidden products are not listed on the store page.`,
+    next_cursor: page.next === null ? null : String(page.next),
+    matches: page.matches,
+    unsearched: page.unsearched,
+    products: page.products.map((p) => ({ id: p.id, title: p.title, price: p.priceCents, what: p.what, hidden: p.hidden, can_go_in: p.why === null, why_not: p.why })),
+  };
+  const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(bundleChoicesWork(page.read.cards, page.read.listings), { bytes: page.read.bytes, sent }), most));
+  return refused ?? { found: true as const, value };
+}
+
+/**
+ * The store's latest imports from another platform (631 [AA1] (a)): what
+ * kind, where from, how far along and what each row came to, as counts. Not
+ * the file's name nor who started it, which may name a person; not the rows
+ * themselves, and not the report of rows left out, which holds addresses.
+ */
+export async function importsTool(store: Store, hold: Hold): Promise<Response | { found: true; value: unknown } | { found: false; error: string }> {
+  // Set aside at its most (every import the history keeps) before the index is read; settled before anything is sent.
+  const most = apiReadUnits(IMPORTS_MOST);
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  // Only Redis's exact answers: anything else is unknown, all that was set aside is kept and it is said so, never an
+  // empty or shorter history (Codex A3 and G, #1933).
+  const read = await storeImportsRead(store);
+  if (read === "unknown") return (await settle(most)) ?? { found: false as const, error: "Your imports could not be read just now. This is not an empty history; try again in a moment." };
+  const value = {
+    note: "Newest first, at most ten. started_at and finished_at are in milliseconds since 1970 (UTC); finished_at is 0 while it runs. added were brought in, already were there, skipped were left out on purpose (no consent, unsubscribed, a repeated row), errors could not be brought in: the creator downloads that report in the studio.",
+    imports: read.jobs.map((job) => ({
+      id: job.id,
+      kind: job.kind,
+      from: job.options.source ?? "csv",
+      state: job.state,
+      started_at: job.at,
+      finished_at: job.finishedAt,
+      rows_expected: job.expected,
+      rows_received: job.total,
+      rows_looked_at: job.done,
+      added: job.counts.added,
+      already: job.counts.already,
+      skipped: job.counts.skipped,
+      errors: job.counts.errors,
+      emailed: job.counts.mailed,
+      not_emailed: job.counts.unmailed,
+      contacts_not_emailable: job.counts.contacts ?? 0,
+      stopped: job.counts.stopped ?? 0,
+    })),
+  };
+  const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(importsWork(read.ids), { bytes: read.bytes, sent }), most));
+  return refused ?? { found: true as const, value };
 }
 
 /** A work's ceiling, raised to what was really read and sent where that came to more. */

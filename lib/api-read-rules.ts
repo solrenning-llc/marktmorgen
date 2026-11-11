@@ -603,3 +603,63 @@ export function proposeWork(bookBytes: number, kindMaxBytes: number): ReadWork {
     roundTrips: 8,
   };
 }
+
+// ---------------------------------------------------------------- bundle choices and imports (MCP read tools, 631 [AA1] (a))
+
+/** A product's cached card (its title, price and whether it has a page), as kept for searching: a review ceiling, settled at what was read. */
+export const CARD_READ_BYTES = 1_024;
+/** Names list_bundle_choices looks through for a search in one call (lib/bundle-choices.ts, SEARCH_STRETCH, one HMGET). */
+export const BUNDLE_SEARCH_STRETCH = 100;
+/** Listings one page of list_bundle_choices reads at the most (lib/bundle-choices.ts, PICKER_PAGE). */
+export const BUNDLE_PAGE_LISTINGS = 20;
+
+/**
+ * list_bundle_choices (lib/bundle-choices.ts, bundleChoicesPage): with a
+ * search, the cached cards of a stretch of products in one HMGET; then the
+ * listings of the page, in one go; and the page sent, a product each and the
+ * note. Set aside at its most (BUNDLE_CHOICES_MOST) before anything is read
+ * and settled at this for what was read, or at what was really read and sent
+ * where that came to more (lib/mcp-tools.ts, bundleChoicesTool).
+ */
+export function bundleChoicesWork(cards: number, listings: number): ReadWork {
+  const c = Math.max(cards, 0);
+  const l = Math.max(listings, 0);
+  return {
+    commands: (c > 0 ? 1 : 0) + l,
+    bytes: c * CARD_READ_BYTES + l * LISTING_BYTES,
+    sent: l * PRODUCT_SENT_BYTES + 2 * TOOL_NOTE_BYTES,
+    stripePages: 0,
+    roundTrips: (c > 0 ? 1 : 0) + (l > 0 ? 1 : 0),
+  };
+}
+/** list_bundle_choices at its most: a whole stretch of cards and a whole page of listings (Codex G2 on #1933: twenty listings read on the door's one request). */
+export const BUNDLE_CHOICES_MOST: ReadWork = bundleChoicesWork(BUNDLE_SEARCH_STRETCH, BUNDLE_PAGE_LISTINGS);
+
+/** Imports a store's history keeps, all of which get_imports reads (lib/imports.ts, IMPORTS_LIST_SIZE). */
+export const IMPORTS_READ = 10;
+/** An entry of the imports' index: an import's id (24 hexadecimal characters, lib/imports.ts IMPORT_ID_PATTERN), with room. */
+export const IMPORT_ID_BYTES = 64;
+/** An import's record (lib/imports.ts), read whole: its counts, kind, source, file name, tags and where it is: a review ceiling, settled at what was read. */
+export const IMPORT_JOB_BYTES = 16_384;
+/** An import as get_imports sends it: counts only. */
+export const IMPORT_SENT_BYTES = 1_024;
+
+/**
+ * get_imports (lib/imports.ts, storeImportsRead): the index (one LRANGE),
+ * then each import it names (a GET each, in one go), each sent as counts.
+ * Set aside at its most (IMPORTS_MOST) before the index is read and settled
+ * at this for the imports it named, or at what was really read and sent
+ * where that came to more (lib/mcp-tools.ts, importsTool).
+ */
+export function importsWork(imports: number): ReadWork {
+  const n = Math.max(imports, 0);
+  return {
+    commands: 1 + n,
+    bytes: n * (IMPORT_ID_BYTES + IMPORT_JOB_BYTES),
+    sent: n * IMPORT_SENT_BYTES + TOOL_NOTE_BYTES,
+    stripePages: 0,
+    roundTrips: n > 0 ? 2 : 1,
+  };
+}
+/** get_imports at its most: every import the history keeps. */
+export const IMPORTS_MOST: ReadWork = importsWork(IMPORTS_READ);

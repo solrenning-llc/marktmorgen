@@ -10,7 +10,7 @@
  *     the billing address equal to the affiliate's own.
  * A fact not read is null, and its signal is null (unknown), never false.
  */
-import { referralMatch } from "@/lib/own-affiliate-rules";
+import { referralMatch } from "@/lib/own-affiliate-match";
 import { done, is, part } from "./check";
 
 const facts = {

@@ -102,6 +102,40 @@ async function main(): Promise<void> {
   is("the studio says, before a podcast is removed, that its episodes and every buyer's feed go", editor.includes("Its podcast episodes are deleted too, and the private feed of every buyer stops working for good."), true);
   const words = readFileSync(join(process.cwd(), "lib/buyer-words/courses.ts"), "utf8");
   is("the buyer is no longer told the feed works for as long as they have the podcast", words.includes("for as long as you have the podcast"), false);
+  // Claude 3's review of #3473 (6749035489, MEDIUM 1, confirmed by Codex U 6751152743 and Claude 1 6787564624): a feed
+  // made again between the removal's deletion of a page of feeds and its taking of that page off the listeners' list
+  // was left for good: the list no longer named the address, so neither the erasure nor the copy reached its grant.
+  part("A listener asks for their feed again while the removal takes its page of listeners off");
+  {
+    const raced = await addProduct(OWNER, "Night Radio", "", "19");
+    if (!raced.ok) throw new Error("no second podcast");
+    const rid = raced.product.id;
+    const rpod = newPodcastId();
+    if (!(await setProductPodcast(OWNER, rid, { id: rpod, episodes: 0 })).ok) throw new Error("not a podcast");
+    await savePodcast({ id: rpod, episodes: [] });
+    const LATE = "late.listener@example.com";
+    const before = (await storeForEmail(OWNER))!;
+    is("the listener's feed is made", typeof (await feedToken(before, rid, LATE)), "string");
+    const real = redis.pipeline.bind(redis);
+    let raceRan = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!raceRan && commands.some((c) => c[0] === "SREM" && String(c[1]).startsWith("nl:pod:ls:"))) {
+        raceRan = true;
+        redis.pipeline = real;
+        await feedToken(before, rid, LATE);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let removed: { status: number };
+    try {
+      removed = await remove(rid);
+    } finally {
+      redis.pipeline = real;
+    }
+    is("control: the race ran inside the removal", [raceRan, removed.status], [true, 200]);
+    const grants = redis.keys().filter((k) => k.startsWith("nl:pod:t:")).map((k) => String(redis.run(["GET", k]) ?? ""));
+    is("no grant holding the listener's address is left behind, out of every list", grants.filter((v) => v.includes(LATE)).length, 0);
+  }
   done();
 }
 

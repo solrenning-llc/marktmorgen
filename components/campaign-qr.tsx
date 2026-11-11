@@ -13,13 +13,21 @@ import { campaignQr, campaignQrTag } from "@/lib/campaign-qr";
  */
 export function CampaignQr({ url, title, campaign, content = "" }: { url: string; title: string; campaign: string; content?: string }) {
   const code = useMemo(() => campaignQr(url, campaign, title, content), [url, campaign, title, content]);
-  const personal = "refused" in campaignQrTag(campaign) || (content.trim() !== "" && "refused" in campaignQrTag(content));
+  // Which field looks personal, so the sentence names the one to change (the name, the optional variant or both).
+  const looksPersonal = (name: string) => {
+    const read = campaignQrTag(name);
+    return "refused" in read && read.refused === "personal";
+  };
+  const nameRefused = looksPersonal(campaign);
+  const variantRefused = content.trim() !== "" && looksPersonal(content);
+  const field = nameRefused && variantRefused ? "this name and this variant look" : nameRefused ? "this name looks" : variantRefused ? "this variant looks" : null;
+  const fix = nameRefused && variantRefused ? "Use a campaign name like spring-fair and a variant like flyer-a." : nameRefused ? "Use a campaign name instead, like spring-fair." : "Use a variant like flyer-a, or leave the variant empty.";
 
   if (!code) {
     return (
       <p className="text-sm text-ink-soft" role="status">
-        {personal
-          ? "No QR code for this name: it looks like an email address or phone number, and the code is printed for anyone to read. Use a campaign name instead, like spring-fair."
+        {field
+          ? `No QR code: ${field} like an email address or phone number, and the code is printed for anyone to read. ${fix}`
           : "The QR code could not be drawn for this name. Use a campaign name with letters or numbers, like spring-fair."}
       </p>
     );

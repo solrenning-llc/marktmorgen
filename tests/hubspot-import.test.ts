@@ -35,7 +35,7 @@ import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
 import { windowId } from "@/lib/allowance-window";
 import { claimHandle, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { dataKey, dataUsed, noteData, takeData } from "@/lib/store-data";
+import { TAKE_DATA, dataKey, dataUsed, noteData, takeData } from "@/lib/store-data";
 import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { putMember } from "@/lib/team";
 import { store as redis } from "./redis-stub";
@@ -253,6 +253,21 @@ async function main(): Promise<void> {
   const overRoom = await call({ action: "save", header: HEADER, rows: [row("7001", "One", "New", "Sales")] }, roomy.session);
   is("refused as a full store, with the room's own words", [overRoom.status, overRoom.body.error, typeof overRoom.body.message], [409, "store_full", "string"]);
   is("nothing written", await dealCount(roomyId), 0);
+  // Sent again and again, a file that cannot fit costs one read of the room each time, never the room's work for
+  // each of its deals (Claude 1 on #2048: that work ran before the refusal, and the month's rows went back).
+  const bigFile = Array.from({ length: 60 }, (_, i) => row(String(7100 + i), `Deal ${i}`, "New", "Sales"));
+  const roomRealPipeline = redis.pipeline.bind(redis);
+  let slotWork = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const c of commands) if (c[0] === "EVAL" && c[1] === TAKE_DATA) slotWork += (c.length - 7) / 3;
+    return roomRealPipeline(commands);
+  }) as typeof redis.pipeline;
+  const resent: string[] = [];
+  try {
+    for (let i = 0; i < 3; i++) resent.push(String((await call({ action: "save", header: HEADER, rows: bigFile }, roomy.session)).body.error));
+  } finally { redis.pipeline = roomRealPipeline; }
+  is("a full store's file sent three times: refused each time, with no room work per deal", [resent, slotWork], [["store_full", "store_full", "store_full"], 0]);
+  is("and still nothing written", await dealCount(roomyId), 0);
 
   part("One import at a time");
   const held = await takeCrmLock(statsId);

@@ -451,7 +451,7 @@ const pt: BlockWords = {
   searchFound: (n, q) => `${n} ${plural(n, "produto", "produtos")} para «${q}»`,
   searchNone: (q) => `Não há nada aqui para «${q}». Experimente outra palavra ou veja todos os produtos.`,
   searchClear: "Ver todos os produtos",
-  searchOrder: (store) => `Na ordem que ${store} definiu para os seus produtos. Ninguém pode pagar ao Marktmorgen para aparecer mais acima.`,
+  searchOrder: (store) => `Na ordem que ${store} definiu para os seus produtos. Ninguém pode pagar à Marktmorgen para aparecer mais acima.`,
   searchSlow: "Demasiadas pesquisas por agora. Tente novamente dentro de alguns minutos.",
   storeFaqTitle: "Perguntas e respostas",
 };

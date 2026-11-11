@@ -179,6 +179,10 @@ const en = {
       title: "We could not send that just now",
       body: "No place was taken or lost. Try again in a moment.",
     },
+    opening: {
+      title: "We could not finish opening your place",
+      body: "Open the link again in a moment. If it was already yours, nothing changes.",
+    },
     expired: {
       title: "That link has expired",
       body: "It works for 24 hours. Type your address again below and a new one comes right away.",
@@ -293,6 +297,8 @@ const en = {
   nameToShow: "Name to show (optional)",
   updateReview: "Update my review",
   postReview: "Post my review",
+  /** A review of theirs that could not be read: never a blank form that would post over it. */
+  reviewUnread: (title: string) => `Your review of ${title} could not be loaded just now. Refresh this page in a moment to see or change it.`,
   reviewPublic: (store: string) =>
     `Your review is public on ${store}'s page, marked as a verified purchase. Your email address is never shown. ${store} can reply and can hide it, but cannot change it.`,
   deleteReview: "Delete my review",
@@ -520,6 +526,10 @@ const es: GivingWords = {
       title: "No hemos podido enviarlo ahora mismo",
       body: "No se ha ocupado ni perdido ninguna plaza. Vuelve a intentarlo en un momento.",
     },
+    opening: {
+      title: "No hemos podido terminar de abrir tu plaza",
+      body: "Vuelve a abrir el enlace en un momento. Si ya era tuya, no cambia nada.",
+    },
     expired: {
       title: "Ese enlace ha caducado",
       body: "Funciona durante 24 horas. Vuelve a escribir tu dirección abajo y te llegará uno nuevo enseguida.",
@@ -626,6 +636,7 @@ const es: GivingWords = {
   nameToShow: "Nombre que se mostrará (opcional)",
   updateReview: "Actualizar mi reseña",
   postReview: "Publicar mi reseña",
+  reviewUnread: (title) => `No pudimos cargar tu reseña de ${title} en este momento. Actualiza esta página en un momento para verla o cambiarla.`,
   reviewPublic: (store) =>
     `Tu reseña es pública en la página de ${store}, marcada como compra verificada. Tu dirección de email nunca se muestra. ${store} puede responder y ocultarla, pero no puede cambiarla.`,
   deleteReview: "Eliminar mi reseña",
@@ -843,6 +854,10 @@ const fr: GivingWords = {
       title: "Nous n'avons pas pu l'envoyer pour le moment",
       body: "Aucune place n'a été prise ni perdue. Réessayez dans un instant.",
     },
+    opening: {
+      title: "Nous n'avons pas pu finir d'ouvrir votre place",
+      body: "Rouvrez le lien dans un instant. Si elle était déjà à vous, rien ne change.",
+    },
     expired: {
       title: "Ce lien a expiré",
       body: "Il fonctionne pendant 24 heures. Saisissez de nouveau votre adresse ci-dessous et un nouveau lien arrive aussitôt.",
@@ -946,6 +961,7 @@ const fr: GivingWords = {
   nameToShow: "Nom affiché (facultatif)",
   updateReview: "Mettre à jour mon avis",
   postReview: "Publier mon avis",
+  reviewUnread: (title) => `Votre avis sur ${title} n'a pas pu être chargé pour l'instant. Actualisez cette page dans un instant pour le voir ou le modifier.`,
   reviewPublic: (store) =>
     `Votre avis est public sur la page de ${store}, marqué comme achat vérifié. Votre adresse e-mail n'est jamais affichée. ${store} peut y répondre et le masquer, mais pas le modifier.`,
   deleteReview: "Supprimer mon avis",
@@ -1164,6 +1180,10 @@ const de: GivingWords = {
       title: "Wir konnten das gerade nicht senden",
       body: "Es wurde kein Platz vergeben oder verloren. Versuchen Sie es gleich noch einmal.",
     },
+    opening: {
+      title: "Wir konnten Ihren Platz nicht fertig öffnen",
+      body: "Öffnen Sie den Link gleich noch einmal. Wenn der Platz schon Ihrer war, ändert sich nichts.",
+    },
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Er funktioniert 24 Stunden lang. Geben Sie Ihre Adresse unten erneut ein, und ein neuer kommt sofort.",
@@ -1266,6 +1286,7 @@ const de: GivingWords = {
   nameToShow: "Angezeigter Name (optional)",
   updateReview: "Meine Bewertung aktualisieren",
   postReview: "Meine Bewertung veröffentlichen",
+  reviewUnread: (title) => `Ihre Bewertung von ${title} konnte gerade nicht geladen werden. Laden Sie diese Seite gleich neu, um sie zu sehen oder zu ändern.`,
   reviewPublic: (store) =>
     `Ihre Bewertung ist auf der Seite von ${store} öffentlich sichtbar und als verifizierter Kauf gekennzeichnet. Ihre E-Mail-Adresse wird nie angezeigt. ${store} kann antworten und sie ausblenden, aber nicht ändern.`,
   deleteReview: "Meine Bewertung löschen",
@@ -1484,6 +1505,10 @@ const it: GivingWords = {
       title: "Non siamo riusciti a inviarlo in questo momento",
       body: "Nessun posto è stato preso o perso. Riprova tra un momento.",
     },
+    opening: {
+      title: "Non siamo riusciti a finire di aprire il tuo posto",
+      body: "Riapri il link tra un momento. Se era già tuo, non cambia nulla.",
+    },
     expired: {
       title: "Quel link è scaduto",
       body: "Funziona per 24 ore. Scrivi di nuovo il tuo indirizzo qui sotto e ne arriva subito uno nuovo.",
@@ -1590,6 +1615,7 @@ const it: GivingWords = {
   nameToShow: "Nome da mostrare (facoltativo)",
   updateReview: "Aggiorna la mia recensione",
   postReview: "Pubblica la mia recensione",
+  reviewUnread: (title) => `Al momento non è stato possibile caricare la tua recensione di ${title}. Aggiorna questa pagina tra un momento per vederla o modificarla.`,
   reviewPublic: (store) =>
     `La tua recensione è pubblica sulla pagina di ${store}, segnata come acquisto verificato. Il tuo indirizzo email non viene mai mostrato. ${store} può rispondere e nasconderla, ma non può modificarla.`,
   deleteReview: "Elimina la mia recensione",
@@ -1806,6 +1832,10 @@ const nl: GivingWords = {
       title: "We konden dat nu niet versturen",
       body: "Er is geen plek ingenomen of verloren gegaan. Probeer het zo opnieuw.",
     },
+    opening: {
+      title: "We konden je plek niet helemaal openen",
+      body: "Open de link zo opnieuw. Was de plek al van jou, dan verandert er niets.",
+    },
     expired: {
       title: "Die link is verlopen",
       body: "Hij werkt 24 uur. Vul je adres hieronder opnieuw in en er komt meteen een nieuwe.",
@@ -1907,6 +1937,7 @@ const nl: GivingWords = {
   nameToShow: "Naam die wordt getoond (optioneel)",
   updateReview: "Mijn beoordeling bijwerken",
   postReview: "Mijn beoordeling plaatsen",
+  reviewUnread: (title) => `Je beoordeling van ${title} kon nu niet worden geladen. Vernieuw deze pagina zo meteen om hem te zien of te wijzigen.`,
   reviewPublic: (store) =>
     `Je beoordeling is openbaar op de pagina van ${store}, gemarkeerd als geverifieerde aankoop. Je e-mailadres wordt nooit getoond. ${store} kan erop reageren en haar verbergen, maar niet wijzigen.`,
   deleteReview: "Mijn beoordeling verwijderen",
@@ -2125,6 +2156,10 @@ const pt: GivingWords = {
       title: "Não foi possível enviá-la neste momento",
       body: "Nenhum lugar foi ocupado nem perdido. Tente novamente daqui a pouco.",
     },
+    opening: {
+      title: "Não foi possível terminar de abrir o seu lugar",
+      body: "Abra a ligação novamente daqui a pouco. Se o lugar já era seu, nada muda.",
+    },
     expired: {
       title: "Essa ligação expirou",
       body: "Funciona durante 24 horas. Introduza novamente o seu endereço abaixo e chega logo uma nova.",
@@ -2231,6 +2266,7 @@ const pt: GivingWords = {
   nameToShow: "Nome a mostrar (opcional)",
   updateReview: "Atualizar a minha avaliação",
   postReview: "Publicar a minha avaliação",
+  reviewUnread: (title) => `Não foi possível carregar a sua avaliação de ${title} neste momento. Atualize esta página daqui a pouco para a ver ou alterar.`,
   reviewPublic: (store) =>
     `A sua avaliação é pública na página de ${store}, marcada como compra verificada. O seu endereço de email nunca é mostrado. ${store} pode responder e ocultá-la, mas não a pode alterar.`,
   deleteReview: "Eliminar a minha avaliação",

@@ -12,6 +12,7 @@
  * that cannot be made, and nothing is taken and the use is refused.
  */
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { LONGEST_WINDOW_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
 import { poolPlace } from "@/lib/free-pool";
@@ -214,13 +215,31 @@ export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind
   const k = key(kind, id, window);
   try {
     // Only a counter that is there: one gone (expired, erased) is not made again below zero, with no expiry.
-    const [left] = await redisPipeline([["DECRBY", k, n]]);
-    const after = Number(left);
-    if (Number.isSafeInteger(after) && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
+    const reply = ownAllowanceReplies(await redisPipeline([["DECRBY", k, n]]), 1);
+    const after = reply?.[0];
+    // Redis integer commands answer numbers. A missing counter can fall no lower than -n.
+    if (typeof after === "number" && Number.isSafeInteger(after) && after >= -n && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
   } catch {
     // Best effort: counted higher, never lower.
   }
 }
+
+/** Local exact reader while the shared repliesFor correction is independently reviewed. */
+function ownAllowanceReplies(reply: unknown, count: number): unknown[] | null {
+  try {
+    if (types.isProxy(reply) || !Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return null;
+    const length = Object.getOwnPropertyDescriptor(reply, "length");
+    if (!length || !Object.hasOwn(length, "value") || length.value !== count || Object.getOwnPropertyNames(reply).length !== count + 1) return null;
+    const values: unknown[] = [];
+    for (let i = 0; i < count; i++) {
+      const slot = Object.getOwnPropertyDescriptor(reply, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      values.push(slot.value);
+    }
+    return values;
+  } catch { return null; }
+}
+
 
 /** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */
 function acknowledgedAllowanceCount(reply: unknown, n: number): number | null {
@@ -248,11 +267,15 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
   if (!window || !id || !isRedisConfigured() || !kinds.length) return null;
   try {
     const reply: unknown = await redisPipeline(kinds.map((kind) => ["GET", key(kind, id, window.id)]));
-    if (!Array.isArray(reply) || reply.length !== kinds.length) return null;
+    const values = ownAllowanceReplies(reply, kinds.length);
+    if (!values) return null;
     const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
     for (const [i, kind] of kinds.entries()) {
-      const raw: unknown = reply[i];
-      if (raw !== null && typeof raw !== "string" && typeof raw !== "number") return null;
+      const raw: unknown = values[i];
+      // Only what INCRBY writes is a count: a confirmed none (null), its decimal text with no sign, space, point,
+      // exponent, base prefix or leading zero, or the same whole number. Number() would read "", " ", "0x0", "0.0"
+      // and "0e4" as 0, an unknown count taken for nothing used (Codex Z on #3169).
+      if (raw !== null && typeof raw !== "number" && !(typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw))) return null;
       const n = raw === null ? 0 : Number(raw);
       if (!Number.isSafeInteger(n) || n < 0) return null;
       out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });
@@ -268,16 +291,20 @@ export function allowanceUsedWords(store: AllowanceStore, kind: AllowanceKind, n
   return usedWords(kind, allowanceFor(store, kind, now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
-/** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */
+/**
+ * What has been taken of a kind in the store's window, read exactly (rule 24): null when it cannot be read (no
+ * window, no Redis, a lost or malformed reply), 0 only for a count never taken. Every decision that spends (a model
+ * call, an email) and every screen that says a figure reads this one, and a null is never room or "0 used".
+ */
+export async function allowanceUsedExact(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number | null> {
+  return (await allowancesUsedStrict(store, [kind], now))?.[0]?.used ?? null;
+}
+
+/**
+ * The same count with an unread one taken as 0. Kept only for the studio's main page (app/studio/page.tsx, held by
+ * another agent's unit; its "0 of N used" when the count is unread is still to be changed there) and for tests that
+ * measure what a call took. Never use it for a decision or a new screen: read allowanceUsedExact.
+ */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
-  const window = allowanceWindow(store, now);
-  const id = idOf(store);
-  if (!window || !id || !isRedisConfigured()) return 0;
-  try {
-    const [raw] = await redisPipeline([["GET", key(kind, id, window.id)]]);
-    const n = Number(raw);
-    return Number.isSafeInteger(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+  return (await allowanceUsedExact(store, kind, now)) ?? 0;
 }

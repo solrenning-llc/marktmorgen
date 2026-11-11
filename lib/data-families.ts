@@ -116,7 +116,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
-  "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
+  "nl:sa:due", "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
   // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
@@ -387,7 +387,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:rl:phone:quiet:": E, "nl:rl:phone:test:": E, "nl:rl:team-invite:": E,
   "nl:rlm:": er(62),
   "nl:sale:told:": X(40),
-  "nl:sa:": E, "nl:sa:t:": T("nl:erase:ix:", 7),
+  "nl:sa:": E, "nl:sa:due": I, "nl:sa:t:": T("nl:erase:ix:", 7),
   "nl:save:": E,
   "nl:sblock:uses:": E, "nl:sblocks:": E,
   "nl:sender:": C,

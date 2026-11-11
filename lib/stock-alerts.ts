@@ -15,9 +15,13 @@
  * reply that is not exactly what was asked for is unknown, never "nobody"
  * or "done" (rule 24).
  *
- * No route, page or email uses this yet (the next unit): asking returns the
- * two links for the caller to email, after taking the email from the store's
- * allowance.
+ *   nl:sa:due                 sorted set  "<store id>|<product>" → when the
+ *                                         restock job next looks at it
+ *                                         (lib/stock-alert-send.ts)
+ *
+ * Asking returns the two links for the caller to email (lib/stock-alert-send.ts,
+ * which takes the email from the store's figure first); confirming puts the
+ * product on the restock job's list.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -37,9 +41,14 @@ type AlertEntry = { at: number; ok: number; t: string };
 type Grant = { s: string; p: string; e: string; k: "confirm" | "leave" };
 
 const listKey = (sid: string, pid: string) => `nl:sa:${sid}:${pid}`;
+/** The products the restock job looks at (lib/stock-alert-send.ts), by the store's own id, which no change of handle moves. */
+export const STOCK_ALERT_DUE = "nl:sa:due";
+export const dueMember = (storeId: string, productId: string) => `${storeId}|${productId}`;
 const tokenKey = (token: string) => `nl:sa:t:${createHash("sha256").update(token).digest("hex")}`;
 const slotOf = (pid: string) => `sa:${pid}`;
 const newToken = () => randomBytes(24).toString("hex");
+/** A place's confirm link for one day (UTC): derived from its secret leave link, 48 hex characters as every link. */
+const confirmFor = (leave: string, now: number) => createHash("sha256").update(`confirm|${leave}|${new Date(now).toISOString().slice(0, 10)}`).digest("hex").slice(0, 48);
 const nowSeconds = (ms: number) => Math.floor(ms / 1000);
 
 function parseEntry(raw: unknown): AlertEntry | null {
@@ -80,6 +89,16 @@ async function readGrant(token: string): Promise<Grant | null> {
   return parseGrant(replies[0]);
 }
 
+/**
+ * What a link is for, for the page that shows its button (a link only shows
+ * it, because mail scanners open links too): its store, product and kind,
+ * never its address. Null for none; throws when it cannot be read.
+ */
+export async function stockAlertLink(token: string): Promise<{ statsId: string; productId: string; kind: "confirm" | "leave" } | null> {
+  const grant = await readGrant(token);
+  return grant ? { statsId: grant.s, productId: grant.p, kind: grant.k } : null;
+}
+
 /** The bytes one address's place and its leave link take in the data room. */
 function placeBytes(email: string, entry: AlertEntry, leave: Grant): number {
   return dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([tokenKey(entry.t), JSON.stringify(leave)], 1);
@@ -114,7 +133,9 @@ export async function askStockAlert(input: { store: DataStore; productId: string
   if (!before && stockAlertSignup(input.left, size) === "full") return { ok: false, reason: "full" };
 
   const leave = before?.t ?? newToken();
-  const confirm = newToken();
+  // The confirm link is the leave link's, for the day (never guessable: the leave link is secret): asking again the
+  // same day makes the same email under the same key, which the service answers once (Codex G on #3620).
+  const confirm = confirmFor(leave, now);
   const entry: AlertEntry = { at: before?.at ?? nowSeconds(now), ok: before?.ok ?? 0, t: leave };
   const grant = (k: Grant["k"]): Grant => ({ s: sid, p: productId, e: email, k });
   const changes: DataChange[] = [{ until: now + CONFIRM_SECONDS * 1000, bytes: dataBytes([tokenKey(confirm), JSON.stringify(grant("confirm"))], 1) }];
@@ -173,22 +194,35 @@ if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
 end
 return 0`;
 
-/** The confirm link used on the store's own page: the place now counts. */
+/**
+ * The confirm link used on the store's own page: the place now counts, and
+ * the product is put on the restock job's list (STOCK_ALERT_DUE), to be
+ * looked at on its next run. Pressing again puts it there again, so a lost
+ * write is mended by the same button.
+ */
 export async function confirmStockAlert(token: string, store: DataStore, now = Date.now()): Promise<{ ok: true; productId: string } | { ok: false }> {
   const grant = await readGrant(token);
   if (!grant || grant.k !== "confirm" || !store.statsId || store.statsId !== grant.s) return { ok: false };
+  // Without the store's own id the restock job could not find it again: nothing is confirmed (unknown, rule 24).
+  if (!store.sid) throw new UnknownReplyError("the store a back-in-stock list belongs to");
   const key = listKey(grant.s, grant.p);
+  const due: (string | number)[] = ["ZADD", STOCK_ALERT_DUE, now, dueMember(store.sid, grant.p)];
   // Read again when the place changed under the write (asked again meanwhile, say), a few times at most.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const read = repliesFor(await redisPipeline([["HGET", key, grant.e]]), 1);
     if (!read) throw new UnknownReplyError("a back-in-stock place");
     const entry = parseEntry(read[0]);
     if (!entry) return { ok: false };
-    if (entry.ok) return { ok: true, productId: grant.p };
-    const wrote = repliesFor(await redisPipeline([["EVAL", CONFIRM_PLACE, 1, key, grant.e, String(read[0]), JSON.stringify({ ...entry, ok: nowSeconds(now) }), WAIT_SECONDS]]), 1);
-    const done = wrote ? countOf(wrote[0]) : null;
-    if (done === null || done > 1) throw new UnknownReplyError("a back-in-stock confirmation");
-    if (done === 1) return { ok: true, productId: grant.p };
+    if (!entry.ok) {
+      // Confirmed only over exactly the entry read (CONFIRM_PLACE): a leave pressed in between is never undone.
+      const wrote = repliesFor(await redisPipeline([["EVAL", CONFIRM_PLACE, 1, key, grant.e, String(read[0]), JSON.stringify({ ...entry, ok: nowSeconds(now) }), WAIT_SECONDS]]), 1);
+      const done = wrote ? countOf(wrote[0]) : null;
+      if (done === null || done > 1) throw new UnknownReplyError("a back-in-stock confirmation");
+      if (done === 0) continue;
+    }
+    const added = repliesFor(await redisPipeline([due]), 1);
+    if (!added || countOf(added[0]) === null) throw new UnknownReplyError("a back-in-stock confirmation");
+    return { ok: true, productId: grant.p };
   }
   throw new UnknownReplyError("a back-in-stock confirmation");
 }
@@ -230,6 +264,33 @@ async function readList(sid: string, productId: string): Promise<[string, AlertE
   return out;
 }
 
+/** Every address on one list, each with whether it confirmed. Throws UnknownReplyError rather than answer "nobody". */
+export async function stockAlertAddresses(store: DataStore, productId: string): Promise<{ email: string; confirmed: boolean }[]> {
+  if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a back-in-stock list");
+  return (await readList(store.statsId, productId)).map(([email, entry]) => ({ email, confirmed: entry.ok > 0 }));
+}
+
+/**
+ * Whether each of these addresses still has a confirmed place, read exactly
+ * just before an email goes: its leave link when it has, null for one that
+ * left (an exact nil) or is not confirmed; throws UnknownReplyError when any
+ * reply is out of shape.
+ */
+export async function stillWaiting(store: DataStore, productId: string, emails: string[]): Promise<(string | null)[]> {
+  if (!emails.length) return [];
+  if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a back-in-stock list");
+  const what = "a back-in-stock list";
+  const replies = repliesFor(await redisPipeline([["HMGET", listKey(store.statsId, productId), ...emails]]), 1);
+  const rows = replies ? repliesFor(replies[0], emails.length) : null;
+  if (!rows) throw new UnknownReplyError(what);
+  return rows.map((row) => {
+    if (row === null) return null;
+    const entry = parseEntry(row);
+    if (!entry) throw new UnknownReplyError(what);
+    return entry.ok > 0 ? entry.t : null;
+  });
+}
+
 /** The confirmed addresses to email when the product is back. Throws UnknownReplyError rather than answer "nobody". */
 export async function confirmedForRestock(store: DataStore, productId: string): Promise<string[]> {
   if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a back-in-stock list");
@@ -253,7 +314,8 @@ export async function clearStockAlerts(store: DataStore, productId: string, emai
     await redisPipeline(places.flatMap(({ email, entry }) => [["HDEL", key, email], ["DEL", tokenKey(entry.t)]])),
     places.length * 2,
   );
-  if (!gone) throw new UnknownReplyError("clearing a back-in-stock list");
+  // Every reply a count: one out of shape is unknown, never "not there" (rule 24), so the restock job keeps its batch.
+  if (!gone || gone.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("clearing a back-in-stock list");
   const cleared = places.filter((_, i) => gone[i * 2] === 1);
   const leave = (email: string): Grant => ({ s: sid, p: productId, e: email, k: "leave" });
   if (cleared.length) await giveData(store, [{ slot: slotOf(productId), bytes: cleared.reduce((sum, p) => sum + placeBytes(p.email, p.entry, leave(p.email)), 0) }], now);

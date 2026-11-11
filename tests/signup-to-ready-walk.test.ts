@@ -120,6 +120,7 @@ async function main(): Promise<void> {
   is("with both: added", added.status, 200);
   const store = await storeForEmail(EMAIL);
   const productId = store?.products?.[0] ?? "";
+  is("the product added is found (review of #3754)", productId !== "", true);
   is("published at once: no separate publish step", (await readListing(store!, productId))?.hidden === true, false);
   walk.push({ step: 4, action: "Add the first product", required: ["title", "price"] });
 

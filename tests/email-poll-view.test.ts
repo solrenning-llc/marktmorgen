@@ -44,6 +44,14 @@ is("taken back", /role="status"[^>]*>Your answer is taken back\./.test(draw({ pa
 is("not saved: says nothing was counted", /role="status"[^>]*>We could not save that just now\. Nothing was counted\./.test(draw({ page: open, done: "unknown" })), true);
 is("a word that is not a result says nothing", /<p role="status" class="sr-only"><\/p>/.test(draw({ page: open, done: "hacked" })), true);
 
+part("After a vote, when the page cannot be read again (review, MÉDIO)");
+for (const state of ["unknown", "resting"]) {
+  const after = draw({ page: state === "resting" ? { state, language: "en" } : { state }, done: "recorded" });
+  is(`${state}: says it was counted, in the live region`, /role="status"[^>]*>Your answer is counted\./.test(after), true);
+  is(`${state}: never "Nothing was counted"`, /Nothing was counted/.test(after), false);
+}
+is("taken back, then not read: says taken back", /Your answer is taken back\./.test(draw({ page: { state: "unknown" }, done: "withdrawn" })), true);
+
 part("Closed");
 const closed = draw({ page: { ...open, state: "closed" } });
 is("said closed", /This poll has closed/.test(closed), true);

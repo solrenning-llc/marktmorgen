@@ -1566,7 +1566,9 @@ async function lookUp(
     if (raw === null) return null;
     if (typeof raw !== "string") throw new UnknownReplyError("HGET of an address's imported purchase");
     const [given] = importedFrom([productId, raw]);
-    if (!given || !inList(given.items ?? [], want.pid)) return null;
+    // Text that does not read as an entry is unknown too, never "no such purchase" (Revisor 1 on #3714).
+    if (!given) throw new UnknownReplyError("an address's imported purchase");
+    if (!inList(given.items ?? [], want.pid)) return null;
     // What was brought over holds one bundle at the most: its own.
     if (want.bundle && (want.bundle !== "main" || !given.items?.length)) return null;
     allow(given.productId, want.pid, ...(want.bundle ? (given.items ?? []) : []));

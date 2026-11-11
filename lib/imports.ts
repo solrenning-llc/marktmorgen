@@ -460,6 +460,9 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
   // The record GET nl:import:A answers is import A's only when it says so: one naming another import is unknown, never
   // listed as A's nor left out (Codex V on #3661, rule 30).
   if (jobs.some((job, i) => job !== null && job.id !== list[i])) throw new UnknownReplyError("one of the store's imports");
+  // Another store's only when it names one: an import whose store is missing, null, empty or not text says nothing of
+  // whose it is, so the list is unknown, never shorter (Claude 4 cloud A on #3686; as storeImportsRead, Codex G on #1933).
+  if (jobs.some((job) => job !== null && (typeof (job as { sid?: unknown }).sid !== "string" || !job.sid))) throw new UnknownReplyError("one of the store's imports");
   return jobs.filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 

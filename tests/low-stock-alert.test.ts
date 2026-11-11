@@ -15,7 +15,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
-process.env.RESEND_API_KEY = "re_test_low_stock_stand_in";
+// The same synthetic key as tests/store-alerts.test.ts: the Resend fixture takes only listed literals.
+process.env.RESEND_API_KEY = "re_test_store_alerts_stand_in";
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 
 const OWNER = "kiln.owner@example.com";

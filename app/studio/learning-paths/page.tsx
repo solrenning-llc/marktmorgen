@@ -52,7 +52,7 @@ export default async function StudioLearningPathsPage({ searchParams }: Params) 
           <StudioTrail store={store} here="Learning paths" />
           <h1 className="t-h2 mt-3">Learning paths</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            Put several of your courses in order. Choose whether each course opens when the one before it is finished, or whether all of them are open at once. Your courses themselves, their lessons and their prices do not change.
+            Put several of your courses in order. Choose whether the path suggests one course at a time, each once the one before it is finished, or no order at all. Students can still open any course they have, and your courses, their lessons and their prices do not change.
           </p>
           <div className="mt-8">
             <LearningPathsEditor initial={paths} courses={courses} />

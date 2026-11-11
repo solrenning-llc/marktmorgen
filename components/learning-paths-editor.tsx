@@ -80,15 +80,16 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
               <label htmlFor={`path-${i}-name`} className="field-label block">Name</label>
               <input id={`path-${i}-name`} className="field mt-1" value={path.name} maxLength={MAX_PATH_NAME} onChange={(event) => change(i, { name: event.target.value })} />
             </div>
-            <div role="radiogroup" aria-labelledby={`path-${i}-order`}>
-              <p id={`path-${i}-order`} className="field-label">How the courses open</p>
+            <div role="radiogroup" aria-labelledby={`path-${i}-order`} aria-describedby={`path-${i}-order-hint`}>
+              <p id={`path-${i}-order`} className="field-label">How the path orders its courses</p>
+              <p id={`path-${i}-order-hint`} className="text-sm text-ink-soft">Either way, students can still open any course they have.</p>
               <label className="flex min-h-11 items-center gap-2 text-sm">
                 <input type="radio" name={`path-${i}-order`} className="h-5 w-5" checked={path.order === "sequence"} onChange={() => change(i, { order: "sequence" })} />
-                One after another: each course opens when the one before it is finished.
+                One after another: the path suggests each course once the one before it is finished.
               </label>
               <label className="flex min-h-11 items-center gap-2 text-sm">
                 <input type="radio" name={`path-${i}-order`} className="h-5 w-5" checked={path.order === "free"} onChange={() => change(i, { order: "free" })} />
-                In any order: every course the student has is open.
+                In any order: the path suggests no order.
               </label>
             </div>
             <div>

@@ -100,9 +100,9 @@ export async function pollPage(input: { broadcastId: string; link: unknown; now:
     return { state: "unknown" };
   }
   if (!broadcast || !broadcast.poll) return { state: "invalid" };
-  if (broadcast.status !== "sending" && broadcast.status !== "sent") return { state: "invalid" };
-  if (!nonnegative(broadcast.total) || !nonnegative(broadcast.sendAt)) return { state: "unknown" };
-  if (checked.recipient >= broadcast.total) return { state: "invalid" };
+  if (!nonnegative(broadcast.sent) || !nonnegative(broadcast.sendAt)) return { state: "unknown" };
+  // Whoever it reached, whatever its status since (as votePoll).
+  if (checked.recipient >= broadcast.sent) return { state: "invalid" };
   // In seconds on the broadcast (createBroadcast), in milliseconds for the poll's rules.
   const sentAt = broadcast.sendAt * 1000;
   const state = pollState(sentAt, broadcast.poll.days, now);

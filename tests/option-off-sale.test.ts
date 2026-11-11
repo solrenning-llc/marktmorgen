@@ -4,7 +4,10 @@
  * or subscribe on it keep what they have: nothing about delivery, renewals or
  * Stripe changes. What is checked, each against the real code:
  *
- *   - the flag is kept as it is stored, and nothing else turns it on;
+ *   - the flag is kept as it is stored, and nothing else turns it on; a
+ *     value stored in a shape it cannot be read in ("true", 1, "yes", null,
+ *     {}) reads as off sale, because this flag is what stops a charge
+ *     (reviewer C3 on #3598): only an absent flag or exactly false is on sale;
  *   - sellableOptions leaves it out, so the product page, the cards, the
  *     "from" price, the buy form, the comparison and the come-back offers
  *     (namedPriceOffered) never show it;
@@ -17,7 +20,7 @@
  */
 import { addOption, addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
-import { handsOver, namedPriceOffered, parseOptions, sellableOptions, type ProductOption } from "@/lib/product-option";
+import { handsOver, namedPriceOffered, parseOptions, sellableOptions, withInvitedOption, type ProductOption } from "@/lib/product-option";
 import { createCheckout, fromPriceCents } from "@/lib/store-checkout";
 import { directoryRow } from "@/lib/affiliate-directory";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
@@ -46,8 +49,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
 
-/** Marks option `id` off sale wherever the store keeps it, as the studio will (unit 2). */
-function takeOffSale(id: string): number {
+/** Marks option `id` off sale wherever the store keeps it, as the studio will (unit 2); `flag` writes another shape. */
+function takeOffSale(id: string, flag: unknown = true): number {
   let patched = 0;
   const walk = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(walk);
@@ -56,7 +59,7 @@ function takeOffSale(id: string): number {
     const next: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(record)) next[key] = walk(inner);
     if (next.id === id && typeof next.priceCents === "number" && "label" in next) {
-      next.offSale = true;
+      next.offSale = flag;
       patched += 1;
     }
     return next;
@@ -88,8 +91,15 @@ async function main(): Promise<void> {
     { id: "a1", label: "A", priceCents: 1000, link: "https://example.com/a", offSale: true },
     { id: "b1", label: "B", priceCents: 2000, link: "https://example.com/b", offSale: "yes" },
     { id: "c1", label: "C", priceCents: 3000, link: "https://example.com/c" },
+    { id: "d1", label: "D", priceCents: 4000, link: "https://example.com/d", offSale: false },
   ]);
-  is("kept only when it is exactly true", read.map((o) => o.offSale === true), [true, false, false]);
+  is("exactly true is off sale; a value it cannot read ('yes') is off sale too; absent or exactly false is on sale", read.map((o) => o.offSale === true), [true, true, false, false]);
+  const unreadable: unknown[] = ["true", 1, "yes", null, {}];
+  const odd = parseOptions(unreadable.map((flag, at) => ({ id: `u${at}`, label: `U${at}`, priceCents: 1000, link: "https://example.com/u", offSale: flag })));
+  is("each unreadable value is kept as an option, read as off sale (never dropped, so a product never falls back to its own price)", odd.map((o) => [o.id, o.offSale]), unreadable.map((_, at) => [`u${at}`, true]));
+  is("none of them is offered, and with all of them unreadable the product is not for sale", [sellableOptions({ options: odd, course: null, podcast: null, shipping: null } as unknown as Listing).length, handsOver({ options: odd, course: { lessons: 3 } } as unknown as Listing)], [0, false]);
+  const invited = withInvitedOption({ options: odd }, "u2");
+  is("a moving-in invitation naming one reopens only that one, for that member, as for exactly true", invited.options.map((o) => o.offSale === true), [true, true, false, true, true]);
 
   part("What a buyer may pick");
   const both = { options: [option({ id: "o1", priceCents: 1000, offSale: true }), option({ id: "o2", label: "Plus", priceCents: 3000 })], priceCents: 1000, file: null, link: null, recurring: null } as unknown as Listing;
@@ -127,6 +137,18 @@ async function main(): Promise<void> {
   is("an old link naming the option off sale: refused, Stripe never reached", await open(ids[0]), ["refused: This product needs one of its options", 0]);
   const opened = await open(ids[1]);
   is("the option still on sale: opens as before, at its own price", [opened, sessions.at(-1)?.get("line_items[0][price_data][unit_amount]")], [["opened", 1], "3000"]);
+  for (const flag of ["true", 1, "yes", null, {}] as unknown[]) {
+    takeOffSale(ids[0], flag);
+    const stored = (await readProduct(shop, made.product.id))!;
+    const before = sessions.length;
+    const outcome = await createCheckout(shop, stored, "https://marktmorgen.com", ids[0], { digitalConsent: TEST_CONSENT }).then(() => "opened", (error: unknown) => `refused: ${(error as Error).message}`);
+    is(`offSale stored as ${JSON.stringify(flag)}: read as off sale, refused, Stripe never reached`, [stored.options.find((o) => o.id === ids[0])?.offSale, outcome, sessions.length - before], [true, "refused: This product needs one of its options", 0]);
+  }
+  takeOffSale(ids[0], false);
+  const back = (await readProduct(shop, made.product.id))!;
+  const reopened = sessions.length;
+  const onSale = await createCheckout(shop, back, "https://marktmorgen.com", ids[0], { digitalConsent: TEST_CONSENT }).then(() => "opened", (error: unknown) => `refused: ${(error as Error).message}`);
+  is("offSale stored as exactly false: on sale, opens at its own price", [onSale, sessions.length - reopened, sessions.at(-1)?.get("line_items[0][price_data][unit_amount]")], ["opened", 1, "1000"]);
 
   part("Never quoted by the affiliate directory or the store assistant");
   const pack = await addProduct(owner, "Font Pack", "", "10", null);

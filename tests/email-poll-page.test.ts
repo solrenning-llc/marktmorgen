@@ -16,6 +16,7 @@
  */
 import { pollLinkPart } from "@/lib/email-poll-links";
 import { pollPage } from "@/lib/email-poll-vote";
+import * as route from "@/app/api/mail/poll/route";
 import { pollWords } from "@/lib/buyer-words/polls";
 import { LANGUAGES } from "@/lib/store-language";
 import type { Store } from "@/lib/store";
@@ -103,6 +104,21 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("opening says it counted nothing", /counted nothing/.test(en.openedNothing), true);
   is("not saved never says counted", /not counted|Nothing was counted/.test(en.notSaved), true);
   is("only totals, never who", /never who/.test(en.totalsOnly), true);
+
+  part("A press from the page goes back to it with what happened");
+  const press = async (query: string, form: Record<string, string>) => {
+    const body = new FormData();
+    for (const [k, v] of Object.entries(form)) body.set(k, v);
+    return route.POST(new Request(`https://marktmorgen.com/api/mail/poll?${query}`, { method: "POST", body }));
+  };
+  const back = await press(`b=${ID}&k=${link(2).replace(/^2\./, "3.")}`, { a: "1", from: "page" });
+  is("a 303 back to the page", back.status, 303);
+  is("with the link and what happened, never a vote", back.headers.get("Location"), `https://marktmorgen.com/poll?b=${ID}&k=${encodeURIComponent(link(2).replace(/^2\./, "3."))}&done=invalid`);
+  is("not cached", back.headers.get("Cache-Control"), "no-store");
+  const odd = await press(`b=${encodeURIComponent("<x>")}&k=${link(2)}`, { a: "1", from: "page" });
+  is("a broadcast id that is not one never goes into the address", odd.headers.get("Location"), "https://marktmorgen.com/poll?done=invalid");
+  const plain = await press(`b=${ID}&k=${link(2).replace(/^2\./, "3.")}`, { a: "1" });
+  is("without the page: plain words, as before", plain.status, 404);
 
   done();
 })();

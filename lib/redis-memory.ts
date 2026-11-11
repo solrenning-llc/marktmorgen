@@ -164,6 +164,18 @@ export class MemoryRedis {
           const [, hold, token] = args;
           return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
         }
+        // lib/group-buy.ts PLACE_DROP: a place's mark taken off only while it is still exactly the text its open wrote.
+        if (key.startsWith("-- marktmorgen:group-place-drop:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, members, field, text] = args;
+          return this.run(["HGET", members, field]) === text ? this.run(["HDEL", members, field]) : 0;
+        }
+        // lib/group-buy.ts PLACE_CLAIM: a place's mark claimed for an open only while it is still the text read.
+        if (key.startsWith("-- marktmorgen:group-place-claim:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, members, field, read, claimed] = args;
+          if (this.run(["HGET", members, field]) !== read) return 0;
+          this.run(["HSET", members, field, claimed]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
         if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
           const [, members, field, json] = args;

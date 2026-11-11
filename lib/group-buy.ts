@@ -616,7 +616,7 @@ export async function takePlace(input: {
   if (lock === null) throw new Error("this place's link is being opened already");
   if (lock !== "OK") throw new UnknownReplyError("a place's opening");
   try {
-    return await takeOpened(input, group, email, who);
+    return await takeOpened(input, group, email, who, mine);
   } finally {
     // Compared and deleted in one step (Codex C2's proof on #2654): an open that outlived its 30 seconds never
     // takes off the hold of the open that came after it.
@@ -627,6 +627,25 @@ export async function takePlace(input: {
 /** Deletes a place's opening hold only while it is still this open's own (its random token). */
 const PLACE_RELEASE = `-- marktmorgen:group-place-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+
+/**
+ * Takes a place's mark off only while it is still exactly the text an open wrote (KEYS[1] the marks, ARGV[1] the
+ * address, ARGV[2] that text): 1 when it did, 0 when it was gone or is another's now (Codex C2 on #2872).
+ */
+const PLACE_DROP = `-- marktmorgen:group-place-drop:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+return 0`;
+
+/**
+ * Claims a place's mark for an open (KEYS[1] the marks, ARGV[1] the address, ARGV[2] the text read, ARGV[3] the open's
+ * own): 1 when it was still the text read and is now the open's, 0 when it changed or is gone.
+ */
+const PLACE_CLAIM = `-- marktmorgen:group-place-claim:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+  return 1
+end
 return 0`;
 
 /**
@@ -650,8 +669,12 @@ return 1`;
 /** How long one open of a link holds it, at most. */
 const OPENING_SECONDS = 30;
 
-/** A place's mark: who, when, the hour its order was admitted in, and whether all that follows the gift was done. */
-type Mark = Member & { h?: number; d?: 1 };
+/**
+ * A place's mark: who, when, the hour its order was admitted in, whether all that follows the gift was done, and the
+ * open that holds it (o, its random token; Codex C2 on #2872): a cleanup takes off only the mark its own open wrote.
+ */
+type Mark = Member & { h?: number; d?: 1; o?: string };
+const OPEN_TOKEN = /^[0-9a-f]{32}$/;
 
 /**
  * A place's mark as HGET answers it: null only for an explicit nil (no
@@ -672,16 +695,17 @@ function markOf(reply: unknown): Mark | null | undefined {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const fields = value as Record<string, unknown>;
-  if (Object.keys(fields).some((name) => !["e", "at", "h", "d"].includes(name))) return undefined;
-  const { e, at, h, d } = fields;
+  if (Object.keys(fields).some((name) => !["e", "at", "h", "d", "o"].includes(name))) return undefined;
+  const { e, at, h, d, o } = fields;
   if (typeof e !== "string" || !e || !Number.isSafeInteger(at) || (at as number) < 1) return undefined;
   if (h !== undefined && !Number.isSafeInteger(h)) return undefined;
   if (d !== undefined && d !== 1) return undefined;
-  return { e, at: at as number, ...(h !== undefined ? { h: h as number } : {}), ...(d === 1 ? { d: 1 as const } : {}) };
+  if (o !== undefined && !(typeof o === "string" && OPEN_TOKEN.test(o))) return undefined;
+  return { e, at: at as number, ...(h !== undefined ? { h: h as number } : {}), ...(d === 1 ? { d: 1 as const } : {}), ...(typeof o === "string" ? { o } : {}) };
 }
 
 /** The address's mark and what it was given, in their exact shape; throws when either is not. */
-async function readPlace(group: Group, email: string, who: string): Promise<{ mark: Mark | null; given: { job: string; at: number } | null }> {
+async function readPlace(group: Group, email: string, who: string): Promise<{ mark: Mark | null; raw: string | null; given: { job: string; at: number } | null }> {
   const read = repliesFor(
     await redisPipeline([
       ["HGET", membersKey(group.id), who],
@@ -692,20 +716,29 @@ async function readPlace(group: Group, email: string, who: string): Promise<{ ma
   const mark = read ? markOf(read[0]) : undefined;
   const given = read ? givenBy(read[1]) : undefined;
   if (mark === undefined || given === undefined) throw new UnknownReplyError("a place's address");
-  return { mark, given };
+  return { mark, raw: mark === null ? null : (read![0] as string), given };
 }
 
-async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string): Promise<Taken> {
+async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string, token: string): Promise<Taken> {
   const { store } = input;
   const members = membersKey(group.id);
-  const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}) });
+  // Every mark this open writes carries its own token (o), so nothing but this open's own cleanup takes it off.
+  const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}), o: token });
+  /** The mark as this open last wrote or claimed it: the only one its cleanup may take off. */
+  let own: string | null = null;
   /**
    * This address's mark taken off, so the place it was not given is free for another address and its link works
    * again (Claude 6 on #2872, ported to the marks; CX-123 rules 24 and 30): Upstash runs each command on its own, so
    * an HDEL whose call failed or whose answer is of another shape is sent once more alone. True only once Redis said
    * the HDEL ran (0 or 1); false leaves the mark as it is, this address's own, picked up when its link is opened again.
    */
-  const dropOnce = () => redisPipeline([["HDEL", members, who]]).then((r) => bit(repliesFor(r, 1)?.[0]) !== null, () => false);
+  // Compared and deleted in one step (PLACE_DROP; Codex C2's proposed HIGH on #2872): a cleanup that times out and
+  // lands later finds the mark another open has claimed or written since, and leaves it. Nothing written by this open
+  // (own null) is nothing to take off.
+  const dropOnce = () =>
+    own === null
+      ? Promise.resolve(true)
+      : redisPipeline([["EVAL", PLACE_DROP, 1, members, who, own]]).then((r) => bit(repliesFor(r, 1)?.[0]) !== null, () => false);
   const letGo = async (): Promise<boolean> => (await dropOnce()) || (await dropOnce());
   /**
    * All that follows the gift, each part once: the doors that read gifts
@@ -728,7 +761,7 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   };
 
   // Read again now that this open holds the link.
-  const { mark, given } = await readPlace(group, email, who);
+  const { mark, raw, given } = await readPlace(group, email, who);
   if (given && given.job === groupJob(group.id)) {
     // Given by this purchase: "already" only once that is so. A gift whose
     // mark went missing has it written back, so it is counted among the
@@ -742,23 +775,36 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   }
   if (given) {
     // Given it some other way: no place is used for it, and a mark left by an
-    // open that stopped half way is taken off.
+    // open that stopped half way is taken off, only as it was read.
+    own = raw;
     if (mark) await letGo();
     return { outcome: "has", email, group };
   }
 
   const at = now();
-  // The mark first, then how many marks there are: the places taken, this
-  // one among them. A mark already there is this address's own, from an open
-  // that stopped before handing anything over, and is picked up here.
+  // A mark already there is this address's own, from an open that stopped before handing anything over, and is
+  // picked up here: claimed for this open first (PLACE_CLAIM, compare-and-set from the text read), so a cleanup of the
+  // earlier open that lands late finds it changed and leaves it (Codex C2 on #2872). Changed since it was read, or an
+  // answer of another shape: nothing is handed out, and the link works again.
+  if (mark) {
+    const claimed = write(mark);
+    const swapped = await redisPipeline([["EVAL", PLACE_CLAIM, 1, members, who, raw as string, claimed]]).then((r) => repliesFor(r, 1)?.[0], () => undefined);
+    if (swapped !== 1) throw new UnknownReplyError("a place's mark, picked up");
+    own = claimed;
+  }
+  // The mark first, then how many marks there are: the places taken, this one among them.
+  const fresh = write({ e: email, at });
+  if (!mark) own = fresh;
   const wrote = await redisPipeline([
-    ...(mark ? [] : [["HSETNX", members, who, write({ e: email, at })] as (string | number)[]]),
+    ...(mark ? [] : [["HSETNX", members, who, fresh] as (string | number)[]]),
     ["HLEN", members],
   ]).then(
     (r) => repliesFor(r, mark ? 1 : 2),
     () => null,
   );
   const set = wrote && !mark ? bit(wrote[0]) : 1;
+  // Not written by this open (another open's mark landed first): it is not this open's to take off.
+  if (!mark && set === 0) own = null;
   const count = wrote ? countOf(wrote.at(-1)) : null;
   if (!wrote || set === null || count === null || count < 1) {
     // The answer never came or is of another shape: the mark may be written,
@@ -776,8 +822,8 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
     // HDEL is known to have run (its answer 0 or 1): when it was not, it is
     // sent once more alone and counted again (#2872, ported), so a mark it
     // was never given a place for is not left counted beside the others.
-    const dropped = await redisPipeline([["HDEL", members, who], ["HLEN", members]]).then(
-      (r) => repliesFor(r, 2),
+    const dropped = await redisPipeline(own === null ? [["HLEN", members]] : [["EVAL", PLACE_DROP, 1, members, who, own], ["HLEN", members]]).then(
+      (r) => (own === null ? [0, ...(repliesFor(r, 1) ?? [])] : repliesFor(r, 2)),
       () => null,
     );
     let after = dropped && bit(dropped[0]) !== null ? countOf(dropped[1]) : null;
@@ -849,7 +895,10 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   // open that stops before all that follows is done gives its room back when
   // the link is opened again; a mark without it leaves the room held until
   // its day ends, never given back twice.
-  if (hour !== null) await redisPipeline([["HSET", members, who, write(placed)]]);
+  if (hour !== null) {
+    await redisPipeline([["HSET", members, who, write(placed)]]);
+    own = write(placed);
+  }
   await finish(placed);
   return { outcome: "taken", email, group };
 }

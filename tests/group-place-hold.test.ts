@@ -38,6 +38,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   return new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 });
 }) as typeof fetch;
 
+/** A place's mark taken off: an HDEL, or since Codex C2's review of #2872 the compare-and-delete script (PLACE_DROP). */
+const dropsMark = (c: (string | number)[], marks: string) =>
+  (c[0] === "HDEL" && c[1] === marks) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:group-place-drop:v1") && c[3] === marks);
+
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_group_place_hold_only";
@@ -177,7 +181,7 @@ async function main(): Promise<void> {
   // is answered, and the whole call then throws (lib/redis.ts). The run must still say "full", never leave the address
   // a record that later reads as a place it was never given (Claude 6 on #2872).
   // Rule 23: on the main the give-back is the HDEL of the mark beside an HLEN, not a script beside a DECR.
-  const isDropOf = (id: string) => (c: Command) => c[0] === "HDEL" && c[1] === `nl:grp:${id}:m`;
+  const isDropOf = (id: string) => (c: Command) => dropsMark(c, `nl:grp:${id}:m`);
   /** The give-back's HDEL fails, the rest of its pipeline lands; `always` fails it alone too (the retry). */
   const failDrop = (id: string, always: boolean) => {
     redis.pipeline = (async (commands: Command[]) => {

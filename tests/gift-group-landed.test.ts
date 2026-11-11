@@ -65,6 +65,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 });
 }) as typeof fetch;
 
+/** A place's mark taken off: an HDEL, or since Codex C2's review of #2872 the compare-and-delete script (PLACE_DROP). */
+const dropsMark = (c: (string | number)[], marks: string) =>
+  (c[0] === "HDEL" && c[1] === marks) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:group-place-drop:v1") && c[3] === marks);
+
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_gift_group_landed_only";
@@ -207,7 +211,7 @@ async function main(): Promise<void> {
   const d1 = await paidGroup(2);
   is("two places, taken", [await take(await d1.link("kai@example.com")), await take(await d1.link("lu@example.com"))], ["taken", "taken"]);
   // Rule 23: on the main a place is given back by an HDEL of the address's mark (no script, no DECR).
-  const isDrop = (c: Command) => c[0] === "HDEL" && c[1] === `nl:grp:${d1.id}:m`;
+  const isDrop = (c: Command) => dropsMark(c, `nl:grp:${d1.id}:m`);
   redis.pipeline = (async (commands: Command[]) => {
     if (!commands.some(isDrop)) return real(commands);
     await real(commands.filter((c) => !isDrop(c)));
@@ -259,7 +263,7 @@ async function main(): Promise<void> {
   // after it (no script, no DECR); the second taker's whole take runs between those two commands. Expectations unchanged.
   const isGiveBack = (commands: Command[]) =>
     commands.length === 2 &&
-    commands.some((c) => c[0] === "HDEL" && c[1] === `nl:grp:${f1.id}:m`) &&
+    commands.some((c) => dropsMark(c, `nl:grp:${f1.id}:m`)) &&
     commands.some((c) => c[0] === "HLEN" && c[1] === `nl:grp:${f1.id}:m`);
   let between: string | null = null;
   redis.pipeline = (async (commands: Command[]) => {

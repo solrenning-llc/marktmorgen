@@ -218,9 +218,9 @@ async function main(): Promise<void> {
     publishMessage?.({ field: "search", kind: null, part: "[Your product]" }, null),
     publishMessage?.({ field: "test", kind: null, part: "⟦Say it⟧" }, "Guide"),
   ], [
-    "“Draft guide” has a part for you to write on its sales page, in the Said elsewhere block: “⟦Their name⟧”. Open it under Sales pages, replace it with your own words, including the brackets, then publish it. Nothing was published.",
-    "This product has a part for you to write on its sales page, in the search title or line: “[Your product]”. Open it under Sales pages, replace it with your own words, including the brackets, then publish it. Nothing was published.",
-    "“Guide” has a part for you to write on its sales page, in the headline you are testing: “⟦Say it⟧”. Open it under Sales pages, replace it with your own words, including the brackets, then publish it. Nothing was published.",
+    "“Draft guide” has a part for you to write on its sales page, in the Said elsewhere block: “⟦Their name⟧”. Open it under Sales pages, replace the whole part, brackets and all, with your own words, then publish it. Nothing was published.",
+    "This product has a part for you to write on its sales page, in the search title or line: “[Your product]”. Open it under Sales pages, replace the whole part, brackets and all, with your own words, then publish it. Nothing was published.",
+    "“Guide” has a part for you to write on its sales page, in the headline you are testing: “⟦Say it⟧”. Open it under Sales pages, replace the whole part, brackets and all, with your own words, then publish it. Nothing was published.",
   ]);
   const products = readFileSync("components/product-editor.tsx", "utf8");
   is("the product list says it when publishing, and never carries the campaigns", [/data\.error === "placeholder"[\s\S]{0,600}templatePublishMessage\(/.test(products), /from "@\/lib\/(template-text|funnel-starters)"/.test(products)], [true, false]);
@@ -238,14 +238,22 @@ async function main(): Promise<void> {
     templateLeftMessage({ field: "block", part: "[Your product]" }, "Text", "site"),
     templateLeftMessage({ field: "search", part: "⟦Say who⟧" }, null, "product"),
   ], [
-    "In the Text block, “[Your product]” is a part for you to write. Replace it with your own words, including the brackets, or keep the page hidden. Nothing was saved.",
-    "In the search title or line, “⟦Say who⟧” is a part for you to write. Replace it with your own words, including the brackets, or take the product off your store first. Nothing was saved.",
+    "In the Text block, “[Your product]” is a part for you to write. Replace the whole part, brackets and all, with your own words, or keep the page hidden. Nothing was saved.",
+    "In the search title or line, “⟦Say who⟧” is a part for you to write. Replace the whole part, brackets and all, with your own words, or take the product off your store first. Nothing was saved.",
   ]);
 
   part("The page editor");
   const editor = readFileSync("components/page-editor.tsx", "utf8");
   is("it says where the part is and opens that block", /data\.error === "placeholder"[\s\S]{0,900}templateLeftMessage\([\s\S]{0,200}if \(block\) show\(block\.id\)/.test(editor), true);
   is("it never carries the campaigns", /from "@\/lib\/(template-text|funnel-starters)"/.test(editor), false);
+  // Revisor 2 on #3693: "replace it with your own words, including the brackets" reads either way (keep them or drop
+  // them). Every place that tells a creator to replace a part in brackets says the brackets go too, in one wording.
+  part("One unambiguous wording: the brackets go with the part (Revisor 2 on #3693)");
+  for (const file of ["lib/template-text-rules.ts", "lib/product-outline.ts", "components/product-editor.tsx"]) {
+    const text = readFileSync(file, "utf8");
+    is(`${file}: never "including the brackets"`, text.includes("including the brackets"), false);
+    is(`${file}: says "brackets and all"`, text.includes("brackets and all"), true);
+  }
   done();
 }
 

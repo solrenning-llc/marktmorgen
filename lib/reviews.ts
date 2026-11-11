@@ -198,17 +198,19 @@ function parseSummary(raw: unknown): Summary {
 export async function summaries(statsId: string | null): Promise<Map<string, Summary>> {
   const out = new Map<string, Summary>();
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", summaryKey(statsId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    if (typeof flat[i] === "string") out.set(flat[i] as string, parseSummary(flat[i + 1]));
-  }
+  // Read exactly (rule 24): a reply of another shape is unknown, never "no reviews".
+  const flat = repliesFor(await redisPipeline([["HGETALL", summaryKey(statsId)]]), 1)?.[0];
+  if (!Array.isArray(flat) || flat.length % 2 !== 0 || !flat.every((x) => typeof x === "string")) throw new UnknownReplyError("a store's review numbers");
+  for (let i = 0; i + 1 < flat.length; i += 2) out.set(flat[i] as string, parseSummary(flat[i + 1]));
   return out;
 }
 
 export async function summaryOf(statsId: string | null, productId: string): Promise<Summary> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
-  const [raw] = await redisPipeline([["HGET", summaryKey(statsId), productId]]);
+  // Read exactly (rule 24): none written is no reviews; a reply of another shape is unknown.
+  const read = repliesFor(await redisPipeline([["HGET", summaryKey(statsId), productId]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a product's review numbers");
   return parseSummary(raw);
 }
 

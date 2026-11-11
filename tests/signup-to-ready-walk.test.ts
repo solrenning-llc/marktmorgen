@@ -106,9 +106,12 @@ async function main(): Promise<void> {
   // The studio's form is what a person uses: the browser will not send it without the fields it marks required.
   const form = renderToStaticMarkup(createElement(HandleForm));
   const formRequired = [...form.matchAll(/<input[^>]*>/g)].map((tag) => tag[0]).filter((tag) => / required=""/.test(tag)).map((tag) => /name="([^"]+)"/.exec(tag)?.[1] ?? "");
-  is("the studio's form requires the address and the name", formRequired, ["handle", "name"]);
+  // 251 [ST4] unit 2: the name was required by the form only; the store takes its address as its name when left empty.
+  is("the studio's form requires the address only", formRequired, ["handle"]);
+  is("and says the name is optional and what an empty one becomes", /Store name \(optional\)/.test(form) && /your address is used/.test(form), true);
   const claimed = await claim(asJson(claimUrl, { handle: "walkergoods" }, true));
-  is("the route alone accepts the address without a name (recorded as a difference)", claimed.status, 200);
+  is("the route accepts the address without a name", claimed.status, 200);
+  is("and names the store by its address", (await storeForEmail(EMAIL))?.name, "walkergoods");
   is("the account has its store", (await storeForEmail(EMAIL))?.handle, "walkergoods");
   walk.push({ step: 3, action: "Claim the store", required: formRequired });
 

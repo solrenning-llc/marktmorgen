@@ -240,25 +240,30 @@ async function main(): Promise<void> {
     is("a paid store's pause says its plan's hours are used, never that it has no paid plan", typeof paid === "function" && drawn.includes(inHtml(paid(current.name))) && !drawn.includes(inHtml(w.pausedRest(current.name))), true);
   }
 
-  part("MEDIO (review of #3402, security M1): one live hold a person a store; pressing another lesson moves it, never adds one");
+  part("MEDIO (review of #3402, security M1, and the owner's decision B): one live hold a person a store; another lesson waits");
   {
     // Before: the same token came back only for the same lesson, so a student pressing different lessons held a new
     // block each time, and could hold the store's whole video time without watching (another student then got busy).
-    const src = async (who: Who, lesson: string, play: string) => /src="([^"]+)"/.exec((await page(who, lesson, { play })).replace(/&amp;/g, "&"))?.[1] ?? "";
+    // Rule 23, the owner's decision of 11 November 2026 (option B, on Claude 6's MEDIUM 6786921313): a press of another
+    // lesson while one of theirs is playing signed a new token with nothing held for it; it now signs nothing and says,
+    // in true words, that a lesson of theirs is playing, until that one ends (at most PLAY_BLOCK_SECONDS).
     const expires = (url: string) => new URL(url).searchParams.get("expires");
+    const src = async (who: Who, lesson: string, play: string) => /src="([^"]+)"/.exec((await page(who, lesson, { play })).replace(/&amp;/g, "&"))?.[1] ?? "";
     await redis.pipeline([["DEL", `nl:watch:sec:${folder}:${windowId((await storeForEmail(OWNER)) as Store)}`]]);
     const live = await press("student", "lesson000002");
     const heldBefore = await held();
     const moved = await press("student", "lesson000001");
-    is("the student's press of another lesson plays", /^[0-9a-f]{24}$/.test(moved.play), true);
+    is("the student's press of another lesson is told a lesson of theirs is playing", moved.play, "playing");
     is("and holds nothing more", await held(), heldBefore);
-    const [a, b] = [await src("student", "lesson000002", live.play), await src("student", "lesson000001", moved.play)];
-    is("its token is the other video's, ending when the live one does", [b.startsWith(PLAYER), a !== b, expires(a) === expires(b)], [true, true, true]);
+    const told = await page("student", "lesson000001", { play: "playing" });
+    is("the page says so in plain words, and frames no player", [told.includes(inHtml(w.playPlayingRest)), framesPlayer(told)], [true, false]);
+    const again = await press("student", "lesson000002");
+    is("the same lesson still plays, on the same token", [/^[0-9a-f]{24}$/.test(again.play), expires(await src("student", "lesson000002", again.play)) === expires(await src("student", "lesson000002", live.play))], [true, true]);
 
     // Presses at once, alternating lessons: still one block, so a person can never sum blocks by racing them.
     await redis.pipeline([["DEL", HOLDS]]);
     const many = await Promise.all(Array.from({ length: 8 }, (_, i) => press("second", i % 2 ? "lesson000001" : "lesson000002", `198.51.100.${200 + i}`)));
-    is("eight presses at once by one student all play", many.every((p) => /^[0-9a-f]{24}$/.test(p.play)), true);
+    is("eight presses at once by one student: each plays one lesson or is told one is playing", many.every((p) => /^[0-9a-f]{24}$/.test(p.play) || p.play === "playing"), true);
     is("and hold one half-hour block, six units, not eight", await held(), 6);
   }
 

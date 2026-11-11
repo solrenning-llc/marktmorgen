@@ -7,7 +7,7 @@
  * before.
  */
 import { readFileSync } from "node:fs";
-import { DRAFTS_KEY, DRAFT_DAYS, MAX_DRAFTS, type DraftStorage, type ListedStorage, clearDraft, draftIds, draftScope, forgetDrafts, forgetEveryonesDrafts, personDrafts, readDraft, saveDraft } from "@/lib/inbox-drafts";
+import { DRAFTS_KEY, DRAFT_DAYS, MAX_DRAFTS, type DraftStorage, type ListedStorage, clearDraft, draftIds, draftScope, forgetDrafts, oldDraftsStuck, forgetEveryonesDrafts, personDrafts, readDraft, saveDraft } from "@/lib/inbox-drafts";
 import { MAX_MESSAGE } from "@/lib/inbox-rules";
 import { done, is, part } from "./check";
 
@@ -115,6 +115,37 @@ part("An old draft leaves storage when it is next read, not only when another is
   const before = fresh.map.get(DRAFTS_KEY);
   readDraft(fresh, a, t0 + 1);
   is("a read with nothing old writes nothing", fresh.map.get(DRAFTS_KEY), before);
+}
+
+part("An old draft the device refuses to remove is said, never claimed gone (Codex U, residual of MEDIUM 1)");
+{
+  const map = new Map<string, string>();
+  let refuse = false;
+  const stubborn: DraftStorage = {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => {
+      if (refuse) throw new Error("SecurityError");
+      map.set(k, String(v));
+    },
+    removeItem: (k) => {
+      if (refuse) throw new Error("SecurityError");
+      map.delete(k);
+    },
+  };
+  saveDraft(stubborn, a, "Old words", t0);
+  refuse = true;
+  const later = t0 + DRAFT_DAYS * DAY + 1;
+  is("read after DRAFT_DAYS: not shown", [readDraft(stubborn, a, later), draftIds(stubborn, later).size], ["", 0]);
+  is("the words are still on the device, because it refused", map.has(DRAFTS_KEY), true);
+  is("and that is known: old words are stuck here", oldDraftsStuck(stubborn, later), true);
+  refuse = false;
+  is("once the device accepts, the next look removes them and says nothing is stuck", [oldDraftsStuck(stubborn, later), map.has(DRAFTS_KEY)], [false, false]);
+  const fine = memory();
+  saveDraft(fine, a, "Kept", t0);
+  is("a device with nothing old has nothing stuck", oldDraftsStuck(fine, t0 + 1), false);
+  is("nor does one with no storage at all, which keeps nothing", oldDraftsStuck(null, t0), false);
+  is("the inbox looks once the page is drawn", studio.includes("setCleanFailed(oldDraftsStuck(storage));"), true);
+  is("and the help under the box then drops the 7-day promise and says what is left", [studio.includes("cleanFailed ? STUCK :"), studio.includes('const STUCK = "What you type is kept on this device only, for you, as a draft for this conversation, until you send it, you log out or your session ends. This device would not let us remove an older draft, so its words are still stored here; clearing this site\'s data in your browser removes them. Nothing is ever sent to us.";')], [true, true]);
 }
 
 part("A draft that could not be kept is said, never claimed kept (Codex U, MEDIUM 2)");

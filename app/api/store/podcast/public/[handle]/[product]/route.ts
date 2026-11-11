@@ -38,7 +38,9 @@ import { photoUrl } from "@/lib/photo-limits";
  *
  * The XML is kept on the server PUBLIC_FEED_CACHE_SECONDS, so an app asking again reads nothing from Redis; caches
  * between are told to ask each time (no-cache), with an ETag, so every answer is counted and an app that already has
- * it gets a 304 with no body. A record that cannot be read is a 503, never an empty feed, and is not kept (rule 24).
+ * it gets a 304 with no body. A store suspension, like a newly hidden draft, takes effect on an already kept
+ * feed within PUBLIC_FEED_CACHE_SECONDS (300 seconds); every uncached build refuses a suspended store before
+ * holding or reading its listing. A record that cannot be read is a 503, never an empty feed, and is not kept (rule 24).
  */
 const FEED_HEADERS = { "Content-Type": "application/rss+xml; charset=utf-8", "Cache-Control": "no-cache" };
 const MAX_SEGMENT = 200;
@@ -123,7 +125,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return unavailable();
     }
     if (store === "unknown") return unavailable();
-    if (store === "none") return notFound();
+    if (store === "none" || store.suspended) return notFound();
     const built = await build(store, segment, now);
     if (built === "none") return notFound();
     if (built === "unavailable") return unavailable();

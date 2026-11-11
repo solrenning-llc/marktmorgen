@@ -8,6 +8,8 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { readListing } from "@/lib/catalog";
 import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
@@ -79,6 +81,9 @@ export default async function StoreOwnPage({ params, searchParams }: Params) {
   // The same rule the store page follows for the creator's own domain.
   const reachedOn = (await headers()).get("x-nimbus-domain");
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) redirect(`${SITE_URL}/@${store.handle}/${page.slug}`);
+  // As the store and product pages (lib/traffic.ts, isResting): one of the store's counted public requests, and a store
+  // whose window's requests are used rests, before the page's product, funnel and forms are read.
+  if (await isResting(store)) return <StoreResting store={store} />;
 
   const { w } = speech(store);
   const bw = blockWords(store.language);

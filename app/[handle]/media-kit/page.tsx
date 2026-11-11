@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { lookStyle } from "@/lib/store-look";
 import { StoreTracking } from "@/components/store-tracking";
 import { speech } from "@/lib/buyer-words";
@@ -61,6 +63,9 @@ export default async function MediaKitPage({ params }: Params) {
   const { handle } = await params;
   const store = await load(handle);
   if (!store) notFound();
+  // As the store page (lib/traffic.ts, isResting): one of the store's counted public requests, and a store whose
+  // window's requests are used rests, before the reviews' summaries and the counted numbers are read.
+  if (await isResting(store)) return <StoreResting store={store} />;
   const kit = store.kit;
   const said = speech(store);
   const w = kitWords(store.language);

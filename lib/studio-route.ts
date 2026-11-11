@@ -271,11 +271,12 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
 export async function holdStudio(
   store: Store,
   units: number,
-): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string }> {
+): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string; reason: "used" | "unknown" | "pool"; limit: number; left?: number; reset?: string }> {
   const now = Date.now();
   const current = await refreshPeriod(store);
   const taken = await takeAllowance(current, "studio", units, now);
-  if (!taken.ok) return { ok: false, message: taken.message };
+  // Why it was refused, and how many were left when that was read, for a caller that words it for itself (lib/list-download.ts).
+  if (!taken.ok) return { ok: false, message: taken.message, reason: taken.reason, limit: taken.limit, left: taken.left, reset: taken.reset };
   return {
     ok: true,
     give: async (n) => {

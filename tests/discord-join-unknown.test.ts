@@ -30,10 +30,14 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 
 const real = redis.pipeline.bind(redis);
 let bend: "real" | "lost" | "text" | "list" | "broken" = "real";
+/** How the orders page's link (nl:orders:link:<token>) answers its GET. */
+let linkBend: "real" | "lost" | "object" | "number" = "real";
 const written: string[] = [];
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const replies = await real(commands);
   for (const command of commands) if (String(command[1] ?? "").startsWith("nl:dc:trip:")) written.push(String(command[0]));
+  const isLinkRead = commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:orders:link:");
+  if (isLinkRead && linkBend !== "real") return linkBend === "lost" ? [] : linkBend === "object" ? [{}] : [1];
   const isServerRead = commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:dc:srv:");
   if (bend === "real" || !isServerRead) return replies;
   if (bend === "lost") return [];
@@ -45,6 +49,7 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 beforeEach(() => {
   redis.clear();
   bend = "real";
+  linkBend = "real";
   stripeDown = false;
   written.length = 0;
 });
@@ -91,4 +96,21 @@ test(`no server kept is still "off", and an order Stripe says is not there is st
   await shop();
   await redis.pipeline([["DEL", (await (async () => "nl:dc:srv:" + storeKey((await storeForEmail("discord-join-unknown@example.com"))!))())]]);
   assert.equal(await press({ session_id: "cs_test_" + "c".repeat(24) }), "off");
+});
+
+// The orders page's "Join the Discord" button names the buyer by the orders link (Claude 1, cloud reviewer C4, and
+// H2 on #3780): a link that cannot be read is "failed" (try again), never "no purchase with Discord access".
+for (const shape of ["lost", "object", "number"] as const) {
+  test(`an orders link read as ${shape} is "failed", never "none"`, async () => {
+    await shop();
+    linkBend = shape;
+    assert.equal(await press({ token: "a".repeat(64) }), "failed");
+    assert.deepEqual(written, []);
+  });
+}
+
+test(`an orders link that is not there is still "none"`, async () => {
+  await shop();
+  assert.equal(await press({ token: "a".repeat(64) }), "none");
+  assert.deepEqual(written, []);
 });

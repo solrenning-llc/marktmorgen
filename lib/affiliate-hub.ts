@@ -39,7 +39,7 @@ import { storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { personKeys, personWrite } from "@/lib/joined-stores";
 
@@ -82,8 +82,10 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinEssentialLimit("affhub-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinEssentialLimit("affhub-address", sha(email), 5, 3_600))) return "limited";
+  const byIp = await essentialLimitState("affhub-ip", input.ip, 10, 3_600);
+  if (byIp !== "within") return byIp === "exceeded" ? "limited" : "error";
+  const byAddress = await essentialLimitState("affhub-address", sha(email), 5, 3_600);
+  if (byAddress !== "within") return byAddress === "exceeded" ? "limited" : "error";
   const stores = await storesPromoted(email);
   if (!stores.length) return "sent";
   const token = randomBytes(32).toString("hex");

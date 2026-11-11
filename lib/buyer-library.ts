@@ -44,7 +44,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
 
@@ -136,8 +136,10 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinEssentialLimit("library-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinEssentialLimit("library-address", sha(email), 5, 3_600))) return "limited";
+  const byIp = await essentialLimitState("library-ip", input.ip, 10, 3_600);
+  if (byIp !== "within") return byIp === "exceeded" ? "limited" : "error";
+  const byAddress = await essentialLimitState("library-address", sha(email), 5, 3_600);
+  if (byAddress !== "within") return byAddress === "exceeded" ? "limited" : "error";
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
   let charged: Store | null = null;

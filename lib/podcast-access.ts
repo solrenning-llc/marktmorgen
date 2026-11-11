@@ -38,7 +38,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
-import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
+import { essentialLimitState, withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { Listing, Store } from "@/lib/store";
@@ -202,7 +202,8 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const { store, product } = input;
   if (!(await withinStore("podcast-link-ip", `${store.handle}:${input.ip}`, 10, 3_600, store, "buyer"))) return "limited";
-  if (!(await withinEssentialLimit("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600))) return "limited";
+  const byAddress = await essentialLimitState("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600);
+  if (byAddress !== "within") return byAddress === "exceeded" ? "limited" : "error";
   if (!(await mayListen(store, product.id, raw))) return "sent";
   const token = await feedToken(store, product.id, raw);
   if (!token) return "error";

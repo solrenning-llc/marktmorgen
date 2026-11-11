@@ -1,0 +1,84 @@
+# Writes TypeScript's incremental build record (.next/cache/.tsbuildinfo) of each commit on main, so
+# the builds of pull requests and merge groups based on that commit re-check only what changed
+# (scripts/test_ci_next_cache.py holds the rules). It tests nothing: it is not a required check and
+# not part of CI, and a failure or a cancellation here only means the next builds type-check cold.
+# One job per place a CI build runs: the runner itself and the Playwright container (a cache entry
+# is found only with the same compression, which differs between them).
+name: Next build cache
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # The running record finishes; of the commits that land meanwhile only the newest waits.
+  group: next-build-cache
+  cancel-in-progress: false
+jobs:
+  runner:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    name: TypeScript build record (runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # The record of an earlier commit on main only makes this build faster.
+      - name: Restore TypeScript build record of the latest commit on main
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .next/cache/.tsbuildinfo
+          key: next-tsbuildinfo-v1-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: next-tsbuildinfo-v1-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+      - run: node scripts/ci-build.mjs
+      - name: Save TypeScript build record of this commit
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .next/cache/.tsbuildinfo
+          key: next-tsbuildinfo-v1-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+
+  playwright:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    name: TypeScript build record (Playwright container)
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
+      options: --init --ipc=host --user pwuser
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # The record of an earlier commit on main only makes this build faster.
+      - name: Restore TypeScript build record of the latest commit on main
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .next/cache/.tsbuildinfo
+          key: next-tsbuildinfo-v1-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: next-tsbuildinfo-v1-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+      - run: node scripts/ci-build.mjs
+      - name: Save TypeScript build record of this commit
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .next/cache/.tsbuildinfo
+          key: next-tsbuildinfo-v1-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}

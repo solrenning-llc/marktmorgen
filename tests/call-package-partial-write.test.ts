@@ -79,7 +79,10 @@ test("a record write answered with neither OK nor null is unknown: no link hande
     if (mentions(c, `nl:pkg:${id}`) && mentions(c, "NX")) return [[0, "QUEUED"]] as never;
     return real(c);
   }) as typeof redis.pipeline;
-  await assert.rejects(recordPackage(input(id)), /package.*could not be confirmed/i);
+  await assert.rejects(recordPackage(input(id)), (error: unknown) =>
+    error instanceof Error && (/package.*could not be confirmed/i.test(error.message) ||
+      (error.name === "UnknownReplyError" && /reply in an unknown shape/.test(error.message))));
   redis.pipeline = real;
   assert.equal(mail.ses.length, 0);
+  assert.equal(await readBought(id), null, "no record, so no booking link, is kept");
 });

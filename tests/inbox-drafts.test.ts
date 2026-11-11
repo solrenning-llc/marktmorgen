@@ -100,6 +100,33 @@ is(
   [true, true, true, true],
 );
 
+part("An old draft leaves storage when it is next read, not only when another is kept (Codex U, MEDIUM 1)");
+{
+  const old = memory();
+  saveDraft(old, a, "Old words", t0);
+  saveDraft(old, b, "Fresh", t0 + DRAFT_DAYS * DAY);
+  is("read after DRAFT_DAYS: not shown", readDraft(old, a, t0 + DRAFT_DAYS * DAY + 1), "");
+  is("and its words are gone from storage, the valid one kept", Object.keys(JSON.parse(old.map.get(DRAFTS_KEY) ?? "{}")), [b]);
+  const listed = memory();
+  saveDraft(listed, a, "Old words", t0);
+  is("the list read on opening the inbox purges too, and nothing is left", [draftIds(listed, t0 + DRAFT_DAYS * DAY + 1).size, listed.map.has(DRAFTS_KEY)], [0, false]);
+  const fresh = memory();
+  saveDraft(fresh, a, "Kept", t0);
+  const before = fresh.map.get(DRAFTS_KEY);
+  readDraft(fresh, a, t0 + 1);
+  is("a read with nothing old writes nothing", fresh.map.get(DRAFTS_KEY), before);
+}
+
+part("A draft that could not be kept is said, never claimed kept (Codex U, MEDIUM 2)");
+{
+  const full: DraftStorage = { getItem: () => null, setItem: () => { throw new Error("QuotaExceededError"); }, removeItem: () => {} };
+  is("a full storage refuses the draft", saveDraft(full, a, "Words", t0), false);
+  is("the inbox acts on the refusal", studio.includes("const kept = saveDraft(browserDrafts(me), thread.conversation.id, next); setDraftFailed(!kept && next.trim() !== \"\"); if (kept) setDrafted(draftIds(browserDrafts(me)));"), true);
+  is("and says so, politely, once", studio.includes("if (!kept && next.trim() && !draftFailed) setDraftSaid(NOT_KEPT);"), true);
+  is("the help under the box no longer says the words are kept", studio.includes("{draftFailed ? NOT_KEPT : \"What you type is kept on this device only"), true);
+  is("the words said", studio.includes('const NOT_KEPT = "This device could not keep your answer as a draft, so it is only in this box until you send it.";'), true);
+}
+
 part("Logging out");
 const signin = readFileSync("app/signin/page.tsx", "utf8");
 is("the sign-in page forgets the drafts whatever brought the person there (a log-out, an expired or refused session, log in again)", [signin.includes("<ForgetInboxDrafts />"), signin.includes('status.startsWith("out") ? <ForgetInboxDrafts />')], [true, false]);

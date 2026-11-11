@@ -35,13 +35,38 @@ test("the real page keeps draft work available when the count is unknown", async
 });
 
 test("missing count prerequisites are unknown without adding a counter read", async () => {
-  for (const absent of ["window", "redis", "list"] as const) {
+  for (const absent of ["window", "redis"] as const) {
     reset();
     if (absent === "redis") world.redis = false;
     else world[absent] = null;
     const html = await render();
     assert.match(html, /could not be loaded/);
     assert.match(html, /Draft editor preserved/);
+    assert.match(html, /data-month-known="false"/);
+    assert.doesNotMatch(html, /0 of 10,000|aria-valuenow/);
+    assert.equal(world.reads, 0);
+  }
+});
+
+test("an explicitly absent list has known zero use without reading a counter", async () => {
+  reset(); world.list = null; world.used = null; world.throws = true;
+  const html = await render();
+  assert.match(html, /0 of 10,000 this month\./);
+  assert.match(html, /data-used="0"/);
+  assert.match(html, /data-month-known="true"/);
+  assert.doesNotMatch(html, /Your email use could not be loaded/);
+  assert.match(html, /Draft editor preserved/);
+  assert.equal(world.reads, 0);
+  assert.deepEqual(world.args, []);
+});
+
+test("an absent list does not certify an unknown month or configuration", async () => {
+  for (const absent of ["window", "redis"] as const) {
+    reset(); world.list = null;
+    if (absent === "redis") world.redis = false;
+    else world.window = null;
+    const html = await render();
+    assert.match(html, /Your email use could not be loaded/);
     assert.match(html, /data-month-known="false"/);
     assert.doesNotMatch(html, /0 of 10,000|aria-valuenow/);
     assert.equal(world.reads, 0);

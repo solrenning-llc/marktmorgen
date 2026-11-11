@@ -12,7 +12,7 @@
  *   - a version's text that is kept but does not read as recorded is unknown for the person's data copy
  *     (readVersionExact throws), never "no text"; the pages still read it as "can't be read right now", and the
  *     person's data copy names that version with its mark and an "unread" note, so it is never blocked for good;
- *   - a delete that finds the lock taken answers 409 "busy" (as a withdraw), not logged; an unknown reply answers 500.
+ *   - a delete that finds the lock taken answers 409 "busy", in its own words, not logged; an unknown reply answers 500.
  *
  * Synthetic store, synthetic people, the in-memory Redis stand-in (lib/redis-memory.ts), the email provider mocked.
  */

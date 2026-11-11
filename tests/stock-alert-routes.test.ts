@@ -162,6 +162,25 @@ async function main(): Promise<void> {
   await ask("lector@example.com", "8.8.2.1");
   is("Spanish subject and html lang", [mails[0]?.subject, mails[0]?.html.includes('lang="es-ES"')], ["Confirma: avísame cuando Signed Print vuelva", true]);
 
+  part("One click from a mail app still works after the store lets its old address go");
+  mails.length = 0;
+  await ask("mover@example.com", "8.8.3.1");
+  const unsubscribe = (mails[0]?.headers?.["List-Unsubscribe"] ?? "").replace(/^<|>$/g, "");
+  const moverLink = new URL(unsubscribe || "https://marktmorgen.com/");
+  const moverLeave = moverLink.searchParams.get("t") ?? "";
+  is("the place is kept", typeof redis.run(["HGET", listKey, "mover@example.com"]), "string");
+  redis.run(["SET", "nl:store:handle:harbor", "released:owner@example.com"]);
+  const stranger = new URL(moverLink);
+  stranger.searchParams.set("i", "store_not_a_store");
+  stranger.searchParams.delete("h");
+  const notFound = await leaveRoute(request(`${stranger.pathname}${stranger.search}`, null, "9.9.3.2", "cross-site"));
+  is("a store that cannot be found is never a silent 200", notFound.status === 200, false);
+  is("and the place is still there", typeof redis.run(["HGET", listKey, "mover@example.com"]), "string");
+  const released = await leaveRoute(request(`${moverLink.pathname}${moverLink.search}`, null, "9.9.3.1", "cross-site"));
+  is("the email's own one-click link, after the old address was let go: done", [released.status, moverLeave.length], [200, 48]);
+  is("the place is gone", redis.run(["HEXISTS", listKey, "mover@example.com"]), 0);
+  is("pressed again: nothing left to stop, done", (await leaveRoute(request(`${moverLink.pathname}${moverLink.search}`, null, "9.9.3.1", "cross-site"))).status, 200);
+
   done();
 }
 

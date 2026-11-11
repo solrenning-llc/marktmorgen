@@ -223,6 +223,31 @@ async function main(): Promise<void> {
   redis.run = run;
   is("nothing asked", shape.calls.length, 0);
 
+  part("A batch whose send stayed unknown is never sent again (Claude 3 on #3620)");
+  redis.run(["DEL", listKey, `nl:sa:${sid}:${pid}:job`]);
+  await place("fay@example.com");
+  await place("gus@example.com");
+  makeDue();
+  const lost = sender("retry");
+  await runRestocks(Date.now() + 30_000, { ...real, send: lost.send });
+  is("tried once: the email service may have taken it, the answer was lost", lost.calls.length, 1);
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + 21 * 3_600_000;
+    makeDue();
+    const still = sender("retry");
+    await runRestocks(Date.now() + 30_000, { ...real, send: still.send });
+    is("the day the email service keeps a batch's key nearly over: never tried under a new key", still.calls.every((c) => c.key === lost.calls[0].key), true);
+    is("an unknown is taken as sent: the addresses leave the list", [redis.run(["HEXISTS", listKey, "fay@example.com"]), redis.run(["HEXISTS", listKey, "gus@example.com"])], [0, 0]);
+    Date.now = () => realNow() + 26 * 3_600_000;
+    makeDue();
+    const later = sender("sent");
+    await runRestocks(Date.now() + 30_000, { ...real, send: later.send });
+    is("a day later: nobody written to a second time", later.calls.flatMap((c) => c.messages.map((m) => m.to)), []);
+  } finally {
+    Date.now = realNow;
+  }
+
   done();
 }
 

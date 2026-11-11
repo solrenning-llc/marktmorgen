@@ -20,6 +20,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type BundleOutline, type FunnelBundle } from "@/lib/funnel-bundle";
 import { MAX_SHARE_DAYS, MAX_SHARE_NAME, SHARE_CODE, SHARE_ID } from "@/lib/funnel-share-rules";
 
@@ -62,19 +63,25 @@ function parseEntry(raw: unknown): ShareEntry | null {
   }
 }
 
-/** A store's share links, newest first. Ones that have run out are cleared from the list as it is read. Throws when the list cannot be read. */
+/**
+ * A store's share links, newest first. Ones that have run out are cleared from the list as it is read.
+ * Throws when the list cannot be read, or when whether a snapshot is there comes back in any shape but
+ * an exact 0 or 1 (CX-123 rule 24): clearing a row revokes its link, so only a confirmed 0 clears one.
+ */
 export async function listShares(statsId: string | null, nowSeconds = Math.floor(Date.now() / 1000)): Promise<ShareEntry[]> {
   if (!statsId || !isRedisConfigured()) throw new Error("Share links unavailable");
   const replies = await redisPipeline([["HGETALL", listKey(statsId)]]);
-  if (replies.length !== 1 || !Array.isArray(replies[0])) throw new Error("Share links unavailable");
-  const flat = replies[0] as unknown[];
+  const flat = repliesFor(replies, 1) ? stringList(replies[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new Error("Share links unavailable");
   const entries: { field: string; entry: ShareEntry | null }[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) entries.push({ field: String(flat[i]), entry: parseEntry(flat[i + 1]) });
+  for (let i = 0; i + 1 < flat.length; i += 2) entries.push({ field: flat[i], entry: parseEntry(flat[i + 1]) });
   // The snapshot's own expiry is the one that counts: an entry whose snapshot is gone is cleared too.
   const readable = entries.filter((row) => row.entry && row.entry.expiresAt > nowSeconds);
   const exists = readable.length ? await redisPipeline(readable.map((row) => ["EXISTS", lookupKey(row.entry!.hash)])) : [];
-  if (exists.length !== readable.length) throw new Error("Share links unavailable");
-  const live: ShareEntry[] = readable.filter((_, i) => Number(exists[i]) === 1).map((row) => row.entry!);
+  if (!repliesFor(exists, readable.length)) throw new Error("Share links unavailable");
+  const there = exists.map(countOf);
+  if (there.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("whether a shared snapshot is there");
+  const live: ShareEntry[] = readable.filter((_, i) => there[i] === 1).map((row) => row.entry!);
   const stale = entries.filter((row) => !live.includes(row.entry!)).map((row) => row.field);
   if (stale.length) await redisPipeline([["HDEL", listKey(statsId), ...stale]]).catch(() => {});
   return live.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
@@ -116,21 +123,22 @@ export async function createShare(
   const replies = await redisPipeline([
     ["EVAL", CREATE_SHARE, 2, listKey(statsId), lookupKey(hash), entry.id, JSON.stringify(entry), JSON.stringify(record), JSON.stringify(input.outline), JSON.stringify(input.bundle), input.limit, days * 86_400],
   ]);
-  if (replies.length !== 1) throw new Error("Share link could not be confirmed");
-  const reply = Number(replies[0]);
+  const reply = repliesFor(replies, 1) ? countOf(replies[0]) : null;
   if (reply === 1) return { ok: true, code, entry };
   if (reply === 0) return { ok: false, error: "full" };
   throw new Error("Share link could not be confirmed");
 }
 
-/** Revokes a link at once: its snapshot first, then its line in the list. */
+/** Revokes a link at once: its snapshot first, then its line in the list. Throws when a reply is in another shape: "not there" only on a confirmed absence. */
 export async function revokeShare(statsId: string, id: string): Promise<boolean> {
   const replies = await redisPipeline([["HGET", listKey(statsId), id]]);
+  if (!repliesFor(replies, 1) || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a share link");
   const entry = parseEntry(replies[0]);
   if (!entry) return false;
   const done = await redisPipeline([["DEL", lookupKey(entry.hash)], ["HDEL", listKey(statsId), id]]);
-  if (done.length !== 2) throw new Error("Revoking could not be confirmed");
-  return Number(done[1]) === 1;
+  const counts = repliesFor(done, 2) ? done.map(countOf) : null;
+  if (!counts || counts.some((n) => n !== 0 && n !== 1)) throw new Error("Revoking could not be confirmed");
+  return counts[1] === 1;
 }
 
 /**
@@ -158,7 +166,9 @@ export async function openShare<T extends "sum" | "bundle">(
   if (typeof record.statsId !== "string" || typeof record.id !== "string" || typeof record.expiresAt !== "number" || record.expiresAt <= nowSeconds) return null;
   // Still on the sender's list: a revoke that stopped halfway still revokes.
   const [listed] = await redisPipeline([["HEXISTS", listKey(record.statsId), record.id]]);
-  if (Number(listed) !== 1) return null;
+  const on = countOf(listed);
+  if (on !== 0 && on !== 1) throw new UnknownReplyError("whether a share link is listed");
+  if (on !== 1) return null;
   return { id: record.id, statsId: record.statsId, from: typeof record.from === "string" ? record.from : "", value };
 }
 
@@ -169,8 +179,8 @@ export async function openShare<T extends "sum" | "bundle">(
  */
 export async function countUse(key: string, limit: number, windowSeconds: number): Promise<boolean> {
   const replies = await redisPipeline([["SET", key, "0", "EX", windowSeconds, "NX"], ["INCR", key]]);
-  const count = Number(replies[1]);
-  if (replies.length !== 2 || !Number.isSafeInteger(count) || count < 1) throw new Error("Use count unavailable");
+  const count = repliesFor(replies, 2) ? countOf(replies[1]) : null;
+  if (count === null || count < 1) throw new Error("Use count unavailable");
   return count <= limit;
 }
 

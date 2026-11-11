@@ -49,7 +49,8 @@ function listedEpisodes(raw: string): number | null {
  * MAX_EPISODES): parsePodcast would leave them out, and written back they would leave the feed.
  */
 export async function readPodcast(id: string): Promise<Podcast | null> {
-  if (!PODCAST_ID.test(id) || !isRedisConfigured()) return null;
+  if (!PODCAST_ID.test(id)) return null;
+  if (!isRedisConfigured()) throw new UnknownReplyError("a podcast's record");
   const reply = repliesFor(await redisPipeline([["GET", podKey(id)]]), 1);
   const raw = reply?.[0];
   if (raw === null) return null;

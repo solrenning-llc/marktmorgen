@@ -27,6 +27,8 @@ export function suggestedSendHour(
   now: number,
 ): SendTimeSuggestion | null {
   if (!Array.isArray(signals) || !Number.isFinite(now)) return null;
+  // Intl uses the host zone for undefined; a person's zone must be explicit.
+  if (typeof timeZone !== "string" || timeZone.trim().length === 0) return null;
 
   let hourFormatter: Intl.DateTimeFormat;
   try {

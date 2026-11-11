@@ -25,6 +25,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
@@ -261,8 +262,17 @@ export async function issueCertificate(input: {
   const bytes = dataBytes([JSON.stringify(certificate)], 3);
   await needData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
   await redisPipeline([["SET", certKey(id), JSON.stringify(certificate)]]);
-  const [claimed] = await redisPipeline([["HSETNX", indexKey(input.course.id), input.who, id]]);
-  if (Number(claimed) !== 1) {
+  // The slot read exactly (rule 24): an answer in another shape is read back, and a slot naming this press's own
+  // certificate is this press's, never "taken by another", which deleted the record just written.
+  const slot = countOf(repliesFor(await redisPipeline([["HSETNX", indexKey(input.course.id), input.who, id]]), 1)?.[0]);
+  // HSETNX answers exactly 0 or 1; anything else is unknown.
+  let claimed = slot === 0 || slot === 1 ? slot : null;
+  if (claimed === null) {
+    const back = repliesFor(await redisPipeline([["HGET", indexKey(input.course.id), input.who]]), 1);
+    if (!back || (back[0] !== null && typeof back[0] !== "string")) throw new UnknownReplyError("a student's certificate slot");
+    claimed = back[0] === id ? 1 : 0;
+  }
+  if (claimed !== 1) {
     const existing = await certificateOf(input.course.id, input.who);
     if (existing) {
       // This press made nothing that stands: its record goes, the standing one is the answer.
@@ -311,8 +321,9 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
     // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
-    const [written] = await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]);
-    if (written === null) return false;
+    // Done only on "OK" (rule 24): another shape is not done, never "withdrawn" while the certificate stands.
+    const written = repliesFor(await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]), 1);
+    if (!written || written[0] !== "OK") return false;
   }
   const who = emailKey(found.email);
   const [current] = await redisPipeline([["HGET", indexKey(courseId), who]]);

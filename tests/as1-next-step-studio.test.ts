@@ -143,7 +143,7 @@ test("the studio's field saves through the route with the body it sends; the rou
   assert.ok("next-step".length <= limit, "the action fits the length the route reads");
 });
 
-test("the studio's field: labelled, its count said, the product list the store's own", () => {
+test("the studio's field: labeled, its count said, the product list the store's own", () => {
   const html = renderToStaticMarkup(
     createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {} } as never }, createElement(CourseNextStep, { productId: "course000001", current: { productId: "advanced0001", line: "Go deeper." }, choices: [{ id: "advanced0001", title: "Advanced watercolor" }], maxLine: MAX_NEXT_STEP_LINE })),
   );

@@ -111,6 +111,7 @@ export const NOT_ACTIONS: Readonly<Record<string, string>> = {
   paused: "Shown only when the studio's requests for the period are used up, never something to open.",
   disputes: "The review of one disputed purchase, which opens only from that purchase in Payment requests.",
   "closing-refunds": "The review before members get unused time back, which opens only while the store is closing.",
+  invoices: "The invoices of the store's own plan, which open from the plan card (What you pay us), shown only for a store with a plan subscription.",
 };
 
 /** A result: what it does, where it goes, and the plan it needs when the store's plan does not include it. */

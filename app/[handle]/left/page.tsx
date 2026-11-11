@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { lookStyle } from "@/lib/store-look";
 import { readListing, readListings } from "@/lib/catalog";
 import { cartable, readCartIds } from "@/lib/cart-rules";
@@ -41,6 +43,9 @@ export default async function LeftPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // As the store page (lib/traffic.ts, isResting): one of the store's counted public requests, and a store whose
+  // window's requests are used rests, before the cart's or the product's listings are read.
+  if (await isResting(store)) return <StoreResting store={store} />;
 
   const query = await searchParams;
   const read = (name: string) => (typeof query[name] === "string" ? (query[name] as string) : "");

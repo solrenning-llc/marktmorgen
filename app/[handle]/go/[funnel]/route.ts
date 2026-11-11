@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { originFrom } from "@/lib/request-origin";
+import { isResting } from "@/lib/traffic";
 import { nextOpen, withMark } from "@/lib/page-funnel";
 import { readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
 
@@ -28,6 +29,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return new Response("Not found", { status: 404 });
   if (store.suspended) return away(`/@${store.handle}`);
+  // One of the store's counted public requests before its funnels are read (lib/traffic.ts, isResting); a store whose
+  // window's requests are used reads nothing more and sends the visitor to its store page, which rests.
+  if (await isResting(store)) return away(`/@${store.handle}`);
 
   // A store without a stats id has never kept a funnel; any other reading is exact or unknown.
   const later = () =>

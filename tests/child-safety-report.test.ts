@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { REPORT_KINDS, readReport } from "@/lib/takedown-rules";
+import { REPORT_KINDS, readReport, statedBySender } from "@/lib/takedown-rules";
 import { CHILD_SAFETY_HOLDS_PER_DAY, TAKE_IT_DOWN_HOURS, alertOwner, holdReported } from "@/lib/child-safety";
 import { POST as reportRoute } from "@/app/api/report/route";
 import { readListing } from "@/lib/catalog";
@@ -41,6 +41,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const DESCRIPTION = "This product page sells material that exploits a child. Please act now.";
 const CHILD = { kind: "child_safety", url: "", work: DESCRIPTION, name: "", email: "worried@example.com", signature: "", goodFaith: true, accurate: false };
+/** What the notice email and page say an intimate-image sender stated: the person shown, or someone acting for them. */
+const SAID_OF_INTIMATE = "this intimate image, of them or of the person they represent, was published without the consent of the person shown";
 const INTIMATE = { kind: "intimate_image", url: "", work: "This is an intimate photo of me, shared here without my consent.", name: "Dana Doe", email: "dana@example.com", signature: "Dana Doe", goodFaith: true, accurate: true };
 
 /** The words a server page puts on screen: text children and title, label and eyebrow props, without running any component. */
@@ -213,7 +215,7 @@ async function main(): Promise<void> {
       is("child_safety: no signature line, since none was asked for", /Signed:/.test(notice?.text ?? ""), false);
     } else if (report.kind === "intimate_image") {
       is("intimate_image: the notice email names the kind", /^Request to remove an intimate image/.test(notice?.subject ?? ""), true);
-      is("intimate_image: it states what the person confirmed on the form", [(notice?.text ?? "").includes("Signed: Dana Doe"), (notice?.text ?? "").includes("this intimate image of them was published without their consent")], [true, true]);
+      is("intimate_image: it states what the person confirmed on the form", [(notice?.text ?? "").includes("Signed: Dana Doe"), (notice?.text ?? "").includes(SAID_OF_INTIMATE)], [true, true]);
     } else {
       is("other: it states what the person confirmed on the form", (notice?.text ?? "").includes("accurate and complete to the best of their knowledge"), true);
     }
@@ -222,7 +224,7 @@ async function main(): Promise<void> {
     is(`${report.kind}: the notice page states no oath under penalty of perjury, nor both statements for a report that has none`, [/perjury/i.test(page), report.kind === "child_safety" && /Signed:|both statements/.test(page)], [false, false]);
     is(`${report.kind}: the notice page shows no empty sender name`, /From:\s*</.test(page), false);
     if (report.kind === "child_safety") is("child_safety: the notice page names the kind", [page.includes("Child safety report"), page.includes("Notice of illegal content")], [true, false]);
-    if (report.kind === "intimate_image") is("intimate_image: the notice page says what the person confirmed", page.includes("this intimate image of them was published without their consent"), true);
+    if (report.kind === "intimate_image") is("intimate_image: the notice page says what the person confirmed", page.includes(SAID_OF_INTIMATE), true);
     const opened = await openReport(token);
     if (!opened?.store) throw new Error("opened");
     sent.length = 0;
@@ -238,6 +240,59 @@ async function main(): Promise<void> {
   sent.length = 0;
   await alertOwner({ kind: "child_safety", url: `${url}?ref=a-tracking-code#a-fragment` }, "no_product", Date.UTC(2026, 10, 9, 18));
   is("the canonical address, without the query or the fragment", [(sent.at(-1)?.text ?? "").includes(`Where: ${url}\n`), (sent.at(-1)?.text ?? "").includes("a-tracking-code"), (sent.at(-1)?.text ?? "").includes("a-fragment")], [true, false, false]);
+
+  part("Only the product's own address reaches the creator and the urgent email, never words typed into the path (Revisor 2 on #3695, LOW)");
+  const typedProduct = await addProduct(owner, "Reported With Words", "On sale", "9", null);
+  if (!typedProduct.ok) throw new Error("no product");
+  const typedWords = ["the-owner-is-a-thief", "call-me-at-555-0100", "a-tracking-code", "a-fragment"];
+  const leaked = (text: string | undefined) => typedWords.filter((word) => (text ?? "").includes(word));
+  const typed = `https://marktmorgen.com/@safetyshop/p/the-owner-is-a-thief-${typedProduct.product.id}/call-me-at-555-0100?ref=a-tracking-code#a-fragment`;
+  const canonical = `https://marktmorgen.com/@safetyshop/p/${typedProduct.product.id}`;
+  sent.length = 0;
+  await alertOwner({ kind: "intimate_image", url: typed }, "not_held", Date.UTC(2026, 10, 9, 19));
+  is("the urgent email names the product by its own address, with nothing the reporter typed", [(sent.at(-1)?.text ?? "").includes(`Where: ${canonical}\n`), leaked(sent.at(-1)?.text)], [true, []]);
+  sent.length = 0;
+  await alertOwner({ kind: "child_safety", url: "https://marktmorgen.com/@safetyshop/the-owner-is-a-thief/call-me-at-555-0100" }, "no_product", Date.UTC(2026, 10, 9, 19));
+  is("an address that names no product: the store's own address alone", [(sent.at(-1)?.text ?? "").includes("Where: https://marktmorgen.com/@safetyshop\n"), leaked(sent.at(-1)?.text)], [true, []]);
+  sent.length = 0;
+  await alertOwner({ kind: "child_safety", url: "https://marktmorgen.com/@safetyshop/p/the-owner-is-a-thief" }, "no_product", Date.UTC(2026, 10, 9, 19));
+  is("a product address whose id names no product: the store's own address alone", [(sent.at(-1)?.text ?? "").includes("Where: https://marktmorgen.com/@safetyshop\n"), leaked(sent.at(-1)?.text)], [true, []]);
+  sent.length = 0;
+  await alertOwner({ kind: "child_safety", url: "https://marktmorgen.com/the-owner-is-a-thief" }, "no_product", Date.UTC(2026, 10, 9, 19));
+  is("a Marktmorgen address with no store in it: the site alone", [(sent.at(-1)?.text ?? "").includes("Where: https://marktmorgen.com\n"), leaked(sent.at(-1)?.text)], [true, []]);
+  const typedKinds = [
+    { report: CHILD, ip: "10.35.88.1" },
+    { report: INTIMATE, ip: "10.35.88.2" },
+  ] as const;
+  for (const { report, ip } of typedKinds) {
+    const product = await addProduct(owner, `Typed Address ${report.kind}`, "On sale", "9", null);
+    if (!product.ok) throw new Error("no product");
+    const address = `https://marktmorgen.com/@safetyshop/p/the-owner-is-a-thief-${product.product.id}/call-me-at-555-0100?ref=a-tracking-code#a-fragment`;
+    const read = readReport({ ...report, url: address });
+    if (!read.ok) throw new Error(`notice ${report.kind}`);
+    sent.length = 0;
+    await fileReport(read.report, ip, "https://marktmorgen.com");
+    const token = sent[0]?.text.match(/\/takedown\/([0-9a-f]{48})/)?.[1] ?? "";
+    const opened = await openReport(token);
+    if (!opened?.store) throw new Error("opened");
+    sent.length = 0;
+    await takeDown(opened.report, opened.store, { type: "product", id: product.product.id }, "https://marktmorgen.com");
+    const creator = sent.find((mail) => [mail.to].flat().includes(owner));
+    is(`${report.kind}: the creator is told the product's own address, with nothing the reporter typed`, [(creator?.text ?? "").includes(`about https://marktmorgen.com/@safetyshop/p/${product.product.id} `), leaked(creator?.text)], [true, []]);
+    if (report.kind === "intimate_image") {
+      await takeDown(opened.report, (await storeForEmail(owner))!, { type: "store", on: true }, "https://marktmorgen.com");
+      sent.length = 0;
+      await takeDown(opened.report, (await storeForEmail(owner))!, { type: "store", on: false }, "https://marktmorgen.com");
+      const back = sent.find((mail) => [mail.to].flat().includes(owner));
+      is("the email that says the store is back on names the same address, with nothing the reporter typed", [(back?.text ?? "").includes(`after the notice about https://marktmorgen.com/@safetyshop/p/${product.product.id}.`), leaked(back?.text)], [true, []]);
+    }
+  }
+
+  part("An intimate-image request's statements cover a person acting for the one shown, on the form and as the sender's statement (Revisor 2 on #3695, LOW)");
+  const form = readFileSync("components/report-form.tsx", "utf8");
+  is("the first statement covers the person shown and a person acting for them", readFileSync("lib/takedown-rules.ts", "utf8").includes('goodFaith: "I believe in good faith that this intimate image, of me or of the person I represent, was published without the consent of the person shown."'), true);
+  is("the form shows that statement and the second one from the same place, and no longer says the image is of the sender alone", [form.includes("INTIMATE_IMAGE_STATEMENTS.goodFaith"), form.includes("INTIMATE_IMAGE_STATEMENTS.accurate"), form.includes("image of me was published without my consent"), form.includes("An intimate image of me shared without my consent")], [true, true, false, false]);
+  is("what the notice email and page say the sender stated is the same statement, in the third person", (statedBySender("intimate_image") ?? "").includes(SAID_OF_INTIMATE), true);
 
   done();
 }

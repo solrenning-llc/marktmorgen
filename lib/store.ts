@@ -2175,6 +2175,16 @@ export type MoveResult =
 const CLOSING_FINAL_LINE = "nl:closing:final";
 const CLOSING_WALK_LINE = "nl:closed:due";
 const CLOSING_HELD_LINE = "nl:closing:held";
+/**
+ * A break's record and the line of breaks, by value: the same keys as recordKey and DUE in lib/plan-pause.ts, which
+ * imports this file; tests/closing-moved-owner.test.ts sets a break by those names and fails when these differ.
+ */
+const breakKey = (ref: string) => `nl:pause:${ref}`;
+const BREAK_LINE = "nl:pause:due";
+
+/** EXISTS as Redis answers it for one key: 0 or 1 (a string of one over REST). */
+const existsReply = (reply: unknown): 0 | 1 | null =>
+  reply === 0 || reply === "0" ? 0 : reply === 1 || reply === "1" ? 1 : null;
 
 /** A sorted set's score as Redis answers ZSCORE: nil, or a number (a string of one over REST). */
 const isScore = (reply: unknown): boolean =>
@@ -2191,15 +2201,23 @@ const isScore = (reply: unknown): boolean =>
  * change meanwhile, and a store whose plan runs enters neither line. Its members are held under its ref too, from the
  * day its plan ended (holdCharges, lib/closing-holds.ts): a plan that runs again is let go only by the daily
  * releaseRestarted, which finds the store by that ref, so a store still in that line keeps its address until then; a
- * move before it left the members paused for good and the buyers never told (Claude 1's review on #3672). A line that
- * does not read is never "not in it" (rule 24): it throws, and nothing moves.
+ * move before it left the members paused for good and the buyers never told (Claude 1's review on #3672). A break the
+ * creator set is kept under the ref too (lib/plan-pause.ts: its record and its place in the line of breaks): the
+ * closing waits for it (onBreak, lib/plan-closing.ts) and the daily run of breaks finds the store by that ref to start
+ * its plan again, so a store with a break set, begun or not, keeps its address until the break is taken back or over;
+ * a move before it left the break at the old address and the closing began on the day the plan stopped (Revisor 2 on
+ * #3672). A line or a break that does not read is never "not in it" (rule 24): it throws, and nothing moves.
  */
 async function closingUnderway(store: Store): Promise<boolean> {
   if (!store.subscriptionActive && closesStore(Date.parse(store.planEndedAt))) return true;
   const ref = storeRef(store);
   const scores = repliesFor(await redisPipeline([["ZSCORE", CLOSING_FINAL_LINE, ref], ["ZSCORE", CLOSING_WALK_LINE, ref], ["ZSCORE", CLOSING_HELD_LINE, ref]]), 3);
   if (!scores || !scores.every(isScore)) throw new UnknownReplyError("a store's place in the closing lines (ZSCORE)");
-  return scores.some((score) => score !== null);
+  if (scores.some((score) => score !== null)) return true;
+  const kept = repliesFor(await redisPipeline([["EXISTS", breakKey(ref)], ["ZSCORE", BREAK_LINE, ref]]), 2);
+  const record = kept ? existsReply(kept[0]) : null;
+  if (!kept || record === null || !isScore(kept[1])) throw new UnknownReplyError("a store's break (EXISTS, ZSCORE)");
+  return record === 1 || kept[1] !== null;
 }
 
 /**
@@ -2269,7 +2287,7 @@ export async function moveAccount(
   if (!isRedisConfigured()) return { ok: false, reason: "none" };
 
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
-    // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go (closingUnderway).
+    // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
     const [existing, theirs] = await redisPipeline([

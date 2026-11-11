@@ -798,6 +798,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pause:last:@lib/contract-funding.ts": { what: "Read-only annual eligibility evidence for the existing pause", parts: [capped(KEY, "Same one-per-store annual marker as plan-pause.ts; no new marker or expiry.")] },
   "nl:pause:@lib/plan-pause.ts": { what: "A store's break and when it was last taken", parts: [capped(4 * KB, "One a store.")] },
   "nl:pause:due@lib/plan-pause.ts": company("Breaks due", "One sorted set for every store."),
+  "nl:pause:@lib/store.ts": { what: "The same break, read only: a store with one set keeps its address until it is taken back or over (moveAccount, closingUnderway)", parts: [capped(4 * KB, "Same one-a-store break; one EXISTS a move, no read of its bytes and no write (Revisor 2 on #3672).")] },
+  "nl:pause:due@lib/store.ts": company("The same line of breaks, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Revisor 2 on #3672)."),
   "nl:pause:last:@lib/plan-pause.ts": { what: "When a break was last taken", parts: [capped(KEY, "One a store.")] },
   "nl:plan:ended@lib/plan-standing.ts": company("Stores whose plan ended, by the day", "One sorted set for every store."),
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),

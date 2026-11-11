@@ -172,6 +172,7 @@ async function main(): Promise<void> {
   redis.run = (c: (string | number)[]) => (String(c[0]).toUpperCase() === "DEL" && String(c[1]).startsWith("nl:sa:t:") ? "garbled" : del(c));
   is("the link's delete answered in another shape: unknown", await rejects(() => leaveStockAlert(cy.leave, s3)), "unknown");
   redis.run = del;
+  is("the place went for sure: off the list, and the same link, pressed again, says done", [(await confirmedForRestock(s3, a.product.id)).includes("cy@example.com"), await leaveStockAlert(cy.leave, s3)], [false, true]);
   const cy2 = await askStockAlert({ store: s3, productId: a.product.id, email: "cy@example.com", left: 0 });
   is("control: asked again, its leave link works and says done", [cy2.ok, cy2.ok && (await leaveStockAlert(cy2.leave, s3)), (await confirmedForRestock(s3, a.product.id)).includes("cy@example.com")], [true, true, false]);
   void pid2;

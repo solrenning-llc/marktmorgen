@@ -160,9 +160,17 @@ export async function leaveStockAlert(token: string, store: DataStore, now = Dat
   const read = repliesFor(await redisPipeline([["HGET", key, grant.e]]), 1);
   if (!read) throw new UnknownReplyError("a back-in-stock place");
   const entry = parseEntry(read[0]);
-  const gone = repliesFor(await redisPipeline([["HDEL", key, grant.e], ["DEL", tokenKey(token)]]), 2);
-  if (!gone) throw new UnknownReplyError("leaving a back-in-stock list");
-  if (entry && gone[0] === 1) await giveData(store, [{ slot: slotOf(grant.p), bytes: placeBytes(grant.e, entry, grant) }], now);
+  // The place goes first and its answer is checked before the link is spent:
+  // a delete not known (anything but 0 or 1) is unknown, never "you left", and
+  // the link still works for another try (Claude 1 on #3616, rule 24).
+  const what = "leaving a back-in-stock list";
+  const place = repliesFor(await redisPipeline([["HDEL", key, grant.e]]), 1);
+  const removed = place ? countOf(place[0]) : null;
+  if (removed === null || removed > 1) throw new UnknownReplyError(what);
+  if (entry && removed === 1) await giveData(store, [{ slot: slotOf(grant.p), bytes: placeBytes(grant.e, entry, grant) }], now);
+  const link = repliesFor(await redisPipeline([["DEL", tokenKey(token)]]), 1);
+  const linkGone = link ? countOf(link[0]) : null;
+  if (linkGone === null || linkGone > 1) throw new UnknownReplyError(what);
   return true;
 }
 

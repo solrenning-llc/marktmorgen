@@ -35,7 +35,7 @@ let disputeReads = 0;
 let chargeReads = 0;
 let eventReads = 0;
 /** When set, the clock jumps past every job's deadline as soon as /refunds has answered, before /events is asked. */
-let lateAfterRefunds = false;
+const lateAfterRefunds = false;
 const realNow = Date.now;
 const lookedUp: string[] = [];
 

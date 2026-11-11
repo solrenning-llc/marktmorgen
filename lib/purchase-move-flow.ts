@@ -17,10 +17,13 @@
  * two emails, one link to each address, the current one first. Each is
  * taken from the store's access emails before it goes (lib/email.ts,
  * EmailMeter "store", "transactional"; the new address, typed by the buyer,
- * as `asked`, so a stranger's inbox only ever gets a share of them). An
- * email whose figure is spent or cannot be read is not sent, and the page
- * says which went: none ("unsent"), or only the current address's ("half").
- * Nothing is said to have been sent that was not.
+ * as `asked`, so a stranger's inbox only ever gets a share of them). The
+ * sender answers false both when it refused and when the provider's answer
+ * was lost after it took the email, so a false is never said as "not sent":
+ * the page says the first email is not confirmed ("unconfirmed"), or that the
+ * second is not ("half"), and asks the buyer to look in the inbox before
+ * asking again (Codex V on #3621). Nothing is said to have been sent, or not
+ * sent, that is not known.
  *
  * A link opens a page that says what would move, from where to where, and
  * asks for Confirm: opening it confirms nothing (mail scanners open links).
@@ -59,8 +62,8 @@ export const MOVE_ASK_UNITS = 1;
 export const MOVE_LINK_UNITS = 1;
 /** Public requests a Confirm holds before it reads: its own reads, and the move written into the index when it is the second. */
 export const MOVE_CONFIRM_UNITS = 2;
-/** Commands an ask makes besides the hold and its two emails: the purchases link, the deleted people, the day's count (2) and the request with its two links (3). */
-export const MOVE_ASK_COMMANDS = 7;
+/** Commands an ask makes besides the hold and its two emails: the purchases link, the deleted people, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT) and the request with its two links (3). */
+export const MOVE_ASK_COMMANDS = 8;
 /** Commands a link's page reads: the link, the request with both confirmations and the claim (4), the deleted people. */
 export const MOVE_LINK_COMMANDS = 6;
 /** Commands a Confirm makes: the page's reads, then the link, the request, the mark (with its read-back) and the request again. */
@@ -149,7 +152,7 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
     subject: words.oldSubject(store.name),
     text: words.oldText(store.name, addresses.to, link(asked.fromToken)),
   });
-  if (!toCurrent) return "unsent";
+  if (!toCurrent) return "unconfirmed";
   const toNew = await send({
     meter: { by: "store", store, kind: "transactional", asked: true },
     from,

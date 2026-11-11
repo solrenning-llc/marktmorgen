@@ -14,6 +14,7 @@ import {
   readPurchaseMove,
 } from "@/lib/purchase-moves";
 import { MAX_MOVES_PER_ADDRESS_DAY, MOVE_CONFIRM_SECONDS } from "@/lib/purchase-move-rules";
+import { MOVE_MARK_SECONDS } from "@/lib/purchase-moves";
 import { PERSON_DATA } from "@/lib/person-data";
 import { store as redis, advance } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -128,6 +129,34 @@ async function main(): Promise<void> {
   undo = answer("SET", "nl:pm:done:", "QUEUED");
   is("a claim whose mark cannot be confirmed does not move", await claimPurchaseMove(u.id, t0 + 2_000), { ok: false, reason: "unknown" });
   undo();
+
+  part("A day's count always ends by itself, whatever one command of its step answers (Codex T on #3608)");
+  const pipe = redis.pipeline;
+  const dayKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:day:"));
+  for (const lost of [null, 0, "1"]) {
+    redis.clear();
+    // A batch where the count's expiry is answered `lost` and never applied, every other command run as asked.
+    redis.pipeline = async (commands: (string | number)[][]) =>
+      Promise.all(commands.map(async (c) => (String(c[0]).toUpperCase() === "EXPIRE" && String(c[1]).startsWith("nl:pm:day:") ? lost : (await pipe([c]))[0])));
+    await askPurchaseMove({ from: "k@example.com", to: "l@example.com", scope: "all", now: t0 });
+    redis.pipeline = pipe;
+    const counts = dayKeys();
+    const ttls = counts.map((k) => redis.run(["TTL", k]) as number);
+    is(`the expiry answered ${JSON.stringify(lost)}: the day's count still ends within its two days`, ttls.length === 1 && ttls[0] > 0 && ttls[0] <= MOVE_MARK_SECONDS, true);
+    advance((MOVE_MARK_SECONDS + 1) * 1000);
+    is(`and two days later it is gone (${JSON.stringify(lost)})`, counts.map((k) => redis.run(["EXISTS", k])), [0]);
+  }
+
+  redis.clear();
+  redis.pipeline = async (commands: (string | number)[][]) => commands.map(() => null);
+  is("control: the whole step lost before it ran: unknown, and nothing counted", [await askPurchaseMove({ from: "k@example.com", to: "l@example.com", scope: "all", now: t0 }), dayKeys()], [{ ok: false, reason: "unknown" }, []]);
+  redis.pipeline = async (commands: (string | number)[][]) => Promise.all(commands.map(async (c) => {
+    const ran = (await pipe([c]))[0];
+    return String(c[0]).toUpperCase() === "EVAL" ? "lost" : ran;
+  }));
+  const ranLost = await askPurchaseMove({ from: "k@example.com", to: "l@example.com", scope: "all", now: t0 });
+  redis.pipeline = pipe;
+  is("control: the step ran but its answer was lost: unknown, no link, and the count still ends by itself", [ranLost, dayKeys().map((k) => (redis.run(["TTL", k]) as number) > 0)], [{ ok: false, reason: "unknown" }, [true]]);
 
   part("The register says what is kept, and for how long");
   is("expires by itself", PERSON_DATA.filter((d) => d.file === "lib/purchase-moves.ts").map((d) => d.how), ["expires"]);

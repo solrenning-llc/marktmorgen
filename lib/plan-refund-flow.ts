@@ -241,10 +241,13 @@ function refundPage(page: unknown, sid: string): { data: RefundRow[]; ids: strin
       if ((owner && (!Object.hasOwn(owner, "value") || typeof owner.value !== "string")) || (!owner && "plan_refund" in metadata)) return null;
       if (!owner || owner.value !== sid) continue;
       const charge = ownValue(row, "charge"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status");
+      // The status first: one of ours that failed or was canceled gave no money back, whatever its amount reads, so it
+      // never holds the plan (R1 on #3190). Only a refund that gives money back must read its amount exactly.
+      if (typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status)) return null;
+      if (status === "failed" || status === "canceled") continue;
       if ((charge !== null && (typeof charge !== "string" || !OBJECT_ID.test(charge))) ||
           typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1 ||
-          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
-          typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status)) return null;
+          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return null;
       // Snapshot only validated data; later projections never observe an unchecked amount.
       refunds.push({ id, charge, amount, currency, status, metadata: { plan_refund: sid } });
     }
@@ -609,12 +612,14 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
       }
       // None was made: our stop goes, the plan goes on as it was; or our stop already ended it, and the letter says so.
       const back = note.m === 1 ? await takeBackStop(note.s) : "live";
+      // Our stop could not be taken back: the note and the stop stay and it is tried again tomorrow, however long, so no
+      // letter ever says the plan goes on while our stop would end it (Claude 1 on #3190).
       if (back === null) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+        if (nowSeconds - note.at > GIVE_UP_DAYS * 86_400) {
+          console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; still held, tried again tomorrow`);
         }
-        console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
+        counts.left += 1;
+        continue;
       }
       await dropNote(sid);
       // Read and none was made: the creator saw "nothing was refunded" or "we check every day", so it reaches them by email.

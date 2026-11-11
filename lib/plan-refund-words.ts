@@ -143,7 +143,9 @@ const CHECK_DAYS = 7;
 export const REFUND_CHECK_DAYS = CHECK_DAYS;
 
 // No deadline is promised: a refund whose outcome cannot be read stays held and is read again every day (rule 24).
-const DECIDED_LATER = "We check it again every day and email you once it is decided: either the refund and the end of your plan, or that nothing was refunded and your plan goes on.";
+// Three outcomes are real: the refund and the end of the plan; nothing refunded and the plan as it was; or nothing
+// refunded and the plan already ended at the end of its period (Claude 1 on #3190). None is promised ahead.
+const DECIDED_LATER = "We check it again every day and email you once it is decided: whether a refund was made, and whether your plan continues or has ended.";
 
 /**
  * What the review page says about the refund route's answer (app/api/billing/refund) or a refund still being

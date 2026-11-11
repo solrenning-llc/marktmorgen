@@ -338,9 +338,12 @@ try {
   });
   await owner.getByLabel("What do you want to do?").selectOption("sales");
   await owner.getByLabel("Find a campaign").fill("digital toolkit");
-  await owner.getByRole("button", { name: "See the journey and what you need", exact: true }).click();
+  // Each journey button names its campaign for assistive technology after its visible words (#3799, WCAG 2.4.6).
+  const journey = owner.getByRole("button", { name: /^See the journey and what you need: \S/ });
+  is("the one matching campaign's journey button names it", await journey.count(), 1);
+  await journey.click();
   is("campaign requirements come from the actual bundle", await owner.getByText("Your download or toolkit (paid)", { exact: true }).isVisible(), true);
-  is("the journey is keyboard accessible", await owner.getByRole("button", { name: "Hide the journey", exact: true }).getAttribute("aria-expanded"), "true");
+  is("the journey is keyboard accessible", await owner.getByRole("button", { name: /^Hide the journey: \S/ }).getAttribute("aria-expanded"), "true");
   await owner.getByLabel("Find a campaign").fill("no-such-campaign");
   is("unmatched search can be reset", await owner.getByText("No campaigns match these filters.", { exact: true }).isVisible(), true);
   await owner.getByRole("button", { name: "Show all campaigns", exact: true }).click();
@@ -474,7 +477,7 @@ try {
     is(`copy page at ${width}: axe`, await page.evaluate(async () => (await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"] } })).violations.map((v) => v.id)), []);
     await open(page, `${LOCAL}/studio/funnels`);
     await page.getByLabel("Find a campaign").fill("launch waitlist");
-    await page.getByRole("button", { name: "See the journey and what you need", exact: true }).click();
+    await page.getByRole("button", { name: /^See the journey and what you need: \S/ }).click();
     const nextAtWidth=page.locator('details[aria-label="Suggested next funnel check"]').first();
     await nextAtWidth.locator("summary").click();
     // Stress a long unbroken customer title at the actual mobile and desktop widths.

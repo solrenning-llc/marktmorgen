@@ -146,6 +146,11 @@ const panel = readFileSync("components/share-panel.tsx", "utf8");
 // Only the optional variant looks personal (Claude 1's LOW on #3194): the sentence names the variant, never the name.
 const variantRefused = renderToStaticMarkup(createElement(CampaignQr, { url: page, title: "Knife skills", campaign: "spring-fair", content: "call 85 99999-1234" }));
 is("a variant that looks like a phone number: no code, and the sentence names the variant, not the campaign name", [variantRefused.includes("<svg"), variantRefused.includes("No QR code for this variant"), variantRefused.includes("No QR code for this name")], [false, true, false]);
+// Only symbols is not "looks like an email address or phone number" (Claude 4's LOW on #3728): it says what is wrong.
+const symbolsVariant = renderToStaticMarkup(createElement(CampaignQr, { url: page, title: "Knife skills", campaign: "spring-fair", content: "!!!" }));
+const symbolsName = renderToStaticMarkup(createElement(CampaignQr, { url: page, title: "Knife skills", campaign: "!!!" }));
+is("a variant of only symbols: told it has no letters or numbers, never that it looks personal", [symbolsVariant.includes("email address or phone number"), symbolsVariant.includes("No QR code for this variant: it has no letters or numbers")], [false, true]);
+is("a name of only symbols: the sentence for a name that cannot be drawn, never that it looks personal", [symbolsName.includes("email address or phone number"), symbolsName.includes("The QR code could not be drawn for this name")], [false, true]);
 is("the share panel shows it beside the campaign link", panel.includes('import { CampaignQr } from "@/components/campaign-qr";') && panel.includes("<CampaignQr url={url} title={title} campaign={post} content={postContent} />"), true);
 const lib = readFileSync("lib/campaign-qr.ts", "utf8") + readFileSync("components/campaign-qr.tsx", "utf8");
 is("drawn locally: no network, no store write", !/fetch\(|@\/lib\/redis|https:\/\/api\./.test(lib), true);

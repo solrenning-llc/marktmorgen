@@ -656,8 +656,12 @@ export function isCallProduct<T extends Listing>(product: T): product is T & { c
 
 /** Whether a booking was already confirmed, so the mail job knows to leave it. */
 export async function isConfirmed(session: string): Promise<boolean> {
-  const [seen] = await redisPipeline([["EXISTS", confirmedKey(session)]]);
-  return Number(seen) === 1;
+  // Read exactly (rule 24): EXISTS answers 1 or 0; anything else is unknown, never "not confirmed", which would
+  // confirm the booking again or count a used package session as left.
+  const seen = repliesFor(await redisPipeline([["EXISTS", confirmedKey(session)]]), 1)?.[0];
+  if (seen === 1) return true;
+  if (seen === 0) return false;
+  throw new UnknownReplyError("a booking's confirmation mark");
 }
 
 // ---- Saving a product's setup --------------------------------------------

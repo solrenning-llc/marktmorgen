@@ -6,6 +6,7 @@
  * Synthetic Redis only.
  */
 import * as store from "@/lib/platform-proof-store";
+import type { PlatformProofSnapshot } from "@/lib/platform-proof";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -20,7 +21,7 @@ async function main(): Promise<void> {
   redis.clear();
   const DAY = 86_400_000;
   const asOf = new Date(Date.now() - 2 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
-  const snapshot = { asOf, evidenceRef: "synthetic-count", mode: "live" as const, excludesDemoAndTest: true as const, counts: { stores: 120, sales: 1500, activeCreators: 60 }, activeWindowDays: 30 };
+  const snapshot: PlatformProofSnapshot = { asOf, evidenceRef: "synthetic-count", mode: "live", excludesDemoAndTest: true, counts: { stores: 120, sales: 1500, activeCreators: 60 }, activeWindowDays: 30 };
   await store.writePlatformProof(snapshot, 30);
   is("read back with its window", await store.readPlatformProofKept(), { snapshot, validDays: 30 });
   done();

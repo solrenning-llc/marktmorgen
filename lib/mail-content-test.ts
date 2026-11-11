@@ -59,10 +59,12 @@ export const CONTENT_PROBLEMS: Record<ContentProblem, string> = {
 };
 
 const whole = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0);
+const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+/** A stored pair of counts, read exactly: one that does not read makes the pair unknown, never a 0 or a count cut down (rule 24). */
 const pair = (value: unknown): Counted => {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
-  return { a: whole(v.a), b: whole(v.b) };
+  return count(v.a) && count(v.b) ? { a: v.a, b: v.b } : null;
 };
 const choices = (value: Record<string, unknown>) => ({
   share: TEST_SHARES.includes(value.share as number) ? (value.share as number) : TEST_SHARES[0],
@@ -138,6 +140,10 @@ export function chooseContent(test: Pick<ContentTest, "a" | "b" | "by">, visits:
       winner,
       why: `${sales ? "Neither version had sold more when the time was up" : "Sales could not be read when the time was up"}, so visits decided: ${name(winner).toLowerCase()} brought ${visitWords(visits, winner)}. The rest got it.`,
     };
+  }
+  // Sales were what decides, and could not be read: said so, never as a tie (Codex G on #3654).
+  if (test.by === "sales" && !sales && visits) {
+    return { winner, why: "Sales could not be read when the time was up, and visits did not set the versions apart, so the rest got the first one. It was not chosen on merit." };
   }
   if (!visits && (test.by === "visits" || !sales)) {
     return { winner, why: "The counts could not be read when the time was up, so the rest got the first version. It was not chosen on merit." };

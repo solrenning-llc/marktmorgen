@@ -141,6 +141,13 @@ export type Settled = {
   /** Not reached: Stripe could not be asked, or the time ran out. Tried again. */
   failed: number;
   left: number;
+  /**
+   * What made those fail, as thrown (Claude 6's N1 on #3463): the closing reads it with lib/stripe-silence.ts, so the
+   * creator's account giving no answer, or refusing us, counts toward the closing's deadline as on its renewals.
+   */
+  errors?: unknown[];
+  /** Whether the creator's account answered on this run (its balance was read): a run of silence or refusals is over. */
+  answered?: boolean;
 };
 
 /**
@@ -283,7 +290,7 @@ export async function giveBackUnused(
       rows = rows.filter((r) => wanted.has(r.sub));
     }
     if (options.mark !== undefined && options.mark !== reviewMark(rows)) return "changed";
-    const out: Settled = { done: [], short: [], unmade: [], pending: 0, disputed: 0, none: 0, over: 0, failed: 0, left: Math.max(0, rows.length - REFUNDS_PER_REQUEST) };
+    const out: Settled = { done: [], short: [], unmade: [], pending: 0, disputed: 0, none: 0, over: 0, failed: 0, left: Math.max(0, rows.length - REFUNDS_PER_REQUEST), errors: [], answered: false };
     rows = rows.slice(0, REFUNDS_PER_REQUEST);
     if (!rows.length) return out;
     let funds: Map<string, number>;
@@ -291,8 +298,9 @@ export async function giveBackUnused(
       funds = await available(account);
     } catch (error) {
       console.error("reading a closing store's Stripe balance failed", error);
-      return { ...out, failed: rows.length };
+      return { ...out, failed: rows.length, errors: [error] };
     }
+    out.answered = true;
     // One at a time: each refund is counted off the balance before the next is weighed.
     for (const row of rows) {
       if (Date.now() > until) {
@@ -474,6 +482,7 @@ export async function giveBackUnused(
       } catch (error) {
         console.error("giving a member's unused time back failed; tried again", error);
         out.failed += 1;
+        out.errors?.push(error);
       } finally {
         await giveCallsBack();
       }

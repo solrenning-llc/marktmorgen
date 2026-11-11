@@ -1251,12 +1251,20 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
     if (stop) return stop;
     let unpaid = settled === null;
     if (settled !== null && settled !== "changed" && settled !== "unavailable") {
+      // The creator's account answered on this step: a run of silence or refusals is over (Claude 6's N1 on #3463).
+      if (settled.answered) await answered();
       const left = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending");
       if (settled.failed > 0 || left.length > 0) {
         // Rows past one request or the run's time are progress, carried on tomorrow. Refunds Stripe failed lapse only
-        // once Stripe's silence was found on this day's own reads (`lapsed`) and its deadline has passed.
-        // `lapsed` is only ever set on this run once its own checks passed (silence or refusal, past the deadline).
-        if (settled.failed === 0 || Date.now() > until || !lapsed) return { key, state: "held", note: "its members' unused time is not all settled yet" };
+        // past the deadline, on this run's own lapse (`lapsed`, from the renewals step) or, once the renewals were
+        // stopped, on this step's own: what failed is read as the renewals' failures are (failureOf, stripeFailure),
+        // and only the account's silence or refusal, with no answer on this run, counts, through the same streak,
+        // together and platform guards (Claude 6's N1 on #3463).
+        if (settled.failed === 0 || Date.now() > until) return { key, state: "held", note: "its members' unused time is not all settled yet" };
+        if (!lapsed) {
+          const kind = failureOf((settled.errors ?? []).map(stripeFailure)) ?? "other";
+          if (settled.answered || !(await failureLapses(kind))) return { key, state: "held", note: "its members' unused time is not all settled yet", overdue: settled.answered ? "other" : heldAs(kind) };
+        }
         unpaid = true;
       }
     }

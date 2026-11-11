@@ -237,7 +237,16 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
     const sub = await subFor(store, account, customer, subscription);
     if (!sub || OVER.has(String(sub.status))) return "error";
 
-    const set = await onAccount("POST", account, `/subscriptions/${subscription}`, new URLSearchParams({ default_payment_method: method }));
+    let set: unknown;
+    try {
+      set = await onAccount("POST", account, `/subscriptions/${subscription}`, new URLSearchParams({ default_payment_method: method }));
+    } catch (error) {
+      // A 4xx is Stripe refusing the set: nothing was changed. Anything else (a 5xx, a timeout, a lost connection) may
+      // have landed, the same uncertainty as a reply we cannot read: unsure, never "nothing changed" (Claude 6 on #3644).
+      if (error instanceof StripeError && error.status >= 400 && error.status < 500) throw error;
+      console.error("setting the card's membership is not known to have landed", store.handle, error);
+      return "unsure";
+    }
     // Only this membership's own reply, with the card asked for, says the card is set (Claude 6 on #3639).
     if (!isOwnReply(set, subscription) || (set as { default_payment_method?: unknown }).default_payment_method !== method) return "unsure";
     await redisPipeline([["DEL", openKey(account, subscription)]]).catch(() => {});
@@ -250,11 +259,13 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
       // "Paid" only from this invoice's own reply saying so; any other answer leaves the card set and says no more.
       return isOwnReply(paid, invoiceId) && (paid as { status?: unknown }).status === "paid" ? "paid" : "updated";
     } catch (error) {
-      // 402 is the card refused. A 400 is a request Stripe would not take (an invoice no longer payable): the card
-      // is set, and nothing says it was declined (Claude 6 on #3639).
+      // 402 is the card refused. Anything else (a 400 for an invoice no longer payable, a 409 while the same pay is
+      // in flight, a 5xx, a timeout) leaves the card set, which its reply confirmed, and the payment not known: the
+      // page says the card is updated and nothing about the payment (Claude 6 on #3639 and #3644). The idempotency
+      // key and owes() reading the invoice again keep a second run from paying twice.
       if (error instanceof StripeError && error.status === 402) return "declined";
-      if (error instanceof StripeError && error.status === 400) return "updated";
-      throw error;
+      console.error("paying with the new card is not known to have gone through", store.handle, error);
+      return "updated";
     }
   } catch (error) {
     console.error("finishing a card update failed", store.handle, error);

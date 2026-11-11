@@ -378,7 +378,7 @@ const en = {
     canceled: { title: "Nothing was changed", body: "You left Stripe's page before saving a card. Press the button to try again." },
     expired: { title: "This link has expired", body: "Ask for a link to your membership on its page; from there you can change your card." },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
-    unsure: { title: "We couldn't confirm your new card", body: "Stripe's answer didn't confirm that your card was saved, so nothing was paid with it. Press the button to try again in a moment." },
+    unsure: { title: "We couldn't confirm your new card", body: "We couldn't confirm that your membership now uses your new card, so nothing was paid with it. Press the button to try again in a moment." },
   } as Record<string, Notice>,
 };
 
@@ -728,7 +728,7 @@ const es: MembershipWords = {
     canceled: { title: "No se ha cambiado nada", body: "Saliste de la página de Stripe antes de guardar una tarjeta. Pulsa el botón para intentarlo de nuevo." },
     expired: { title: "Este enlace ha caducado", body: "Pide un enlace a tu membresía en su página; desde allí puedes cambiar tu tarjeta." },
     error: { title: "Algo salió mal por nuestra parte", body: "No se ha cambiado nada. Inténtalo de nuevo en un momento." },
-    unsure: { title: "No pudimos confirmar tu nueva tarjeta", body: "La respuesta de Stripe no confirmó que tu tarjeta se guardara, así que no se pagó nada con ella. Pulsa el botón para intentarlo de nuevo en un momento." },
+    unsure: { title: "No pudimos confirmar tu nueva tarjeta", body: "No pudimos confirmar que tu membresía ya use tu nueva tarjeta, así que no se pagó nada con ella. Pulsa el botón para intentarlo de nuevo en un momento." },
   },
 };
 
@@ -1086,7 +1086,7 @@ const fr: MembershipWords = {
     canceled: { title: "Rien n'a été modifié", body: "Vous avez quitté la page de Stripe avant d'enregistrer une carte. Appuyez sur le bouton pour réessayer." },
     expired: { title: "Ce lien a expiré", body: `Demandez un lien vers votre abonnement sur sa page${S}; de là, vous pouvez changer de carte.` },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
-    unsure: { title: "Nous n'avons pas pu confirmer votre nouvelle carte", body: "La réponse de Stripe n'a pas confirmé que votre carte a été enregistrée, donc rien n'a été payé avec elle. Appuyez sur le bouton pour réessayer dans un instant." },
+    unsure: { title: "Nous n'avons pas pu confirmer votre nouvelle carte", body: "Nous n'avons pas pu confirmer que votre abonnement utilise désormais votre nouvelle carte, donc aucun paiement n'a été effectué avec celle-ci. Appuyez sur le bouton pour réessayer dans un instant." },
   },
 };
 
@@ -1450,7 +1450,7 @@ const de: MembershipWords = {
     canceled: { title: "Es wurde nichts geändert", body: "Sie haben die Seite von Stripe verlassen, bevor eine Karte gespeichert war. Drücken Sie den Knopf, um es erneut zu versuchen." },
     expired: { title: "Dieser Link ist abgelaufen", body: "Fordern Sie auf der Seite Ihrer Mitgliedschaft einen Link an; von dort können Sie Ihre Karte ändern." },
     error: { title: "Bei uns ist etwas schiefgegangen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
-    unsure: { title: "Wir konnten Ihre neue Karte nicht bestätigen", body: "Die Antwort von Stripe hat nicht bestätigt, dass Ihre Karte gespeichert wurde, daher wurde nichts damit bezahlt. Drücken Sie gleich noch einmal auf die Schaltfläche." },
+    unsure: { title: "Wir konnten Ihre neue Karte nicht bestätigen", body: "Wir konnten nicht bestätigen, dass Ihre Mitgliedschaft jetzt Ihre neue Karte nutzt, daher wurde nichts damit bezahlt. Drücken Sie gleich noch einmal auf den Knopf." },
   },
 };
 
@@ -1809,7 +1809,7 @@ const it: MembershipWords = {
     canceled: { title: "Non è cambiato nulla", body: "Hai lasciato la pagina di Stripe prima di salvare una carta. Premi il pulsante per riprovare." },
     expired: { title: "Questo link è scaduto", body: "Chiedi un link al tuo abbonamento dalla sua pagina; da lì puoi cambiare la carta." },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è cambiato nulla. Riprova tra un momento." },
-    unsure: { title: "Non siamo riusciti a confermare la tua nuova carta", body: "La risposta di Stripe non ha confermato che la tua carta è stata salvata, quindi non è stato pagato nulla con essa. Premi di nuovo il pulsante tra un momento." },
+    unsure: { title: "Non siamo riusciti a confermare la tua nuova carta", body: "Non siamo riusciti a confermare che il tuo abbonamento usi ora la tua nuova carta, quindi non è stato effettuato alcun pagamento. Premi di nuovo il pulsante tra un momento." },
   },
 };
 
@@ -2160,7 +2160,7 @@ const nl: MembershipWords = {
     canceled: { title: "Er is niets gewijzigd", body: "Je hebt de pagina van Stripe verlaten voordat er een kaart was opgeslagen. Druk op de knop om het opnieuw te proberen." },
     expired: { title: "Deze link is verlopen", body: "Vraag op de pagina van je lidmaatschap een link aan; van daaruit kun je je kaart wijzigen." },
     error: { title: "Er ging aan onze kant iets mis", body: "Er is niets gewijzigd. Probeer het zo opnieuw." },
-    unsure: { title: "We konden je nieuwe kaart niet bevestigen", body: "Het antwoord van Stripe bevestigde niet dat je kaart is opgeslagen, dus er is niets mee betaald. Druk zo nog een keer op de knop." },
+    unsure: { title: "We konden je nieuwe kaart niet bevestigen", body: "We konden niet bevestigen dat je lidmaatschap nu je nieuwe kaart gebruikt, dus er is niets mee betaald. Druk zo nog een keer op de knop." },
   },
 };
 
@@ -2511,7 +2511,7 @@ const pt: MembershipWords = {
     canceled: { title: "Nada foi alterado", body: "Saiu da página da Stripe antes de guardar um cartão. Prima o botão para tentar de novo." },
     expired: { title: "Este link expirou", body: "Peça um link para a sua subscrição na página dela; a partir daí pode alterar o seu cartão." },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente de novo dentro de momentos." },
-    unsure: { title: "Não conseguimos confirmar o seu novo cartão", body: "A resposta da Stripe não confirmou que o seu cartão foi guardado, por isso nada foi pago com ele. Prima o botão para tentar de novo dentro de momentos." },
+    unsure: { title: "Não conseguimos confirmar o seu novo cartão", body: "Não conseguimos confirmar que a sua subscrição já usa o seu novo cartão, por isso nada foi pago com ele. Prima o botão para tentar de novo dentro de momentos." },
   },
 };
 

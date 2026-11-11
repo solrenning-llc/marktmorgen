@@ -17,7 +17,8 @@
  *   that cannot be read (the payment, whether it was answered) means it is
  *   not asked.
  * - An answer carries no name, address or order: only the version, the
- *   choice, its words and the comment, with links and email addresses
+ *   choice, its words and the comment, with links, email addresses, phone
+ *   numbers and social handles
  *   taken out so it does not become a way to reach anybody.
  *
  * Browser-safe: no storage, no network.
@@ -112,6 +113,10 @@ export type JoinAnswer = { v: number; choice: string; label: string; comment: st
 
 const LINK = /\b(?:https?:\/\/|www\.)\S+/gi;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
+/** A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits with spaces, dots, hyphens or brackets. */
+const PHONE = /\+?\(?\d[\d\s().-]{7,}\d/g;
+/** A social handle: "@" and a name, with no dot after it (an address is taken out above). */
+const HANDLE = /(^|\s)@[A-Za-z0-9_.]+/g;
 /**
  * The most of a comment the link and address patterns read: far more than is kept (MAX_JOIN_COMMENT), so the
  * patterns never run over an unbounded text (a long one with no spaces took seconds; Claude 3 and Codex G on #3652).
@@ -134,6 +139,6 @@ export function cleanJoinAnswer(
   if (raw.v !== setting.version) return { ok: false, problem: "version" };
   const choice = joinChoices(setting).find((c) => c.id === raw.choice);
   if (!choice) return { ok: false, problem: "choice" };
-  const comment = typeof raw.comment === "string" ? words(commentHead(raw.comment).replace(LINK, " ").replace(EMAIL, " "), MAX_JOIN_COMMENT) : "";
+  const comment = typeof raw.comment === "string" ? words(commentHead(raw.comment).replace(LINK, " ").replace(EMAIL, " ").replace(PHONE, " ").replace(HANDLE, "$1"), MAX_JOIN_COMMENT) : "";
   return { ok: true, answer: { v: setting.version, choice: choice.id, label: choice.label, comment } };
 }

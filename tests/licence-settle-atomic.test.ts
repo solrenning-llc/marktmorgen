@@ -143,6 +143,8 @@ async function main(): Promise<void> {
     }) as typeof redis.pipeline;
     const poolBefore = (await pipeline([["LLEN", pool]]))[0];
     const head = (await pipeline([["LINDEX", pool, 0]]))[0];
+    const everMade = async () => ((await pipeline([["SMEMBERS", all]]))[0] as string[]).sort();
+    const madeBefore = await everMade();
     let got: Awaited<ReturnType<typeof keyForSale>>;
     try {
       got = await keyForSale(store, product, reference, "buyer@example.com");
@@ -153,12 +155,10 @@ async function main(): Promise<void> {
     const flat = (await redis.pipeline([["HGETALL", info]]))[0] as string[];
     const forSale = flat.filter((_, i) => i % 2 === 0).filter((_, i) => (JSON.parse(flat[2 * i + 1]) as { r?: string }).r === reference);
     is(`${label}: the only record for this sale is the winner's (the losing key has none)`, forSale, [winner]);
-    const lines = Object.values(Object.fromEntries(((await redis.pipeline([["HGETALL", sale]]))[0] as string[]).reduce<[string, string][]>((out, v, i, arr) => (i % 2 ? out : [...out, [v, arr[i + 1]]]), [])));
     if (label === "pool") {
       is("pool: the popped key is back at the front, the count unchanged", [(await redis.pipeline([["LINDEX", pool, 0]]))[0], (await redis.pipeline([["LLEN", pool]]))[0]], [head, poolBefore]);
     } else {
-      const made = ((await redis.pipeline([["SMEMBERS", all]]))[0] as string[]).filter((k) => !lines.includes(k));
-      is("made: the losing key is out of the set of keys ever made", made, []);
+      is("made: the losing key is out of the set of keys ever made (the set as it was)", await everMade(), madeBefore);
     }
   }
 

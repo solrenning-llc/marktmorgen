@@ -33,7 +33,8 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, path: `/@${store.handle}/letters/${done.letter.id}` });
     }
     if (action === "unpublish") {
-      await unpublishLetter(store, letterIdFor(store.sid, id));
+      // Ok only once its copy is confirmed deleted; an unknown reply throws and is answered below (CX-123 rule 24).
+      if (!(await unpublishLetter(store, letterIdFor(store.sid, id)))) return refuse("unavailable", "This can't be taken off right now. Try again in a minute.", 503);
       return Response.json({ ok: true });
     }
     return refuse("invalid", "That is not something this page can do.");

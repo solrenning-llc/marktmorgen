@@ -72,6 +72,7 @@ import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
@@ -92,6 +93,7 @@ import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetBenefitPerson } from "@/lib/tier-benefits";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
@@ -108,7 +110,7 @@ import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
  * (the FTC's rule on consumer reviews forbids suppressing them, lib/reviews.ts),
  * nor take away what an import gave a buyer for a purchase made elsewhere.
  */
-type Eraser = { module: string; only?: ErasureBy; run: (scope: ErasureScope, files: string[], notes: Set<ErasureNote>) => Promise<number> };
+type Eraser = { module: string; only?: ErasureBy; after?: string[]; run: (scope: ErasureScope, files: string[], notes: Set<ErasureNote>) => Promise<number> };
 
 /** Something the creator should know, said with the result. */
 export type ErasureNote = "discord-roles" | "email-platform";
@@ -156,6 +158,7 @@ export const ERASERS: Eraser[] = [
       return records;
     },
   },
+  { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
   { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds) : Promise.resolve(0)) },
   { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
@@ -194,8 +197,15 @@ export const ERASERS: Eraser[] = [
     module: "lib/reviews.ts",
     only: "person",
     run: async (s, files) => {
-      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it.
-      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files);
+      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it. Their
+      // name and words leave the store page's quotes before the reviews go (lib/store-quotes.ts); when that fails, this
+      // part fails and the reviews are kept for the retry.
+      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files, (reviews) => dropReviewQuotes(s.store, reviews));
+      // Then the quotes are kept again from the reviews as they now stand, under the store's lock, even when this run
+      // found none: a review an earlier run deleted is not found again, a refresh that read one before its delete has
+      // written by now, and other buyers' quotes taken off above come back. When they cannot be kept, they are all
+      // taken off; this part fails only when that is not confirmed either.
+      await keepStoreQuotes(s.store);
       return done.records;
     },
   },
@@ -203,7 +213,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
-  { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },
+  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email) },
 ];
 
 export type ErasureResult =
@@ -293,7 +303,7 @@ export async function erasePerson(
     if (!more.ok) return { ok: false, reason: more.reason === "used" ? "limit" : "unavailable", message: more.message };
   }
 
-  // First, and on its own: whatever happens next, they are never written to again.
+  // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).
   await redisPipeline([suppressCommand(scope.listId as string, email)]);
 
   const parts: ErasedPart[] = [];
@@ -302,6 +312,10 @@ export async function erasePerson(
   const notes = new Set<ErasureNote>();
   for (const eraser of ERASERS) {
     if (eraser.only && eraser.only !== by.kind) continue;
+    if (eraser.after?.some((module) => failed.includes(module))) {
+      failed.push(eraser.module);
+      continue;
+    }
     try {
       parts.push({ module: eraser.module, records: await eraser.run(scope, files, notes) });
     } catch (error) {

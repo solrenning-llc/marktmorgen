@@ -1475,7 +1475,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
-      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD", "fencedBy", "CLOSING_FENCED", "FENCED_KEYS", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft"] },
+      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "decideCalendars", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD", "fencedBy", "CLOSING_FENCED", "FENCED_KEYS", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft"] },
       { file: "lib/team.ts", names: ["memberStoresExact", "MEMBER_STORES_READ"] },
       { file: "lib/store.ts", names: ["storeForIdExact", "MAX_STORES_PER_ACCOUNT"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_STORE_EXPORTS"] },
@@ -1536,6 +1536,16 @@ export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 2 + MAX_STORES_PER_A
  * from where it stopped: each such walk is one more preparation at this count.
  */
 export const CLAIMS_LEFT_COMMANDS = 3;
+/**
+ * A host whose serving another store could not be known at the preparation (lib/closed-store-data.ts, servesAnother;
+ * Claude 4's MEDIUM on #3660) is kept in the store's batch entry and read again before the store is finished
+ * (decideCalendars), each run until it is known: for each such host (its owner and its team, 1 + MAX_TEAM at the most)
+ * the same read of the stores it serves (SERVED_COMMANDS) and one DEL of its calendar, and the entry written once
+ * (HSET). Fewer commands than one preparation (PREPARE_COMMANDS, tests/closed-store.test.ts), and, as a walk that
+ * stopped in its hosts' claims, each run it takes again is one more preparation at that count; it lasts only while a
+ * reply does not read (rule 24), never as a plan's allowance.
+ */
+export const DECIDE_CALENDARS_COMMANDS = (1 + MAX_TEAM) * (SERVED_COMMANDS + 1) + 1;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS + 3) + CLAIMS_LEFT_COMMANDS + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * CLAIM_PAGES + 10);
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command (lib/store-export.ts). */

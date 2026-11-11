@@ -28,6 +28,7 @@ import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
+import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS } from "./plan-cost-registry";
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
 
@@ -325,6 +326,9 @@ async function main(): Promise<void> {
     const stores = await walkAt(at);
     is("control: no record (nil): out of line, nothing prepared", [stores, line(OWNER, at)], [0, "out"]);
   }
+  part("Its cost: each run that reads an undecided host again is counted (tests/plan-cost-registry.ts)");
+  is("a run deciding the hosts again costs less than one preparation", DECIDE_CALENDARS_COMMANDS > 0 && DECIDE_CALENDARS_COMMANDS < PREPARE_COMMANDS, true);
+
   done();
 }
 

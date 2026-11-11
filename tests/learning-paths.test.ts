@@ -26,7 +26,7 @@ redis.pipeline = (async (batch: Command[]) => {
   for (const c of batch) seen.push(c[0] === "EVAL" ? String(c[1]).split("\n")[0] : `${c[0]} ${c[1]}`);
   if (room && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))) return room;
   if (getReply && batch.some((c) => c[0] === "GET" && c[1] === KEY)) return getReply;
-  if (writeReply && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:learning-paths-write:"))) return writeReply;
+  if (writeReply && batch.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-set:"))) return writeReply;
   return real(batch);
 }) as typeof redis.pipeline;
 
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   redis.clear();
 
   part("The pure rules: a whole list, all or nothing");
-  is("a list reads", readPathsInput([two("Start"), { name: "More", courses: ["c3", "c4"], order: "free" }], [], COURSES, () => 0.5).ok, true);
+  is("a list reads", readPathsInput([two("Start"), { name: "More", courses: ["c3", "c4"], order: "free" }], [], COURSES).ok, true);
   const bad = readPathsInput([two("Start"), { name: "", courses: ["c1", "c2"], order: "free" }], [], COURSES);
   is("one bad path refuses the whole list, saying which", bad.ok ? null : [bad.problem, bad.index], ["name", 1]);
   const many = readPathsInput(Array.from({ length: MAX_PATHS + 1 }, (_, i) => two(`P${i}`)), [], COURSES);
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   is("each path is given its own id", ids.every((id) => /^[a-z0-9]{8}$/.test(id)) && new Set(ids).size === 2, true);
   is("read back as saved", (await readPaths(statsId)).map((p) => [p.name, p.courses, p.order]), [["Start here", ["c1", "c2"], "sequence"], ["Go further", ["c3", "c4", "c1"], "free"]]);
   const takeAt = seen.findIndex((s) => s.startsWith("-- marktmorgen:store-data:"));
-  const writeAt = seen.findIndex((s) => s.startsWith("-- marktmorgen:learning-paths-write:"));
+  const writeAt = seen.findIndex((s) => s.startsWith("-- marktmorgen:fenced-set:"));
   is("the room is taken before the list is written", takeAt >= 0 && writeAt > takeAt, true);
 
   part("An id is kept across saves; a new path never takes an old id");
@@ -104,8 +104,24 @@ async function main(): Promise<void> {
   writeReply = ["OK"];
   is("an answer that is not exactly 1 is unknown", (await savePaths(STORE, [two("Y")], COURSES, NOW + 6)).state, "unknown");
   writeReply = [0];
-  is("the lock no longer ours: busy, nothing said as saved", (await savePaths(STORE, [two("Y")], COURSES, NOW + 7)).state, "busy");
+  is("the lock no longer ours: nothing said as saved", (await savePaths(STORE, [two("Y")], COURSES, NOW + 7)).state, "unknown");
   writeReply = null;
+
+  part("The room is never counted as less than what is kept");
+  const roomKey = `nl:data:${ROOM.sid}`;
+  const slotNow = async () => Number((await real([["HGET", roomKey, "paths"]]))[0]);
+  await savePaths(STORE, [two("Kept")], COURSES, NOW + 9);
+  const keptSize = await slotNow();
+  is("the slot counts the kept list", keptSize > 0, true);
+  writeReply = [0];
+  await savePaths(STORE, [two("A much longer name for a path, so the list is larger than before"), two("And another one, also long enough to grow it")], COURSES, NOW + 10);
+  is("a larger list not written: the slot keeps the larger size", (await slotNow()) > keptSize, true);
+  writeReply = null;
+  await savePaths(STORE, [two("Kept")], COURSES, NOW + 11);
+  writeReply = [0];
+  await savePaths(STORE, [two("S")], COURSES, NOW + 12);
+  writeReply = null;
+  is("a smaller list not written: the slot is never below the kept list's size", await slotNow(), keptSize);
 
   part("One save at a time");
   await real([["SET", `nl:paths:lock:${statsId}`, "someone", "EX", 60]]);

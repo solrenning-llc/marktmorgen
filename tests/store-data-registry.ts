@@ -388,6 +388,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:payreq:s:@lib/closed-store-data.ts": follower("nl:payreq:s:"),
   "nl:agent:book:@lib/agent-book.ts": room("A store's book of the AI agent's proposals and what it did (631 [AA1] (c)), bounded by lib/agent-proposal-rules.ts", "lib/agent-book.ts"),
   "nl:agent:book:lock:@lib/agent-book.ts": short("A store's agent book being changed, a minute at the most", "studio", 1, 128),
+  "nl:paths:@lib/learning-paths.ts": room("A store's learning paths (249 [ST2]), the whole list set to its size in the room before it is written, bounded by MAX_PATHS (lib/learning-path-rules.ts)", "lib/learning-paths.ts"),
+  "nl:paths:lock:@lib/learning-paths.ts": short("A store's learning paths being saved, a minute at the most", "studio", 1, 128),
   "nl:agree:s:@lib/closed-store-data.ts": follower("nl:agree:s:"),
   "nl:letters:s:@lib/closed-store-data.ts": follower("nl:letters:s:"),
   "nl:pkg:s:@lib/closed-store-data.ts": follower("nl:pkg:s:"),

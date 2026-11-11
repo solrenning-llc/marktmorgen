@@ -317,6 +317,7 @@ type Reading = {
   checkout: boolean;
   drop: (what: DroppedKind, example?: string, count?: number) => void;
   found: PageDraft["found"];
+  pictures: SavedPicture[];
 };
 
 /** Walks the file's tags, keeping what the page says and counting what it does. */

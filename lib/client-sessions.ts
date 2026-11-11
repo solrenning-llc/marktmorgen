@@ -105,16 +105,15 @@ export async function clientSessions(store: Store, token: string, reads: Session
   if (!opened.admitted) return { state: "busy" };
   if (!opened.email) return { state: "expired" };
 
-  // A store with no Stripe account has taken no booking: confirmed none, and nothing to read.
-  let raw: unknown = { paid: [], partial: false };
-  if (store.stripeAccountId) {
-    try {
-      const outcome = await withinOpening(reads.read(store, opened.meter), opened.meter, reads.ms ?? ORDERS_READ_MS);
-      if (outcome === "late") return { state: "unreadable" };
-      raw = outcome;
-    } catch (error) {
-      return trouble(error);
-    }
+  // Disconnecting Stripe does not prove the buyer never booked: history is unavailable.
+  if (!store.stripeAccountId) return { state: "unreadable" };
+  let raw: unknown;
+  try {
+    const outcome = await withinOpening(reads.read(store, opened.meter), opened.meter, reads.ms ?? ORDERS_READ_MS);
+    if (outcome === "late") return { state: "unreadable" };
+    raw = outcome;
+  } catch (error) {
+    return trouble(error);
   }
   const reading = readingOf(raw);
   if (!reading) return { state: "unreadable" };

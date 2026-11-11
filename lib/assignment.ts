@@ -182,7 +182,11 @@ export async function applyTaskDrop(drop: TaskDrop, room: string | null, data: D
   const replies = repliesFor(await redisPipeline(commands), commands.length);
   const bytes = files.length ? removedBytes(replies?.slice(1, 1 + files.length) ?? null, sizes) : 0;
   if (room && bytes) await releaseBytes(room, bytes);
-  if (freed) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: freed }]);
+  // The records' room comes back only when every delete is confirmed by this call (rule 24, MR): each DEL and HDEL
+  // answers exactly 1. Replies cut short or of another shape, or a drop racing another (whose deletes found nothing),
+  // give nothing back: the room stays counted, more never less, never given for records that may stand, or twice.
+  const deletes = replies ? replies.slice(0, 1 + files.length + gone.length) : null;
+  if (freed && deletes && deletes.every((reply) => reply === 1)) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: freed }]);
   return files;
 }
 

@@ -294,4 +294,31 @@ await t.test(`a damaged note is kept, no letter lost, when the let-go cannot be 
   }
 });
 }
+
+// Claude 4 (cloud D) on #3740: a store that is gone (its id answers nil) is not unknown. Its damaged note goes, with no
+// letter (there is nobody to tell), so it never holds a place among the first MAX_NOTES notes for good.
+await t.test("a damaged note of a store that is gone is dropped, with no letter (cloud D on #3740)", async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[] };
+  note.p = [null];
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify(note)]]);
+  world.emails = [];
+  redis.pipeline = async (commands) => commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:store:id:") ? [null] : original(commands);
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_601);
+    redis.pipeline = original;
+    assert.equal(await shop.note(), null, "the note of a store that is gone is dropped");
+    assert.equal(world.emails.length, 0, "and no letter goes to a store that is gone");
+  } finally {
+    redis.pipeline = original;
+    delete process.env.RESEND_API_KEY;
+  }
+});
 });

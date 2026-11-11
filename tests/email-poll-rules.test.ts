@@ -93,6 +93,7 @@ is("each answer is its own link, its words the link's text", lines.slice(1, 4), 
 ]);
 is("says opening a link is not a vote", lines.some((l) => /counted only when you press Confirm/.test(l)), true);
 is("says when it closes", lines.some((l) => l.includes("December 8, 2026")), true);
+is("with the hour it closes, not the day alone (Claude 3 on #3673, LEVE)", lines.some((l) => l.includes("12:00 PM UTC on December 8, 2026")), true);
 is("says the sender sees the totals, not a list of who answered", lines.some((l) => /sees only the totals, not a list of who answered/.test(l)), true);
 
 part("The email never promises what the totals cannot keep (Claude 3 and R1 on #3673)");

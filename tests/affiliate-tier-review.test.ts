@@ -11,7 +11,7 @@
  */
 import * as affiliates from "@/lib/affiliates";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { approveUnconfirmed, noteSession, readBook } from "@/lib/affiliates";
+import { approveUnconfirmed, noteSession, programNumbers, readBook } from "@/lib/affiliates";
 import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -148,6 +148,8 @@ async function main(): Promise<void> {
   is("then it earns, once, on its own payment", [after?.status, after?.commission, (await readBook(await store())).lines.filter((l) => l.ref === "tier2:in_renew1").length], ["earned", 400, 1]);
   is("and it is payable", await anaPayable(), before + 400);
   is("approving it again: not waiting", await approveUnconfirmed(await store(), "tier2:in_renew1"), "not-waiting");
+  // Claude 4 on #3485 (6785133314): the payment written down is "recurring", which the program's public numbers must read.
+  is("and the program's numbers still read, with the renewal written down", await programNumbers(await store()).then((n) => n !== null, (e) => `threw: ${e instanceof Error ? e.message : e}`), true);
   is("an invoice that is not one of the store's waiting lines: gone", await approveUnconfirmed(await store(), "tier2:in_nothere"), "gone");
 
   done();

@@ -32,7 +32,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -146,34 +146,49 @@ export async function releasePictures(statsId: string, productId: string, paths:
   return mine;
 }
 
-/** A product's page, or the empty page when it has none (or it cannot be read). */
+/**
+ * A product's page, or the empty page when Redis confirms none is kept (a GET
+ * that answers null). Any other answer (no reply, more than one, a slot that
+ * is not a text, a kept record that is not a page) throws UnknownReplyError,
+ * so nothing is ever decided from an empty page that was not (CX-123 rule 24;
+ * Codex T's proof, C4-20261106-2610-C6-153). A failed request throws as before.
+ */
 export async function readPage(statsId: string | null, productId: string): Promise<SalesPage> {
   if (!statsId || !isRedisConfigured()) return { ...EMPTY_PAGE, blocks: [] };
-  const [raw] = await redisPipeline([["GET", pageKey(statsId, productId)]]);
-  return pageOf(raw);
+  const replies = repliesFor(await redisPipeline([["GET", pageKey(statsId, productId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a page read");
+  return pageOf(replies[0]);
 }
 
+/** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
 function pageOf(raw: unknown): SalesPage {
-  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) return { ...EMPTY_PAGE, blocks: [] };
+  if (raw === null) return { ...EMPTY_PAGE, blocks: [] };
+  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) throw new UnknownReplyError("a kept page");
   try {
-    return parsePage(JSON.parse(raw));
+    return pageRecordExact(raw, "a kept page");
   } catch {
-    return { ...EMPTY_PAGE, blocks: [] };
+    throw new UnknownReplyError("a kept page");
   }
 }
 
-/** Values of many keys, a hundred at a command (MGET): what the whole export reads (lib/store-export.ts). */
+/**
+ * Values of many keys, a hundred at a command (MGET): what the whole export
+ * reads (lib/store-export.ts). Each command must answer exactly one list with
+ * one slot per key asked, or the whole read throws UnknownReplyError.
+ */
 async function readMany(keys: string[]): Promise<unknown[]> {
   const out: unknown[] = [];
   for (let i = 0; i < keys.length; i += 100) {
-    const [raw] = await redisPipeline([["MGET", ...keys.slice(i, i + 100)]]);
-    const values = Array.isArray(raw) ? raw : [];
-    for (let n = 0; n < Math.min(100, keys.length - i); n += 1) out.push(values[n] ?? null);
+    const asked = keys.slice(i, i + 100);
+    const replies = repliesFor(await redisPipeline([["MGET", ...asked]]), 1);
+    const values = replies ? repliesFor(replies[0], asked.length) : null;
+    if (!values) throw new UnknownReplyError("a batch of page reads");
+    out.push(...values);
   }
   return out;
 }
 
-/** The pages of many products, in their order, a hundred at a command. */
+/** The pages of many products, in their order, a hundred at a command; throws like readPage when any answer is unknown. */
 export async function readPages(statsId: string | null, productIds: string[]): Promise<SalesPage[]> {
   if (!statsId || !isRedisConfigured()) return productIds.map(() => ({ ...EMPTY_PAGE, blocks: [] }));
   return (await readMany(productIds.map((id) => pageKey(statsId, id)))).map(pageOf);

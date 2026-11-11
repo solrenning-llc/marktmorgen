@@ -122,7 +122,9 @@ const outcome = async <T,>(run: () => Promise<T>): Promise<string> => {
     return JSON.stringify(await run());
   } catch (error) {
     if (error instanceof NotConnected) return `not connected: ${error.message}`;
-    return (error as Error).name === "UnknownReplyError" ? "unknown" : `other: ${(error as Error).message}`;
+    // Main's deletion pass wraps what stopped it (IncompleteForget, lib/meet-connect.ts): its cause is what is read.
+    const cause = (error as Error).name === "IncompleteForget" ? ((error as Error).cause as Error | undefined) : (error as Error);
+    return cause?.name === "UnknownReplyError" ? "unknown" : `other: ${(error as Error).message}`;
   }
 };
 const kept = async (key: string) => (await redisPipeline([["GET", key]]))[0];

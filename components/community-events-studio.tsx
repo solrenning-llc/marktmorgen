@@ -49,8 +49,9 @@ export type StudioEvent = {
   /** "Tuesday, October 6, 6:00 PM (EDT)". */
   when: string;
   length: string;
-  going: number;
-  /** The first people coming, in the order they said so. */
+  /** How many are coming; null when who is coming could not be read just now (never 0 for that). */
+  going: number | null;
+  /** The first people coming, in the order they said so; empty when `going` is null. */
   people: { name: string; email: string; at: number }[];
   post: string;
 };
@@ -100,7 +101,14 @@ const MESSAGES: Record<string, string> = {
 const ROOM_CHECK = roomOnLeave(MESSAGES.link);
 const LINK_CHECK: LinkCheck = (raw) => (raw.trim() ? ROOM_CHECK(raw) : { problem: MESSAGES.link, fix: null });
 
-type Answer = { ok?: boolean; error?: string; moved?: boolean };
+/**
+ * `notice`, after a move or a cancellation that was made: "waiting" when who is coming could not be read just then
+ * (the email goes out once it can), "failed" when the email could not be started at all.
+ */
+type Answer = { ok?: boolean; error?: string; moved?: boolean; notice?: "waiting" | "failed" };
+
+/** What the studio says when the email about a change could not be started. */
+const UNSENT = "but the email to anyone coming could not be started. Tell them in the community.";
 
 async function send(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -258,7 +266,13 @@ export function CommunityEventsStudio({
                   onCancel={() => setEditing(null)}
                   onSave={async (payload) => {
                     const ok = await run(`e-${event.id}`, { action: "edit", event: event.id, ...payload }, (a) =>
-                      a.moved ? (event.going ? `Moved. ${event.going === 1 ? "The person" : `The ${event.going} people`} coming ${event.going === 1 ? "is" : "are"} being emailed.` : "Moved.") : "Saved.",
+                      a.moved
+                        ? a.notice === "failed"
+                          ? `Moved, ${UNSENT}`
+                          : a.notice === "waiting" || event.going === null
+                            ? "Moved. Anyone coming is being emailed."
+                            : event.going ? `Moved. ${event.going === 1 ? "The person" : `The ${event.going} people`} coming ${event.going === 1 ? "is" : "are"} being emailed.` : "Moved."
+                        : "Saved.",
                     );
                     if (ok) setEditing(null);
                   }}
@@ -277,9 +291,15 @@ export function CommunityEventsStudio({
                     setEditing(event.id);
                   }}
                   onCancelEvent={() => {
-                    const who = event.going ? ` The ${event.going === 1 ? "person" : `${event.going} people`} coming will be emailed once.` : "";
+                    const who = event.going === null ? " Anyone coming will be emailed once." : event.going ? ` The ${event.going === 1 ? "person" : `${event.going} people`} coming will be emailed once.` : "";
                     if (window.confirm(`Cancel "${event.title}"?${who} This cannot be undone.`)) {
-                      run(`e-${event.id}`, { action: "cancel", event: event.id }, event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.");
+                      run(`e-${event.id}`, { action: "cancel", event: event.id }, (a) =>
+                        a.notice === "failed"
+                          ? `Canceled, ${UNSENT}`
+                          : a.notice === "waiting" || event.going === null
+                            ? "Canceled. Anyone coming is being emailed."
+                            : event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.",
+                      );
                     }
                   }}
                   onDelete={() => {
@@ -356,7 +376,10 @@ function EventRow({
   const meetName = event.where === "meet" && event.meet ? MEET_NAMES[event.meet] : null;
   const made = Boolean(meetName && event.meeting?.made);
   const only = event.only.map((id) => products.find((p) => p.id === id)?.title).filter(Boolean);
-  const places = event.over ? `${event.going} RSVP'd` : event.cap ? `${event.going} of ${event.cap} ${event.cap === 1 ? "place" : "places"} taken` : `${event.going} going`;
+  // Who is coming did not read: no count at all, and the notice below says why.
+  const places = event.going === null
+    ? event.over ? "Not known how many RSVP'd" : event.cap ? `Not known how many of ${event.cap} ${event.cap === 1 ? "place is" : "places are"} taken` : "Not known how many are going"
+    : event.over ? `${event.going} RSVP'd` : event.cap ? `${event.going} of ${event.cap} ${event.cap === 1 ? "place" : "places"} taken` : `${event.going} going`;
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
@@ -421,7 +444,11 @@ function EventRow({
         ) : null}
       </div>
 
-      {event.people.length ? (
+      {event.going === null ? (
+        <p className="mt-2 rounded-[10px] bg-amber-brand/10 px-3 py-2 text-sm text-ink" role="status">
+          Who is coming could not be read just now, so the number and the names are not shown. Reload the page to try again.
+        </p>
+      ) : event.people.length ? (
         <details className="mt-3">
           <summary className="inline-flex min-h-11 cursor-pointer items-center text-sm font-semibold text-ink">
             {`Who is coming (${event.going})`}
@@ -434,7 +461,7 @@ function EventRow({
               </li>
             ))}
           </ul>
-          {event.going > event.people.length ? <p className="mt-2 text-xs text-ink-mute">{`The first ${event.people.length} of ${event.going}.`}</p> : null}
+          {event.going !== null && event.going > event.people.length ? <p className="mt-2 text-xs text-ink-mute">{`The first ${event.people.length} of ${event.going}.`}</p> : null}
         </details>
       ) : null}
 

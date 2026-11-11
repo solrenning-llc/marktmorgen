@@ -1012,8 +1012,11 @@ export async function noteSignIn(
 /** Carries the browsers an account knows to its new address, when it moves. */
 export async function moveDevices(from: string, to: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  const [members] = await redisPipeline([["SMEMBERS", await devicesKey(from)]]);
-  const list = Array.isArray(members) ? members.filter((m): m is string => typeof m === "string") : [];
+  // Read exactly (rule 24): a reply cut short or of another shape is not "no browsers", and the old set is not
+  // deleted on it; the move route logs the error and the move itself stands.
+  const [members] = repliesFor(await redisPipeline([["SMEMBERS", await devicesKey(from)]]), 1) ?? [];
+  const list = stringList(members);
+  if (!list) throw new UnknownReplyError("an account's known browsers");
   await redisPipeline([
     ...(list.length ? [["SADD", await devicesKey(to), ...list], ["EXPIRE", await devicesKey(to), DEVICE_TTL_SECONDS]] : []),
     ["DEL", await devicesKey(from)],

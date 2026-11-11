@@ -16,7 +16,8 @@
  *   bought from or joined the store, in every quarter.
  * - forgetCommunityUnsub (lib/community-mail.ts): the member's unsubscribe token.
  * - forgetHandle (lib/community-mentions.ts): the member's @handle; an unknown
- *   HGET also became "not theirs".
+ *   HGET also became "not theirs". It is now one EVAL (check and delete in one
+ *   step, tests/community-handle-forget-race.test.ts), read as 1 or 0 exactly.
  *
  * Expected: every off-shape reply rejects (UnknownReplyError), so the part is
  * said as not finished and retried; exact counts still count.
@@ -137,30 +138,29 @@ void (async () => {
   is("forgetCommunityUnsub: the token goes, counted", await forgetCommunityUnsub(TOKEN), 1);
   is("forgetCommunityUnsub: none left is none", await forgetCommunityUnsub(TOKEN), 0);
 
-  // forgetHandle: HGET whose handle it is, then its HDEL.
-  for (const [label, bad] of [...BAD_ONE, ["more than the one field", [2]] as [string, unknown]]) {
-    replies = { HGET: () => [WHO], HDEL: () => bad };
-    is(`forgetHandle, HDEL ${label}: never a finished count`, rejected(await outcome(() => forgetHandle(COMMUNITY, HANDLE, WHO))), true);
-  }
+  // forgetHandle: one EVAL that deletes the handle only while it is theirs (FORGET_HANDLE), 1 or 0.
   for (const [label, bad] of [
-    ["a number", [7]],
-    ["true", [true]],
-    ["a list", [[WHO]]],
-    ["empty reply", []],
-    ["not a list", { result: WHO }],
+    ...BAD_ONE,
+    ["more than the one field", [2]],
+    ["the owner's id", [WHO]],
+    ["a list", [[1]]],
   ] as [string, unknown][]) {
-    replies = { HGET: () => bad, HDEL: () => [1] };
-    sent.length = 0;
-    is(`forgetHandle, HGET ${label}: not "someone else's", rejected`, rejected(await outcome(() => forgetHandle(COMMUNITY, HANDLE, WHO))), true);
-    is(`forgetHandle, HGET ${label}: no HDEL sent`, sent.includes("HDEL"), false);
+    replies = { EVAL: () => bad };
+    is(`forgetHandle, EVAL ${label}: never a finished count`, rejected(await outcome(() => forgetHandle(COMMUNITY, HANDLE, WHO))), true);
   }
-  replies = { HGET: () => [null] };
-  is("forgetHandle: no owner is 0", await forgetHandle(COMMUNITY, HANDLE, WHO), 0);
-  replies = { HGET: () => ["m-someone-else"] };
-  is("forgetHandle: another member's handle is kept, 0", await forgetHandle(COMMUNITY, HANDLE, WHO), 0);
-  replies = { HGET: () => [WHO], HDEL: () => [1] };
+  replies = { EVAL: () => [0] };
+  is("forgetHandle: not theirs or already gone is 0", await forgetHandle(COMMUNITY, HANDLE, WHO), 0);
+  replies = { EVAL: () => [1] };
   is("forgetHandle: theirs, removed, is 1", await forgetHandle(COMMUNITY, HANDLE, WHO), 1);
-  replies = { HGET: () => [WHO], HDEL: () => [0] };
+  // With the real stub: no owner, another member's, theirs.
+  replies = {};
+  const handles = `nl:cm:${COMMUNITY}:h`;
+  is("forgetHandle: no owner is 0", await forgetHandle(COMMUNITY, HANDLE, WHO), 0);
+  await redis.pipeline([["HSET", handles, HANDLE, "m-someone-else"]]);
+  is("forgetHandle: another member's handle is kept, 0", await forgetHandle(COMMUNITY, HANDLE, WHO), 0);
+  is("forgetHandle: another member's handle is still theirs", (await redis.pipeline([["HGET", handles, HANDLE]]))[0], "m-someone-else");
+  await redis.pipeline([["HSET", handles, HANDLE, WHO]]);
+  is("forgetHandle: theirs, removed, is 1", await forgetHandle(COMMUNITY, HANDLE, WHO), 1);
   is("forgetHandle: theirs, already gone, is 0", await forgetHandle(COMMUNITY, HANDLE, WHO), 0);
   done();
 })();

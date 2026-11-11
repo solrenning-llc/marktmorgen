@@ -25,7 +25,7 @@
  * turns a community's notifications into something people switch off.
  */
 import { redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { CREATOR } from "@/lib/community";
 
 const handlesKey = (id: string) => `nl:cm:${id}:h`;
@@ -163,16 +163,24 @@ export function withMentions(
   return out;
 }
 
+/**
+ * Lets go of a handle only while it still points at this member, the check and
+ * the delete in one step: read first and deleted later, a handle another
+ * member took in between was deleted from under them (Codex U on #3095).
+ * 1 deleted, 0 not theirs or already gone; any other answer is not known.
+ */
+const FORGET_HANDLE = [
+  "-- marktmorgen:community-handle-forget:v1",
+  'if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end',
+  'return redis.call("HDEL", KEYS[1], ARGV[1])',
+].join("\n");
+
 /** Lets go of the handle a deleted member held, if it is still theirs (lib/community-erasure.ts). */
 export async function forgetHandle(id: string, handle: string, who: string): Promise<number> {
   if (!handle) return 0;
-  // Whose handle it is, read exactly (CX-123 rule 24): only text or null is an answer; anything else is not
-  // "someone else's", so it throws and the erasure is said as not finished.
-  const read = repliesFor(await redisPipeline([["HGET", handlesKey(id), handle]]), 1);
-  const owner = read?.[0];
-  if (!read || (owner !== null && typeof owner !== "string")) throw new UnknownReplyError("whose handle it is");
-  if (owner !== who) return 0;
-  const gone = countOf(repliesFor(await redisPipeline([["HDEL", handlesKey(id), handle]]), 1)?.[0]);
-  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of a member's handle");
+  // Read exactly (CX-123 rule 24): only 1 or 0 is an answer; anything else is not
+  // "someone else's" nor "gone", so it throws and the erasure is said as not finished.
+  const gone = repliesFor(await redisPipeline([["EVAL", FORGET_HANDLE, 1, handlesKey(id), handle, who]]), 1)?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("the deletion of a member's handle");
   return gone;
 }

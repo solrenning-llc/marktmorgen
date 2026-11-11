@@ -6,10 +6,11 @@
  *
  *   1. asks for a sign-in link with an email address;
  *   2. opens it (the one-tap confirm form);
- *   3. claims a store with an address and a name;
+ *   3. claims a store with an address (its name is optional);
  *   4. adds a first product with a title and a price;
- *   5. starts Stripe's onboarding with a country;
- *   6. asks for a plan, which turns the checkout on.
+ *   5. gives it something to deliver (a link), without which it never sells;
+ *   6. starts Stripe's onboarding with a country;
+ *   7. asks for a plan, which turns the checkout on.
  *
  * Each step counts as one action of the person. A field counts as required
  * when the route refuses the same request without it, or when the form the
@@ -18,7 +19,7 @@
  * docs/signup-to-ready-measured.md, so the record cannot drift from the code.
  *
  * It does not measure a person's time (that needs real people, item 202) and
- * it never opens selling: with PLANS_ON_SALE false the walk ends at step 6,
+ * it never opens selling: with PLANS_ON_SALE false the walk ends at step 7,
  * refused with billing=not-open, and the store cannot sell (canSell false).
  */
 import { readFileSync, existsSync } from "node:fs";
@@ -120,31 +121,40 @@ async function main(): Promise<void> {
   const productUrl = `${ORIGIN}/api/store/product`;
   is("without a title: refused", (await product(asJson(productUrl, { action: "add", price: "19" }, true))).ok, false);
   is("without a price: refused", (await product(asJson(productUrl, { action: "add", title: "Field notes" }, true))).ok, false);
-  // 251 [ST4] unit 3: a sellable product needs something to deliver; the add step already takes a link, optional.
-  const added = await product(asJson(productUrl, { action: "add", title: "Field notes", price: "19", link: "https://example.com/field-notes.pdf" }, true));
+  const added = await product(asJson(productUrl, { action: "add", title: "Field notes", price: "19" }, true));
   is("with both: added", added.status, 200);
   const store = await storeForEmail(EMAIL);
   // The store's listings, read whole (no ids: all of them), never an id guessed (review of #3754).
   const listings = store ? await readListings(store) : [];
   is("the product added is found, by its title (review of #3754)", listings.map((listing) => listing.title), ["Field notes"]);
   is("published at once: no separate publish step", listings[0]?.hidden, false);
-  is("with its delivery given in the same step, it has something to hand over (unit 3)", listings[0] ? handsOver(listings[0]) : null, true);
   walk.push({ step: 4, action: "Add the first product", required: ["title", "price"] });
 
-  part("5. Start Stripe's onboarding");
+  // 251 [ST4] unit 3: a product sells only with something to hand over, and the add step does not take it: the
+  // product's row has its own way to give a link or a file (action "link", or the file door).
+  part("5. Give it something to deliver");
+  is("as added, it has nothing to hand over", listings[0] ? handsOver(listings[0]) : null, false);
+  const linkFor = (body: Record<string, unknown>) => product(asJson(productUrl, { action: "link", id: listings[0]?.id ?? "", ...body }, true));
+  is("without a link: refused", (await linkFor({})).ok, false);
+  is("with one: kept", (await linkFor({ link: "https://example.com/field-notes.pdf" })).status, 200);
+  const delivered = (await readListings((await storeForEmail(EMAIL))!))[0];
+  is("now it has something to hand over", delivered ? handsOver(delivered) : null, true);
+  walk.push({ step: 5, action: "Give it something to deliver", required: ["link"] });
+
+  part("6. Start Stripe's onboarding");
   const connectUrl = `${ORIGIN}/api/stripe/connect`;
   is("without a country: asked for it", where(await connect(asForm(connectUrl, {}, true))).includes("stripe=country"), true);
   const started = await connect(asForm(connectUrl, { country: "US" }, true));
   is("with one: sent to Stripe's own pages", where(started), "https://connect.stripe.com/setup/e/acct_1WalkTest/walk");
   is("only the account and its link were asked of Stripe", stripeCalls.map((call) => call.split("?")[0]), ["/v2/core/accounts", "/v2/core/account_links"]);
-  walk.push({ step: 5, action: "Start Stripe's onboarding", required: ["country"] });
+  walk.push({ step: 6, action: "Start Stripe's onboarding", required: ["country"] });
 
-  part("6. Turn the checkout on");
+  part("7. Turn the checkout on");
   const planned = await plan(asForm(`${ORIGIN}/api/billing/checkout`, { tier: "creator" }, true));
   is("closed while plans are not on sale", [PLANS_ON_SALE, where(planned).includes("billing=not-open")], [false, true]);
   is("so the store cannot sell", canSell((await storeForEmail(EMAIL))!), false);
   // Its fields cannot be measured: the route refuses before it reads them.
-  walk.push({ step: 6, action: "Choose a plan (closed today)", required: [] });
+  walk.push({ step: 7, action: "Choose a plan (closed today)", required: [] });
 
   part("The record matches the walk");
   const recordPath = "docs/signup-to-ready-measured.md";
@@ -158,7 +168,6 @@ async function main(): Promise<void> {
   is("one row per step, with its action and required fields", rows, walk);
   const fields = walk.reduce((sum, step) => sum + step.required.length, 0);
   is("the totals it states", [record.includes(`**${walk.length} actions**`), record.includes(`**${fields} required fields**`)], [true, true]);
-  is("it says the add step already takes the delivery, not that it could (unit 3)", [record.includes("already takes the delivery"), record.includes("could ask for the delivery")], [true, false]);
   is("it says selling stays closed and no person's time was measured", [/PLANS_ON_SALE/.test(record), /not measured/i.test(record)], [true, true]);
 
   done();

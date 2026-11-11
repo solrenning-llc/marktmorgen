@@ -4261,6 +4261,26 @@ fieldset:disabled .cm-poll-row {
   color: inherit;
   opacity: 0.6;
 }
+/* A store's community, held to WCAG 2.2 AAA (tests/community-accessibility.test.ts): its name in the bar, a tab
+   however short its word, a post's title in the feed and the composer's poll label are 44 px targets (2.5.5); no
+   paragraph after the bar is wider than 80 characters (1.4.8), a notice box excepted. */
+.cm-home {
+  min-height: 2.75rem;
+}
+.cm-tab:where(*) {
+  min-width: 2.75rem;
+}
+.cm-post h2 > a.st-title-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+.st-page label:has(> input[name="poll"]) {
+  min-height: 2.75rem;
+}
+.cm-bar ~ main p:not(.st-note) {
+  max-width: 46ch;
+}
 .cm-search:hover {
   border-color: color-mix(in srgb, currentColor 34%, transparent);
 }

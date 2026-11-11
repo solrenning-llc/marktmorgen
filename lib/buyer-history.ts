@@ -93,7 +93,7 @@ function rowOf(row: unknown, email: string): { id: string; kind: "checked" | "un
 }
 
 /** The count from Stripe's listings, one a spelling of the address; any one that cannot be read spoils it. */
-export function historyFrom(listings: unknown[], email: string): RefundHistory {
+export function historyFrom(_handles: Set<string>, listings: unknown[], email: string): RefundHistory {
   if (listings.length === 0) return UNKNOWN;
   const address = normaliseEmail(email);
   const seen = new Set<string>();
@@ -143,5 +143,5 @@ export async function refundHistory(store: Store, email: string): Promise<Refund
     console.error("reading a buyer's past refunds and disputes failed", error);
     return UNKNOWN;
   }
-  return historyFrom(listings, email);
+  return historyFrom(new Set(), listings, email);
 }

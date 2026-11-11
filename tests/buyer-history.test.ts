@@ -31,11 +31,13 @@ type Row = Record<string, unknown>;
 const charge = (refunded: boolean, amountRefunded: number, disputed: boolean, extra: Row = {}): Row => ({ id: "ch_1", object: "charge", refunded, amount_refunded: amountRefunded, disputed, ...extra });
 const paid = (id: string, latest: unknown, extra: Row = {}): Row => ({
   id, object: "checkout.session", status: "complete", mode: "payment", payment_status: "paid",
-  customer_details: { email: "buyer@example.com" },
+  customer_details: { email: "buyer@example.com" }, metadata: { store: "mara" },
   payment_intent: { id: `pi_${id}`, object: "payment_intent", latest_charge: latest },
   ...extra,
 });
 const list = (data: unknown[], hasMore = false): Row => ({ object: "list", data, has_more: hasMore });
+/** The store's names, the one it has and one it had (lib/store.ts saleHandles). */
+const HERE = new Set(["mara", "mara-old"]);
 
 /** What the synthetic Stripe answers, by the address asked for; and every call made. */
 let replies: Record<string, { status: number; body: unknown }> = {};
@@ -81,37 +83,48 @@ async function main(): Promise<void> {
     paid("cs_both", charge(true, 4900, true)),
     paid("cs_clean", charge(false, 0, false)),
   ]);
-  is("each kind counted once", historyFrom([mixed], BUYER), { state: "known", checked: 5, refunded: 2, partly: 1, disputed: 2, more: false, unchecked: 0 });
-  is("nothing bought here", historyFrom([list([])], BUYER), { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0 });
-  is("the same checkout under both spellings counted once", historyFrom([list([paid("cs_full", charge(true, 4900, false))]), list([paid("cs_full", charge(true, 4900, false))])], BUYER),
+  is("each kind counted once", historyFrom(HERE, [mixed], BUYER), { state: "known", checked: 5, refunded: 2, partly: 1, disputed: 2, more: false, unchecked: 0 });
+  is("nothing bought here", historyFrom(HERE, [list([])], BUYER), { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0 });
+  is("the same checkout under both spellings counted once", historyFrom(HERE, [list([paid("cs_full", charge(true, 4900, false))]), list([paid("cs_full", charge(true, 4900, false))])], BUYER),
     { state: "known", checked: 1, refunded: 1, partly: 0, disputed: 0, more: false, unchecked: 0 });
-  is("more than one page: said as the newest only", historyFrom([list([paid("cs_clean", charge(false, 0, false))], true)], BUYER),
+  is("more than one page: said as the newest only", historyFrom(HERE, [list([paid("cs_clean", charge(false, 0, false))], true)], BUYER),
     { state: "known", checked: 1, refunded: 0, partly: 0, disputed: 0, more: true, unchecked: 0 });
-  is("a subscription is not checked, and said so", historyFrom([list([{ ...paid("cs_sub", null), mode: "subscription", payment_intent: null }])], BUYER),
+  is("a subscription is not checked, and said so", historyFrom(HERE, [list([{ ...paid("cs_sub", null), mode: "subscription", payment_intent: null }])], BUYER),
     { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 1 });
-  is("a payment not made yet is not checked, and said so", historyFrom([list([paid("cs_wait", null, { payment_status: "unpaid" })])], BUYER),
+  is("a payment not made yet is not checked, and said so", historyFrom(HERE, [list([paid("cs_wait", null, { payment_status: "unpaid" })])], BUYER),
     { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 1 });
-  is("a free checkout is no purchase to count", historyFrom([list([{ ...paid("cs_free", null), payment_status: "no_payment_required", payment_intent: null }])], BUYER),
+  is("nor one waiting on its bank, whatever its charge says", historyFrom(HERE, [list([paid("cs_bank", charge(true, 4900, true), { payment_status: "unpaid" })])], BUYER),
+    { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 1 });
+
+  part("Only this store's sales, though the Stripe account serves others");
+  is("a sale of another store of the same account is left out", historyFrom(HERE, [list([paid("cs_lee", charge(true, 4900, true), { metadata: { store: "lee" } })])], BUYER),
+    { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0 });
+  is("so is a sale made outside Marktmorgen", historyFrom(HERE, [list([paid("cs_out", charge(true, 4900, true), { metadata: {} })])], BUYER),
+    { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0 });
+  is("a sale under a name the store had is its own", historyFrom(HERE, [list([paid("cs_old", charge(true, 4900, false), { metadata: { store: "mara-old" } })])], BUYER),
+    { state: "known", checked: 1, refunded: 1, partly: 0, disputed: 0, more: false, unchecked: 0 });
+  is("metadata that does not read: could not check", historyFrom(HERE, [list([paid("cs_x", charge(false, 0, false), { metadata: "mara" })])], BUYER), { state: "unknown" });
+  is("a free checkout is no purchase to count", historyFrom(HERE, [list([{ ...paid("cs_free", null), payment_status: "no_payment_required", payment_intent: null }])], BUYER),
     { state: "known", checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0 });
 
   part("What cannot be read is not counted as clean");
   const unknown = { state: "unknown" };
-  is("no listing", historyFrom([], BUYER), unknown);
-  is("a listing that is not a list", historyFrom([{ object: "list", data: {}, has_more: false }], BUYER), unknown);
-  is("a listing that does not say whether more follow", historyFrom([{ object: "list", data: [] }], BUYER), unknown);
-  is("a reply that is not an object", historyFrom(["nope"], BUYER), unknown);
-  is("a row that is not an object", historyFrom([list([null])], BUYER), unknown);
-  is("a checkout not complete", historyFrom([list([paid("cs_open", charge(false, 0, false), { status: "open" })])], BUYER), unknown);
-  is("another address's checkout", historyFrom([list([paid("cs_x", charge(true, 4900, false), { customer_details: { email: "someone@example.com" } })])], BUYER), unknown);
-  is("a payment not expanded", historyFrom([list([paid("cs_x", null, { payment_intent: "pi_x" })])], BUYER), unknown);
-  is("a paid payment without its charge", historyFrom([list([paid("cs_x", null)])], BUYER), unknown);
-  is("a charge given only by its id", historyFrom([list([paid("cs_x", "ch_1")])], BUYER), unknown);
-  is("refunded not a yes or no", historyFrom([list([paid("cs_x", charge("yes" as unknown as boolean, 0, false))])], BUYER), unknown);
-  is("disputed not a yes or no", historyFrom([list([paid("cs_x", { ...charge(false, 0, false), disputed: null })])], BUYER), unknown);
-  is("an amount refunded that is not a whole number", historyFrom([list([paid("cs_x", charge(false, 10.5, false))])], BUYER), unknown);
-  is("a negative amount refunded", historyFrom([list([paid("cs_x", charge(false, -1, false))])], BUYER), unknown);
-  is("a mode not known", historyFrom([list([paid("cs_x", charge(false, 0, false), { mode: "other" })])], BUYER), unknown);
-  is("one bad row spoils the whole check", historyFrom([list([paid("cs_full", charge(true, 4900, false)), paid("cs_x", null)])], BUYER), unknown);
+  is("no listing", historyFrom(HERE, [], BUYER), unknown);
+  is("a listing that is not a list", historyFrom(HERE, [{ object: "list", data: {}, has_more: false }], BUYER), unknown);
+  is("a listing that does not say whether more follow", historyFrom(HERE, [{ object: "list", data: [] }], BUYER), unknown);
+  is("a reply that is not an object", historyFrom(HERE, ["nope"], BUYER), unknown);
+  is("a row that is not an object", historyFrom(HERE, [list([null])], BUYER), unknown);
+  is("a checkout not complete", historyFrom(HERE, [list([paid("cs_open", charge(false, 0, false), { status: "open" })])], BUYER), unknown);
+  is("another address's checkout", historyFrom(HERE, [list([paid("cs_x", charge(true, 4900, false), { customer_details: { email: "someone@example.com" } })])], BUYER), unknown);
+  is("a payment not expanded", historyFrom(HERE, [list([paid("cs_x", null, { payment_intent: "pi_x" })])], BUYER), unknown);
+  is("a paid payment without its charge", historyFrom(HERE, [list([paid("cs_x", null)])], BUYER), unknown);
+  is("a charge given only by its id", historyFrom(HERE, [list([paid("cs_x", "ch_1")])], BUYER), unknown);
+  is("refunded not a yes or no", historyFrom(HERE, [list([paid("cs_x", charge("yes" as unknown as boolean, 0, false))])], BUYER), unknown);
+  is("disputed not a yes or no", historyFrom(HERE, [list([paid("cs_x", { ...charge(false, 0, false), disputed: null })])], BUYER), unknown);
+  is("an amount refunded that is not a whole number", historyFrom(HERE, [list([paid("cs_x", charge(false, 10.5, false))])], BUYER), unknown);
+  is("a negative amount refunded", historyFrom(HERE, [list([paid("cs_x", charge(false, -1, false))])], BUYER), unknown);
+  is("a mode not known", historyFrom(HERE, [list([paid("cs_x", charge(false, 0, false), { mode: "other" })])], BUYER), unknown);
+  is("one bad row spoils the whole check", historyFrom(HERE, [list([paid("cs_full", charge(true, 4900, false)), paid("cs_x", null)])], BUYER), unknown);
 
   part("Read from the creator's own account");
   redis.clear();
@@ -155,6 +168,15 @@ async function main(): Promise<void> {
   is("an unknown conversation", (await route(OWNER, { action: "history", id: "zzzzzzzzzzzz" })).status, 404);
   replies = { "buyer@example.com": { status: 500, body: { error: { type: "api_error" } } } };
   is("could not check: said, not shown as none", await route(OWNER, { action: "history", id: conversation.id }), { status: 503, body: { ok: false, error: "unknown" } });
+
+  part("A store with no Stripe account is told so, spending none of its checks");
+  await shop("bare@example.com", "bare", null);
+  await startChat({ store: (await storeForEmail("bare@example.com"))!, email: "buyer@example.com", name: "", text: "Hello there", ip: "10.0.0.9" });
+  const bareStore = (await storeForEmail("bare@example.com"))!;
+  const [bareChat] = await readInbox(bareStore.statsId!);
+  const bareBefore = new Set(redis.keys());
+  is("nothing to check", await route("bare@example.com", { action: "history", id: bareChat.id }), { status: 200, body: { ok: true, history: { state: "none" } } });
+  is("no day's check and no studio reads taken", redis.keys().filter((key) => !bareBefore.has(key) && /^nl:rl:refund-history/.test(key)), []);
 
   part("A studio figure used up is refused before Stripe is asked");
   await redis.pipeline([["SET", studioKey, String(STORE_ALLOWANCES.pro.studio - 1)]]);

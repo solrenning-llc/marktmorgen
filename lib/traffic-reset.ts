@@ -6,7 +6,12 @@
  *
  * What it may do, and nothing more:
  *   - lower the visits of the store's current window to a
- *     figure the operator gives, never raise them and never below zero;
+ *     figure the operator gives, never raise them and never below zero. The
+ *     visits are what admission and the plan's limit read: the people counted
+ *     plus the live room's parts (lib/traffic.ts, trafficForAdmission). Only
+ *     the people counter is lowered, so a figure below what the live room
+ *     alone holds is refused ("room"), never answered as done (Claude 1 on
+ *     #3380);
  *   - never touch the window's requests, its connections'
  *     shares or the live room: the requests' ceiling is what bounds what the
  *     store's pages cost us in a window, so it is never given back here
@@ -24,7 +29,8 @@ import { allowanceWindow } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
-import { countKey } from "@/lib/traffic";
+import { countKey, partsKey } from "@/lib/traffic";
+import { PARTS_PER_VISIT } from "@/lib/traffic-rules";
 
 /** How many resets are kept in the record, the newest first. */
 export const TRAFFIC_LOG_KEEP = 1_000;
@@ -38,15 +44,18 @@ const LOCK_SECONDS = 30;
  * than the one read (another reset got in) writes nothing; otherwise the record first, then the visits lowered by
  * the delta, so visits counted meanwhile stay counted. Both or neither.
  */
-const RESET_SCRIPT = `-- marktmorgen:traffic-reset:v1
+const RESET_SCRIPT = `-- marktmorgen:traffic-reset:v2
 if redis.call('GET', KEYS[3]) ~= ARGV[4] then return {-2} end
 local current = redis.call('GET', KEYS[1])
 if current == false then current = '0' end
 if not string.match(current, '^%d+$') then return {-3} end
+local parts = redis.call('GET', KEYS[4])
+if parts == false then parts = '0' end
+if not string.match(parts, '^%d+$') then return {-3} end
 if tonumber(current) < tonumber(ARGV[1]) then return {-1, tonumber(current)} end
 redis.call('LPUSH', KEYS[2], ARGV[3])
 redis.call('LTRIM', KEYS[2], 0, tonumber(ARGV[5]) - 1)
-return {1, redis.call('DECRBY', KEYS[1], ARGV[2])}`;
+return {1, redis.call('DECRBY', KEYS[1], ARGV[2]), tonumber(parts)}`;
 
 /** The lock let go only by the token that took it. */
 const RELEASE_SCRIPT = `-- marktmorgen:traffic-reset-release:v1
@@ -59,7 +68,7 @@ export type TrafficReset = { at: number; sid: string; handle: string; window: st
 export type ResetResult =
   | { ok: true; window: string; before: number; after: number }
   | { ok: false; reason: "invalid" | "no-window" | "busy" | "unknown" }
-  | { ok: false; reason: "above" | "same"; before: number };
+  | { ok: false; reason: "above" | "same" | "room"; before: number };
 
 /** A count as Redis keeps it: digits only, a whole number from zero up; a missing key is zero. Anything else is null. */
 function storedCount(reply: unknown): number | null {
@@ -79,6 +88,7 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
   const folder = await storeFolder(storeRef(store));
   if (!FOLDER_PATTERN.test(folder)) return { ok: false, reason: "unknown" };
   const key = countKey(folder, window.id);
+  const room = partsKey(folder, window.id);
 
   // The lock is this reset's own token: a reset that waited past its lease can neither change the visits (the
   // script checks the token) nor let go of a lock another reset now holds (the release checks it too).
@@ -87,25 +97,33 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
   if (!lock) return { ok: false, reason: "unknown" };
   if (lock[0] !== "OK") return lock[0] === null ? { ok: false, reason: "busy" } : { ok: false, reason: "unknown" };
   try {
-    const read = repliesFor(await redisPipeline([["GET", key]]), 1);
-    const before = read ? storedCount(read[0]) : null;
-    if (before === null) return { ok: false, reason: "unknown" };
+    const read = repliesFor(await redisPipeline([["GET", key], ["GET", room]]), 2);
+    const people = read ? storedCount(read[0]) : null;
+    const parts = read ? storedCount(read[1]) : null;
+    if (people === null || parts === null) return { ok: false, reason: "unknown" };
+    // The visits admission and the plan's limit read (lib/traffic.ts, trafficForAdmission), not the people alone.
+    const before = people + Math.floor(parts / PARTS_PER_VISIT);
+    if (!Number.isSafeInteger(before)) return { ok: false, reason: "unknown" };
     if (to > before) return { ok: false, reason: "above", before };
     if (to === before) return { ok: false, reason: "same", before };
-    // One script: the record, then the visits lowered by what was asked, both or neither (Codex M on #3380).
+    // Only the people counter is lowered: a figure below what the live room alone holds cannot be reached.
+    const delta = before - to;
+    if (delta > people) return { ok: false, reason: "room", before };
+    // One script: the record, then the people lowered by what is over the figure, both or neither (Codex M on #3380).
     const entry: TrafficReset = { at: now, sid: store.sid, handle: store.handle, window: window.id, before, after: to };
     const replies = repliesFor(
       await redisPipeline([
-        ["EVAL", RESET_SCRIPT, 3, key, LOG_KEY, LOCK_KEY, String(before), String(before - to), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP],
+        ["EVAL", RESET_SCRIPT, 4, key, LOG_KEY, LOCK_KEY, room, String(people), String(delta), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP],
       ]),
       1,
     );
     const answer = replies && Array.isArray(replies[0]) ? (replies[0] as unknown[]) : null;
     if (answer && answer[0] === -2) return { ok: false, reason: "busy" };
-    const left = answer && answer[0] === 1 && answer.length === 2 && typeof answer[1] === "number" && Number.isSafeInteger(answer[1]) ? answer[1] : null;
-    // DECRBY keeps visits counted while this ran: the count is `to` plus them, never less than `to`.
-    if (left === null || left < to) return { ok: false, reason: "unknown" };
-    return { ok: true, window: window.id, before, after: left };
+    const whole = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+    const after = answer && answer[0] === 1 && answer.length === 3 && whole(answer[1]) && whole(answer[2]) ? answer[1] + Math.floor(answer[2] / PARTS_PER_VISIT) : null;
+    // DECRBY keeps visits counted while this ran, and the room may have grown: the total is `to` plus them, never less.
+    if (after === null || after < to) return { ok: false, reason: "unknown" };
+    return { ok: true, window: window.id, before, after };
   } finally {
     await redisPipeline([["EVAL", RELEASE_SCRIPT, 1, LOCK_KEY, token]]).catch(() => undefined);
   }

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { type Store, StoreFullError, appendSitePages, imageFolder, setSitePages } from "@/lib/store";
+import { type Store, StoreFullError, appendSitePages, imageFolder, setSitePages, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -46,8 +46,13 @@ async function placeNewPage(ref: string, store: Store, entry: SitePage, page: Sa
   try {
     saved = await appendSitePages(ref, [entry]);
   } catch (error) {
-    // The list could not be written (its lock or its write failed): the blocks are taken back, never left unlisted.
     console.error("listing a new store page failed", error);
+    // The write may have been applied with only its answer lost (Codex U on #3531): the list is read again before
+    // anything is taken back. Listed: the page was made. Confirmed not listed: the blocks are taken back, never left
+    // unlisted. Not known: nothing is taken back, so a listed page never loses its blocks, and the creator is told.
+    const now = await storeForEmail(ref).catch(() => null);
+    if (now && now.sitePages.some((held) => held.id === entry.id)) return { ok: true, store: now };
+    if (!now) return { ok: false, error: "copy_unknown", status: 503 };
     await takeBack();
     return { ok: false, error: "copy_failed", status: 500 };
   }

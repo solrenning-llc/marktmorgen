@@ -202,7 +202,9 @@ await t.test(`present debt evidence with a ${malformed} is let go after GIVE_UP_
 // Rule 24 (Codex CX1's MEDIUM on #3585): a status Stripe has no name for, a stop flag that is missing or not a boolean,
 // and a cancel_at that is neither null nor a number are not read as "renews"; the letter says to check the studio.
 const UNREADABLE_SHAPES = ["an unknown status", "no stop flag", "a string stop flag", "a string cancel_at", "no cancel_at"] as const;
-for (const plan of ["the creator's own stop", "kept by the creator", "unreadable", "gone at Stripe", ...UNREADABLE_SHAPES] as const) {
+// Claude 1's LOW 1 on #3585: a paused or unpaid plan does not renew as usual, so the letter says to check the studio.
+const NOT_RENEWING = ["paused", "unpaid"] as const;
+for (const plan of ["the creator's own stop", "kept by the creator", "unreadable", "gone at Stripe", ...UNREADABLE_SHAPES, ...NOT_RENEWING] as const) {
 await t.test(`the give-up letter says what Stripe shows of the plan, not the note's flag: ${plan} (Claude 4's LOW on #3585)`, async () => {
   await reset();
   const shop = await paidShop({ at: NOW - 20 * DAY, stopSet: plan === "the creator's own stop" });
@@ -224,6 +226,7 @@ await t.test(`the give-up letter says what Stripe shows of the plan, not the not
   if (plan === "a string stop flag") shape.cancel_at_period_end = "true";
   if (plan === "a string cancel_at") shape.cancel_at = "2000000000";
   if (plan === "no cancel_at") delete shape.cancel_at;
+  if (plan === "paused" || plan === "unpaid") shape.status = plan;
   const callsBefore = world.calls.length;
   world.emails = [];
   process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";

@@ -22,7 +22,7 @@ import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
-import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
+import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonthExact } from "@/lib/mail";
 import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { costStandingOf } from "@/lib/plan-standing";
@@ -213,10 +213,18 @@ function parse(raw: unknown): Broadcast | null {
   }
 }
 
+/**
+ * One campaign's record. Null only when Redis answers its own nil (not there, or expired after RECORD_DAYS); a reply
+ * in any other shape throws BroadcastsUnreadable (rule 24), never "this email does not exist".
+ */
 export async function readBroadcast(id: string): Promise<Broadcast | null> {
   if (!BROADCAST_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", bcKey(id)]]);
-  return parse(raw);
+  const response = await redisPipeline([["GET", bcKey(id)]]);
+  if (!Array.isArray(response) || response.length !== 1) throw new BroadcastsUnreadable("a campaign's record");
+  if (response[0] === null) return null;
+  const b = parse(response[0]);
+  if (!b) throw new BroadcastsUnreadable("a campaign's record");
+  return b;
 }
 
 async function save(b: Broadcast): Promise<void> {
@@ -435,9 +443,9 @@ export async function createBroadcast(
   if (startsNow) {
     // The month as the plan counts it (lib/allowance-window.ts), the same window
     // reserve takes from and the studio shows; a window that cannot be told
-    // leaves nothing, as reserve would refuse every batch of it.
+    // leaves nothing, as reserve would refuse every batch of it. A count that cannot be read throws: never an untouched month.
     const window = windowId(store);
-    const left = window ? monthlyAllowance(store) - (await usedThisMonth(store.listId, window)) : 0;
+    const left = window ? monthlyAllowance(store) - (await usedThisMonthExact(store.listId, window)) : 0;
     if (reach > left) return { ok: false, reason: "allowance" };
   }
   const broadcast: Broadcast = {
@@ -527,7 +535,9 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
     await redisPipeline([["DEL", toKey(id)]]).catch(() => {});
     if (b.hold?.units) await giveAllowanceIn(store, "studio", b.hold.units, b.hold.window);
     return true;
-  } catch {
+  } catch (error) {
+    // Its record is read before any write: one that could not be read changed nothing, so it is passed on as it is.
+    if (error instanceof BroadcastsUnreadable) throw error;
     // Either write may have happened: do not retry or restore a scheduled state.
     throw new BroadcastCancellationUnconfirmed();
   } finally {

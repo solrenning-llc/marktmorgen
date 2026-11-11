@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
+import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 
 // Once per page load, however many times React runs the effect.
 const sent = new Set<string>();
@@ -54,18 +56,22 @@ function remember(handle: string, code: string) {
  * the law asks for consent first (`askFirst`): there this asks, in plain
  * words, and the cookie is set only after a yes. The answer is kept for this
  * store on this device, so a visitor who said yes is not asked again and one
- * who said no is not asked again either.
+ * who said no is not asked again either. It speaks the store's language
+ * (lib/buyer-words/tracking-consent.ts) and says so (`lang`).
  */
 export function AffiliateClick({
   handle,
   storeName,
   days,
   askFirst,
+  language,
 }: {
   handle: string;
   storeName: string;
   days: number;
   askFirst: boolean;
+  /** The store's language (lib/store-language.ts); English when missing or unknown. */
+  language?: LanguageCode;
 }) {
   const [code, setCode] = useState<string | null>(null);
 
@@ -100,17 +106,20 @@ export function AffiliateClick({
 
   if (!code) return null;
 
+  const spoken = parseLanguage(language);
+  const words = trackingConsentWords(spoken);
   return (
     <section
-      aria-label="Affiliate link"
+      lang={LANGUAGES[spoken].locale}
+      aria-label={words.affiliateLabel}
       className="st-card fixed inset-x-3 top-3 z-50 mx-auto max-w-xl p-5 text-left sm:inset-x-6 sm:top-6"
       style={{ boxShadow: "0 18px 50px -18px rgba(0,0,0,.45)" }}
     >
-      <p className="font-bold">{`An affiliate of ${storeName} sent you here`}</p>
+      <p className="font-bold">{words.affiliateTitle(storeName)}</p>
       <p className="st-muted mt-1 text-sm leading-relaxed">
-        {`With your permission, this store keeps a cookie with that affiliate's code and the time you arrived, so they are credited if you buy within ${days} ${days === 1 ? "day" : "days"}. It holds nothing else about you, and the price is the same either way.`}{" "}
+        {words.affiliateBody(days)}{" "}
         <Link href="/privacy#affiliates" className="st-footer-link font-semibold">
-          More about this
+          {words.more}
         </Link>
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -123,7 +132,7 @@ export function AffiliateClick({
             setCode(null);
           }}
         >
-          Allow
+          {words.allow}
         </button>
         <button
           type="button"
@@ -133,7 +142,7 @@ export function AffiliateClick({
             setCode(null);
           }}
         >
-          No thanks
+          {words.noThanks}
         </button>
       </div>
     </section>

@@ -35,10 +35,10 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | FOLLOW-UP-CHARGE | 10 |
 | NEW-CHARGE | 20 |
 | TOTALS | 34 |
-| PAST-SALE | 10 |
-| SETTING | 42 |
-| OTHER | 2 |
-| All | 118 |
+| PAST-SALE | 6 |
+| SETTING | 43 |
+| OTHER | 3 |
+| All | 116 |
 
 ## The files
 

@@ -26,6 +26,7 @@ import { listingsToRead } from "@/lib/catalog-read-count";
 import { readAboutExact } from "@/lib/product-about";
 import { type Course, findLesson, readBody, readCourseExact } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
+import { heldRefusal } from "@/lib/child-safety";
 import { readTaskFor } from "@/lib/assignment";
 import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
 import { countSections, readSectionsExact } from "@/lib/saved-block-store";
@@ -45,7 +46,7 @@ import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
   EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
-  membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
+  holdMarkWork, membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
   COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
 } from "@/lib/api-read-rules";
 import { paypalCounts } from "@/lib/paypal-sales";
@@ -522,10 +523,35 @@ async function payFor(store: Store, id: string, work: Parameters<typeof addWork>
   return charge(apiReadUnits(addWork(listingsWork(listingsToRead(store, [id])), work)));
 }
 
+/**
+ * The refusal an MCP tool gives instead of reading a product held for a child-safety report (lib/child-safety.ts),
+ * or null to go on (Revisor 2 on #3588). The assistant's conversation is kept by whoever runs the assistant, so
+ * nothing of a held product goes to it, whoever holds the key, the store's owner included (as the studio's AI
+ * writing help). Read after the tool's work is paid for, which counts this read (holdMarkWork), and before anything
+ * of the product is read; a mark that cannot be read is not a yes. The refusal carries the sentence the route sends.
+ */
+async function heldForAgent(store: Store, id: string): Promise<Response | null> {
+  const refused = await heldRefusal(store, id);
+  if (!refused) return null;
+  const held = refused.status === 409;
+  return Response.json(
+    {
+      ok: false,
+      error: held ? "on_hold" : "unavailable",
+      message: held
+        ? "This product is on hold, so it cannot be read through the API for now. To ask about it, write to support@marktmorgen.com."
+        : "That could not be read just now. Try again in a moment.",
+    },
+    { status: refused.status },
+  );
+}
+
 /** One product's long description, or null for an unknown product; the refusal when the store's API requests are used up. */
 export async function productTextTool(store: Store, id: string, charge: Charge): Promise<Response | { product: string; title: string; description: string } | null> {
   const refused = await payFor(store, id, productTextWork(), charge);
   if (refused) return refused;
+  const onHold = await heldForAgent(store, id);
+  if (onHold) return onHold;
   const listing = await readListing(store, id);
   if (!listing) return null;
   if (!listing.about) return { product: listing.id, title: listing.title, description: "" };
@@ -538,6 +564,8 @@ export async function productTextTool(store: Store, id: string, charge: Charge):
 export async function readSalesPageTool(store: Store, id: string, charge: Charge) {
   const refused = await payFor(store, id, salesPageWork(), charge);
   if (refused) return refused;
+  const onHold = await heldForAgent(store, id);
+  if (onHold) return onHold;
   const listing = await readListing(store, id);
   if (!listing) return null;
   // Read exactly: an answer that is not known is "unavailable", never an empty page (Codex J on #1821).
@@ -579,6 +607,8 @@ export function courseOutlineTool(productId: string, title: string, course: Cour
 export async function readCourseTool(store: Store, id: string, charge: Charge) {
   const refused = await payFor(store, id, courseOutlineWork(), charge);
   if (refused) return refused;
+  const onHold = await heldForAgent(store, id);
+  if (onHold) return onHold;
   const listing = await readListing(store, id);
   // Read exactly: only a course Redis says is not there is none; another answer throws, never "no course" (CX-123 rule 24).
   const course = listing?.course ? await readCourseExact(listing.course.id) : null;
@@ -589,6 +619,8 @@ export async function readCourseTool(store: Store, id: string, charge: Charge) {
 export async function readLessonTool(store: Store, id: string, lessonId: string, charge: Charge) {
   const refused = await payFor(store, id, lessonWork(), charge);
   if (refused) return refused;
+  const onHold = await heldForAgent(store, id);
+  if (onHold) return onHold;
   const listing = await readListing(store, id);
   const course = listing?.course ? await readCourseExact(listing.course.id) : null;
   const found = course ? findLesson(course, lessonId) : null;
@@ -623,6 +655,8 @@ export function pageTestTool(productId: string, page: SalesPage, counts: Counts,
 export async function readPageTestTool(store: Store, id: string, charge: Charge): Promise<Response | { found: false; error: string } | { found: true; value: ReturnType<typeof pageTestTool> }> {
   const refused = await payFor(store, id, pageTestWork(), charge);
   if (refused) return refused;
+  const onHold = await heldForAgent(store, id);
+  if (onHold) return onHold;
   const listing = await readListing(store, id);
   if (!listing) return { found: false, error: "There is no product with that id in this store. Use list_products for the ids." };
   // Read exactly: an answer that is not known is "unavailable", never a page with no test.
@@ -640,6 +674,8 @@ export async function readPageTestTool(store: Store, id: string, charge: Charge)
 export async function readPageReadingTool(store: Store, id: string, charge: Charge) {
   const refused = await payFor(store, id, pageReadingWork(), charge);
   if (refused) return refused;
+  const onHold = await heldForAgent(store, id);
+  if (onHold) return onHold;
   const listing = await readListing(store, id);
   if (!listing) return null;
   // The page read exactly: an answer that is not known is "unavailable", never a page with no blocks.
@@ -672,6 +708,9 @@ export async function readPageVersionsTool(store: Store, id: string, version: nu
   const most = apiReadUnits(addWork(listings, pageVersionsWork(MAX_VERSIONS, version !== null)));
   const settle = await hold(most);
   if (settle instanceof Response) return settle;
+  // A held product's versions go to no AI client (heldForAgent): settled at the mark's read alone.
+  const onHold = await heldForAgent(store, id);
+  if (onHold) return (await settle(settledUnits(holdMarkWork(), most))) ?? onHold;
   const unavailable = { found: false as const, error: "The page's versions could not be read just now. Try again in a moment." };
   const listing = await readListing(store, id);
   if (!listing) {

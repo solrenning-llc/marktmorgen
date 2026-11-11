@@ -10,6 +10,7 @@ import { storeOf } from "@/lib/usage-billing";
 import { checkQuiet } from "@/lib/quiet-sales";
 import { checkAlerts } from "@/lib/store-alerts";
 import { sendDueAlerts } from "@/lib/child-safety-alerts";
+import { hideHeldProducts } from "@/lib/child-safety";
 
 /**
  * Once a day for each store with visits this month or last, whether its
@@ -35,9 +36,12 @@ export async function GET(request: NextRequest) {
   if (got === "taken") return Response.json({ ok: true, busy: true });
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   const started = Date.now();
-  const out = { sent: 0, fine: 0, skipped: 0, seen: 0, failed: 0, alerts: 0, reminders: 0 };
+  const out = { sent: 0, fine: 0, skipped: 0, seen: 0, failed: 0, alerts: 0, reminders: 0, hidden: 0 };
   try {
-    // The reminders of open child-safety reports first, under this lock: a bounded batch that never throws
+    // Held products whose taking off the store did not go through, taken off first, under this lock: a bounded batch
+    // that never throws and leaves what it cannot confirm for the next hour (lib/child-safety.ts, hideHeldProducts).
+    out.hidden = (await hideHeldProducts(started)).hidden;
+    // The reminders of open child-safety reports next, under this lock: a bounded batch that never throws
     // and leaves what it cannot read for the next hour (lib/child-safety-alerts.ts).
     out.reminders = (await sendDueAlerts(started, started + 15_000)).sent;
     const now = new Date();

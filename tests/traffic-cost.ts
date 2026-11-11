@@ -117,6 +117,10 @@ export const COMMANDS = {
    * Drawing another page of the store, and saying it was opened. On a
    * product's own page that also counts the page's view (lib/stats.ts, added
    * 8 October 2026): two commands more, measured, and a third once a day.
+   * Since November 11, 2026 a product's own page also reads its own mark of a
+   * child-safety hold (app/[handle]/p/[product]/page.tsx, Revisor 2 on
+   * #3588): one GET, inside what tests/traffic.test.ts measures under this
+   * figure.
    */
   laterPage: 10,
   laterCount: 8,

@@ -45,6 +45,7 @@ import { createCartCheckout } from "@/lib/cart-checkout";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import { fingerprint, offerRefunded, takeUpsell } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { noteSession, settleLine } from "@/lib/affiliates";
 import { applyShareToPayment, owedOn, toGiveBack } from "@/lib/platform-share";
 import { salePrice } from "@/lib/store-sale";
@@ -210,7 +211,7 @@ async function main(): Promise<void> {
     customer_details: { email: "buyer@example.com" },
     payment_intent: { id: "pi_front0001", payment_method: { id: "pm_card0001", type: "card", customer: "cus_Buyer0001" } },
   };
-  const take = (step: string, answer: "yes" | "no", secret = SECRET, at: Store = store) => takeUpsell({ store: at, session: SESSION, secret, origin: "https://marktmorgen.com", step, answer, consent: TEST_CONSENT });
+  const take = async (step: string, answer: "yes" | "no", secret = SECRET, at: Store = store) => takeUpsell({ store: at, session: SESSION, secret, origin: "https://marktmorgen.com", step: await shownRef(at, step), answer, consent: TEST_CONSENT });
   is("another browser, without the buyer's secret, can charge nothing", (await take("offerone", "yes", "someone-else")).kind, "unavailable");
   is("with sales tax on, nothing is offered after paying", (await take("offerone", "yes", SECRET, { ...store, tax: { ...store.tax, enabled: true } })).kind, "unavailable");
   session = { ...session, currency: "eur" };

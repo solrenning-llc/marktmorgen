@@ -27,6 +27,7 @@ import { POST as callback } from "@/app/api/auth/callback/route";
 import { BATCH_KEY, DUE_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX, HELD_INDEX, type Released, releaseRestarted } from "@/lib/closing-holds";
 import { ENDED_INDEX } from "@/lib/plan-standing";
+import { dropPause, onBreak } from "@/lib/plan-pause";
 import { KEEP_NOTHING_FROM } from "@/lib/plan-closing-rules";
 import { type MoveResult, type Store, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -35,6 +36,9 @@ import { done, is, part } from "./check";
 const ownerKey = (email: string) => "nl:store:owner:" + createHash("sha256").update("nimbus-store:" + email).digest("hex").slice(0, 40);
 const idKey = (sid: string) => `nl:store:id:${sid}`;
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
+/** A break's record and the line of breaks, as lib/plan-pause.ts keeps them (recordKey, DUE). */
+const pauseKey = (ref: string) => `nl:pause:${ref}`;
+const PAUSE_DUE = "nl:pause:due";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const ORIGIN = "https://marktmorgen.com";
@@ -57,6 +61,8 @@ let linesUnread = false;
 let heldUnread = false;
 /** The owner key whose record read fails as a transient Redis error does (a timeout, a 5xx), once armed. */
 let recordReadFails: string | null = null;
+/** The read of a store's break (its record and its place in the line of breaks) answered in a shape Redis never gives. */
+let pauseUnread = false;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (recordReadFails && commands.some((c) => c[0] === "GET" && c[1] === recordReadFails)) throw new Error("Redis request failed with status 503");
@@ -65,6 +71,7 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     onBatchWrite = null;
     await hook(String(commands[0][2]));
   }
+  if (pauseUnread && commands.some((c) => c[1] === PAUSE_DUE)) return commands.map(() => ({ unexpected: true }));
   if (linesUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === FINAL_INDEX)) return [{}];
   if (heldUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === HELD_INDEX)) {
     const replies = await realPipeline(commands);
@@ -244,6 +251,41 @@ async function main(): Promise<void> {
   redis.run(["ZADD", HELD_INDEX, Date.now() - 1000, "nobody-n@example.com"]);
   is("nil record: gone, out of the line", [await releaseRestarted(Date.now() + 30_000, async () => true), redis.run(["ZSCORE", HELD_INDEX, "nobody-n@example.com"])], [[{ key: "nobody-n@example.com", state: "gone" }], null]);
 
+  part("A break set while the paid period runs: the move is refused until it is taken back (Revisor 2 on #3672)");
+  // A break is kept under the store's ref (lib/plan-pause.ts: its record and its place in the line of breaks), and
+  // the closing waits while it runs (onBreak, lib/plan-closing.ts). closingUnderway did not read it: with a break set
+  // and the paid period still running, the address moved, the break stayed at the old one, the worker could not find
+  // the store, and on the day the plan stopped the closing began on a store whose creator asked for a break.
+  redis.clear();
+  const P = "paused-p@example.com";
+  const P2 = "paused-p-new@example.com";
+  const p = await makeStore(P, "pausedp");
+  await setSubscription(P, { active: true, customerId: "cus_paused0001", subscriptionId: "sub_paused0001", tier: "creator" });
+  const nowS = Math.floor(Date.now() / 1000);
+  const breakRecord = JSON.stringify({ subscription: "sub_paused0001", customer: "cus_paused0001", paymentMethod: "pm_paused0001", tier: "creator", from: nowS + 10 * 86_400, until: nowS + 70 * 86_400, told: 0 });
+  redis.run(["SET", pauseKey(P), breakRecord]);
+  redis.run(["ZADD", PAUSE_DUE, nowS + 70 * 86_400, P]);
+  is("a break set: the move is refused", outcome(await moveAccount(P, P2)), refused);
+  is("the store, its break and its place in the line of breaks stay at its address", [traces(P, P2, p.sid, p.handle).atOld, traces(P, P2, p.sid, p.handle).atNew, redis.run(["GET", pauseKey(P)]) === breakRecord, redis.run(["ZSCORE", PAUSE_DUE, P]) !== null, redis.run(["GET", pauseKey(P2)])], [true, false, true, true, null]);
+  is("so its closing still waits for the break, under the address it is kept at", await onBreak(P), true);
+  // Only its place in the line of breaks is left (the record already gone): the daily run of breaks takes it out.
+  redis.run(["DEL", pauseKey(P)]);
+  is("its place in the line of breaks alone: the move is refused", outcome(await moveAccount(P, P2)), refused);
+  redis.run(["SET", pauseKey(P), breakRecord]);
+  pauseUnread = true;
+  let pauseThrew = "";
+  try {
+    await moveAccount(P, P2);
+  } catch (error) {
+    pauseThrew = (error as Error).name;
+  } finally {
+    pauseUnread = false;
+  }
+  is("rule 24: a break that does not read is never \"no break\": the move throws an unknown reply", pauseThrew, "UnknownReplyError");
+  is("nothing moved", [traces(P, P2, p.sid, p.handle).atOld, traces(P, P2, p.sid, p.handle).atNew, redis.run(["GET", idKey(p.sid)])], [true, false, P]);
+  await dropPause(p);
+  is("control: once the break is taken back, it moves", [(await moveAccount(P, P2)).ok, traces(P, P2, p.sid, p.handle).atNew], [true, true]);
+
   part("Rule 24: the line of held stores that does not read is never \"not held\"");
   redis.clear();
   const U = "unread-u@example.com";
@@ -296,6 +338,7 @@ async function main(): Promise<void> {
   const said = notice ? notice[2] : "";
   is("the notice does not say the plan has ended as if it always had", /plan has ended/i.test(said), false);
   is("the notice names a closing, a break and members' payments on hold", [/closing/.test(said), /on a break/.test(said), /payments are still on hold/.test(said)], [true, true, true]);
+  is("the notice covers a break that is set but has not begun, and says how to take it back", [/break set/.test(said), /take the break back/i.test(said)], [true, true]);
 
   part("Controls: a store that is not closing moves as before");
   redis.clear();

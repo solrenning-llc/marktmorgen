@@ -1,4 +1,5 @@
 import { membershipStatus, isLive } from '@/lib/membership-access';
+import { UnknownReplyError } from '@/lib/redis-reply';
 import type { Store } from '@/lib/store';
 import { store as redis } from './redis-stub';
 import { done, is } from './check';
@@ -26,14 +27,15 @@ async function main() {
     // Avoid spreading the sparse array: its missing/inherited slot is the
     // exact boundary under test.
     redis.pipeline=async commands=>commands[0]?.[0]==='GET'?reply:original(commands);
-    is('sparse or inherited cache slot proves neither access nor a provider lookup',[await membershipStatus(store,sub),requests],[null,0]);
+    let error: unknown;try{await membershipStatus(store,sub);}catch(caught){error=caught;}
+    is('sparse or inherited cache slot is unknown and does not call the provider',[error instanceof UnknownReplyError,requests],[true,0]);
   }
   redis.pipeline=original;
   for (const reply of [{status:'active',pause_collection:null},{id:'sub_Different000001',status:'active',pause_collection:null}]) {
     redis.clear();requests=0;body=reply;
-    const result=await membershipStatus(store,sub);
+    let error: unknown;try{await membershipStatus(store,sub);}catch(caught){error=caught;}
     const [cached]=await original([['GET',key]]);
-    is('unconfirmed or different provider identity cannot grant/cache requested membership',[isLive(result),cached,requests],[false,null,1]);
+    is('unconfirmed or different provider identity is unknown and cannot cache requested membership',[error instanceof UnknownReplyError,cached,requests],[true,null,1]);
   }
   redis.clear();requests=0;body={error:{message:'Synthetic provider unavailable'}};status=503;
   let threw=false;try{await membershipStatus(store,sub);}catch{threw=true;}

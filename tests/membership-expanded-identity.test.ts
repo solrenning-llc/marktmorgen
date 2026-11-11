@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { membershipStatus } from "@/lib/membership-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 
 test("expanded membership needs its own subscription identity before access", async () => {
@@ -37,7 +38,7 @@ test("expanded membership needs its own subscription identity before access", as
   }) as typeof fetch;
   try {
     for (const [label, value] of malformed) {
-      assert.equal(await membershipStatus(store, value), null, label);
+      await assert.rejects(() => membershipStatus(store, value), UnknownReplyError, label);
     }
     assert.equal(idReads, 0, "identity getters are not evaluated");
     for (const status of ["active", "trialing", "canceled", "paused"]) {

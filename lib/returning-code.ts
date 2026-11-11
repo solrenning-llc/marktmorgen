@@ -79,7 +79,9 @@ export async function requestReturningLink(input: { store: Store; productId: str
   if (!(await withinLimit("returning-code-address", `${store.handle}|${email}`, RETURNING_LINKS_PER_ADDRESS, 3600))) return "busy";
   // The ceiling before the spend: no room this month is unknown, the same for every address.
   if (!(await takeBuyerRead(store, RETURNING_CODE_REQUEST_UNITS).catch(() => false))) return "unknown";
-  later(() => sendReturningLink(store, input.productId, input.productTitle, code, email, input.origin));
+  // Read as typed and as kept here (paidHere tries both); kept and sent to the address as kept here.
+  const typed = input.email.trim().slice(0, MAX_EMAIL_LENGTH);
+  later(() => sendReturningLink(store, input.productId, input.productTitle, code, email, input.origin, sendEmail, typed));
   return "sent";
 }
 
@@ -97,8 +99,8 @@ function later(task: () => Promise<void>): void {
 }
 
 /** Emails the link only when the address paid for an order here before; anything unknown sends nothing. */
-export async function sendReturningLink(store: Store, productId: string, productTitle: string, code: ReturningCode, email: string, origin: string, send: typeof sendEmail = sendEmail): Promise<void> {
-  if ((await paidHere(store, email)) !== true) return;
+export async function sendReturningLink(store: Store, productId: string, productTitle: string, code: ReturningCode, email: string, origin: string, send: typeof sendEmail = sendEmail, typed = email): Promise<void> {
+  if ((await paidHere(store, typed)) !== true) return;
   const token = randomBytes(32).toString("hex");
   const record: LinkRecord = { s: store.handle, p: productId, c: code.code, e: email };
   // Only a SET answered exactly "OK" is a link (CX-123 rule 24): anything else emails nothing.
@@ -117,10 +119,12 @@ export async function sendReturningLink(store: Store, productId: string, product
 }
 
 /**
- * The link a buyer opened, used once: its record is read and deleted in one
- * step, so a second try finds nothing. Refused ("link") when it is gone,
- * not in its exact shape, or for another store or product; refused
- * ("code") when its code has since been stopped or has ended.
+ * The link a buyer opened: its record is read, and spent (spendReturningLink)
+ * only once the checkout it opens exists, so a buyer who goes back from
+ * Stripe's page, or is sent back for a box, can press buy again. Refused
+ * ("link") when it is gone, not in its exact shape, or for another store or
+ * product; refused ("code") when its code has since been stopped or ended.
+ * Whoever holds it can only open a checkout for the address it was sent to.
  */
 export async function redeemReturningLink(store: Store, productId: string, rawToken: string, now = Date.now()): Promise<{ ok: true; code: ReturningCode; email: string } | { ok: false; reason: "link" | "code" | "unknown" }> {
   const token = readLinkToken(rawToken);
@@ -128,7 +132,7 @@ export async function redeemReturningLink(store: Store, productId: string, rawTo
   if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
   let raw: unknown;
   try {
-    const replies = repliesFor(await redisPipeline([["GETDEL", linkKey(token)]]), 1);
+    const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
     if (!replies) return { ok: false, reason: "unknown" };
     raw = replies[0];
   } catch {
@@ -140,6 +144,13 @@ export async function redeemReturningLink(store: Store, productId: string, rawTo
   const code = returningCodeFor(store.returningCodes, record.c, Math.floor(now / 1000));
   if (!code) return { ok: false, reason: "code" };
   return { ok: true, code, email: record.e };
+}
+
+/** Spends a link once its checkout is open; a failure is only logged, the link then runs out by itself within half an hour. */
+export async function spendReturningLink(rawToken: string): Promise<void> {
+  const token = readLinkToken(rawToken);
+  if (!token) return;
+  await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("spending a returning-buyer code link failed; it runs out by itself", error));
 }
 
 function readRecord(raw: unknown): LinkRecord | null {

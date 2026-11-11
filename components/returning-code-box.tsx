@@ -95,7 +95,8 @@ export function ReturningCodeBox({ id, lang, className = "" }: { id: string; lan
               </p>
             </div>
             {/* Asking for the link is not buying: the boxes for buying are not checked for it. */}
-            <button type="submit" formNoValidate className="btn st-btn-ghost min-h-11">
+            {/* name="rask": only this button asks for a link (the buy button never does); data-no-checkout: not a checkout started, for the pixels and the page's depth. */}
+            <button type="submit" name="rask" value="1" formNoValidate data-no-checkout="" className="btn st-btn-ghost min-h-11">
               {w.send}
             </button>
           </div>

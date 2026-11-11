@@ -19,6 +19,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
@@ -155,10 +156,22 @@ export async function keepAssistReminder(input: { store: Store; session: string;
 export async function forgetAssistReminderPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const who = whoKey(statsId, email);
-  const [members] = await redisPipeline([["SMEMBERS", who]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
-  const [gone] = await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]);
-  return Number(gone) || 0;
+  const sessions = await sessionsOf(who);
+  // Read exactly (rule 24): a count that does not read is not "nothing deleted"; the part is said not finished.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("the deletion of a person's checkout reminders");
+  return gone;
+}
+
+/**
+ * The checkouts one address said yes on, read exactly (rule 24): only a list of strings is the note. A reply out of
+ * shape throws UnknownReplyError, never "none": the erasure would delete the note alone and say it was done, leaving
+ * every yes it named (with the typed address) for a queued reminder to email, and the copy would say there was none.
+ */
+async function sessionsOf(who: string): Promise<string[]> {
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the note of a person's checkout reminders");
+  return members.filter((s) => SESSION.test(s));
 }
 
 /**
@@ -168,11 +181,14 @@ export async function forgetAssistReminderPerson(statsId: string | null, email: 
  */
 export async function remindersOf(statsId: string | null, email: string): Promise<{ address: string; sentence: string; version: string; at: number }[]> {
   if (!statsId || !email || !isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", whoKey(statsId, email)]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
+  const sessions = await sessionsOf(whoKey(statsId, email));
   if (!sessions.length) return [];
-  const raws = await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)]));
+  const raws = repliesFor(await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)])), sessions.length);
+  if (!raws) throw new UnknownReplyError("a person's checkout reminders");
   return raws.flatMap((raw) => {
+    // Gone by itself (Redis's null): not listed. Anything but a string is not known, never left out of the copy.
+    if (raw === null) return [];
+    if (typeof raw !== "string") throw new UnknownReplyError("a person's checkout reminder");
     try {
       const v = JSON.parse(String(raw)) as Partial<Consent>;
       return typeof v.e === "string" ? [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }] : [];

@@ -318,8 +318,8 @@ export function affiliatesOn(store: Store): boolean {
 
 /**
  * Whether the programme takes anybody new: on, and the store not switched off after notices about its content
- * (lib/takedown.ts). The one place every way in reads (canApply, buyersJoin, acceptPartnership, openAffiliateLink),
- * so a direct POST is refused as the page is; an affiliate the store already has keeps signing in.
+ * (lib/takedown.ts). The one place every way in reads (canApply, buyersJoin, acceptPartnership, openAffiliateLink,
+ * invitePartner), so a direct POST is refused as the page is; an affiliate the store already has keeps signing in.
  */
 export function takesNewAffiliates(store: Store): boolean {
   return affiliatesOn(store) && !store.suspended;
@@ -1045,7 +1045,8 @@ export async function invitePartner(input: {
   const { store, share, origin } = input;
   const raw = input.email.trim();
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
-  if (!affiliatesOn(store) || !isSenderConfigured()) return "unavailable";
+  // Taking nobody new (takesNewAffiliates, as a store switched off after notices about its content): no email is sent.
+  if (!takesNewAffiliates(store) || !isSenderConfigured()) return "unavailable";
   const email = normaliseEmail(raw);
   if (email === normaliseEmail(store.email)) return "owner";
 

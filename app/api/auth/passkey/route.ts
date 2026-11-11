@@ -3,7 +3,7 @@ import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { RemovalBusyError, RemovalUnsentError, addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
+import { RemovalBusyError, RemovalUnsentError, addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
 import { liveSecondStep, mayAddNow, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { lockedUntil, twoStepOn } from "@/lib/two-step";
@@ -82,8 +82,8 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     try {
-      const at = await scheduleRemoval(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "", session, await twoStepOn(email));
-      return at === null ? Response.json({ ok: false, error: "unknown" }, { status: 404 }) : Response.json({ ok: true, removeOn: at });
+      const set = await scheduleRemovalSaid(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "", session, await twoStepOn(email));
+      return set === null ? Response.json({ ok: false, error: "unknown" }, { status: 404 }) : Response.json({ ok: true, removeOn: set.at, loggedOut: set.loggedOut });
     } catch (error) {
       return failed(error, "asking for a passkey removal failed");
     }
@@ -124,13 +124,16 @@ export async function POST(request: NextRequest) {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
       // At once only from a session with a valid second step (not one opened with a passkey that is itself set to be removed).
       if ((await liveSecondStep(email, session)) === null) {
-        const at = await scheduleRemoval(email, id, session, await twoStepOn(email));
-        if (at === null) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-        return Response.json({ ok: true, removeOn: at });
+        const set = await scheduleRemovalSaid(email, id, session, await twoStepOn(email));
+        if (set === null) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+        // Set either way; browsers that could not be logged out are said as such (review of #2556).
+        return Response.json({ ok: true, removeOn: set.at, loggedOut: set.loggedOut });
       }
       // Checked again under the account's lock (lib/passkeys.ts removePasskey).
       const removed = await removePasskey(email, id, session);
-      return removed === "removed" ? Response.json({ ok: true }) : Response.json({ ok: false, error: removed }, { status: ANSWERS[removed] ?? 400 });
+      // Gone either way; sessions that could not be read are said as not logged out (audit SG2, finding 6).
+      if (removed === "removed" || removed === "removed-sessions-open") return Response.json({ ok: true, loggedOut: removed === "removed" });
+      return Response.json({ ok: false, error: removed }, { status: ANSWERS[removed] ?? 400 });
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {

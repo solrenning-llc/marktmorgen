@@ -6,6 +6,7 @@ import { Pricing } from "@/components/home-parts";
 import { isDomainsConfigured } from "@/lib/domains";
 import { feeWords } from "@/lib/fee-words";
 import "../home.css";
+import "./pricing.css";
 import { MorningHeader } from "@/components/morning-header";
 import { MORNING_FONTS } from "@/components/morning-fonts";
 import { ToolsCalculator } from "@/components/tools-calculator";
@@ -51,18 +52,25 @@ export default function PricingPage() {
        boundary, for hydrating apart (components/home-parts.tsx). Do not wrap the cards again. */}
    <Pricing domains={DOMAINS} />
   </section>
+  <nav aria-label="Pricing sections" className="pricing-section-index">
+   <a href="#plans">Plans</a>
+   <a href="#limits-heading">What&apos;s included</a>
+   <a href="#addons-heading">Add-ons</a>
+   <a href="#calculator-heading">Calculator</a>
+   <a href="#compare-heading">Compare tools</a>
+   <a href="#faq-heading">Questions</a>
+  </nav>
   <div className="mt-20"><PricingValue place="plans" /></div>
   <section aria-labelledby="limits-heading" className="mt-20">
    <h2 id="limits-heading" className="t-h2">What each plan includes</h2>
    <p className="mt-4 max-w-3xl">Each store has its own allowances. Count ceilings and storage limits apply together; a store can reach one before another. Annual billing does not turn a monthly allowance into a yearly pool.</p>
    {PRICING_GROUPS.map(group=><section key={group.id} aria-labelledby={group.id} className="mt-12">
     <h3 id={group.id} className="t-section">{group.title}</h3><p className="mt-3">{group.period}</p>
-    <div className="mt-5 hidden md:block"><table className="w-full table-fixed text-left">
+    <div className="mt-5"><table className="pricing-comparison w-full table-fixed text-left">
      <caption className="sr-only">{group.title} by plan</caption>
-     <thead><tr><th scope="col" className="w-2/5 border-b border-line-strong p-3">Allowance</th>{PRICING_PLANS.map(p=><th key={p.tier} scope="col" className="border-b border-line-strong p-3">{p.title}</th>)}</tr></thead>
+     <thead><tr><th scope="col" className="border-b border-line-strong p-3">Allowance</th>{PRICING_PLANS.map(p=><th key={p.tier} scope="col" className="border-b border-line-strong p-3">{p.title}</th>)}</tr></thead>
      <tbody>{group.rows.map(row=><tr key={row.key}><th scope="row" className="border-b border-line p-3 font-medium">{row.label}{row.note&&<span className="mt-2 block text-sm font-normal">{row.note}</span>}</th>{PRICING_PLANS.map(p=><td key={p.tier} className="border-b border-line p-3 align-top break-words">{row.values[p.tier]}</td>)}</tr>)}</tbody>
     </table></div>
-    <dl className="mt-5 divide-y divide-line md:hidden">{group.rows.map(row=><div key={row.key} className="py-5"><dt className="font-semibold">{row.label}</dt><dd className="mt-3"><ul className="space-y-2">{PRICING_PLANS.map(p=><li key={p.tier}><span className="font-medium">{p.title}: </span>{row.values[p.tier]}</li>)}</ul>{row.note&&<p className="mt-3 text-sm">{row.note}</p>}</dd></div>)}</dl>
    </section>)}
    <p className="mt-6">Permissions, consent, funding checks and feature availability still apply. <Link className="underline" href="/terms">Read the Terms</Link> and <Link className="underline" href="/platform">explore each feature</Link> for its operating rules.</p>
   </section>

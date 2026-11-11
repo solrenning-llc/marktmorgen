@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { reserveFundedExposure } from "@/lib/exposure-budget";
 import { CURRENT_EXPOSURE_BUDGET_POLICY, exposureBudgetConfiguration, type ExposureBudgetPolicy, type ExposureFundingContext } from "@/lib/exposure-budget-policy";
@@ -14,10 +15,26 @@ const dayOf = (now: number): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) && !day.startsWith("0000") ? day : null;
 };
 const number = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+/** Redis replies are evidence only as ordinary, dense arrays of own data.
+ * Native Proxy detection must precede every reflective operation, so a reply
+ * cannot run a trap while pretending to be complete. */
+const exactArray = (reply: unknown): unknown[] | null => {
+  if (!Array.isArray(reply) || types.isProxy(reply) || Object.getPrototypeOf(reply) !== Array.prototype) return null;
+  if (Object.getOwnPropertySymbols(reply).length) return null;
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  if (!length || !Object.hasOwn(length, "value") || !Number.isSafeInteger(length.value) || length.value < 0) return null;
+  if (Reflect.ownKeys(reply).length !== length.value + 1) return null;
+  const values: unknown[] = [];
+  for (let index = 0; index < length.value; index += 1) {
+    const field = Object.getOwnPropertyDescriptor(reply, String(index));
+    if (!field || !field.enumerable || !Object.hasOwn(field, "value")) return null;
+    values.push(field.value);
+  }
+  return values;
+};
 const ack = (reply: unknown): boolean => {
-  if (!Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return false;
-  const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
-  return Boolean(length && Object.hasOwn(length, "value") && length.value === 1 && value && Object.hasOwn(value, "value") && value.value === 1);
+  const values = exactArray(reply);
+  return values?.length === 1 && values[0] === 1;
 };
 
 /** One store/day and a site-wide day ceiling, committed before any Stripe read.
@@ -60,15 +77,18 @@ export async function claimHeldRecheck(ref: string, now: number): Promise<boolea
   } catch { return false; }
 }
 export async function heldStoreKnown(ref: string): Promise<boolean> {
-  const [score] = await redisPipeline([["ZSCORE", INDEX, ref]]);
+  const reply = exactArray(await redisPipeline([["ZSCORE", INDEX, ref]]));
+  if (!reply || reply.length !== 1) throw new Error("held store observation is unknown");
+  const score = reply[0];
   if (score === null) return false;
   if (number(score) === null) throw new Error("held store observation is unknown");
   return true;
 }
 export async function heldStoresDue(now: number): Promise<string[]> {
   if (dayOf(now) === null) return [];
-  const [rows] = await redisPipeline([["ZRANGEBYSCORE", INDEX, "-inf", now, "LIMIT", 0, HELD_RECHECKS_PER_DAY]]);
-  if (!Array.isArray(rows) || rows.some(ref => !refValid(ref))) throw new Error("held store candidates are unknown");
+  const reply = exactArray(await redisPipeline([["ZRANGEBYSCORE", INDEX, "-inf", now, "LIMIT", 0, HELD_RECHECKS_PER_DAY]]));
+  const rows = reply?.length === 1 ? exactArray(reply[0]) : null;
+  if (!rows || rows.some(ref => typeof ref !== "string" || !refValid(ref))) throw new Error("held store candidates are unknown");
   return rows as string[];
 }
 /** Index changes invalidate the monthly observation in the same Redis operation. */
@@ -114,12 +134,9 @@ export type HeldMonthCount = { month: string; count: number; peak: number };
 export async function readHeldMonth(month: string): Promise<HeldMonthCount | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
   try {
-    const [raw] = await redisPipeline([["HMGET", "nl:held:month:" + month, "count", "peak", "day", "complete"]]);
-    if (!Array.isArray(raw) || raw.length !== 4) return null;
-    if (Object.getOwnPropertySymbols(raw).length) return null;
-    const entries = Array.from({ length: 4 }, (_, i) => Object.getOwnPropertyDescriptor(raw, String(i)));
-    if (entries.some(entry => !entry || !Object.hasOwn(entry, "value"))) return null;
-    const values = entries.map(entry => entry!.value);
+    const reply = exactArray(await redisPipeline([["HMGET", "nl:held:month:" + month, "count", "peak", "day", "complete"]]));
+    const values = reply?.length === 1 ? exactArray(reply[0]) : null;
+    if (!values || values.length !== 4) return null;
     const count = number(values[0]), peak = number(values[1]);
     const [year, m] = month.split("-").map(Number);
     const last = new Date(0);

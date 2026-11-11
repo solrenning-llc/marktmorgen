@@ -30,6 +30,7 @@ import { readPage } from "@/lib/sales-page-store";
 import { readCountry } from "@/lib/fair-price";
 import { pageShown, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
+import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
 import { markFromReferer } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
@@ -160,7 +161,8 @@ export async function POST(request: NextRequest) {
   // (lib/waitlist.ts) — unless it takes pre-orders and that is what was
   // pressed (lib/preorders.ts). A pre-order is sold before there is anything
   // to hand over: it is handed over the day the product comes out.
-  const coming = await soonOne(store, product.id).catch(() => ({ soon: false, day: null }));
+  const coming = await soonOne(store, product.id).catch(() => null);
+  if (!coming) return away(`/@${store.handle}?status=error`);
   const preorder = coming.soon && wantsPreorder && preorderDay(store, product, coming.soon, coming.day) !== null;
   if (coming.soon && !preorder) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   // Refused here rather than at Stripe, so a buyer never reaches a card form
@@ -178,8 +180,15 @@ export async function POST(request: NextRequest) {
   // A call is booked for a time on its own page, never bought without one.
   if (product.call) return away(`/@${store.handle}/book/${product.id}`);
   // Every license key in the pool is given: nobody is charged for one that
-  // does not exist. The creator was emailed when the pool ran low.
-  if (await outOfKeys(store, product).catch(() => false)) return away(`/@${store.handle}?status=soldout`);
+  // does not exist. The creator was emailed when the pool ran low. A count
+  // that could not be read is unknown, never "some left": nothing opens and
+  // the buyer is told plainly (SG2, finding 11).
+  const noKeys = await outOfKeys(store, product).then(
+    (out) => out,
+    () => null,
+  );
+  if (noKeys === null) return away(`/@${store.handle}?status=error`);
+  if (noKeys) return away(`/@${store.handle}?status=soldout`);
 
   // Asked before a gift or a group is written down, so a refused yes leaves
   // nothing behind; the charge itself checks again, with what was added.
@@ -242,6 +251,9 @@ export async function POST(request: NextRequest) {
     let abTest = "";
     let ab: string | undefined;
     if (product.page && bucket !== null && !gift && !group) {
+      // A page whose read is not known never blocks the sale, and no version is claimed for it: the buyer goes on to
+      // Stripe with no metadata[ab], and the test counts nothing (C4-20261106-2610-C6-153, unit B;
+      // tests/checkout-ab-page-unknown.test.ts).
       const page = await readPage(store.statsId, product.id).catch(() => null);
       const test = page ? runningTest(page) : null;
       if (page && test && pageShown(page)) {
@@ -331,6 +343,8 @@ export async function POST(request: NextRequest) {
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
+    // Stripe says the account cannot take card payments: written down, and said, since trying again will not help.
+    if (await chargesOffAfterRefusal(store, error)) return away(`/@${store.handle}?status=nocharges`);
     return away(`/@${store.handle}?status=error`);
   }
 }

@@ -52,6 +52,30 @@ const membersKey = (id: string) => `nl:cm:${id}:m`;
 const dayOf = (ms: number) => Math.floor(ms / 86_400_000);
 
 /**
+ * Removes at most one point from each board in one Redis turn. Older races
+ * could leave a negative integer; the next removal repairs that value to
+ * zero. Non-integer or unsafe scores are unknown and nothing is changed.
+ */
+export const REMOVE_POINT = `-- marktmorgen:community-point-remove:v1
+local function score(key)
+  local raw = redis.call('ZSCORE', key, ARGV[1])
+  if raw == false then return 0 end
+  local value = tonumber(raw)
+  if not value or value ~= math.floor(value) or math.abs(value) > 9007199254740991 then return false end
+  return value
+end
+local total = score(KEYS[1])
+local today = score(KEYS[2])
+if total == false or today == false then return {-1, -1} end
+local function take(key, value)
+  if value < 0 then redis.call('ZADD', key, 0, ARGV[1]); return 0 end
+  if value == 0 then return 0 end
+  redis.call('ZINCRBY', key, -1, ARGV[1])
+  return 1
+end
+return {take(KEYS[1], total), take(KEYS[2], today)}`;
+
+/**
  * Gives a member a point, or takes one back. Only a member's own key earns:
  * the creator, and anything that is not a member key, is passed over.
  * All-time points never go below zero.
@@ -68,18 +92,13 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
     ]);
     return;
   }
-  const [total, today] = await redisPipeline([
-    ["ZSCORE", allKey(id), who],
-    ["ZSCORE", day, who],
-  ]);
-  // A like taken back comes off the day it is taken back on when that day has
-  // a point to give, and off the all-time total always: the recent boards may
-  // stay a point high for a like given last week and taken back today, which
-  // is the kinder error of the two.
-  const writes: (string | number)[][] = [];
-  if (Number(total) > 0) writes.push(["ZINCRBY", allKey(id), -1, who]);
-  if (Number(today) > 0) writes.push(["ZINCRBY", day, -1, who]);
-  if (writes.length) await redisPipeline(writes);
+  // A like taken back comes off today only when today has a point to give;
+  // a like from last week can therefore leave a recent board one point high.
+  // Both decisions are made atomically so two presses cannot cross at zero.
+  const [reply] = await redisPipeline([["EVAL", REMOVE_POINT, 2, allKey(id), day, who]]);
+  if (!Array.isArray(reply) || reply.length !== 2 || reply.some((value) => value !== 0 && value !== 1)) {
+    throw new Error("Community points could not be removed");
+  }
 }
 
 /** Each member's all-time points; 0 for anybody with none. */
@@ -134,6 +153,13 @@ export async function board(
 
 // ------------------------------------------------------------------ rewards
 
+/** Points and stored start dates are integer evidence, never coercible objects. */
+function rewardInteger(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw))) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 export async function readRewards(id: string): Promise<Reward[]> {
   if (!COMMUNITY.test(id) || !isRedisConfigured()) return [];
   const [raw] = await redisPipeline([["GET", rewardsKey(id)]]);
@@ -162,33 +188,54 @@ export async function earnedCourses(
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!COMMUNITY.test(id) || !MEMBER.test(member) || !isRedisConfigured()) return out;
-  const [rawRewards, points, record, already] = await redisPipeline([
+  const replies = await redisPipeline([
     ["GET", rewardsKey(id)],
     ["ZSCORE", allKey(id), member],
     ["HGET", membersKey(id), member],
     ["HGETALL", unlockedKey(id, member)],
   ]);
+  if (!Array.isArray(replies) || replies.length !== 4) return out;
+  const [rawRewards, points, record, already] = replies;
   const held = new Map<string, number>();
-  const flat = Array.isArray(already) ? already.map(String) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) held.set(flat[i], Number(flat[i + 1]) || 0);
-  let removed = typeof record !== "string";
-  if (typeof record === "string") {
-    try {
-      removed = (JSON.parse(record) as { removed?: unknown }).removed === true;
-    } catch {
-      removed = true;
-    }
+  if (!Array.isArray(already) || already.length % 2 !== 0) return out;
+  for (let i = 0; i < already.length; i += 2) {
+    const product: unknown = already[i];
+    const at = rewardInteger(already[i + 1]);
+    // Reuse the product rule of the existing reward parser. A retained
+    // course does not need to remain in today's reward configuration.
+    if (typeof product !== "string" || parseRewards([{ level: 2, product }]).length !== 1 || held.has(product)
+      || at === null || at === 0 || at > 8_640_000_000_000) return out;
+    held.set(product, at);
   }
-  if (removed) return out;
+  if (typeof record !== "string") return out;
+  try {
+    const value: unknown = JSON.parse(record);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+    const membership = value as { k?: unknown; removed?: unknown };
+    if (membership.k !== member || membership.removed !== false) return out;
+  } catch { return out; }
   for (const [product, at] of held) out.set(product, at);
-  const level = levelOf(Math.max(0, Number(points) || 0));
   if (!grant) return out;
-  const due = parseRewards(rawRewards).filter((r) => r.level <= level && !held.has(r.product));
+  const score = points === null ? 0 : rewardInteger(points);
+  if (score === null || !Number.isSafeInteger(now) || now <= 0 || now > 8_640_000_000_000_000 || typeof rawRewards !== "string") return out;
+  let configuration: unknown;
+  try { configuration = JSON.parse(rawRewards); } catch { return out; }
+  const rewards = parseRewards(configuration);
+  // Dropping one malformed entry would turn an unconfirmed configuration
+  // into an apparently valid partial authorization list.
+  if (!Array.isArray(configuration) || rewards.length !== configuration.length) return out;
+  const level = levelOf(score);
+  const due = rewards.filter((r) => r.level <= level && !held.has(r.product));
   if (due.length) {
     const at = Math.floor(now / 1000);
     const writes = due.map((r) => ["HSETNX", unlockedKey(id, member), r.product, at]);
-    await (owner ? orderWrite(owner, writes) : redisPipeline(writes));
-    for (const r of due) out.set(r.product, at);
+    const answers = await (owner ? orderWrite(owner, writes) : redisPipeline(writes));
+    if (!Array.isArray(answers) || answers.length !== due.length || answers.some((a) => a !== 0 && a !== 1)) return out;
+    for (let i = 0; i < due.length; i += 1) {
+      // Zero means another writer already created it. Its original date is
+      // confirmed by the next ordinary read, never replaced with this clock.
+      if (answers[i] === 1) out.set(due[i].product, at);
+    }
   }
   return out;
 }
@@ -210,6 +257,38 @@ export async function forgetPointsPerson(id: string, who: string, now = Date.now
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
 }
 
+const STORED_PRODUCT = /^[a-z0-9]{6,40}$/;
+
+function storedPoints(value: unknown): number | null {
+  if (value === null) return null;
+  // A pair of removals could race before the atomic decrement existed and
+  // leave a negative integer behind. It is known points data, not a missing
+  // Redis answer; the copy represents that impossible public score as zero.
+  if (typeof value !== "string" || !/^(0|-[1-9][0-9]*|[1-9][0-9]*)$/.test(value)) throw new Error("Incomplete community points record");
+  const points = Number(value);
+  if (!Number.isSafeInteger(points)) throw new Error("Incomplete community points record");
+  return points;
+}
+
+function storedRewards(value: unknown): Record<string, string> {
+  if (!Array.isArray(value) || value.length % 2 !== 0) {
+    throw new Error("Incomplete community points record");
+  }
+  const rewards: Record<string, string> = {};
+  for (let i = 0; i < value.length; i += 2) {
+    const product = value[i];
+    const at = value[i + 1];
+    if (typeof product !== "string" || !STORED_PRODUCT.test(product) || typeof at !== "string" || !/^(0|[1-9][0-9]*)$/.test(at)) {
+      throw new Error("Incomplete community points record");
+    }
+    if (Object.hasOwn(rewards, product)) throw new Error("Incomplete community points record");
+    const reachedAt = Number(at);
+    if (!Number.isSafeInteger(reachedAt)) throw new Error("Incomplete community points record");
+    rewards[product] = at;
+  }
+  return rewards;
+}
+
 /**
  * One member's points, for the copy of their data (619 [SZ3],
  * lib/person-copy.ts): the all-time total, each kept day's, and the rewards
@@ -219,13 +298,14 @@ export async function pointsRecordOf(id: string, who: string, now = Date.now()):
   if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return { total: 0, days: [], rewards: {} };
   const today = dayOf(now);
   const dayList = Array.from({ length: DAYS_KEPT + 1 }, (_, i) => today - i);
-  const [total, unlocked, ...days] = await redisPipeline([["ZSCORE", allKey(id), who], ["HGETALL", unlockedKey(id, who)], ...dayList.map((day) => ["ZSCORE", dayKey(id, day), who])]);
-  const flat = Array.isArray(unlocked) ? unlocked.map(String) : [];
-  const rewards: Record<string, string> = {};
-  for (let i = 0; i + 1 < flat.length; i += 2) rewards[flat[i]] = flat[i + 1];
+  const replies = await redisPipeline([["ZSCORE", allKey(id), who], ["HGETALL", unlockedKey(id, who)], ...dayList.map((day) => ["ZSCORE", dayKey(id, day), who])]);
+  if (!Array.isArray(replies) || replies.length !== dayList.length + 2) throw new Error("Incomplete community points record");
+  const total = storedPoints(replies[0]);
+  const rewards = storedRewards(replies[1]);
+  const days = replies.slice(2).map(storedPoints);
   return {
-    total: Math.max(0, Number(total) || 0),
-    days: dayList.flatMap((day, i) => (days[i] === null || days[i] === undefined ? [] : [{ day, points: Number(days[i]) || 0 }])),
+    total: Math.max(0, total ?? 0),
+    days: dayList.flatMap((day, i) => (days[i] === null ? [] : [{ day, points: Math.max(0, days[i]) }])),
     rewards,
   };
 }

@@ -51,6 +51,7 @@
 import { createHash } from "node:crypto";
 import {
   type Hold,
+  type KeyHold,
   type KeyMaker,
   type KeyRecord,
   NOT_LEFT,
@@ -150,7 +151,7 @@ export async function pausePreview(store: Store): Promise<PausePreview> {
 }
 
 /** What a pause is to do, key by key: the hold it takes and the one it had, so it can be undone exactly. */
-export type PausePlan = { id: string; to: Hold; before: Hold | null }[];
+export type PausePlan = { id: string; to: Hold; before: KeyHold | null }[];
 
 /**
  * What the rule pauses now: a key whose maker is on the team is held
@@ -166,7 +167,7 @@ export async function planPause(store: Store): Promise<PausePlan> {
 }
 
 const groups = (plan: PausePlan) => {
-  const out = new Map<string, { to: Hold; before: Hold | null; ids: string[] }>();
+  const out = new Map<string, { to: Hold; before: KeyHold | null; ids: string[] }>();
   for (const p of plan) {
     const at = `${p.to}|${p.before ?? ""}`;
     const group = out.get(at) ?? { to: p.to, before: p.before, ids: [] };
@@ -195,7 +196,8 @@ export async function pauseForRule(store: Store): Promise<number> {
  * the plan never reached.
  */
 export async function undoPause(store: Store, plan: PausePlan): Promise<void> {
-  for (const g of groups(plan)) await swapHolds(store.sid, g.ids, g.before, [g.to]);
+  // A key whose hold this code does not know was never changed (swapHolds never matches it), and "unknown" is never written.
+  for (const g of groups(plan)) if (g.before !== "unknown") await swapHolds(store.sid, g.ids, g.before, [g.to]);
 }
 
 /**
@@ -227,7 +229,7 @@ export type Exit = { left: string[]; unmatched: string[]; unrecorded: string[]; 
  * can be undone exactly, from the very values it would have written, if the
  * removal it belongs to did not happen.
  */
-export type ExitAttempt = { theirs: string[]; holds: { id: string; to: Hold; before: Hold | null }[] };
+export type ExitAttempt = { theirs: string[]; holds: { id: string; to: Hold; before: KeyHold | null }[] };
 
 /**
  * A teammate left the team or was taken off it (lib/team.ts removeMember,
@@ -321,7 +323,7 @@ const normalised = (email: string) => email.trim().toLowerCase();
 
 /** Keys whose maker's fingerprint matches nobody on the team now, not the leaver's, not already held for it or for good. */
 function unmatchedOf(keys: KeyRecord[], members: Map<string, string>, leaving: string[] = []): KeyRecord[] {
-  return keys.filter((k) => !madeBy(k, leaving) && whoseOf(k.maker, members).kind === "unmatched" && k.hold !== "unmatched" && k.hold !== "left");
+  return keys.filter((k) => !madeBy(k, leaving) && whoseOf(k.maker, members).kind === "unmatched" && k.hold !== "unmatched" && k.hold !== "left" && k.hold !== "unknown");
 }
 
 
@@ -431,10 +433,11 @@ async function teamNow(store: Store) {
  * pauseWhy, the gate's own reading): its maker, on the team, for the two-step
  * rule; the owner, for one nobody is recorded as making, one whose maker
  * could not be matched to the team or one its maker's role does not allow;
- * nobody, for one whose maker left.
+ * nobody, for one whose maker left or whose hold this code does not know.
  */
 function mayTurnOnAs(why: PauseWhy | null, key: KeyRecord, whose: Whose, mine: string[], role: Role): boolean {
-  if (!why || why === "left") return false;
+  // A hold this code does not know is turned back on by nobody: only revoked (Claude 2 on #3096).
+  if (!why || why === "left" || why === "unknown") return false;
   if (why === "rule") return whose.kind === "member" && role !== "owner" && madeBy(key, mine);
   return role === "owner";
 }
@@ -443,7 +446,8 @@ function mayTurnOnAs(why: PauseWhy | null, key: KeyRecord, whose: Whose, mine: s
 /** The key list as the studio's panel shows it to this person, newest first. */
 export async function shownKeys(store: Store, email: string, role: Role): Promise<ShownKey[]> {
   if (!store.sid) return [];
-  const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
+  // Strict: a list read in another shape throws, so the studio says it could not read the keys (audit SG2, finding 23).
+  const [keys, team] = await Promise.all([keyRecords(store.sid, true), teamNow(store)]);
   const mine = makerPrints(store.sid, email);
   return keys
     .map((k): ShownKey => {

@@ -759,6 +759,12 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
     }
     case "row":
       return RowView({ block, ctx });
+    // Only arrangement (375 [TB1]): no words and nothing to press. The line is a separator a screen reader may name;
+    // the room is not read at all and never takes the focus. Neither sits on a card or a band (no .sp-section).
+    case "divider":
+      return <hr className="sp-divider" />;
+    case "space":
+      return <div className={`sp-space sp-space-${block.size}`} aria-hidden="true" />;
     case "booking": {
       // One of the store's calls (lib/booking-cards.ts): gone, a draft, not a call or not on sale, and nothing is drawn.
       const call = block.product ? ctx.bookings?.[block.product] : undefined;
@@ -862,7 +868,13 @@ export function PageSections({
     const view = BlockView({ block, ctx, reviews: block.kind === "reviews" ? reviewsFor(block.heading) : null });
     if (view !== null) shown.push({ block, view });
   }
-  const bands = bandsOf(style, shown.map(({ block }) => block));
+  // A divider or a space is never a band, and is not counted among them: the sections around it alternate as if it
+  // were not there (375 [TB1]).
+  const arranges = (block: PageBlock) => block.kind === "divider" || block.kind === "space";
+  const sectionBands = bandsOf(style, shown.filter(({ block }) => !arranges(block)).map(({ block }) => block));
+  const noBand = { phone: false, computer: false };
+  let section = 0;
+  const bands = shown.map(({ block }) => (arranges(block) ? noBand : sectionBands[section++]));
   return (
     <>
       {shown.map(({ block, view }, index) => {

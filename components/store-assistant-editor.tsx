@@ -38,6 +38,9 @@ const NOTICES: Record<string, string> = {
   error: "Something went wrong. Nothing was changed.",
 };
 
+/** A notice's words, read only from NOTICES' own keys: ?assistant=constructor or toString is none of them. */
+const noticeOf = (key: string | null) => (key !== null && Object.hasOwn(NOTICES, key) ? NOTICES[key] : undefined);
+
 /**
  * The Store assistant in the studio (lib/store-assistant-rules.ts): what it
  * is and costs, the add-on's state and this month's replies, the switch and
@@ -73,6 +76,8 @@ export function StoreAssistantEditor({
   pin: string;
 }) {
   const router = useRouter();
+  const noticeText = noticeOf(notice);
+  const refusalText = noticeOf(refusal);
   const [on, setOn] = useState(setting.on);
   const [notes, setNotes] = useState(setting.notes);
   const [nextOn, setNextOn] = useState(next.on);
@@ -118,9 +123,9 @@ export function StoreAssistantEditor({
       </p>
       <p className="mt-2 text-sm text-ink-soft">{assistantAllowanceWords()}</p>
 
-      {notice && NOTICES[notice] ? (
+      {noticeText ? (
         <p className="notice mt-4" role="status">
-          {NOTICES[notice]}
+          {noticeText}
         </p>
       ) : null}
 
@@ -154,7 +159,7 @@ export function StoreAssistantEditor({
                 <button type="submit" className="btn btn-primary btn-sm" disabled={refusal !== null}>
                   {`Start the ${ASSISTANT_NAME}`}
                 </button>
-                {refusal && NOTICES[refusal] ? <p className="mt-2 text-xs text-ink-soft">{NOTICES[refusal]}</p> : null}
+                {refusalText ? <p className="mt-2 text-xs text-ink-soft">{refusalText}</p> : null}
               </form>
             ) : null}
           </>

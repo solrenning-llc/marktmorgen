@@ -51,6 +51,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const q = url.searchParams;
   const page = (data: unknown[]) => json({ object: "list", data, has_more: false });
+  const searchPage = (data: unknown[]) => json({ object: "search_result", data, has_more: false, next_page: null });
   if (method === "POST" && path === "/refunds") {
     if (world.writesDown) return json({ error: { message: "down" } }, 500);
     const key = new Headers(init?.headers).get("idempotency-key") ?? "";
@@ -76,7 +77,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/charges") return page(world.charges.filter((c) => c.customer === q.get("customer")));
   const charge = path.match(/^\/charges\/(ch_\w+)$/);
   if (charge) return json(world.charges.find((c) => c.id === charge[1]));
-  if (path === "/charges/search" || path === "/customers/search") return page([]);
+  if (path === "/charges/search" || path === "/customers/search") return searchPage([]);
   if (path === "/disputes") return page([{ charge: q.get("charge"), status: "needs_response", amount: 6_900 }]);
   if (path === "/refunds" && world.jump) clock += world.jump;
   if (path === "/refunds") return page(world.refunds.filter((r) => r.charge === q.get("charge")));

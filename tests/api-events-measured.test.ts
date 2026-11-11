@@ -194,7 +194,7 @@ async function main(): Promise<void> {
   commands = [];
   const refused = await eventsRead(get(key, "/api/v1/events?type=sale.completed&limit=10"));
   const words = (await refused.json()) as { error: string; message: string };
-  is("refused with the whole count it may take", [refused.status, words.error, words.message.includes(`up to ${(heldTen + 1).toLocaleString("en-US")} of your store's API requests`)], [429, "monthly_limit", true]);
+  is("refused with the whole count it may take", [refused.status, words.error, words.message.includes(`up to ${(heldTen + 1).toLocaleString("en-US")} of your store's API requests`), words.message.includes("so no event was read. The requests used to measure them stay counted."), words.message.includes("nothing was read")], [429, "monthly_limit", true, true, false]);
   is("no delivery read", commands.some(reads), false);
   is("only the door's request and the measuring done kept", await used(), allowanceFor(await mine(), "api") - heldTen + 1 + apiReadUnits({ commands: 1 + LOG_SIZE, bytes: logBytes, roundTrips: 2 }));
   await leave(heldTen + 1);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { type ReactNode, useRef, useSyncExternalStore } from "react";
 import { MOVE_SECONDS, stampSpot } from "@/lib/video-stamp";
 
 /**
@@ -45,5 +45,49 @@ export function VideoStamp({ text, seed }: { text: string; seed: string }) {
     >
       {text}
     </span>
+  );
+}
+
+const onFullscreen = (changed: () => void) => {
+  document.addEventListener("fullscreenchange", changed);
+  return () => document.removeEventListener("fullscreenchange", changed);
+};
+const never = () => () => {};
+
+/**
+ * A stamped lesson player. A video's own full-screen view shows the video
+ * alone, so the mark over it would be left behind: the page turns the
+ * player's own full screen off (the lesson page does it, only when stamped)
+ * and offers this "Full screen" button instead, which puts the video and the
+ * mark in full screen together. Where the browser has no full-screen support
+ * (an iPhone, say), the button stays hidden, rather than doing nothing.
+ */
+export function StampedPlayer({ text, seed, enter, exit, children }: { text: string; seed: string; enter: string; exit: string; children?: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  // Hidden on the server and until the browser says it can.
+  const can = useSyncExternalStore(never, () => document.fullscreenEnabled === true && typeof HTMLElement.prototype.requestFullscreen === "function", () => false);
+  const full = useSyncExternalStore(onFullscreen, () => document.fullscreenElement !== null && document.fullscreenElement === box.current, () => false);
+  const toggle = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else void box.current?.requestFullscreen().catch(() => {});
+  };
+  return (
+    <div
+      ref={box}
+      data-stamped-player=""
+      className="mt-6 [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:justify-center [&:fullscreen]:bg-[var(--st-bg)] [&:fullscreen]:p-4 [&:fullscreen]:[--player-tall:calc(100vh-6.5rem)]"
+    >
+      <div className="relative overflow-hidden rounded-2xl bg-black">
+        <VideoStamp text={text} seed={seed} />
+        {children}
+      </div>
+      {/* Drawn hidden, and shown only once the browser says it can go full
+          screen: before that it could not do anything. */}
+      <div data-full-screen-row="" className={can ? "mt-2 flex justify-end" : "hidden"}>
+        <button type="button" className="btn st-btn" onClick={toggle}>
+          {full ? exit : enter}
+        </button>
+      </div>
+    </div>
   );
 }

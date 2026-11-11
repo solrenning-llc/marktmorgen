@@ -29,7 +29,7 @@ import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS, STALE_ID_COMMANDS, decideCalendarRuns } from "./plan-cost-registry";
-import { MAX_TEAM, MEMBER_STORES_READ } from "@/lib/team";
+import { MAX_TEAM, MEMBER_STORES_READ, memberStoresExact, readTeam } from "@/lib/team";
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
 
@@ -407,6 +407,53 @@ async function main(): Promise<void> {
     const stores = await walkAt(at);
     is("control: no record (nil): out of line, nothing prepared", [stores, line(OWNER, at)], [0, "out"]);
   }
+
+  part("LEVE (Claude 1 C3 on #3660 at 0c057f2cb8): a join landing between the read past's team read and its SREM is never lost");
+  {
+    fresh();
+    const S_OWNER = "owner-s@example.com";
+    await claimHandle(S_OWNER, "owners", "Owner S", "");
+    const s = (await ensureStoreId(S_OWNER))!;
+    // S first, then more stale ids than are read: X is not on S's team when the read past reads it.
+    redis.run(["SADD", teamIndexKey(X), s.sid]);
+    for (let i = 0; i < MEMBER_STORES_READ + 1; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`join${i}`).digest("hex")]);
+    let joined = false;
+    replaced = [{
+      word: "GET",
+      key: teamKey(s.sid),
+      reply: () => {
+        // X joins S right after the read past read S's team (putMember's write; its SADD is a no-op, S is indexed).
+        if (!joined) {
+          joined = true;
+          redis.run(["SET", teamKey(s.sid), JSON.stringify({ members: [{ email: X, role: "admin", joinedAt: new Date().toISOString() }], invites: [] })]);
+          redis.run(["SADD", teamIndexKey(X), s.sid]);
+          return null;
+        }
+        return redis.run(["GET", teamKey(s.sid)]);
+      },
+    }];
+    const read = await memberStoresExact(X, "f".repeat(32)).then(() => "read", (error: unknown) => (error as Error).name);
+    replaced = [];
+    is("the read past read S's team and stayed unknown", [joined, read], [true, "UnknownReplyError"]);
+    is("X is on S's team", (await readTeam(s.sid)).members.some((m) => m.email === X), true);
+    is("and S is still in X's index", redis.run(["SISMEMBER", teamIndexKey(X), s.sid]), 1);
+  }
+
+  part("LEVE (Claude 1 C3 on #3660 at 0c057f2cb8): an entry kept only for an undecided calendar keeps no more of the store than that");
+  {
+    fresh();
+    const at = await closing(OWNER, "slimentry");
+    replaced = [{ word: "SMEMBERS", key: teamIndexKey(OWNER), reply: ["not-a-confirmed-store-id"] }];
+    for (let k = 0; k <= 2; k += 1) await walkAt(walkTime(at, k));
+    replaced = [];
+    const entry = JSON.parse(String(redis.run(["HGET", BATCH_KEY, OWNER]) ?? "{}")) as Record<string, unknown>;
+    is("still to decide: the entry stays, with its calendars", [batchLeft(), entry.calendars], [1, [OWNER]]);
+    is("it no longer keeps the owner's address, the store's name, handles, marks or stats id", [entry.email ?? "", entry.name ?? "", entry.handle ?? "", entry.handles ?? [], entry.marks ?? [], entry.statsId ?? null], ["", "", "", [], [], null]);
+    // Healthy again: the calendar is decided and the entry leaves.
+    await walkAt(walkTime(at, 3));
+    is("once known, the calendar goes and the entry leaves the batch", [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
+  }
+
   part("Its cost: each run that reads an undecided host again is counted (tests/plan-cost-registry.ts)");
   is("a run deciding the hosts again costs less than one preparation", DECIDE_CALENDARS_COMMANDS > 0 && DECIDE_CALENDARS_COMMANDS < PREPARE_COMMANDS, true);
   is("each read past drops at least all it read but the closing store, so an index is decided in a bounded number of reads", [decideCalendarRuns(MEMBER_STORES_READ), decideCalendarRuns(MEMBER_STORES_READ + 1), decideCalendarRuns(2 * MEMBER_STORES_READ - 1), decideCalendarRuns(2 * MEMBER_STORES_READ)], [1, 2, 2, 3]);

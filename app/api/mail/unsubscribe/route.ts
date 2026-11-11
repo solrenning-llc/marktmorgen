@@ -51,7 +51,8 @@ export async function POST(request: NextRequest) {
     fromPage = false;
   }
   const done = UPDATE_STOP.test(update)
-    ? await stopUpdates(update)
+    // A stop whose read or write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
+    ? await stopUpdates(update).catch(() => null)
     : REVIEW_STOP.test(review)
     // A stop whose write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
     ? await stopReviewRequests(review).catch(() => null)

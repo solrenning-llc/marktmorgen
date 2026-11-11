@@ -48,7 +48,8 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark } from "@/lib/claim-mark";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1422,12 +1423,18 @@ async function freshStore(fields: {
  */
 export async function storesAfter(cursor: string): Promise<{ stores: Store[]; next: string }> {
   if (!isRedisConfigured()) return { stores: [], next: "0" };
-  const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", "nl:store:owner:*", "COUNT", 200]]);
-  if (!Array.isArray(reply) || reply.length < 2) return { stores: [], next: "0" };
-  const next = String(reply[0]);
-  const keys = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
+  // Read exactly (rule 24): a SCAN cut short or of another shape, or GETs that do not come back one per key as text or
+  // null, throw. Never cursor "0" ("every store has been read"), which ended every daily walk early and let the move
+  // of all stores delete its cursor and call itself complete. A store whose record does not parse is still left out
+  // here (one bad record must not stop every walk); one whose reply was unknown is never left out silently.
+  const scanned = repliesFor(await redisPipeline([["SCAN", cursor, "MATCH", "nl:store:owner:*", "COUNT", 200]]), 1)?.[0];
+  const pair = Array.isArray(scanned) && scanned.length === 2 ? scanned : null;
+  const next = pair && typeof pair[0] === "string" && /^\d+$/.test(pair[0]) ? pair[0] : null;
+  const keys = pair ? stringList(pair[1]) : null;
+  if (next === null || !keys) throw new UnknownReplyError("a page of every store");
   if (keys.length === 0) return { stores: [], next };
-  const values = await redisPipeline(keys.map((key) => ["GET", key]));
+  const values = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  if (!values || values.some((value) => value !== null && typeof value !== "string")) throw new UnknownReplyError("a page of every store");
   const stores = values.map(parseStore).filter((store): store is Store => store !== null);
   return { stores, next };
 }
@@ -1755,10 +1762,11 @@ export async function claimHandle(
   const existing = await storeForEmail(email);
   if (existing) return { ok: false, reason: "already" };
 
-  const [taken] = await redisPipeline([
-    ["SET", handleKey(handle), email.toLowerCase(), "NX"],
-  ]);
-  if (taken === null) return { ok: false, reason: "taken" };
+  // Ours only on "OK" or our own value read back (claimMark, rule 24): an answer cut short never takes an address
+  // another store holds.
+  const taken = await claimMark(handleKey(handle), null, email.toLowerCase());
+  if (taken === "taken") return { ok: false, reason: "taken" };
+  if (taken !== "ours") throw new UnknownReplyError("an address's claim");
 
   const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid: newListId(), extra: false });
 
@@ -1803,19 +1811,26 @@ export async function createStore(
   const sid = newListId();
   const ref = extraRef(sid);
   const account = await accountKey(email);
-  const [, count] = await redisPipeline([
+  const counted = repliesFor(await redisPipeline([
     ["SADD", account, sid],
     ["SCARD", account],
-  ]);
-  if (Number(count) + 1 > MAX_STORES_PER_ACCOUNT) {
+  ]), 2);
+  // A whole number or unknown (rule 24), never NaN that passed the cap.
+  const count = countOf(counted?.[1]);
+  if (count === null) {
+    await redisPipeline([["SREM", account, sid]]);
+    throw new UnknownReplyError("an account's stores");
+  }
+  if (count + 1 > MAX_STORES_PER_ACCOUNT) {
     await redisPipeline([["SREM", account, sid]]);
     return { ok: false, reason: "too_many", limit: MAX_STORES_PER_ACCOUNT };
   }
 
-  const [taken] = await redisPipeline([["SET", handleKey(handle), ref, "NX"]]);
-  if (taken === null) {
+  const taken = await claimMark(handleKey(handle), null, ref);
+  if (taken !== "ours") {
     await redisPipeline([["SREM", account, sid]]);
-    return { ok: false, reason: "taken" };
+    if (taken === "taken") return { ok: false, reason: "taken" };
+    throw new UnknownReplyError("an address's claim");
   }
 
   const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid, extra: true });
@@ -1933,10 +1948,9 @@ export async function renameHandle(
       if (store.previousHandles.length + 2 > MAX_ADDRESSES) {
         return { ok: false, reason: "too_many", limit: MAX_ADDRESSES };
       }
-      const [taken] = await redisPipeline([
-        ["SET", handleKey(handle), email.toLowerCase(), "NX"],
-      ]);
-      if (taken === null) return { ok: false, reason: "taken" };
+      const taken = await claimMark(handleKey(handle), null, email.toLowerCase());
+      if (taken === "taken") return { ok: false, reason: "taken" };
+      if (taken !== "ours") throw new UnknownReplyError("an address's claim");
       claimed = true;
     }
 

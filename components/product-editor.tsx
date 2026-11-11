@@ -136,8 +136,9 @@ const MESSAGES: Record<string, string> = {
   outline_left: PRODUCT_OUTLINE_LEFT,
   ...STUDIO_MESSAGES,
   title: "Give it a name before saving.",
-  // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
+  // A sales page published with a part still to write, marked ⟦…⟧ or in a campaign's [brackets] (Revisor 2 on #3593).
   placeholder: "This product's sales page still has a part for you to write, marked ⟦like this⟧ or in [brackets] from a campaign. Open it under Sales pages, replace each one with your own words, then publish it. Nothing was published.",
+  // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
   payments: `Type ${MIN_MEMBER_PAYMENTS} to ${MAX_MEMBER_PAYMENTS} payments, or leave it empty for a membership that runs until it is canceled.`,

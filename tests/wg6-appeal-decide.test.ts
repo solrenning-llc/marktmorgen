@@ -144,7 +144,7 @@ async function main() {
   let holdName = "";
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (String(commands[0]?.[1]).includes(":al:")) holdName = String(commands[0][1]);
-    if (!decidedMidSend && commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith(`nl:report:${e.report.id}:a:`) && commands[0][3] === "XX") {
+    if (!decidedMidSend && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:appeal-write:v1") && String(commands[0][4]).startsWith(`nl:report:${e.report.id}:a:`)) {
       redis.pipeline = realPipeline;
       decidedMidSend = await answer({ token: e.token, decision: e.decision.key, to: "under_review" });
     }

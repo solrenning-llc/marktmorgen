@@ -102,6 +102,25 @@ export async function reportedProduct(report: Report, store: Store): Promise<Lis
   }
 }
 
+/**
+ * A new link to this notice for the support inbox, working `seconds` from now (646 [WG6] unit 3; Claude 4 on #3612): a
+ * creator may ask us to look again for six months after being told, and the answer may come later still, while the
+ * notice's own link works for TOKEN_SECONDS only. It opens the same notice, with the same reach, and goes only to the
+ * support inbox, as the first one does. The notice is kept at least as long. Null when the notice itself is no longer
+ * kept (it lives REPORT_SECONDS from when it was sent): there is nothing for a link to open. Every reply is read
+ * exactly: a link whose write is not confirmed is never handed out (rule 24).
+ */
+export async function noticeLinkFor(reportId: string, seconds: number): Promise<string | null> {
+  if (!/^[0-9a-f]{16}$/.test(reportId) || !Number.isSafeInteger(seconds) || seconds <= 0) return null;
+  const kept = repliesFor(await redisPipeline([["EXPIRE", reportKey(reportId), seconds]]), 1);
+  if (!kept || (kept[0] !== 0 && kept[0] !== 1)) throw new UnknownReplyError("a notice's link");
+  if (kept[0] === 0) return null;
+  const token = randomBytes(24).toString("hex");
+  const set = repliesFor(await redisPipeline([["SET", tokenKey(token), reportId, "EX", seconds]]), 1);
+  if (!set || set[0] !== "OK") throw new UnknownReplyError("a notice's link");
+  return token;
+}
+
 /** The notice a token opens, and its store when the address names one. */
 export async function openReport(token: string): Promise<{ report: Report; store: Store | null } | null> {
   if (!TAKEDOWN_TOKEN.test(token) || !isRedisConfigured()) return null;

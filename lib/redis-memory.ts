@@ -374,6 +374,14 @@ export class MemoryRedis {
           this.run(["SET", target, value, "EX", seconds]);
           return 1;
         }
+        // A request to look again's record, written only while its hold is the writer's and the record is there (lib/takedown-appeals.ts, APPEAL_WRITE).
+        if (key.startsWith("-- marktmorgen:appeal-write:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, target, token, value, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          if (this.run(["EXISTS", target]) === 0) return -1;
+          this.run(["SET", target, value, "EX", seconds]);
+          return 1;
+        }
         // The customer voice's summary, written only while its reading's lock is its own (lib/customer-voice.ts, VOICE_KEEP).
         if (key.startsWith("-- marktmorgen:voice-keep:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lock, target, token, value, seconds] = args;

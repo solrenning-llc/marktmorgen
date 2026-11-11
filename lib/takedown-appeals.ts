@@ -23,9 +23,11 @@
  *
  * Every reply is read in its exact shape (rule 24): an unknown read throws, and is never "no request".
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { type Held, releaseLock } from "@/lib/redis-lock";
+import { noticeLinkFor } from "@/lib/takedown";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import type { Store } from "@/lib/store";
@@ -127,18 +129,40 @@ function readKept(raw: string): KeptAppeal {
 /**
  * Runs `work` while this request is held, so two writers of one request (the creator sending it, a person deciding it)
  * never write over each other: each reads the request again inside. "busy" when someone else holds it; an unknown
- * reply throws. The hold ends with the work, or by itself after LOCK_SECONDS.
+ * reply throws. The hold is this writer's own (a random token), ends with the work and is let go only while it is still
+ * this writer's (lib/redis-lock.ts releaseLock), or by itself after LOCK_SECONDS. An email can take longer than that,
+ * so every write inside is fenced on the hold (writeHeld): a writer whose hold ran out, and was taken by another, writes
+ * nothing over what that one wrote (Claude 4 on #3612).
  */
-async function held<T>(sid: string, decision: Decision, work: () => Promise<T>): Promise<T | "busy"> {
-  const lk = lockKey(sid, decision);
-  const got = repliesFor(await redisPipeline([["SET", lk, "1", "NX", "EX", LOCK_SECONDS]]), 1);
+async function held<T>(sid: string, decision: Decision, work: (hold: Held) => Promise<T>): Promise<T | "busy"> {
+  const hold: Held = { key: lockKey(sid, decision), token: randomBytes(16).toString("hex"), ttlSeconds: LOCK_SECONDS };
+  const got = repliesFor(await redisPipeline([["SET", hold.key, hold.token, "NX", "EX", LOCK_SECONDS]]), 1);
   if (!got || (got[0] !== "OK" && got[0] !== null)) throw new UnknownReplyError("a request's hold");
   if (got[0] === null) return "busy";
   try {
-    return await work();
+    return await work(hold);
   } finally {
-    await redisPipeline([["DEL", lk]]).catch(() => null);
+    await releaseLock(hold);
   }
+}
+
+/**
+ * Writes a request's record only while the hold is still this writer's and the record is there, in one script, with
+ * the record's expiry. -1 when the record is gone: an unknown, never written over (rule 24). The first line names the
+ * script for the local stand-in (lib/redis-memory.ts).
+ */
+export const APPEAL_WRITE = `-- marktmorgen:appeal-write:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call("EXISTS", KEYS[2]) == 0 then return -1 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+return 1`;
+
+/** "written", or "lost" when the hold ran out and may be another writer's (nothing written); an unknown reply throws. */
+async function writeHeld(hold: Held, rk: string, kept: KeptAppeal): Promise<"written" | "lost"> {
+  const replies = repliesFor(await redisPipeline([["EVAL", APPEAL_WRITE, 2, hold.key, rk, hold.token, JSON.stringify(kept), KEEP_SECONDS]]), 1);
+  if (replies?.[0] === 1) return "written";
+  if (replies?.[0] === 0) return "lost";
+  throw new UnknownReplyError("a request to look again's write");
 }
 
 /** One request read again, exactly, or null when there is none. */
@@ -225,22 +249,25 @@ export async function sendAgain(store: Store, decisionKeyRaw: unknown, origin: s
 
 /** Tells the inbox, holding the request and reading it again first; held by someone else, it is left to Send it again. */
 async function tellInbox(store: Store, decision: StoreDecision, origin: string): Promise<FileResult> {
-  const result = await held(store.sid, decision, async () => {
+  const result = await held(store.sid, decision, async (hold) => {
     const kept = await readOne(store.sid, decision);
     if (!kept) throw new UnknownReplyError("a request to look again");
     if (kept.told) return { ok: true as const, kept };
-    return tell(store, decision, kept, origin);
+    return tell(store, decision, kept, origin, hold);
   });
   return result === "busy" ? { ok: false, problem: "unsent", words: UNSENT_WORDS } : result;
 }
 
-async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string): Promise<FileResult> {
+async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string, hold: Held): Promise<FileResult> {
   const { appeal } = kept;
   if (kept.tries >= MAX_TELL_TRIES) return { ok: false, problem: "unsent", words: TRIES_SPENT_WORDS };
-  // The try is counted before the email, so a lost count never lets a fourth one go.
+  const rk = recordKey(store.sid, decision);
+  // The notice's own link works for 60 days; the request may come, or be answered, later (Claude 4 on #3612). The
+  // inbox gets a link to the same notice for as long as the request is kept (none when the notice is no longer kept).
+  const link = await noticeLinkFor(decision.report, KEEP_SECONDS);
+  // The try is counted before the email, so a lost count never lets a fourth one go. A hold lost already: nothing sent.
   const counted: KeptAppeal = { ...kept, tries: kept.tries + 1 };
-  const mark = repliesFor(await redisPipeline([["SET", recordKey(store.sid, decision), JSON.stringify(counted), "XX", "EX", KEEP_SECONDS]]), 1);
-  if (!mark || mark[0] !== "OK") throw new UnknownReplyError("a request to look again's try");
+  if ((await writeHeld(hold, rk, counted)) === "lost") return { ok: false, problem: "unsent", words: UNSENT_WORDS };
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
@@ -255,7 +282,10 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
       "What they wrote:",
       appeal.explanation.slice(0, MAX_APPEAL_TEXT),
       "",
-      `Open the notice from its own email to act on it; the store is ${origin}/@${store.handle}.`,
+      link
+        ? `Open the notice to act on it (this link works for as long as the request is kept, 400 days): ${origin}/takedown/${link}`
+        : `The notice ${decision.report} is no longer kept, so there is no link to it: answer the creator by replying to this email.`,
+      `The store is ${origin}/@${store.handle}.`,
       "A person decides, and the answer gives its reason. Reply to this email to answer the creator.",
     ].join("\n"),
     // One key per try: a retry of one try never sends twice; a new try is a new email, at most MAX_TELL_TRIES.
@@ -263,11 +293,11 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
   }).catch(() => false);
   if (!sent) return { ok: false, problem: "unsent", words: counted.tries >= MAX_TELL_TRIES ? TRIES_SPENT_WORDS : UNSENT_WORDS };
   const told: KeptAppeal = { ...counted, told: true };
-  const replies = repliesFor(await redisPipeline([["SET", recordKey(store.sid, decision), JSON.stringify(told), "XX", "EX", KEEP_SECONDS]]), 1);
-  // The inbox has it. A mark that did not land leaves Send it again offered, and a press of it is a new try with a new
-  // key, so the inbox may get this request once more: never more than MAX_TELL_TRIES in all, and never a buyer.
-  if (!replies || replies[0] !== "OK") return { ok: true, kept: counted };
-  return { ok: true, kept: told };
+  // The inbox has it. A mark that did not land, or a hold that ran out during a slow email (then another writer's
+  // record is never written over), leaves Send it again offered, and a press of it is a new try with a new key, so the
+  // inbox may get this request once more: never more than MAX_TELL_TRIES in all, and never a buyer.
+  const marked = await writeHeld(hold, rk, told).catch(() => "lost" as const);
+  return { ok: true, kept: marked === "written" ? told : counted };
 }
 
 /** A request about one decision of this notice, for the page a person at Marktmorgen opens from the notice's email. */
@@ -308,15 +338,14 @@ export async function decideAppeal(report: { id: string }, store: Store, decisio
   if (!decision || !store.sid) return null;
   if (typeof toRaw !== "string" || !(APPEAL_STATES as readonly string[]).includes(toRaw)) return { ok: false, problem: "order", words: DECIDE_PROBLEMS.order };
   const to = toRaw as AppealState;
-  const result = await held(store.sid, decision, async (): Promise<DecideResult> => {
+  const result = await held(store.sid, decision, async (hold): Promise<DecideResult> => {
     const kept = await readOne(store.sid, decision);
     if (!kept) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
     const moved = moveAppeal(kept.appeal, to, { role: "operator" }, now, typeof reason === "string" ? reason : undefined);
     if (!moved.ok) return { ok: false, problem: moved.problem, words: DECIDE_PROBLEMS[moved.problem] };
     const next: KeptAppeal = { ...kept, appeal: moved.appeal, creator: { state: moved.appeal.state, tries: 0, told: false } };
-    const written = repliesFor(await redisPipeline([["SET", recordKey(store.sid, decision), JSON.stringify(next), "XX", "EX", KEEP_SECONDS]]), 1);
-    if (!written || written[0] !== "OK") throw new UnknownReplyError("a request's new state");
-    return tellCreator(store, decision, next, origin);
+    if ((await writeHeld(hold, recordKey(store.sid, decision), next)) === "lost") return { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy };
+    return tellCreator(store, decision, next, origin, hold);
   });
   return result === "busy" ? { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy } : result;
 }
@@ -325,23 +354,23 @@ export async function decideAppeal(report: { id: string }, store: Store, decisio
 export async function tellCreatorAgain(report: { id: string }, store: Store, decisionKeyRaw: unknown, origin: string): Promise<DecideResult | null> {
   const decision = decisionsOf(store).find((d) => d.key === decisionKeyRaw && d.report === report.id);
   if (!decision || !store.sid) return null;
-  const result = await held(store.sid, decision, async (): Promise<DecideResult> => {
+  const result = await held(store.sid, decision, async (hold): Promise<DecideResult> => {
     const kept = await readOne(store.sid, decision);
     if (!kept) return { ok: false, problem: "none", words: DECIDE_PROBLEMS.none };
     if (!kept.creator || kept.creator.told) return { ok: true, kept, emailed: Boolean(kept.creator?.told) };
-    return tellCreator(store, decision, kept, origin);
+    return tellCreator(store, decision, kept, origin, hold);
   });
   return result === "busy" ? { ok: false, problem: "busy", words: DECIDE_PROBLEMS.busy } : result;
 }
 
-async function tellCreator(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string): Promise<DecideResult> {
+async function tellCreator(store: Store, decision: StoreDecision, kept: KeptAppeal, origin: string, hold: Held): Promise<DecideResult> {
   const told = kept.creator as CreatorTold;
   if (told.tries >= MAX_TELL_TRIES) return { ok: true, kept, emailed: false };
-  // The try is counted before the email, so a lost count never lets one more go.
+  // The try is counted before the email, so a lost count never lets one more go. A hold lost already: nothing is sent,
+  // and "Email the creator again" stays offered.
   const counted: KeptAppeal = { ...kept, creator: { ...told, tries: told.tries + 1 } };
   const rk = recordKey(store.sid, decision);
-  const mark = repliesFor(await redisPipeline([["SET", rk, JSON.stringify(counted), "XX", "EX", KEEP_SECONDS]]), 1);
-  if (!mark || mark[0] !== "OK") throw new UnknownReplyError("a request's email try");
+  if ((await writeHeld(hold, rk, counted)) === "lost") return { ok: true, kept, emailed: false };
   const { appeal } = counted;
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
@@ -361,8 +390,8 @@ async function tellCreator(store: Store, decision: StoreDecision, kept: KeptAppe
   }).catch(() => false);
   if (!sent) return { ok: true, kept: counted, emailed: false };
   const done: KeptAppeal = { ...counted, creator: { ...(counted.creator as CreatorTold), told: true } };
-  const replies = repliesFor(await redisPipeline([["SET", rk, JSON.stringify(done), "XX", "EX", KEEP_SECONDS]]), 1);
-  // The creator has it. A mark that did not land leaves "Email the creator again" offered: at most MAX_TELL_TRIES.
-  if (!replies || replies[0] !== "OK") return { ok: true, kept: counted, emailed: true };
-  return { ok: true, kept: done, emailed: true };
+  // The creator has it. A mark that did not land leaves "Email the creator again" offered: at most MAX_TELL_TRIES. A hold
+  // that ran out during a slow email writes nothing: a later decision's record is never written back to this state.
+  const marked = await writeHeld(hold, rk, done).catch(() => "lost" as const);
+  return { ok: true, kept: marked === "written" ? done : counted, emailed: true };
 }

@@ -12,6 +12,7 @@ import { ClicksBox } from "@/components/store-product";
 import { scriptMode, withTags } from "@/lib/embed-sites";
 import { readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
+import { StoreBeacon } from "@/components/store-beacon";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -100,6 +101,9 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
   const store = found;
 
   const open = await readScriptOpen(store, mode, query);
+  // Opened by the checkout script: the visit is counted by the page itself, through the host's browser check
+  // (lib/embed-open.ts, components/store-beacon.tsx), whatever the form then shows.
+  const counted = (...shown: Parameters<typeof shell>) => shell(<><StoreBeacon handle={store.handle} front={false} />{shown[0]}</>, shown[1], shown[2], shown[3]);
   const w = joinWords(store.language);
   const said = speech(store);
   const look = lookStyle(store.look) as React.CSSProperties;
@@ -116,7 +120,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
 
   if (status) {
     const notice = status === "sent" ? { title: w.sentTitle, body: w.sentBody(store.name) } : w.notices[status] ?? w.notices.error;
-    return shell(
+    return counted(
       <>
         {status === "sent" ? <p className="st-price text-sm">{w.almost}</p> : null}
         <h1 className="font-display mt-3 text-2xl font-semibold leading-tight">{notice.title}</h1>
@@ -132,7 +136,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
   }
 
   if (!open.live || !joinOpen(store)) {
-    return shell(
+    return counted(
       <>
         <h1 className="font-display text-xl font-semibold leading-snug">{store.join.heading || w.heading}</h1>
         {joinOpen(store) ? (framed ? <p className="st-muted mt-2">{said.w.cardOpens(store.name)}</p> : null) : <p className="st-muted mt-2">{w.notices.closed.title}</p>}
@@ -146,7 +150,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
     );
   }
 
-  return shell(
+  return counted(
     <>
       <h1 className="font-display text-xl font-semibold leading-snug">{store.join.heading || w.heading}</h1>
       <p className="st-muted mt-2">{store.join.line || w.line(store.name)}</p>

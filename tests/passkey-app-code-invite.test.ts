@@ -75,8 +75,8 @@ is("empty list: English", inviteLanguage([]), "en");
 part("The studio draws it from what it already reads, and links to the app's own section");
 const page = read("app/studio/page.tsx");
 is(
-  "rendered only under the rule, from the passkeys and two-step status already loaded (never while that status is unread)",
-  page.includes("{store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}"),
+  "rendered only under the rule, from the passkeys and two-step status already loaded (never while that status or the lock is unread)",
+  page.includes("{store && twoStepRead !== null && !lockUnread && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedNow }) ? <AppCodeInvite /> : null}"),
   true,
 );
 is("drawn nowhere else on the page", page.split("<AppCodeInvite").length - 1, 1);

@@ -27,6 +27,13 @@
  * hand the new tier over for nothing until the free days end. So it is refused
  * while they run ("freeDays"), and the page says why; it opens again with the
  * next charge (Claude 4 team review of #2912, A1).
+ *
+ * A membership with a pause set (lib/membership-pause.ts), started or still to
+ * start, is not switched either ("paused"), as the yearly move is not
+ * (lib/yearly-switch-rules.ts): Stripe voids every invoice under a "void"
+ * pause, so the switch's charge could be voided and the new tier handed over
+ * for nothing (Claude 6, R43 F4). It opens again once the pause is over or
+ * the member resumes.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -38,6 +45,7 @@ import { type Membership, endsAtOf, grantOf, subscriptionCurrency, subsOf } from
 import { canTier, direction, dueNow, productOfSub } from "@/lib/tier-rules";
 import { formatMoney } from "@/lib/money";
 import { inPaidFreeDays } from "@/lib/member-free-days-rules";
+import { type PauseSub, pauseSet } from "@/lib/membership-pause-rules";
 import { membershipLine } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
@@ -88,6 +96,8 @@ export function tierWords(store: Store, product: Listing, language: unknown = DE
 /** The tiers one membership can switch to; none when it cannot switch at all. */
 export function choicesFor(store: Store, membership: Membership, tiers: Listing[]): TierChoice[] {
   if (membership.endsAt !== null || membership.fixedEnd || !SWITCHABLE.has(membership.status)) return [];
+  // A pause set on it, of any kind: nothing is offered until it is over (find says why on a link).
+  if (membership.pauseSet) return [];
   // Paid in another currency than the store's now (it changed its currency since): every tier is
   // priced in the store's, so a switch would change the subscription's currency. None is offered.
   if (membership.currency.toLowerCase() !== store.currency) return [];
@@ -224,6 +234,42 @@ export function switchBody(itemId: string, price: string, at: number): URLSearch
   return body;
 }
 
+/**
+ * The Idempotency-Key of a switch's charging update (lib/yearly-switch.ts too): the membership, the preview's second
+ * and the price it moves onto. A retry of the same switch sends the same key, so Stripe answers it with the first
+ * request's result, or a 409 while that one still runs, never with a second charge. PREVIEW_SECONDS (15 minutes)
+ * keeps every retry inside the 24 hours Stripe keeps a key; an older preview is "stale", and the new one reads the
+ * subscription again before anything is sent.
+ */
+export function switchKey(subscription: string, at: number, price: string): string {
+  return `switch:${subscription}:${at}:${price}`;
+}
+
+/**
+ * Whether Stripe's refusal of a switch's charging update says that nothing was applied: a 4xx, except a 409 (the
+ * first request with this key still running) and an idempotency_error (this key already sent with other parameters,
+ * as when the EU box is ticked again, so the yes has another second). Those two may stand for a switch already made:
+ * "unconfirmed", never "nothing changed".
+ */
+export function refusedUnapplied(error: unknown): error is StripeError {
+  return (
+    error instanceof StripeError &&
+    error.status < 500 &&
+    error.status !== 409 &&
+    error.code !== "idempotency_error" &&
+    error.code !== "idempotency_key_in_use"
+  );
+}
+
+/**
+ * After an unconfirmed switch the membership's lock is held a full 60 seconds from that answer (withLock, keepFullTerm,
+ * whatever the reads before the charge took) and left to run out rather than let go: a new preview, whose new second makes a new key, is "busy" while the first
+ * request may still be running at Stripe, and is read again afterwards.
+ */
+export function keepWhileUnconfirmed(result: { ok: boolean; reason?: string }): boolean {
+  return !result.ok && result.reason === "unconfirmed";
+}
+
 /** The price a tier is switched onto, made once on the creator's account and reused. */
 export async function tierPrice(store: Store, product: Listing): Promise<string> {
   const account = store.stripeAccountId as string;
@@ -258,12 +304,12 @@ export type Preview = {
   digital: boolean;
 };
 
-export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "error" };
+export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "paused" | "error" };
 
 type Found = { grant: NonNullable<Awaited<ReturnType<typeof grantOf>>>; itemId: string; from: Listing; to: Listing; trialing: boolean };
 
 /** Checks one switch against the link, the membership and the tiers, asking Stripe only what it must. */
-async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" | "freeDays" }> {
+async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "paused" }> {
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone" };
   const grant = await grantOf(store, token);
   if (!grant) return { reason: "expired" };
@@ -272,6 +318,8 @@ async function find(store: Store, token: string, subscription: string, target: s
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
   // Paid, in free days: Stripe would prorate nothing, so nothing is switched until they end.
   if (inPaidFreeDays(sub as Record<string, unknown>)) return { reason: "freeDays" };
+  // A pause set on it: Stripe would void the switch's charge, so nothing is switched until it is over.
+  if (pauseSet(sub as PauseSub)) return { reason: "paused" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription
@@ -321,7 +369,7 @@ export async function previewSwitch(store: Store, token: string, subscription: s
 
 export type SwitchResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "paused" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
 
 /**
  * Makes the switch, at the second the preview was worked out for. The card on
@@ -352,12 +400,14 @@ export async function switchTier(store: Store, token: string, subscription: stri
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.to));
       let updated: Record<string, unknown>;
       try {
-        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+        // Under the switch's stable key (switchKey): a retry of this preview is never a second charge.
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION, switchKey(subscription, at, price));
       } catch (error) {
-        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, or Stripe's own
-        // failure, after the update was sent: it may have been applied, so it is "unconfirmed", never "nothing changed"
-        // (Codex CX1 on #2764). Nothing is sent again.
-        if (error instanceof StripeError && error.status < 500) throw error;
+        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, Stripe's own
+        // failure, or its answer that this key is still running or was used (refusedUnapplied), after the update was
+        // sent: it may have been applied, so it is "unconfirmed", never "nothing changed" (Codex CX1 on #2764).
+        // Nothing is sent again, and the lock is left to run out (keepWhileUnconfirmed).
+        if (refusedUnapplied(error)) throw error;
         console.error("a tier switch's charging update had no answer that can be read", error);
         return { ok: false, reason: "unconfirmed" };
       }
@@ -389,7 +439,7 @@ export async function switchTier(store: Store, token: string, subscription: stri
       ).catch((error) => console.error("recording a tier switch failed", error));
       await tell(store, account, found, updated, kept);
       return { ok: true, title: found.to.title };
-    });
+    }, keepWhileUnconfirmed);
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("switching a tier failed", error);

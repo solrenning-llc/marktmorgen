@@ -94,5 +94,5 @@ export async function POST(request: NextRequest) {
   // Switched instead of leaving, from the page that asked why (lib/leave-flow.ts).
   if (result.ok && fromLeave && store.leaving.on) await countLeave(store.statsId, "switched");
   // Paid free days running: said as such on the membership page (lib/tier-switch.ts).
-  return back(result.ok ? "switched" : result.reason === "gone" || result.reason === "tier" ? "cannot-switch" : result.reason === "freeDays" ? "free-days" : result.reason);
+  return back(result.ok ? "switched" : result.reason === "gone" || result.reason === "tier" ? "cannot-switch" : result.reason === "freeDays" ? "free-days" : result.reason === "paused" ? "switch-paused" : result.reason);
 }

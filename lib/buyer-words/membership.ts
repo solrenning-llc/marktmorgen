@@ -207,6 +207,8 @@ const en = {
     yearlyExpired: { title: "This link has expired", body: "The link in the email works for 14 days. Ask for a link to your membership on its page; from there you can pay yearly." },
     // A paid membership in free days the store gave: no switch until the next payment (lib/tier-switch.ts, review of #2912).
     freeDays: { title: "Your free days are running", body: "The store gave you free days, so your next payment comes later than usual. You can switch plans once that payment is made. Nothing was changed." },
+    // A pause set on the membership: no switch until it is over (lib/tier-switch.ts, R43 F4).
+    paused: { title: "This membership has a pause set", body: "So it stays on its plan until the pause ends. To switch sooner, resume it on your membership page first. Nothing was changed." },
   } as Record<string, Notice>,
   switchTo: (title: string) => `Switch to ${title}`,
   nowLabel: "Now",
@@ -232,6 +234,8 @@ const en = {
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
     limited: "Too many tries for now. Wait a few minutes and press the button again.",
+    /** The link could not be checked just now (CX-123 rule 24): never said as an offer that ended. */
+    unknown: "We could not check this offer right now. Nothing was charged. Please try again in a moment.",
   } as Record<string, string>,
   membershipLabel: "Membership",
   endedBody: (title: string) =>
@@ -570,6 +574,7 @@ const es: MembershipWords = {
     yearly: { title: "Esta membresía no ofrece el pago anual", body: "Puede que ya se pague al año, tenga un descuento, esté cancelada o pendiente de un pago, o que el precio anual haya cambiado. No se cambió nada." },
     yearlyExpired: { title: "Este enlace ha caducado", body: "El enlace del correo funciona 14 días. Pide un enlace a tu membresía en su página; desde allí puedes pagar al año." },
     freeDays: { title: "Tus días gratis están en curso", body: "La tienda te dio días gratis, así que tu próximo pago llega más tarde de lo habitual. Puedes cambiar de plan cuando se haga ese pago. No se cambió nada." },
+    paused: { title: "Esta membresía tiene una pausa programada", body: "Por eso sigue en su plan hasta que termine la pausa. Para cambiar antes, reanúdala primero en la página de tu membresía. No se cambió nada." },
   },
   switchTo: (title) => `Cambiar a ${title}`,
   nowLabel: "Ahora",
@@ -594,6 +599,7 @@ const es: MembershipWords = {
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
     limited: "Demasiados intentos por ahora. Espera unos minutos y vuelve a pulsar el botón.",
+    unknown: "No pudimos comprobar esta oferta en este momento. No se cobró nada. Vuelve a intentarlo en un momento.",
   },
   membershipLabel: "Membresía",
   endedBody: (title) =>
@@ -926,6 +932,7 @@ const fr: MembershipWords = {
     yearly: { title: "Le paiement annuel n'est pas proposé pour cet abonnement", body: "Il est peut-être déjà payé à l'année, bénéficie d'une réduction, est résilié ou en attente d'un paiement, ou le prix annuel a changé. Rien n'a été modifié." },
     yearlyExpired: { title: "Ce lien a expiré", body: "Le lien de l'e-mail fonctionne 14 jours. Demandez un lien vers votre abonnement sur sa page ; de là, vous pouvez payer à l'année." },
     freeDays: { title: "Vos jours offerts sont en cours", body: "La boutique vous a offert des jours gratuits, donc votre prochain paiement arrive plus tard que d'habitude. Vous pourrez changer de formule une fois ce paiement effectué. Rien n'a été modifié." },
+    paused: { title: "Cet abonnement a une pause prévue", body: "Il reste donc sur sa formule jusqu'à la fin de la pause. Pour changer plus tôt, reprenez-le d'abord depuis la page de votre abonnement. Rien n'a été modifié." },
   },
   switchTo: (title) => `Passer à ${title}`,
   nowLabel: "Actuellement",
@@ -950,6 +957,7 @@ const fr: MembershipWords = {
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
     limited: "Trop de tentatives pour le moment. Attendez quelques minutes et appuyez à nouveau sur le bouton.",
+    unknown: "Nous n'avons pas pu vérifier cette offre pour le moment. Rien n'a été débité. Réessayez dans un instant.",
   },
   membershipLabel: "Abonnement",
   endedBody: (title) =>
@@ -1284,6 +1292,7 @@ const de: MembershipWords = {
     yearly: { title: "Für diese Mitgliedschaft gibt es keine jährliche Zahlung", body: "Sie wird vielleicht schon jährlich bezahlt, hat einen Rabatt, ist gekündigt oder wartet auf eine Zahlung, oder der Jahrespreis hat sich geändert. Es wurde nichts geändert." },
     yearlyExpired: { title: "Dieser Link ist abgelaufen", body: "Der Link in der E-Mail gilt 14 Tage. Fordern Sie auf der Seite Ihrer Mitgliedschaft einen Link an; von dort können Sie jährlich zahlen." },
     freeDays: { title: "Ihre geschenkten Tage laufen", body: "Der Shop hat Ihnen kostenlose Tage geschenkt, daher kommt Ihre nächste Zahlung später als sonst. Sie können den Tarif wechseln, sobald diese Zahlung erfolgt ist. Es wurde nichts geändert." },
+    paused: { title: "Für diese Mitgliedschaft ist eine Pause eingerichtet", body: "Deshalb bleibt sie bis zum Ende der Pause in ihrem Tarif. Um früher zu wechseln, setzen Sie sie zuerst auf der Seite Ihrer Mitgliedschaft fort. Es wurde nichts geändert." },
   },
   switchTo: (title) => `Zu ${title} wechseln`,
   nowLabel: "Jetzt",
@@ -1313,6 +1322,7 @@ const de: MembershipWords = {
     refused:
       "Das Angebot konnte gerade nicht angewendet werden. Sie können unten zum normalen Preis zurückkehren oder auf die E-Mail antworten, mit der es kam.",
     limited: "Vorerst zu viele Versuche. Warten Sie ein paar Minuten und drücken Sie die Schaltfläche erneut.",
+    unknown: "Wir konnten dieses Angebot gerade nicht prüfen. Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal.",
   },
   membershipLabel: "Mitgliedschaft",
   endedBody: (title) =>
@@ -1649,6 +1659,7 @@ const it: MembershipWords = {
     yearly: { title: "Il pagamento annuale non è offerto per questo abbonamento", body: "Potrebbe essere già pagato annualmente, avere uno sconto, essere annullato o in attesa di un pagamento, oppure il prezzo annuale potrebbe essere cambiato. Non è stato cambiato nulla." },
     yearlyExpired: { title: "Questo link è scaduto", body: "Il link nell'email funziona per 14 giorni. Chiedi un link al tuo abbonamento sulla sua pagina; da lì puoi pagare annualmente." },
     freeDays: { title: "I tuoi giorni gratuiti sono in corso", body: "Il negozio ti ha regalato giorni gratuiti, quindi il tuo prossimo pagamento arriva più tardi del solito. Potrai cambiare piano una volta effettuato quel pagamento. Non è stato modificato nulla." },
+    paused: { title: "Per questo abbonamento è prevista una pausa", body: "Resta quindi sul suo piano fino alla fine della pausa. Se vuoi cambiare prima, riprendilo dalla pagina del tuo abbonamento. Non è stato modificato nulla." },
   },
   switchTo: (title) => `Passa a ${title}`,
   nowLabel: "Ora",
@@ -1673,6 +1684,7 @@ const it: MembershipWords = {
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
     limited: "Troppi tentativi per ora. Aspetta qualche minuto e premi di nuovo il pulsante.",
+    unknown: "Non è stato possibile verificare questa offerta in questo momento. Non è stato addebitato nulla. Riprova tra un momento.",
   },
   membershipLabel: "Abbonamento",
   endedBody: (title) =>
@@ -2002,6 +2014,7 @@ const nl: MembershipWords = {
     yearly: { title: "Per jaar betalen kan niet voor dit lidmaatschap", body: "Misschien wordt het al per jaar betaald, heeft het een korting, is het opgezegd of wacht het op een betaling, of is de jaarprijs veranderd. Er is niets gewijzigd." },
     yearlyExpired: { title: "Deze link is verlopen", body: "De link in de e-mail werkt 14 dagen. Vraag op de pagina van je lidmaatschap een link aan; van daaruit kun je per jaar betalen." },
     freeDays: { title: "Je gratis dagen lopen", body: "De winkel heeft je gratis dagen gegeven, dus je volgende betaling komt later dan normaal. Je kunt van abonnement wisselen zodra die betaling is gedaan. Er is niets gewijzigd." },
+    paused: { title: "Voor dit lidmaatschap staat een pauze gepland", body: "Daarom blijft het op zijn abonnement tot de pauze voorbij is. Wil je eerder wisselen, hervat het dan eerst op de pagina van je lidmaatschap. Er is niets gewijzigd." },
   },
   switchTo: (title) => `Overstappen naar ${title}`,
   nowLabel: "Nu",
@@ -2026,6 +2039,7 @@ const nl: MembershipWords = {
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
     limited: "Even te veel pogingen. Wacht een paar minuten en druk dan opnieuw op de knop.",
+    unknown: "We konden dit aanbod nu niet controleren. Er is niets afgeschreven. Probeer het zo meteen opnieuw.",
   },
   membershipLabel: "Lidmaatschap",
   endedBody: (title) =>
@@ -2353,6 +2367,7 @@ const pt: MembershipWords = {
     yearly: { title: "O pagamento anual não está disponível para esta subscrição", body: "Pode já ser paga anualmente, ter um desconto, estar cancelada ou à espera de um pagamento, ou o preço anual pode ter mudado. Nada foi alterado." },
     yearlyExpired: { title: "Esta ligação expirou", body: "A ligação do email funciona durante 14 dias. Peça uma ligação para a sua subscrição na respetiva página; a partir daí pode pagar anualmente." },
     freeDays: { title: "Os seus dias grátis estão a decorrer", body: "A loja ofereceu-lhe dias grátis, por isso o seu próximo pagamento chega mais tarde do que o habitual. Pode mudar de plano depois de esse pagamento ser feito. Nada foi alterado." },
+    paused: { title: "Esta subscrição tem uma pausa marcada", body: "Por isso mantém-se no seu plano até a pausa terminar. Para mudar antes, retome-a primeiro na página da sua subscrição. Nada foi alterado." },
   },
   switchTo: (title) => `Mudar para ${title}`,
   nowLabel: "Agora",
@@ -2377,6 +2392,7 @@ const pt: MembershipWords = {
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",
     limited: "Demasiadas tentativas por agora. Aguarde alguns minutos e carregue novamente no botão.",
+    unknown: "Não foi possível verificar esta oferta neste momento. Não foi cobrado nada. Tente novamente daqui a pouco.",
   },
   membershipLabel: "Subscrição",
   endedBody: (title) =>

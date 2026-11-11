@@ -16,9 +16,10 @@
  *     the answer is kept for two minutes.
  *
  * Open means Stripe calls the membership active, in its free trial, or past
- * due — a payment failed and Stripe is still retrying it, which is the
- * member's grace, not a reason to lock them out mid-retry. Anything else —
- * cancelled, unpaid after the retries, paused (by Stripe, or by a pause the
+ * due while Stripe still has another attempt at its latest invoice scheduled
+ * — the member's grace, not a reason to lock them out mid-retry. Anything
+ * else — cancelled, unpaid after the retries, past due with no attempt left
+ * (a creator's Stripe may leave it so), paused (by Stripe, or by a pause the
  * member chose, memberState), a first payment never made —
  * is ended, and the member is shown a page that says so plainly, with the
  * way to join again and, where a card can be fixed, the way to fix it.
@@ -51,16 +52,38 @@ export function isLive(status: unknown): boolean {
 }
 
 /**
+ * What the doors call a membership that is past due with no attempt at its
+ * latest invoice scheduled, or whose latest invoice was not read: ended.
+ */
+export const PAST_DUE_NO_RETRY = "past_due_no_retry";
+
+/**
+ * Whether Stripe has another attempt at a past-due membership's latest
+ * invoice scheduled. The subscription carries no retry date of its own; its
+ * latest invoice does (`next_payment_attempt`, null once none is scheduled),
+ * so every door reads the membership with that invoice expanded. An invoice
+ * not expanded, or any other shape, is not a retry.
+ */
+function retryScheduled(sub: object): boolean {
+  const invoice = (sub as { latest_invoice?: unknown }).latest_invoice;
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return false;
+  const next = (invoice as { next_payment_attempt?: unknown }).next_payment_attempt;
+  return typeof next === "number" && Number.isSafeInteger(next) && next > 0;
+}
+
+/**
  * The state a membership's doors go by: Stripe's own, or "paused" while a
  * pause its member chose is running (lib/membership-pause-rules.ts). Stripe
  * keeps calling a paused membership active, because it is not cancelled;
  * here it is not being paid for, so it opens nothing until the pause ends.
+ * Past due is Stripe's own only while a retry is scheduled (PAST_DUE_NO_RETRY).
  */
 export function memberState(sub: unknown): string | null {
   if (!sub || typeof sub !== "object") return null;
   const status = (sub as { status?: unknown }).status;
   if (typeof status !== "string") return null;
-  return pausedNow(sub as PauseSub) ? "paused" : status;
+  if (pausedNow(sub as PauseSub)) return "paused";
+  return status === "past_due" && !retryScheduled(sub) ? PAST_DUE_NO_RETRY : status;
 }
 
 /** Whether a membership, as Stripe sent it, opens its doors now. */
@@ -81,7 +104,10 @@ export function soldAMembership(product: Listing, session: { mode?: unknown; met
  * Stripe's state for a membership, from the subscription on a checkout —
  * already expanded, or asked for by its id and kept for two minutes. Null
  * when Stripe cannot say, which callers treat as ended: a door that cannot
- * check whether someone still pays stays shut rather than open.
+ * check whether someone still pays stays shut rather than open. Its one
+ * caller (lib/store-checkout.ts, readOrder) hands it the subscription with
+ * its latest invoice expanded; read by its id alone, without that invoice, a
+ * past-due membership is ended by the same rule (memberState).
  */
 export async function membershipStatus(store: Store, subscription: unknown): Promise<string | null> {
   if (subscription && typeof subscription === "object") return memberState(subscription);

@@ -35,9 +35,17 @@ const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
 const STRIPE_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 /** One page of customers under an address: more than that is not checked, and says so. */
 const MAX_CUSTOMERS = 20;
-/** A customer's subscriptions, read page by page up to this many; past it the memberships are not known. */
+/** A customer's subscriptions, read 100 to a page, Stripe's largest. */
 const SUB_PAGE = 100;
-const MAX_SUB_PAGES = 5;
+/**
+ * The most Stripe pages one find (or one apply) waits on, the customers' page
+ * included: the base's worst, one page of memberships a customer at the most
+ * customers read, so the one studio request the route takes still covers it
+ * (tests/plan-cost-registry.ts prices a Stripe page waited on; Claude 4 and
+ * Claude 1 on #2979). A customer with more than one page is followed while
+ * the budget lasts; past it the answer is "unreadable", never "none".
+ */
+export const STRIPE_PAGES = 1 + MAX_CUSTOMERS;
 
 /** One of a member's running memberships of this store, as the studio shows it. */
 export type MemberSub = {
@@ -80,11 +88,16 @@ const legibleSub = (row: Record<string, unknown>): boolean => {
   return typeof status === "string" && STRIPE_STATUSES.has(status) && plainObject(ownField(row, "metadata"));
 };
 
-/** Every row of a Stripe list read to its end, every row readable; otherwise StripeListUnreadable. */
-async function readWhole(account: string, path: string, limit: number, maxPages: number, pattern: RegExp, legible?: (row: Record<string, unknown>) => boolean): Promise<StripeRow[]> {
+/**
+ * Every row of a Stripe list read to its end, every row readable; otherwise StripeListUnreadable. Each page is taken
+ * from `budget`, shared by the whole find: past it the list is not read whole.
+ */
+async function readWhole(account: string, path: string, limit: number, budget: { pages: number }, pattern: RegExp, legible?: (row: Record<string, unknown>) => boolean): Promise<StripeRow[]> {
   const rows: StripeRow[] = [];
   let after = "";
-  for (let page = 0; page < maxPages; page += 1) {
+  for (;;) {
+    if (budget.pages <= 0) throw new StripeListUnreadable(`more than ${STRIPE_PAGES} Stripe pages for one address's memberships`);
+    budget.pages -= 1;
     const read = readStripePage(await onAccount("GET", account, `${path}&limit=${limit}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`, undefined, API_VERSION), legible, pattern);
     if (read.unreadable > 0) throw new StripeListUnreadable(`${read.unreadable} row(s) could not be read`);
     rows.push(...read.rows);
@@ -92,7 +105,6 @@ async function readWhole(account: string, path: string, limit: number, maxPages:
     if (!read.lastId) throw new StripeListUnreadable("no row to read the next page from");
     after = read.lastId;
   }
-  throw new StripeListUnreadable("more pages than are read");
 }
 
 /** A subscription row made safe for the studio, or null when it is not a running membership of this store. */
@@ -137,10 +149,14 @@ export async function memberSubRows(store: Store, email: string): Promise<{ row:
   if (!account) return null;
   const handles = saleHandles(store);
   try {
-    const customers = await readWhole(account, `/customers?email=${encodeURIComponent(email)}`, MAX_CUSTOMERS, 1, CUSTOMER_PATTERN);
+    // One budget for the whole find (STRIPE_PAGES), the customers' page included; a second page of customers is more
+    // than MAX_CUSTOMERS under one address, so it is not read: unreadable.
+    const budget = { pages: STRIPE_PAGES };
+    const customers = await readWhole(account, `/customers?email=${encodeURIComponent(email)}`, MAX_CUSTOMERS, { pages: 1 }, CUSTOMER_PATTERN);
+    budget.pages -= 1;
     const out: { row: MemberSub; raw: Raw }[] = [];
     for (const customer of customers) {
-      const subs = await readWhole(account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all`, SUB_PAGE, MAX_SUB_PAGES, SUB_PATTERN, legibleSub);
+      const subs = await readWhole(account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all`, SUB_PAGE, budget, SUB_PATTERN, legibleSub);
       for (const sub of subs) {
         const row = readMemberSub(sub, handles);
         if (row) out.push({ row, raw: sub });

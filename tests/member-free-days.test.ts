@@ -76,8 +76,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const path = url.pathname.replace(/^\/v1/, "");
   // Stripe's lists carry has_more: an answer without it is not one this code reads (rule 24).
-  if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [], has_more: false });
-  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [], has_more: false });
+  // offrow@ has a customer row that is not one, offsub@ a subscription row that is not one (Codex S second review of #2912).
+  const email = url.searchParams.get("email");
+  if (path === "/customers") return answer({ object: "list", data: email === "member@example.com" ? [{ id: "cus_member0001" }] : email === "offrow@example.com" ? [{}] : email === "offsub@example.com" ? [{ id: "cus_offsub00001" }] : [], has_more: false });
+  const customer = url.searchParams.get("customer");
+  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: customer === "cus_member0001" ? subs : customer === "cus_offsub00001" ? [[]] : [], has_more: false });
   if (path.startsWith("/products")) return answer({ object: "list", data: [] });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
@@ -156,21 +159,33 @@ async function main(): Promise<void> {
   is("one behind on a payment", await giveFreeDays(store, "member@example.com", "sub_behind0001", 7, 0, by), { ok: false, reason: "blocked", blocked: "behind" });
   is("no days, or more than the cap", [(await giveFreeDays(store, "member@example.com", "sub_live000001", 0, PERIOD_END, by)).ok, (await giveFreeDays(store, "member@example.com", "sub_live000001", 91, PERIOD_END, by)).ok], [false, false]);
   is("a next charge that is not the one the creator saw", await giveFreeDays(store, "member@example.com", "sub_live000001", 7, PERIOD_END - DAY, by), { ok: false, reason: "changed" });
+  // A row Stripe could not have sent is unknown: the studio says Stripe could not be read and the route answers 502, never "no running membership" (Codex S second review of #2912).
+  is("a customer or subscription row that is not one: the studio is told Stripe could not be read", [await freeDaysSubs(store, "offrow@example.com"), await freeDaysSubs(store, "offsub@example.com")], ["unreadable", "unreadable"]);
+  is("and giving days says Stripe, never not a member", [await giveFreeDays(store, "offrow@example.com", "sub_live000001", 7, PERIOD_END, by), await giveFreeDays(store, "offsub@example.com", "sub_live000001", 7, PERIOD_END, by)], [{ ok: false, reason: "unavailable" }, { ok: false, reason: "unavailable" }]);
+  is("nobody under that address is still none", await freeDaysSubs(store, "nobody@example.com"), []);
   is("nothing was sent to Stripe for any of them", posted.length, 0);
 
   part("An answer that cannot be read records nothing as done");
+  // Rule 23 (Claude 4's LOW on #2912): a write sent and not confirmed keeps the membership's lock a full term
+  // (tests/member-free-days-lock-kept.test.ts); each case here lets it run out, as that term passing would.
+  const termOver = () => redis.run(["DEL", "nl:tier:sub_live000001:lock"]);
   mode = "error";
   is("Stripe failing: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
+  termOver();
   mode = "odd";
   is("Stripe answering without the date asked for: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
+  termOver();
   const realPipeline = redis.pipeline.bind(redis);
-  redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "SET" ? [{ odd: true }] : realPipeline(commands))) as typeof redis.pipeline;
+  // Regra 23: this bent every SET; since Codex V's review of #2912 the press first takes the membership's lock (a SET NX
+  // of nl:tier:...:lock), so only the claim's own SET (nl:free-days:) is bent, as the check means.
+  redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "SET" && String(commands[0]?.[1]).startsWith("nl:free-days:") ? [{ odd: true }] : realPipeline(commands))) as typeof redis.pipeline;
   mode = "ok";
   const before = posted.length;
   is("Redis answering the claim in an unknown shape: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
   redis.pipeline = realPipeline;
   is("and Stripe was not asked then", posted.length, before);
-  is("no log line and no email for any of them", [(await readLog(store.sid)).length, emails.length], [0, 0]);
+  // readLog answers null for a log that does not read (main): null?.length is undefined, never the 0 asked for.
+  is("no log line and no email for any of them", [(await readLog(store.sid))?.length, emails.length], [0, 0]);
   mode = "refuse";
   is("Stripe saying no: refused, nothing changed", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "refused" });
   is("the membership still has its date", byId("sub_live000001").trial_end, undefined);
@@ -187,7 +202,7 @@ async function main(): Promise<void> {
     ["/subscriptions/sub_live000001", "acct_1Freedaysxxxxxx", String(PERIOD_END + 14 * DAY), "none", `member-free-days:sub_live000001:${PERIOD_END}:14`],
   );
   is("the membership's next charge on Stripe moved exactly 14 days", byId("sub_live000001").trial_end, PERIOD_END + 14 * DAY);
-  const log = await readLog(store.sid);
+  const log = (await readLog(store.sid)) ?? [];
   is("who gave it, when and how many days is in the activity log", [log.length, log[0]?.who, log[0]?.what.includes("14 free days"), typeof log[0]?.at === "string"], [1, owner, true, true]);
   is("the member is emailed once", [emails.length, emails[0]?.to], [1, "member@example.com"]);
   is("and the email was taken from the store's own emails first", (await allowanceUsed(store, "email")) - emailsUsed, 1);
@@ -205,7 +220,9 @@ async function main(): Promise<void> {
     giveFreeDays(store, "member@example.com", "sub_trial00001", 10, TRIAL_END, by),
   ]);
   slow = 0;
-  is("one gives the days, the other is told it is under way", both.map((r) => (r.ok ? "ok" : r.reason)).sort(), ["busy", "ok"]);
+  // Regra 23: this said ["busy", "ok"]. Since Codex V's review of #2912 both presses take the membership's lock: the
+  // second waits for the first, reads the membership again and finds the date already moved, so it is "changed".
+  is("one gives the days, the other finds them given and adds nothing", both.map((r) => (r.ok ? "ok" : r.reason)).sort(), ["changed", "ok"]);
   is("Stripe asked once, the member emailed once", [posted.length - postedBefore, emails.length - emailsBefore], [1, 1]);
   is("a trial's end moved exactly the days given", byId("sub_trial00001").trial_end, TRIAL_END + 10 * DAY);
 

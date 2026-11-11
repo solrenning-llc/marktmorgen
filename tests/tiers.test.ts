@@ -27,7 +27,9 @@ import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
-import { TEST_CONSENT } from "./digital-consent-fixture";
+import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
+import { NextRequest } from "next/server";
+import { POST as switchRoute } from "@/app/api/store/manage/switch/route";
 import { consentMetaValue } from "@/lib/digital-consent";
 
 const emails: { to: string | string[]; text: string; subject: string }[] = [];
@@ -39,6 +41,9 @@ let tierA = "";
 let priceMeta: Record<string, string> = {};
 // The currency the member pays in: the store's, unless it changed its currency since (22 [E5], unit 2b).
 let paidIn = "usd";
+// A pause set on the membership (lib/membership-pause.ts): Stripe's pause_collection, and the day it starts (R43 F4).
+let pausedWith: Record<string, unknown> | null = null;
+let pauseMeta: Record<string, string> = {};
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -60,7 +65,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           status: "active",
           customer: "cus_Member0001",
           created: 1,
-          metadata: { store: "harbor", product: tierA },
+          metadata: { store: "harbor", product: tierA, ...pauseMeta },
+          pause_collection: pausedWith,
           items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
@@ -199,6 +205,42 @@ async function main(): Promise<void> {
   is("the member is told so in every language", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => membershipWords(l).switchProblems.currency?.body.length > 40 && membershipWords(l).manageNotices.currency?.title.length > 10), true);
   paidIn = "usd";
 
+  part("A membership with a pause set (Claude 6, R43 F4)");
+  // Stripe voids every invoice while pause_collection is "void" (lib/membership-pause.ts), so a switch's charge
+  // could be voided and the new tier handed over for nothing. Refused like the yearly move (lib/yearly-switch-rules.ts).
+  const nowS = Math.floor(Date.now() / 1000);
+  for (const [label, pause, meta] of [
+    ["a pause set to start when the paid period ends", { behavior: "void", resumes_at: nowS + 40 * 86_400 }, { pause_from: String(nowS + 10 * 86_400) }],
+    ["a pause running now", { behavior: "void", resumes_at: nowS + 20 * 86_400 }, { pause_from: String(nowS - 86_400) }],
+    // Set on Stripe by hand, without the day it starts: unknown, so refused all the same.
+    ["a pause this code did not set", { behavior: "void" }, {}],
+  ] as const) {
+    pausedWith = pause;
+    pauseMeta = meta;
+    const beforePause = calls.length;
+    const pausedList = (await membershipsFor(store, token))!;
+    is(`${label}: no tier offered, on the member's page or the leaving one`, choicesFor(store, pausedList[0], tiers), []);
+    const pausedPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+    const pausedSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, nowS, TEST_CONSENT);
+    is(`${label}: a link to a switch says why`, [pausedPreview.ok ? "shown" : pausedPreview.reason, pausedSwitch.ok ? "switched" : pausedSwitch.reason], ["paused", "paused"]);
+    is(`${label}: no price made, no preview asked, no subscription touched`, calls.slice(beforePause).filter((c) => c.method === "POST").map((c) => c.path), []);
+  }
+  const pausedForm = withConsent(new URLSearchParams({ handle: "harbor", token, sub: "sub_Member0001", to: b.product.id, at: String(nowS) }));
+  const pausedBack = await switchRoute(new NextRequest("https://marktmorgen.com/api/store/manage/switch", {
+    method: "POST",
+    headers: { Host: "marktmorgen.com", Origin: "https://marktmorgen.com", "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": "203.0.113.9" },
+    body: pausedForm.toString(),
+  }));
+  // Never "paused": that status is the pause's own notice ("Your membership is paused ... an email with the dates").
+  is("the button: back to the member's page with its own notice", new URL(pausedBack.headers.get("location") ?? "https://x.invalid/").searchParams.get("status"), "switch-paused");
+  is("which says why in every language", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => membershipWords(l).switchProblems.paused?.body.length > 40 && membershipWords(l).switchProblems.paused?.title.length > 10), true);
+  is("in plain words", [membershipWords("en").switchProblems.paused?.title, membershipWords("en").switchProblems.paused?.body], [
+    "This membership has a pause set",
+    "So it stays on its plan until the pause ends. To switch sooner, resume it on your membership page first. Nothing was changed.",
+  ]);
+  pausedWith = null;
+  pauseMeta = {};
+
   part("The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)");
   is("the preview says the tier is delivered at once, so the page shows the box", preview.preview.digital, true);
   const unasked = calls.length;
@@ -228,6 +270,10 @@ async function main(): Promise<void> {
   unreadable = false;
   // The card may have been charged: the member is told it could not be confirmed, never that nothing changed.
   is("an answer that cannot be read: not confirmed, and nobody is told it happened", [unsure.ok ? "switched" : unsure.reason, emails.length], ["unconfirmed", 0]);
+  // The lock is left to run out at its own expiry, not let go: a new switch is "busy" while the first may still run at Stripe.
+  const [lockLeft] = await redisPipeline([["GET", "nl:tier:sub_Member0001:lock"]]);
+  is("an unconfirmed switch keeps the membership's lock to its expiry", typeof lockLeft === "string" && lockLeft.length > 0, true);
+  await redisPipeline([["DEL", "nl:tier:sub_Member0001:lock"]]);
   is("said in every language without claiming nothing changed", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => {
     const notice = membershipWords(l).manageNotices.unconfirmed;
     return Boolean(notice && notice.title.length > 10 && notice.body.length > 40) && notice.body !== membershipWords(l).manageNotices.error.body;

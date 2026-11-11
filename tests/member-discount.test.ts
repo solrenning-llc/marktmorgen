@@ -12,6 +12,9 @@ import { applyMemberDiscount, hasDiscount, memberSubs, readMemberSub } from "@/l
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
+/** The rows of a lookup, or null when it is not a list ("unreadable" or unreachable): an assertion on rows then fails. */
+const listed = <T,>(value: T[] | "unreadable" | null): T[] | null => (Array.isArray(value) ? value : null);
+
 process.env.STRIPE_SECRET_KEY = "sk_test_member_discount_only";
 
 const subscription = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -33,6 +36,16 @@ const codes = [
   { id: "promo_active0001", code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } },
   { id: "promo_stopped001", code: "OLD", active: false, promotion: { type: "coupon", coupon: { id: "co_2", percent_off: 10, duration: "once" } } },
 ];
+/** A customer row that is not one: an empty object, an array, an id that is not a customer's. */
+const OFF_CUSTOMERS: Record<string, unknown> = { "rowobject@example.com": {}, "rowarray@example.com": [], "rowbadid@example.com": { id: 42 } };
+/** A subscription row that is not one: an empty object, an array, no status, metadata that is not an object, an id that is not a subscription's. */
+const OFF_SUBS: Record<string, unknown> = {
+  "subobject@example.com": {},
+  "subarray@example.com": [],
+  "subnostatus@example.com": { id: "sub_nostatus01", metadata: { store: "memberstore" } },
+  "submeta@example.com": { id: "sub_badmeta001", status: "active", metadata: "memberstore" },
+  "subbadid@example.com": { id: 7, status: "active", metadata: { store: "memberstore" } },
+};
 const posted: { path: string; body: string; key: string | null }[] = [];
 let refuse = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -40,9 +53,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   // Stripe's lists carry has_more: an answer without it is not one this code reads (rule 24).
-  if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [], has_more: false });
-  if (path === "/subscriptions") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [], has_more: false });
-  if (path === "/promotion_codes") return answer({ object: "list", data: codes });
+  // Rows Stripe could not have sent, one per address (Codex S second review of #2912, residual of M2):
+  // a customer or a subscription row that is not a readable one is unknown, never "no membership".
+  if (path === "/customers") {
+    const email = url.searchParams.get("email") ?? "";
+    const data = email === "member@example.com" ? [{ id: "cus_member0001" }] : email in OFF_CUSTOMERS ? [OFF_CUSTOMERS[email]] : email in OFF_SUBS ? [{ id: `cus_${email.split("@")[0]}01` }] : [];
+    return answer({ object: "list", data, has_more: false });
+  }
+  if (path === "/subscriptions") {
+    const customer = url.searchParams.get("customer") ?? "";
+    const off = Object.keys(OFF_SUBS).find((email) => customer === `cus_${email.split("@")[0]}01`);
+    return answer({ object: "list", data: customer === "cus_member0001" ? subs : off ? [OFF_SUBS[off]] : [], has_more: false });
+  }
+  if (path === "/promotion_codes") return answer({ object: "list", data: codes, has_more: false });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
     posted.push({ path, body: String(init.body), key: headers.get("Idempotency-Key") });
@@ -66,7 +89,15 @@ async function main(): Promise<void> {
   const found = Array.isArray(read) ? read : null;
   is("only this store's running memberships of that address", found?.map((s) => [s.id, s.discounted]), [["sub_live000001", false], ["sub_disc000001", true]]);
   is("with what each renewal costs", found?.[0] ? [found[0].amount, found[0].currency, found[0].interval, found[0].product] : null, [2900, "usd", "month", "prod000001"]);
-  is("nobody under that address: none", (await memberSubs(store, "nobody@example.com"))?.length, 0);
+  is("nobody under that address: none", listed(await memberSubs(store, "nobody@example.com"))?.length, 0);
+
+  part("A row Stripe could not have sent is unknown, never no membership (Codex S second review of #2912)");
+  for (const email of [...Object.keys(OFF_CUSTOMERS), ...Object.keys(OFF_SUBS)]) {
+    is(`${email}: the lookup says Stripe could not be read`, await memberSubs(store, email), "unreadable");
+    is(`${email}: putting a code on says Stripe, never not a member`, await applyMemberDiscount(store, email, "sub_live000001", "promo_active0001"), { ok: false, reason: "unavailable" });
+  }
+  is("a readable but ended membership still is not one", listed(await memberSubs(store, "member@example.com"))?.some((s) => s.id === "sub_gone000001"), false);
+  is("nothing was sent to Stripe for an unreadable row", posted.length, 0);
 
   part("Putting a code on");
   is("not this member's membership: refused", await applyMemberDiscount(store, "member@example.com", "sub_else000001", "promo_active0001"), { ok: false, reason: "not_member" });

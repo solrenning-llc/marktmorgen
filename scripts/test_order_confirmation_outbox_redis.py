@@ -10,6 +10,7 @@ import re
 import socket
 import subprocess
 import tempfile
+import threading
 import uuid
 from test_form_opportunity_redis import Redis
 
@@ -74,6 +75,16 @@ def main():
         before = stats(); result = run(); after = stats()
         return result, sum(after.get(k, 0) - before.get(k, 0) for k in set(before) | set(after))
     profiles = {}
+    # Another client keeps talking to the same server (as the CI service's health check does):
+    # a measured profile must count only the measured script's own commands.
+    neighbor_stop = threading.Event()
+    def neighbor():
+        other = LocalRedis()
+        try:
+            while not neighbor_stop.is_set(): other.command("PING")
+        finally: other.sock.close()
+    neighbor_thread = threading.Thread(target=neighbor, daemon=True)
+    neighbor_thread.start()
     try:
         row, keys = fixture("atomic")
         first, profiles["enqueue"] = measured(lambda: enqueue(row, keys))
@@ -436,6 +447,7 @@ if(result.status!==0){process.exitCode=result.status ?? 1;break;}
                            env=dict(os.environ, CONFIRMATION_ORIGIN_REDIS_PORT=os.environ.get("CONFIRMATION_ORIGIN_REDIS_PORT", "16379")))
 
     finally:
+        neighbor_stop.set(); neighbor_thread.join(10)
         for key in made: db.command("DEL", key)
         db.sock.close()
         print("CLEANUP: only this proof's synthetic keys removed")

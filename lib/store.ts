@@ -1913,6 +1913,10 @@ export async function closeStoreRecord(
     if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a closing store's record, read again before it goes");
     const fresh = raw === null ? null : parseStore(raw);
     if (raw !== null && !fresh) throw new UnknownReplyError("a closing store's record, read again before it goes");
+    // Only this store's own record (the same sid) is this closing's to read and delete: another store made at the same
+    // key since is never named by this one's walk, nor deleted with it; nothing goes, and the walk reads it afresh
+    // (Codex G on #3643).
+    if (fresh && fresh.sid !== store.sid) throw new StoreBusyError();
     await beforeDelete?.(fresh);
     // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
     // go first, and the record last: a step that fails here leaves the record, so the closing walk prepares the store

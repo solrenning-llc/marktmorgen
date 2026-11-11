@@ -2185,6 +2185,18 @@ export async function addPayout(
   return payout;
 }
 
+/**
+ * The references of every payout written down, read exactly (rule 24): a reply missing, cut short or of another
+ * shape, or a record not as addPayout writes it, throws UnknownReplyError, never "none written". PayPal's settling
+ * (lib/paypal-payouts.ts, settlePayPal) reads it so a PayPal item is written in the book once, and never again after
+ * a write that landed although it answered badly. Only Redis is read: no Stripe call, unlike readBook.
+ */
+export async function payoutReferences(store: Store): Promise<Set<string>> {
+  if (!store.statsId || !isRedisConfigured()) throw new UnknownReplyError("a program's payments");
+  const pairs = hashPairsExact(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), "a program's payments");
+  return new Set(pairs.map(([, raw]) => exactPayout(raw).reference));
+}
+
 export async function removePayout(store: Store, id: string): Promise<boolean> {
   if (!store.statsId || !/^[0-9a-f]{12}$/.test(id)) return false;
   const [held, removed] = await redisPipeline([["HGET", payoutsKey(store.statsId), id], ["HDEL", payoutsKey(store.statsId), id]]);

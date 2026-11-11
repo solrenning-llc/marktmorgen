@@ -31,8 +31,10 @@
 import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
+import { type Book, addPayout, payAddress, payoutReferences, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
@@ -451,6 +453,8 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   const auth = await bearer(store).catch(() => null);
   if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
   const day = new Date().toISOString().slice(0, 10);
+  /** The references already written in the book, read once, only when PayPal reports an item paid. */
+  let recorded: Set<string> | undefined;
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a
     // day, and its people stay on their way whatever comes back (decision C1-20261105-1830-C5-1, option A).
@@ -484,11 +488,32 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        const [fresh] = await redisPipeline([["SET", itemKey(got.item), batch, "NX", "EX", 400 * 86_400]]);
-        if (fresh !== null) {
-          await addPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference: `PayPal ${got.item}` });
-          out.paid += 1;
+        // Written in the book once per PayPal item, and the line leaves the batch only when that is known (rule 24).
+        // A payout already in the book under this item's reference (an earlier run's write that landed although it
+        // answered badly) is never written again; the book's payments are read exactly, once a run, from Redis only. Otherwise the item's mark is taken first: a mark answered in
+        // another shape is read back (claimMark), never taken as fresh; "taken" means another run holds it, so the
+        // line stays on its way; "unknown" stops the run with the line kept. When the payout's own write then fails,
+        // the mark is let go and the line kept, so a later run writes it, or finds it written, instead of dropping
+        // a line the book still owes and paying the affiliate again on the next batch.
+        const reference = `PayPal ${got.item}`;
+        recorded ??= await payoutReferences(store);
+        if (recorded.has(reference)) continue;
+        const key = itemKey(got.item);
+        const value = claimValue();
+        const claimed = await claimMark(key, 400 * 86_400, value);
+        if (claimed === "unknown") throw new UnknownReplyError("a PayPal item's mark");
+        if (claimed === "taken") {
+          still.push(line);
+          continue;
         }
+        try {
+          await addPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference });
+        } catch (error) {
+          await releaseMark(key, value);
+          throw error;
+        }
+        recorded.add(reference);
+        out.paid += 1;
       } else if (NOT_PAID.has(status)) {
         out.released += 1;
       } else {

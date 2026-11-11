@@ -256,9 +256,10 @@ export async function readFeed(url: string, fallbackTz: string, now: number, fet
 export type FetchHooks = Pick<Parameters<typeof safeFetch>[1], "resolve" | "agent">;
 
 /**
- * The busy times from every calendar the creator added, never throwing. A
- * reading under ten minutes old is used as it is; an older one is refreshed,
- * by one request at a time per calendar.
+ * The busy times from every calendar the creator added. Unknown settings throw;
+ * feed failures are counted so callers can refuse availability. A reading
+ * under ten minutes old is used as it is; an older one is refreshed, by one
+ * request at a time per calendar.
  */
 export async function calendarBusy(
   store: Store,
@@ -268,8 +269,9 @@ export async function calendarBusy(
   let config: Config | null;
   try {
     config = await readConfig(store);
-  } catch {
-    return { busy: [], failing: 0 };
+  } catch (error) {
+    console.error("reading calendar settings failed", error);
+    throw error;
   }
   if (!config || !config.feeds.length) return { busy: [], failing: 0 };
   const fallbackTz = await homeZone(store);

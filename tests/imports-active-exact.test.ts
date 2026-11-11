@@ -164,6 +164,27 @@ async function main(): Promise<void> {
   await real([["LREM", `nl:imports:list:${sid}`, 0, "not-an-import-id"]]);
   is("healthy control: with both gone, the list reads again", (await storeImports(store))[0]?.id, running);
 
+  // Claude 4 (cloud A) LOW and Claude 1 (cloud reviewer C3) LEVE on #3686: an import on this store's list whose store
+  // is missing, null, empty or not text says nothing of whose it is, so the list is unknown, never shorter (rule 30),
+  // as its MCP sibling storeImportsRead already reads it (Codex G on #1933). One naming another store is still left out.
+  part("An import on the store's list kept without a store that reads is unknown, never left out");
+  for (const [label, value] of [["missing", undefined], ["null", null], ["a number", 7], ["empty", ""]] as [string, unknown][]) {
+    const nameless = "e".repeat(24);
+    const record: Record<string, unknown> = { ...JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0])), id: nameless };
+    if (value === undefined) delete record.sid;
+    else record.sid = value;
+    await real([["SET", `nl:import:${nameless}`, JSON.stringify(record)], ["LPUSH", `nl:imports:list:${sid}`, nameless]]);
+    is(`its store ${label}: storeImports throws UnknownReplyError`, await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+    await real([["LREM", `nl:imports:list:${sid}`, 0, nameless], ["DEL", `nl:import:${nameless}`]]);
+  }
+  {
+    const elsewhere = "e".repeat(24);
+    const record = { ...JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0])), id: elsewhere, sid: "9".repeat(32) };
+    await real([["SET", `nl:import:${elsewhere}`, JSON.stringify(record)], ["LPUSH", `nl:imports:list:${sid}`, elsewhere]]);
+    is("healthy control: an import naming another store is left out", (await storeImports(store)).map((job) => job.id).includes(elsewhere), false);
+    await real([["LREM", `nl:imports:list:${sid}`, 0, elsewhere], ["DEL", `nl:import:${elsewhere}`]]);
+  }
+
   // Revisor 2 on #3686 (MEDIUM): the GET of import B's key answering import A's record is not B (readJob, jobOf).
   part("One import's key holding another import's record is not that import");
   const mixed = "f".repeat(24);

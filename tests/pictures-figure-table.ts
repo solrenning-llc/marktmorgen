@@ -6,7 +6,7 @@ import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { MAX_REVIEW_PHOTO_BYTES } from "@/lib/review-summary";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MOST_CORRECT_READING, receivingOf } from "@/lib/receiving-costs";
-import { PLAN_TITLES, TIERS, type Tier } from "@/lib/plan";
+import { PLAN_TITLES, type Tier } from "@/lib/plan";
 import { GB, STORAGE_PER_GB } from "./plan-cost-registry";
 import { planUnits, roomKept } from "./margin-alignment-table";
 

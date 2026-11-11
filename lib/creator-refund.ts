@@ -27,7 +27,7 @@
  *      the same form at once give back once) and a key still being worked
  *      on with 409, said here as "in_progress". The same key with other
  *      figures, or any other refusal Stripe answers with a 4xx, made nothing
- *      and writes no line ("invalid", "stripe_refused");
+ *      and writes no line ("form_used", "stripe_refused");
  *   7. the answer is read exactly (refundOutcome): "done" only for a refund
  *      of this charge, for this amount, that succeeded. One that cannot be
  *      read, or no answer at all, is "unknown" and never recorded as done:
@@ -72,6 +72,9 @@ export type RefundError =
   | "forbidden"
   | "no_stripe"
   | "invalid"
+  | "reason"
+  | "form_used"
+  | "refund_failed"
   | "not_found"
   | "unavailable"
   | "unreadable"
@@ -88,7 +91,8 @@ export type RefundError =
   | "unknown";
 
 export type RefundAnswer =
-  | { ok: true; state: "done" | "pending" | "failed"; cents: number; currency: string }
+  // A refund Stripe refused is never ok: "refund_failed", so no screen can take it for money given back (Claude 3 on #3678).
+  | { ok: true; state: "done" | "pending"; cents: number; currency: string }
   | { ok: false; error: RefundError };
 
 /** The HTTP status each answer goes back with. */
@@ -105,6 +109,8 @@ export function refundStatus(answer: RefundAnswer): number {
     case "fully_refunded":
     case "in_progress":
     case "stripe_refused":
+    case "form_used":
+    case "refund_failed":
       return 409;
     case "unavailable":
     case "unreadable":
@@ -157,7 +163,7 @@ export async function giveRefund(
   const key = refundIdempotencyKey(store.sid ?? "", chargeId, typeof input.token === "string" ? input.token : "");
   if (!key) return fail("invalid");
   const reason = input.reason === undefined || input.reason === "" ? null : parseRefundReason(input.reason);
-  if (input.reason !== undefined && input.reason !== "" && !reason) return fail("invalid");
+  if (input.reason !== undefined && input.reason !== "" && !reason) return fail("reason");
 
   let charge: Record<string, unknown>;
   try {
@@ -184,7 +190,8 @@ export async function giveRefund(
   }
   if (earlier === undefined) return fail("unavailable");
   if (earlier) {
-    if (record(earlier.metadata)?.mm_form !== form) return fail("invalid");
+    // The same form with other figures: this form already made its refund; a new form is drawn for another.
+    if (record(earlier.metadata)?.mm_form !== form) return fail("form_used");
     const currency = typeof charge.currency === "string" ? charge.currency : "";
     const cents = typeof earlier.amount === "number" ? earlier.amount : Number.NaN;
     return settle(store, who, chargeId, key, earlier, cents, currency);
@@ -207,7 +214,7 @@ export async function giveRefund(
       if (error.code === "charge_already_refunded") return fail("fully_refunded");
       if (error.code === "amount_too_large") return fail("over_refundable");
       // The same form's key sent with other figures: Stripe refuses it before doing anything (the first refund stands).
-      if (error.code === "idempotency_error") return fail("invalid");
+      if (error.code === "idempotency_error") return fail("form_used");
       // Any other refusal Stripe gives as a 4xx made nothing: said as refused, never as made or unknown.
       if (error.status >= 400 && error.status < 500) return fail("stripe_refused");
     }
@@ -239,5 +246,6 @@ async function settle(store: Store, who: { email: string; role: Role }, chargeId
     await logTeam(store.sid, { who: who.email, role: who.role, what });
   }
   if (state === "unknown") return fail("unknown");
+  if (state === "failed") return fail("refund_failed");
   return { ok: true, state, cents, currency };
 }

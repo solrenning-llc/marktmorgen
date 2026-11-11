@@ -218,7 +218,7 @@ export async function POST(request: NextRequest) {
   if (linkToken || typedCode) {
     // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
     // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.
-    if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")))) return backToField("other");
+    if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")), undefined, { plan: plan && activePlan(product) !== null })) return backToField("other");
     // Each try may read the creator's Stripe account or use a link: a few per connection.
     if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
     // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.

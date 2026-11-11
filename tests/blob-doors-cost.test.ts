@@ -71,8 +71,9 @@ part("The buyers' doors, checks and hand-ins: line buyer-blob");
 const buyer = COST_LINES.find((line) => line.id === "buyer-blob");
 is("a line of its own", Boolean(buyer), true);
 const perAction = (registry as Record<string, unknown>).buyerBlobPerAction;
-is("each buyer action at the dearest Blob work it may be: a door (a token and a put, every try)", typeof perAction === "function" ? (perAction as () => number)() : Number.NaN, perBuyerAction);
-is("a door is the dearest of the three today", perBuyerAction, door);
+// Changed (rule 23, Claude 2 on #2852, 6751277724): with its read counted as the studio's is, the check is the dearest.
+is("each buyer action at the dearest Blob work it may be: a post's check (a head, a read through the origin and the CDN)", Math.abs((typeof perAction === "function" ? (perAction as () => number)() : Number.NaN) - perBuyerAction) < 1e-15, true);
+is("a check is the dearest of the three today", perBuyerAction, check);
 for (const tier of TIERS) {
   is(`${tier}: the buyer figure (${STORE_ALLOWANCES[tier].buyer}), each action at the dearest`, Math.abs((buyer?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].buyer * perBuyerAction) < 1e-12, true);
 }

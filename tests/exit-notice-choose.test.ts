@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import "./redis-stub";
 import { done, is, part } from "./check";
-import { chooseExitNotice, claimHandle, closeStoreRecord, storeForEmail, storeHandleKey, storeRef } from "@/lib/store";
+import { chooseExitNotice, claimHandle, closeStoreRecord, noteTakedown, storeForEmail, storeHandleKey, storeRef } from "@/lib/store";
 import { exitFromReleased } from "@/lib/exit-redirect-rules";
 import { KEEP_NOTHING_FROM } from "@/lib/plan-closing-rules";
 import { redisPipeline } from "@/lib/redis";
@@ -68,7 +68,24 @@ const root = process.cwd();
   const [value] = await redisPipeline([["GET", storeHandleKey("choosing-shop")]]);
   is("the old address carries it", exitFromReleased(value)?.to, "https://example.com/new-shop");
 
+  part("Taken away at any time before the closing day, closing or not (review of #3730)");
+  await chooseExitNotice(ref, "https://example.com/new-shop", closing, now);
+  is("a store no longer closing (closing null) can still take it away", (await chooseExitNotice(ref, "", null, now)).ok, true);
+  is("nothing kept", (await storeForEmail("chooser@example.com"))?.exitNotice, undefined);
+  is("but a store no longer closing cannot give one", await chooseExitNotice(ref, "https://example.com/new-shop", null, now), { ok: false, reason: "not_closing" });
+
+  part("A suspended store: never a notice (review of #3730)");
+  is("a second store is made", (await claimHandle("suspended@example.com", "suspended-shop", "Suspended", "")).ok, true);
+  const held = storeRef((await storeForEmail("suspended@example.com"))!);
+  await chooseExitNotice(held, "https://example.com/elsewhere", closing, now);
+  await noteTakedown(held, null, true);
+  is("it cannot choose one", await chooseExitNotice(held, "https://example.com/other", closing, now), { ok: false, reason: "suspended" });
+  await closeStoreRecord((await storeForEmail("suspended@example.com"))!);
+  const [heldValue] = await redisPipeline([["GET", storeHandleKey("suspended-shop")]]);
+  is("closed, its old address carries no notice", exitFromReleased(heldValue), null);
+
   part("The route");
+  is("a removal is let through when the store is no longer closing", /closingOf\(guarded\.store\)[\s\S]*chooseExitNotice\(guarded\.ref, to \?\? "", closing\)/.test(readFileSync(join(root, "app/api/store/exit/route.ts"), "utf8")) && !/if \(!closing\) return/.test(readFileSync(join(root, "app/api/store/exit/route.ts"), "utf8")), true);
   const route = readFileSync(join(root, "app/api/store/exit/route.ts"), "utf8");
   is("needs the settings permission", /guardStoreWrite\(request, "settings"/.test(route), true);
   is("reads the store's own closing", /closingOf\(guarded\.store\)/.test(route), true);

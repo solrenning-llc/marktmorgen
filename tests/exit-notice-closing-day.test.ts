@@ -19,15 +19,24 @@ const DAY = 86_400_000;
 const closedAt = Date.UTC(2026, 11, 1);
 const notice: ExitNotice = { to: "https://example.com/", host: "example.com", closedAt, setAt: closedAt - DAY };
 
-is("no notice chosen: the store as always", exitAnswerForStore({}, closedAt + DAY), { kind: "none" });
-is("before the closing day: the store as always", exitAnswerForStore({ exitNotice: notice }, closedAt - 1), { kind: "none" });
-is("on the closing day: the notice", exitAnswerForStore({ exitNotice: notice }, closedAt), { kind: "moved", to: notice.to, host: notice.host, until: closedAt + EXIT_NOTICE_DAYS * DAY });
-is("days after it, the record not yet deleted: the notice", exitAnswerForStore({ exitNotice: notice }, closedAt + 10 * DAY).kind, "moved");
-is("after the 90 days: gone, not the store", exitAnswerForStore({ exitNotice: notice }, closedAt + EXIT_NOTICE_DAYS * DAY), { kind: "gone" });
-is("a record that does not read: the store as always", exitAnswerForStore({ exitNotice: { ...notice, to: "http://example.com/" } as ExitNotice }, closedAt + DAY), { kind: "none" });
-is("an unknown clock: the store as always", exitAnswerForStore({ exitNotice: notice }, Number.NaN), { kind: "none" });
+const today = { day: closedAt, today: true };
+is("no notice chosen: the store as always", exitAnswerForStore({}, today, closedAt + DAY), { kind: "none" });
+is("before the closing day: the store as always", exitAnswerForStore({ exitNotice: notice }, { day: closedAt }, closedAt - 1), { kind: "none" });
+is("on the closing day: the notice", exitAnswerForStore({ exitNotice: notice }, today, closedAt), { kind: "moved", to: notice.to, host: notice.host, until: closedAt + EXIT_NOTICE_DAYS * DAY });
+is("days after it, the record not yet deleted: the notice", exitAnswerForStore({ exitNotice: notice }, today, closedAt + 10 * DAY).kind, "moved");
+is("after the 90 days: gone, not the store", exitAnswerForStore({ exitNotice: notice }, today, closedAt + EXIT_NOTICE_DAYS * DAY), { kind: "gone" });
+is("a record that does not read: the store as always", exitAnswerForStore({ exitNotice: { ...notice, to: "http://example.com/" } as ExitNotice }, today, closedAt + DAY), { kind: "none" });
+is("an unknown clock: the store as always", exitAnswerForStore({ exitNotice: notice }, today, Number.NaN), { kind: "none" });
+
+// Review of #3730: the notice only for a store whose closing day has really begun.
+is("closing given up (closingOf null): the store as always, the old day past", exitAnswerForStore({ exitNotice: notice }, null, closedAt + DAY), { kind: "none" });
+is("the closing could not be read: the store as always", exitAnswerForStore({ exitNotice: notice }, "unknown", closedAt + DAY), { kind: "none" });
+is("the closing day moved later and not begun: the store as always, though the day chosen has passed", exitAnswerForStore({ exitNotice: notice }, { day: closedAt + 5 * DAY }, closedAt + DAY), { kind: "none" });
+is("the day it really began counts for the 90 days", exitAnswerForStore({ exitNotice: notice }, { day: closedAt + 5 * DAY, today: true }, closedAt + 6 * DAY), { kind: "moved", to: notice.to, host: notice.host, until: closedAt + 5 * DAY + EXIT_NOTICE_DAYS * DAY });
+is("a suspended store: never the notice", exitAnswerForStore({ exitNotice: notice, suspended: true }, today, closedAt + DAY), { kind: "none" });
 
 const page = readFileSync(join(process.cwd(), "app/[handle]/page.tsx"), "utf8");
-is("the page asks the store it already read", /exitAnswerForStore\(store, Date\.now\(\)\)|exitAnswerForStore\(found\.store/.test(page) || /closingNotice\(found\.store\)/.test(page), true);
+is("the page reads the closing only for a store with a notice that is not suspended", /if \(!store\.exitNotice \|\| store\.suspended\) return null;\s*const closing = await closingOf\(store\)/.test(page), true);
+is("the notice page is never indexed", /closedNotice[\s\S]{0,200}robots: \{ index: false, follow: false \}/.test(page), true);
 
 done();

@@ -86,7 +86,7 @@ export default async function LeavePage({ params, searchParams }: Params) {
           {!memberships ? (
             <>
               <div className="st-note mb-6">
-                <p className="font-bold" style={{ color: "var(--st-text)" }}>{m.manageNotices.expired.title}</p>
+                <h1 className="font-bold" style={{ color: "var(--st-text)" }}>{m.manageNotices.expired.title}</h1>
                 <p className="mt-1 text-sm">{m.manageNotices.expired.body}</p>
               </div>
               <Link href={manage} className="btn st-btn btn-block">
@@ -95,7 +95,7 @@ export default async function LeavePage({ params, searchParams }: Params) {
             </>
           ) : !one || one.endsAt !== null ? (
             <>
-              <p className="st-muted text-lg leading-relaxed">{m.leaveGone}</p>
+              <h1 className="st-muted text-lg leading-relaxed">{m.leaveGone}</h1>
               <Link href={manage} className="btn st-btn btn-block mt-6">
                 {m.yourMembership}
               </Link>

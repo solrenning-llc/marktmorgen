@@ -62,7 +62,8 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { type StripePage, StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -521,18 +522,22 @@ async function planSaleOf(
 ): Promise<{ session: string; meta: Record<string, string> } | null> {
   let invoice = idOf(pi.invoice);
   if (!invoice) {
-    const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": intent, limit: "1" })}`);
-    const row = (Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [])[0];
-    invoice = idOf(row?.invoice);
+    // In its exact shape (CX-123 rule 24): a list in another shape, or its one row not readable, is not "no
+    // invoice" (so "not a plan" and the refund marked read with its key still valid): it throws, and the caller
+    // leaves the refund for the next run.
+    const listed = readStripePage(await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": intent, limit: "1" })}`));
+    if (listed.unreadable) throw new StripeListUnreadable("an invoice payment not readable");
+    invoice = idOf(listed.rows[0]?.invoice);
   }
   if (!/^in_[A-Za-z0-9]{8,255}$/.test(invoice)) return null;
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
   const parent = read.parent as { subscription_details?: { subscription?: unknown } } | null | undefined;
   const subscription = idOf(read.subscription) || idOf(parent?.subscription_details?.subscription);
   if (!/^sub_[A-Za-z0-9]{8,255}$/.test(subscription)) return null;
-  const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ subscription, limit: "1" })}`);
-  const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
-  if (!session || typeof session.id !== "string" || idOf(session.invoice) !== invoice) return null;
+  const sessions = readStripePage(await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ subscription, limit: "1" })}`));
+  if (sessions.unreadable) throw new StripeListUnreadable("a checkout not readable");
+  const session = sessions.rows[0];
+  if (!session || idOf(session.invoice) !== invoice) return null;
   const meta = (session.metadata ?? {}) as Record<string, string>;
   return meta.kind === "plan" ? { session: session.id, meta } : null;
 }
@@ -561,8 +566,21 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
-    const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // The page in its exact shape (lib/stripe-list.ts), each row by the refunds' own rule (refundRowKnown,
+    // lib/refunds.ts), as the review pass reads it (lib/review-proof.ts, lot 2): a page in another shape, or a row
+    // not readable, keeps the anchor (unsure), so no refund on it is passed over and its key revoked by a later run;
+    // the readable rows are still handled.
+    let listed: StripePage;
+    try {
+      listed = readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading refunds for license keys: a page in another shape", error);
+      unsure = true;
+      break;
+    }
+    if (listed.unreadable) unsure = true;
+    const refunds: Record<string, unknown>[] = listed.rows;
     // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
     const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
     if (lost) lostRead = lost;
@@ -595,9 +613,23 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
 
       // Which sale that payment was: a checkout of this store, or an offer.
       const sales: { reference: string; products: string[] }[] = [];
-      const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
-      if (session && typeof session.id === "string") {
+      // The checkout list in its exact shape (rule 24): one in another shape, or its row not readable, is not "no
+      // checkout" (then read as some other payment, and marked read with its key still valid): the refund is left
+      // unread, the anchor kept, and the next run tells its sale.
+      let sessions: StripePage;
+      try {
+        sessions = readStripePage(await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`));
+      } catch (error) {
+        if (!(error instanceof StripeListUnreadable)) throw error;
+        sessions = { rows: [], unreadable: 1, hasMore: false, lastId: null };
+      }
+      if (sessions.unreadable) {
+        console.error("reading the checkout of a refunded payment for license keys: a list in another shape", intent);
+        unsure = true;
+        continue;
+      }
+      const session = sessions.rows[0];
+      if (session) {
         const meta = (session.metadata ?? {}) as Record<string, string>;
         // The product, the one ticked, and every product of a bundle among them.
         if (handles.has(meta.store ?? "")) sales.push({ reference: session.id, products: deliveredIds(meta) });
@@ -630,15 +662,27 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         continue;
       }
 
+      // Whether every key of the refund's sale was read: one that was not keeps the refund unread for the next run.
+      let told = true;
       for (const sale of sales) {
         for (const productId of sale.products) {
           const product = await readListing(store, productId);
           if (!product) continue;
           const [key] = await redisPipeline([["HGET", saleKey(store, product), sale.reference]]);
-          if (typeof key === "string" && key && (await setRevoked(store, product, key, true, "refund"))) revoked += 1;
+          // The sale's key read exactly: nothing (null) is no key; any other reply is unknown, never "no key", so the
+          // refund is not marked read below and the next run revokes it.
+          if (key !== null && (typeof key !== "string" || !key)) {
+            told = false;
+            continue;
+          }
+          if (typeof key === "string" && (await setRevoked(store, product, key, true, "refund"))) revoked += 1;
           // A buyer still waiting for a key from an empty pool is not given one.
           await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]);
         }
+      }
+      if (!told) {
+        unsure = true;
+        continue;
       }
       await redisPipeline([
         ["SADD", refundSeenKey(store), id],
@@ -646,12 +690,13 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       ]);
       newest = Math.max(newest, created);
     }
-    const last = refunds[refunds.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (!listed.hasMore) {
       complete = true;
       break;
     }
-    after = last.id;
+    // More pages, and no readable last row to read them from: not complete.
+    if (!listed.lastId) break;
+    after = listed.lastId;
   }
   // Only moved forward past what was read to the end: a run cut short by
   // its deadline, its pages or its lookups starts from the same place next

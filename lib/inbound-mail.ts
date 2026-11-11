@@ -124,7 +124,11 @@ export const SUPPORT_ANNOUNCED_DAILY = 1_000;
  * (SUPPORT_ANNOUNCED_DAILY - this) is the public share, with every announcement that shows no From. Resend's
  * email.received event is read for `data.from`; no dated Resend source could be read when this was written
  * (resend.com was out of the session's network), so an announcement without a From string is counted as public.
- * From is not authenticated: a forged From of any store owner, a free store included, spends the reserve.
+ * One address takes at most SUPPORT_CREATOR_SENDER_DAILY of it a day, and the public share past that, so one store
+ * owner's own address, a free store's included, cannot use it up (Claude 1's review of #3481). From is not
+ * authenticated: forged Froms of SUPPORT_ANNOUNCED_CREATOR_DAILY / SUPPORT_CREATOR_SENDER_DAILY different store owners'
+ * addresses, free stores included, still spend the reserve; a paying creator's mail is then held only once the public
+ * share is used up too.
  */
 export const SUPPORT_ANNOUNCED_CREATOR_DAILY = 200;
 /** Bytes of files sent on with them in a UTC day, together, before base64. */
@@ -503,8 +507,11 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
 
   // Mail the announcement does not show written to a store is our own support's: its announcements are
   // counted before the message is read at Resend, so held ones cannot cost a read each without end. An announcement
-  // whose From has a store (one EXISTS) takes the creators' reserve of the day's announcements; every other, and every
-  // one with no From, the public share, so made-up senders cannot hold a creator's mail unread.
+  // whose From has a store (one EXISTS) takes the creators' reserve of the day's announcements, at most
+  // SUPPORT_CREATOR_SENDER_DAILY a day for one address (past it, the public share), so using the reserve up takes many
+  // store owners' addresses, not one free store's (Claude 1's review of #3481, MEDIUM); every other, and every one with
+  // no From, the public share, so made-up senders cannot hold a creator's mail unread. With the reserve used up, a store
+  // owner's announcement still takes the public share while it has room (Claude 3's LOW 2).
   const creatorsDomain = creatorDomain(NIMBUS_FROM);
   const announced = typeof announcedTo === "string" ? [announcedTo] : list(announcedTo);
   if (!creatorsDomain || !announced.some((one) => (parseSender(one).address ?? "").toLowerCase().endsWith(`@${creatorsDomain}`))) {
@@ -519,21 +526,36 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
       if (announcedFromAddress && !out?.creator) {
         const owns = await ownsAStore(announcedFromAddress);
         if (owns === null) return "retry";
-        if (owns) pool = "creator";
+        if (owns) {
+          // One store owner's address takes at most SUPPORT_CREATOR_SENDER_DAILY of the reserve a day; past it, the public share.
+          const own = await essentialLimitState("support-announced-from", canonicalEmail(announcedFromAddress), SUPPORT_CREATOR_SENDER_DAILY, 86_400);
+          if (own === "unknown") return "retry";
+          if (own === "within") pool = "creator";
+        }
       }
     }
-    if (out?.[pool]) {
-      if (!out.told) out.told = await tellHeld(target, now, named);
-      return "held";
+    const take = (from: "public" | "creator") => from === "creator"
+      ? essentialLimitState("support-announced-creator", today, SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400)
+      : essentialLimitState("support-announced", today, SUPPORT_ANNOUNCED_DAILY - SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400);
+    // The pools this announcement may take, in turn: a store owner's the reserve, then the public share; anyone else's the public share.
+    const pools: ("public" | "creator")[] = pool === "creator" ? ["creator", "public"] : ["public"];
+    let admitted = false;
+    for (const each of pools) {
+      if (out?.[each]) continue;
+      const heard = await take(each);
+      if (heard === "unknown") return "retry";
+      if (heard === "within") {
+        admitted = true;
+        break;
+      }
+      console.warn(`a support message's announcement was past the day's ${each} announcements`);
+      const now_out = announcedOut?.day === today ? announcedOut : { day: today, public: false, creator: false, told: false };
+      now_out[each] = true;
+      announcedOut = now_out;
     }
-    const heard = pool === "creator"
-      ? await essentialLimitState("support-announced-creator", today, SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400)
-      : await essentialLimitState("support-announced", today, SUPPORT_ANNOUNCED_DAILY - SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400);
-    if (heard === "unknown") return "retry";
-    if (heard === "exceeded") {
-      console.warn(`a support message was held in Resend unread: past the day's ${pool} announcements`);
-      const now_out = out ?? { day: today, public: false, creator: false, told: false };
-      now_out[pool] = true;
+    if (!admitted) {
+      console.warn("a support message was held in Resend unread: past the day's announcements it may take");
+      const now_out = announcedOut?.day === today ? announcedOut : { day: today, public: false, creator: false, told: false };
       announcedOut = now_out;
       if (!now_out.told) now_out.told = await tellHeld(target, now, named);
       return "held";

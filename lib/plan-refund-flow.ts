@@ -28,8 +28,7 @@
  *      read, or an earlier request left a note): the note AND the stop stay,
  *      so no renewal can be charged before it is decided; the daily job ends
  *      the plan if the refund turns up, and takes the stop back only once it
- *      concludes none was made (SETTLE_SECONDS after the last try, from a
- *      reply that reads).
+ *      concludes none was made (SETTLE_SECONDS after the last try).
  * The plan is ended only on a refund Stripe says succeeded: a pending one
  * (it may still fail and give the money back to the charge) keeps the note
  * and the stop for the daily job. A refund whose answer was lost is found by
@@ -49,15 +48,15 @@ import { LOCK_SECONDS, type PlanRefundMade, refundPlanPayment } from "@/lib/plan
 import { dropPause } from "@/lib/plan-pause";
 import { syncAssistant } from "@/lib/assistant-billing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef } from "@/lib/store";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { planRefundLetter, planRefundNotMadeEndedLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
-import { ownField, plainObject, readStripePage, StripeListUnreadable, type StripePage } from "@/lib/stripe-list";
 import { randomBytes } from "node:crypto";
+import { types } from "node:util";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 const AT = "2024-06-20";
 /** The notes of plan refunds not finished yet: field a store's id, value a Note. */
@@ -106,6 +105,8 @@ export type Note = { s: string; at: number; t: number; m: 0 | 1; p?: NotedPart[]
 /** A charge the refund was about to give back, and how much (written before any money moves). */
 export type NotedPart = { c: string; a: number };
 
+const INVALID_NOTED_PARTS = Symbol("invalid noted plan-refund parts");
+
 export type PlanRefundFlow =
   /** Given back; `ended` false: the plan is ended by the daily job. `earlier`: given back by an earlier request. */
   | { ok: true; cents: number; currency: string; refundId: string; status: "succeeded" | "pending"; ended: boolean; earlier: boolean }
@@ -114,62 +115,67 @@ export type PlanRefundFlow =
 
 type Row = Record<string, unknown>;
 const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
-/**
- * A refund's amount as Stripe sends it: whole cents above zero, or null. Rule 24: an amount missing, as text, zero,
- * fractional or negative does not read, so a refund of ours carrying one is unknown, never a refund of $0 and never
- * "nothing given back" (which would take the stop back and tell the creator nothing was refunded).
- */
-const refundCents = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null);
-/** A refund's currency as Stripe sends it: three lowercase letters, or null (never assumed to be US dollars). */
-const refundCurrency = (value: unknown): string | null => (typeof value === "string" && /^[a-z]{3}$/.test(value) ? value : null);
-/** Our refund given back or on its way (not failed or canceled): the ones whose amounts say what was given. */
-const counts = (status: unknown): boolean => status === "succeeded" || status === "pending" || status === "requires_action";
-/** Every status Stripe gives a refund (the Refund object in Stripe's API reference; the set lib/refunds.ts reads). */
-const REFUND_STATES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
-/**
- * A refund row that reads (rule 24): its status one Stripe gives, its metadata an object (or null: none). A row that
- * does not read proves nothing: it may be ours, so a list holding one never says "none" or "partial".
- */
-const refundLegible = (row: Row): boolean => {
-  const status = ownField(row, "status");
-  const metadata = ownField(row, "metadata");
-  return typeof status === "string" && REFUND_STATES.has(status) && (metadata === null || plainObject(metadata));
-};
-/** Whether a readable refund row says it is this store's plan refund (`metadata.plan_refund`). */
-const oursFor = (row: Row, sid: string): boolean => {
-  const metadata = ownField(row, "metadata");
-  return plainObject(metadata) && ownField(metadata, "plan_refund") === sid;
-};
-/**
- * One page of refunds read exactly (lib/stripe-list.ts), or null when it is not a list at all. Stripe names every
- * list reply `"object": "list"`; a reply named anything else, or not named, is not that list, however empty its
- * `data` looks, so it never reads as "no refund" (Codex G on #3190, 6726655568).
- */
-function refundPage(listed: unknown): StripePage | null {
-  if (!plainObject(listed) || ownField(listed, "object") !== "list") return null;
-  try {
-    return readStripePage(listed, refundLegible);
-  } catch (error) {
-    if (error instanceof StripeListUnreadable) return null;
-    throw error;
-  }
-}
 
-function readNote(raw: unknown): Note | null {
+function readNote(raw: unknown): Note | typeof INVALID_NOTED_PARTS | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Partial<Note>;
     if (typeof v.s !== "string" || !SUBSCRIPTION_PATTERN.test(v.s) || typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at <= 0) return null;
     const t = typeof v.t === "number" && Number.isSafeInteger(v.t) && v.t >= v.at ? v.t : v.at;
+    const hasParts = Object.hasOwn(v, "p");
     const p = Array.isArray(v.p) && v.p.length && v.p.every((x) => x && typeof x.c === "string" && /^(ch|py)_[A-Za-z0-9]{6,128}$/.test(x.c) && Number.isSafeInteger(x.a) && x.a > 0) ? v.p : undefined;
+    // A legacy note may have no debt list. Once `p` is present, however, every entry is durable evidence of what
+    // remains owed. Treating a damaged present list as absent would fall back to a store-wide search and could
+    // mistake one refund for the whole multi-charge debt.
+    if (hasParts && !p) return INVALID_NOTED_PARTS;
     return { s: v.s, at: v.at, t, m: v.m === 1 ? 1 : 0, ...(p ? { p } : {}) };
   } catch {
     return null;
   }
 }
-const noteOf = async (sid: string): Promise<Note | null> => readNote((await redisPipeline([["HGET", ENDING_KEY, sid]]))[0]);
-const writeNote = (sid: string, note: Note) => redisPipeline([["HSET", ENDING_KEY, sid, JSON.stringify(note)]]);
-const dropNote = (sid: string) => redisPipeline([["HDEL", ENDING_KEY, sid]]);
+
+/** Plain owned array slots only: a getter, Proxy, hole or extra field is not Redis evidence. */
+function exactArray(value: unknown, expected?: number): unknown[] | null {
+  try {
+    if (types.isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return null;
+    const length = Object.getOwnPropertyDescriptor(value, "length");
+    if (!length || !Object.hasOwn(length, "value") || !Number.isSafeInteger(length.value) || length.value < 0 ||
+      (expected !== undefined && length.value !== expected) || Reflect.ownKeys(value).length !== length.value + 1) return null;
+    const out: unknown[] = [];
+    for (let i = 0; i < length.value; i += 1) {
+      const slot = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      out.push(slot.value);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+const oneNoteReply = async (command: (string | number)[], what: string): Promise<unknown> => {
+  const replies = exactArray(await redisPipeline([command]), 1);
+  if (!replies) throw new UnknownReplyError(what);
+  return replies[0];
+};
+
+const noteOf = async (sid: string): Promise<Note | null> => {
+  const raw = await oneNoteReply(["HGET", ENDING_KEY, sid], "the plan-refund recovery note");
+  if (raw === null) return null;
+  const note = readNote(raw);
+  if (!note || note === INVALID_NOTED_PARTS) throw new UnknownReplyError("the plan-refund recovery note");
+  return note;
+};
+
+const writeNote = async (sid: string, note: Note): Promise<void> => {
+  const count = await oneNoteReply(["HSET", ENDING_KEY, sid, JSON.stringify(note)], "the plan-refund recovery note write");
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("the plan-refund recovery note write");
+};
+
+const dropNote = async (sid: string): Promise<void> => {
+  const count = await oneNoteReply(["HDEL", ENDING_KEY, sid], "the plan-refund recovery note removal");
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("the plan-refund recovery note removal");
+};
 
 /** The subscription as Stripe has it now, or null when it cannot be read. */
 async function subscriptionOf(id: string): Promise<Row | null> {
@@ -202,14 +208,55 @@ async function takeBackStop(id: string): Promise<"live" | "ended" | null> {
   }
 }
 
-/** `cents` and `currency` are what was given back, as read exactly: a found refund never carries a guessed amount. */
-type Found = { kind: "found"; refund: Row; cents: number; currency: string; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
+type RefundRow = { id: string; charge: string | null; amount: number; currency: string; status: string; metadata: { plan_refund: string } };
+type Found = { kind: "found"; refund: RefundRow; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
+const ownValue = (row: unknown, key: string): unknown => {
+  if (!row || typeof row !== "object" || types.isProxy(row) || Array.isArray(row)) return undefined;
+  const field = Object.getOwnPropertyDescriptor(row, key);
+  return field && Object.hasOwn(field, "value") ? field.value : undefined;
+};
+
+/** Validate the complete observed page before any refund settles a plan or is said to be absent. */
+function refundPage(page: unknown, sid: string): { data: RefundRow[]; ids: string[]; more: boolean } | null {
+  try {
+    // Stripe names every list reply `"object": "list"`: a reply named anything else, or not named, is not that list,
+    // however empty its `data` looks, so it never reads as "no refund" (Codex G on #3190, 6726655568).
+    if (ownValue(page, "object") !== "list") return null;
+    const data = ownValue(page, "data"), more = ownValue(page, "has_more");
+    if (typeof more !== "boolean" || types.isProxy(data) || !Array.isArray(data)) return null;
+    const length = Object.getOwnPropertyDescriptor(data, "length")?.value;
+    if (!Number.isSafeInteger(length) || length > 100 || Object.getOwnPropertyNames(data).length !== length + 1 || Object.getOwnPropertySymbols(data).length) return null;
+    const refunds: RefundRow[] = [], ids = new Set<string>();
+    for (let i = 0; i < length; i++) {
+      const slot = Object.getOwnPropertyDescriptor(data, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      const row: unknown = slot.value;
+      const id = ownValue(row, "id"), metadata = ownValue(row, "metadata");
+      if (typeof id !== "string" || !REFUND_ID.test(id) || ids.has(id)) return null;
+      ids.add(id);
+      // Stripe permits null metadata/charge/status on unrelated refunds. Only ours can settle this plan.
+      if (metadata === null) continue;
+      if (!metadata || typeof metadata !== "object" || types.isProxy(metadata) || Array.isArray(metadata)) return null;
+      const owner = Object.getOwnPropertyDescriptor(metadata, "plan_refund");
+      if ((owner && (!Object.hasOwn(owner, "value") || typeof owner.value !== "string")) || (!owner && "plan_refund" in metadata)) return null;
+      if (!owner || owner.value !== sid) continue;
+      const charge = ownValue(row, "charge"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status");
+      if ((charge !== null && (typeof charge !== "string" || !OBJECT_ID.test(charge))) ||
+          typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1 ||
+          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
+          typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status)) return null;
+      // Snapshot only validated data; later projections never observe an unchecked amount.
+      refunds.push({ id, charge, amount, currency, status, metadata: { plan_refund: sid } });
+    }
+    return { data: refunds, ids: [...ids], more };
+  } catch { return null; }
+}
 
 /**
  * What became of the charges a note says were about to be given back, read from each charge's own refunds (ours:
  * `metadata.plan_refund` = the store's id): all given ("found", settled), all given or on their way ("found", not
  * settled), some given and some not ("partial": never ended on, never taken back, until it is whole), none, or not
- * readable, which includes one of ours given back or on its way whose amount or currency does not read.
+ * readable.
  */
 /**
  * The charges to judge a refund by: an earlier request's and this one's. A charge in both keeps the larger amount,
@@ -226,9 +273,10 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
   let succeededAll = true;
   let coveredAll = true;
   let anyOurs = false;
-  let unreadable = false;
-  let first: Row | null = null;
+  let first: RefundRow | null = null;
+  let currency: string | null = null;
   let total = 0;
+  const observed = new Set<string>();
   for (const part of parts) {
     let listed: Row;
     try {
@@ -237,33 +285,32 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
       console.error("reading a plan payment's refunds failed", error);
       return { kind: "unknown" };
     }
-    const page = refundPage(listed);
-    // A list in another shape, or one with more than one page (a charge has a few refunds), is not decided.
-    if (!page || page.hasMore) return { kind: "unknown" };
-    // A row that does not read may be ours: it keeps a "none" or a "partial" from being said (below).
-    if (page.unreadable > 0) unreadable = true;
-    // Rule 30: a charge's list holds that charge's refunds only; a row of another charge is not this one's to count.
-    if (page.rows.some((r) => ownField(r, "charge") !== part.c)) return { kind: "unknown" };
-    // Ours, but with an id that is not a refund's: not decided, never left out as not ours.
-    if (page.rows.some((r) => oursFor(r, sid) && !REFUND_ID.test(r.id))) return { kind: "unknown" };
-    const ours = page.rows.filter((r) => oursFor(r, sid));
-    // One of ours whose amount or currency does not read: not decided, never counted as nothing given (rule 24).
-    if (ours.some((r) => counts(r.status) && (refundCents(r.amount) === null || refundCurrency(r.currency) === null))) return { kind: "unknown" };
-    const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + (refundCents(r.amount) ?? 0), 0);
+    const page = refundPage(listed, sid);
+    if (!page || page.more) return { kind: "unknown" };
+    // A refund belongs to exactly one charge: contradictory pages cannot repay two debts.
+    for (const id of page.ids) {
+      if (observed.has(id)) return { kind: "unknown" };
+      observed.add(id);
+    }
+    if (page.data.some((r) => r.charge !== part.c)) return { kind: "unknown" };
+    const ours = page.data.filter((r) => r.metadata.plan_refund === sid);
+    for (const r of ours) {
+      currency ??= r.currency;
+      if (r.currency !== currency) return { kind: "unknown" };
+    }
+    const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + r.amount, 0);
     const given = sum((x) => x === "succeeded");
     const coming = sum((x) => x === "pending" || x === "requires_action");
+    if (!Number.isSafeInteger(given + coming) || !Number.isSafeInteger(part.a) || part.a < 1 || !Number.isSafeInteger(total + part.a)) return { kind: "unknown" };
     if (given + coming > 0) anyOurs = true;
     if (given < part.a) succeededAll = false;
     if (given + coming < part.a) coveredAll = false;
-    first ??= ours.find((r) => counts(r.status)) ?? null;
+    first ??= ours.find((r) => r.status === "succeeded" || r.status === "pending" || r.status === "requires_action") ?? null;
     total += part.a;
   }
-  if (unreadable && (!anyOurs || !coveredAll)) return { kind: "unknown" };
   if (!anyOurs) return { kind: "none" };
   if (!coveredAll || !first) return { kind: "partial" };
-  const currency = refundCurrency(first.currency);
-  if (currency === null) return { kind: "unknown" };
-  return { kind: "found", refund: { ...first, amount: total, status: succeededAll ? "succeeded" : "pending" }, cents: total, currency, settled: succeededAll };
+  return { kind: "found", refund: { ...first, amount: total, status: succeededAll ? "succeeded" : "pending" }, settled: succeededAll };
 }
 /**
  * Our refund for this store made between `at` and `until` (seconds), found by its metadata among the platform's
@@ -272,7 +319,7 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
  */
 export async function findPlanRefund(sid: string, at: number, until: number): Promise<Found> {
   let after = "";
-  let unreadable = false;
+  const observed = new Set<string>();
   for (let page = 0; page < MAX_REFUND_PAGES; page += 1) {
     let listed: Row;
     try {
@@ -283,21 +330,20 @@ export async function findPlanRefund(sid: string, at: number, until: number): Pr
       console.error("reading the platform's refunds failed", error);
       return { kind: "unknown" };
     }
-    const page = refundPage(listed);
-    if (!page) return { kind: "unknown" };
-    if (page.unreadable > 0 || page.rows.some((r) => oursFor(r, sid) && !REFUND_ID.test(r.id))) unreadable = true;
-    const ours = page.rows.find((r) => oursFor(r, sid) && REFUND_ID.test(r.id) && counts(r.status));
-    if (ours) {
-      // Ours, but its amount or currency does not read: not decided (rule 24), never ended on with a letter of $0.
-      const cents = refundCents(ours.amount);
-      const currency = refundCurrency(ours.currency);
-      if (cents === null || currency === null) return { kind: "unknown" };
-      return { kind: "found", refund: ours, cents, currency, settled: ours.status === "succeeded" };
+    const parsed = refundPage(listed, sid);
+    if (!parsed) return { kind: "unknown" };
+    for (const id of parsed.ids) {
+      if (observed.has(id)) return { kind: "unknown" };
+      observed.add(id);
     }
-    // "None" only from a list read to its end with every row readable (lib/stripe-list.ts).
-    if (!page.hasMore) return unreadable ? { kind: "unknown" } : { kind: "none" };
-    if (!page.lastId) return { kind: "unknown" };
-    after = page.lastId;
+    const data = parsed.data;
+    const ours = data.find((r) => r.metadata.plan_refund === sid &&
+      (r.status === "succeeded" || r.status === "pending" || r.status === "requires_action"));
+    if (ours) return ours.charge === null ? { kind: "unknown" } : { kind: "found", refund: ours, settled: ours.status === "succeeded" };
+    if (!parsed.more) return { kind: "none" };
+    const last = parsed.ids.at(-1);
+    if (!last) return { kind: "unknown" };
+    after = last;
   }
   // More refunds since the note than we read: not decided, never "none".
   return { kind: "unknown" };
@@ -380,12 +426,12 @@ async function tell(store: Store, r: { cents: number; currency: string; refundId
   await mail(store, planRefundLetter({ store: store.name || store.handle, cents: r.cents, currency: r.currency, pending: r.status === "pending", assistant: Boolean(store.assistantPlan?.active) }), `plan-refund-told:${r.refundId}`);
 }
 
-const refundOf = (found: Extract<Found, { kind: "found" }>, earlier: boolean, ended: boolean): PlanRefundFlow => ({
+const refundOf = (r: RefundRow, earlier: boolean, ended: boolean): PlanRefundFlow => ({
   ok: true,
-  cents: found.cents,
-  currency: found.currency,
-  refundId: String(found.refund.id),
-  status: found.refund.status === "succeeded" ? "succeeded" : "pending",
+  cents: r.amount,
+  currency: r.currency,
+  refundId: String(r.id),
+  status: r.status === "succeeded" ? "succeeded" : "pending",
   ended,
   earlier,
 });
@@ -456,7 +502,7 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // Not made now: one made before (an earlier request, or this one whose answer was lost) is looked for.
     const found = note.p ? await partsOutcome(store.sid, note.p) : await findPlanRefund(store.sid, note.at, nowSeconds);
     if (found.kind === "found") {
-      const result = refundOf(found, made.reason !== "failed", await finish(found.settled));
+      const result = refundOf(found.refund, made.reason !== "failed", await finish(found.settled));
       if (result.ok && result.ended) await tell(store, result);
       return result;
     }
@@ -481,14 +527,16 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
   // Rule 24: the notes and the job's place, each read exactly. One that does not read is unknown: nothing is decided
   // on a guess (the caller logs it and the next run tries again), never "no notes" or "start from the top".
-  const replies = repliesFor(await redisPipeline([["HGETALL", ENDING_KEY], ["GET", NEXT_KEY]]), 2);
-  if (!replies) throw new UnknownReplyError("the plan refund notes and the daily job's place");
-  const flat = stringList(replies[0]);
-  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(`HGETALL ${ENDING_KEY}`);
-  const last = replies[1];
+  const raw = await oneNoteReply(["HGETALL", ENDING_KEY], "the plan-refund recovery-note list");
+  const flat = exactArray(raw);
+  if (!flat || flat.length % 2 !== 0 || flat.some((value) => typeof value !== "string")) {
+    throw new UnknownReplyError("the plan-refund recovery-note list");
+  }
+  const place = exactArray(await redisPipeline([["GET", NEXT_KEY]]), 1);
+  const last = place ? place[0] : undefined;
   if (last !== null && typeof last !== "string") throw new UnknownReplyError(`GET ${NEXT_KEY}`);
   const all: [string, string][] = [];
-  for (let i = 0; i < flat.length; i += 2) all.push([flat[i], flat[i + 1]]);
+  for (let i = 0; i < flat.length; i += 2) all.push([String(flat[i]), String(flat[i + 1])]);
   // Fair turns: store ids in order, starting after the one looked at last, so every note has its turn however many
   // stay undecided (finding of Claude 5, 6732230896, and Codex G, G102-Q). Unread notes are never let go to make room.
   all.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -514,6 +562,11 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
     }
     try {
       const note = readNote(value);
+      if (note === INVALID_NOTED_PARTS) {
+        console.error(`plan-refund: store ${sid}'s recovery note has unknown debt evidence; it is retained`);
+        counts.left += 1;
+        continue;
+      }
       const store = note ? await storeForId(sid) : null;
       if (!note || !store) {
         if (!note) console.error(`plan-refund: an unreadable note for store ${sid} is dropped`);
@@ -526,7 +579,7 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         // Still pending: looked at again tomorrow, the stop kept, so nothing renews meanwhile.
         if (found.settled && (await endPlanNow(store, note.s))) {
           await dropNote(sid);
-          const result = refundOf(found, false, true);
+          const result = refundOf(found.refund, false, true);
           if (result.ok) await tell(store, result);
           counts.ended += 1;
         } else counts.left += 1;

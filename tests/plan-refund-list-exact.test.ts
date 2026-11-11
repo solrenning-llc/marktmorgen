@@ -62,7 +62,7 @@ async function main() {
   const ok = await shop();
   refund(ok.charge, ok.sid);
   const okFound = await partsOutcome(ok.sid, one(ok.charge));
-  is("an exact refund of ours on the charge: found, settled, its amount", [okFound.kind, okFound.kind === "found" && okFound.settled, okFound.kind === "found" && okFound.cents], ["found", true, 6_900]);
+  is("an exact refund of ours on the charge: found, settled, its amount", [okFound.kind, okFound.kind === "found" && okFound.settled, okFound.kind === "found" && okFound.refund.amount], ["found", true, 6_900]);
   is("the same refund found among the platform's", (await findPlanRefund(ok.sid, NOW - 60, NOW + 60)).kind, "found");
   const none = await shop();
   is("no refund on the charge: none", (await partsOutcome(none.sid, one(none.charge))).kind, "none");
@@ -80,7 +80,7 @@ async function main() {
   refund(both.charge, both.sid);
   refund(both2, both.sid);
   const bothFound = await partsOutcome(both.sid, [{ c: both.charge, a: 6_900 }, { c: both2, a: 6_900 }]);
-  is("each of two charges refunded: found, US$138.00", [bothFound.kind, bothFound.kind === "found" && bothFound.cents], ["found", 13_800]);
+  is("each of two charges refunded: found, US$138.00", [bothFound.kind, bothFound.kind === "found" && bothFound.refund.amount], ["found", 13_800]);
 
   part("Our refund on a charge, its status unreadable: unknown, never none");
   for (const [label, status] of [["missing", undefined], ["null", null], ["a word Stripe does not give", "processing"]] as const) {
@@ -128,7 +128,7 @@ async function main() {
   const onSecond = refund(second, pair.sid);
   reshape = (url) => (url.searchParams.get("charge") === pair.charge ? { object: "list", data: [onSecond], has_more: false } : undefined);
   const crossed = await partsOutcome(pair.sid, [{ c: pair.charge, a: 6_900 }, { c: second, a: 6_900 }]);
-  is("the first charge's reply lists the second charge's refund: unknown, never found US$138.00", [crossed.kind, crossed.kind === "found" && crossed.cents], ["unknown", false]);
+  is("the first charge's reply lists the second charge's refund: unknown, never found US$138.00", [crossed.kind, crossed.kind === "found" && crossed.refund.amount], ["unknown", false]);
   reshape = null;
 
   part("The daily job: a refund of ours whose status does not read keeps the note and the stop");

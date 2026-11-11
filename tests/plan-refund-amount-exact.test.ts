@@ -8,8 +8,9 @@
  *     refunded) or "partial";
  *   - findPlanRefund() handing over our refund with an amount or currency that does not read, so the plan is ended
  *     and the confirmation letter says "We refunded $0.00" (or names US dollars it did not read).
- * Healthy controls: an exact refund is found with its cents and currency; a refund of another store, or one of ours
- * that failed, is not ours to count whatever its amount; no refund at all is still "none".
+ * Healthy controls: an exact refund is found with its cents and currency; a refund of another store
+ * is not ours to count whatever its amount; one of ours that failed with an amount that does not read is unknown
+ * (it is not read); no refund at all is still "none".
  * Nothing real is reached (tests/plan-refund-stripe-world.ts).
  */
 import { store as redis } from "./redis-stub";
@@ -56,7 +57,7 @@ async function main() {
   is("another store's refund on the charge, its amount unreadable: not ours to count, none", (await partsOutcome(other.sid, [{ c: other.charge, a: 6_900 }])).kind, "none");
   const failed = await shop();
   refund(failed.charge, failed.sid, { status: "failed", amount: undefined });
-  is("our refund that failed, its amount unreadable: nothing given, none", (await partsOutcome(failed.sid, [{ c: failed.charge, a: 6_900 }])).kind, "none");
+  is("our refund that failed, its amount unreadable: not read, so unknown (main's exact refund rows), never \"nothing given\"", (await partsOutcome(failed.sid, [{ c: failed.charge, a: 6_900 }])).kind, "unknown");
 
   part("Our refund on a charge, its amount unreadable: unknown, never none or partial");
   for (const [label, amount] of [["missing", undefined], ["null", null], ["a text", "6900"], ["zero", 0], ["fractional", 6_900.5], ["negative", -6_900], ["not finite", Number.POSITIVE_INFINITY]] as const) {

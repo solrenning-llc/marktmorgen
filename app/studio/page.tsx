@@ -662,11 +662,6 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one.",
   },
-  // A store in its closing keeps its address until its records are erased (lib/store.ts closingUnderway).
-  closing: {
-    title: "A closing store keeps its address",
-    body: "Your store's plan has ended, so the store is closing, and its sign-in address cannot change while it closes. Nothing was changed. To keep the store and move it, start a plan again before its closing day.",
-  },
   none: {
     title: "There is no store to move yet",
     body: "Take your address first. Until then, simply log in with whichever email you prefer.",

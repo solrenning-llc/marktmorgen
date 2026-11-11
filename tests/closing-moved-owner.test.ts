@@ -19,7 +19,6 @@
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
-import { POST as addressRoute } from "@/app/api/store/address/route";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { BATCH_KEY, DUE_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
@@ -188,20 +187,14 @@ async function main(): Promise<void> {
   is("the move throws an unknown reply", threw, "UnknownReplyError");
   is("nothing moved", [traces(H, "unread-h-new@example.com", h.sid, h.handle).atOld, traces(H, "unread-h-new@example.com", h.sid, h.handle).atNew, redis.run(["GET", idKey(h.sid)])], [true, false, H]);
 
-  part("The routes: asking for a move and tapping its link both say the store is closing");
+  part("The route: tapping a move link for a closing store says so, and nothing moves");
   redis.clear();
   const R = "route-r@example.com";
   const R2 = "route-r-new@example.com";
   const r = await endedStore(R, "router");
   const session = await linkSession(R);
-  const moveLinks = () => {
-    const page = redis.run(["SCAN", "0", "MATCH", "nl:auth:move:*", "COUNT", 10_000]) as [string, string[]];
-    return page[1].length;
-  };
-  const asked = await addressRoute(form(`${ORIGIN}/api/store/address`, { email: R2 }, `nl_session=${session}`));
-  is("asked from the studio: refused before any link is made", [asked.headers.get("location"), moveLinks()], [`${ORIGIN}/studio?address=closing`, 0]);
-  // A link asked for before the plan ended (written here as lib/auth.ts sendMoveLink writes one) is refused at the tap,
-  // under the store's lock.
+  // A move link (written here as lib/auth.ts sendMoveLink writes one): the tap is refused under the store's lock, and
+  // the ways in that moved first are put back (app/api/auth/move, undo).
   const token = hex("closing-moved-owner-link");
   await redis.pipeline([["SET", `nl:auth:move:${hex(`nimbus-auth-move:${token}`).slice(0, 40)}`, JSON.stringify({ from: R, to: R2, session }), "EX", 900]]);
   const tapped = await moveRoute(form(`${ORIGIN}/api/auth/move`, { token }));

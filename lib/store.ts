@@ -2172,7 +2172,7 @@ const isScore = (reply: unknown): boolean =>
  * change meanwhile, and a store whose plan runs enters neither line. A line that does not read is never "not in it"
  * (rule 24): it throws, and nothing moves.
  */
-export async function closingUnderway(store: Store): Promise<boolean> {
+async function closingUnderway(store: Store): Promise<boolean> {
   if (!store.subscriptionActive && closesStore(Date.parse(store.planEndedAt))) return true;
   const ref = storeRef(store);
   const scores = repliesFor(await redisPipeline([["ZSCORE", CLOSING_FINAL_LINE, ref], ["ZSCORE", CLOSING_WALK_LINE, ref]]), 2);

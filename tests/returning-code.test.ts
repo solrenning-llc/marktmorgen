@@ -109,7 +109,7 @@ async function main(): Promise<void> {
   is("a typed code is made the shape codes have", [readTypedCode(" thankyou "), readTypedCode("<b>"), readTypedCode(undefined)], ["THANKYOU", "", ""]);
   is("a code that ended is not found", [returningCodeFor([VIP, ENDED], "oldthanks", 1_790_000_100), returningCodeFor([VIP, ENDED], "oldthanks", 1_790_000_099)?.code], [null, "OLDTHANKS"]);
   is("the decision: unknown is never a discount", [returningDecision(VIP, null), returningDecision(VIP, new Set()), returningDecision(null, new Set(["x"])), returningDecision(VIP, new Set(["x"])).ok], [{ ok: false, reason: "unknown" }, { ok: false, reason: "bought" }, { ok: false, reason: "code" }, true]);
-  is("only the five reasons are read back from an address", [readRefusal("bought"), readRefusal("open"), readRefusal(null)], ["bought", null, null]);
+  is("only the five reasons are read back from an address", [readRefusal("bought"), readRefusal("proof"), readRefusal("email"), readRefusal("open"), readRefusal(null)], ["bought", "proof", null, null, null]);
   is("offered only by a store that can sell, with a code still running, on a price the creator set", [
     returningCodeOffered({ returningCodes: [VIP], stripeAccountId: "acct_x" }, {}, 1),
     returningCodeOffered({ returningCodes: [VIP], stripeAccountId: null }, {}, 1),

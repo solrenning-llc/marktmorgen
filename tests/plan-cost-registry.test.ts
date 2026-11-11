@@ -46,7 +46,7 @@ import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./pl
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
-import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
+import { NEXT_OFFER_CHOICES, NEXT_OFFER_PRODUCTS, NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
@@ -267,6 +267,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.equal(CART_OFFER_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
   // A code only for people who bought here before reads the same purchases the same way (lib/returning-code.ts): the same ceiling holds it.
   assert.equal(RETURNING_CODE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
+  // Its one read of the library link that proves the email (libraryOwner, one GET of one address) is taken after the same
+  // units and fits inside the product and choice reads NEXT_OFFER_READ prices and this check never makes (review of #3666).
+  assert.ok(NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES >= 1 && NEXT_OFFER_PRODUCTS * 16_384 >= 4_096, "the returning code's link read has room inside NEXT_OFFER_READ");
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);

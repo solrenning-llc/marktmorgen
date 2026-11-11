@@ -9,16 +9,18 @@
  * is never a promotion code Stripe's own box could take. It is the creator's
  * coupon on their own Stripe account (what it takes off, how many times it
  * can be used and its end date are Stripe's, checked by Stripe), with the
- * word a buyer types kept here, on the store. The buyer types the code and
- * their email on the store's page, before the checkout; the server reads
- * what that email bought in this store (lib/next-offer.ts, ownedHere) and
- * opens the checkout with the coupon, for that email only, or refuses the
+ * word a buyer types kept here, on the store. The buyer types the code on
+ * the store's page, before the checkout, with the link we emailed to their
+ * library as the proof of their email (never a typed address: review of
+ * #3666); the server reads what that proved email bought in this store
+ * (lib/next-offer.ts, ownedHere) and opens the checkout with the coupon,
+ * for that email only, or refuses the
  * code with a plain sentence. Anything that cannot be read is a refusal:
  * an unknown purchase history is never a discount.
  *
- * The typed email is not kept by Marktmorgen: it is read once, in the
- * request, and is the address the checkout opens with on Stripe's page,
- * where the buyer would have typed it anyway.
+ * The proved email is not kept again by Marktmorgen: it is read once, from
+ * the library link, in the request, and is the address the checkout opens
+ * with on Stripe's page, where the buyer would have typed it anyway.
  *
  * Pure, so the store record and the page can import it.
  */
@@ -106,17 +108,20 @@ export function returningCodeFor(codes: readonly ReturningCode[], typed: string,
 }
 
 /**
- * Why a code typed with an email is not taken:
+ * Why a code is not taken:
  *   - "code": no such code in this store, or it has ended;
- *   - "email": the email is not one;
- *   - "bought": the email has no earlier purchase in this store;
+ *   - "proof": no library link with it, or one we did not send or that has
+ *     ended: the same answer whatever email anyone typed, so it never says
+ *     whether someone bought here;
+ *   - "bought": the proved email has no earlier purchase in this store (said
+ *     only to whoever opened that email's own link);
  *   - "unknown": what the email bought could not be read in full, or the
  *     store's month of requests is used: never taken on a guess;
  *   - "busy": too many tries from this connection in a short time.
  */
-export type ReturningRefusal = "code" | "email" | "bought" | "unknown" | "busy";
+export type ReturningRefusal = "code" | "proof" | "bought" | "unknown" | "busy";
 
-export const RETURNING_REFUSALS: readonly ReturningRefusal[] = ["code", "email", "bought", "unknown", "busy"];
+export const RETURNING_REFUSALS: readonly ReturningRefusal[] = ["code", "proof", "bought", "unknown", "busy"];
 
 /** A refusal carried back to the page in its address, or null for anything else. */
 export function readRefusal(raw: string | null | undefined): ReturningRefusal | null {

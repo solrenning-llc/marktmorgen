@@ -99,10 +99,11 @@ export async function POST(request: NextRequest) {
   // version of the sentence this code shows. Checked again where the charge
   // is built, so nothing digital is opened without it.
   let digitalConsent: DigitalConsent | null = null;
-  // A code only for people who already bought here, and the email it is for
-  // (lib/returning-code.ts): read only when a code was typed; never kept.
+  // A code only for people who already bought here, and the library link that
+  // proves whose email it is (lib/returning-code.ts): read only when a code was
+  // typed; never kept. A typed email is never taken as the proof (review of #3666).
   let typedCode = "";
-  let typedEmail = "";
+  let proof = "";
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
   try {
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
     typedCode = read("rcode", 40).trim();
-    typedEmail = typedCode ? read("remail", MAX_EMAIL_LENGTH + 1) : "";
+    proof = typedCode ? read("rproof", 80) : "";
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -211,10 +212,10 @@ export async function POST(request: NextRequest) {
   let returning: Extract<ReturningCheck, { ok: true }> | null = null;
   const refusedCode = (reason: string) => away(`/@${store.handle}/p/${product.id}?returning=${reason}#returning`);
   if (typedCode) {
-    // Each try reads what an email bought from the creator's Stripe account:
-    // a few per connection, so nobody can try address after address.
+    // Each try reads one library link and what its email bought from the
+    // creator's Stripe account: a few per connection and store.
     if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return refusedCode("busy");
-    const checked = await checkReturningCode(store, typedCode, typedEmail);
+    const checked = await checkReturningCode(store, typedCode, proof);
     if (!checked.ok) return refusedCode(checked.reason);
     returning = checked;
   }

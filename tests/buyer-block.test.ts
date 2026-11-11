@@ -11,7 +11,7 @@ import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, setContact, setInboxSetting, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { BLOCK_ENTRY_BYTES, BLOCK_REASON_MAX, MAX_BLOCKED, blockKey, blockPerson, blockedState, forgetBlockedPerson, mayWrite, personMark, unblockPerson } from "@/lib/buyer-block";
-import { fileContact, handOver, readInbox, startChat, visitorSend } from "@/lib/inbox";
+import { fileContact, fileOrderProblem, handOver, readInbox, startChat, visitorSend } from "@/lib/inbox";
 import { sendContact } from "@/lib/store-contact";
 import { dataUsed } from "@/lib/store-data";
 import { POST as inboxRoute } from "@/app/api/store/inbox/route";
@@ -81,6 +81,14 @@ async function main(): Promise<void> {
   is("someone else still can", (await startChat({ store, email: KIND, name: "", text: "Hello there", ip: "10.0.0.4" })).ok, true);
 
   part("What is never stopped: the buyer's protections");
+  {
+    const filed = await fileOrderProblem({ store, email: RUDE, text: "Problem with an order: I did not get it." });
+    is("an order case is filed for a blocked person", filed.state, "filed");
+    const caseId = filed.state === "filed" ? filed.id : "";
+    const [caseRaw] = await redis.pipeline([["GET", `nl:inbox:${store.statsId}:c:${caseId}`]]);
+    const caseToken = (JSON.parse(String(caseRaw)) as { token: string }).token;
+    is("and they can still answer in their own case", (await visitorSend(caseToken, "Here is my order number again.", async () => store)).ok, true);
+  }
   is("the withdrawal notice and the order-problem report are filed (fileContact and fileOrderProblem do not read the list)", await fileContact({ store, email: RUDE, name: "", text: "I withdraw from order cs_test_x." }), true);
 
   part("The list cannot be read: nobody is let in");
@@ -100,7 +108,9 @@ async function main(): Promise<void> {
 
   part("Limits");
   is("a reason is at most BLOCK_REASON_MAX characters", (await blockPerson(store, "long@example.com", "y".repeat(500)), (await blockedState(store, "long@example.com")) as { reason?: string }).reason?.length, BLOCK_REASON_MAX);
-  for (let i = 0; i < MAX_BLOCKED - 1; i++) await redis.pipeline([["HSET", blockKey(store.sid!), `fill${i}`, JSON.stringify({ r: "", at: 1 })]]);
+  for (let i = 0; i < MAX_BLOCKED - 2; i++) await redis.pipeline([["HSET", blockKey(store.sid!), `fill${i}`, JSON.stringify({ r: "", at: 1 })]]);
+  is("two blocks at once with one place left: one is let in, the other refused", (await Promise.all([blockPerson(store, "race-a@example.com", ""), blockPerson(store, "race-b@example.com", "")])).sort(), ["blocked", "many"]);
+  is("never more than MAX_BLOCKED", Number((await redis.pipeline([["HLEN", blockKey(store.sid!)]]))[0]), MAX_BLOCKED);
   is("at most MAX_BLOCKED a store", await blockPerson(store, "one-more@example.com", ""), "many");
 
   part("Deleting the person");

@@ -18,9 +18,9 @@ const src = readFileSync("components/page-order-editor.tsx", "utf8");
 const up = src.slice(src.lastIndexOf("<button", src.indexOf("aria-label={`Move ${about?.label} up`}")), src.indexOf("</button>", src.indexOf("aria-label={`Move ${about?.label} up`}")));
 const down = src.slice(src.lastIndexOf("<button", src.indexOf("aria-label={`Move ${about?.label} down`}")), src.indexOf("</button>", src.indexOf("aria-label={`Move ${about?.label} down`}")));
 
-is("Move up is never turned off for being first: it says so instead", /disabled=\{[^}]*i === 0/.test(up), false);
+is("Move up is never turned off for being first: it says so instead", /(?<![-\w])disabled=\{[^}]*i === 0/.test(up), false);
 is("it is marked as unavailable there, and still takes the focus", /aria-disabled=\{i === 0 \|\| undefined\}/.test(up), true);
-is("Move down likewise at the end", !/disabled=\{[^}]*i === list\.length - 1/.test(down) && /aria-disabled=\{i === list\.length - 1 \|\| undefined\}/.test(down), true);
+is("Move down likewise at the end", !/(?<![-\w])disabled=\{[^}]*i === list\.length - 1/.test(down) && /aria-disabled=\{i === list\.length - 1 \|\| undefined\}/.test(down), true);
 is("both still look unavailable there", [up, down].every((b) => /aria-disabled:opacity-40/.test(b)), true);
 is("a polite status line says what happened", /<p role="status" className="sr-only">\{said\}<\/p>/.test(src), true);
 is("a move says where the part went", src.includes("`Moved ${name} to place ${to + 1} of ${list.length}.`"), true);

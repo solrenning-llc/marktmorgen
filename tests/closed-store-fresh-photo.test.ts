@@ -259,6 +259,43 @@ async function main(): Promise<void> {
     }
   }
 
+  part("Codex on #3643 (MEDIUM, lib/closed-store-data.ts:817): an entry never confirmed out never starts a walk on a later run either");
+  {
+    redis.clear();
+    const email = "stale@example.com";
+    await makeStore(email, "staleentry");
+    const otherSid = "d".repeat(32);
+    const ownerKey = String(redis.keys().find((key) => key.startsWith("nl:store:owner:") && String(redis.run(["GET", key])).includes(email)));
+    const otherBreak = JSON.stringify({ subscription: "sub_staleother", customer: "cus_staleother", paymentMethod: "pm_staleother", tier: "creator", from: 2_000_000_000, until: 2_005_000_000, told: 0 });
+    const otherLast = "1900000001";
+    inWindow = async () => {
+      const record = JSON.parse(String(redis.run(["GET", ownerKey])));
+      redis.run(["SET", ownerKey, JSON.stringify({ ...record, sid: otherSid, planEndedAt: "" })]);
+      redis.run(["SET", `nl:pause:${email}`, otherBreak]);
+      redis.run(["SET", `nl:pause:last:${email}`, otherLast]);
+    };
+    const finished: string[] = [];
+    const run = (now: number) => eraseClosed(Date.now() + 30_000, async (entry) => {
+      finished.push(entry.ref);
+    }, now);
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    // Every taking-out of the entry answers what EVAL never says, in this run and in the next ones.
+    withdrawUnknown = 99;
+    const first = await run(T);
+    is("the first run leaves the entry in the batch and starts no walk", [redis.run(["HGET", BATCH_KEY, email]) !== null, first.started, first.done], [true, false, false]);
+    const later: { started: boolean }[] = [];
+    for (const at of [T + WALK_GAP_MS + 1, T + 2 * WALK_GAP_MS + 2, T + 3 * WALK_GAP_MS + 3]) later.push(await run(at));
+    withdrawUnknown = 0;
+    is("no later run starts a walk from the entry never confirmed out", later.map((r) => r.started), [false, false, false]);
+    is("the other store's break and last break are kept on every later run", [redis.run(["GET", `nl:pause:${email}`]), redis.run(["GET", `nl:pause:last:${email}`])], [otherBreak, otherLast]);
+    is("the other store's record is kept", (await storeForEmail(email))?.sid ?? null, otherSid);
+    is("nothing is finished under the other store's ref", finished, []);
+    const healed = await run(T + 4 * WALK_GAP_MS + 4);
+    is("once Redis answers, the entry is taken out and no walk starts for it", [redis.run(["HGET", BATCH_KEY, email]), healed.started, healed.done], [null, false, true]);
+    is("and still the other store's break is kept, and nothing finished", [redis.run(["GET", `nl:pause:${email}`]), finished], [otherBreak, []]);
+  }
+
   part("Rule 24 (Claude 6's P8 on #3643): an addresses' hold and id release that Redis did not confirm keep the record, and the store waits a walk");
   redis.clear();
   {

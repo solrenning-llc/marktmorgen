@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   is("it says what was done and where", [alert?.text.includes(url), alert?.text.includes("taken off the store")], [true, true]);
   is("it never quotes the reporter's description", alert?.text.includes(DESCRIPTION), false);
   is("it says not to open the content, and that no AI agent may look at it", [alert?.text.includes("Do not open, download, forward or describe"), alert?.text.includes("AI")], [true, true]);
-  is("it names the CyberTipline and the procedure", [alert?.text.includes("report.cybertip.org"), alert?.text.includes("docs/incident-response.md")], [true, true]);
+  is("it names the CyberTipline and the procedure", [alert?.text.includes("NCMEC's CyberTipline (report.cybertip.org)"), alert?.text.includes("docs/incident-response.md")], [true, true]);
   sent.length = 0;
   await alertOwner({ kind: "child_safety", url: "https://elsewhere.example/page" }, "no_product", Date.UTC(2026, 10, 9, 18));
   is("an address outside Marktmorgen is named, never shown, in the urgent email", [sent.at(-1)?.text.includes("elsewhere.example"), sent.at(-1)?.text.includes("an address outside Marktmorgen")], [false, true]);
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
 
   part("Where people read it");
   const page = readFileSync("app/report/page.tsx", "utf8") + readFileSync("components/report-form.tsx", "utf8");
-  is("the form offers both kinds and points to the CyberTipline", [page.includes("child_safety"), page.includes("intimate_image"), page.includes("report.cybertip.org")], [true, true, true]);
+  is("the form offers both kinds and points to the CyberTipline", [page.includes("child_safety"), page.includes("intimate_image"), page.includes('href="https://report.cybertip.org"')], [true, true, true]);
   is("it asks people not to send or describe the images", page.includes("Do not upload, attach or describe"), true);
   is("it does not promise more than is done: an intimate image is removed within 48 hours", [page.includes("we act on those at once"), page.includes("removed within 48")], [false, true]);
   is("the form note does not promise more either, and an intimate-image confirmation does not speak of a product", [page.includes("We take the product off the store at once"), page.includes("We remove the image within 48 hours of a complete request")], [false, true]);

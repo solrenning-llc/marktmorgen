@@ -14,15 +14,15 @@
  * Refused, before anything is built or anything reaches Stripe: a bundle
  * holding a held product, and a checked checkout box whose product is held or
  * is a bundle holding one. A hold that cannot be read refuses too (rule 24).
- * The product itself is held only when hidden, which canSellProduct already
- * refuses at every door. One pipeline of GETs, only when the checkout carries
- * a bundle or a checked box (heldInSale).
+ * The product itself carrying its own keep mark is refused too: its hidden
+ * write may not have landed (Claude 6's MEDIUM on #3471), and canSellProduct
+ * reads only `hidden`. One pipeline of GETs per checkout (heldInSale).
  */
 import { heldInSale } from "@/lib/child-safety";
 import { createCheckout } from "@/lib/store-checkout";
 
 /** Why a checkout was refused for a product kept for a report: as heldInSale answers. */
-export type HeldWhy = "bundle" | "box" | "unavailable";
+export type HeldWhy = "held" | "bundle" | "box" | "unavailable";
 
 /** Thrown before anything reaches Stripe, so no unit is held and nothing is charged (lib/stock.ts withdraws on it). */
 export class HeldInSaleError extends Error {

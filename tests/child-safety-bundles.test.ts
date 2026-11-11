@@ -175,6 +175,24 @@ async function main(): Promise<void> {
   is("the month's tries were not counted", await applies(), 0);
   is("a page not held still takes it", await send(savedBlocksRoute as Handler, "saved-blocks", { action: "apply", id: section.section.id, pages: [partD] }), [200, "ok"]);
 
+  part("Kept for a report while its hidden write did not land (Claude 6's MEDIUM on #3471, 6759114338)");
+  {
+    // holdReported writes the keep mark, then hides the product; when the second write fails the product carries the
+    // mark and is still listed. Every door reads the product's own mark, not only its bundle's and its boxes'.
+    const store = await current();
+    const tag = store.statsId || `h:${store.handle}`;
+    const kept = await make("item-kept-not-hidden");
+    await redis.pipeline([["SET", `nl:csa:keep:${tag}:${kept}`, "1"]]);
+    is("the product is still listed (not hidden)", (await listing(kept)).hidden ?? false, false);
+    is("the single checkout refuses it", await sale(kept, []), "held");
+    is("the cart refuses it, nothing reaches Stripe", await cart([kept, partD]), ["refused", 0]);
+    await redis.pipeline([["SET", `nl:csa:keep:${tag}:${kept}`, "garbled"]]);
+    is("its own mark unreadable: the single checkout says unavailable", await sale(kept, []), "unavailable");
+    is("its own mark unreadable: the cart refuses", await cart([kept, partD]), ["refused", 0]);
+    await redis.pipeline([["DEL", `nl:csa:keep:${tag}:${kept}`]]);
+    is("with no mark it sells again", [await sale(kept, []), (await cart([kept, partD]))[0]], [null, "opened"]);
+  }
+
   part("A hold that cannot be read refuses (rule 24)");
   const store = await current();
   const tag = store.statsId || `h:${store.handle}`;

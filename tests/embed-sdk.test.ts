@@ -327,7 +327,9 @@ async function main(): Promise<void> {
   const card = read("app/embed/[handle]/[product]/page.tsx");
   const form = read("app/embed/[handle]/join/page.tsx");
   const opener = read("lib/embed-open.ts");
-  is("an open by the script is read and counted on the server", [/readScriptOpen\(store, mode, query\)/.test(card), /readScriptOpen\(store, mode, query\)/.test(form), /recordVisit\(store, ip\)/.test(opener)], [true, true, true]);
+  // TODOS-51 (owner, 9 November 2026): an open is read on the server, but its visit is counted only by the page
+  // itself, through the host's browser check (app/api/store/hit); the server never counts it, since any program can ask.
+  is("an open by the script is read on the server, and its visit is counted by the page, never there", [/readScriptOpen\(store, mode, query\)/.test(card), /readScriptOpen\(store, mode, query\)/.test(form), /recordVisit|countVisit|after\(/.test(opener), /open \? <StoreBeacon handle=\{store\.handle\} front=\{false\} \/> : null/.test(card), /<StoreBeacon handle=\{store\.handle\} front=\{false\} \/>/.test(form)], [true, true, false, true, true]);
   is("it rests with the store, and is limited per connection", [/isResting\(store\)/.test(opener), /withinLimit\("embed-open"/.test(opener)], [true, true]);
   is("a frame on an unlisted site buys nothing", /if \(mode === "overlay" && !site\) return \{ \.\.\.base, live: false, reason: "site" \}/.test(opener), true);
   is("the card messages only a listed site, while it can buy", /const messaging = open\?\.mode === "overlay" && open\.live && open\.site \? open\.site : null;/.test(card), true);

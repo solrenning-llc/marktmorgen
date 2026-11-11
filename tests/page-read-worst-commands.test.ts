@@ -24,7 +24,7 @@ import { DEPTH_FIELDS_MAX } from "@/lib/page-depth-rules";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { POST as readRoute } from "@/app/api/store/read/route";
-import { COMMANDS, readBeaconCost } from "./traffic-cost";
+import { COMMANDS, READ_CEILINGS, readBeaconCost } from "./traffic-cost";
 import { COMMAND, COST_LINES, readingsAtCeiling } from "./plan-cost-registry";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, publicVisitLimit, visitsIncluded } from "@/lib/traffic-rules";
 import { TIERS } from "@/lib/plan";
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   is("(a reading is drawn one in READ_SAMPLE)", READ_SAMPLE, 8);
 
   // One reading first, to learn the two records' keys from the capped count the route sends.
-  let keys: string[] = [];
+  const keys: string[] = [];
   const spy = redis.pipeline;
   (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: Command[]) => {
     // The blocks' record is the capped count's first; the time's is the record beside it, ending in ":t".
@@ -166,6 +166,7 @@ async function main(): Promise<void> {
     // Every ceiling a store's tokens can carry: its setup, its trial and each tier's (lib/traffic-rules.ts, requestLimitFor).
     const ceiling = (visits: number, extra: number) => Math.ceil(publicVisitLimit(REQUESTS_PER_VISIT * visits + extra) / READ_SAMPLE);
     const ceilings = new Set([ceiling(SETUP_VISITS, SETUP_EXTRA_REQUESTS), ceiling(TRIAL_VISITS, TRIAL_EXTRA_REQUESTS), ...TIERS.map((t) => ceiling(visitsIncluded(t), EXTRA_REQUESTS[t]))]);
+    is(`READ_CEILINGS counts them (${ceilings.size})`, READ_CEILINGS, ceilings.size);
     const line = COST_LINES.find((l) => l.id === "page-readings")!;
     for (const tier of TIERS) {
       const readings = readingsAtCeiling(REQUESTS_PER_VISIT * visitsIncluded(tier) + EXTRA_REQUESTS[tier]);

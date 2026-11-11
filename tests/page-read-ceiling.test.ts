@@ -234,12 +234,14 @@ async function main(): Promise<void> {
   is("the same token again counts nothing, in either record", [twice.visitors, twice.stopped, twice.time], [1, { blok0001: 1 }, { "@t2": 1 }]);
   is("and costs no command at all on the server that spent it (Claude 5 on #2571)", [again, againSent], [0, []]);
   // The most one reading counted sends, each a command of the stand-in's pipeline (a script is one): the mark;
-  // the window's count of readings and its expiry; the reading's count, one script, and each record's expiry the
-  // first time it is written (two). No read of the store, no public request, no place in the month's free pool.
-  const MOST = 1 + 2 + 3;
+  // the window's count of readings and its expiry; the reading's count, the blocks' script and the time's HINCRBY
+  // beside it (two, since 11 November 2026: the time's record needs no capped count, so the script's HLEN and
+  // HMGET for it are no longer billed, tests/page-read-worst-commands.test.ts), and each record's expiry the first
+  // time it is written (two). No read of the store, no public request, no place in the month's free pool.
+  const MOST = 1 + 2 + 2 + 2;
   const steady = await counted(() => sale(slotted(statsId, PRODUCT, store), "blok0001", 42));
   console.log(`  commands: first reading ${first}, a later one ${steady}, a repeat ${again}`);
-  is("a reading counted is bounded: the mark, the count of readings, the reading's count", [first <= MOST, steady <= 1 + 2 + 1, MOST <= COMMANDS.readBeacon], [true, true, true]);
+  is("a reading counted is bounded: the mark, the count of readings, the reading's count", [first <= MOST, steady <= 1 + 2 + 2, MOST <= COMMANDS.readBeacon], [true, true, true]);
   is("and in that order: the mark, then the count with its expiry, then the reading", firstSent.slice(0, 3), ["SET", "INCR", "EXPIRE"]);
   const mark = `nl:read:once:${readTokenPass(token, PRODUCT)!.nonce}`;
   const ttl = Number(redis.run(["TTL", mark]));

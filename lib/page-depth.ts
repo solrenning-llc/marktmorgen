@@ -62,27 +62,31 @@ export async function countDepth(statsId: string | null, productId: string, bloc
   const field = depthField(blockId, whyNot, video);
   if (!statsId || !isRedisConfigured() || !field) return;
   const k = key(statsId, productId);
-  // How long they stayed, in its range (639 [GL7](25)): counted in the same command, in a record of its own,
-  // so a full blocks' record can never push it, or a block, into the overflow field.
+  // How long they stayed, in its range (639 [GL7](25)): counted in the same pipeline, in a record of its own, so a
+  // full blocks' record can never push it, or a block, into the overflow field. Its field is always one of the
+  // TIME_RANGES names (timeField), so its record never holds more than those: a plain HINCRBY, with no capped count
+  // (#2571, the review at 5d245b24, MEDIUM 1: the capped count billed its HLEN and, at six ranges, its HMGET).
   const time = timeField(seconds);
   try {
     if (time) {
       const tk = timeKey(statsId, productId);
       const both: (string | number)[][] = [["EXPIRE", k, KEEP_SECONDS], ["EXPIRE", tk, KEEP_SECONDS]];
-      let reply: unknown;
+      let replies: unknown;
       try {
-        [reply] = await redisPipeline([cappedCountCommand([{ key: k, most: DEPTH_FIELDS_MAX }, { key: tk, most: TIME_RANGES.length }], [{ hash: 0, field, by: 1 }, { hash: 1, field: time, by: 1 }])]);
+        replies = await redisPipeline([cappedCountCommand([{ key: k, most: DEPTH_FIELDS_MAX }], [{ hash: 0, field, by: 1 }]), ["HINCRBY", tk, time, 1]]);
       } catch {
-        reply = undefined;
+        replies = undefined;
       }
-      // Only the two counts sent, each a whole number, say which record is new. Any other answer (lost after the
-      // write, empty, cut short) may have made them: both are given their expiry again, never none (Claude 5 on #2571).
-      const exact = Array.isArray(reply) && reply.length === 2 && reply.every((v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0);
+      // Only the two answers sent, the block's count (a whole number, 0 when it went to the overflow field) and the
+      // range's (at least 1), say which record is new. Any other answer (lost after the write, empty, cut short) may
+      // have made them: both are given their expiry again, never none (Claude 5 on #2571).
+      const whole = (v: unknown, least: number) => typeof v === "number" && Number.isSafeInteger(v) && v >= least;
+      const exact = Array.isArray(replies) && replies.length === 2 && Array.isArray(replies[0]) && replies[0].length === 1 && whole(replies[0][0], 0) && whole(replies[1], 1);
       if (!exact) {
         await redisPipeline(both);
         return;
       }
-      const [count, timeCount] = reply as number[];
+      const [[count], timeCount] = replies as [number[], number];
       const expiries = [...(count === 1 ? [both[0]] : []), ...(timeCount === 1 ? [both[1]] : [])];
       if (expiries.length) await redisPipeline(expiries);
       return;

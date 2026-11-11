@@ -107,8 +107,8 @@ import { SETUP_STORAGE_BYTES, SETUP_VIDEO_HOURS, TRIAL_STORAGE_BYTES } from "@/l
 import { CLOSING_DAYS, KEEP_NOTHING_FROM, WARN_WEEK_DAYS, keptRoomFor } from "@/lib/plan-closing-rules";
 import { LONGEST_PAUSE_MONTHS, PAID_MONTHS_BEFORE_PAUSE } from "@/lib/plan-pause-rules";
 import { REQUESTS_PER_VISIT, SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, VISITS_INCLUDED, VISIT_CENTS_PER_THOUSAND_OVER } from "@/lib/traffic-rules";
-import { readBeaconCost, visitCost } from "./traffic-cost";
-import { readingsAtCeiling } from "./plan-cost-registry";
+import { visitCost } from "./traffic-cost";
+import { readingsCost } from "./plan-cost-registry";
 import { ORDERS_INCLUDED, ORDER_CENTS_PER_THOUSAND_OVER, TRIAL_ORDERS, freeCopiesLimitFor } from "@/lib/order-rules";
 import { coveredByShare } from "@/lib/orders";
 import { SHARE_PROVED_IN_TEST_MODE, shareOf } from "@/lib/platform-share";
@@ -354,11 +354,11 @@ test("a store that pays nothing can cost next to nothing", () => {
   // And the visits its pages are shown for before they rest.
   const visited = SETUP_VISITS * visitCost();
   // And its page readings, at their own ceiling (lib/page-read.ts), now priced apart from a visit.
-  const read = readingsAtCeiling(REQUESTS_PER_VISIT * SETUP_VISITS + SETUP_EXTRA_REQUESTS) * readBeaconCost();
+  const read = readingsCost(REQUESTS_PER_VISIT * SETUP_VISITS + SETUP_EXTRA_REQUESTS);
   assert.ok(kept + watched + visited + read < 0.4, `a store with no plan can cost $${(kept + watched + visited + read).toFixed(2)} a month`);
   // A free trial lasts two weeks with a card on file. All it may keep,
   // every hour it may play and every visit it may have, in one month:
-  const trial = (TRIAL_STORAGE_BYTES / GB) * STORAGE_PER_GB + (TRIAL_VIDEO_SECONDS / 3600) * hourCost() + TRIAL_VISITS * visitCost() + readingsAtCeiling(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * readBeaconCost();
+  const trial = (TRIAL_STORAGE_BYTES / GB) * STORAGE_PER_GB + (TRIAL_VIDEO_SECONDS / 3600) * hourCost() + TRIAL_VISITS * visitCost() + readingsCost(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS);
   assert.ok(trial < 8, `a trial at every limit costs $${trial.toFixed(2)} in a month`);
 });
 

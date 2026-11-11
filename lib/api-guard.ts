@@ -149,6 +149,9 @@ async function apiKeyed(
   if (!found) return unauthorized();
   // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
   // the key is real and kept, so its holder is told why and what to do.
+  // A key whose state did not read (a hold this code does not know, a team record in another shape) is refused
+  // as unavailable, like unknown reply evidence: its own words already say to try again, never that it is paused.
+  if (found.paused && found.why === "unknown") return apiError(503, "unavailable", KEY_PAUSED_WORDS.unknown);
   if (found.paused) return apiError(403, "key_paused", KEY_PAUSED_WORDS[found.why ?? "rule"]);
   if (!(await withinLimit("api", found.id, API_RATE, 60))) {
     return apiError(429, "rate_limited", `At most ${API_RATE} requests a minute per key. Try again in a minute.`, { "Retry-After": "60" });

@@ -73,6 +73,16 @@ is("a ready choice", cleanJoinAnswer(on, { v: 1, choice: "learn", comment: "" })
 is("\"Something else\" with a comment", cleanJoinAnswer(on, { v: 1, choice: "other", comment: "  To   start a podcast  " }), { ok: true, answer: { v: 1, choice: "other", label: JOIN_NAMES.other, comment: "To start a podcast" } });
 is("a comment is cut to the limit", (cleanJoinAnswer(on, { v: 1, choice: "other", comment: "a".repeat(MAX_JOIN_COMMENT + 50) }) as { answer: { comment: string } }).answer.comment.length, MAX_JOIN_COMMENT);
 is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, { v: 1, choice: "other", comment: "see https://spam.example/x or mail me@x.com please" }) as { answer: { comment: string } }).answer.comment, "see or mail please");
+{
+  // A huge comment with no spaces is read only up to a bounded head, so the link and address patterns stay fast
+  // (Claude 3 and Codex G on #3652: 80,000 characters took about 10 s of CPU).
+  const started = performance.now();
+  const huge = cleanJoinAnswer(on, { v: 1, choice: "other", comment: "a".repeat(200_000) }) as { answer: { comment: string } };
+  is("a 200,000-character comment with no spaces is cleaned in well under a second", performance.now() - started < 500, true);
+  is("and is still cut to the limit", huge.answer.comment.length, MAX_JOIN_COMMENT);
+  const tailAddress = cleanJoinAnswer(on, { v: 1, choice: "other", comment: `${"https://x.example/a ".repeat(120)}${"b".repeat(5)} me@x.com ok` }) as { answer: { comment: string } };
+  is("an address past many links is still taken out, never left half", /@/.test(tailAddress.answer.comment), false);
+}
 is("a comment that is not text is none", (cleanJoinAnswer(on, { v: 1, choice: "learn", comment: 5 }) as { answer: { comment: string } }).answer.comment, "");
 is("a choice that is not offered", cleanJoinAnswer(on, { v: 1, choice: "bogus", comment: "" }), { ok: false, problem: "choice" });
 is("a ready choice the creator dropped", cleanJoinAnswer(editJoinSurvey(on, { hopes: ["learn"] }), { v: 2, choice: "community", comment: "" }), { ok: false, problem: "choice" });

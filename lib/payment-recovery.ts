@@ -486,9 +486,15 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
     if (notHandledFrom[notHandledFrom.length - 1] !== from) notHandledFrom.push(from);
   };
 
-  for (const { sub, card, customer, email, payAt, from } of due) {
+  for (let dueIndex = 0; dueIndex < due.length; dueIndex += 1) {
+    const { sub, card, customer, email, payAt, from } = due[dueIndex];
     if (Date.now() >= deadline) {
       notHandled(from);
+      // If time ran out before this member was tried, keep the cursor moving to the next due member. When this
+      // member is at the start of the walk, stepping past just it lets the other due members from the pages we
+      // already read be handled on the next run; this one is read again when the list comes round.
+      const next = due[dueIndex + 1];
+      if (next) notHandled(next.from);
       break;
     }
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";

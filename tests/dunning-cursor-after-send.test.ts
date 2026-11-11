@@ -30,6 +30,8 @@ const pastDue = new Map<string, Record<string, unknown>[]>();
 const broken = new Set<string>();
 /** Accounts whose past-due page takes the rest of the run. */
 const slow = new Set<string>();
+/** Active-account cursor whose page read takes the rest of the run. */
+const slowActive = new Map<string, string>();
 /** The run's time runs out as the next email is sent. */
 let outOfTimeOnSend = false;
 /** Memberships told to keep the card that pays (before a first failed-payment email). */
@@ -57,6 +59,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const after = url.searchParams.get("starting_after");
     const from = after ? all.findIndex((s) => s.id === after) + 1 : 0;
     const limit = Number(url.searchParams.get("limit")) || 10;
+    if (status === "active" && slowActive.get(account) === after) {
+      slowActive.delete(account);
+      shift += 60_000;
+    }
     return answer({ object: "list", data: all.slice(from, from + limit), has_more: from + limit < all.length });
   }
   if (/^\/subscriptions\/sub_\w+$/.test(path) && method === "POST") {
@@ -147,6 +153,7 @@ function reset(): void {
   pastDue.clear();
   broken.clear();
   slow.clear();
+  slowActive.clear();
   outOfTimeOnSend = false;
 }
 
@@ -167,6 +174,22 @@ async function main(): Promise<void> {
     await run();
     await run();
     is("never twice, for either", [told("cardtime-0010@example.com"), told("cardtime-0020@example.com")], [1, 1]);
+  }
+
+  part("Card pages read after the deadline still leave due members for the next run");
+  reset();
+  {
+    const product = await makeStore("cards-page-time@example.com", "cardpagetime", "acct_1TestCardPageTime01", true);
+    const expiring = Array.from({ length: 49 }, (_, i) => (i + 1) * 10);
+    active.set("acct_1TestCardPageTime01", running("cardpagetime", product, 600, expiring));
+    slowActive.set("acct_1TestCardPageTime01", "sub_cardpagetimeRun0399");
+    await run();
+    is("the fifth page finishes after the deadline, so no late email is sent", mails.length, 0);
+    await run();
+    is("the other due members from the pages already read are handled next", expiring.slice(1).every((i) => told(`cardpagetime-${String(i).padStart(4, "0")}@example.com`) === 1), true);
+    await run();
+    await run();
+    is("every due member from that read window is eventually told exactly once", expiring.every((i) => told(`cardpagetime-${String(i).padStart(4, "0")}@example.com`) === 1), true);
   }
 
   part("Card notices: whether a card update waits cannot be read for one member");

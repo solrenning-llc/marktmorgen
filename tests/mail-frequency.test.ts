@@ -156,6 +156,24 @@ async function main(): Promise<void> {
   reset();
   is("an unreadable time: nobody sent, nothing asked", [(await admit(["a@x.test"], Number.NaN)).unknown, sent.length], [["a@x.test"], 0]);
 
+  part("One person in any letter case is one person (Claude 1 on #3636)");
+  reset();
+  is("sent once", (await admit(["Ann@Example.test"], T0)).send, ["Ann@Example.test"]);
+  is("an hour later, the same address in lower case: held", (await admit(["ann@example.test"], T0 + HOUR)).held, ["ann@example.test"]);
+
+  part("A record of the send that did not come back: the person is not sent, so never twice (Claude 1 on #3636)");
+  reset();
+  watch((commands) => (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:mgap:last:")) ? Promise.resolve(commands.map(() => null)) : null));
+  is("the record refused: the person is unknown, not sent", await admit(["b@x.test"], T0), { send: [], held: [], unknown: ["b@x.test"], repeated: 0, refused: false });
+  reset();
+  watch((commands) => (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:mgap:last:")) ? Promise.reject(new Error("connection lost")) : null));
+  is("the record lost: the person is unknown, not sent", (await admit(["b@x.test"], T0)).send, []);
+
+  part("Named among the records about a person, gone by itself (Claude 1 on #3636)");
+  const { PERSON_DATA } = await import("@/lib/person-data");
+  const line = PERSON_DATA.find((d) => d.file === "lib/mail-frequency.ts");
+  is("lib/person-data.ts names it, kept no longer than the longest gap", [line?.how, line && "days" in line ? line.days : null], ["expires", MAIL_GAP_KEEP_SECONDS / 86_400]);
+
   done();
 }
 

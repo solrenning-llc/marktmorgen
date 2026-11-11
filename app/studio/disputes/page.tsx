@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { STORE_ID_PATTERN } from "@/lib/store";
+import { can } from "@/lib/team-roles";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { DisputePurchaseReviewPanel } from "@/components/dispute-purchase-review";
@@ -29,7 +30,8 @@ export default async function StudioDisputesPage({ searchParams }: Params) {
         <h1 className="t-h2 mt-3">Review one disputed purchase</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">Check a payment on this store&apos;s Stripe account before preparing your response. This page only reads the purchase record; it does not send evidence or promise a result.</p>
         <DisputePurchaseReviewPanel connected={Boolean(store.stripeAccountId)} />
-        <p className="mt-8 text-sm text-ink-soft">Payments that never went through are elsewhere: <Link href={studioPath(store, "", "declines")} className="underline underline-offset-4">Payments that did not go through</Link></p>
+        {/* Only the account's owner may open that page (it reads the whole Stripe account), so only the owner is shown the link. */}
+        {can(view.role, "payments") ? <p className="mt-8 text-sm text-ink-soft">Payments that never went through are elsewhere: <Link href={studioPath(store, "", "declines")} className="underline underline-offset-4">Payments that did not go through</Link></p> : null}
       </main>
     </StudioStorePin>
   </div>;

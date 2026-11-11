@@ -9,8 +9,12 @@
 
 export type DeclineGroup = "funds" | "expired" | "typo" | "confirm" | "bank" | "fraud" | "network" | "unsupported" | "other";
 
-/** Stripe's reasons, as they are grouped here. Anything not listed is "other". */
-const REASONS: Record<string, DeclineGroup> = {
+/**
+ * Stripe's reasons, as they are grouped here. Anything not listed is "other".
+ * A Map, so a reason is only ever one of these keys, never a name every
+ * object inherits ("constructor", "__proto__").
+ */
+const REASONS: ReadonlyMap<string, DeclineGroup> = new Map(Object.entries({
   insufficient_funds: "funds",
   card_velocity_exceeded: "funds",
   withdrawal_count_limit_exceeded: "funds",
@@ -44,7 +48,7 @@ const REASONS: Record<string, DeclineGroup> = {
   card_not_supported: "unsupported",
   transaction_not_allowed: "unsupported",
   not_permitted: "unsupported",
-};
+} satisfies Record<string, DeclineGroup>));
 
 /** What each group is called and what usually helps, in plain words. */
 export const DECLINE_WORDS: Record<DeclineGroup, { title: string; help: string }> = {
@@ -59,11 +63,15 @@ export const DECLINE_WORDS: Record<DeclineGroup, { title: string; help: string }
   other: { title: "Other reasons", help: "Stripe gave another reason, shown with each. Its dashboard explains them." },
 };
 
-export type DeclineRow = { reason: string; cents: number; currency: string; created: number };
+/**
+ * One declined charge. `cents` and `currency` are null together when Stripe
+ * did not give both readably: unknown, never 0 and never a guessed currency.
+ */
+export type DeclineRow = { reason: string; cents: number | null; currency: string | null; created: number };
 
 /** The group a reason belongs to. */
 export function declineGroup(reason: string): DeclineGroup {
-  return REASONS[reason] ?? "other";
+  return REASONS.get(reason) ?? "other";
 }
 
 /** The reason a declined charge gives, as Stripe writes it; "" when it gives none. */
@@ -73,20 +81,22 @@ export function reasonOf(charge: { outcome?: unknown; failure_code?: unknown }):
   return /^[a-z_]{1,60}$/.test(raw) ? raw : "";
 }
 
-export type DeclineSummary = { group: DeclineGroup; count: number; amounts: { currency: string; cents: number }[]; reasons: string[] }[];
+/** Per group: how many, the amounts per currency, how many had no readable amount (`unknown`), and Stripe's reasons. */
+export type DeclineSummary = { group: DeclineGroup; count: number; amounts: { currency: string; cents: number }[]; unknown: number; reasons: string[] }[];
 
-/** The declines by group, most first; each with its amounts per currency (never added across currencies) and Stripe's reasons in it. */
+/** The declines by group, most first; each with its amounts per currency (never added across currencies, an unknown amount never added as 0) and Stripe's reasons in it. */
 export function declineSummary(rows: readonly DeclineRow[]): DeclineSummary {
-  const by = new Map<DeclineGroup, { count: number; amounts: Map<string, number>; reasons: Set<string> }>();
+  const by = new Map<DeclineGroup, { count: number; amounts: Map<string, number>; unknown: number; reasons: Set<string> }>();
   for (const row of rows) {
     const group = declineGroup(row.reason);
-    const entry = by.get(group) ?? { count: 0, amounts: new Map(), reasons: new Set() };
+    const entry = by.get(group) ?? { count: 0, amounts: new Map(), unknown: 0, reasons: new Set() };
     entry.count += 1;
-    entry.amounts.set(row.currency, (entry.amounts.get(row.currency) ?? 0) + row.cents);
+    if (row.cents === null || row.currency === null) entry.unknown += 1;
+    else entry.amounts.set(row.currency, (entry.amounts.get(row.currency) ?? 0) + row.cents);
     if (row.reason) entry.reasons.add(row.reason);
     by.set(group, entry);
   }
   return [...by.entries()]
-    .map(([group, e]) => ({ group, count: e.count, amounts: [...e.amounts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, cents]) => ({ currency, cents })), reasons: [...e.reasons].sort() }))
+    .map(([group, e]) => ({ group, count: e.count, amounts: [...e.amounts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, cents]) => ({ currency, cents })), unknown: e.unknown, reasons: [...e.reasons].sort() }))
     .sort((a, b) => b.count - a.count || a.group.localeCompare(b.group));
 }

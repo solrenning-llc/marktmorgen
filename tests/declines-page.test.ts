@@ -9,6 +9,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import StudioDeclinesPage from "@/app/studio/declines/page";
 import { DECLINE_PAGES } from "@/lib/declines";
+import { formatMoney } from "@/lib/money";
 import { can } from "@/lib/team-roles";
 import { STORE, world } from "./declines-page-world";
 import { done, is, part } from "./check";
@@ -65,7 +66,7 @@ async function main(): Promise<void> {
   part("An amount Stripe did not give is never $0.00 (Codex H MEDIUM 1)");
   pages = [{ object: "list", has_more: false, data: [charge("ch_noamount", { amount: null, failure_code: "expired_card" }), charge("ch_eur", { currency: "eur", failure_code: "expired_card" })] }];
   const unknown = await render();
-  is("the readable amount in its own currency, the other said to be unknown, no $0.00 and no USD guess", [unknown.includes("€49.00"), unknown.includes("1 without a readable amount"), unknown.includes("$0.00"), unknown.includes("$49.00")], [true, true, false, false]);
+  is("the readable amount in its own currency, the other said to be unknown, no $0.00 and no USD guess", [unknown.includes(formatMoney(4900, "eur")), unknown.includes("1 without a readable amount"), unknown.includes(formatMoney(0, "usd")), unknown.includes(formatMoney(4900, "usd"))], [true, true, false, false]);
   is("both declines counted", unknown.includes("2 declined payments in the last 30 days."), true);
 
   part("The table scrolls by keyboard too (Claude 5 LEVE 3, WCAG 2.1.1)");

@@ -36,6 +36,8 @@
  *     gone, and its row goes with it.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { CREATOR } from "@/lib/community";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -44,6 +46,8 @@ const DEVICES_SLOT = "cm:ps";
 import { type Subscription, readSubscription, sendPush, vapidKeys, vapidKeysFor } from "@/lib/web-push";
 
 const pushKey = (id: string, who: string) => `nl:cm:${id}:ps:${who}`;
+/** Where lib/community.ts keeps the member records (its membersKey): only read here, never written. */
+const membersKey = (id: string) => `nl:cm:${id}:m`;
 
 /** How many devices one member may have listening. */
 export const MAX_MEMBER_DEVICES = 5;
@@ -104,12 +108,17 @@ export async function rememberDevice(id: string, who: string, raw: unknown, room
   const subscription = readSubscription(raw);
   if (!subscription) return "invalid";
   const key = pushKey(id, who);
-  const [size, held] = await redisPipeline([
+  // Read in their exact shape (CX-123 rule 24): the count a number, the device kept or nil. Anything else throws, and
+  // nothing is written: a count that does not read is never under the limit.
+  const replies = repliesFor(await redisPipeline([
     ["HLEN", key],
     ["HGET", key, subscription.endpoint],
-  ]);
-  const already = typeof held === "string" && held.length > 0;
-  if (!already && Number(size) >= MAX_MEMBER_DEVICES) return "full";
+  ]), 2);
+  const size = replies ? countOf(replies[0]) : null;
+  const held = replies ? replies[1] : undefined;
+  if (size === null || (held !== null && (typeof held !== "string" || !held))) throw new UnknownReplyError("a member's push devices");
+  const already = typeof held === "string";
+  if (!already && size >= MAX_MEMBER_DEVICES) return "full";
   const device: MemberDevice = { ...subscription, kid: keys.kid, addedAt: Date.now() };
   const value = JSON.stringify(device);
   // A new device takes room in the store's data room first; one known already is rewritten in its place.
@@ -138,19 +147,85 @@ export async function renewDevice(id: string, who: string, oldEndpoint: string, 
 export async function forgetDevice(id: string, who: string, endpoint: string, room?: DataStore): Promise<void> {
   if (!endpoint) return;
   const [held] = room ? await redisPipeline([["HGET", pushKey(id, who), endpoint]]) : [null];
-  const [removed] = await redisPipeline([["HDEL", pushKey(id, who), endpoint]]);
-  if (room && Number(removed) === 1 && typeof held === "string") await giveData(room, [{ slot: DEVICES_SLOT, bytes: dataBytes([endpoint, held], 1) }]);
+  // Said done only when the deletion is answered in its exact shape (rule 24): "turn this off" is never confirmed unwritten.
+  const removed = countOf(repliesFor(await redisPipeline([["HDEL", pushKey(id, who), endpoint]]), 1)?.[0]);
+  if (removed === null) throw new UnknownReplyError("forgetting a member's push device");
+  if (room && removed === 1 && typeof held === "string") await giveData(room, [{ slot: DEVICES_SLOT, bytes: dataBytes([endpoint, held], 1) }]);
 }
 
-/** Forgets every device of one member: what leaving, or being removed, writes. */
+/**
+ * Forgets every device of one member: what leaving, or being removed, is meant to write. Nothing calls it yet (the
+ * studio's removal does not); until it does, stillMembers keeps a member who was taken out from being notified.
+ */
 export async function forgetMember(id: string, who: string): Promise<void> {
   await redisPipeline([["DEL", pushKey(id, who)]]);
 }
 
-/** How many devices this member has listening. */
+/**
+ * How many devices this member has listening, read in its exact shape (CX-123 rule 24): the copy of their data states it
+ * (lib/person-copy.ts, devicesNotified), so a reply of another shape throws UnknownReplyError, as allNoticesOf does,
+ * rather than say 0. Only no key at all is 0.
+ */
 export async function deviceCount(id: string, who: string): Promise<number> {
-  const [n] = await redisPipeline([["HLEN", pushKey(id, who)]]);
-  return Number(n) || 0;
+  const n = countOf(repliesFor(await redisPipeline([["HLEN", pushKey(id, who)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("a member's push device count");
+  return n;
+}
+
+/**
+ * How many devices to show this member: deviceCount, or null when it does not read (shown as unknown, never as 0 and
+ * never as an error page). For the notifications page and the push switch's answer, which only show it.
+ */
+export async function devicesShown(id: string, who: string): Promise<number | null> {
+  return deviceCount(id, who).catch(() => null);
+}
+
+declare const stillIn: unique symbol;
+/** The keys stillMembers let through: the only list pushMembers takes, so a push never skips the check. */
+export type StillIn = readonly string[] & { readonly [stillIn]: true };
+
+/**
+ * One mark per key, decided inside Redis from the member record as lib/community.ts readMember reads it (its own
+ * key, and a mute and a removal each a yes or a no): "y" in, "r" taken out, "n" no record, "?" a record of any other
+ * shape. Only the marks cross the wire, never the records (a record at its largest is about nine kilobytes).
+ */
+const STILL_IN = [
+  "-- marktmorgen:community-still-in:v1",
+  'local rows = redis.call("HMGET", KEYS[1], unpack(ARGV))',
+  "local out = {}",
+  "for i = 1, #ARGV do",
+  "  local raw, mark = rows[i], \"?\"",
+  "  if raw == false then",
+  "    mark = \"n\"",
+  "  else",
+  "    local ok, record = pcall(cjson.decode, raw)",
+  "    if ok and type(record) == \"table\" and record.k == ARGV[i] and type(record.removed) == \"boolean\" and type(record.muted) == \"boolean\" then",
+  "      if record.removed then mark = \"r\" else mark = \"y\" end",
+  "    end",
+  "  end",
+  "  out[i] = mark",
+  "end",
+  "return table.concat(out)",
+].join("\n");
+
+/**
+ * Of `keys`, those a notice or a push may still reach: the creator, and each member whose record reads in its exact
+ * shape and was not taken out. A device belongs to a member, and stops belonging the moment they stop being one: a
+ * key whose record Redis says is not there (never in, or erased) is left out, one taken out by the creator is left
+ * out, and a reply or a record of any other shape throws UnknownReplyError (CX-123 rule 24), so the caller reaches
+ * nobody rather than take the unknown for a member. One command, whatever the number of keys, and one short mark
+ * per key back (STILL_IN).
+ */
+export async function stillMembers(id: string, keys: readonly string[]): Promise<StillIn> {
+  const unique = [...new Set(keys)].filter(Boolean);
+  const asked = unique.filter((key) => key !== CREATOR);
+  if (!asked.length) return unique as unknown as StillIn;
+  const marks = repliesFor(await redisPipeline([["EVAL", STILL_IN, 1, membersKey(id), ...asked]]), 1)?.[0];
+  if (typeof marks !== "string" || marks.length !== asked.length || !/^[ynr]*$/.test(marks)) {
+    throw new UnknownReplyError("the community members a notice reaches");
+  }
+  const here = new Set(asked.filter((_, i) => marks[i] === "y"));
+  return unique.filter((key) => key === CREATOR || here.has(key)) as unknown as StillIn;
 }
 
 export type MemberAlert = { title: string; body: string; url: string; tag?: string };
@@ -166,16 +241,16 @@ function payloadFor(alert: MemberAlert): string {
 }
 
 /**
- * Tells everybody named, on every device they have.
+ * Tells everybody stillMembers let through, on every device they have. It takes that answer as it is, so the caller
+ * that asked who is still in (lib/community-notify.ts tell) does not have the records read twice.
  *
  * Never throws into the caller. A comment lost because a notification failed
  * would be a lost comment; a notification that never arrived is a smaller
  * loss than the thing it was about. A device the push service says is gone is
  * forgotten rather than tried again.
  */
-export async function pushMembers(id: string, to: string[], alert: MemberAlert): Promise<number> {
+export async function pushMembers(id: string, who: StillIn, alert: MemberAlert): Promise<number> {
   if (!vapidKeys()) return 0;
-  const who = [...new Set(to)].filter(Boolean);
   if (!who.length) return 0;
   const body = payloadFor(alert);
   let sent = 0;

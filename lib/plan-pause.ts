@@ -67,7 +67,6 @@ import {
 } from "@/lib/plan-pause-rules";
 
 const DAY = 86_400;
-/** Days a restart that failed for a reason other than the card is tried again. */
 
 /** Whether Stripe refused because of the card or the bank, which trying again will not change. */
 function declined(error: unknown): boolean {
@@ -681,7 +680,7 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
     }
     if (!record) {
       // The explicit pause miss above proves this is only a stale due member.
-      if (!(await forgetObserved(ref, stored.raw, record.funding ? "forget" : "claimed"))) { counts.failed += 1; continue; }
+      if (!(await forgetObserved(ref, stored.raw))) { counts.failed += 1; continue; }
       counts.dropped += 1;
       continue;
     }
@@ -770,7 +769,7 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       // A provider response is not an acknowledged store write. Retain the
       // exact pause and due evidence when the nullable writer cannot confirm.
       if (!saved) { counts.failed += 1; continue; }
-      if (!(await forgetObserved(ref, stored.raw))) { counts.failed += 1; continue; }
+      if (!(await forgetObserved(ref, stored.raw, record.funding ? "forget" : "claimed"))) { counts.failed += 1; continue; }
       await tell(store, "restarted", record).catch(() => false);
       counts.restarted += 1;
     } catch (error) {

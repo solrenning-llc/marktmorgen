@@ -73,7 +73,7 @@ export async function checkGrowthAndContact({owner,LOCAL,abStore,second,contactT
    await contact.emulateMedia({reducedMotion:"reduce"});
    const url=LOCAL+"/studio/people?store="+abStore+"&p="+contactToken;
    await contact.goto(url,{waitUntil:"domcontentloaded",timeout:60000});
-   const company=contact.getByLabel("Company",{exact:true});
+   const company=contact.getByRole("textbox",{name:"Company",exact:true});
    await company.waitFor();
    const matched=contact.getByText("Contact fields match the last confirmed values.",{exact:true});
    const savedValue="Confirmed company "+width;

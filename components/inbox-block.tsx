@@ -19,7 +19,8 @@ const REFUSED: Record<string, string> = {
  * Block the person of an inbox conversation in the store's messages
  * (567 [GD1] (f), unit 2; the rules are lib/buyer-block.ts). It first checks
  * whether they are blocked; what cannot be read is said as not known, with
- * "Check again", never as "not blocked". The creator's note is theirs alone.
+ * "Check again", never as "not blocked". The note is seen only by the creator
+ * and whoever on their team may answer buyers.
  * Reports about an order the person paid for, and a withdrawal, still reach
  * the creator, and the box says so before anything is done. Every result is
  * said in a live region; blocking can be undone at once.
@@ -106,7 +107,7 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
               They can no longer write to you in your store&apos;s chat or contact form. A report about an order they paid for, and a withdrawal from an order, still reach you.
             </p>
             <label className="block">
-              <span className="field-label">Your note (only you see it, optional)</span>
+              <span className="field-label">Your note (only you and your team see it, optional)</span>
               <input className="field" maxLength={NOTE_MAX} value={note} onChange={(event) => setNote(event.target.value)} />
             </label>
             <button type="submit" className={control} disabled={busy} aria-busy={busy}>
@@ -124,7 +125,8 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
           </button>
         </>
       ) : null}
-      <p className="sr-only" role="status" aria-live="polite">
+      {/* Seen and heard: a refusal leaves the screen as it was, so the sentence is the only sign (3.3.1). */}
+      <p className={said ? "mt-2 text-sm font-semibold" : undefined} role="status" aria-live="polite">
         {said}
       </p>
     </div>

@@ -44,6 +44,7 @@ export default async function PoliciesPage({ params }: Params) {
 
   // As the store's other public pages: the drawing is one of the window's requests (isResting), and the listings
   // it reads are paid for before they are read (paidPolicyInput); past the window, the resting page, nothing read.
+  if (store.suspended) return <StoreResting store={store} suspended />;
   if (await isResting(store)) return <StoreResting store={store} />;
   const input = await paidPolicyInput(store);
   if (!input) return <StoreResting store={store} />;

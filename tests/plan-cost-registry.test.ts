@@ -58,9 +58,9 @@ const ORDERS_SPARE = 1.1;
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
-import { laterPageCost } from "./traffic-cost";
+import { COMMAND, laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
-import { LIBRARY_WAITING_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
+import { LIBRARY_WAITING_UNITS, PUBLIC_LISTINGS_PER_UNIT, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
 import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
@@ -280,7 +280,7 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   for (const listings of [0, 1, 31, 32, 33, 100, MAX_PRODUCTS]) {
     // Somebody not signed in: the page itself is the request isResting counts, and its listings take listingUnits more.
-    assert.ok(listingUnits(listings) * laterPageCost() >= publicListingsRead(listings), `affiliate terms, ${listings} listings`);
+    assert.ok(listingUnits(listings) * (laterPageCost() + PUBLIC_LISTINGS_PER_UNIT * COMMAND) >= publicListingsRead(listings), `policy page, ${listings} listings`);
     for (const carried of [0, 1, 999, 1_000, 1_001, MAX_PRODUCTS]) for (const postPages of [0, 1, 4, 5, 6, MAX_POST_PAGES]) {
       const size = { listings, carried, postPages };
       assert.ok(sitemapUnits(size) * laterPageCost() >= sitemapRead(size), `store map ${JSON.stringify(size)}: ${sitemapUnits(size)} x ${laterPageCost()} < ${sitemapRead(size)}`);

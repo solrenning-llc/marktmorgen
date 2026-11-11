@@ -93,7 +93,7 @@ import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
-import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { AFFILIATE_ROW_CAP, PUBLIC_LISTINGS_PER_UNIT, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
@@ -446,7 +446,7 @@ export function affiliateLoadRead(size: AffiliateLoadSize): number {
 }
 /** What the listings a visitor's affiliate page reads add to the page itself (a later page, counted by isResting). */
 export function publicListingsRead(listings: number): number {
-  return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
+  return listings * COMMAND + listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
 }
 /**
  * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
@@ -1133,7 +1133,7 @@ export const COST_LINES: CostLine[] = [
     feature: "Requests beyond the counted visit: pages drawn again, the cart, searches, downloads, the page after paying, reviews, members' pages to manage, forms (17 October 2026)",
     monthlyUsd: (tier) => {
       const limit = REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier];
-      return EXTRA_REQUESTS[tier] * laterPageCost() + limit * REQUEST_COMMANDS * COMMAND;
+      return EXTRA_REQUESTS[tier] * laterPageCost() + limit * (REQUEST_COMMANDS + PUBLIC_LISTINGS_PER_UNIT) * COMMAND;
     },
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
@@ -1559,7 +1559,7 @@ export function perPaymentCost(tier: Tier): number {
 export function nonPayingWorst(): number {
   const creator = (id: string) => COST_LINES.find((line) => line.id === id)!.monthlyUsd("creator");
   const allowances = NON_PAYING_ALLOWANCES.trial;
-  const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
+  const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1 + PUBLIC_LISTINGS_PER_UNIT) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
   return TRIAL_VISITS * visitCost()
     + requests
     + TRIAL_ORDERS * ORDER_COST

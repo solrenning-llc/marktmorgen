@@ -42,6 +42,7 @@ const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
 is("built from the store as it is now, in its language", page.includes("policyFacts(input, store.language)") && readFileSync("lib/store-policy-input.ts", "utf8").includes("return policyInput(store);"), true);
 is("its version is the fingerprint of its words", page.includes("const version = policyFingerprint(sections);"), true);
 is("says it is not legal advice", page.includes("{notAdvice(store.language)}"), true);
+is("a suspended store rests before any paid listing reads", page.indexOf("if (store.suspended)") >= 0 && page.indexOf("if (store.suspended)") < page.indexOf("await paidPolicyInput(store)") && page.includes("StoreResting store={store} suspended"), true);
 is("one h1, a titled h2 per section, the page's language marked", [(page.match(/<h1\b/g) ?? []).length, page.includes("aria-labelledby={`policy-${section.id}`}"), page.includes("lang={said.lang.locale}")], [1, true, true]);
 is("a product read that fails is never quietly left out", [readFileSync("lib/store-policy-input.ts", "utf8").includes("const products = await readListingsAll(store, visibleIds(store));"), /\bcatch\b|\breadListings\(/.test(readFileSync("lib/store-policy-input.ts", "utf8").replace(/\/\/.*$/gm, ""))], [true, false]);
 is("a creator's page cannot take its address", RESERVED_SLUGS.has("policies"), true);

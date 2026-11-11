@@ -126,14 +126,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
-        // lib/traffic-reset.ts RESET_SCRIPT: under the caller's own lock token only, the record first, then the visits
-        // lowered by the delta, never below the figure asked for; nothing written on a lost lock or a count read otherwise.
-        if (key.startsWith("-- marktmorgen:traffic-reset:v1\n") && args[0] === "3" && args.length === 9) {
-          const [, visits, log, lock, before, delta, entry, token, keep] = args;
+        // lib/traffic-reset.ts RESET_SCRIPT: under the caller's own lock token only, the record first, then the people
+        // lowered by the delta, with the live room as it is now; nothing written on a lost lock or a count read otherwise.
+        if (key.startsWith("-- marktmorgen:traffic-reset:v2\n") && args[0] === "4" && args.length === 10) {
+          const [, visits, parts, log, lock, before, delta, entry, token, keep] = args;
           if (this.run(["GET", lock]) !== token) return [-2];
           const held = this.run(["GET", visits]);
           const current = held === null ? "0" : held;
           if (typeof current !== "string" || !/^\d+$/.test(current)) return [-3];
+          const roomHeld = this.run(["GET", parts]);
+          const room = roomHeld === null ? "0" : roomHeld;
+          if (typeof room !== "string" || !/^\d+$/.test(room)) return [-3];
           if (Number(current) < Number(before)) return [-1, Number(current)];
           // Redis stops the script on a record key of another type, before anything is written.
           this.live(log);
@@ -141,7 +144,7 @@ export class MemoryRedis {
           if (record !== undefined && !Array.isArray(record)) throw new Error("WRONGTYPE");
           this.run(["LPUSH", log, entry]);
           this.run(["LTRIM", log, 0, Number(keep) - 1]);
-          return [1, this.run(["DECRBY", visits, delta])];
+          return [1, this.run(["DECRBY", visits, delta]), Number(room)];
         }
         // lib/traffic-reset.ts RELEASE_SCRIPT: the lock let go only by the token that took it.
         if (key.startsWith("-- marktmorgen:traffic-reset-release:v1\n") && args[0] === "1" && args.length === 3) {

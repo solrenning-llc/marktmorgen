@@ -48,7 +48,7 @@ import { PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, publicVisitLimit, request
 const dayKey = (folder: string, day: string) => `nl:traffic:day:${folder}:${day}`;
 /** A store's visits in one window (also lowered by the operator, lib/traffic-reset.ts). */
 export const countKey = (folder: string, month: string) => `nl:traffic:n:${folder}:${month}`;
-const partsKey = (folder: string, month: string) => `nl:traffic:x:${folder}:${month}`;
+export const partsKey = (folder: string, month: string) => `nl:traffic:x:${folder}:${month}`;
 const requestsKey = (folder: string, window: string) => `nl:traffic:r:${folder}:${window}`;
 const shareKey = (folder: string, window: string) => `nl:traffic:c:${folder}:${window}`;
 const foldersKey = (month: string) => `nl:traffic:folders:${month}`;

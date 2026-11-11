@@ -7,6 +7,12 @@ import { claimHandle } from "@/lib/store";
 import { ALL_KEY, byKey, invitedBy, inviteCode, inviterFor, listKey, recordInvite } from "@/lib/creator-invites";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { LEGACY_INVITE_RECORDING_UNTIL } from "@/lib/creator-invite-rules";
+
+// Every invite here is recorded at a fixed time inside the legacy recording window, which closes on
+// LEGACY_INVITE_RECORDING_UNTIL (16 Dec 2026) by design. On the real clock the test answered "paused" from that
+// day on and failed for reasons of the calendar only.
+const WHEN = LEGACY_INVITE_RECORDING_UNTIL - 86_400_000;
 
 type Command = (string | number)[];
 const original = redis.pipeline.bind(redis);
@@ -72,10 +78,10 @@ async function main(): Promise<void> {
     const cal = await made("cal@example.com", "cal");
     const anaCode = (await inviteCode(ana.sid))!;
     const beaCode = (await inviteCode(bea.sid))!;
-    is("ana's invite is the first, written down", await recordInvite(cal, anaCode), "recorded");
+    is("ana's invite is the first, written down", await recordInvite(cal, anaCode, WHEN), "recorded");
     claimAnswers((key) => key === byKey(cal.sid), () => [...reply]);
     let second: unknown = "threw";
-    try { second = await recordInvite(cal, beaCode); } catch { /* checked below */ }
+    try { second = await recordInvite(cal, beaCode, WHEN); } catch { /* checked below */ }
     restore();
     const listed = (await original([["ZSCORE", listKey(bea.sid), cal.sid]]))[0];
     is(`${label} on a store already invited by ana: never written down under bea`, [second === "recorded", listed], [false, null]);
@@ -87,7 +93,7 @@ async function main(): Promise<void> {
     const anaCode = (await inviteCode(ana.sid))!;
     claimAnswers((key) => key === byKey(cal.sid), () => new Error("synthetic lost reply"));
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, WHEN); } catch { /* checked below */ }
     restore();
     const listed = (await original([["ZSCORE", listKey(ana.sid), cal.sid], ["ZSCORE", ALL_KEY, cal.sid]]));
     is("an invite written whose reply was lost: read back as this one, listed under ana", [first, listed.every((x) => x !== null)], ["recorded", true]);
@@ -99,7 +105,7 @@ async function main(): Promise<void> {
     const anaCode = (await inviteCode(ana.sid))!;
     claimAnswers((key) => key === byKey(cal.sid), () => [undefined], { read: () => [undefined] });
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, WHEN); } catch { /* checked below */ }
     restore();
     const listed = (await original([["ZSCORE", listKey(ana.sid), cal.sid]]))[0];
     is("answered and read back in no known shape: not said recorded, not listed", [first === "recorded", listed], [false, null]);
@@ -107,7 +113,7 @@ async function main(): Promise<void> {
     // record. Ana's own list is left alone, since nothing confirmed that this record is hers.
     const all = (await original([["ZSCORE", ALL_KEY, cal.sid]]))[0];
     is("and the record written stays on the settlement walk, under its own inviter", [first, (await invitedBy(cal.sid))?.r === ana.sid, all !== null], ["threw", true, true]);
-    is("a later try answers already", await recordInvite(cal, anaCode), "already");
+    is("a later try answers already", await recordInvite(cal, anaCode, WHEN), "already");
   }
   {
     // The same two unknown answers, when the SET was never applied: no record is made up, nobody's list gains it.
@@ -121,11 +127,11 @@ async function main(): Promise<void> {
       return original(commands);
     };
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, WHEN); } catch { /* checked below */ }
     restore();
     const [mine] = await original([["ZSCORE", listKey(ana.sid), cal.sid]]);
     is("not applied, answered and read back in no known shape: no record, not on ana's list", [first, await invitedBy(cal.sid), mine], ["threw", null, null]);
-    is("and a later try records it", await recordInvite(cal, anaCode), "recorded");
+    is("and a later try records it", await recordInvite(cal, anaCode, WHEN), "recorded");
   }
   {
     // Bea invited cal first; ana's try is answered in no known shape: bea's record and lists stay, ana gains nothing.
@@ -135,12 +141,12 @@ async function main(): Promise<void> {
     const cal = await made("cal@example.com", "cal");
     const anaCode = (await inviteCode(ana.sid))!;
     const beaCode = (await inviteCode(bea.sid))!;
-    await recordInvite(cal, beaCode);
+    await recordInvite(cal, beaCode, WHEN);
     const [allBefore] = await original([["ZSCORE", ALL_KEY, cal.sid]]);
     // Ana's try a second later, so a score written over bea's would show.
     claimAnswers((key) => key === byKey(cal.sid), () => [undefined], { read: () => [undefined] });
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode, Date.now() + 1_000); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, WHEN + 1_000); } catch { /* checked below */ }
     restore();
     const [mine, theirs, all] = await original([["ZSCORE", listKey(ana.sid), cal.sid], ["ZSCORE", listKey(bea.sid), cal.sid], ["ZSCORE", ALL_KEY, cal.sid]]);
     is("and its place on the settlement walk keeps bea's time", all, allBefore);
@@ -153,7 +159,7 @@ async function main(): Promise<void> {
     const cal = await made("cal@example.com", "cal");
     const anaCode = (await inviteCode(ana.sid))!;
     const beaCode = (await inviteCode(bea.sid))!;
-    is("healthy: the first invite is recorded, a second is already", [await recordInvite(cal, anaCode), await recordInvite(cal, beaCode)], ["recorded", "already"]);
+    is("healthy: the first invite is recorded, a second is already", [await recordInvite(cal, anaCode, WHEN), await recordInvite(cal, beaCode, WHEN)], ["recorded", "already"]);
   }
   done();
 }

@@ -3240,3 +3240,134 @@ Prepared acceptance cases (NOT EXECUTED): unknown/zero/nonfinite/negative durati
 Resume with fresh channel metadata -> full UTF-8 blob and current main/issue/PR heads. If #3677 is closed and #3680 merged, inspect current failing jobs again before any repair. For the two Mobile render matches, integrate the shared repair only through an authorized conflict/junction after #3642 or #3638 merges; do not replicate it. Re-audit the next eligible queue unit and its owners before marking it. Run linked tests/types/lint/scanner/diff before review; no GREEN, complete RED execution, customer availability, profitability or accessibility certification is claimed here.
 
 This own checkpoint append is documentation only on Codex P's checkpoint branch. Shared product and foreign content stay untouched.
+
+
+## PONTO DE PARADA — Codex P — 11 November 2026, 10:52 Fortaleza
+
+Authority: C1-20261111-1026-codexP-2, second batch, OPEN PRs #3017 through #3273 inclusive. The first batch #3400/#3399/#3388 was already diagnosed in the preceding checkpoint and was not repeated. GitHub connector ONLY; no terminal, node_repl, local browser, local filesystem, subagent or new runtime.
+
+### Completed results and exact receipt
+
+- Enumerated all five ascending open-PR pages (100/100/100/100/71) and found 53 open PRs in range. Refetched the five pages at the end: the same 53 remained open with the same heads.
+- Read exact-head check runs, PR metadata, whole issue discussions and review submissions for every candidate. A green aggregate was not allowed to override a remaining HIGH/MEDIUM or an unresolved stacked dependency.
+- Published one individual English comment on each of the 53 PRs. All 53 bodies were fetched back and matched exactly. Seven initial readiness reports were corrected in place after directly confirming the newer hold-release notice; those replacements were also fetched back exactly.
+- Eight readiness reports: #3160, #3189, #3193, #3226, #3247, #3252, #3261, #3271. They credit existing qualified review scopes and LOW notes, not new independent reviews. No enqueue or merge action.
+- Read 16 complete failed job logs; five other failed verify logs returned Transport closed twice each. The blocked annotations endpoint was not presented as read. Actual failures were distinguished from the two proto-keys TODOs.
+- Two source-only corrective candidates prepared, with hosted RED evidence saved and verified BEFORE construction. They have NOT been pushed because the fresh final Actions queue is 231 (>150). Do not call the batch fully repaired.
+
+Complete reproducible triage, initial snapshots, each finding disposition, every comment ID, exact candidate patches and limitations:
+https://github.com/solrenning-llc/marktmorgen/blob/3e28bf1f73ad38a0d748916c59521d22a7e8dd1a/evidence/p/batch2-20261111-triage.json
+Blob5558648f7a84dc5b4c69bcb9e189012e82794991, FULL75302, verified exact.
+
+Hosted RED/source evidence, before both candidates:
+https://github.com/solrenning-llc/marktmorgen/blob/2cecc2bf00c89fc7369a64ded2221d05cd5309c3/evidence/p/batch2-20261111-red.json
+Blob6729d8df9c89ec9d563f2fb6299150787d8b7d7f, FULL36057, verified exact. A first own evidence version had an unverified run URL; it was corrected to the API-confirmed URL and verified before either candidate was created.
+
+### Main release and push hold
+
+#3680 is confirmed MERGED. #3677 is confirmed CLOSED. Main is c6f9a7b90600c31bad5a8430fcd24234fd3cdbc3. TODOS-110/111 explicitly released the main-red hold; do not keep waiting for another main-green order. #3642 has advanced to 9f79827eb961fdef83cf8ad0dcaa9a67d0f364bc and remains open; do not reuse its old head or duplicate its Mobile render fix.
+
+The SEPARATE TODOS-108 condition still blocks source pushes: queue count was187 at candidate preflight,207 later,213,203, and231 at the final check. These are snapshots, not a background watcher. No product ref was updated. Before the next single push, freshly verify queue<=150, the expected PR head, absence of active exact-head CI, and the latest orders. Never overwrite another actor's advance.
+
+Own work observed and preserved:
+- #3515 OPEN/unmerged, head4b0de90a7a614740969944ea9970ed7d856c5716, mergeable.
+- #3516 OPEN/unmerged, now headd22e651499a32d2351eb28818a87adcf1b456f1e, mergeable. It advanced outside this run; I did not create, reset or certify that update.
+- The STN11 dependent continuation still needs #3515 MERGED; no new queue item was claimed while the assigned corrective batch remains pending.
+- Historical four are freshly confirmed MERGED: #2487 head dd4895cc085bfb3a5869b7b2c6fddfc8c338a0d1 →23be8ea6a701ba4f0e833d006038bafecf4dcde9; #2518 head b9f351e8ae757fde883253e355ced8620e8ec996 →7fa81fd99b117c7b33c4bccd9c44e4d45c0de008; #2539 final head2fb7140af59bfef6d796c2080796dbc3b6bd703d →35261ed388034c71bb3271b4f04ad9b64d3fbb50; #2542 final head54041a6edf51067b4785d4e7b5e87bb268feeb36 →050bf383ae011cfedeed5d32f4198333a62423a8. Do not recreate them.
+
+### Two prepared repairs, no source ref update
+
+1. #3070:
+   - Expected current head92b02aa03f346da12fe8e08cfde835a8869f2aa2, branch claude4/meta-reads-exact.
+   - Candidate025fd33c8a8bbb34061672c639981979c43687cd, treea6785b3178dfb709b397d3faae19333e18d27a50, one direct child of that head.
+   - One file only: tests/affiliate-leads.test.ts, blob4f31fe2e4a5d225f1124c09895a3e5e7d435dd49. Exactly the already merged #3142 date-fixture delta; every assertion remains unchanged. The three synthetic days stay in one UTC month.
+   - Historical real RED: verify128857919619, affiliate-leads68checks/1FAIL, monthly program budget. #3142 mergeef7037542ec0a9dd72ea75f5c31c609fac72dabd is the upstream cause, not a new commercial change.
+   - Comment6797437067 states candidate and hold.
+
+2. #3073:
+   - Expected current heade988e105b1528780310c1dd6a696500025645727, branch claude4/store-callers-exact.
+   - Candidate1cc894511d0d8b2eac8c0a7ee84c3e1ce5f7fab4, tree525001f30eb78871571023b82da5cd11b5013102, one direct child of that head.
+   - Four exact main blobs only: tests/check.ts2729607d0019b4fa327033a48153e222588efc07; tests/check-exit.test.tsb6705a63d6f099a76627659bc6336094e50591b3; tests/check-exit.proof.ts29b7a3198c79a51f44b2d2d51edec8f93eef12f0; tests/run.mjs74ad63c22e6480163adf3a2dded382195ad90b46.
+   - Historical hosted RED: verify128483210700, backup-run96PASS then timeout600s, exit not seen, next compile resolved. Old done() still called synchronous process.exit. Port main's reviewed exitCode correction, preserve the unref guard, failure/no-done refusal, regression and bounded stress proof. Do not increase the600s deadline.
+   - Comment6797437747 states candidate and hold.
+
+Both candidate comparisons were inspected through GitHub:3070 one fixture delta,3073 four test paths. No broad main merge. P executed NO new RED/GREEN, Node stress proof, linked tests, TypeScript, lint, official scanner, build, native diff-check or provider calls. Do not claim runtime validation by reading main's authors' evidence. Source-level comparison is not GREEN. The next authorized push launches exact-candidate CI, then required targeted verification and review closure still apply.
+
+### Important unresolved causes
+
+- #3017: G's later residual privacy MEDIUM6787959688 remains; verify log unavailable after two reads.
+- #3020: pending-picture recovery MEDIUM6751455863 remains despite9green; current conflict.
+- #3024: stale-snapshot byte accounting MEDIUM, V's existing candidate, plus conflict; do not duplicate or underfund a CAS.
+- #3037: G's exact-head conditional escaped-require MEDIUM requires coordinator disposition, not a blind ninth focal.
+- #3095/#3156/#3158: explicit #2957/#3660/#3173 prerequisites remain open; green does not merge an unmerged fix.
+- #3190: false plan-renewal letter MEDIUM6784937400 still needs its author's correction; channel already says C4 has guarded work, so do not create a competing patch.
+- #3215: two exact-head cursor-progress MEDIUMs6784932849/6786534085 remain.
+- #3272: CX1's conditional HIGH on unreadable stored payout receipts is not explicitly disposed by the favorable C1 review. Keep out of queue pending classification/correction.
+- #3022's official regeneration was assigned by TODOS-110 to the coordinator's Node/SciPy cloud session; do not manually edit monetary artifacts.
+- #3027/#3033/#3062 already have V's published corrections; don't change their active heads or duplicate the fixes.
+- #3068 has a store c.js match AND a separate unattributed home-page failure. #3173's home-page pointerdown failure has no c.js evidence. Do not label those whole jobs fixed by #3642.
+- Reservations may be reconciled only by the owner/coordinator. No docs/reservations content was changed.
+
+### Exact batch heads and comment receipts
+
+| PR | Head observed before its comment and unchanged at final inventory | Comment ID | Disposition |
+| --- | --- | --- | --- |
+| #3017 | 5b7a26d40625d6f2917ac433c0b3d6d9c7b83d5c | 6797416948 | changes requested / CI red |
+| #3020 | baaa18ed8e9003eabbc8bd4e7fa76bf1bd9caacd | 6797417554 | changes requested / conflict |
+| #3021 | cab993b0274d8ec808cbd4056ebe1c1f0ea72db0 | 6797418295 | stacked dependency held |
+| #3022 | 0838662d83cca8ccedb2f207035850492a60b218 | 6797418989 | CI repair pending / generated artifacts |
+| #3023 | e008c6003b9324d60db70962ac4cf771e6ae2986 | 6797419794 | CI held / external installation failure |
+| #3024 | 6c82240bf3f0f3d41293974c679a47ba43e988a9 | 6797420483 | changes requested / conflict |
+| #3026 | e5d60ff04648ce0c9c6c1e36354223d326c0b7a4 | 6797421264 | conflict held |
+| #3027 | 5d2e9d9eba6e695615133fc7ed9abb99f7af899c | 6797422011 | new head / conflict held |
+| #3029 | 3c0a62845d3c50c70e097a3d0eb804492528e995 | 6797422765 | stacked dependency held |
+| #3033 | b9c0e9c7074b1dbc2805c07f045c0352aa3c2bf3 | 6797423427 | new head / conflict held |
+| #3034 | fd6ea6de1e69f551d930cb9e5d469267c589af60 | 6797424102 | conflict held |
+| #3035 | 479bd9d69e8e0198d9a6c6ef29d91d06e698c3f3 | 6797424748 | CI held / shared Mobile render cause |
+| #3036 | 3496dde7a207e157bff578dd8befd32cddbad743 | 6797425558 | conflict held |
+| #3037 | 585f5d333a8c5f951d1e013c6492cca55844dee0 | 6797426350 | coordinator disposition required |
+| #3051 | 2c45b6b27d1df5cecf1d3ea291e143504d5e926e | 6797432246 | CI held / external installation failure |
+| #3062 | b2f741a62298c6b24ee31ad18c57297e280ea008 | 6797433141 | new corrective head / CI pending |
+| #3066 | 745ce60a03b3819d6dca6f530f48faaf9940ef72 | 6797433824 | CI held / reservation |
+| #3067 | c631abe65f48939136faef03b49fe57139fdf765 | 6797434587 | CI held / cause unavailable |
+| #3068 | 801e021dd203bbf3006e097bb9528e6699bc9178 | 6797435401 | CI held / two distinct mobile failures |
+| #3069 | 7e98f9186bb0734fc0e8d081b011a7e6dac332c4 | 6797436178 | stacked dependency held |
+| #3070 | 92b02aa03f346da12fe8e08cfde835a8869f2aa2 | 6797437067 | CI held / dated fixture |
+| #3073 | e988e105b1528780310c1dd6a696500025645727 | 6797437747 | CI held / test process timeout |
+| #3075 | e532048c4fb76d45d07bff171aeea227c7d8614d | 6797438553 | CI held / shared Mobile render cause |
+| #3079 | fbea9ffa6d3bd661f2d18afc6d3a61d3de5dbb73 | 6797439254 | CI and owner decision held |
+| #3086 | e0ede3c13d76f5a64c1fee8e5c32a6e59667247b | 6797439892 | conflict held |
+| #3095 | 5e748c7b48c35d177bd7c4b660a932bdf0ca697d | 6797440599 | changes requested / dependency held |
+| #3101 | a3430542c7549c5a79adad3c77399ee669aa76ba | 6797441597 | CI held / shared Mobile render cause |
+| #3107 | a46dd30840a7f44dbddf9d3141fd56211f1bd3c4 | 6797442308 | conflict held |
+| #3118 | 1a8913d01f4b11d08310e9cf3a466de651c536c7 | 6797443060 | CI held / five real failing files |
+| #3129 | 365d627e6da31aef0ff4688ea90a11142a5abf69 | 6797443741 | draft / changes requested / CI and conflict held |
+| #3156 | 9ebc7b7de17b8fc731280cdd9db0ee6834525a6e | 6797444411 | privacy finding / dependency held |
+| #3158 | db19fcb9252ce41e4c9d58f6a9ae660077d1f2e7 | 6797445107 | dependency held |
+| #3159 | d824cc0a413b5273d11388382dbc3e51d37ad9de | 6797445754 | conflict held / partial overlap, not duplicate |
+| #3160 | 26be932d6e6ffffdbe7afde926ce0ec438cf7868 | 6797170318 | ready report |
+| #3171 | 90fb5f74fb4e20dccfeb3f9060673ee8188e8733 | 6797453823 | conflict held |
+| #3173 | adf09726af8a925b71f6bd040601b302454ec14f | 6797454532 | CI and conflict held / reservation plus separate mobile issue |
+| #3189 | bd0e13d753de1b79311136394fc2ae02045f6253 | 6797171727 | ready report |
+| #3190 | b7c4f15c2aba07c054a007f876ff680a7a9adc7c | 6797455282 | changes requested / CI and conflict held |
+| #3193 | 0df0c467c70533ba18e55fb19eb852e001117588 | 6797173046 | ready report |
+| #3194 | bc3ddc1501464830cd93f8d3dde3a3c8738ecb2a | 6797455981 | conflict held |
+| #3203 | 881caed76deeac4cd39e6bbbc87bb125d0d4a837 | 6797456791 | conflict held |
+| #3206 | 338bea602b10be89c7fc8d756bed199666db7c03 | 6797457434 | owner-only reservation conflict held |
+| #3213 | 208c078026bf16f22781a91be79bf03787b2fec3 | 6797458213 | CI held / actual failing reservation file |
+| #3215 | f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2 | 6797458976 | changes requested despite nine green checks |
+| #3225 | e02db96854a1e15240670506ea66dddb4879058a | 6797459610 | conflict held |
+| #3226 | 3c7c19af5b2a2da03a8421d15b10776e6e69cbb0 | 6797174270 | ready report |
+| #3247 | 453256f5a529329c7366d79c2bee2f0f51a6e4ed | 6797175777 | ready report |
+| #3252 | ba0727f2382849244fb0b497d4c11a069f0a91b2 | 6797177269 | ready report |
+| #3261 | ed1ce6d5b55ee607f3613025ba41c97ca46a3ffa | 6797178391 | ready report |
+| #3267 | 91aecfa183d72f9dd9499d4c26f2b6fb448f4e49 | 6797460517 | conflict held |
+| #3271 | aaee666db197a2738ed12b00bfedbb4738debf4c | 6797469523 | ready report |
+| #3272 | ef8922f9e64073a38808620dfff700b850b29de7 | 6797461359 | HIGH finding and conflict held |
+| #3273 | f970f05fd9ec09a6cbaf7922c0c19f3710b9e4e5 | 6797462090 | conflict held |
+
+### Channel receipt and resume
+
+Real batch results, eight ready reports and the two held candidates were appended after fresh metadata→full UTF-8 blob with CAS. Channel commit2bc905b65fdb673a08ddc57486a30ff7e669a0cb, blob68d85793f027ef80c7e64adfa869cb8763e3caa1. Full readback preserved the original prefix and contained the append exactly once. Claim commit e90b28fad935da90d515485ad575301cbd5327f6 was likewise verified before candidate work; two earlier409 attempts wrote nothing. CODEX-91 keeps stopping-state detail in this own checkpoint, not repeated as a long shared-channel PONTO.
+
+Resume: FIRST fresh own checkpoint and authorized channel metadata→FULL. Check TODOS-108 and newer orders. If queue<=150, first reconcile each candidate's expected parent and inactive CI, then one normal CAS/fast-forward per PR; no force, no second push while CI runs. If a parent advanced, compare and preserve the new work rather than moving it backwards. Post the published commit and request only the required focal closure after validation. Continue other batch repairs/reservation-owner handoffs while held; no duplicate reviews, no new unit until this assignment is resolved. No deployment, customer availability, commercial margin or full accessibility certificate is claimed. Unknown cost remains unknown.

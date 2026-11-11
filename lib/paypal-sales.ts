@@ -568,23 +568,37 @@ export async function readPaidExact(order: string): Promise<Paid | null | "unkno
  */
 export async function paypalOrdersOf(statsId: string | null, productIds: string[], email: string): Promise<Paid[]> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return [];
-  const sets = await redisPipeline(productIds.map((p) => ["SMEMBERS", ownKey(statsId, email, p)]));
-  const orders = [...new Set(sets.flatMap((set) => (Array.isArray(set) ? set.map(String) : [])))].filter((o) => ORDER_ID.test(o));
+  // Read exactly (rule 24): a reply cut short or of another shape, or a paid record that does not read, throws, so the
+  // copy of the person's data fails whole and is tried again, never handed over without their PayPal orders.
+  const sets = repliesFor(await redisPipeline(productIds.map((p) => ["SMEMBERS", ownKey(statsId, email, p)])), productIds.length);
+  const lists = sets?.map((set) => stringList(set));
+  if (!lists || lists.some((list) => list === null)) throw new UnknownReplyError("a person's PayPal orders");
+  const orders = [...new Set((lists as string[][]).flat())].filter((o) => ORDER_ID.test(o));
   const out: Paid[] = [];
   for (const order of orders) {
-    const paid = await readPaid(order);
+    const paid = await readPaidExact(order);
+    if (paid === "unknown") throw new UnknownReplyError("a person's PayPal order");
     if (paid) out.push(paid);
   }
   return out;
 }
 
-async function readOpened(order: string): Promise<Opened | null> {
-  const [raw] = await redisPipeline([["GET", orderKey(order)]]);
+/**
+ * An order's own record, read exactly (rule 24): null only when GET answers exactly null (never opened here, or its
+ * 30 days are over); a reply cut short or of another shape, or a record that does not read, is "unknown", never
+ * expired: the watch keeps such an order and the capture refuses it, both for now.
+ */
+async function readOpened(order: string): Promise<Opened | null | "unknown"> {
+  const read = repliesFor(await redisPipeline([["GET", orderKey(order)]]), 1);
+  if (!read) return "unknown";
+  const raw = read[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") return "unknown";
   try {
-    const opened = JSON.parse(String(raw)) as Opened | null;
-    return opened && typeof opened.s === "string" ? opened : null;
+    const opened = JSON.parse(raw) as Opened | null;
+    return opened && typeof opened === "object" && typeof opened.s === "string" ? opened : "unknown";
   } catch {
-    return null;
+    return "unknown";
   }
 }
 
@@ -669,7 +683,7 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   const already = await readPaid(order);
   if (already) return { ok: true, paid: already, fresh: false };
   const opened = await readOpened(order);
-  if (!opened || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
+  if (!opened || opened === "unknown" || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
   let done: Record<string, unknown>;
   try {
     done = await call("POST", `/v2/checkout/orders/${encodeURIComponent(order)}/capture`, { body: {}, merchant: opened.m, requestId: `nl-capture-${order}` });
@@ -808,6 +822,8 @@ export async function watchPayPal(
   for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
     if (Date.now() >= deadline) return result;
     const opened = await readOpened(order);
+    // Not read just now: kept, and asked about on a later run (rule 24), never dropped as expired.
+    if (opened === "unknown") continue;
     // Thirty days without PayPal settling it: no longer asked about.
     if (!opened || (await readPaid(order))) {
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);

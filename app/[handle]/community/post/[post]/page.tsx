@@ -30,6 +30,8 @@ import {
   storeWhen,
 } from "@/components/community-parts";
 import { ConfirmDeletes } from "@/components/community-composer";
+import { heldOf } from "@/lib/community-approval";
+import { HeldList } from "@/components/community-held";
 
 type Params = { params: Promise<{ handle: string; post: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -212,6 +214,8 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   const asked = typeof query.edit === "string" ? query.edit : "";
   const editingPost = asked === "post" && canWrite && post.a === key;
   const editingComment = asked && asked !== "post" && canWrite ? (all.find((c) => c.id === asked && c.a === key && !c.hid)?.id ?? "") : "";
+  // The member's own comments here that wait for the creator's approval (543 [CM2]); null when they could not be read.
+  const held = owner ? [] : await heldOf(id, key).then((items) => items.filter((h) => h.kind === "comment" && h.post === post.id), () => null);
 
   return (
     <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -303,6 +307,10 @@ export default async function CommunityPostPage({ params, searchParams }: Params
               })}
             </ul>
           )}
+
+          <div className="mt-6">
+            <HeldList store={store} items={held} kind="comment" from="post" post={post.id} heading={3} />
+          </div>
 
           {canWrite ? (
             <form id="reply" action="/api/store/community" method="post" className="mt-6 scroll-mt-28">

@@ -22,8 +22,9 @@ import {
   MAIL_GAP_KEEP_SECONDS,
   admitForSend,
   mailGapCheckLimit,
+  MAIL_GAP_TRIAL_CHECKS,
 } from "@/lib/mail-frequency";
-import { monthlyEmails } from "@/lib/plan";
+import { TRIAL_MONTHLY_EMAILS, monthlyEmails } from "@/lib/plan";
 import { store } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -48,7 +49,7 @@ function reset(): void {
 }
 
 const admit = (people: string[], now: number, over: Partial<Parameters<typeof admitForSend>[0]> = {}) =>
-  admitForSend({ store: STORE, tier: "pro", kind: "marketing", people, setting: 1, now, ...over });
+  admitForSend({ store: STORE, tier: "pro", trial: false, kind: "marketing", people, setting: 1, now, ...over });
 
 async function main(): Promise<void> {
   part("The ceiling's figures");
@@ -175,6 +176,26 @@ async function main(): Promise<void> {
   const { PERSON_DATA } = await import("@/lib/person-data");
   const line = PERSON_DATA.find((d) => d.file === "lib/mail-frequency.ts");
   is("lib/person-data.ts names it, kept no longer than the longest gap", [line?.how, line && "days" in line ? line.days : null], ["expires", MAIL_GAP_KEEP_SECONDS / 86_400]);
+
+  part("A store in its free trial checks at the trial's emails, not its plan's (Claude 3 on #3636, MEDIUM 1)");
+  is("the trial's checks: two for each of the trial's monthly emails", MAIL_GAP_TRIAL_CHECKS, MAIL_GAP_CHECKS_PER_EMAIL * TRIAL_MONTHLY_EMAILS);
+  is("a trial on Scale or Studio checks at the trial's figure", [mailGapCheckLimit("scale", true), mailGapCheckLimit("pro", true)], [MAIL_GAP_TRIAL_CHECKS, MAIL_GAP_TRIAL_CHECKS]);
+  is("a trial on the Store plan still checks nobody", mailGapCheckLimit("creator", true), 0);
+  is("paid, the plan's figure", mailGapCheckLimit("scale", false), 2 * monthlyEmails("scale"));
+  reset();
+  const trialMany = Array.from({ length: MAIL_GAP_TRIAL_CHECKS + 1 }, (_, i) => `t${i}`);
+  const trialOver = await admit(trialMany, T0, { tier: "scale", trial: true });
+  is("a Scale trial's send past the trial's checks: refused, nothing read", [trialOver.refused, trialOver.send.length, sent.length], [true, 0, 0]);
+  reset();
+  const trialCounter = `nl:mgap:checks:${STORE}:2026-11`;
+  await realPipeline([["SET", trialCounter, String(MAIL_GAP_TRIAL_CHECKS), "EX", 60]]);
+  is("a Scale trial whose trial checks are spent: refused", (await admit(["a@x.test"], T0, { tier: "scale", trial: true })).refused, true);
+  reset();
+  is("not knowing whether the store is in its trial: refused, nothing asked", [(await admit(["a@x.test"], T0, { trial: undefined as unknown as boolean })).refused, sent.length], [true, 0]);
+
+  const registry = (await import("node:fs")).readFileSync("tests/plan-cost-registry.ts", "utf8");
+  const worst = registry.slice(registry.indexOf("export function nonPayingWorst"), registry.indexOf("export type AddOnLine"));
+  is("the trial's checks are priced in the trial's own exposure (nonPayingWorst)", /MAIL_GAP_TRIAL_CHECKS \* \(MAIL_GAP_COMMANDS_PER_CHECK \* COMMAND/.test(worst), true);
 
   done();
 }

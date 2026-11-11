@@ -249,6 +249,8 @@ async function main(): Promise<void> {
   is("it sends the sale action with a boolean", /action: "sale", id: option\.id, onSale: /.test(editor), true);
   is("it asks for the count of the product", /action: "count", id: product\.id/.test(editor), true);
   is("an unknown count links to Memberships instead of saying 0", /href="\/studio\/memberships"/.test(editor), true);
+  // The link says what Memberships truly shows (Claude 1, reviewer C3 on #3589): the count on each price, not who.
+  is("the link says Memberships shows how many are on each price, and Memberships renders that table", [/See how many members are on each price in Memberships/.test(editor), /<MembershipByPrice /.test(readFileSync("app/studio/memberships/page.tsx", "utf8"))], [true, true]);
   is("it asks for the invitations of the product", /action: "invited", id: product\.id/.test(editor), true);
   is("it never says an invitation can't be used on a price off sale: it can (Claude 4 on #2690)", /can’t be used while it is off sale/.test(editor), false);
   is("the count says it is as of the last membership reading", /still on it here \(paying, in a free trial or with a late payment\), as of your last membership reading/.test(editor), true);

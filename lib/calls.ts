@@ -484,6 +484,8 @@ async function readBusy(
           throw error;
         })
     : Promise.resolve({ busy: [] as Busy[], failing: 0 });
+  // The calendar read can fail while Stripe is still being read; attach a handler now, then await its failure below.
+  calendar.catch(() => {});
   // The creator's dated sessions count against weekly hours only.
   const sessions = weekly ? readListings(store, idsOfKind(store, "call")).then((calls) => sessionTimes(calls, now)) : Promise.resolve([]);
   // Awaited below; marked here so a failure while Stripe is being read is not left unheard.

@@ -86,21 +86,17 @@ export type LetterReader =
  * nothing here any more; an address that purchases moved to holds what each
  * of its old addresses (at most MAX_MOVED_INTO) holds, each asked as the
  * address itself is, after one more of the store's public requests is taken
- * for it. When the index cannot be read, nothing changes: the address holds
- * what it bought itself, as if nothing moved, never nothing.
+ * for it. When the index cannot be read, the answer is unknown for either
+ * address: never restored access or a definite denial from missing evidence.
  */
 export async function holdsLetter(store: Store, letter: Letter, email: string): Promise<boolean> {
   if (!membersOnly(letter) || !store.sid) return false;
   const products = letter.products!;
   const sid = store.sid;
   const holds = (address: string) => holdsProductsOrThrow(store, products, address, okKey(sid, products, address), "1");
-  let moved: Awaited<ReturnType<typeof readMovedIndex>>;
-  try {
-    moved = await readMovedIndex(sid, email);
-  } catch (error) {
-    console.error("the moved addresses could not be read; who may read an email is answered as if nothing moved", error);
-    return holds(email);
-  }
+  // Unknown move evidence must reach both callers' existing unknown/retry
+  // handling; falling back would restore access to the abandoned address.
+  const moved = await readMovedIndex(sid, email);
   if (moved.movedTo) return false;
   if (await holds(email)) return true;
   const olds = moved.movedFrom.slice(0, MAX_MOVED_INTO);

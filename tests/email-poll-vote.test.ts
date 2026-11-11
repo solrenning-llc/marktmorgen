@@ -24,11 +24,13 @@ import { done, is, part } from "./check";
 
 const DAY = 86_400_000;
 const now = Date.now();
+/** A broadcast keeps its times in seconds, as createBroadcast writes them. */
+const sec = (ms: number) => Math.floor(ms / 1000);
 const ID = "0123456789abcdef01234567";
 const poll = { question: "Which class next?", options: ["Glazing", "Trimming", "Firing"], days: 7 };
 const record = (extra: Record<string, unknown> = {}) => ({
   id: ID, listId: "list1", handle: "clayhouse", subject: "News", body: "Hello", productId: null, notProductId: null,
-  who: "all", narrow: null, status: "sent", createdAt: now - DAY, sendAt: now - DAY, finishedAt: now - DAY + 60_000,
+  who: "all", narrow: null, status: "sent", createdAt: sec(now - DAY), sendAt: sec(now - DAY), finishedAt: sec(now - DAY + 60_000),
   total: 10, sent: 10, note: "", failures: 0, listed: true, tagged: true, test: null, poll, ...extra,
 });
 const put = (extra: Record<string, unknown> = {}) => redis.run(["SET", `nl:mail:bc:${ID}`, JSON.stringify(record(extra))]);
@@ -67,6 +69,9 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("changed", await votePoll({ broadcastId: ID, link: link(2), option: 2, now }, deps()), "recorded");
   is("taken back", await votePoll({ broadcastId: ID, link: link(2), option: null, now }, deps()), "withdrawn");
   is("nothing kept for that place", votes(), []);
+  put({ sendAt: sec(now - 6 * DAY) });
+  is("six days after it went out, a seven-day poll is still open", await votePoll({ broadcastId: ID, link: link(3), option: 0, now }, deps()), "recorded");
+  put();
   is("the last place of the list", await votePoll({ broadcastId: ID, link: link(9), option: 0, now }, deps()), "recorded");
 
   part("Refused, with no read of the database");
@@ -100,7 +105,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
 
   part("Closed");
   redis.clear();
-  put({ sendAt: now - 8 * DAY });
+  put({ sendAt: sec(now - 8 * DAY) });
   taken = 0;
   is("after its days", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "closed");
   is("taking back after it closed: closed too", await votePoll({ broadcastId: ID, link: link(2), option: null, now }, deps()), "closed");

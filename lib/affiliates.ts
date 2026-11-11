@@ -747,7 +747,12 @@ async function peopleCount(store: Store, meter?: Meter): Promise<number> {
 
 export async function readAffiliate(store: Store, id: string): Promise<Affiliate | null> {
   if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["HGET", peopleKey(store.statsId), id]]);
+  // Read exactly (rule 24): only an exact null is "no such affiliate"; a reply cut short or of another shape throws,
+  // never "no such affiliate", which wrote an affiliate's own purchase with a commission. A stored record that does not
+  // parse is still none, as before.
+  const read = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("an affiliate's record");
   return parseAffiliate(raw);
 }
 

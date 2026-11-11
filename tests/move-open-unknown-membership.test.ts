@@ -8,10 +8,8 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { inviteMembers, openMove, readInvite, keptAlready } from "@/lib/move-members";
-import { store as redis, advance } from "./redis-stub";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { moveWords } from "@/lib/buyer-words/move";
-import { LANGUAGE_CODES as LANGUAGES } from "@/lib/store-language";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "move-open-mark@example.com";
@@ -20,14 +18,12 @@ const checkouts: URLSearchParams[] = [];
 const closes = new Map<string, number>();
 let lostAnswer = false;
 let refusedByStripe = false;
-let sessionUnreadable = false;
+const sessionUnreadable = false;
 /** Stripe answers the creation with the checkout's own expires_at, as the API does; off to play an answer without it. */
-let postSaysCloses = true;
-/** GET /checkout/sessions/:id reads, to show none is needed when the creation said when it closes. */
-let sessionReads = 0;
+const postSaysCloses = true;
 /** The emails Stripe shows a live membership to this product for. */
 const paid = new Set<string>();
-let membershipsUnreadable = false;
+const membershipsUnreadable = false;
 let overrideSubscriptions: unknown = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -54,7 +50,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const session = /^\/checkout\/sessions\/(cs_test_\w+)$/.exec(path);
   if (session && method === "GET") {
-    sessionReads += 1;
     if (sessionUnreadable) return json({ id: session[1], object: "checkout.session" });
     const at = closes.get(session[1]);
     return at ? json({ id: session[1], object: "checkout.session", expires_at: at, status: at > Date.now() / 1000 ? "open" : "expired" }) : json({ error: { message: "No such session" } }, 404);
@@ -102,7 +97,6 @@ async function main(): Promise<void> {
   if (!fields.every((field): field is string => typeof field === "string")) throw new Error("not invited");
   const invites = Object.fromEntries(await Promise.all(people.map(async (name, i) => [name, (await readInvite(statsId, fields[i]!))!] as const)));
   const press = (name: string) => openMove(store, productId, invites[name].t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  const mark = (name: string) => `nl:mv:open:${statsId}:${fields[people.indexOf(name)]}`;
 
   part('Unknown membership rows must not become proof that no membership exists');
   const rows: [string, string, unknown, boolean | null][] = [

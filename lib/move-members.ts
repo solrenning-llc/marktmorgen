@@ -44,6 +44,22 @@ const INVITES_SLOT = "mv";
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const FIELD_PATTERN = /^[0-9a-f]{32}:[A-Za-z0-9_-]{1,64}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
+/** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 10/11/2026). */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+
+/**
+ * Whether one subscription row is a live membership to this product: true or false only when the row reads (rule 24,
+ * Codex CX1's MEDIUM on #3598). A row that is not an object, a status Stripe has no name for, or metadata that is not
+ * a map of strings (missing, null, a product that is a number) is null, never "not a member". Empty metadata reads.
+ */
+function liveRow(sub: unknown, productId: string): boolean | null {
+  if (!sub || typeof sub !== "object" || Array.isArray(sub)) return null;
+  const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
+  if (typeof status !== "string" || !SUB_STATUSES.has(status)) return null;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  if (!Object.values(metadata).every((value) => typeof value === "string")) return null;
+  return LIVE.has(status) && (metadata as Record<string, string>).product === productId;
+}
 
 /** One member invited to keep their membership here. */
 export type Invite = {
@@ -316,12 +332,17 @@ export async function keptAlready(store: Store, email: string, productId: string
   // cut short or that does not say it is whole (Claude 4's LEVE on #2685): a live membership may lie beyond it.
   const customers = wholeList(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(KEPT_CUSTOMERS_READ) })}`), KEPT_CUSTOMERS_READ);
   if (!customers) throw new Error("a member's customers did not read whole");
-  for (const customer of customers as { id?: unknown }[]) {
-    if (typeof customer?.id !== "string") continue;
-    const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`), 100);
+  for (const customer of customers) {
+    const id = customer && typeof customer === "object" ? (customer as { id?: unknown }).id : undefined;
+    // A customer without its id is unknown, never skipped: its membership may be the live one.
+    if (typeof id !== "string" || !/^cus_[A-Za-z0-9]+$/.test(id)) throw new Error("a member's customer did not read");
+    const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
     if (!subs) throw new Error("a member's subscriptions did not read whole");
-    const list = subs as { status?: unknown; metadata?: Record<string, string> | null }[];
-    if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
+    for (const sub of subs) {
+      const live = liveRow(sub, productId);
+      if (live === null) throw new Error("a member's subscription did not read");
+      if (live) return true;
+    }
   }
   return false;
 }
@@ -522,11 +543,9 @@ async function liveMembership(store: Store, email: string, productId: string): P
       const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
       if (!subs) return null;
       for (const sub of subs) {
-        if (!sub || typeof sub !== "object") return null;
-        const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
-        if (typeof status !== "string") return null;
-        const product = metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>).product : undefined;
-        if (LIVE.has(status) && product === productId) return true;
+        const live = liveRow(sub, productId);
+        if (live === null) return null;
+        if (live) return true;
       }
     }
     return false;

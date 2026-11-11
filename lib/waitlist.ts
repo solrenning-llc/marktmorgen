@@ -10,7 +10,7 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
@@ -138,17 +138,25 @@ export async function joinWaitlist(input: {
   let mustExist = false;
   let lastLink = "";
   for (let tries = 0; tries < 3 && !leave; tries += 1) {
-    const [existing, size] = await redisPipeline([
-      ["HGET", listKey(sid, product.id), email],
-      ["HLEN", listKey(sid, product.id)],
-    ]);
+    // Read exactly (Claude 4 cloud R on #3707): a size that is not a whole count would be NaN, and NaN is never at
+    // the ceiling, so the public list would grow past it; a place of another shape is not "absent". Either is unknown.
+    const read = repliesFor(
+      await redisPipeline([
+        ["HGET", listKey(sid, product.id), email],
+        ["HLEN", listKey(sid, product.id)],
+      ]),
+      2,
+    );
+    const existing = read?.[0];
+    const size = countOf(read?.[1]);
+    if (!read || size === null || (existing !== null && typeof existing !== "string")) return "error";
     if (typeof existing !== "string") {
       if (mustExist) {
         // Deleted in between: the links this request wrote go with it.
         await redisPipeline([["DEL", tokenKey(confirm), ...(lastLink ? [tokenKey(lastLink)] : [])]]);
         return "error";
       }
-      if (Number(size) >= MAX_WAITLIST) return "full";
+      if (size >= MAX_WAITLIST) return "full";
       const t = newToken();
       const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t } satisfies WaitEntry);
       // A new address takes room in the store's data room, with its link to leave

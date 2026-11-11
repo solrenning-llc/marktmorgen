@@ -9,12 +9,12 @@
  *   nl:oprob:<sid>:<reference>   "pending" for PENDING_SECONDS while it is filed, then
  *                                "filed:<conversation id>" for the seven days
  *
- * The conversation's id is kept so the seven days' check can tell whether the
- * creator answered. A report of an order whose case is open is answered from
- * the mark alone, before any room is taken.
  * is taken with SET NX before anything is filed, so two clicks never file
- * two cases. Its bytes are counted in the store's data room before it is
- * written, and it goes by itself. A filing that fails gives the mark back;
+ * two cases. The conversation's id is kept so the seven days' check can tell
+ * whether the creator answered. A report of an order whose case is open is
+ * answered from the mark alone. The mark's bytes are counted in the store's
+ * data room once it is ours and before anything is filed, and it goes by
+ * itself. A filing that fails gives the mark back;
  * if even that fails, the "pending" mark ends by itself after a few minutes,
  * so a buyer is never told a case was filed when it was not.
  *
@@ -67,9 +67,6 @@ export async function reportOrderProblem(
   if (seen === "filed") return "already";
   if (seen === "pending") return "busy";
 
-  const room = await takeData(store, [{ until: due, bytes: dataBytes([key, `filed:${"0".repeat(12)}`]) }], nowMs);
-  if (!room.ok) return room.reason === "full" ? "full" : "error";
-
   let claim: unknown[] | null;
   try {
     claim = repliesFor(await redisPipeline([["SET", key, "pending", "NX", "EX", ORDER_PROBLEM_PENDING_SECONDS]]), 1);
@@ -83,6 +80,14 @@ export async function reportOrderProblem(
     return now === "filed" ? "already" : now === "pending" ? "busy" : "error";
   }
   if (claim[0] !== "OK") return "error";
+
+  // The room only once the mark is ours, so a report that lost the race takes none. A mark that expires by itself is
+  // never given back early (lib/store-data.ts, giveData): a filing that then fails keeps it to the end of its month.
+  const room = await takeData(store, [{ until: due, bytes: dataBytes([key, `filed:${"0".repeat(12)}`]) }], nowMs).catch(() => null);
+  if (!room?.ok) {
+    await redisPipeline([["DEL", key]]).catch(() => null);
+    return room?.ok === false && room.reason === "full" ? "full" : "error";
+  }
 
   const filed = await fileOrderProblem({ store, email, text, now: nowMs }).catch((error) => {
     console.error("filing a problem with an order failed", error);

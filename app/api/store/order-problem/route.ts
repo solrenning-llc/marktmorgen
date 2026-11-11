@@ -6,7 +6,9 @@ import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readOrderProblem } from "@/lib/order-problem-rules";
 import { reportOrderProblem } from "@/lib/order-problem";
 
-const MAX_BODY_BYTES = 4_000;
+// A note of 1,000 characters, each up to 12 bytes once form-encoded (a 4-byte character as %XX%XX%XX%XX), and the
+// other fields: a full note in any language fits, so it is never refused as too large before it is read.
+const MAX_BODY_BYTES = 13_000;
 /** Reports one address may send to one store in a day, whatever the orders. */
 export const ORDER_PROBLEM_PER_DAY = 5;
 

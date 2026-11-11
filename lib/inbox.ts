@@ -265,14 +265,14 @@ export type FiledProblem = { state: "filed"; id: string } | { state: "limited" |
 
 /**
  * A buyer's report of a problem with an order (567 [GD1] (a), lib/order-problem.ts):
- * filed as a contact from the address the order was paid with, and the team
+ * filed as an order problem ("order") from the address the order was paid with, and the team
  * told by email, as a chat is. One inbox message from the store's allowance,
  * taken before it is written (open).
  */
 export async function fileOrderProblem(input: { store: Store; email: string; text: string; now?: number }): Promise<FiledProblem> {
   const { store } = input;
   if (!store.statsId || !isRedisConfigured()) return { state: "error" };
-  const made = await open({ ...input, name: "", source: "contact" }).catch((error) => {
+  const made = await open({ ...input, name: "", source: "order" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const, reason: "full" as const };
     throw error;
   });

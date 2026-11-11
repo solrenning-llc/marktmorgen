@@ -256,7 +256,7 @@ export function InboxStudio({
                       ) : null}
                     </span>
                     <span className="mt-0.5 block text-xs text-ink-soft" suppressHydrationWarning>
-                      {x.source === "chat" ? "Chat" : "Contact form"} · {x.lastFrom === "store" ? "Answered" : "Waiting"} · {when(x.lastAt)}
+                      {x.source === "chat" ? "Chat" : x.source === "order" ? "Problem with an order" : "Contact form"} · {x.lastFrom === "store" ? "Answered" : "Waiting"} · {when(x.lastAt)}
                       {x.assigned ? ` · ${x.assigned === me ? "You" : x.assigned}` : ""}
                     </span>
                   </button>
@@ -290,7 +290,7 @@ export function InboxStudio({
                     <a className="underline" href={`mailto:${c.email}`}>
                       {c.email}
                     </a>{" "}
-                    · {c.source === "chat" ? "Chat on your store" : "Your contact form"} · since {when(c.startedAt)}
+                    · {c.source === "chat" ? "Chat on your store" : c.source === "order" ? "A buyer's problem with an order" : "Your contact form"} · since {when(c.startedAt)}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

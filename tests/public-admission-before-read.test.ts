@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   // ---- The booking page ------------------------------------------------------------------------------------------
   const BOOK = "admitbook@example.com";
   await shop(BOOK, "admitbook");
-  await setStripeAccount(BOOK, "acct_1TestAdmitBook01", true);
+  await setStripeAccount(BOOK, "acct_1TestAdmitBook0", true);
   const call = await addProduct(BOOK, "Coaching", "", "45", null);
   if (!call.ok) throw new Error("setup");
   await setProductCall(BOOK, call.product.id, readSetup(weekly) as CallSetup);

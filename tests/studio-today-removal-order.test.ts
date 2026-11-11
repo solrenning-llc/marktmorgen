@@ -264,7 +264,9 @@ async function main(): Promise<void> {
   await makePasskey(THIRD, "cred-today-two-step").keep();
   const recordKey = `nl:2fa:${hex(`nimbus-2fa:${THIRD}`).slice(0, 40)}`;
   const reset = Date.now() + 3 * 86_400_000;
-  await redis.pipeline([["SET", recordKey, JSON.stringify({ s: "synthetic-secret", since: Date.now() - 86_400_000, codes: [], last: -1, reset, backup: "" })]]);
+  // In the shape lib/two-step.ts writes: the day is RESET_DAYS after the first request, which came after it was
+  // turned on, so it was on at least four days before that request (a day too close to "since" reads as unknown).
+  await redis.pipeline([["SET", recordKey, JSON.stringify({ s: "synthetic-secret", since: Date.now() - 5 * 86_400_000, codes: [], last: -1, reset, backup: "" })]]);
   const thirdSession = await openSession(THIRD);
   // The page's parts are waited for inside the request, as React waits for them (#2900).
   const render = async (fault: boolean): Promise<{ text: string; twoStep: string[]; invites: number }> => {

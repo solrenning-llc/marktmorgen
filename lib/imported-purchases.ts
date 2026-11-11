@@ -68,6 +68,72 @@ export function addressHash(email: string): string {
 
 export const importedKey = (statsId: string, email: string) => `nl:imp:buy:${statsId}:${addressHash(email)}`;
 export const importedWhoKey = (statsId: string) => `nl:imp:who:${statsId}`;
+
+/**
+ * Grants written only for addresses not deleted from the store, in one step
+ * with the check (review of #3383, as lib/suppression.ts KEEP_UNLESS_ERASED):
+ * KEYS[1] the store's prints (nl:erased:<listId>), KEYS[2] the buyers an
+ * import brought, KEYS[3..] each grant's address key; ARGV[1] when they were
+ * brought ("" for a grant that is not an import's), then for each grant its
+ * print, its address, its product and its record. One HMGET; a grant whose
+ * print is found writes nothing and answers -1; otherwise its address is
+ * noted once among the buyers brought (HSETNX) and its product written
+ * (HSETNX: 1 new, 0 already). Billed 1 + 1 + 2 a grant at most, the same two
+ * HSETNX a grant cost before; lib/redis-memory.ts runs it the same way.
+ */
+export const GRANT_UNLESS_ERASED = `-- marktmorgen:grant-unless-erased:v1
+local n = #KEYS - 2
+local prints = {}
+for i = 1, n do prints[i] = ARGV[4 * i - 2] end
+local found = redis.call("HMGET", KEYS[1], unpack(prints))
+local out = {}
+local noted = {}
+for i = 1, n do
+  if found[i] then
+    out[i] = -1
+  else
+    local who = ARGV[4 * i - 1]
+    if ARGV[1] ~= "" and not noted[who] then
+      redis.call("HSETNX", KEYS[2], who, ARGV[1])
+      noted[who] = true
+    end
+    out[i] = redis.call("HSETNX", KEYS[i + 2], ARGV[4 * i], ARGV[4 * i + 1])
+  end
+end
+return out`;
+
+/** What one grant checked against the store's deleted people became: written, had already, or nothing written. */
+export type GrantAnswer = "new" | "already" | "erased";
+
+/**
+ * grantImported for an import or the API's gift (both take from the store's
+ * data room), with the store's deleted people checked in the same step as
+ * each write (GRANT_UNLESS_ERASED): `erased` is the store's prints key and
+ * how one address is printed (lib/suppression.ts). Throws when the step
+ * cannot run or its answer is not exactly one of -1, 0 or 1 for each grant:
+ * the caller writes nothing more and refuses (CX-123 rule 24).
+ */
+export async function grantUnlessErased(
+  statsId: string,
+  job: string,
+  grants: { email: string; productId: string; items: string[] | null }[],
+  erased: { key: string; print: (email: string) => string },
+  room: DataStore,
+  atSeconds = Math.floor(Date.now() / 1000),
+): Promise<GrantAnswer[]> {
+  if (!grants.length || !isRedisConfigured()) return grants.map(() => "already");
+  // Each grant at the most it weighs, as grantImported takes it.
+  await needData(room, [{ slot: "imp", bytes: grants.reduce((sum, g) => sum + dataBytes([g.productId, JSON.stringify({ at: atSeconds, job, items: g.items, option: null }), g.email], 3), 0) }]);
+  const keys = grants.map((g) => importedKey(statsId, g.email));
+  const args = grants.flatMap((g) => [erased.print(g.email), normaliseEmail(g.email), g.productId, JSON.stringify({ at: atSeconds, job, items: g.items })]);
+  const brought = IMPORT_JOB.test(job) ? String(atSeconds) : "";
+  const replies = await redisPipeline([["EVAL", GRANT_UNLESS_ERASED, keys.length + 2, erased.key, importedWhoKey(statsId), ...keys, brought, ...args]]);
+  const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!Array.isArray(reply) || reply.length !== grants.length || !reply.every((a) => a === -1 || a === 0 || a === 1)) {
+    throw new Error("the grants could not be checked where they are written");
+  }
+  return (reply as number[]).map((a) => (a === 1 ? "new" : a === 0 ? "already" : "erased"));
+}
 /** An import's own job id (lib/imports.ts): only those are brought over; a gift, a place or a PayPal sale is not. */
 const IMPORT_JOB = /^[0-9a-f]{24}$/;
 

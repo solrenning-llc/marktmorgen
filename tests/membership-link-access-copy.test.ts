@@ -10,9 +10,12 @@ for (const onSale of [false, true]) {
   is("self-service cancellation is still explained", answer.includes("The member cancels on their own") && answer.includes("Manage or cancel") && answer.includes("Stripe's own page"), true);
 }
 part("The hosted membership gate follows its real state");
-for (const [status, open] of [["active", true], ["trialing", true], ["past_due", true], ["canceled", false], ["unpaid", false], ["paused", false]] as const) {
+for (const [status, open] of [["active", true], ["trialing", true], ["canceled", false], ["unpaid", false], ["paused", false]] as const) {
   is(status, isLiveSub({ status }), open);
 }
+// Past due opens only while Stripe has another attempt scheduled (tests/membership-past-due-retry.test.ts).
+is("past_due while Stripe retries", isLiveSub({ status: "past_due", latest_invoice: { next_payment_attempt: Math.floor(Date.now() / 1000) + 86_400 } }), true);
+is("past_due with no retry scheduled", isLiveSub({ status: "past_due", latest_invoice: { next_payment_attempt: null } }), false);
 const product = { recurring: { interval: "month" } } as Listing;
 is("an outside delivery link is still sold as a membership", soldAMembership(product, { mode: "subscription", metadata: { kind: "membership" } }), true);
 is("a payment plan is still distinguished from membership access", soldAMembership(product, { mode: "subscription", metadata: { kind: "plan" } }), false);

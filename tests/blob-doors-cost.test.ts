@@ -18,7 +18,8 @@
  */
 import { readFileSync } from "node:fs";
 import * as registry from "./plan-cost-registry";
-import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE, BLOB_PUT_TRIES, BLOB_HEAD_TRIES, BLOB_TOKEN_TRIES, studioBlobPerRequest } from "./plan-cost-registry";
+import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE, BLOB_PUT_TRIES, BLOB_HEAD_TRIES, BLOB_TOKEN_TRIES, ORIGIN_PER_BYTE, pictureCheckBlob, studioBlobPerRequest } from "./plan-cost-registry";
+import { CDN_PER_REQUEST } from "./traffic-cost";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { done, is, part } from "./check";
@@ -29,7 +30,10 @@ const TIERS = ["creator", "pro", "scale"] as const;
 
 // What a door, a check and a head cost, written here from the prices, not read from the registry's helpers.
 const door = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP;
-const check = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE;
+// Changed (rule 23, Claude 2 on #2852, 6751277724, MEDIUM): the check's read is the same private get the studio's
+// picture check makes (lib/community-files.ts, lib/picture-check.ts), so it crosses at Fast Origin Transfer too and is
+// one CDN request, as pictureCheckBlob counts it; the community path sends no clean-up head (it only deletes).
+const check = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_PER_REQUEST;
 const handInHead = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
 const perBuyerAction = Math.max(door, check, handInHead);
 const mailPut = BLOB_PUT_TRIES * BLOB_ADVANCED_OP;
@@ -54,6 +58,10 @@ const mailPictures = read("lib/mail-pictures.ts");
 is("an email's picture is one put from the server, and nothing else", [count(mailPictures, "await put("), /\b(head|get|list|issueSignedToken)\(/.test(mailPictures)], [1, false]);
 const mailRoute = read("app/api/store/mail/picture/route.ts");
 is("it is one of the store's calls to connected services, taken before the put", mailRoute.indexOf('withinServiceWhy("mail-picture"') > 0 && mailRoute.indexOf('withinServiceWhy("mail-picture"') < mailRoute.indexOf("keepMailPicture(ref"), true);
+
+part("A community picture's check is priced as the studio's picture check is, less its clean-up head");
+is("at least pictureCheckBlob less the clean-up head the community path does not send", check >= pictureCheckBlob(MAX_IMAGE_BYTES) - BLOB_HEAD_TRIES * BLOB_SIMPLE_OP - 1e-12, true);
+is("so the dearest buyer action is the check, not the door", [check > door, registry.buyerBlobPerAction() >= check - 1e-12], [true, true]);
 
 part("The creator's community doors and checks are studio requests, inside studio-blob");
 is("a studio request is already priced above a community door", studioBlobPerRequest() >= door, true);

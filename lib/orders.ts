@@ -475,17 +475,28 @@ export async function countLegacyCheckoutForConfirmation(store: Store, reference
       : typeof admission.hour === "string" && /^(0|[1-9][0-9]{0,8})$/.test(admission.hour) ? admission.hour : "";
     const owner = storeRef(store), folder = await storeFolder(owner);
     if (!FOLDER_PATTERN.test(folder)) return "unknown";
-    const window = (allowanceWindow(store, now) ?? calendarWindow(now)).id, month = calendarWindow(now).id;
+    // Counted where its admission reads it, as countOrder does: a paying
+    // store's order paid for while its billing window is unknown is held,
+    // never counted in the calendar month (rule 30), and moves into the
+    // window once that is known (lib/order-admission.ts, countHeldOrders).
+    const known = allowanceWindow(store, now), month = calendarWindow(now).id;
+    const counter = known ? countKey(folder, known.id) : heldOrdersKey(folder);
     const bytes = orderDataBytes(admission.items), count = paidCents === null ? 1 : coveredByShare(store, paidCents, now / 1000) ? 0 : 1;
     const receipt = `oc1:${fingerprint(JSON.stringify(["legacy-checkout-v1", reference, folder, paidCents, hour, bytes, count, admission.createdAtMs]))}`;
     const [open, held] = orderConfirmationHoldKeys(folder);
-    const reply: unknown = await redisPipeline([["EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference), countKey(folder, window), open, held,
+    const reply: unknown = await redisPipeline([["EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference), counter, open, held,
       foldersKey(month), `nl:store:folder-owner:${folder}`, receipt, hour, bytes, count, folder, owner,
       admission.createdAtMs + SEEN_SECONDS * 1000, now, KEEP_SECONDS]]);
     if (!Array.isArray(reply)) return "unknown";
     const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
     if (!length || !("value" in length) || length.value !== 1 || !value || !("value" in value)) return "unknown";
-    return value.value === 1 ? "committed" : value.value === 2 ? "already" : "unknown";
+    const outcome = value.value === 1 ? "committed" : value.value === 2 ? "already" : "unknown";
+    // The order is counted already; those held while the window was unknown
+    // move in now, and a failure leaves them held for the next order.
+    if (outcome === "committed" && known) await countHeldOrders(folder, known.id).catch((error) => {
+      console.error("could not count the orders held for an unknown window; counted next time", error);
+    });
+    return outcome;
   } catch (error) {
     console.error("could not count a legacy checkout", error);
     return "unknown";

@@ -61,6 +61,10 @@ part("Every real opening is listed, and every listed file still opens one");
   }
   const unlisted = [...found.keys()].filter((file) => !listed.has(file));
   is("no file opens a checkout or a payment on a creator's account without being in lib/sale-openings.ts", unlisted, []);
+  // Read raw too, comments and all, so a string that looks like a comment can never hide an opening from the scan.
+  const rawOpening = /\bonAccount\s*\)?\s*\(\s*["'`]POST["'`]\s*,[^,]*,\s*(["'`])(\/checkout\/sessions|\/payment_intents)\1|\bcall\s*\(\s*["'`]POST["'`]\s*,\s*(["'`])\/v2\/checkout\/orders\3/;
+  const rawUnlisted = files.filter((file) => file !== "lib/stripe-account.ts" && file !== "lib/sale-openings.ts" && !listed.has(file) && rawOpening.test(read(file)));
+  is("and read raw, comments and all, no other file seems to open one", rawUnlisted, []);
   const stale = [...listed].filter((file) => !found.has(file));
   is("every file in lib/sale-openings.ts still opens one", stale, []);
   for (const entry of [...SALE_OPENINGS, ...NOT_A_SALE, ...COVERED_OPENINGS]) {

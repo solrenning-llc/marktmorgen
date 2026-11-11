@@ -8,7 +8,8 @@
  * another would sell where the record says nobody can buy, so the list is
  * kept here and tests/sale-openings.test.ts checks it against the real
  * sources: a file that opens a checkout session or a payment intent through
- * onAccount (lib/stripe-account.ts) and is not listed fails the test.
+ * onAccount (lib/stripe-account.ts, also as a default provider), or a PayPal
+ * order on the creator's PayPal account, and is not listed fails the test.
  *
  * None of these calls the refusal yet, and nothing is recorded: with no
  * record, openingsWithoutRefusal has nothing to check. A "refuse-consumers"
@@ -26,8 +27,8 @@
 export type SaleOpening = {
   /** The file, from the repository root. */
   file: string;
-  /** The Stripe endpoint it posts to on the creator's account. */
-  opens: "/checkout/sessions" | "/payment_intents";
+  /** The endpoint it posts to on the creator's account: Stripe's, or PayPal's for an order (#3682 reviews). */
+  opens: "/checkout/sessions" | "/payment_intents" | "/v2/checkout/orders";
   /** What the buyer is buying there. */
   what: string;
 };
@@ -40,6 +41,7 @@ export const SALE_OPENINGS: readonly SaleOpening[] = Object.freeze([
   { file: "lib/payment-requests.ts", opens: "/checkout/sessions", what: "a payment request the creator sent" },
   { file: "lib/store-tip-checkout.ts", opens: "/checkout/sessions", what: "a tip (\"Support my work\")" },
   { file: "lib/upsell.ts", opens: "/payment_intents", what: "a one-click offer after paying, on the card just used" },
+  { file: "lib/paypal-sales.ts", opens: "/v2/checkout/orders", what: "a product through PayPal, on the creator's PayPal account" },
 ].map((entry) => Object.freeze(entry as SaleOpening)));
 
 /** Files that open a checkout session that charges nothing. */
@@ -48,18 +50,44 @@ export const NOT_A_SALE: readonly (Omit<SaleOpening, "what"> & { why: string })[
 ]);
 
 /**
- * The openings in a source text: each POST through onAccount whose path is
- * exactly "/checkout/sessions" or "/payment_intents". A path that
- * goes on ("/checkout/sessions/" + id + "/expire") acts on one that exists.
+ * Files that open a session only on behalf of a listed sale opening, so the
+ * refusal there covers them: each is reached only from `by`, which refuses
+ * before it is called. Named so the scan still sees every opening.
  */
-export function openingCalls(source: string): SaleOpening["opens"][] {
+export const COVERED_OPENINGS: readonly (Omit<SaleOpening, "what"> & { by: string; why: string })[] = Object.freeze([
+  Object.freeze({
+    file: "lib/order-confirmation-outbox.ts",
+    opens: "/checkout/sessions" as const,
+    by: "lib/store-checkout.ts",
+    why: "the original paid confirmation's session, created only from inside createCheckout",
+  }),
+]);
+
+/** A source with its comments taken out, so a name in a comment never reads as code. */
+const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
+
+/**
+ * The openings in a source text: each POST through onAccount (called by name,
+ * or as the default of a provider chosen at run time, `(… ?? onAccount)(`)
+ * whose path is exactly "/checkout/sessions" or "/payment_intents", and each
+ * PayPal `call("POST", "/v2/checkout/orders"`. A path that goes on
+ * ("/checkout/sessions/" + id + "/expire", an order's "/capture") acts on one
+ * that exists. Comments are left out.
+ */
+export function openingCalls(text: string): SaleOpening["opens"][] {
+  const source = withoutComments(text);
   const found: SaleOpening["opens"][] = [];
-  const call = /\bonAccount\s*\(\s*["'`]POST["'`]\s*,[^,]*,\s*(["'`])(\/checkout\/sessions|\/payment_intents)\1/g;
-  for (let match = call.exec(source); match; match = call.exec(source)) {
+  const stripe = /\bonAccount\s*\)?\s*\(\s*["'`]POST["'`]\s*,[^,]*,\s*(["'`])(\/checkout\/sessions|\/payment_intents)\1/g;
+  for (let match = stripe.exec(source); match; match = stripe.exec(source)) {
+    found.push(match[2] as SaleOpening["opens"]);
+  }
+  const paypal = /\bcall\s*\(\s*["'`]POST["'`]\s*,\s*(["'`])(\/v2\/checkout\/orders)\1/g;
+  for (let match = paypal.exec(source); match; match = paypal.exec(source)) {
     found.push(match[2] as SaleOpening["opens"]);
   }
   return found;
 }
+
 
 const named = (implementedIn: unknown) =>
   new Set(
@@ -86,7 +114,8 @@ export function openingsWithoutRefusal(
     const files = named(record.implementedIn);
     for (const opening of SALE_OPENINGS) {
       if (!files.has(opening.file)) gaps.push(`${record.jurisdiction}: ${opening.file} is not named in implementedIn`);
-      else if (!/\bcheckoutLocationDecision\b/.test(sourceOf(opening.file))) {
+      // A call, outside comments: an import or a mention alone is not a refusal (Claude 3 on #3682).
+      else if (!/\bcheckoutLocationDecision\s*\(/.test(withoutComments(sourceOf(opening.file)))) {
         gaps.push(`${record.jurisdiction}: ${opening.file} never calls checkoutLocationDecision`);
       }
     }

@@ -188,6 +188,17 @@ async function main(): Promise<void> {
   busyReply = null;
   is("once Redis answers in its shape again, the held time is still not offered", (await offered(held.store, held.call))?.includes(H), false);
 
+  part("A weekly calendar that cannot be read blocks availability");
+  is("control: without configured calendars, weekly times are offered", await offered(held.store, held.call) !== null, true);
+  await redis.pipeline([["SET", `nl:cal:cfg:${held.store.statsId}`, JSON.stringify({
+    handle: held.store.handle,
+    feeds: [{ id: "abcdef0123456789", url: "https://calendar.example.com/calendar.ics", addedAt: "2026-11-11T00:00:00.000Z" }],
+    token: null,
+    tokenAt: "",
+    callsId: held.store.callsId,
+  })]]);
+  is("an unreadable configured calendar makes weekly availability unknown", await offered(held.store, held.call), null);
+
   done();
 }
 

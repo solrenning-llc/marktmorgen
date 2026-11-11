@@ -6,7 +6,8 @@
  *   - a person sent once is held for the gap and sent again after it;
  *   - two sends at the same time give the person one email, never two;
  *   - the send is recorded BEFORE it goes, so a send whose outcome is
- *     uncertain still counts as sent;
+ *     uncertain still counts as sent, and a person whose record did not
+ *     come back is not sent;
  *   - a failed or odd read is unknown, never "never sent"; an odd reply to
  *     the record is read back, and only our own value is ours;
  *   - the ceiling: checks are taken from the store's month before any read,
@@ -84,11 +85,12 @@ async function main(): Promise<void> {
   is("exactly one of them sends to the person", one.send.length + two.send.length, 1);
   is("the other holds the person", one.held.length + two.held.length, 1);
 
-  part("Recorded before sending: an uncertain send counts");
+  part("Recorded before sending: no record, no send");
   reset();
-  // The record of when the person was sent fails to answer: the send still counts, the person is held next time.
+  // The record of when the person was sent fails to answer: the person is not sent now (Claude 1 on #3636), and the
+  // gate taken holds them next time.
   watch((commands) => (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:mgap:last:")) ? Promise.reject(new Error("timeout")) : null));
-  is("the send goes on (the gate is ours)", (await admit(["a@x.test"], T0)).send, ["a@x.test"]);
+  is("not sent without its record: unknown", (await admit(["a@x.test"], T0)).unknown, ["a@x.test"]);
   watch();
   is("and the next send an hour later holds the person", (await admit(["a@x.test"], T0 + HOUR)).held, ["a@x.test"]);
 

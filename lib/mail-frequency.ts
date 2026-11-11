@@ -17,8 +17,13 @@
  *     second run that read the same {last} finds it taken and holds the
  *     person. An odd reply is read back, and only our own value is ours
  *     (as lib/claim-mark.ts does); anything else is unknown.
- * If writing `last` fails, the gate stays taken, so the person is held, never
- * sent twice.
+ * A person is sent only once `last` is written and its reply came back
+ * exactly; otherwise the person is unknown and not sent this time, so a
+ * person is never sent twice because a record is missing.
+ *
+ * The person is lib/person-key.ts's personKey of the store and the address,
+ * the address normalised, so it is person data lib/person-data.ts names:
+ * gone by itself after MAIL_GAP_KEEP_SECONDS.
  *
  * The ceiling before any read (MR): each person checked takes one check
  * from the store's calendar month, at most mailGapCheckLimit(tier):
@@ -33,12 +38,12 @@
  * gap into a send: lib/broadcasts.ts is being changed in open pull requests,
  * so the wiring is the next unit.
  */
-import { createHash } from "node:crypto";
 import { claimValue } from "@/lib/claim-mark";
 import { MAIL_GAP_KEEP_MS, markValue, planSend, readLastSent, type LastSent, type MailGapSetting, type MailKind, type SendPlan } from "@/lib/mail-frequency-rules";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
+import { personKey } from "@/lib/person-key";
 
 /** Checks a store may make in a calendar month for each monthly email of its plan. */
 export const MAIL_GAP_CHECKS_PER_EMAIL = 2;
@@ -62,9 +67,6 @@ export function mailGapCheckLimit(tier: Tier): number {
 }
 
 export type AdmitPlan = SendPlan & { refused: boolean };
-
-const personHash = (store: string, person: string): string =>
-  createHash("sha256").update(`mgap\u0000${store}\u0000${person}`).digest("hex").slice(0, 32);
 
 async function pipeline(commands: (string | number)[][]): Promise<unknown[] | null> {
   try {
@@ -112,7 +114,8 @@ export async function admitForSend(input: {
   if (!Number.isSafeInteger(now) || now <= 0) return asUnknown(false);
   if (!(await takeChecks(store, tier, unique.length, now))) return asUnknown(true);
 
-  const hashes = new Map(unique.map((p) => [p, personHash(store, p)] as const));
+  // The person as lib/person-key.ts makes it: the address normalised first, so one person in two letter cases is one.
+  const hashes = new Map(unique.map((p) => [p, personKey(store, p)] as const));
   const lastKey = (p: string) => `nl:mgap:last:${store}:${hashes.get(p)}`;
   const read = await pipeline(unique.map((p) => ["GET", lastKey(p)]));
   const lasts = new Map<string, LastSent>();
@@ -147,15 +150,20 @@ export async function admitForSend(input: {
     });
   }
 
-  // The record of the send, before it goes. Its reply is not needed: the gate taken already holds the person.
-  if (ours.length) await pipeline(ours.map((p) => ["SET", lastKey(p), markValue(now), "EX", MAIL_GAP_KEEP_SECONDS]));
+  // The record of the send, before it goes. Only a person whose record came back exactly is sent: the gate alone
+  // holds them only while their earlier record lives, so one without its record is unknown and not sent (rule 24).
+  const recorded: string[] = [];
+  if (ours.length) {
+    const marks = await pipeline(ours.map((p) => ["SET", lastKey(p), markValue(now), "EX", MAIL_GAP_KEEP_SECONDS]));
+    ours.forEach((p, i) => (marks && marks[i] === "OK" ? recorded : lost).push(p));
+  }
 
   const order = (list: string[]) => {
     const set = new Set(list);
     return unique.filter((p) => set.has(p));
   };
   return {
-    send: order(ours),
+    send: order(recorded),
     held: order([...plan.held, ...taken]),
     unknown: order([...plan.unknown, ...lost]),
     repeated: plan.repeated,

@@ -12,7 +12,7 @@ export function BlogUnavailable({ language, handle, name }: { language: unknown;
    <a href={base} className="link inline-flex min-h-11 items-center">{name}</a>
    <h1 className="t-h2 mt-6">{wordsIn(code).blogOf(name)}</h1>
    <p role="status" className="notice mt-6">{words.unavailable}</p>
-   <a href={`${base}/blog`} className="btn btn-secondary mt-6 min-h-11">{words.retry}</a>
+   <a href={`${base}/blog`} className="btn btn-secondary mt-6 inline-flex min-h-11 items-center justify-center">{words.retry}</a>
   </main>
  </div>;
 }

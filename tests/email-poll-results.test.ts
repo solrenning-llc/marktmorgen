@@ -60,8 +60,11 @@ const take = async (units: number) => { asked.push(units); return true; };
   put({ poll: undefined });
   is("an email with no poll: none", await studioPollResults(shop, ID, take, now), { state: "none" });
   is("and no units taken for any of them", asked, []);
-  put({ status: "scheduled" });
+  put({ status: "scheduled", sent: 0 });
   is("not gone out: none yet", await studioPollResults(shop, ID, take, now), { state: "none" });
+  // It waits with part of its list sent (daily portions, a subject test): its totals so far are read (review, ALTO).
+  put({ status: "waiting", sent: 4 });
+  is("waiting after some went out: read", (await studioPollResults(shop, ID, take, now)).state, "ok");
   is("an id that is not one", await studioPollResults(shop, "nope", take, now), { state: "none" });
 
   part("Unknown, never a count");

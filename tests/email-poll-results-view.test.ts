@@ -30,6 +30,8 @@ for (const [what, raw] of [
   ["nothing", null],
 ] as [string, unknown][]) is(`unknown: ${what}`, readPollResultsAnswer(raw, 3), { kind: "unknown" });
 is("the month spent: said with its own sentence", readPollResultsAnswer({ ok: false, error: "studio_used", message: "This needs 2 studio requests and 1 is left." }, 3), { kind: "used", message: "This needs 2 studio requests and 1 is left." });
+// The mail route answers studio_used with its own sentence (notCounted), never a bare code (review, LOW).
+is("the route's own words for a spent month are read as such", readPollResultsAnswer({ ok: false, error: "studio_used", message: "Your studio requests for this month are used up." }, 3).kind, "used");
 is("no longer kept", readPollResultsAnswer({ ok: false, error: "poll_none" }, 3), { kind: "none" });
 is("could not be read", readPollResultsAnswer({ ok: false, error: "poll_unknown" }, 3), { kind: "unknown" });
 

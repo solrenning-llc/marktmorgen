@@ -10,7 +10,10 @@
  * - the walk that erases closed stores (eraseClosed, lib/closed-store-data.ts) took it out of its line (DUE_KEY)
  *   without preparing it, so its data, and what keeping it costs, was never erased.
  *
- * Only a record Redis says is not there (nil) takes a store out of a line; any other reply keeps it in, read again on
+ * - removing what a closing store keeps (removeStored, lib/plan-closing.ts) said it was all seen through (clean)
+ *   with nothing deleted, so the store was written down as done and its files were kept for good.
+ *
+ * Only a record Redis says is not there (nil) takes a store out of a line or counts as nothing left to remove; any other reply keeps it in, read again on
  * the next run (storeForRefExact, lib/store.ts).
  *
  * Synthetic stores, in-memory Redis.
@@ -18,7 +21,7 @@
 import { createHash } from "node:crypto";
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Hands, closeOne } from "@/lib/plan-closing";
+import { type Hands, closeOne, removeStored } from "@/lib/plan-closing";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -118,6 +121,42 @@ async function main(): Promise<void> {
     redis.run(["DEL", ownerKey(N)]);
     const walked = await eraseClosed(Date.now() + 30_000, async () => {}, T);
     is("nil record: not prepared, out of the line", [walked.stores, redis.run(["ZSCORE", DUE_KEY, N])], [0, null]);
+  }
+
+  /** Hands that count what they are asked to list and delete. */
+  const counting = () => {
+    const asked = { listed: 0, removed: 0 };
+    const hands = { list: async () => (asked.listed += 1, []), remove: async (paths: string[]) => void (asked.removed += paths.length) } as unknown as Pick<Hands, "list" | "remove">;
+    return { asked, hands };
+  };
+
+  for (const [what, spoil] of SPOILS) {
+    part(`removeStored: ${what} is never "nothing left to remove"`);
+    redis.clear();
+    const C = "removing-c@example.com";
+    await makeStore(C, "removingc");
+    const kept = String(redis.run(["GET", ownerKey(C)]));
+    spoil(ownerKey(C), kept);
+    const { asked, hands: counted } = counting();
+    let result: unknown;
+    try {
+      result = await removeStored(C, counted);
+    } catch (error) {
+      result = `threw: ${(error as Error).message}`;
+    }
+    is(`${what}: not seen through, so it is tried again tomorrow`, result, { files: 0, clean: false });
+    is(`${what}: nothing listed or deleted`, asked, { listed: 0, removed: 0 });
+    is(`${what}: the record is left as it was`, redis.run(["GET", ownerKey(C)]) !== null, true);
+  }
+
+  part("removeStored, control: a record Redis says is not there (nil) has nothing left to remove");
+  {
+    redis.clear();
+    const N = "removing-n@example.com";
+    await makeStore(N, "removingn");
+    redis.run(["DEL", ownerKey(N)]);
+    const { asked, hands: counted } = counting();
+    is("nil record: clean, nothing to remove", [await removeStored(N, counted), asked], [{ files: 0, clean: true }, { listed: 0, removed: 0 }]);
   }
 
   done();

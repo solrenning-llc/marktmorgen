@@ -76,6 +76,26 @@ export async function saveServer(room: string, server: DiscordServer): Promise<v
 }
 
 /**
+ * The people of a server read by forgetServer, deleted in one step (Codex G on #3017): KEYS[1] the people, KEYS[2] the
+ * due list, KEYS[3..] each person's address link as read; ARGV[1] the server's sid, ARGV[2..] each person's id and the
+ * row read for them. A person's address link goes while it still points at them (an address they no longer hold is
+ * theirs no more); their row and due entry go only while the row is still the one read, so one rewritten meanwhile
+ * (another address, from a join under way) is kept whole, with its new link, for the next try. Answers the people
+ * deleted, the links deleted and the people left. lib/redis-memory.ts runs it the same way.
+ */
+export const FORGET_PEOPLE = `-- marktmorgen:discord-forget-people:v1
+local gone, links = 0, 0
+for i = 1, #KEYS - 2 do
+  local id, row = ARGV[2 * i], ARGV[2 * i + 1]
+  if redis.call("GET", KEYS[i + 2]) == id then links = links + redis.call("DEL", KEYS[i + 2]) end
+  if redis.call("HGET", KEYS[1], id) == row then
+    gone = gone + redis.call("HDEL", KEYS[1], id)
+    redis.call("ZREM", KEYS[2], ARGV[1] .. "|" .. id)
+  end
+end
+return {gone, links, redis.call("HLEN", KEYS[1])}`;
+
+/**
  * Forgets the server, the roles each product gave and everyone given them.
  * Returns who was given roles, so the caller can say how many; nothing is
  * taken back in Discord, where the bot is no longer.
@@ -102,17 +122,32 @@ export async function forgetServer(room: string, sid: string): Promise<number> {
   // Only the people read, with their address links and due entries, are deleted; then the list must be empty. Anybody
   // left (a reading that missed somebody, a person who joined meanwhile) keeps the server for the next try, which
   // forgets them with their address: no buyer's address is ever left linked to a Discord id with nobody to forget it.
-  const commands: (string | number)[][] = [
-    ...(people.length ? [["HDEL", membersKey(room), ...people], ["ZREM", DUE_KEY, ...people.map((id) => `${sid}|${id}`)]] : []),
-    ...(addresses.length ? [["DEL", ...addresses.map((e) => addressKey(room, e))]] : []),
-    ["HLEN", membersKey(room)],
-  ];
-  // The deletes are read too, as forgetMember's (#2932, CX-123 rule 24): a missing, short, long or queued answer is not
-  // "forgotten". HDEL and ZREM remove at most the people named, DEL at most the address links named.
-  const counts = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
-  const most = [...(people.length ? [people.length, people.length] : []), ...(addresses.length ? [addresses.length] : [])];
-  if (!counts || !most.every((limit, i) => counts[i] !== null && (counts[i] as number) <= limit)) throw new UnknownReplyError("the deletion of a Discord server's people");
-  if (counts[counts.length - 1] !== 0) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
+  // Each person goes only while their row is still the one read, in one step (FORGET_PEOPLE; Codex G on #3017): a join
+  // that rewrote them with another address meanwhile keeps its row, its new link and its due entry for the next try.
+  if (people.length) {
+    const command: (string | number)[] = [
+      "EVAL",
+      FORGET_PEOPLE,
+      2 + people.length,
+      membersKey(room),
+      DUE_KEY,
+      ...addresses.map((e) => addressKey(room, e)),
+      sid,
+      ...people.flatMap((id, i) => [id, rows[i]]),
+    ];
+    // The deletes are read too, as forgetMember's (#2932, CX-123 rule 24): a missing, short, long or queued answer is
+    // not "forgotten". At most the people named go, and at most their address links.
+    const reply = repliesFor(await redisPipeline([command]), 1)?.[0];
+    const counts = Array.isArray(reply) && reply.length === 3 ? reply.map(countOf) : null;
+    if (!counts || counts[0] === null || counts[1] === null || counts[2] === null || counts[0] > people.length || counts[1] > people.length) {
+      throw new UnknownReplyError("the deletion of a Discord server's people");
+    }
+    if (counts[2] !== 0) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
+  } else {
+    const left = repliesFor(await redisPipeline([["HLEN", membersKey(room)]]), 1)?.map(countOf);
+    if (!left || left[0] === null) throw new UnknownReplyError("the deletion of a Discord server's people");
+    if (left[0] !== 0) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
+  }
   const gone = repliesFor(await redisPipeline([["DEL", serverKey(room), productsKey(room), membersKey(room)]]), 1)?.map(countOf);
   if (!gone || gone[0] === null || (gone[0] as number) > 3) throw new UnknownReplyError("the deletion of a Discord server");
   return people.length;

@@ -8,9 +8,11 @@
  * address↔Discord link stayed stored. As forgetMember does (#2932), a missing, short, long, queued or impossible
  * count is unknown: it throws UnknownReplyError, and the studio's disconnect never answers ok with a count.
  *
- * Since Codex G's review of #3017 the people are deleted by name with their address links and due entries (HDEL,
- * ZREM, DEL, then HLEN, which must be 0), and the server, its products' roles and the emptied list after (DEL): each
- * of the two pipelines is read exactly the same way.
+ * Since Codex G's review of #3017 the people are deleted by name with their address links and due entries, and the
+ * server, its products' roles and the emptied list after (DEL): each step is read exactly the same way. Since Codex G's
+ * second review (6787959688) the people's deletes are one step, FORGET_PEOPLE (an EVAL answering the people deleted,
+ * the links deleted and the people left), so each case below answers that step's one reply; the cases and what they
+ * must give are those of the four replies of HDEL, ZREM, DEL and HLEN before it.
  */
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { emailKey, storeKey } from "@/lib/learn";
@@ -37,13 +39,14 @@ const ROLE = "323456789012345678";
 
 type Command = (string | number)[];
 /**
- * Answers the first of forgetServer's deletes (the people's, starting with HDEL; with nobody kept, the server's DEL)
- * with `reply`, without applying it.
+ * Answers the first of forgetServer's deletes (the people's, FORGET_PEOPLE; with nobody kept, the server's DEL) with
+ * `reply`, without applying it.
  */
 let reply: { value: unknown } | null = null;
 const original = redis.pipeline.bind(redis);
 const isDelete = (command: Command | undefined) =>
-  Boolean(command) && ((command![0] === "HDEL" && String(command![1]).startsWith("nl:dc:mem:")) || (command![0] === "DEL" && String(command![1]).startsWith("nl:dc:srv:")));
+  Boolean(command) &&
+  ((command![0] === "EVAL" && String(command![1]).startsWith("-- marktmorgen:discord-forget-people:v1\n")) || (command![0] === "DEL" && String(command![1]).startsWith("nl:dc:srv:")));
 redis.pipeline = (async (commands: Command[]) => {
   if (reply && commands.length && isDelete(commands[0])) {
     const answer = reply.value;
@@ -121,25 +124,29 @@ async function main(): Promise<void> {
   await seed(false);
   is("nobody given roles: the server alone is forgotten, 0 people", [await forgetServer(room, sid), await kept()], [0, NOTHING_KEPT]);
   await seed();
-  reply = { value: [2, 2, 2, 0] };
-  is("exact counts (both people, both checks, both address links, nobody left) are known", [await outcome(() => forgetServer(room, sid))], [2]);
+  reply = { value: [[2, 2, 0]] };
+  is("exact counts (both people, both address links, nobody left) are known", [await outcome(() => forgetServer(room, sid))], [2]);
   await seed();
-  reply = { value: [0, 0, 0, 0] };
+  reply = { value: [[0, 0, 0]] };
   is("zero counts (already gone) are known, never unknown", [await outcome(() => forgetServer(room, sid))], [2]);
 
   part("Unread deletes cannot say the people were forgotten");
   for (const [label, value] of [
     ["no replies", []],
-    ["queued replies", ["QUEUED", "QUEUED", "QUEUED", "QUEUED"]],
+    ["queued replies", ["QUEUED"]],
     ["one reply that is not a count", ["x"]],
-    ["one reply short", [2, 2, 2]],
-    ["one reply too many", [2, 2, 2, 0, 1]],
-    ["missing replies", [undefined, undefined, undefined, undefined]],
-    ["null replies", [null, null, null, null]],
+    ["one count short", [[2, 2]]],
+    ["one count too many", [[2, 2, 0, 1]]],
+    ["one reply too many", [[2, 2, 0], 1]],
+    ["missing replies", [undefined]],
+    ["missing counts", [[undefined, undefined, undefined]]],
+    ["null replies", [null]],
+    ["null counts", [[null, null, null]]],
     ["not a list", "OK"],
-    ["string counts", ["2", "2", "2", "0"]],
-    ["a negative count", [-1, 2, 2, 0]],
-    ["a fraction", [2, 1.5, 2, 0]],
+    ["a reply that is not a list of counts", ["OK"]],
+    ["string counts", [["2", "2", "0"]]],
+    ["a negative count", [[-1, 2, 0]]],
+    ["a fraction", [[2, 1.5, 0]]],
   ] as [string, unknown][]) {
     await seed();
     reply = { value };
@@ -147,8 +154,8 @@ async function main(): Promise<void> {
   }
 
   part("A count no command can give is unknown");
-  // HDEL and ZREM name two people, DEL two address links; HLEN must say nobody is left.
-  for (const value of [[3, 2, 2, 0], [2, 3, 2, 0], [2, 2, 3, 0], [2, 2, 99, 0], [2, 2, 2, 1]]) {
+  // Two people named, two address links; the people left must be none.
+  for (const value of [[[3, 2, 0]], [[2, 3, 0]], [[2, 99, 0]], [[99, 2, 0]], [[2, 2, 1]]]) {
     await seed();
     reply = { value };
     is(`deletes answered ${JSON.stringify(value)}: rejected`, [await outcome(() => forgetServer(room, sid)), await kept()], ["rejected: UnknownReplyError", ALL_KEPT]);
@@ -170,7 +177,7 @@ async function main(): Promise<void> {
         body: JSON.stringify({ action: "disconnect" }),
       }),
     );
-  for (const value of [[], ["QUEUED", "QUEUED", "QUEUED", "QUEUED"], ["x"]]) {
+  for (const value of [[], ["QUEUED"], ["x"]]) {
     await seed();
     reply = { value };
     const answered = await disconnect();

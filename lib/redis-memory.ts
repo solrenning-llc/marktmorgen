@@ -636,6 +636,25 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
+        // each address link only while it points at them; the people and links deleted and the people left.
+        if (key.startsWith("-- marktmorgen:discord-forget-people:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 1 + 2 * (Number(args[0]) - 2)) {
+          const n = Number(args[0]);
+          const [members, due, ...links] = args.slice(1, 1 + n);
+          const [sid, ...pairs] = args.slice(1 + n);
+          this.scriptCalls += 1;
+          let gone = 0;
+          let unlinked = 0;
+          links.forEach((link, i) => {
+            const [id, row] = [pairs[2 * i], pairs[2 * i + 1]];
+            if (this.run(["GET", link]) === id) unlinked += this.run(["DEL", link]) as number;
+            if (this.run(["HGET", members, id]) === row) {
+              gone += this.run(["HDEL", members, id]) as number;
+              this.run(["ZREM", due, `${sid}|${id}`]);
+            }
+          });
+          return [gone, unlinked, this.run(["HLEN", members])];
+        }
         // lib/store-readings.ts, READING_COPY: a reading kept only when nobody it names was deleted from the store;
         // the places of those who were answered, and the copy gone.
         if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {

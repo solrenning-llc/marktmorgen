@@ -26,6 +26,7 @@
  * function that draws the email.
  */
 import { MAX_MAIL_PICTURES, readPicture, withoutPictures } from "@/lib/mail-picture-rules";
+import { readSentLinkTarget } from "@/lib/sent-link-rules";
 import { contrast, lookColours } from "@/lib/store-look";
 
 export const MAX_MAIL_HEADING = 120;
@@ -164,23 +165,33 @@ function buttonColours(accent: string): { fill: string; ink: string } {
 export type BodyPaint = { text: string; link: string; line: string; headFont: string; button: { fill: string; ink: string } };
 
 /**
+ * The address of each button of an email, in order, one a button: what
+ * `buttonTo` numbers them by, in the HTML, in the text and in the studio's
+ * list of links that can be changed after sending (124 [F2-EDIT-SENT-LINKS]).
+ * Only buttons, and only those whose address can be changed (`changeable`):
+ * an address written in the text is the link's own words, and
+ * words that say one address while the link goes to another are what mail
+ * filters take for phishing, and would mislead the reader once changed.
+ */
+export function bodyButtons(body: string): string[] {
+  return parseMailBlocks(body).flatMap((block) => (block.kind === "button" && changeable(block.href) ? [block.href] : []));
+}
+
+/**
+ * A button that can be changed after sending: its address is one the redirect
+ * accepts (readSentLinkTarget), so never one with no public host nor one that
+ * is already our own /r/ link, which would chain two redirects (review of #3715).
+ */
+function changeable(href: string): boolean {
+  return readSentLinkTarget(href).ok;
+}
+
+/**
  * The creator's text as HTML: headings, paragraphs, lists, links, buttons,
  * lines across and the pictures kept for it, nothing else. `accent` is the
  * starting colour of a button, adjusted only when its text cannot reach 7:1;
  * `paint`, when given, draws it in the store's email colors instead.
  */
-/**
- * The address of each button of an email, in order, one a button: what
- * `buttonTo` numbers them by, in the HTML, in the text and in the studio's
- * list of links that can be changed after sending (124 [F2-EDIT-SENT-LINKS]).
- * Only buttons: an address written in the text is the link's own words, and
- * words that say one address while the link goes to another are what mail
- * filters take for phishing, and would mislead the reader once changed.
- */
-export function bodyButtons(body: string): string[] {
-  return parseMailBlocks(body).flatMap((block) => (block.kind === "button" ? [block.href] : []));
-}
-
 export function bodyHtml(
   body: string,
   goesTo?: (href: string) => string,
@@ -202,9 +213,11 @@ export function bodyHtml(
         out.push(`<h2 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;${headingStyle}">${escape(block.text)}</h2>`);
         break;
       case "button": {
-        const plain = goesTo ? goesTo(block.href) : block.href;
-        const href = buttonTo ? buttonTo(plain, buttons) : plain;
-        buttons += 1;
+        // A changeable button signs the untagged address, the same original as the
+        // text and the studio's list, so nothing of one reader is inside it (review of #3715).
+        const wrap = buttonTo !== undefined && changeable(block.href);
+        const href = wrap ? buttonTo(block.href, buttons) : goesTo ? goesTo(block.href) : block.href;
+        if (wrap) buttons += 1;
         out.push(
           `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
         );
@@ -278,8 +291,9 @@ export function bodyText(body: string, buttonTo?: (href: string, n: number) => s
           case "heading":
             return block.text;
           case "button": {
-            const href = buttonTo ? buttonTo(block.href, buttons) : block.href;
-            buttons += 1;
+            const wrap = buttonTo !== undefined && changeable(block.href);
+            const href = wrap ? buttonTo(block.href, buttons) : block.href;
+            if (wrap) buttons += 1;
             return `${block.label}: ${href}`;
           }
           case "divider":

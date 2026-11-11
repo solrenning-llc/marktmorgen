@@ -41,8 +41,13 @@ const RECORD_ROOM_BYTES = 256;
  */
 export const MAX_IDEMPOTENCY_RECORD_BYTES = MAX_KEPT_ANSWER_BYTES + RECORD_ROOM_BYTES;
 const recordBytes = (record: string) => new TextEncoder().encode(record).length;
-/** Database commands one keyed write adds at most: read the record, claim it, keep the answer. */
-export const IDEMPOTENCY_COMMANDS = 3;
+/**
+ * Database commands one keyed write adds at most: read the record, claim it, list it under the person it is about
+ * and set that list's expiry (SADD, EXPIRE: lib/api-idempotency.ts, unit 3), keep the answer.
+ */
+export const IDEMPOTENCY_COMMANDS = 5;
+/** The most one record's line in the person's index weighs, as kept (tests/store-data-registry.ts, nl:api:idem:p:). */
+export const PERSON_INDEX_LINE_BYTES = 128;
 
 export type KeyRead = { kind: "none" } | { kind: "key"; key: string } | { kind: "invalid"; message: string };
 
@@ -178,13 +183,14 @@ export function afterWrite(fp: string, startedAt: number, status: number, body: 
 
 /**
  * The most the header can cost a store in a month, in micro-dollars, before it is turned on: every API request of
- * the plan's month (`apiRequests`, lib/store-allowance-rules.ts) sent with a key, each adding its three commands,
- * moving its largest record twice (write and read) and keeping it, counted as if kept the whole month (it is kept
- * 24 hours). Upstash pay-as-you-go figures with no free quota (lib/spend-cost-table.ts). Rounded up.
+ * the plan's month (`apiRequests`, lib/store-allowance-rules.ts) sent with a key, each adding its IDEMPOTENCY_COMMANDS
+ * commands, moving its largest record and its line in the person's index twice (write and read) and keeping both,
+ * counted as if kept the whole month (they are kept 24 hours). Upstash pay-as-you-go figures with no free quota
+ * (lib/spend-cost-table.ts). Rounded up.
  */
 export function idempotencyWorstMicroUsd(apiRequests: number): number {
   if (!Number.isSafeInteger(apiRequests) || apiRequests < 0) throw new Error("a plan's API requests must be a whole number");
-  const gb = (apiRequests * MAX_IDEMPOTENCY_RECORD_BYTES) / 1e9;
+  const gb = (apiRequests * (MAX_IDEMPOTENCY_RECORD_BYTES + PERSON_INDEX_LINE_BYTES)) / 1e9;
   const commands = (apiRequests * IDEMPOTENCY_COMMANDS * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1e6;
   const transfer = 2 * gb * UPSTASH_MICRO_USD_PER_GB_TRANSFER;
   const storage = gb * UPSTASH_MICRO_USD_PER_GB_MONTH;

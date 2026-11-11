@@ -8,7 +8,7 @@
 import { done, is, part } from "./check";
 import {
   IDEMPOTENCY_COMMANDS, IDEMPOTENCY_SECONDS, IN_FLIGHT_WORDS, MAX_IDEMPOTENCY_KEY, MAX_IDEMPOTENCY_RECORD_BYTES, MAX_KEPT_ANSWER_BYTES,
-  MISMATCH_WORDS, TOO_LARGE_WORDS, UNKNOWN_WORDS, afterWrite, decide, idempotencyWorstMicroUsd, readIdempotencyKey, readRecord,
+  MISMATCH_WORDS, PERSON_INDEX_LINE_BYTES, TOO_LARGE_WORDS, UNKNOWN_WORDS, afterWrite, decide, idempotencyWorstMicroUsd, readIdempotencyKey, readRecord,
   requestFingerprint, takesKey,
 } from "@/lib/api-idempotency-rules";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -112,13 +112,13 @@ part("A write whose answer can be larger than is kept refuses a key before it ru
 part("The most it can cost, counted before it is turned on, from the plan's own API figure");
 {
   const by = (requests: number) => {
-    const gb = (requests * MAX_IDEMPOTENCY_RECORD_BYTES) / 1e9;
+    const gb = (requests * (MAX_IDEMPOTENCY_RECORD_BYTES + PERSON_INDEX_LINE_BYTES)) / 1e9;
     return Math.ceil((requests * IDEMPOTENCY_COMMANDS * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1e6 + 2 * gb * UPSTASH_MICRO_USD_PER_GB_TRANSFER + gb * UPSTASH_MICRO_USD_PER_GB_MONTH);
   };
   const plans = (["creator", "pro", "scale"] as const).map((tier) => [tier, STORE_ALLOWANCES[tier].api, idempotencyWorstMicroUsd(STORE_ALLOWANCES[tier].api)]);
   is("each paid plan, every API request of its month keyed", plans, (["creator", "pro", "scale"] as const).map((tier) => [tier, STORE_ALLOWANCES[tier].api, by(STORE_ALLOWANCES[tier].api)]));
-  // Store, 500 requests: 1,500 commands = 3,000; 500 × 8,448 bytes = 0.004224 GB, moved twice = 253.44, kept = 1,056.
-  is("today's figures, in micro-dollars (Store, Studio, Scale): at most $0.0044, $0.0173, $0.0862 a month", plans.map((p) => p[2]), [4_310, 17_238, 86_189]);
+  // Store, 500 requests: 2,500 commands = 5,000; 500 × (8,448 + 128) bytes = 0.004288 GB, moved twice = 257.28, kept = 1,072.
+  is("today's figures, in micro-dollars (Store, Studio, Scale): at most $0.0064, $0.0254, $0.1266 a month", plans.map((p) => p[2]), [6_330, 25_318, 126_586]);
   is("nothing keyed, nothing spent", idempotencyWorstMicroUsd(0), 0);
   let threw = 0;
   for (const bad of [-1, 1.5, Number.NaN]) { try { idempotencyWorstMicroUsd(bad); } catch { threw++; } }

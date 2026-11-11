@@ -504,8 +504,11 @@ async function creatorChange(
 ): Promise<Review | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   return locked(statsId, productId, async () => {
-    const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
-    const before = parseReview(raw);
+    // Missing only on HGET's exact null; a reply cut short, of another shape or a review that does not read throws
+    // (rule 24), so a refund sweep never takes a refund as seen with the review left unmarked.
+    const replies = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+    if (!replies) throw new UnknownReplyError("a review");
+    const before = storedReview(replies[0], "a review");
     if (!before) return "missing" as const;
     const after = change(before);
     // What the creator's answer grows the review by takes room first (DataRoomError when it does not fit);

@@ -5224,3 +5224,22 @@ html:has([data-product-editor]) {
   }
 }
 /* end 654 [WG14] */
+
+/* begin studio target floor (AX274 audit, cloud P)
+ * In the studio, every disclosure summary and every label that wraps a checkbox or a radio is a target at least
+ * 44 px tall (WCAG 2.2 2.5.5 Target Size (Enhanced), AAA; AX274 Part A item 4). About 50 summaries and 167 checkboxes
+ * across its components measured 13 to 20 px; a label is the checkbox's target too, since a click on it ticks the box.
+ * app/studio/layout.tsx marks the studio's pages with data-studio (display: contents, so no box of its own). In a layer
+ * and behind :where, so a size or a padding a control sets for itself with a utility still wins (tests/studio-target-floor.test.ts).
+ * align-content centers a one-line summary's words, its open/closed marker with them, in the taller row.
+ */
+@layer components {
+  [data-studio] :where(summary) {
+    min-height: 2.75rem;
+    align-content: center;
+  }
+  [data-studio] :where(label:has(> input[type="checkbox"], > input[type="radio"])) {
+    min-height: 2.75rem;
+  }
+}
+/* end studio target floor */

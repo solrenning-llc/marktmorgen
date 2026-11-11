@@ -32,6 +32,7 @@ is(
   /\[data-studio\] :where\(label:has\(> input\[type="checkbox"\], > input\[type="radio"\]\)\)\s*\{[^}]*min-height:\s*2\.75rem/.test(block),
   true,
 );
-is("it reaches only the studio, never the store front or the public pages", (block.match(/^\s*[^/*@}\s][^{]*\{/gm) ?? []).every((rule) => rule.trim().startsWith("[data-studio]")), true);
+const selectors = [...block.matchAll(/^[ \t]*([^\n{}]+?)[ \t]*\{[ \t]*$/gm)].map((m) => m[1]).filter((s) => !s.startsWith("@"));
+is("it reaches only the studio, never the store front or the public pages", selectors.length >= 2 && selectors.every((s) => s.startsWith("[data-studio]")), true);
 
 done();

@@ -68,7 +68,7 @@ const en: ChallengeWords = {
   notices: {
     joined: { text: "You joined. Come back each day to check in.", tone: "ok" },
     already: { text: "You had already joined.", tone: "ok" },
-    checked: { text: "Checked in. See you tomorrow.", tone: "ok" },
+    checked: { text: "Checked in.", tone: "ok" },
     checkedalready: { text: "You had already checked in today.", tone: "ok" },
     notyet: { text: "This challenge has not started yet.", tone: "warn" },
     ended: { text: "This challenge is over.", tone: "warn" },
@@ -110,7 +110,7 @@ const es: ChallengeWords = {
   notices: {
     joined: { text: "Te uniste. Vuelve cada día para registrarlo.", tone: "ok" },
     already: { text: "Ya te habías unido.", tone: "ok" },
-    checked: { text: "Día registrado. Hasta mañana.", tone: "ok" },
+    checked: { text: "Día registrado.", tone: "ok" },
     checkedalready: { text: "Ya habías registrado el día de hoy.", tone: "ok" },
     notyet: { text: "Este reto aún no ha empezado.", tone: "warn" },
     ended: { text: "Este reto ha terminado.", tone: "warn" },
@@ -152,7 +152,7 @@ const fr: ChallengeWords = {
   notices: {
     joined: { text: "Vous avez rejoint le défi. Revenez chaque jour pour pointer.", tone: "ok" },
     already: { text: "Vous aviez déjà rejoint ce défi.", tone: "ok" },
-    checked: { text: "C’est pointé. À demain.", tone: "ok" },
+    checked: { text: "C’est pointé.", tone: "ok" },
     checkedalready: { text: "Vous aviez déjà pointé aujourd’hui.", tone: "ok" },
     notyet: { text: "Ce défi n’a pas encore commencé.", tone: "warn" },
     ended: { text: "Ce défi est terminé.", tone: "warn" },
@@ -194,7 +194,7 @@ const de: ChallengeWords = {
   notices: {
     joined: { text: "Sie sind dabei. Kommen Sie jeden Tag zum Einchecken wieder.", tone: "ok" },
     already: { text: "Sie waren schon dabei.", tone: "ok" },
-    checked: { text: "Eingecheckt. Bis morgen.", tone: "ok" },
+    checked: { text: "Eingecheckt.", tone: "ok" },
     checkedalready: { text: "Sie hatten heute schon eingecheckt.", tone: "ok" },
     notyet: { text: "Diese Challenge hat noch nicht begonnen.", tone: "warn" },
     ended: { text: "Diese Challenge ist vorbei.", tone: "warn" },
@@ -236,7 +236,7 @@ const it: ChallengeWords = {
   notices: {
     joined: { text: "Partecipi. Torna ogni giorno per il check-in.", tone: "ok" },
     already: { text: "Partecipavi già.", tone: "ok" },
-    checked: { text: "Check-in fatto. A domani.", tone: "ok" },
+    checked: { text: "Check-in fatto.", tone: "ok" },
     checkedalready: { text: "Avevi già fatto il check-in oggi.", tone: "ok" },
     notyet: { text: "Questa sfida non è ancora iniziata.", tone: "warn" },
     ended: { text: "Questa sfida è conclusa.", tone: "warn" },
@@ -278,7 +278,7 @@ const nl: ChallengeWords = {
   notices: {
     joined: { text: "Je doet mee. Kom elke dag terug om in te checken.", tone: "ok" },
     already: { text: "Je deed al mee.", tone: "ok" },
-    checked: { text: "Ingecheckt. Tot morgen.", tone: "ok" },
+    checked: { text: "Ingecheckt.", tone: "ok" },
     checkedalready: { text: "Je had vandaag al ingecheckt.", tone: "ok" },
     notyet: { text: "Deze uitdaging is nog niet begonnen.", tone: "warn" },
     ended: { text: "Deze uitdaging is afgelopen.", tone: "warn" },
@@ -320,7 +320,7 @@ const pt: ChallengeWords = {
   notices: {
     joined: { text: "Está a participar. Volte todos os dias para fazer o check-in.", tone: "ok" },
     already: { text: "Já estava a participar.", tone: "ok" },
-    checked: { text: "Check-in feito. Até amanhã.", tone: "ok" },
+    checked: { text: "Check-in feito.", tone: "ok" },
     checkedalready: { text: "Já tinha feito o check-in hoje.", tone: "ok" },
     notyet: { text: "Este desafio ainda não começou.", tone: "warn" },
     ended: { text: "Este desafio terminou.", tone: "warn" },

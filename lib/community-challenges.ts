@@ -534,6 +534,9 @@ export async function forgetChallengesPerson(id: string, who: string, room?: Dat
         ["HINCRBY", countKey(id, ch), "all", -gone.length],
         ...gone.map((d) => ["HINCRBY", countKey(id, ch), `d${d}`, -1]),
       ]);
+      // A challenge deleted in between (its index entry goes first) would have its counts made again here, with no
+      // TTL and outside its room: checked after, as the writers do, and its keys go (Claude 1 on #3452).
+      if (!(await stillKept(id, ch))) await redisPipeline([["DEL", joinedKey(id, ch), checkKey(id, ch), countKey(id, ch)]]);
     }
     const joined = left === 1;
     records += (joined ? 1 : 0) + gone.length;

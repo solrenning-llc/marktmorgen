@@ -107,6 +107,10 @@ export type SessionRecord = {
   amount_total?: unknown;
   amount_subtotal?: unknown;
   currency?: unknown;
+  /** What came off, as Stripe sums it (`amount_discount`). */
+  total_details?: unknown;
+  /** The coupons and promotion codes on it; each coupon's `duration` only when Stripe returned it expanded. */
+  discounts?: unknown;
   customer_email?: unknown;
   metadata?: Record<string, string> | null;
   customer_details?: { email?: unknown } | null;
@@ -193,7 +197,8 @@ export function confirmationFor(
    */
   next: NextOffer | null = null,
 ): Confirmation | null {
-  return renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true);
+  const letter = renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true);
+  return letter === UNREAD_CHARGE ? null : letter;
 }
 
 /** Only the selected, protected physical origin may outlive the old sweep.
@@ -207,11 +212,62 @@ export function originalPhysicalConfirmation(store: Store, session: SessionRecor
       !Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0 ||
       session.payment_status === "no_payment_required" && session.amount_total !== 0 ||
       typeof session.currency !== "string" || !/^[a-z]{3}$/.test(session.currency)) return null;
-  return renderConfirmation(store, session, Date.now() / 1000, [], [product], null, null, false);
+  const letter = renderConfirmation(store, session, Date.now() / 1000, [], [product], null, null, false);
+  return letter === UNREAD_CHARGE ? null : letter;
+}
+
+/**
+ * What renderConfirmation answers for a checkout it would confirm but whose amount, currency or discount figure does
+ * not read in its exact shape (CX-123 rule 24): no email is written with a value it does not know, and confirmOnce
+ * takes no mark, so the next run reads the checkout again.
+ */
+const UNREAD_CHARGE = "unread-charge";
+
+/** What was charged and in what, as Stripe returned it: a whole number of the currency's smallest unit, and its code. */
+function chargeReads(session: SessionRecord): boolean {
+  return Number.isSafeInteger(session.amount_total) && Number(session.amount_total) >= 0 &&
+    typeof session.currency === "string" && /^[a-z]{3}$/.test(session.currency);
+}
+
+/** A coupon's `duration` on one of the checkout's discounts, when Stripe returned the coupon expanded; null otherwise. */
+function couponDuration(entry: unknown): "once" | "repeating" | "forever" | null {
+  if (!entry || typeof entry !== "object") return null;
+  const { coupon, promotion_code: code } = entry as { coupon?: unknown; promotion_code?: unknown };
+  const promotion = code && typeof code === "object" ? (code as { promotion?: { coupon?: unknown } | null; coupon?: unknown }) : null;
+  const found = [coupon, promotion?.promotion?.coupon, promotion?.coupon].find((c) => c && typeof c === "object") as { duration?: unknown } | undefined;
+  const duration = found?.duration;
+  return duration === "once" || duration === "repeating" || duration === "forever" ? duration : null;
+}
+
+/**
+ * Whether a discount came off a membership's first charge, and how long it keeps coming off, read exactly from the
+ * checkout: "none" when Stripe says nothing came off (or says nothing and nothing names a discount); "once" when only
+ * this charge had it: Stripe's own coupon says so, or it is the store sale or the welcome offer, whose coupons are
+ * always made for the first charge only (app/api/store/sale/route.ts, app/api/store/welcome-offer/route.ts);
+ * "every" when Stripe's coupon says every charge; "unsure" when something came off and how long it lasts does not
+ * read (a code, which the creator may have made in their own Stripe dashboard, one typed at checkout, a come-back
+ * offer); "unread" when the amount that came off is there but not a whole number (CX-123 rule 24).
+ */
+function firstChargeDiscount(session: SessionRecord): "none" | "once" | "every" | "unsure" | "unread" {
+  const meta = session.metadata ?? {};
+  const details = session.total_details;
+  if (details !== undefined && details !== null) {
+    const off = typeof details === "object" ? (details as { amount_discount?: unknown }).amount_discount : undefined;
+    if (!Number.isSafeInteger(off) || Number(off) < 0) return "unread";
+    if (off === 0) return "none";
+  }
+  const coupons = Array.isArray(session.discounts) ? session.discounts : [];
+  const named = Boolean(meta.code || meta.sale || meta.welcome || meta.winback);
+  if ((details === undefined || details === null) && coupons.length === 0 && !named) return "none";
+  const durations = coupons.map(couponDuration);
+  if (durations.length > 0 && durations.every((d) => d === "once")) return "once";
+  if (durations.length > 0 && durations.every((d) => d === "forever")) return "every";
+  if (durations.every((d) => d === null) && (meta.sale || meta.welcome) && !meta.code && !meta.winback) return "once";
+  return "unsure";
 }
 
 function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],
-  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean): Confirmation | null {
+  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean): Confirmation | null | typeof UNREAD_CHARGE {
   const id = typeof session.id === "string" ? session.id : "";
   if (!SESSION_ID_PATTERN.test(id)) return null;
   if (!isSettled(session)) return null;
@@ -226,6 +282,10 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const typed = session.customer_details?.email;
   const email = typeof typed === "string" && typed ? typed : typeof session.customer_email === "string" ? session.customer_email : "";
   if (!email) return null;
+  // What it cost, in what, and for a membership what came off, never assumed (CX-123 rule 24).
+  if (!chargeReads(session)) return UNREAD_CHARGE;
+  const discount = product.recurring ? firstChargeDiscount(session) : "none";
+  if (discount === "unread") return UNREAD_CHARGE;
 
   const option = product.options.find((entry) => entry.id === meta.option) ?? null;
   // What a bundle bought or ticked hands over, from the list on the order.
@@ -244,9 +304,9 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
     meta.kind === "plan" && Number(meta.plan_payments) >= 2
       ? { payments: Number(meta.plan_payments), weekly: meta.plan_interval === "week" }
       : null;
-  const amount = typeof session.amount_total === "number" ? session.amount_total : 0;
-  // What Stripe charged it in; the store's own currency for a record that says none.
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  const amount = session.amount_total as number;
+  // What Stripe charged it in.
+  const currency = session.currency as string;
   const title = option ? `${product.title} (${option.label})` : product.title;
   const base = storeBase(store);
   const name = store.name;
@@ -270,7 +330,7 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const paid =
     firstChargeAt && amount === 0
       ? words.movedToday(speaking(store, currency).money(0))
-      : paidLine(store, product, amount, currency, plan, trialDays, endsAfter, intro, every);
+      : paidLine(store, product, amount, currency, plan, trialDays, endsAfter, intro, every, discount, regularOf(session, meta));
   const lines: string[] = [
     words.confirmIntro(name),
     "",
@@ -394,8 +454,18 @@ function wholeNumber(raw: string | undefined): number {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
+/**
+ * What each charge of a membership is before any discount, as Stripe returned the checkout (`amount_subtotal`), or
+ * null when it does not read or when products ticked at checkout are in it too: never a catalog price that may have
+ * changed since.
+ */
+function regularOf(session: SessionRecord, meta: Record<string, string>): number | null {
+  const subtotal = session.amount_subtotal;
+  return Number.isSafeInteger(subtotal) && Number(subtotal) > 0 && bumpsFromMeta(meta).length === 0 ? Number(subtotal) : null;
+}
+
 function paidLine(
-  store: Pick<Store, "language">,
+  store: Pick<Store, "language" | "tax">,
   product: Listing,
   amount: number,
   currency: string,
@@ -404,14 +474,26 @@ function paidLine(
   endsAfter: number,
   intro: { cents: number; count: number; regular: number } | null = null,
   every: "day" | "week" | "month" | "year" = product.recurring?.interval ?? "month",
+  discount: ReturnType<typeof firstChargeDiscount> = "none",
+  regular: number | null = null,
 ): string {
   const words = ordersWords(store.language);
   const { w, money } = speaking(store, currency);
+  const taxOnTop = store.tax.enabled && !store.tax.included;
   if (trialDays > 0 && amount === 0) return words.trialStarted(money(0), trialDays);
+  // A membership whose discount came off the first charge: today's amount, and each charge after it at its price
+  // before the discount, saying the discount may go on when how long it lasts does not read. Never today's amount as
+  // the price of every charge.
+  if (product.recurring && !plan && !intro && (discount === "once" || discount === "unsure")) {
+    const then = regular === null ? null : `${money(regular)} ${w.every(every)}`;
+    return words.discountToday(money(amount), then && endsAfter > 0 ? words.paymentsInAll(then, endsAfter) : then, taxOnTop, discount === "unsure");
+  }
   if (amount === 0) return words.discountCovered(money(0));
   if (plan) return w.today(money(amount));
   if (product.recurring && intro) {
-    return w.introThen(money(intro.cents), intro.count, product.recurring.interval, `${money(intro.regular)} ${w.every(product.recurring.interval)}`);
+    const schedule = w.introThen(money(intro.cents), intro.count, product.recurring.interval, `${money(intro.regular)} ${w.every(product.recurring.interval)}`);
+    // With sales tax added on top, what was charged today is said first, as a one-time order says what it charged.
+    return taxOnTop ? words.introTaxed(money(amount), schedule) : schedule;
   }
   if (product.recurring) {
     const line = `${money(amount)} ${w.every(every)}`;
@@ -500,7 +582,10 @@ async function confirmOnce(
     if (bought) await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
     return bought ? "sent" : "skip";
   }
-  if (!confirmationFor(store, session, Date.now() / 1000, [], listings)) return "skip";
+  const first = renderConfirmation(store, session, Date.now() / 1000, [], listings, null, null, true);
+  // A charge that does not read: failed, with no mark taken, so the next run reads the checkout again (CX-123 rule 24).
+  if (first === UNREAD_CHARGE) return "failed";
+  if (!first) return "skip";
   const next = await nextOfferForEmail(store, sessionId, session.metadata ?? {}).catch(() => null);
   const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next);
   if (!letter) return "skip";

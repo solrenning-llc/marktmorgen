@@ -7,7 +7,8 @@
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import BackInStockPage from "@/app/[handle]/back-in-stock/page";
-import { claimHandle, ensureStatsId } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
+import { confirmEmail } from "@/lib/stock-alert-send";
 import { STOCK_ALERT_WORDS } from "@/lib/buyer-words/stock-alert";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -33,6 +34,19 @@ async function unreadable<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** What the page did at `handle`: drawn, sent elsewhere (and where), or not found. */
+async function outcome(handle: string, query: Record<string, string>): Promise<string> {
+  try {
+    await BackInStockPage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(query) });
+    return "shown";
+  } catch (error) {
+    const digest = String((error as { digest?: unknown }).digest ?? "");
+    if (digest.startsWith("NEXT_REDIRECT")) return `redirect ${digest.split(";")[2]}`;
+    if (digest.includes("404")) return "not found";
+    throw error;
+  }
+}
+
 async function main(): Promise<void> {
   redis.clear();
   await claimHandle("owner@example.com", "harbor", "Harbor Prints", "");
@@ -51,6 +65,19 @@ async function main(): Promise<void> {
   const confirm = await unreadable(() => page({ token: TOKEN }));
   is("a confirm link read unknown: not \"expired\"", confirm.includes(w.notices.expired.title), false);
   is("a confirm link read unknown: the error notice", confirm.includes(w.notices.error.title), true);
+
+  part("A link in an email names the store by its own id, so a handle let go or taken by another store still reaches it (Claude 1 on #3620)");
+  await ensureStoreId("owner@example.com");
+  const harbor = (await storeForEmail("owner@example.com"))!;
+  const mail = confirmEmail(harbor, { id: "p1", title: "Signed Print" } as never, { confirm: TOKEN, leave: TOKEN }, "https://marktmorgen.com");
+  const links = [...String(mail.text).matchAll(/https:\/\/marktmorgen\.com\/@harbor\/back-in-stock\?[^\s]+/g)].map((m) => m[0]);
+  is("both page links carry the store's own id", links.length >= 2 && links.every((l) => new URL(l).searchParams.get("i") === harbor.sid), true);
+  is("a handle no store has now, with the store's id: sent to its current page, the link kept", await outcome("@oldharbor", { leave: TOKEN, i: harbor.sid! }), `redirect /@harbor/back-in-stock?leave=${TOKEN}&i=${harbor.sid}`);
+  await claimHandle("other@example.com", "quay", "Quay Goods", "");
+  await ensureStoreId("other@example.com");
+  is("a handle now another store's, with the first store's id: sent to the first store's page", await outcome("@quay", { token: TOKEN, i: harbor.sid! }), `redirect /@harbor/back-in-stock?token=${TOKEN}&i=${harbor.sid}`);
+  is("an id no store has: not found, as before", await outcome("@oldharbor", { leave: TOKEN, i: "zz".repeat(8) }), "not found");
+  is("the store's own handle and id: drawn", await outcome("@harbor", { leave: TOKEN, i: harbor.sid! }), "shown");
 
   done();
 }

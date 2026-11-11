@@ -119,6 +119,7 @@ export function tallyPoll(optionCount: number, votes: readonly unknown[] | null)
 }
 
 const DATE = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+const HOUR = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "UTC" });
 
 /**
  * The poll as plain text in the email: the question, each answer with its
@@ -132,7 +133,7 @@ export function pollEmailLines(poll: EmailPoll, linkFor: (option: number) => str
     ...poll.options.map((option, i) => `${option}: ${linkFor(i)}`),
     "",
     "Pick an answer: a page opens, and your answer is counted only when you press Confirm there. Opening the link alone counts nothing.",
-    ...(closes === null ? [] : [`You can change or take back your answer until ${DATE.format(closes)} (UTC).`]),
+    ...(closes === null ? [] : [`You can change or take back your answer until ${HOUR.format(closes).replace(/\s/g, " ")} UTC on ${DATE.format(closes)}.`]),
     "The sender sees only the totals, not a list of who answered. If very few people get this email, the totals can still show how one person answered.",
   ];
 }

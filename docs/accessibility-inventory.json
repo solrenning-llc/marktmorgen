@@ -1109,6 +1109,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/learning-paths/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/learning-paths",
+      "parameters": []
+    },
+    {
       "source": "app/studio/meetings/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/meetings",
@@ -1424,6 +1430,7 @@
     "components/join-box-editor.tsx",
     "components/kept-by-currency.tsx",
     "components/kit-editor.tsx",
+    "components/learning-paths-editor.tsx",
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
@@ -1850,6 +1857,7 @@
     "app/api/store/kit/route.ts",
     "app/api/store/language/route.ts",
     "app/api/store/leads/route.ts",
+    "app/api/store/learning-paths/route.ts",
     "app/api/store/leaving/route.ts",
     "app/api/store/letters/link/route.ts",
     "app/api/store/letters/open/route.ts",
@@ -2073,6 +2081,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

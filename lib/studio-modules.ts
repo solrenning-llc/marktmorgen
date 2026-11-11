@@ -112,6 +112,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   card: "The business card, one address with a Save contact button, opened from Your pages.",
   invoices: "The invoices of the store's own Marktmorgen plan, opened from the plan card on the studio home.",
   tax: "The tax registrations active on the store's Stripe account, read from Stripe: a report for the owner, not a part of the store.",
+  "learning-paths": "Several of the store's courses in an order the creator sets; no card yet, because students cannot open a path until 249 [ST2] unit 4 shows it to them.",
 };
 
 /** What the page knows about the person, the store and the deployment. */

@@ -180,6 +180,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/kit": row("pages", draft),
   "POST store/language": row("settings", draft),
   "GET store/leads": row("email", never(PEOPLE_FILE)),
+  "POST store/learning-paths": row("products", draft),
   "POST store/leaving": row("settings", draft),
   "POST store/letters": row("email", draft),
   "POST store/link-image": row("pages", draft),

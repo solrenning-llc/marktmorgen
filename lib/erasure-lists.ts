@@ -30,6 +30,12 @@ return n`;
 /** Writes over every place this value holds in these lists. */
 export async function blankInLists(keys: string[], value: string): Promise<number> {
   if (!keys.length || !value || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["EVAL", BLANK_IN_LISTS, keys.length, ...keys, value, ERASED_MARK]]);
-  return Number(n) || 0;
+  const reply = await redisPipeline([["EVAL", BLANK_IN_LISTS, keys.length, ...keys, value, ERASED_MARK]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0) ||
+      typeof reply[0] !== "number" || !Number.isSafeInteger(reply[0]) || reply[0] < 0) {
+    // A lost receipt may still mean the script ran. Do not replay it or let
+    // the caller certify completion while this part remains unconfirmed.
+    throw new Error("This deletion could not be confirmed. Try again.");
+  }
+  return reply[0];
 }

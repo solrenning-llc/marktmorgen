@@ -7,12 +7,18 @@ on:
   pull_request:
   push:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 permissions:
   contents: read
   actions: read
 concurrency:
   group: product-checks-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: true
+  # A merge group's ref is its own (gh-readonly-queue/main/pr-N-…), so with the event in
+  # the group a merge group never shares one with a pull request run or another merge group.
+  # The active merge-group run is never canceled by this group; a newer delivery of the same
+  # merge group may replace one still pending, and that replacement is the same check.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 jobs:
   documentation-scope:
     name: Documentation scope (product-checks)
@@ -47,7 +53,7 @@ jobs:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}

@@ -99,7 +99,7 @@ export function FairPriceEditor({
     <div className="card p-6 sm:p-8" id="fair-prices">
       <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Fair prices by country</p>
       <p className="mt-2 text-ink-soft">
-        Buyers in the countries you choose see a lower price, at the level you choose, and pay it on Stripe&apos;s page with no code to type.
+        Buyers in the countries you choose see a lower price, at the level you choose, and pay it at checkout, on Stripe&apos;s page or with PayPal, with no code to type.
         Off until you switch it on.
       </p>
 

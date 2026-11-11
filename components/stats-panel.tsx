@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AllTimeSales, Ranked, RangeKey, StatsData, Today } from "@/lib/stats";
 import { StoreField } from "@/components/studio-store-pin";
@@ -8,7 +8,7 @@ import { dashboardPaidComplete, dashboardProducts } from "@/lib/dashboard-covera
 import { ledgerPaymentsComplete } from "@/lib/payment-ledger-coverage";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
 import { formatMoney } from "@/lib/money";
-import { SOURCE_NAMES, channelName } from "@/lib/channel-names";
+import { channelName, sourceName } from "@/lib/channel-names";
 import type { StatsNote } from "@/lib/stats-notes";
 import { type AdSpend, paybackOf, spendBy } from "@/lib/ad-spend-rules";
 import { channelCashflows, cashflowStatus } from "@/lib/channel-cashflow";
@@ -21,6 +21,7 @@ import { PaymentMixPanel } from "@/components/payment-mix";
 import { DailyCashflowPanel } from "@/components/daily-cashflow";
 import { RefundActivityPanel } from "@/components/refund-activity";
 import { KeptByCurrency } from "@/components/kept-by-currency";
+import { TaxCollected } from "@/components/tax-collected";
 import { WeeklyCohortsPanel } from "@/components/weekly-cohorts";
 import { RevenueQuality, BuyerChannelsPanel } from "@/components/revenue-quality";
 import { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
@@ -49,6 +50,7 @@ import type { AutoMark, MarkKind } from "@/lib/auto-marks";
 import { useStudioStore } from "@/components/studio-store-pin";
 import { WeeklyAiToggle } from "@/components/weekly-ai-toggle";
 import { AttributionTable } from "@/components/attribution-table";
+import { footnoteWords, LIVE_TIMEOUT_MS, headlineWords, newLiveBox, readingAnswered, readingFailed, startReading, todayFailedWords, type LiveBox } from "@/lib/live-box-rules";
 import { LocalClock, UtcAndLocal } from "@/components/local-clock";
 
 /**
@@ -202,7 +204,7 @@ function Breakdown({
           return (
             <li key={row.name} className="text-sm">
               <div className="flex items-baseline justify-between gap-3">
-                <span className="min-w-0 truncate font-semibold text-ink">{label ? label(row.name) : named ? SOURCE_NAMES[row.name] ?? row.name : row.name}</span>
+                <span className="min-w-0 truncate font-semibold text-ink">{label ? label(row.name) : named ? sourceName(row.name) ?? row.name : row.name}</span>
                 <span className="shrink-0 tabular-nums text-ink-soft">{`${count(row.visits)} · ${share}%`}</span>
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-paper ring-1 ring-line" aria-hidden="true">
@@ -287,35 +289,42 @@ type LiveNow = { visitors: number; sources: { source: string; visitors: number }
  * Who is on the store right now: asked every half minute while the page is
  * open and in view, and not at all from a tab in the background. Each ask is
  * one of the store's studio requests (lib/store-allowance-rules.ts), so it
- * stops after LIVE_ASKS of them, ten minutes, until the page is opened again.
+ * stops after LIVE_ASKS of them (lib/live-box-rules.ts), ten minutes, until the page is opened again. What it says about a
+ * next reading comes from the same count of readings made that decides whether there is one.
  */
-const LIVE_ASKS = 20;
-export function RightNow({ currency }: { currency: string }) {
-  const [live, setLive] = useState<LiveNow | null>(null);
-  // A first answer that did not come is said in words, never left as "Checking".
-  const [failed, setFailed] = useState(false);
-  const [rested, setRested] = useState(false);
+export function RightNow({ currency, initialBox, timeZone, now }: { currency: string; initialBox?: LiveBox<LiveNow>; timeZone?: string; now?: number }) {
+  // initialBox and timeZone are for tests that draw the box in a given state; the studio passes neither.
+  const [box, setBox] = useState<LiveBox<LiveNow>>(() => initialBox ?? newLiveBox<LiveNow>());
+  // The machine in lib/live-box-rules.ts holds the count, the last good reading and what to say; the ref lets each
+  // event see the newest state without waiting for a render.
+  const boxRef = useRef(box);
+  // The time of the last event, so what the box says about the age of its numbers is not read from the clock during a render.
+  const [clock, setClock] = useState(0);
+  const apply = (next: LiveBox<LiveNow>) => {
+    boxRef.current = next;
+    setBox(next);
+    setClock(Date.now());
+  };
   useEffect(() => {
     let stopped = false;
-    let asked = 0;
     const ask = async () => {
-      if (document.visibilityState !== "visible") return;
-      if (asked >= LIVE_ASKS) {
-        setRested(true);
-        return;
-      }
-      asked += 1;
+      const started = startReading(boxRef.current, document.visibilityState === "visible");
+      if (!started) return;
+      apply(started.box);
+      // A reading that does not come back is a failed one, so the box can never be left waiting for it.
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), LIVE_TIMEOUT_MS);
       try {
-        const response = await fetch("/api/store/live", { cache: "no-store" });
+        const response = await fetch("/api/store/live", { cache: "no-store", signal: controller.signal });
         const body = (await response.json().catch(() => ({}))) as { ok?: boolean } & Partial<LiveNow>;
         if (stopped) return;
-        if (body.ok) {
-          setLive({ visitors: body.visitors ?? 0, sources: body.sources ?? [], today: body.today ?? null });
-          setFailed(false);
-        } else setFailed(true);
+        if (body.ok) apply(readingAnswered(boxRef.current, started.seq, { visitors: body.visitors ?? 0, sources: body.sources ?? [], today: body.today ?? null }, Date.now()));
+        else apply(readingFailed(boxRef.current, started.seq));
       } catch {
         // A missed reading is simply the next one's to make; until one comes, the box says so.
-        if (!stopped) setFailed(true);
+        if (!stopped) apply(readingFailed(boxRef.current, started.seq));
+      } finally {
+        window.clearTimeout(timeout);
       }
     };
     void ask();
@@ -328,6 +337,8 @@ export function RightNow({ currency }: { currency: string }) {
       document.removeEventListener("visibilitychange", seen);
     };
   }, []);
+  const live = box.last?.data ?? null;
+  const failed = box.failed;
   // Drawn from the first paint with the shape it keeps (inbox C4-28): the answer fills it in rather than pushing the
   // rest of the studio down under a finger or a pointer already on its way (WCAG 2.4.3, 3.2.5). Only the list of where
   // people came from, there when someone is on the store, adds lines.
@@ -340,24 +351,17 @@ export function RightNow({ currency }: { currency: string }) {
     </>
   );
   return (
-    <div className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line" aria-live="polite" aria-busy={live === null && !failed}>
-      <p className="flex items-center gap-2 text-sm font-bold text-ink">
+    <div className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line">
+      {/* Only this sentence is a live region: it is the one that changes, and it carries the time when the numbers are old. */}
+      <p className="flex items-center gap-2 text-sm font-bold text-ink" aria-live="polite" aria-busy={live === null && !failed}>
         <span className={`inline-block h-2 w-2 rounded-full ${live?.visitors ? "bg-emerald-500" : "bg-line"}`} aria-hidden="true" />
-        {live === null
-          ? failed
-            ? rested
-              ? "Who is on your store could not be read; reload the page to try again"
-              : "Who is on your store could not be read just now; it is asked again in half a minute"
-            : "Checking who has opened your store in the last 5 minutes"
-          : live.visitors === 0
-            ? "Nobody has opened your store in the last 5 minutes"
-            : `${count(live.visitors)} ${live.visitors === 1 ? "person has" : "people have"} opened your store in the last 5 minutes`}
+        {headlineWords(box, timeZone, now ?? clock)}
       </p>
       {live && live.visitors > 0 && live.sources.length > 0 ? (
         <ul className="mt-2 space-y-1 text-sm">
           {live.sources.map((s) => (
             <li key={s.source} className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 truncate text-ink">{`From ${s.source === "direct" ? "a direct visit or an app that hides it" : SOURCE_NAMES[s.source] ?? s.source}`}</span>
+              <span className="min-w-0 truncate text-ink">{`From ${s.source === "direct" ? "a direct visit or an app that hides it" : sourceName(s.source) ?? s.source}`}</span>
               <span className="shrink-0 tabular-nums text-ink-soft">{count(s.visitors)}</span>
             </li>
           ))}
@@ -365,9 +369,7 @@ export function RightNow({ currency }: { currency: string }) {
       ) : null}
       {/* One line either way, so the pause never adds one above the rest of the studio. */}
       <p className="mt-2 text-xs text-ink-soft">
-        {rested
-          ? "Paused after ten minutes, to save your plan's studio requests. Reload the page to see it live again."
-          : "Your store page, each person once, updated every half minute. Nothing about who."}
+        {footnoteWords(box, timeZone)}
       </p>
       <div className="mt-4 border-t border-line pt-3">
         <p className="text-sm font-bold text-ink">Today so far</p>
@@ -390,7 +392,9 @@ export function RightNow({ currency }: { currency: string }) {
             : today
               ? "No visits from a known source yet today."
               : live
-                ? "Today's numbers could not be read just now."
+                ? // Only a reading that failed leaves today out (app/api/store/live/route.ts): said as one, with when it
+                  // is read again, never as numbers that do not exist (inbox C4-34).
+                  todayFailedWords(box)
                 : "Reading today's numbers."}
         </p>
         <p className="mt-1 text-xs text-ink-soft">The day in UTC, like every day here. Sales are paid ones, read from Stripe every two minutes.</p>
@@ -1137,6 +1141,7 @@ export function StatsPanel({
       {range !== "all" ? <PaymentComparisonPanel data={data} range={range} /> : null}
       {range !== "all" ? <DailyCashflowPanel data={data} range={range} spends={spends} /> : null}
       {range !== "all" ? <KeptByCurrency data={data} range={range} /> : null}
+      {data.sales !== "none" && range !== "all" ? <TaxCollected data={data} range={range} /> : null}
       {range !== "all" ? <RefundActivityPanel data={data} range={range} /> : null}
       {salesHere && range !== "all" && days.length > 0 && data.buyerChannels ? (
         <BuyerChannelsPanel window={data.buyerChannels[range]} currency={data.currency} historyPartial={data.buyerChannels.historyPartial} period={{ from: days[0].date, to: days[days.length - 1].date }} />

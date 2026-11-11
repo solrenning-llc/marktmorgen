@@ -24,6 +24,9 @@ import { hasContent } from "@/lib/preorder-rules";
  * emails nobody on the waitlist, and the pre-orders it hands over get the
  * fixed delivery email (lib/preorders.ts sendOut), only to buyers who paid
  * for the product, with nothing typed in this request.
+ *
+ * A change that was saved but whose view cannot be read afterwards answers
+ * `{ ok: true, viewsUnread: true }` (CX-123 rule 24): saved, numbers unread.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 4_000);
@@ -57,7 +60,14 @@ export async function POST(request: NextRequest) {
     if (releasing) {
       after(() => runPreorderReleases(storeForHandle, readListing, preorderDeps, Date.now() + 8_000).catch((error) => console.error("handing over pre-orders failed", error)));
     }
-    const views = await waitlistViews(store, [product.id]);
+    // The change is saved by now. A view that cannot be read after it is
+    // answered as unread, never as a failure (it was saved) and never drawn
+    // from a set that could not be read.
+    const views = await waitlistViews(store, [product.id]).catch((error: unknown) => {
+      console.error("reading a waitlist after a saved change failed", error);
+      return null;
+    });
+    if (!views) return Response.json({ ok: true, viewsUnread: true });
     return Response.json({ ok: true, view: views[product.id] ?? { soon: false, confirmed: 0, waiting: 0, launch: null } });
   } catch (error) {
     console.error("changing a waitlist failed", error);

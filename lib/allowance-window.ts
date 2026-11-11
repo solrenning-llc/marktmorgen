@@ -125,6 +125,25 @@ function monthOfPeriod(period: BillingPeriod, cycle: Cycle, now: number): Allowa
 }
 
 /**
+ * Where the periods after a renewing one are counted from. Stripe counts every period from its anchor, not from the
+ * last period's end: an anchor on the 29th to the 31st is cut to a short month's last day and comes back after it
+ * (31 January, 28 February, 31 March). The next period always begins at this one's end, the boundary Stripe gave.
+ * Only a whole period (exactly a step from its start, as Stripe cuts it) whose end fell on an earlier day than its
+ * start proves a cut end, and then the anchor is the start's day; any other period, a partial first one included
+ * (31 January to 15 February, before the first whole invoice), is anchored on its end (Codex H, #2269: inferring the
+ * anchor from the later day of either end put the next window on 28 February, after now, and a second allowance
+ * opened once the real period came). So the k-th period after this one starts at addMonthsMs(anchor, offset + k *
+ * step), the first of them at this one's end, and ends a step later, each cut to its month as Stripe cuts it.
+ */
+function anchorOf(period: BillingPeriod, yearly: boolean): { anchor: number; offset: number; step: number } {
+  const step = yearly ? 12 : 1;
+  const startMs = period.start * 1000;
+  const endMs = period.end * 1000;
+  const cutEnd = addMonthsMs(startMs, step) === endMs && new Date(startMs).getUTCDate() > new Date(endMs).getUTCDate();
+  return cutEnd ? { anchor: startMs, offset: step, step } : { anchor: endMs, offset: 0, step };
+}
+
+/**
  * The window a store's allowances are counted in right now, or null when it
  * pays and its period is not known: then nothing that costs money may start.
  */
@@ -145,10 +164,19 @@ export function allowanceWindow(store: WindowFields, now = Date.now()): Allowanc
   const current = monthOfPeriod(period, cycle, now);
   if (current) return current;
   // Past the period's end: the next one, which begins exactly there, for a
-  // short while, when the period renews.
+  // short while, when the period renews. It ends where Stripe ends it, counted
+  // from the anchor, not a month after a cut day: a period of 31 January to 28
+  // February is followed by 28 February to 31 March, never to 28 March, or a
+  // counter made for it would lapse on 29 March and open a second allowance
+  // for the three days left (review of #2205, C3-112).
   if (period.funded === true || !period.renews || now < period.end * 1000 || now >= (period.end + RENEW_GRACE_SECONDS) * 1000) return null;
-  const start = period.end * 1000;
-  return { id: day(start), start, end: addMonthsMs(start, 1), billing: true };
+  const { anchor, offset, step } = anchorOf(period, cycle === "year");
+  const start = addMonthsMs(anchor, offset);
+  const end = addMonthsMs(anchor, offset + step);
+  // It begins at the period's end, by construction; a window that would begin after now is never answered (Codex H, #2269).
+  if (start !== period.end * 1000 || now < start || now >= end) return null;
+  if (cycle === "year") return monthOfPeriod({ start: start / 1000, end: end / 1000, renews: true }, "year", now);
+  return { id: day(start), start, end, billing: true };
 }
 
 /**
@@ -170,15 +198,8 @@ export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | n
   const period = store.period;
   if (!isPeriod(period) || !period.renews || atMs < period.end * 1000) return null;
   const yearly = store.cycle === "year";
-  const step = yearly ? 12 : 1;
-  // Stripe counts every period from its anchor, not from the last period's end: an anchor on the 29th to the 31st
-  // is cut to a short month's last day and comes back after it (31 January, 28 February, 31 March). Of the period's
-  // two ends, the later day of the month is the anchor's (the other may have been cut), so the next ends are that one
-  // moved by whole periods, each cut to its month as Stripe cuts it.
-  const startMs = period.start * 1000;
-  const endMs = period.end * 1000;
-  const anchor = new Date(endMs).getUTCDate() >= new Date(startMs).getUTCDate() ? endMs : startMs;
-  const offset = anchor === endMs ? 0 : step;
+  // The periods that follow, each from the anchor as Stripe counts them (anchorOf).
+  const { anchor, offset, step } = anchorOf(period, yearly);
   // At most a year and a day ahead is ever asked (lib/broadcasts.ts, MAX_SCHEDULE_DAYS); bounded all the same.
   for (let k = 0; k < 40; k += 1) {
     const start = addMonthsMs(anchor, offset + k * step);
@@ -199,9 +220,17 @@ export function ledgerMonthOf(window: AllowanceWindow): string {
   return window.id.slice(0, 7);
 }
 
-/** Seconds a counter of this window must be kept: to its end, and a day more. */
+/**
+ * Seconds a counter of this window must be kept: to its end, and a day more. A
+ * billing month's counter is kept, besides, at least LONGEST_WINDOW_DAYS from
+ * its start: a counter made ahead for a window worked out before the period
+ * that holds it was known (a scheduled email's hold) never lapses while that
+ * month still runs, which would open a second allowance in it, and a give-back
+ * (lib/store-allowance.ts, giveAllowanceIn) still finds it (C3-112).
+ */
 export function keepSecondsFor(window: AllowanceWindow, now = Date.now()): number {
-  return Math.max(86_400, Math.ceil((window.end - now) / 1000) + 86_400);
+  const until = window.billing ? Math.max(window.end, window.start + LONGEST_WINDOW_DAYS * 86_400_000) : window.end;
+  return Math.max(86_400, Math.ceil((until - now) / 1000) + 86_400);
 }
 
 /** "November 19" (or "November 19, 2027" in another year): the day an allowance opens again. */

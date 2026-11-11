@@ -251,8 +251,8 @@ test("the sweep looks at codes too, or a sale with no click is never written dow
   );
   assert.match(
     sweep,
-    /codeOwners\(store\), listPartners\(store\)/,
-    "reading the store's given-away codes and its partners once, not once per order",
+    /Promise\.all\(\[\s*coded \? codeOwners\(store\)[^\n]*\n\s*listPartners\(store\)/,
+    "reading the store's given-away codes (only for a page with a code on it) and its partners once, not once per order",
   );
 });
 

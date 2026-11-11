@@ -6,13 +6,16 @@ import type { VoiceSource, VoiceSummary } from "@/lib/customer-voice";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
+  unread: "Some of what customers said could not be read just now, so no summary was made: it would leave them out for the whole month. No AI job was used. Try again in a moment.",
   few: "Not enough yet: fewer than 8 things customers wrote or searched for in the last 90 days. It is worth reading once there are more.",
   used: "This month's AI jobs are used up. They come back with your next billing month.",
   off: "This summary is not available right now.",
   busy: "It is already being read. Look again in a minute.",
+  changed: "Your store changed while this was being read (for example, someone was deleted), or it could not be saved, so it was not kept. Read it again. This try counted as one of this month's AI jobs.",
   slow: "A few AI jobs a minute at most. Try again in a moment.",
-  failed: "No summary came back, and nothing was counted. Try again.",
-  server_error: "Something went wrong on our side. Nothing was counted; try again in a moment.",
+  failed: "No summary came back. Try again. This try may have counted as one of this month's AI jobs.",
+  late: "Reading your store took too long this time, so no AI job was used. Try again in a moment.",
+  server_error: "Something went wrong on our side. Try again in a moment. If the summary had already started, this try may have counted as one of this month's AI jobs.",
 };
 
 const SOURCE_WORDS: Record<VoiceSource, [string, string]> = {
@@ -27,6 +30,13 @@ const said = (counts: Partial<Record<VoiceSource, number>>) =>
   SOURCES.filter((s) => counts[s])
     .map((s) => `${counts[s]} ${SOURCE_WORDS[s][counts[s] === 1 ? 0 : 1]}`)
     .join(" · ");
+
+/** The lists named in plain words, the first capitalized: "Reviews and searches with no result". Pure. */
+export function unreadWords(unread: VoiceSource[]): string {
+  const names = SOURCES.filter((s) => unread.includes(s)).map((s) => SOURCE_WORDS[s][1]);
+  const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return list ? `${list[0].toUpperCase()}${list.slice(1)}` : "";
+}
 
 function monthName(month: string): string {
   const [y, m] = month.split("-").map(Number);
@@ -52,9 +62,13 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
     setError(null);
     try {
       const response = await fetch("/api/store/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; summary?: VoiceSummary };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; summary?: VoiceSummary; unread?: VoiceSource[] | null };
       if (data.ok && data.summary) setSummary(data.summary);
-      else setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      else {
+        const message = MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
+        const named = data.error === "unread" && Array.isArray(data.unread) ? unreadWords(data.unread) : "";
+        setError(named ? `${message} Not read: ${named}.` : message);
+      }
     } catch {
       setError(MESSAGES.server_error);
     } finally {
@@ -68,7 +82,7 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
         What customers are saying
       </p>
       <p className="mt-1 text-xs text-ink-soft">
-        The last 90 days of what members wrote when leaving, questions your pages could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. Once a month, as one of the month&apos;s AI jobs.
+        The last 90 days of what members wrote when leaving, questions your pages could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
       </p>
       {summary ? (
         <div className="mt-3">

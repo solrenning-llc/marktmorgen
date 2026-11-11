@@ -7,6 +7,7 @@ import { releaseRestarted } from "@/lib/closing-holds";
 import { tellStaysOpen } from "@/lib/closing-buyers";
 import { retryPlanUndos } from "@/lib/closing-plan-guard";
 import { finishPlanRefunds } from "@/lib/plan-refund-flow";
+import { retryStoreForgets } from "@/lib/store-forget-retry";
 
 export const maxDuration = 60;
 
@@ -59,6 +60,13 @@ async function run(request: NextRequest): Promise<Response> {
       return null;
     });
     if (refunds?.left) console.error(`plan-refund: ${refunds.left} plan refunds are not finished yet; tried again on the next run`);
+    // Deleted stores whose webhooks, API keys or assistant notes could not be forgotten at the delete (lib/store-forget-retry.ts):
+    // tried again, at most FORGET_TRIES times in all; what is given up is counted for the owner's report.
+    const forgets = await retryStoreForgets(start + 32_000).catch((error) => {
+      console.error("trying again to forget deleted stores' webhooks, keys and assistant notes failed", error);
+      return null;
+    });
+    if (forgets && (forgets.failed || forgets.gaveUp || forgets.left)) console.error(`store-forget: ${forgets.done} done, ${forgets.failed} failed again, ${forgets.gaveUp} given up, ${forgets.left} left for the next run`);
     const looked = await closeEnded(start + 52_000);
     const count = (state: string) => looked.filter((row) => row.state === state).length;
     const counts = { looked: looked.length, told: count("told"), waiting: count("waiting"), removed: count("removed"), held: count("held"), running: count("running") };

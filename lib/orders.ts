@@ -15,10 +15,12 @@
  * marked by its own reference before it is added, so a confirmation sent
  * again, or noticed by two paths at once, counts once.
  *
- * What this errs toward. A count that cannot be written is not made, and an
- * order that paid a share of its sale is not counted at all. Both are in the
- * creator's favor, which is the way round a figure that is billed from has
- * to err.
+ * What this errs toward. An order that paid a share of its sale is not
+ * counted at all, in the creator's favor. An order's mark and its count are
+ * written in one step (COUNT_ORDER), so a round trip that fails or loses its
+ * reply never leaves an order marked and uncounted, which would let the
+ * store's window read one short of the plan's figure; a count that cannot be
+ * confirmed is answered as unknown, never as nothing left to count.
  */
 import { createHash } from "node:crypto";
 import { rememberFolderOwner } from "@/lib/delivery";
@@ -27,7 +29,8 @@ import { shareBps } from "@/lib/platform-share";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { type Admission, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
+import { type Admission, countHeldOrders, heldOrdersKey, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 
 const seenKey = (reference: string) => `nl:orders:seen:${createHash("sha256").update(reference).digest("hex").slice(0, 32)}`;
 const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${month}`;
@@ -324,50 +327,127 @@ export function coveredByShare(store: Parameters<typeof shareBps>[0], paidCents:
 }
 
 /**
+ * KEYS[1] an order's mark, KEYS[2] the count it adds to (the window's, or the
+ * store's held orders while its window is unknown); ARGV[1] the mark's
+ * seconds, ARGV[2] the count's, ARGV[3] 1 to count the order, 0 only to mark
+ * it (covered by its sale's share). Marks the order and adds it to the count
+ * in one step: answers the count it made, 0 when the order was marked already
+ * (or is only marked now), or -1, with nothing written, when the count is not
+ * a whole number or an argument is not one. Nothing is written before the
+ * count is read and known to be a count, because Redis keeps a script's
+ * earlier writes when a later command fails: an INCR refused after the mark
+ * was set would leave the order marked and never counted. The count stays
+ * under 16 digits, so INCR cannot overflow.
+ */
+export const COUNT_ORDER = `-- marktmorgen:orders-count:v1
+local mark = tonumber(ARGV[1])
+local keep = tonumber(ARGV[2])
+local n = tonumber(ARGV[3])
+if not mark or mark < 1 or not keep or keep < 1 or (n ~= 0 and n ~= 1) then return -1 end
+if n == 1 then
+  local have = redis.call('GET', KEYS[2])
+  if have and (#have > 15 or (have ~= '0' and not string.match(have, '^[1-9]%d*$'))) then return -1 end
+end
+if not redis.call('SET', KEYS[1], '1', 'NX', 'EX', mark) then return 0 end
+if n == 0 then return 0 end
+local count = redis.call('INCR', KEYS[2])
+redis.call('EXPIRE', KEYS[2], keep)
+return count`;
+
+/** How many times one order's step is sent when its reply does not come back as a count: it ran whole or not at all, and its mark makes a second run count nothing. */
+const COUNT_TRIES = 3;
+
+/**
+ * Sends COUNT_ORDER for one order, reading its reply exactly (rule 24): the
+ * count it made, 0 when there was nothing to count, or "unknown". A failed
+ * round trip or a reply of another shape is sent again, up to COUNT_TRIES:
+ * the step ran whole or not at all, so the order is counted once whichever
+ * of them reached Redis. A refusal (-1) wrote nothing and is not sent again.
+ */
+async function markAndCount(reference: string, key: string, count: 0 | 1): Promise<number | "unknown"> {
+  for (let attempt = 1; attempt <= COUNT_TRIES; attempt += 1) {
+    let answer: unknown;
+    try {
+      const reply: unknown = await redisPipeline([["EVAL", COUNT_ORDER, 2, seenKey(reference), key, SEEN_SECONDS, KEEP_SECONDS, count]]);
+      answer = repliesFor(reply, 1)?.[0];
+    } catch (error) {
+      console.error("an order's count did not answer; sent again", error);
+      continue;
+    }
+    if (answer === -1) {
+      console.error("an order's count is not a whole number; the order was not marked and is counted once it is");
+      return "unknown";
+    }
+    const made = countOf(answer);
+    if (made !== null) return made;
+    console.error("an order's count answered in an unknown shape; sent again");
+  }
+  return "unknown";
+}
+
+/**
  * One order handed over. `reference` names it (a checkout, a payment, a
  * place, a free copy) and `paidCents` is what was paid for it, zero for
- * nothing. Answers whether it was counted.
+ * nothing. Answers true when this call counted it (or held it while its
+ * paying store's window is unknown), false when there was nothing to count
+ * (counted already, or covered by its sale's share), and "unknown" when that
+ * could not be confirmed: the order may be uncounted, and calling again with
+ * the same reference counts it at most once. A caller that can try again
+ * later does so; one that cannot must not take "unknown" as counted (giving
+ * back the room its checkout was admitted with, for one) nor as false.
  *
  * Never throws: a count that cannot be written must not cost a buyer their
  * email.
  */
-export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now()): Promise<boolean> {
+export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now()): Promise<boolean | "unknown"> {
   if (!isRedisConfigured() || !reference) return false;
   try {
-    const [fresh] = await redisPipeline([["SET", seenKey(reference), "1", "NX", "EX", SEEN_SECONDS]]);
-    if (fresh === null) return false;
     // What the order leaves in the database is counted in the store's data
     // room by the writes that leave it, at what each really adds
     // (lib/order-data.ts), never refused: its room was held when its checkout
     // was admitted (lib/order-admission.ts), at the most an order can take.
-    if (coveredByShare(store, paidCents, now / 1000)) return false;
+    // Covered by its sale's share, it is only marked, so it is never counted later.
+    const counted = !coveredByShare(store, paidCents, now / 1000);
     const owner = storeRef(store);
     const folder = await storeFolder(owner);
-    // Counted in the store's window (lib/allowance-window.ts). An order paid
-    // for when no window is known (its checkout was opened before) still
-    // counts, in the calendar month, rather than nowhere.
-    const window = (allowanceWindow(store, now) ?? calendarWindow(now)).id;
+    // Counted in the store's window (lib/allowance-window.ts): a store with no
+    // plan's is the calendar month. A paying store's order paid for when its
+    // billing window is unknown (its checkout was admitted before) is held,
+    // never counted in the calendar month, which its admission never reads
+    // (rule 30): it is counted in the window once that is known, by the next
+    // admission or order (lib/order-admission.ts, countHeldOrders).
+    const known = allowanceWindow(store, now);
+    const made = await markAndCount(reference, known ? countKey(folder, known.id) : heldOrdersKey(folder), counted ? 1 : 0);
+    if (made === "unknown") return "unknown";
+    if (made === 0) return false;
+    if (!known) return true;
     const month = calendarWindow(now).id;
-    const [count] = await redisPipeline([
-      ["INCR", countKey(folder, window)],
-      ["EXPIRE", countKey(folder, window), KEEP_SECONDS],
-    ]);
+    // Those held while it was unknown too; a failure leaves them held for the next.
+    const held = await countHeldOrders(folder, known.id).catch((error) => {
+      console.error("could not count the orders held for an unknown window; counted next time", error);
+      return 0;
+    });
     // Written with the month's first order, and again at every hundredth, so
     // one write lost to a bad moment mends itself long before a bill could be
-    // made from the count: no plan covers fewer than a hundred orders.
-    const n = Number(count);
-    if (n === 1 || n % 100 === 0) {
-      await redisPipeline([
-        ["SADD", foldersKey(month), folder],
-        ["EXPIRE", foldersKey(month), KEEP_SECONDS],
-      ]);
-      // Whose folder this is, for the daily job that bills and writes (lib/usage-billing.ts, storeOf).
-      await rememberFolderOwner(folder, owner);
+    // made from the count: no plan covers fewer than a hundred orders. Held
+    // orders counted now may pass either, so they write it too. The order is
+    // counted already, so a failure here is logged, never answered as unknown.
+    if (made === 1 || made % 100 === 0 || held > 0) {
+      try {
+        await redisPipeline([
+          ["SADD", foldersKey(month), folder],
+          ["EXPIRE", foldersKey(month), KEEP_SECONDS],
+        ]);
+        // Whose folder this is, for the daily job that bills and writes (lib/usage-billing.ts, storeOf).
+        await rememberFolderOwner(folder, owner);
+      } catch (error) {
+        console.error("could not list a store among the month's orders; listed again by a later order", error);
+      }
     }
     return true;
   } catch (error) {
     console.error("could not count an order", error);
-    return false;
+    return "unknown";
   }
 }
 
@@ -384,9 +464,16 @@ export async function ordersIn(folder: string, month = calendarWindow().id): Pro
   }
 }
 
-/** The orders a store has had in its window (its billing month when it pays), by the store. */
-export async function storeOrdersThisMonth(store: Store, now = Date.now()): Promise<number> {
-  return ordersIn(await storeFolder(storeRef(store)), (allowanceWindow(store, now) ?? calendarWindow(now)).id);
+/**
+ * The orders a store has had in its window (its billing month when it pays,
+ * the calendar month when it has no plan), by the store. Null when it pays
+ * and its billing window is unknown: never the calendar month's (rule 30),
+ * and nothing counted against it may start.
+ */
+export async function storeOrdersThisMonth(store: Store, now = Date.now()): Promise<number | null> {
+  const window = allowanceWindow(store, now);
+  if (!window) return null;
+  return ordersIn(await storeFolder(storeRef(store)), window.id);
 }
 
 /** The stores that had any order counted in a month. */

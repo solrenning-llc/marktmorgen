@@ -204,7 +204,11 @@ export async function openCardUpdate(store: Store, token: string, origin: string
 /**
  * What finishing a card update came to. "unsure": Stripe answered the card's setting with something that is not
  * this membership with the card asked for (rules 24 and 30), so the card may or may not be set: never said set,
- * nothing is paid with it, and the page stays open for the daily job to finish it.
+ * nothing is paid with it, and the page stays open (nl:card:open, kept OPEN_SECONDS) so it can be finished again.
+ * What finishes it again is the member returning from Stripe's page again (app/api/store/manage/card), or the daily job (lib/payment-recovery.ts,
+ * noticeCards), which reads a waiting update only for a membership whose card notice is due and only while the
+ * store's card notice is on. A membership with neither is not retried by anything: the key runs out and "unsure"
+ * stays unconfirmed (Revisor 2's LOW on #3644).
  */
 export type CardFinish = "updated" | "paid" | "declined" | "canceled" | "unsure" | "error";
 

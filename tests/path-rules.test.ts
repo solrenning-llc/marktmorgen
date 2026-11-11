@@ -152,4 +152,18 @@ part("The reminder");
   is("and an ordinary line passes", forbiddenIn("Prepare your first digital product"), null);
 }
 
+part("The lead missions say what Path counts today (Revisor 2's LOW on #3591)");
+{
+  // Path counts an address only once it used its confirmation link (lib/path-lead.ts), so no lead text may say that
+  // merely leaving an address counts, and the change from the older reading is said where the mission is shown.
+  const lead = dayMissions(facts(), answers)[5];
+  const traffic = pathProgress(facts({ titlePublished: true }), answers, START, START + 8 * DAY).traffic.filter((m) => m.closesOn.includes("people have"));
+  is("two list missions are checked", traffic.length, 2);
+  const texts = [lead.why, lead.closesOn, ...lead.steps, ...traffic.flatMap((d) => [d.why, d.closesOn])];
+  is("no text says that leaving an address is what counts", texts.some((t) => /leaves? their address|left their address|left an address/i.test(t)), false);
+  is("the lead mission says confirming from the email is what counts", lead.closesOn.includes("confirms their address from the email"), true);
+  is("and that earlier unconfirmed sign-ups no longer count", lead.closesOn.includes("never confirmed before this changed"), true);
+  is("the list missions say the same", traffic.filter((d) => d.closesOn.includes("people have")).every((d) => d.closesOn.includes("confirmed their address") && d.closesOn.includes("before this changed")), true);
+}
+
 done();

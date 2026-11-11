@@ -132,6 +132,36 @@ async function main(): Promise<void> {
   is("a mark that cannot be let go is counted", (failedStuck as { unreleased?: unknown }).unreleased, 1);
   lists.past_due = [];
 
+  part("A claim answered in another shape is unknown: no email on a guess (Claude 1 and Claude 6 on #3215)");
+  {
+    const real = redis.pipeline.bind(redis);
+    let left = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (left > 0 && commands[0]?.[0] === "SET" && /^nl:remind:(trial|failed):/.test(String(commands[0]?.[1] ?? ""))) {
+        left -= 1;
+        return ["QUEUED"];
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    redis.clear();
+    lists.past_due = [];
+    lists.trialing = [trial("sub_TrialOdd00001", 7)];
+    left = 1;
+    await sendReminders(NOW);
+    is("a trial reminder whose claim answered QUEUED is not sent", sentTo("sub_TrialOdd00001@example.com"), 0);
+    await sendReminders(NOW);
+    is("the next run claims it and sends it once", sentTo("sub_TrialOdd00001@example.com"), 1);
+    lists.trialing = [];
+    lists.past_due = [failing("sub_FailedOdd0001")];
+    left = 1;
+    await sendFailedPlanNotices();
+    is("a failed-payment notice whose claim answered QUEUED is not sent", sentTo("sub_FailedOdd0001@example.com"), 0);
+    await sendFailedPlanNotices();
+    is("the next run sends it once", sentTo("sub_FailedOdd0001@example.com"), 1);
+    lists.past_due = [];
+    redis.pipeline = real;
+  }
+
   part("More trials than one run reads");
   redis.clear();
   // 5,050 trials, one due: the 5,021st, past the fifty pages of a hundred one run reads.

@@ -9,7 +9,7 @@
  * address itself, and no other store can read it: there is no list shared
  * between stores. At most MAX_BLOCKED a store; each entry's bytes are counted
  * in the store's data room before it is written and given back when it is
- * removed. Deleting a person removes their entry (lib/person-erasure.ts);
+ * removed (giveData). The limit is held in one Lua step (BLOCK_LUA). Deleting a person removes their entry (lib/person-erasure.ts);
  * closing a store removes the whole list (lib/closed-store-data.ts).
  *
  * What it never stops: a buyer's report of a problem with an order
@@ -24,7 +24,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { takeData } from "@/lib/store-data";
+import { giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -99,37 +99,40 @@ export async function mayWrite(store: Pick<Store, "sid">, email: string): Promis
 
 export type BlockOutcome = "blocked" | "already" | "many" | "full" | "error";
 
+/**
+ * The entry is written only while the list has room and the person is not on
+ * it, in one step, so two blocks at once never pass MAX_BLOCKED.
+ * KEYS[1] the list; ARGV the mark, the entry, MAX_BLOCKED.
+ * 1 written, 0 already there, -1 the list is full.
+ */
+export const BLOCK_LUA = `-- marktmorgen:buyer-block:v1
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then return 0 end
+if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then return -1 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+return 1
+`;
+
 /** Blocks a person in the store's messages, with the creator's reason. */
 export async function blockPerson(store: BlockStore, email: string, reasonRaw: unknown, now = Date.now()): Promise<BlockOutcome> {
   if (!store.sid || !isRedisConfigured()) return "error";
   const mark = personMark(email);
   if (!mark) return "error";
   const key = blockKey(store.sid);
-  let read: unknown[] | null;
-  try {
-    read = repliesFor(await redisPipeline([["HEXISTS", key, mark], ["HLEN", key]]), 2);
-  } catch {
-    return "error";
-  }
-  const exists = read ? countOf(read[0]) : null;
-  const count = read ? countOf(read[1]) : null;
-  if (exists === null || count === null || exists > 1) return "error";
-  if (exists === 1) return "already";
-  if (count >= MAX_BLOCKED) return "many";
+  // The room first, at the entry's largest size; given back when nothing was written.
   const room = await takeData(store, [{ slot: BLOCK_SLOT, bytes: BLOCK_ENTRY_BYTES }], now);
   if (!room.ok) return room.reason === "full" ? "full" : "error";
   let written: unknown[] | null;
   try {
-    written = repliesFor(await redisPipeline([["HSETNX", key, mark, JSON.stringify({ r: blockReason(reasonRaw), at: now })]]), 1);
+    written = repliesFor(await redisPipeline([["EVAL", BLOCK_LUA, 1, key, mark, JSON.stringify({ r: blockReason(reasonRaw), at: now }), MAX_BLOCKED]]), 1);
   } catch {
+    // Not known whether it was written: the room stays taken, as the entry may be there.
     return "error";
   }
-  const made = written ? countOf(written[0]) : null;
+  const made = written ? written[0] : undefined;
   if (made === 1) return "blocked";
-  // Not written by this call: the room taken for it is given back. An unknown answer keeps it, since the entry may be there.
-  if (made === 0) {
-    await takeData(store, [{ slot: BLOCK_SLOT, bytes: -BLOCK_ENTRY_BYTES }], now).catch(() => null);
-    return "already";
+  if (made === 0 || made === -1) {
+    await giveData(store, [{ slot: BLOCK_SLOT, bytes: BLOCK_ENTRY_BYTES }], now);
+    return made === 0 ? "already" : "many";
   }
   return "error";
 }
@@ -147,7 +150,7 @@ export async function unblockPerson(store: BlockStore, email: string, now = Date
   }
   const count = removed ? countOf(removed[0]) : null;
   if (count === null || count > 1) return "error";
-  if (count === 1) await takeData(store, [{ slot: BLOCK_SLOT, bytes: -BLOCK_ENTRY_BYTES }], now).catch(() => null);
+  if (count === 1) await giveData(store, [{ slot: BLOCK_SLOT, bytes: BLOCK_ENTRY_BYTES }], now);
   return count === 1;
 }
 

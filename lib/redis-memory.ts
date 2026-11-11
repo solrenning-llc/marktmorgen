@@ -139,6 +139,14 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/buyer-block.ts BLOCK_LUA: a person added only while not on the list and the list has room.
+        if (key.startsWith("-- marktmorgen:buyer-block:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, list, mark, entry, most] = args;
+          if (this.run(["HEXISTS", list, mark]) === 1) return 0;
+          if (Number(this.run(["HLEN", list])) >= Number(most)) return -1;
+          this.run(["HSET", list, mark, entry]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;

@@ -329,7 +329,8 @@ export async function visitorSend(
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
   const conversation = await readKept(found.statsId, found.id);
   if (!conversation || conversation.token !== token) return { ok: false, reason: "gone" };
-  if (!(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
+  // A buyer's own order case is never stopped by a block (567 [GD1]): it protects what they already paid for.
+  if (conversation.source !== "order" && !(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
   if (!(await withinLimit("chat-send", `${found.statsId}:${found.id}`, VISITOR_PER_HOUR, 3_600))) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
@@ -640,17 +641,17 @@ export async function suggestReply(store: Store, id: string, now = Date.now()): 
   });
 }
 
-/**
- * Deletes every conversation one person had with the store's inbox
- * (lib/person-erasure.ts): what they wrote, what the store answered, and the
- * link their chat opened with.
- */
 /** One conversation as the studio sees it, without marking it read; null when it is not there. */
 export async function conversationOf(statsId: string, id: string): Promise<Conversation | null> {
   const kept = await readKept(statsId, id);
   return kept ? shown(kept) : null;
 }
 
+/**
+ * Deletes every conversation one person had with the store's inbox
+ * (lib/person-erasure.ts): what they wrote, what the store answered, and the
+ * link their chat opened with.
+ */
 export async function forgetInboxPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);

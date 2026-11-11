@@ -199,6 +199,17 @@ async function main(): Promise<void> {
       is(`its store ${label}: an error, not a shorter list of imports`, [read.isError, "imports" in read.value], [true, false]);
       await redis.pipeline([["LREM", `nl:imports:list:${store.sid}`, 0, "c".repeat(24)], ["DEL", `nl:import:${"c".repeat(24)}`]]);
     }
+    // Codex V on #3661 (6788586117): the record GET nl:import:A answers is import A's only when it says so. One kept under
+    // A that names another import (B), even well formed and this store's, is unknown, never shown as A nor as a history
+    // that reads known.
+    part("Codex V (#3661): a record kept under one import's id that names another is unknown");
+    {
+      const under = "d".repeat(24);
+      await redis.pipeline([["SET", `nl:import:${under}`, JSON.stringify({ ...job, id: "e".repeat(24) })], ["LPUSH", `nl:imports:list:${store.sid}`, under]]);
+      const read = await call("get_imports");
+      is("another import's id under this one: an error, not a history", [read.isError, "imports" in read.value, /imports could not be read/.test(String(read.value.error))], [true, false, true]);
+      await redis.pipeline([["LREM", `nl:imports:list:${store.sid}`, 0, under], ["DEL", `nl:import:${under}`]]);
+    }
     // Claude 4 (cloud B) and Codex Nuvem 3 on #3661: a kept record with an import's id is not an import by that alone.
     // Every field get_imports sends is read exactly (whole numbers >= 0 for each count and row figure, times as whole
     // numbers, kind, state and source from their sets); anything else is unknown, with all that was set aside kept,

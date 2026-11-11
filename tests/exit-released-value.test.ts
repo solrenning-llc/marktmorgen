@@ -45,6 +45,9 @@ for (const [what, raw] of [
   ["a notice with a field more", `released:${AT.toISOString()} exit:${JSON.stringify({ ...notice, ref: "owner@example.com" })}`],
   ["a notice whose address does not read", `released:${AT.toISOString()} exit:${JSON.stringify({ ...notice, to: "javascript:alert(1)" })}`],
   ["a notice part with no time before it", `released: exit:${JSON.stringify(notice)}`],
+  ["a time that is only a number", `released:1 exit:${JSON.stringify(notice)}`],
+  ["a day that does not exist", `released:2026-02-30T00:00:00.000Z exit:${JSON.stringify(notice)}`],
+  ["a time not written by toISOString", `released:2026-12-01 exit:${JSON.stringify(notice)}`],
 ] as [string, unknown][]) is(`none: ${what}`, exitFromReleased(raw), null);
 
 part("Size");

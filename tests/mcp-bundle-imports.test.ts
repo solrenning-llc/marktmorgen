@@ -8,7 +8,8 @@
 import { POST } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
 import { bundleChoices } from "@/lib/bundle-choices";
-import { BUNDLE_CHOICES_MOST } from "@/lib/api-read-rules";
+import { BUNDLE_CHOICES_MOST, IMPORTS_MOST, apiReadUnits } from "@/lib/api-read-rules";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { addDraftProducts, addProduct, claimHandle, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -198,6 +199,61 @@ async function main(): Promise<void> {
       is(`its store ${label}: an error, not a shorter list of imports`, [read.isError, "imports" in read.value], [true, false]);
       await redis.pipeline([["LREM", `nl:imports:list:${store.sid}`, 0, "c".repeat(24)], ["DEL", `nl:import:${"c".repeat(24)}`]]);
     }
+    // Claude 4 (cloud B) and Codex Nuvem 3 on #3661: a kept record with an import's id is not an import by that alone.
+    // Every field get_imports sends is read exactly (whole numbers >= 0 for each count and row figure, times as whole
+    // numbers, kind, state and source from their sets); anything else is unknown, with all that was set aside kept,
+    // never a TypeError after the hold was taken and never a count sent as text or an object.
+    part("Claude 4 (cloud B) and Codex Nuvem 3 (#3661): a kept import not in its exact shape is unknown, all set aside kept");
+    const used = async () => allowanceUsed((await storeForEmail(OWNER))!, "api");
+    const counts = job.counts;
+    const odd: [string, Record<string, unknown>][] = [
+      ["only an id and this store", { id: "c".repeat(24), sid: store.sid }],
+      ["no counts", { ...job, counts: undefined }],
+      ["no options", { ...job, options: undefined }],
+      ["a count as text", { ...job, counts: { ...counts, added: "1" } }],
+      ["a count as an object", { ...job, counts: { ...counts, errors: {} } }],
+      ["a count below zero", { ...job, counts: { ...counts, skipped: -1 } }],
+      ["a count not whole", { ...job, counts: { ...counts, already: 1.5 } }],
+      ["a count missing", { ...job, counts: { ...counts, mailed: undefined } }],
+      ["contacts kept as text", { ...job, counts: { ...counts, contacts: "1" } }],
+      ["stopped kept as null", { ...job, counts: { ...counts, stopped: null } }],
+      ["rows expected below zero", { ...job, expected: -3 }],
+      ["rows received as text", { ...job, total: "3" }],
+      ["rows looked at missing", { ...job, done: undefined }],
+      ["started at as text", { ...job, at: "1000" }],
+      ["finished at null", { ...job, finishedAt: null }],
+      ["a state not an import's", { ...job, state: "paused" }],
+      ["a kind not an import's", { ...job, kind: "orders" }],
+      ["a source not an import's", { ...job, options: { ...job.options, source: "elsewhere" } }],
+    ];
+    const failed: unknown[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => void failed.push(args[0]);
+    try {
+      for (const [label, record] of odd) {
+        await redis.pipeline([["SET", `nl:import:${"c".repeat(24)}`, JSON.stringify({ ...record, id: "c".repeat(24) })], ["LPUSH", `nl:imports:list:${store.sid}`, "c".repeat(24)]]);
+        const before = await used();
+        const read = await call("get_imports");
+        const kept = (await used()) - before;
+        is(`${label}: unknown, said so, all set aside kept`, [read.isError, "imports" in read.value, /imports could not be read/.test(String(read.value.error)), kept], [true, false, true, 1 + apiReadUnits(IMPORTS_MOST)]);
+        await redis.pipeline([["LREM", `nl:imports:list:${store.sid}`, 0, "c".repeat(24)], ["DEL", `nl:import:${"c".repeat(24)}`]]);
+      }
+    } finally {
+      console.error = realError;
+    }
+    is("no tool threw on any of them", failed, []);
+
+    // LOW (rule 24): an import made before contacts and stopped were counted never recorded them; null, not a zero
+    // nobody counted, and the note says so.
+    part("Claude 4 (cloud B) LOW (#3661): counts an older import never recorded are null, never 0");
+    const older = { ...job, counts: { added: 1, already: 1, skipped: 1, errors: 0, mailed: 0, unmailed: 0 } };
+    await redis.pipeline([["SET", `nl:import:${id}`, JSON.stringify(older)]]);
+    const olderRead = await call("get_imports");
+    const olderRow = (olderRead.value.imports as Record<string, unknown>[])[0];
+    is("contacts_not_emailable and stopped are null", [olderRow.contacts_not_emailable, olderRow.stopped], [null, null]);
+    is("the note says null is not counted", /null.*(never|not) counted|not counted.*null/i.test(String(olderRead.value.note)), true);
+    await redis.pipeline([["SET", `nl:import:${id}`, JSON.stringify(job)]]);
+
     is("with it gone, the history reads again", ((await call("get_imports")).value.imports as { id: string }[]).map((i) => i.id), [id]);
 
     is("nothing reached outside", outside, 0);

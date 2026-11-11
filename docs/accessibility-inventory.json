@@ -1797,6 +1797,7 @@
     "app/api/store/creator-card/route.ts",
     "app/api/store/crm/route.ts",
     "app/api/store/currency/route.ts",
+    "app/api/store/delivery-check/route.ts",
     "app/api/store/depth/route.ts",
     "app/api/store/details/route.ts",
     "app/api/store/discord/connect/route.ts",

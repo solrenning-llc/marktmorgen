@@ -29,6 +29,7 @@ import {
   MAX_DELIVERY_ITEMS,
   addressVerdict,
   fileVerdict,
+  leftWords,
 } from "@/lib/delivery-check-rules";
 import { type DeliveryReaders, addressReader, checkDelivery, fileReader } from "@/lib/delivery-check";
 import { R2_CLASS_B_MICRO_USD_PER_MILLION, VERCEL_CALL_MICRO_USD_PER_MILLION, VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR } from "@/lib/spend-cost-table";
@@ -36,7 +37,9 @@ import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { COMMAND, DB_BYTE, ORIGIN_PER_BYTE, TAKE_COMMANDS, UNIT_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
-const file = { pathname: "vault/s1/p1/guide.pdf", bytes: 1200, name: "guide.pdf", contentType: "application/pdf", addedAt: "2026-11-10T00:00:00.000Z" };
+const FOLDER = "0123456789abcdef0123456789abcdef";
+const vaultFile = (name: string) => `vault/${FOLDER}/p1/0123456789abcdef-${name}`;
+const file = { pathname: vaultFile("guide.pdf"), bytes: 1200, name: "guide.pdf", contentType: "application/pdf", addedAt: "2026-11-10T00:00:00.000Z" };
 const NOW = Date.UTC(2026, 10, 10, 12);
 
 /** Readers that answer from a table and remember what they were asked. */
@@ -136,6 +139,9 @@ async function main() {
     is("the first ones, in the product's order", asked[0], "address https://example.com/main");
     is("the rest counted as left", result.left, options.length + 1 - MAX_DELIVERY_ITEMS);
     is("and only the read ones have a verdict", result.items.length, MAX_DELIVERY_ITEMS);
+    is("the rest are said as not checked, with how many", leftWords(result.left), `${result.left} more things this product hands over were not checked this time: we check ${MAX_DELIVERY_ITEMS} at a time.`);
+    is("one left, in the singular", leftWords(1), `1 more thing this product hands over was not checked this time: we check ${MAX_DELIVERY_ITEMS} at a time.`);
+    is("none left: nothing said", [leftWords(0), leftWords(-1), leftWords(Number.NaN)], ["", "", ""]);
   }
 
   part("Storage: a file gone, a file there, storage not reached, storage not set up");
@@ -151,9 +157,9 @@ async function main() {
         throw new Error("the host's store is not asked about a vault file");
       },
     });
-    is("a vault file there", await read("vault/s1/p1/guide.pdf"), { size: 1200 });
-    is("a vault file confirmed gone", await read("vault/s1/p1/gone.pdf"), "missing");
-    is("a vault that did not answer: not known", await read("vault/s1/p1/down.pdf"), null);
+    is("a vault file there", await read(vaultFile("guide.pdf")), { size: 1200 });
+    is("a vault file confirmed gone", await read(vaultFile("gone.pdf")), "missing");
+    is("a vault that did not answer: not known", await read(vaultFile("down.pdf")), null);
     is("each asked of the vault", asked.length, 3);
   }
   {
@@ -166,7 +172,7 @@ async function main() {
       },
       blob: async () => ({ size: 1 }),
     });
-    is("a vault not set up is never read as the file gone", [await read("vault/s1/p1/guide.pdf"), asked], [null, 0]);
+    is("a vault not set up is never read as the file gone", [await read(vaultFile("guide.pdf")), asked], [null, 0]);
   }
   {
     const read = fileReader({

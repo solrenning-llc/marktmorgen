@@ -138,6 +138,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/crm": row("buyers", draft),
   "POST store/currency": row("settings", draft),
   "GET store/depth": row("numbers", tool("get_page_reading")),
+  "POST store/delivery-check": row("products", read, "Checks a product's file or link now, from the studio's requests (479 [SB2]); nothing is written."),
   "POST store/details": row("pages", draft),
   "POST store/discord": row("community", draft),
   "POST store/discord/connect": row("connections", never(CONNECT)),

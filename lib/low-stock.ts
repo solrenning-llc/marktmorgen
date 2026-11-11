@@ -32,6 +32,13 @@ import { dataBytes } from "@/lib/store-data-rules";
 export type LowStock = { low: number; seen: number | null };
 
 const keyOf = (statsId: string) => `nl:ls:${statsId}`;
+/**
+ * The products the low-stock job checks (lib/low-stock-alert.ts,
+ * runLowStockChecks), scored by when each is due: "storeId|productId". One
+ * enters when its number is set and leaves when it is turned off.
+ */
+export const LOW_STOCK_DUE = "nl:ls:due";
+export const lowStockMember = (storeId: string, productId: string) => `${storeId}|${productId}`;
 const slotOf = (productId: string) => `ls:${productId}`;
 const sha1 = (value: string) => createHash("sha1").update(value).digest("hex");
 
@@ -94,13 +101,20 @@ export async function setLowStock(store: DataStore, productId: string, raw: unkn
       const removed = countOf(repliesFor(await redisPipeline([["HDEL", key, productId]]), 1)?.[0]);
       if (removed === null || removed > 1) return "unknown";
       if (removed === 1) await giveData(store, [{ slot: slotOf(productId), bytes: 0, set: true }], now);
+      if (store.sid) {
+        const left = countOf(repliesFor(await redisPipeline([["ZREM", LOW_STOCK_DUE, lowStockMember(store.sid, productId)]]), 1)?.[0]);
+        if (left === null) return "unknown";
+      }
       return "off";
     }
-    if (!isLeft(left)) return "unknown";
+    if (!isLeft(left) || !store.sid) return "unknown";
     const taken = await takeData(store, [{ slot: slotOf(productId), bytes: bytesOf(productId), set: true }], now);
     if (!taken.ok) return taken.reason === "full" ? "full" : "unknown";
-    const written = countOf(repliesFor(await redisPipeline([["HSET", key, productId, JSON.stringify({ low, seen: left })]]), 1)?.[0]);
-    return written === 0 || written === 1 ? "saved" : "unknown";
+    // Kept, then due for the job at once (a product already waiting keeps its turn).
+    const replies = repliesFor(await redisPipeline([["HSET", key, productId, JSON.stringify({ low, seen: left })], ["ZADD", LOW_STOCK_DUE, "NX", now, lowStockMember(store.sid, productId)]]), 2);
+    const written = countOf(replies?.[0]);
+    const due = countOf(replies?.[1]);
+    return (written === 0 || written === 1) && (due === 0 || due === 1) ? "saved" : "unknown";
   } catch (error) {
     console.error("saving a low-stock number failed", error);
     return "unknown";

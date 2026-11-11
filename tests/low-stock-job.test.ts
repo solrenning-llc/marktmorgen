@@ -1,6 +1,6 @@
 /**
  * 623 [SZ7], unit 5b: the creator's low-stock alert is checked by the job
- * that already runs every five minutes for back-in-stock emails, never in the
+ * that already sends back-in-stock emails, never in the
  * checkout (whose stock share of an order's compute has no room left). A
  * product joins the job's set when its number is set and leaves it when it
  * is turned off, its product is gone (its number goes too) or its store is
@@ -9,7 +9,7 @@
  * crossing (Claude 3 and Codex G on #3650). Anything unreadable waits.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { setProductExtras } from "@/lib/catalog";
+import { setProductExtras } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { stockLeft } from "@/lib/stock";

@@ -62,7 +62,15 @@ export const metadata: Metadata = {
  */
 function Code({ children }: { children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff]">
+    // Reachable by Tab in every browser, so a long line can be scrolled from the keyboard (2.1.1), with a 3 px ring
+    // outside the dark block, on the page (2.4.13); a named group, as a lesson's code is (components/lesson-text.tsx).
+    <pre
+      tabIndex={0}
+      role="group"
+      aria-label="Code"
+      translate="no"
+      className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[3px] focus-visible:outline-[var(--violet-deep)]"
+    >
       <code>{children}</code>
     </pre>
   );

@@ -13,7 +13,7 @@
  *   - made only with enough to read, once a calendar month, as one of the
  *     month's AI jobs, and given back unchanged after that.
  */
-import { KEEP_SECONDS, LOCK_SECONDS, MIN_TEXTS, cleanVoice, keptMonths, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, logVoiceFailure, type VoiceItem } from "@/lib/customer-voice";
+import { KEEP_SECONDS, LOCK_SECONDS, MIN_TEXTS, cleanVoice, keptMonths, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, type VoiceItem } from "@/lib/customer-voice";
 import { keepAnswer } from "@/lib/answers";
 import { saveReview } from "@/lib/reviews";
 import { countSearchMiss } from "@/lib/stats";
@@ -47,17 +47,6 @@ async function main(): Promise<void> {
     cleanVoice(("Write to me at pat.smith@example.com or " + ("+" + "1 (415) 555-0199") + ", see https://example.com/x")),
     "Write to me at [email] or [number], see [link]",
   );
-
-  part("Provider errors are not copied into server logs");
-  const originalConsoleError = console.error;
-  const logged: unknown[][] = [];
-  console.error = (...args: unknown[]) => { logged.push(args); };
-  try {
-    logVoiceFailure("review", new Error("buyer@example.test wrote private health details"));
-  } finally {
-    console.error = originalConsoleError;
-  }
-  is("the log contains only a fixed operation label", logged, [["reading customer reviews for the customer summary failed"]]);
 
   part("The model only sorts");
   const items: VoiceItem[] = [
@@ -117,6 +106,29 @@ async function main(): Promise<void> {
   await countSearchMiss(statsId, ["printable"]);
   await countSearchMiss(statsId, ["printable"]);
   const { items: gathered } = await gatherVoice(store, now);
+
+  part("Provider errors are not copied into server logs (through the real reads)");
+  {
+    // Every Redis read fails with customers' words in its error (Claude 3 M LEVE on #3733: the
+    // check now drives gatherVoice instead of calling logVoiceFailure directly).
+    const realPipeline = redis.pipeline.bind(redis);
+    const originalConsoleError = console.error;
+    const logged: unknown[][] = [];
+    redis.pipeline = (async () => { throw new Error("buyer@example.test wrote private health details"); }) as typeof redis.pipeline;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    let failedReads: string[] = [];
+    try {
+      failedReads = (await gatherVoice(store, now)).unread;
+    } finally {
+      redis.pipeline = realPipeline;
+      console.error = originalConsoleError;
+    }
+    const text = logged.flat().map((value) => (value instanceof Error ? `${value.message}\n${value.stack}` : String(value))).join("\n");
+    is("the failed lists are named", failedReads.length > 0, true);
+    is("something was logged for them", logged.length > 0, true);
+    is("the log never carries what customers wrote", text.includes("buyer@example.test") || text.includes("health details"), false);
+    is("every line is a fixed label alone", logged.every((args) => args.length === 1 && typeof args[0] === "string"), true);
+  }
   is("questions, reviews and searches, never the old question", gathered.map((g) => `${g.source}|${g.text}|${g.n}`).sort(), [
     "question|Can I print the planner?|1",
     "question|Does it work in metric?|1",

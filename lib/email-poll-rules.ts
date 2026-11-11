@@ -13,8 +13,11 @@
  *   - One vote per recipient, through their own link: they can change it, or
  *     take it back, until the poll closes, 1 to 30 days after the email was
  *     sent (POLL_DEFAULT_DAYS unless the creator picks another).
- *   - The creator sees only the totals, never who answered what, and the
- *     email says that too.
+ *   - The creator sees only the totals, never a list of who answered what,
+ *     and the email says that too, with its limit: when very few people get
+ *     the email, the totals alone can show how one person answered (one
+ *     recipient, or all but one answers known some other way), so the email
+ *     never promises more (Claude 3 and R1 on #3673).
  *   - Unknown is never a vote (rule 24): a link that could not be checked, a
  *     clock or a sending time that is not a number, a kept vote that does not
  *     read. Results with a vote that does not read are "unknown", never a
@@ -130,6 +133,6 @@ export function pollEmailLines(poll: EmailPoll, linkFor: (option: number) => str
     "",
     "Pick an answer: a page opens, and your answer is counted only when you press Confirm there. Opening the link alone counts nothing.",
     ...(closes === null ? [] : [`You can change or take back your answer until ${DATE.format(closes)} (UTC).`]),
-    "The sender sees only the totals, never who answered what.",
+    "The sender sees only the totals, not a list of who answered. If very few people get this email, the totals can still show how one person answered.",
   ];
 }

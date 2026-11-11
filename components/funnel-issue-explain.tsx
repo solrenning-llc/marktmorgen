@@ -17,6 +17,8 @@ export function explainErrorText(reason: string): string {
       return "AI writing is not part of this store's plan right now.";
     case "allowance":
       return "We could not check your AI allowance just now. Nothing was used. Reload the page in a minute to try again.";
+    case "unconfirmed":
+      return "We could not confirm your AI writing job just now, so nothing was asked. Reload the page in a minute to see how many jobs are left, then try again.";
     case "long":
       return "This funnel has too much text to explain in one go. Shorten its step names, then try again. Nothing was used.";
     case "stale":

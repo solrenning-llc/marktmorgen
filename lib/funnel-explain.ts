@@ -88,6 +88,9 @@ export function explainFits(request: { system: string; prompt: string }): boolea
 /** Words that would overturn the fixed check: such an answer is never shown. */
 const OVERTURNS = /\b(?:no (?:problem|issue|action)|nothing to (?:fix|do|change)|(?:is|was|looks|seems) (?:fine|ok|okay|correct|resolved)|already (?:fixed|resolved|done)|false (?:alarm|positive)|(?:can|may) (?:safely )?(?:ignore|skip) (?:this|it))\b/i;
 
+/** A result promised in words, which the rules forbid as they forbid an invented figure (Claude 1 on #3454): never shown. */
+const PREDICTS = /\b(?:double|triple|quadruple|multiply)\s+(?:your\s+|the\s+)?(?:sales|revenue|income|profits?|conversions?|sign-?ups|leads|buyers|orders)\b|\bguarantee(?:s|d)?\b/i;
+
 /** A web address or an email address: the facts never hold one, so a line that carries one is never shown (Claude 6 on #3454). */
 const LINK = /(?:https?:\/\/|www\.)\S|[\w.+-]+@[\w-]+(?:\.[\w-]+)+/i;
 
@@ -100,7 +103,7 @@ export function readExplanation(json: Record<string, unknown> | null, request: {
   const why = line(json.why, MAX_EXPLAIN_WHY);
   const todo = (Array.isArray(json.todo) ? json.todo : []).map((item) => line(item, MAX_EXPLAIN_STEP)).filter(Boolean).slice(0, MAX_EXPLAIN_TODO);
   if (!why || !todo.length) return null;
-  if ([why, ...todo].some((text) => OVERTURNS.test(text))) return null;
+  if ([why, ...todo].some((text) => OVERTURNS.test(text) || PREDICTS.test(text))) return null;
   return { why, todo };
 }
 

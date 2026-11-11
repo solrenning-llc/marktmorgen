@@ -38,6 +38,9 @@ export async function POST(request: NextRequest) {
   if (!read.ok) return fail(read.reason, read.reason === "gone" ? 404 : 503);
   if (!read.checks.issues.some((found) => sameIssue(found, issue))) return fail("stale", 409);
   const done = await explainFunnelIssue(taken.store ?? store, issue, read.checks.funnel.name, read.checks.steps);
+  // The plan has jobs (aiAvailableFor, aiLeft above), so counted()'s "off" here is a job reservation that could not be
+  // confirmed (an unreadable INCRBY/EXPIRE reply): never "not in your plan", and the job may have been taken (rule 24).
+  if (!done.ok && done.reason === "off") return fail("unconfirmed", 503);
   if (!done.ok) return fail(done.reason, done.reason === "failed" ? 502 : 400);
   return Response.json({ ok: true, value: done.value, left: done.left });
 }

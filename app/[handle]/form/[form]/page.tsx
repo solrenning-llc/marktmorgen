@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
 import { formWords } from "@/lib/buyer-words/form";
@@ -47,6 +49,9 @@ export default async function FormDonePage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store || store.suspended) notFound();
+  // As the store page (lib/traffic.ts, isResting): one of the store's counted public requests, and a store whose
+  // window's requests are used rests, before the form, its product and its funnel are read.
+  if (await isResting(store)) return <StoreResting store={store} />;
   const form = await readForm(store.statsId, formId).catch(() => null);
   if (!form) notFound();
   const w = formWords(store.language);

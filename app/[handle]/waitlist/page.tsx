@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { lookStyle } from "@/lib/store-look";
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
@@ -44,6 +46,11 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
   const leave = read("leave");
   const status = read("status");
   if (!token && !leave && !status) redirect(`/@${store.handle}`);
+  // One of the store's counted public requests (lib/traffic.ts, isResting), before the spot and the product are read:
+  // the page after joining rests with the store's pages; a person's own emailed link to their spot rests only once
+  // the whole month's are used, as a buyer's course does.
+  const own = Boolean(token || leave);
+  if (await isResting(store, Date.now(), own ? "buyer" : "public")) return <StoreResting store={store} buyer={own} />;
 
   const grant = token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
   const productId = grant?.p ?? read("product");

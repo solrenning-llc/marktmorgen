@@ -5,6 +5,8 @@ import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type Listing, type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { linkHost } from "@/lib/product-link";
 import { readClaimFull } from "@/lib/free";
 import { welcomeFor } from "@/lib/welcome-offer-send";
@@ -101,6 +103,10 @@ export default async function FreePage({ params, searchParams }: Params) {
   const productId = typeof query.product === "string" ? query.product : "";
   // Nothing asked and nothing to pick up: the store itself is the page.
   if (!token && !status) redirect(`/@${store.handle}`);
+  // One of the store's counted public requests (lib/traffic.ts, isResting), before the claim and the products are
+  // read: the page after signing up rests with the store's pages; a person's own emailed link to what they already
+  // have rests only once the whole month's are used, as a buyer's course does.
+  if (await isResting(store, Date.now(), token ? "buyer" : "public")) return <StoreResting store={store} buyer={Boolean(token)} />;
 
   const full = token ? await readClaimFull(token) : null;
   const claim = full ? { handle: full.h, productId: full.p } : null;

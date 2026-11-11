@@ -94,6 +94,8 @@ export async function POST(request: NextRequest) {
       case "history": {
         const conversation = id ? await conversationOf(store.statsId, id) : null;
         if (!conversation) return refuse("none", 404);
+        // Nothing to read, so none of the day's checks or the studio's requests is spent on it.
+        if (!store.stripeAccountId) return answer({ ok: true, history: { state: "none" } });
         // Bounded before Stripe is asked: each check is at most two reads (lib/buyer-history.ts).
         if (!(await withinLimit("refund-history", store.statsId, REFUND_HISTORY_PER_DAY, 86_400))) return refuse("limited", 429);
         const paid = await countStudio(store, null, REFUND_HISTORY_UNITS);

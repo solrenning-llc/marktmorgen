@@ -1,5 +1,5 @@
 import { normaliseEmail } from "@/lib/auth";
-import type { Store } from "@/lib/store";
+import { saleHandles, type Store } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
 
 /**
@@ -36,7 +36,7 @@ export type RefundHistory =
       disputed: number;
       /** More checkouts than one page under a spelling: only the newest were read. */
       more: boolean;
-      /** Subscriptions, and payments not made yet: not checked. */
+      /** Subscriptions, and payments not made yet (a bank payment waiting): not checked. */
       unchecked: number;
     }
   | { state: "none" }
@@ -67,24 +67,31 @@ const isObject = (value: unknown): value is Record<string, unknown> => value !==
 class Unreadable extends Error {}
 
 /** One checkout's part in the count, or Unreadable. */
-function rowOf(row: unknown, email: string): { id: string; kind: "checked" | "unchecked" | "skip"; refunded: boolean; partly: boolean; disputed: boolean } {
+function rowOf(row: unknown, email: string, handles: Set<string>): { id: string; kind: "checked" | "unchecked" | "skip"; refunded: boolean; partly: boolean; disputed: boolean } {
   if (!isObject(row) || typeof row.id !== "string" || !row.id) throw new Unreadable();
   if (row.status !== "complete") throw new Unreadable();
   // Only this address's checkouts: a row of another address is not "nothing found".
   const details = row.customer_details;
   if (!isObject(details) || typeof details.email !== "string" || normaliseEmail(details.email) !== email) throw new Unreadable();
   const none = { id: row.id, refunded: false, partly: false, disputed: false };
+  // The creator's Stripe account may serve their other stores, and sales made
+  // outside Marktmorgen: only a checkout this store made, under any name it has
+  // had (lib/buyer-orders.ts reads it the same way), is counted.
+  if (!isObject(row.metadata)) throw new Unreadable();
+  const made = row.metadata.store;
+  if (typeof made !== "string" || !handles.has(made)) return { ...none, kind: "skip" };
   if (row.mode === "subscription" || row.mode === "setup") return { ...none, kind: "unchecked" };
   if (row.mode !== "payment") throw new Unreadable();
   if (row.payment_status === "no_payment_required") {
     if (row.payment_intent !== null && row.payment_intent !== undefined) throw new Unreadable();
     return { ...none, kind: "skip" };
   }
-  if (row.payment_status !== "paid" && row.payment_status !== "unpaid") throw new Unreadable();
+  // A payment waiting on the buyer's bank is not paid yet, whatever its charge says so far.
+  if (row.payment_status === "unpaid") return { ...none, kind: "unchecked" };
+  if (row.payment_status !== "paid") throw new Unreadable();
   const intent = row.payment_intent;
   if (!isObject(intent)) throw new Unreadable();
   const charge = intent.latest_charge;
-  if (row.payment_status === "unpaid" && (charge === null || charge === undefined)) return { ...none, kind: "unchecked" };
   if (!isObject(charge)) throw new Unreadable();
   const { refunded, disputed, amount_refunded: amount } = charge;
   if (typeof refunded !== "boolean" || typeof disputed !== "boolean") throw new Unreadable();
@@ -93,7 +100,7 @@ function rowOf(row: unknown, email: string): { id: string; kind: "checked" | "un
 }
 
 /** The count from Stripe's listings, one a spelling of the address; any one that cannot be read spoils it. */
-export function historyFrom(_handles: Set<string>, listings: unknown[], email: string): RefundHistory {
+export function historyFrom(handles: Set<string>, listings: unknown[], email: string): RefundHistory {
   if (listings.length === 0) return UNKNOWN;
   const address = normaliseEmail(email);
   const seen = new Set<string>();
@@ -103,7 +110,7 @@ export function historyFrom(_handles: Set<string>, listings: unknown[], email: s
       if (!isObject(listing) || !Array.isArray(listing.data) || typeof listing.has_more !== "boolean") return UNKNOWN;
       if (listing.has_more) out.more = true;
       for (const row of listing.data) {
-        const read = rowOf(row, address);
+        const read = rowOf(row, address, handles);
         if (seen.has(read.id)) continue;
         seen.add(read.id);
         if (read.kind === "unchecked") out.unchecked += 1;
@@ -129,7 +136,10 @@ export function historyFrom(_handles: Set<string>, listings: unknown[], email: s
 export async function refundHistory(store: Store, email: string): Promise<RefundHistory> {
   const account = store.stripeAccountId;
   if (!account) return { state: "none" };
-  // Stripe keeps the address as it was typed at checkout (lib/buyer-orders.ts, checkoutsOf).
+  // Stripe keeps the address as it was typed at checkout (lib/buyer-orders.ts, checkoutsOf). An inbox conversation
+  // keeps it in lowercase (lib/inbox.ts, readEmail), so from the studio there is one spelling to ask under. Whether
+  // Stripe's filter finds a checkout typed with capitals is not confirmed here: the studio says the check was made
+  // under the address as the conversation has it (components/inbox-history.tsx), never "none" for the person.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])].filter(Boolean);
   if (!variants.length) return UNKNOWN;
   const listings: unknown[] = [];
@@ -143,5 +153,5 @@ export async function refundHistory(store: Store, email: string): Promise<Refund
     console.error("reading a buyer's past refunds and disputes failed", error);
     return UNKNOWN;
   }
-  return historyFrom(new Set(), listings, email);
+  return historyFrom(saleHandles(store), listings, email);
 }

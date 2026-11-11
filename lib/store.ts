@@ -856,7 +856,7 @@ async function sha256Hex(value: string): Promise<string> {
     .join("");
 }
 
-const ownerKey = async (email: string) =>
+export const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;

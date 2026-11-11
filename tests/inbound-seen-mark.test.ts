@@ -79,6 +79,11 @@ function delAnswers(shape: unknown[] | "throws", failOthers = false): void {
   }) as typeof redis.pipeline;
 }
 const restore = () => { redis.pipeline = real; };
+const isClaim = (commands: (string | number)[][]) => commands[0]?.[0] === "SET" && commands[0]?.[3] === "NX" && String(commands[0][1]).startsWith("nl:inbound:seen:");
+/** The claim (SET … NX with its GET) answers `shape` and does not land: nothing proves this request holds it. */
+function claimAnswers(shape: unknown[]): void {
+  redis.pipeline = (async (commands: (string | number)[][]) => (isClaim(commands) ? shape : real(commands))) as typeof redis.pipeline;
+}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -150,6 +155,33 @@ async function main(): Promise<void> {
     advance(RESEND_SECOND_RETRY_MS);
     const retried = await POST(complained(msg, to));
     is(`DEL ${label}: Resend's retry five minutes later records the complaint`, [retried.status, (await retried.json()).result, (await listHealth(HEALTH)).complained - before], [200, "counted", 1]);
+  }
+
+  // Codex R1 on #3261 (app/api/mail/inbound/route.ts:113-124): only an exact "OK" with the hold read
+  // back proves this request won the claim; any other reply is unknown, never taken as won.
+  part("the claim's reply is unknown: nothing is acted on and Resend keeps the announcement");
+  for (const shape of [[], [undefined, undefined], ["QUEUED", "QUEUED"], ["OK", "1"], ["OK", null], [0, "acting"]] as unknown[][]) {
+    const label = JSON.stringify(shape);
+    const emailId = emailIdOf(++n);
+    const msg = `msg_claim_${n}`;
+    const before = sent;
+    claimAnswers(shape);
+    const first = await POST(received(msg, emailId));
+    restore();
+    const firstBody = await first.json();
+    is(`claim ${label}: message not sent on and not answered ok`, [sent - before, first.status >= 200 && first.status < 300 && firstBody.ok === true], [0, false]);
+    advance(RESEND_SECOND_RETRY_MS);
+    const retried = await POST(received(msg, emailId));
+    is(`claim ${label}: Resend's retry is heard and sent on once`, [retried.status, (await retried.json()).result, sent - before], [200, "sent", 1]);
+
+    const cmsg = `msg_claim_complaint_${n}`;
+    const to = `claim${n}@example.com`;
+    const was = (await listHealth(HEALTH)).complained;
+    claimAnswers(shape);
+    const report = await POST(complained(cmsg, to));
+    restore();
+    const reportBody = await report.json();
+    is(`claim ${label}: complaint not recorded and not answered ok`, [(await listHealth(HEALTH)).complained - was, report.status >= 200 && report.status < 300 && reportBody.ok === true], [0, false]);
   }
 
   part("a retry that comes while the first try is still running, which then fails");

@@ -156,7 +156,7 @@ is("every icon has a name a person reads, each different", [ROW_ICONS.every((ico
 is(
   "words start empty; a picture and a video start from what is chosen",
   ROW_ELEMENT_KINDS.map((kind) => blankElement(kind)),
-  [{ kind: "heading", text: "" }, { kind: "subheading", text: "" }, { kind: "paragraph", text: "" }, { kind: "list", items: [] }, { kind: "icon", name: "check", label: "" }, { kind: "button", label: "", url: "" }, null, null],
+  [{ kind: "heading", text: "" }, { kind: "subheading", text: "" }, { kind: "paragraph", text: "" }, { kind: "list", items: [] }, { kind: "icon", name: "check", label: "" }, { kind: "button", label: "", url: "" }, null, null, null],
 );
 is("every refusal is said in words", Object.values(ROW_EDIT_WHY).every((text) => text.length > 10 && !/undefined/.test(text)), true);
 
@@ -183,6 +183,8 @@ part("What a part still needs before saving");
     ["a picture described", { kind: "image", picture: { ...picture, alt: "A page of the planner" }, decorative: false }, true],
     ["a picture not described", { kind: "image", picture, decorative: false }, false],
     ["a picture marked as decoration", { kind: "image", picture, decorative: true }, true],
+    ["a video in a window with button words", { kind: "video-window", video: { provider: "youtube", id: "dQw4w9WgXcQ", hash: "" }, title: "", label: "Watch the walkthrough" }, true],
+    ["a video in a window without button words", { kind: "video-window", video: { provider: "youtube", id: "dQw4w9WgXcQ", hash: "" }, title: "Tour", label: "  " }, false],
   ];
   for (const [what, element, ready] of cases) {
     const problem = rowElementProblem(element);
@@ -271,12 +273,21 @@ part("The editor uses the rules, with buttons");
   is("what happened is said in a status line", rowEditor.includes('role="status"'), true);
   is("a part is checked before the page is sent", editor.includes("rowProblem(b.columns)"), true);
   // Seen in a browser at 1280 pixels: in the narrow block list beside the side menu and the page, the choice shrank to 64 pixels and showed "H".
-  is("the Add to column choice is never narrower than its longest name; the Add button goes below it instead", rowEditor.includes('<div className="flex flex-wrap items-end gap-2">') && rowEditor.includes('<div className="min-w-[min(13rem,100%)] flex-1">\n            <label htmlFor={id} className="field-label">{`Add to column ${column + 1}`}</label>'), true);
+  is("the Add to column choice is never narrower than its longest name; the Add button goes below it instead", rowEditor.includes('<div className="flex flex-wrap items-end gap-2">') && rowEditor.includes('<div className="min-w-[min(14rem,100%)] flex-1">\n            <label htmlFor={id} className="field-label">{`Add to column ${column + 1}`}</label>'), true);
   {
-    // 13rem against the longest name at a generous 0.6em a letter, the field's padding (2 × 0.9rem), the arrow (1.5rem) and the border.
+    // 14rem against the longest name at a generous 0.6em a letter, the field's padding (2 × 0.9rem), the arrow (1.5rem) and the border.
     const longest = Math.max(...Object.values(ROW_ELEMENT_NAMES).map((n) => n.length));
-    is("13rem holds the longest name, \"Smaller heading\"", [longest, longest * 0.6 + 1.8 + 1.5 + 0.125 <= 13], [15, true]);
+    is("14rem holds the longest name, \"Video in a window\"", [longest, longest * 0.6 + 1.8 + 1.5 + 0.125 <= 14], [17, true]);
   }
+  is(
+    "a video in a window is offered by its name, made from the address typed, and asks for its button words first",
+    [
+      ROW_ELEMENT_NAMES["video-window"],
+      rowEditor.includes('kind === "video-window" ? { kind: "video-window", video, title: "", label: "" }'),
+      /\{inWindow \? \(\s*<div>\s*\{label\(`\$\{id\}-a`, "Button words"/.test(rowEditor),
+    ],
+    ["Video in a window", true, true],
+  );
   is("the Add button stays a 44 pixel target", rowEditor.includes('"inline-flex min-h-11 items-center gap-1.5 rounded-full'), true);
   is("after a change the keyboard goes to the new field once it is drawn, at a later frame if need be, never left on Add", rowEditor.includes("stopFocus.current = focusWhenDrawn(() => document.getElementById(id), browserFrames());") && !rowEditor.includes("document.getElementById(focusTo.current)?.focus();"), true);
   // Inbox C4-31: a picture that arrives after the row was closed and reopened, or after other changes.

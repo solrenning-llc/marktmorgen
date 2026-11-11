@@ -7,19 +7,23 @@
  * it is on, as the editor's other switches do (Build or Preview, Computer or
  * Phone).
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { SIDE_PANELS, SIDE_PANEL_DEFAULT, SIDE_PANEL_KEY, SIDE_PANEL_LABEL, type SidePanel, readSidePanel } from "@/lib/side-panel";
 
 /**
  * What the column shows: the choice remembered in this browser only (the
  * default until it is read, or when the browser keeps nothing), a choice that
- * is remembered, and a change the editor makes by itself, which is not.
+ * is remembered, and a change the editor makes by itself, which is not. Once
+ * either is made on the page, the remembered choice read after it no longer
+ * replaces it: a place pressed before the read keeps its blocks to add.
  */
 export function useSidePanel(): [SidePanel, (next: SidePanel) => void, (next: SidePanel) => void] {
   const [panel, setPanel] = useState<SidePanel>(SIDE_PANEL_DEFAULT);
+  const changed = useRef(false);
   useEffect(() => {
     const first = window.setTimeout(() => {
+      if (changed.current) return;
       try {
         setPanel(readSidePanel(window.localStorage.getItem(SIDE_PANEL_KEY)));
       } catch {
@@ -28,15 +32,20 @@ export function useSidePanel(): [SidePanel, (next: SidePanel) => void, (next: Si
     }, 0);
     return () => window.clearTimeout(first);
   }, []);
-  const choose = (next: SidePanel) => {
+  const choose = useCallback((next: SidePanel) => {
+    changed.current = true;
     setPanel(next);
     try {
       window.localStorage.setItem(SIDE_PANEL_KEY, next);
     } catch {
       // Not remembered; the choice still holds on this page.
     }
-  };
-  return [panel, choose, setPanel];
+  }, []);
+  const show = useCallback((next: SidePanel) => {
+    changed.current = true;
+    setPanel(next);
+  }, []);
+  return [panel, choose, show];
 }
 
 /** Two buttons, Add blocks and Preview; the one on says so in words and with a check, not by color alone. Focus stays where it is. */

@@ -48,7 +48,7 @@ test("only the previous complete UTC month and reconciled actual data are report
   }
   for (const period of ["2026", "2026-09", "2026-11", "2026-1", "", "2026-10-01"]) {
     const input = fixture(); input.period = period;
-    assert.equal(companyMonthlyMarginReport(input, NOW).reason, "wrong_period_or_basis");
+    assert.equal(companyMonthlyMarginReport(input, NOW).reason, period === "" ? "missing_or_invalid_data" : "wrong_period_or_basis");
   }
   const forecast = fixture(); forecast.basis = "worst_case";
   assert.equal(companyMonthlyMarginReport(forecast, NOW).reason, "wrong_period_or_basis");

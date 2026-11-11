@@ -12,16 +12,20 @@ const commands: (string | number)[][] = [];
 const LAST = "nl:mail-check:last";
 const LOCK = "nl:mail-check:lock";
 let rejectSave = false;
+let rejectRuns = false;
+const RUNS = "nl:mail-check:runs";
+const lastRun = () => { const all = redis.run(["LRANGE", RUNS, 0, -1]) as string[]; return all.length ? JSON.parse(all[0]) : null; };
 let beforeLock: (() => Promise<void>) | null = null;
 const request = () => new NextRequest("https://example.test/api/cron/mail-check");
 
 function reset(previous?: string): void {
   redis.clear();
   commands.length = 0;
-  control.allowed = true; control.sender = true; control.deliveryOk = true; control.throwLoop = false; control.throwAccount = false;
+  control.allowed = true; control.sender = true; control.deliveryOk = true; control.throwLoop = false; control.throwAccount = false; control.loopRan = true;
   control.calls.length = 0; control.notices.length = 0; control.deadlines.length = 0; control.cutoffRoom.length = 0;
   control.afterUsage = null; control.afterAccount = null;
   rejectSave = false;
+  rejectRuns = false;
   beforeLock = null;
   if (previous !== undefined) redis.run(["SET", LAST, previous]);
 }
@@ -34,6 +38,7 @@ async function main(): Promise<void> {
     if (rejectSave && batch.some(command => command[0] === "SET" && command[1] === LAST)) {
       throw new Error("synthetic result persistence failure");
     }
+    if (rejectRuns && batch.some(command => command[1] === RUNS)) throw new Error("WRONGTYPE synthetic");
     return oldPipeline(batch);
   };
 
@@ -178,6 +183,26 @@ async function main(): Promise<void> {
     control.calls.filter(call => ["account", "usage", "loop"].includes(call)), ["account", "usage"]);
   is("the existing failure notice and lock cleanup remain intact",
     [control.notices.length, redis.run(["GET", LOCK])], [1, null]);
+
+  part("The status page's run: passed only when a delivery loop ran, and never able to stop the save or the notice");
+  reset();
+  await GET(request());
+  is("a loop ran and passed: kept as passed", lastRun()?.ok, true);
+  reset();
+  control.loopRan = false;
+  const untested = await GET(request());
+  is("no loop ran: the run itself still passes, as before", (await untested.json()).ok, true);
+  is("but the status page keeps it as having tested nothing", lastRun()?.ok, null);
+  reset();
+  control.deliveryOk = false;
+  await GET(request());
+  is("a failed loop: kept as failed", lastRun()?.ok, false);
+  reset();
+  control.deliveryOk = false;
+  rejectRuns = true;
+  const wrongType = await GET(request());
+  is("a status write that fails still answers, saves the result and sends the owner's notice",
+    [wrongType.status, (JSON.parse(String(redis.run(["GET", LAST]) ?? "null")) as { ok?: boolean } | null)?.ok, control.notices.length, redis.run(["GET", LOCK])], [200, false, 1, null]);
 
   part("Authorization and the existing lock still prevent work");
   reset();

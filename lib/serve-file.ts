@@ -15,7 +15,7 @@ import {
   REDIRECT_ABOVE_BYTES,
   type ProductFile,
 } from "@/lib/product-file";
-import { folderFromPathname, freeDeliveryPaused, recordDelivery } from "@/lib/delivery";
+import { folderFromPathname, freeDeliveryPause, recordDelivery } from "@/lib/delivery";
 import { fileHeaders } from "@/lib/request-guard";
 
 /** A short answer in plain text, never cached and never indexed. */
@@ -28,6 +28,11 @@ export function plain(status: number, message: string): Response {
       "X-Robots-Tag": "noindex",
     },
   });
+}
+
+/** A free copy whose month's count could not be read or written: refused, and said so truthfully. */
+function notChecked(): Response {
+  return plain(503, "We couldn't check this download right now. Please try again in a few minutes.");
 }
 
 /**
@@ -70,12 +75,18 @@ export async function serveFile(
   */
   if (!paid) {
     const folder = folderFromPathname(file.pathname);
-    if (folder && (await freeDeliveryPaused(folder))) {
+    const pause = folder ? await freeDeliveryPause(folder) : "open";
+    if (pause === "over") {
       return plain(
         429,
-        "This free download is paused until next month. The store has given away more this month than its plan covers. Anything you have bought is unaffected, and the creator has been told.",
+        // Only what is true at this moment: free copies pause past FREE_PAUSE_ABOVE_BYTES, while the creator is
+        // written to only past the larger delivery allowance (app/api/cron/usage), so the page never says they were told.
+        "This free download is paused until next month. This store has reached its free download allowance for this month. Anything you have bought is unaffected. Please try again next month or contact the creator.",
       );
     }
+    // The counter could not be read (CX-123 rule 24): a free copy is not handed out on an unknown count, and the
+    // buyer is told only what is true. Nothing was decided about the store, and nobody was told.
+    if (pause === "unknown") return notChecked();
   }
 
   // A file in the store that charges nothing to send goes straight from it
@@ -84,7 +95,8 @@ export async function serveFile(
   if (file.bytes > REDIRECT_ABOVE_BYTES || isVaultPath(file.pathname)) {
     const url = await signedDownload(file);
     if (!url) return plain(502, "We could not fetch the file right now.");
-    await recordDelivery(file.pathname, file.bytes);
+    // A free copy goes out only counted; a paid one goes out whatever the counter says.
+    if (!(await recordDelivery(file.pathname, file.bytes)) && !paid) return notChecked();
     return new Response(null, {
       status: 302,
       headers: { Location: url, "Cache-Control": "private, no-store" },
@@ -97,7 +109,10 @@ export async function serveFile(
       return plain(404, "The file is not there anymore.");
     }
 
-    await recordDelivery(file.pathname, file.bytes);
+    if (!(await recordDelivery(file.pathname, file.bytes)) && !paid) {
+      await result.stream.cancel().catch(() => {});
+      return notChecked();
+    }
     // Saved, never opened as a page of ours: the name is encoded so any
     // character survives, and the file may run nothing (lib/request-guard.ts).
     return new Response(result.stream, { headers: fileHeaders(file.contentType, file.name) });

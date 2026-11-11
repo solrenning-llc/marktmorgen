@@ -170,6 +170,22 @@ function argsOf(changes: DataChange[], nowMs: number): (string | number)[] | nul
   return out;
 }
 
+/**
+ * What a script that ran TAKE_DATA answered ({state, total}), read as run
+ * reads it: for a write that takes its room in the same script as itself
+ * (lib/creator-card.ts, lib/path.ts).
+ */
+export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.now() / 1000): DataTaken {
+  const room = dataRoomFor(store, nowSeconds);
+  // Read exactly (Codex G2, #1961): {state, total}, the state the number 0 (full) or 1 (taken) and the total a safe
+  // whole number of bytes, 0 or more. Anything else (missing, null, text, negative, an extra item) is not a receipt.
+  const exact = Array.isArray(reply) && reply.length === 2 && (reply[0] === 0 || reply[0] === 1) && typeof reply[1] === "number" && Number.isSafeInteger(reply[1]) && reply[1] >= 0;
+  if (!exact) return { ok: false, reason: "unknown", used: 0, room, message: "This can't be saved right now. Try again in a minute." };
+  const used = reply[1] as number;
+  if (reply[0] === 1) return { ok: true, used };
+  return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
+}
+
 async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number): Promise<DataTaken> {
   const room = dataRoomFor(store, nowSeconds);
   const unknown = (used = 0): DataTaken => ({ ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." });
@@ -179,11 +195,7 @@ async function run(store: DataStore, changes: DataChange[], always: boolean, now
   if (!key || !args || !isRedisConfigured()) return unknown();
   try {
     const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, contentRoomFor(store, nowSeconds), always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
-    const [state, total] = Array.isArray(reply) ? reply.map(Number) : [NaN, NaN];
-    const used = Number.isFinite(total) ? total : 0;
-    if (state === 1) return { ok: true, used };
-    if (state === 0) return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
-    return unknown(used);
+    return dataTakenOf(store, reply, nowSeconds);
   } catch (error) {
     console.error("could not count a store's data", error);
     return unknown();
@@ -263,15 +275,42 @@ export function giveDataBytes(store: DataStore, slot: string, bytes: number, now
   return giveData(store, [{ slot, bytes }], now);
 }
 
-/** What a store keeps, in bytes, and the room it has, for the studio; null when it cannot be read. */
-export async function dataUsed(store: DataStore, now = Date.now()): Promise<{ used: number; orders: number; room: number } | null> {
+/**
+ * The room's field that holds what all the store's students' lesson notes
+ * take of it, each note's slot with its own 64-byte field
+ * (lib/lesson-notes.ts keeps it in the same step as each note's slot).
+ */
+export const NOTES_TOTAL_FIELD = "ln#";
+
+/**
+ * What a store keeps, in bytes, and the room it has, for the studio; null
+ * when it cannot be read. With `notes`, the same read also gives what the
+ * students' lesson notes take (NOTES_TOTAL_FIELD): null when that one count
+ * cannot be read, never zero.
+ */
+export async function dataUsed(store: DataStore, now = Date.now(), ask: { notes?: boolean } = {}): Promise<{ used: number; orders: number; room: number; notes?: number | null } | null> {
   const key = dataKey(store);
   if (!key || !isRedisConfigured()) return null;
+  const fields = ask.notes ? ["#", "o", NOTES_TOTAL_FIELD] : ["#", "o"];
   try {
-    const [reply] = await redisPipeline([["HMGET", key, "#", "o"]]);
-    const [used, orders] = Array.isArray(reply) ? reply.map((v) => Number(v ?? 0)) : [NaN, NaN];
-    if (!Number.isFinite(used) || !Number.isFinite(orders)) return null;
-    return { used: Math.max(0, used), orders: Math.max(0, orders), room: dataRoomFor(store, now / 1000) };
+    const replies = await redisPipeline([["HMGET", key, ...fields]]);
+    if (replies.length !== 1) return null;
+    const reply = replies[0];
+    if (!Array.isArray(reply) || reply.length !== fields.length) return null;
+    // HMGET returns a decimal string for a kept hash field and null for one
+    // that is absent. Coercing another value would turn an unknown count into
+    // zero (or a fraction) before callers set aside the work it pays for.
+    const count = (value: unknown): number | null => {
+      if (value === null) return 0;
+      if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) ? parsed : null;
+    };
+    const used = count(reply[0]);
+    const orders = count(reply[1]);
+    if (used === null || orders === null) return null;
+    const room = dataRoomFor(store, now / 1000);
+    return ask.notes ? { used, orders, room, notes: count(reply[2]) } : { used, orders, room };
   } catch {
     return null;
   }

@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** All reminder-setting writes are synthetic intercepted replies; no email/provider action. */
 export async function checkNudgeAcknowledgment({browser,LOCAL,fixture,is}){
  const scenarios=[
@@ -32,6 +34,7 @@ export async function checkNudgeAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("[data-nudge-editor]"),form=section.locator("form");await form.waitFor({state:"visible"});
    const toggle=form.getByRole("checkbox",{name:"Email members who stopped coming",exact:true}),address=form.getByLabel("Your postal address, printed at the bottom",{exact:true});
+   await waitForReactChangeHandler(page,toggle);
    await toggle.setChecked(true);
    for(const scenario of scenarios){
     await address.fill("  123  Example Lane, Test City  ");

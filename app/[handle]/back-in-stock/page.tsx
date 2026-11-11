@@ -45,7 +45,9 @@ export default async function BackInStockPage({ params, searchParams }: Params) 
   if (!token && !leave && !status) redirect(`/@${store.handle}`);
 
   const asked = token || leave;
-  const link = asked && ALERT_TOKEN.test(asked) ? await stockAlertLink(asked).catch(() => null) : null;
+  // A link that could not be read is not a link that is gone: it gets the error notice, never a confident "no" (rule 24).
+  let unread = false;
+  const link = asked && ALERT_TOKEN.test(asked) ? await stockAlertLink(asked).catch(() => { unread = true; return null; }) : null;
   const grant = link && link.statsId === store.statsId ? link : null;
   const productId = grant?.productId ?? read("product");
   const listed = productId ? await readListing(store, productId).catch(() => null) : null;
@@ -65,7 +67,9 @@ export default async function BackInStockPage({ params, searchParams }: Params) 
   );
 
   let body: React.ReactNode;
-  if (token) {
+  if (unread) {
+    body = say(w.notices.error.title, w.notices.error.body);
+  } else if (token) {
     body =
       grant?.kind === "confirm" ? (
         <>

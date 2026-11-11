@@ -12,7 +12,7 @@
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
-import { marksOf } from "@/lib/closed-store-data";
+import { marksOf, prepareStore } from "@/lib/closed-store-data";
 import { POST as photoRoute } from "@/app/api/store/photo/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -30,7 +30,10 @@ type Commands = (string | number)[][];
 const original = redis.pipeline.bind(redis);
 /** Lets one pipeline throw, or answer in another shape, when `when` says so. */
 let fault: ((commands: Commands) => "throw" | "odd" | null) | null = null;
+/** Runs before a pipeline is looked at, for something else happening at that moment. */
+let hook: ((commands: Commands) => Promise<void>) | null = null;
 redis.pipeline = (async (commands: Commands) => {
+  if (hook) await hook(commands);
   const hit = fault ? fault(commands) : null;
   if (hit === "throw") throw new Error("synthetic Redis timeout");
   const replies = await original(commands);
@@ -178,6 +181,31 @@ async function main(): Promise<void> {
   is("after the wait the upload goes through", await upload(), [200, ""]);
   is("only the photo shown is kept", photoKeys(), [`${PHOTO}${await shown()}`]);
   is("the store record names no photo waiting", (await storeForEmail(OWNER))?.photoLeft ?? [], []);
+
+  part("The store closed while a photo is uploaded, and pointing at it fails: the photo is not left unnamed (Codex G on #3614)");
+  const snapshot = await storeForEmail(OWNER);
+  if (!snapshot) throw new Error("no store");
+  const kept = new Set([snapshot.photoId, ...(snapshot.photoLeft ?? []).map((entry) => entry.id)]);
+  let closed = false;
+  let wroteNew = false;
+  // The closing walk prepares the store from a record it read before the upload named its photo.
+  hook = async (commands) => {
+    if (closed || !touches(commands, "SET", PHOTO)) return;
+    closed = true;
+    await prepareStore(snapshot);
+  };
+  fault = (commands) => {
+    if (touches(commands, "SET", PHOTO)) wroteNew = true;
+    else if (wroteNew && touches(commands, "GET", "nl:store:owner:")) {
+      fault = null;
+      return "throw";
+    }
+    return null;
+  };
+  is("the creator is told to try again", await upload(), [500, "server_error"]);
+  hook = null;
+  is("the store's record is gone: the closing walk ran", [closed, await storeForEmail(OWNER)], [true, null]);
+  is("the photo written for it is deleted, never kept with nothing naming it", photoKeys().filter((key) => !kept.has(key.slice(PHOTO.length))), []);
   done();
 }
 

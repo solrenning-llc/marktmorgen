@@ -33,6 +33,12 @@ const world = {
   charges: new Map<string, number>(),
   refunds: [] as { id: string; charge: string; payment_intent: string; amount: number; status: string; key: string }[],
   customers: new Map<string, () => unknown>(),
+  /** A payment intent whose reply is replaced by this function's answer (given Stripe's own). */
+  intentReply: new Map<string, (own: Record<string, unknown>) => unknown>(),
+  /** Rows a charge's refund list holds beyond its own (a row for another charge). */
+  extraRefundRows: new Map<string, Record<string, unknown>[]>(),
+  /** A refund POST whose reply is replaced by this function's answer (given Stripe's own). */
+  refundReply: new Map<string, (own: Record<string, unknown>) => unknown>(),
 };
 const sent: { to: string; text: string }[] = [];
 
@@ -70,16 +76,22 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = world.charges.get(intent[1]);
     if (!amount) return json({ error: { message: "No such payment_intent" } }, 404);
     const refunded = world.refunds.filter((row) => row.payment_intent === intent[1] && row.status === "succeeded").reduce((sum, row) => sum + row.amount, 0);
-    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount, amount_refunded: refunded, disputed: false } });
+    const own = { id: intent[1], object: "payment_intent", latest_charge: { id: `ch_${intent[1].slice(3)}`, object: "charge", payment_intent: intent[1], currency: "usd", amount, amount_refunded: refunded, disputed: false } };
+    const odd = world.intentReply.get(intent[1]);
+    return json(odd ? odd(own) : own);
   }
-  if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
+  if (path === "/refunds" && method === "GET") {
+    const charge = String(url.searchParams.get("charge"));
+    return json({ object: "list", data: [...world.refunds.filter((row) => row.charge === charge), ...(world.extraRefundRows.get(charge) ?? [])], has_more: false });
+  }
   if (path === "/refunds" && method === "POST") {
     const pi = String(form.get("payment_intent"));
     const kept = world.refunds.find((row) => row.key === key);
     if (kept) return json(kept);
     const refund = { id: `re_${String(world.refunds.length + 1).padStart(8, "0")}`, charge: `ch_${pi.slice(3)}`, payment_intent: pi, amount: Number(form.get("amount")), status: "succeeded", key };
     world.refunds.push(refund);
-    return json(refund);
+    const odd = world.refundReply.get(pi);
+    return json(odd ? odd(refund) : refund);
   }
   const customer = path.match(/^\/customers\/(cus_\w+)$/);
   if (customer) {
@@ -180,6 +192,53 @@ async function main() {
     world.customers.set(`cus_${name}`, () => answer(`cus_${name}`));
     is(`${label}: settled as before (the money is back; there is no address)`, await settleOne(one.id), true);
     is(`${label}: the $69 given back once`, refundsOf(one.pi), [6_900]);
+  }
+
+  part("The payment it gives back, read for its own intent and charge (rule 30, Claude 6 on #3628)");
+  {
+    // Stripe answers for another payment intent, one whose charge is refunded in full already.
+    const one = await inLine("piother001", S(day) - 3_600, "piother001@example.com");
+    world.intentReply.set(one.pi, (own) => ({ ...own, id: "pi_someoneelse1", latest_charge: { id: "ch_someoneelse1", object: "charge", payment_intent: "pi_someoneelse1", currency: "usd", amount: 6_900, amount_refunded: 6_900, disputed: false } }));
+    world.extraRefundRows.set("ch_someoneelse1", [{ id: "re_someoneelse1", object: "refund", charge: "ch_someoneelse1", payment_intent: "pi_someoneelse1", amount: 6_900, status: "succeeded" }]);
+    is("a reply for another payment intent is not taken as this payment returned", await settleOne(one.id), false);
+    is("no letter says the money was returned", sent.some((m) => m.to === "piother001@example.com"), false);
+    is("the plan stays in line", (await entryOf(one.id))?.done, undefined);
+    world.intentReply.delete(one.pi);
+    is("once Stripe answers for it, it settles", await settleOne(one.id), true);
+    is("and the $69 is given back once", refundsOf(one.pi), [6_900]);
+  }
+  {
+    // The intent's own id, but a latest charge that belongs to another intent.
+    const one = await inLine("chother001", S(day) - 3_600, "chother001@example.com");
+    world.intentReply.set(one.pi, (own) => ({ ...own, latest_charge: { id: "ch_someoneelse3", object: "charge", payment_intent: "pi_someoneelse3", currency: "usd", amount: 6_900, amount_refunded: 6_900, disputed: false } }));
+    world.extraRefundRows.set("ch_someoneelse3", [{ id: "re_someoneelse3", object: "refund", charge: "ch_someoneelse3", payment_intent: "pi_someoneelse3", amount: 6_900, status: "succeeded" }]);
+    is("a charge of another intent is not taken as this payment returned", await settleOne(one.id), false);
+    is("no letter for it", sent.some((m) => m.to === "chother001@example.com"), false);
+    world.intentReply.delete(one.pi);
+    is("once Stripe answers with its own charge, it settles with the $69 given back once", [await settleOne(one.id), refundsOf(one.pi)], [true, [6_900]]);
+  }
+  {
+    // This charge's refund list holds a succeeded $69 row for another charge.
+    const one = await inLine("rowother01", S(day) - 3_600, "rowother01@example.com");
+    world.extraRefundRows.set("ch_rowother01", [{ id: "re_someoneelse2", object: "refund", charge: "ch_someoneelse2", payment_intent: "pi_someoneelse2", amount: 6_900, status: "succeeded" }]);
+    is("a refund row for another charge is not counted as this one's", await settleOne(one.id), false);
+    is("no letter for it, nothing asked for on a list that does not read", [sent.some((m) => m.to === "rowother01@example.com"), refundsOf(one.pi)], [false, []]);
+    world.extraRefundRows.delete("ch_rowother01");
+    is("once the list holds only its own rows, it settles with the $69 given back once", [await settleOne(one.id), refundsOf(one.pi)], [true, [6_900]]);
+  }
+
+  part("The refund it asks for, its reply read for that refund (Claude 6's LOW on #3628)");
+  for (const [label, name, odd] of [
+    ["for another payment intent", "reodd00001", (own: Record<string, unknown>) => ({ ...own, payment_intent: "pi_someoneelse4" })],
+    ["an amount that does not read", "reodd00002", (own: Record<string, unknown>) => ({ ...own, amount: "6900" })],
+    ["an amount larger than asked for", "reodd00003", (own: Record<string, unknown>) => ({ ...own, amount: 13_800 })],
+  ] as [string, string, (own: Record<string, unknown>) => unknown][]) {
+    const one = await inLine(name, S(day) - 3_600, `${name}@example.com`);
+    world.refundReply.set(one.pi, odd);
+    is(`${label}: not settled on that reply`, await settleOne(one.id), false);
+    is(`${label}: no letter`, sent.some((m) => m.to === `${name}@example.com`), false);
+    world.refundReply.delete(one.pi);
+    is(`${label}: the next run reads the refund made and settles, never asking twice`, [await settleOne(one.id), refundsOf(one.pi)], [true, [6_900]]);
   }
 
   console.error = quiet;

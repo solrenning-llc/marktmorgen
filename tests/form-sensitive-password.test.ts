@@ -83,6 +83,13 @@ for (const label of [
   "Describe your password",
   "Can I get your password?",
   "What's the wifi password?",
+  // Claude 3 (cloud I): refused at 66edd3877, let through at 49b626455. The request for "it" follows a
+  // comma or a short opener, not a sentence break, so a sentence-only check never saw it.
+  "Do you remember your password? If yes, type it in the box",
+  "Do you remember your password? If so, write it below",
+  "Do you remember your password? Great, enter it here",
+  "Do you have your password handy, please type it here",
+  "Do you know your password? If yes type it in the box",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -124,6 +131,8 @@ for (const label of [
   "What is the best password?",
   "When did you last change your password?",
   "Why do you reuse your password?",
+  // A survey question that follows one about the visitor's passwords is still a question, not a request.
+  "How do you remember your passwords? Do you write them down?",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");

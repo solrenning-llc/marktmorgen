@@ -30,14 +30,14 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccoun
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking } from "@/lib/calls";
-import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import type { CallSetup } from "@/lib/call-setup";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
 const NY = "America/New_York";
 const SWAP_SCRIPT = "-- marktmorgen:call-lock-swap:v1\n";
 const HOLD_SCRIPT = "-- marktmorgen:call-hold-if-locked:v1\n";
@@ -115,17 +115,6 @@ const weekly = {
   seats: 1,
   sessions: [],
 } as unknown as CallSetup;
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * DAY);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 type World = { store: Store; call: CallListing; full: Product & { call: CallSetup } };
 

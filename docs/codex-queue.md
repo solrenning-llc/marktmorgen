@@ -22180,6 +22180,7 @@ Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de be
 25. Store assistant também no site próprio do criador, pelo script de checkout embutido, com as mesmas reservas (estende lib/embed-sdk.ts e lib/store-assistant.ts).
 26. E-mail digitado no formulário do funil passado ao checkout seguinte na mesma visita (estende lib/funnel.ts e lib/store-checkout.ts; complemento de 616 [WP15](5)).
 27. Link que abre um produto com uma opção de preço já escolhida, e opções escondidas vendidas só por link (estende lib/product-option.ts e lib/catalog.ts).
+Andamento (Claude 1, agente b, 10/11/2026): 630 [HN6](27), parte (a), **testada num PR** (ramo claude1/hn6-option-link): ?option=<id> na página do produto deixa marcada a opção que a página oferece agora e diz ao comprador por quê, nos sete idiomas; id desconhecido, removido, sem entrega ou malformado não marca nada (487 [IT4] preservado); no estúdio, cada opção que entrega algo tem "Copy a link that opens <opção> chosen". Falta a parte (b), opções escondidas vendidas só por link.
 28. Motivos de pagamentos recusados, lidos do Stripe do criador e somados por motivo, com o que fazer em cada um (estende lib/stats.ts).
 29. Vendas por país do comprador nos números da loja (estende lib/stats.ts; complemento de 624 [SZ8](31)).
 30. Marca invisível com nome e e-mail do comprador dentro de arquivos EPUB (complemento de lib/pdf-stamp.ts).

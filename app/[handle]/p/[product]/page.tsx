@@ -1,3 +1,4 @@
+import { OPTION_PARAM, linkedOption } from "@/lib/option-link-rules";
 import { absoluteImageUrl, servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { listedLengths } from "@/lib/call-lengths";
 import { assistReminderShown } from "@/lib/assistant-reminder";
@@ -291,6 +292,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
+  // A link to one price option opens the page with it chosen (630 [HN6](27)): only one the page offers now.
+  const linkedChoice = linkedOption(query[OPTION_PARAM], sellableOptions(product));
   const embedReturn = typeof query.return === "string" ? query.return.slice(0, 700) : "";
   // A reminder asked for below the buy box, and what came of it (lib/checkout-ask.ts).
   const remindAsked = typeof query.asked === "string" ? query.asked.slice(0, 20) : "";
@@ -450,7 +453,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
+      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
       {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (

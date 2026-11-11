@@ -30,6 +30,7 @@ import {
   checkIn,
   createChallenge,
   deleteChallenge,
+  forgetChallengesPerson,
   joinBytes,
   joinChallenge,
   checkInBytes,
@@ -45,6 +46,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { dataKey } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { CHALLENGE_WORDS } from "@/lib/buyer-words/challenges";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "challengeowner@example.com";
@@ -317,6 +319,37 @@ async function main(): Promise<void> {
   is("the list's heading can take the focus", /<h3[^>]*ref=\{listHeadRef\}[^>]*tabIndex=\{-1\}|<h3[^>]*tabIndex=\{-1\}[^>]*ref=\{listHeadRef\}/.test(studioPart), true);
   is("a delete that worked sends the focus there, not to the Delete button that goes", /asked\.current = null;[\s\S]{0,200}listHeadRef\.current\?\.focus\(\)/.test(studioPart), true);
 
+  part("A challenge deleted while a person is being erased leaves no count behind (Claude 1's LOW on #3452)");
+  redis.clear();
+  await claimHandle(OWNER, "challengeshop", "Challenge Shop", "");
+  await ensureStatsId(OWNER);
+  await ensureListId(OWNER);
+  await setSubscription(OWNER, { customerId: "cus_Chal00001", subscriptionId: "sub_Chal00001", active: true, period: paidPeriod() });
+  await setCommunity(OWNER, true);
+  const raced = (await storeForEmail(OWNER))!;
+  const rid = raced.community!.id;
+  const racedMade = await createChallenge(raced, ok, now);
+  if (!racedMade.ok) throw new Error("not made for the race");
+  const rc = racedMade.challenge;
+  is("(she checks in on the first day)", await checkIn(rid, rc, ada, raced, rc.start), "checked");
+  const racedReal = redis.pipeline.bind(redis);
+  let deletedMidway = "";
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await racedReal(commands);
+    // Right after the erasure's HDEL of her place, the creator deletes the challenge.
+    if (!deletedMidway && commands.some((c) => c[0] === "HDEL" && c[1] === `nl:cm:${rid}:ch:${rc.id}:in`)) deletedMidway = await deleteChallenge(raced, rc.id);
+    return replies;
+  }) as typeof redis.pipeline;
+  try {
+    await forgetChallengesPerson(rid, ada, raced);
+  } finally {
+    redis.pipeline = racedReal;
+  }
+  is("deleted in between, and its counts are not made again", [deletedMidway, redis.run(["EXISTS", `nl:cm:${rid}:ch:${rc.id}:n`])], ["deleted", 0]);
+
+  part("A check-in on the last day promises no tomorrow (Claude 1's LOW on #3452, VR item 2)");
+  const tomorrow: Record<string, RegExp> = { en: /tomorrow/i, es: /mañana/i, fr: /demain/i, de: /morgen/i, it: /domani/i, nl: /morgen/i, pt: /amanhã/i };
+  is("the check-in notice, in every language, says it is done and nothing about tomorrow", Object.entries(CHALLENGE_WORDS).filter(([code, w]) => tomorrow[code]?.test(w.notices.checked.text) ?? true).map(([code]) => code), []);
   done();
 }
 

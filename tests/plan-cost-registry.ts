@@ -1500,10 +1500,12 @@ export const KEY_NAME_BYTES = 128;
  * Then the record's going (lib/store.ts, closeStoreRecord): the store's lock
  * (SET NX, tried again for LOCK_WAIT_MS: at most STORE_LOCK_TRIES), the record
  * read again (GET), the walk's entry written again when it names more (HSET),
- * the record deleted only while the lock is still held (EVAL, GET, DEL) and
- * the lock let go (EVAL, GET, DEL).
+ * its id taken out of its account's list at the address the record read again
+ * names too (one more SREM: an account moved since), the record deleted only
+ * while the lock is still held (EVAL, GET, DEL) and the lock let go (EVAL,
+ * GET, DEL).
  */
-export const CLOSE_RECORD_COMMANDS = STORE_LOCK_TRIES + 1 + 1 + 3 + 3;
+export const CLOSE_RECORD_COMMANDS = STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS;
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command (lib/store-export.ts). */

@@ -1913,21 +1913,29 @@ export async function closeStoreRecord(
     if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a closing store's record, read again before it goes");
     const fresh = raw === null ? null : parseStore(raw);
     if (raw !== null && !fresh) throw new UnknownReplyError("a closing store's record, read again before it goes");
-    // Only this store's own record (the same sid) is this closing's to read and delete: another store made at the same
-    // key since is never named by this one's walk, nor deleted with it; nothing goes, and the walk reads it afresh
-    // (Codex G on #3643).
-    if (fresh && fresh.sid !== store.sid) throw new StoreBusyError();
+    // Only this store's own record (the same sid) is this closing's to read and delete: another store at the same key
+    // (Codex G on #3643) means this one's record is already gone. Nothing of the other is read, released or deleted,
+    // and this returns as for a record that is gone, so the walk takes this ref out of line and never prepares the
+    // other store under it a walk later (Claude 6 on #3643); this store's entry still walks only its own marks.
+    if (fresh && fresh.sid !== store.sid) return;
     await beforeDelete?.(fresh);
     // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
-    // go first, and the record last: a step that fails here leaves the record, so the closing walk prepares the store
-    // again and every step is run again.
+    // go first, and the record last. Its id leaves its account's list at both addresses read, as one moved since is the
+    // account's now (Claude 6 on #3643). Only "OK" for each hold and a count for each removal is done (rule 24): any
+    // other answer throws before the record goes, so the record stays, the closing walk prepares the store again and
+    // every step is run again (Claude 6's MEDIUM on #3643).
     const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
-    await redisPipeline([
-      ...[...handles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
-      ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
+    const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
+    const holds = [...handles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]);
+    const removals = [
+      ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ...[...accounts].map((account) => ["SREM", account, store.sid])] : []),
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
-    ]);
+    ];
+    const replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
+    if (!replies || replies.some((reply, i) => (i < holds.length ? reply !== "OK" : countOf(reply) === null))) {
+      throw new UnknownReplyError("a closing store's addresses held back and its places released");
+    }
     if (!(await deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner), ...extraKeys]))) throw new StoreBusyError();
   } finally {
     await releaseLock(held);

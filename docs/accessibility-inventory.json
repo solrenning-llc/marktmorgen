@@ -1398,6 +1398,7 @@
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
+    "components/forget-inbox-drafts.tsx",
     "components/forget-lesson-positions.tsx",
     "components/form-answers.tsx",
     "components/form-branching.tsx",

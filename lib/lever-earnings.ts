@@ -15,12 +15,15 @@ import { formatMoney } from "@/lib/money";
  *     a typed code takes part of the bump's line off, and that share is not
  *     recorded, so such an order is "left", never estimated.
  *   - Upsell: a succeeded PaymentIntent with metadata kind=upsell
- *     (lib/upsell.ts), at its own amount. A downsell is paid the same way and
- *     its payment does not say it followed a "No", so it is counted here.
+ *     (lib/upsell.ts), at its own amount, unless it is a downsell below.
+ *   - Downsell: the same, with metadata after_no exactly "yes" (lib/upsell.ts
+ *     marks an offer reached by another offer's "No thanks", since 752 [CD3]
+ *     (b) unit 2). One taken before the mark existed carries none and stays
+ *     under Upsell, so the downsell figure is always said as "at least".
  *   - Bundle: a paid Checkout Session whose own product is a bundle
  *     (metadata `bundle`), at its whole amount_total (tax and any order bump on
  *     the same order included).
- *   - Downsell, checkout recovery, next offer: not recognizable. The reminder
+ *   - Checkout recovery, next offer: not recognizable. The reminder
  *     (lib/checkout-recovery.ts) and the next offer (components/next-offer-card.tsx)
  *     link to the product page, and the order placed from there carries no
  *     mark of either; Stripe's `recovered_from` is its own recovery address,
@@ -55,7 +58,7 @@ export function leverEarnings(sales: readonly PaidRecord[], currency: string, pa
   const own = currency.toLowerCase();
   let complete = !partial;
   const bucket = () => ({ amounts: [{ currency: own, cents: 0, orders: 0 }] as LeverAmount[], left: 0 });
-  const sums = { bump: bucket(), upsell: bucket(), bundle: bucket() };
+  const sums = { bump: bucket(), upsell: bucket(), downsell: bucket(), bundle: bucket() };
   const add = (key: keyof typeof sums, code: string, cents: number | null) => {
     const lever = sums[key];
     if (cents === null) {
@@ -90,7 +93,7 @@ export function leverEarnings(sales: readonly PaidRecord[], currency: string, pa
     if (created < from.getTime() || created > now) continue;
     const meta = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? (row.metadata as Record<string, string>) : {};
     if (sale.upsell) {
-      add("upsell", code, exact(row.amount) ? row.amount : null);
+      add(meta.after_no === "yes" ? "downsell" : "upsell", code, exact(row.amount) ? row.amount : null);
       continue;
     }
     const total = exact(row.amount_total) ? row.amount_total : null;
@@ -117,7 +120,7 @@ export function leverEarnings(sales: readonly PaidRecord[], currency: string, pa
     rows: {
       bump: { measured: true, ...sums.bump },
       upsell: { measured: true, ...sums.upsell },
-      downsell: { measured: false },
+      downsell: { measured: true, ...sums.downsell },
       bundle: { measured: true, ...sums.bundle },
       recovery: { measured: false },
       next: { measured: false },
@@ -127,8 +130,8 @@ export function leverEarnings(sales: readonly PaidRecord[], currency: string, pa
 
 const HOW: Record<LeverKey, string> = {
   bump: "Counted from each order bump's own price on paid checkouts, before tax. An order with a discount is not counted, because the bump's discounted share is not recorded.",
-  upsell: "Counted from each one-click offer paid after checkout, as charged. Downsells are paid the same way and are included here.",
-  downsell: "A downsell is paid like an upsell and its payment does not say it followed a No, so it is counted under Upsell.",
+  upsell: "Counted from each one-click offer paid after checkout, as charged. A downsell whose payment says it followed a No thanks is counted under Downsell instead; older downsells are counted here.",
+  downsell: "Counted from each one-click offer taken after a No thanks, as charged, when its payment says so. Older downsells do not say so and are counted under Upsell, so this is the least they earned.",
   bundle: "Counted from each whole paid order for a bundle, as charged, including tax and any order bump on the same order.",
   recovery: "A reminder links to your product page, and the order placed from there is not tagged, so it cannot be told apart from other orders.",
   next: "The next offer links to your product page, and the order placed from there is not tagged, so it cannot be told apart from other orders.",
@@ -155,7 +158,8 @@ export function leverEarnedWords(row: LeverEarned | KeptLeverMeasure | undefined
   const amounts: unknown = row.amounts;
   if (!Array.isArray(amounts) || !amounts.length || !amounts.every(exactAmount) || !exact(row.left)) return { line: "Not measured yet.", how };
   const [first, ...others] = amounts as LeverAmount[];
-  const atLeast = !complete || row.left > 0 ? "at least " : "";
+  // A downsell's figure leaves out the older ones its payment did not mark (counted under Upsell): always a lower bound.
+  const atLeast = !complete || row.left > 0 || key === "downsell" ? "at least " : "";
   let line = `Earned in the last 30 days: ${atLeast}${formatMoney(first.cents, first.currency)} from ${orders(first.orders)}`;
   if (row.left > 0) line += `; ${row.left === 1 ? "1 more order is" : `${row.left} more orders are`} not counted, because ${row.left === 1 ? "its" : "their"} exact amount is not in the payment record`;
   line += ".";

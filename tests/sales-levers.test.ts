@@ -9,8 +9,8 @@ test("a record without Stripe's own date and amount is never credited to a lever
  // These rows carry only metadata, as a record whose answer lacked created and amount_total would (lib/stats.ts then dates it "now").
  const reading=measureSalesLevers([sale({bump:"extra001",bump_cents:"1200"}),sale({bundle:"inside001"},2400),sale({kind:"upsell"},500,true),sale({bump:"extra001"},9900,false,"eur")],"usd",false,now);
  assert.equal(reading.complete,false);
- for(const key of ["bump","upsell","bundle"] as const){const row=reading.rows[key];assert.ok("measured" in row&&row.measured);assert.deepEqual(row.amounts,[{currency:"usd",cents:0,orders:0}]);}
- for(const key of ["downsell","recovery","next"] as const){const row=reading.rows[key];assert.ok("measured" in row&&!row.measured);}
+ for(const key of ["bump","upsell","downsell","bundle"] as const){const row=reading.rows[key];assert.ok("measured" in row&&row.measured);assert.deepEqual(row.amounts,[{currency:"usd",cents:0,orders:0}]);}
+ for(const key of ["recovery","next"] as const){const row=reading.rows[key];assert.ok("measured" in row&&!row.measured);}
 });
 test("reviewing lever settings cannot enable paid/opted-out features or contact a provider",async()=>{
  redis.clear();await claimHandle("levers@example.test","leversfixture","Synthetic levers","");

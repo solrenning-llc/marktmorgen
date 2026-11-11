@@ -221,7 +221,8 @@ test("a kept row whose figures do not read exactly is 'Not measured yet', never 
     html = `threw ${String(error)}`;
   }
   assert.doesNotMatch(html, /\$0 from 1 order|threw/);
-  assert.equal((html.match(/Not measured yet\./g) ?? []).length, 5);
+  // Bump and upsell (malformed) plus recovery and next (not recognizable); downsell is measured since 752 [CD3] (b) unit 2.
+  assert.equal((html.match(/Not measured yet\./g) ?? []).length, 4);
 });
 
 test("measureSalesLevers is this count: the studio's kept reading carries it, with no provider call", () => {
@@ -249,10 +250,11 @@ test("each card shows what it earned or 'Not measured yet', and a kept reading f
   const html = renderToStaticMarkup(createElement(SalesLevers, { store, reading, canConfigure: false }));
   assert.match(html, /Earned in the last 30 days: \$15 from 1 order\./);
   assert.match(html, /Earned in the last 30 days: \$9 from 1 order\./);
-  assert.equal((html.match(/Not measured yet\./g) ?? []).length, 3);
+  // Recovery and next offer; downsell is measured since 752 [CD3] (b) unit 2.
+  assert.equal((html.match(/Not measured yet\./g) ?? []).length, 2);
   assert.doesNotMatch(html, /tagged paid records/);
   const kept = { ...reading, rows: { ...reading.rows, upsell: { records: 1, cents: 900, scope: "old" } } } as unknown as LeverReading;
-  assert.equal((renderToStaticMarkup(createElement(SalesLevers, { store, reading: kept, canConfigure: false })).match(/Not measured yet\./g) ?? []).length, 4);
+  assert.equal((renderToStaticMarkup(createElement(SalesLevers, { store, reading: kept, canConfigure: false })).match(/Not measured yet\./g) ?? []).length, 3); // the old-shape upsell, recovery and next
   const none = renderToStaticMarkup(createElement(SalesLevers, { store, reading: null, canConfigure: false }));
   assert.equal((none.match(/Not measured yet\./g) ?? []).length, 6);
 });

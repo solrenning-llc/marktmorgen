@@ -78,7 +78,7 @@ import { PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ENDED_INDEX, SETUP_STORAGE_BYTES, standingOf } from "@/lib/plan-standing";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
@@ -1182,10 +1182,16 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
   let from: string = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
   const out = finals;
   for (;;) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]);
-    const flat = Array.isArray(raw) ? raw : [];
+    // Read exactly (rule 24, as the final walk above): a page out of shape is unknown, never an empty one. Taken
+    // for empty, the run ended as if every store whose plan ended had been looked at and let go of its place, so
+    // those stores were neither held, told nor closed, and nothing failed for anyone to see.
+    const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]), 1)?.[0]);
+    if (!flat || flat.length % 2 !== 0 || flat.length > 2 * PAGE) throw new UnknownReplyError("a page of the stores whose plan ended");
     const rows: { key: string; score: string }[] = [];
-    for (let i = 0; i + 1 < flat.length; i += 2) rows.push({ key: String(flat[i]), score: String(flat[i + 1]) });
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(flat[i + 1])) throw new UnknownReplyError("a page of the stores whose plan ended");
+      rows.push({ key: flat[i], score: flat[i + 1] });
+    }
     for (const row of rows) {
       if (seen.has(row.key)) continue;
       if (Date.now() > deadline) {

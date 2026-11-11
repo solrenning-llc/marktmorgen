@@ -63,6 +63,10 @@ export async function recordVote(broadcastId: string, place: number, option: num
     const replies = repliesFor(await redisPipeline([write, ["EXPIREAT", key, until]]), 2);
     const changed = replies ? countOf(replies[0]) : null;
     if (changed === null || changed > 1) return "unknown";
+    // A vote kept must go by itself when promised (app/privacy#email-polls): its end not set is not a vote kept.
+    // Taking back a vote never cast leaves no key, so its end answers 0 there.
+    const ended = replies ? countOf(replies[1]) : null;
+    if (ended === null || (option !== null && ended !== 1)) return "unknown";
     return option === null ? "withdrawn" : "recorded";
   } catch (error) {
     console.error("keeping a poll vote failed", error);

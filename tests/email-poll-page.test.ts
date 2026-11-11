@@ -78,8 +78,12 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("a place past the list", await pollPage({ broadcastId: ID, link: link(10), now }, deps()), { state: "invalid" });
   put({ poll: undefined });
   is("no poll", await pollPage({ broadcastId: ID, link: link(2), now }, deps()), { state: "invalid" });
-  put({ status: "scheduled" });
+  put({ status: "scheduled", sent: 0 });
   is("not gone out", await pollPage({ broadcastId: ID, link: link(2), now }, deps()), { state: "invalid" });
+  // It waits with part of its list sent (daily portions, a subject test's wait): those it reached see the poll (review, ALTO).
+  put({ status: "waiting", sent: 4 });
+  is("waiting after 4 went out: shown to one of them", (await pollPage({ broadcastId: ID, link: link(3), now }, deps())).state, "open");
+  is("…not to one it has not reached", await pollPage({ broadcastId: ID, link: link(4), now }, deps()), { state: "invalid" });
 
   part("Closed: said so, with its words");
   put({ sendAt: sec(now - 8 * DAY) });
@@ -104,6 +108,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
     is(`${code}: none empty`, Object.values(w).every((v) => (typeof v === "function" ? String(v("X")).trim() : String(v).trim()).length > 0), true);
   }
   is("an unknown language: English", pollWords("xx"), en);
+  for (const code of Object.keys(LANGUAGES)) is(`${code}: resting never claims the month is spent`, /month|mes|mois|Monat|mese|maand|mês/i.test(pollWords(code).resting), false);
   is("opening says it counted nothing", /counted nothing/.test(en.openedNothing), true);
   is("not saved never says counted", /not counted|Nothing was counted/.test(en.notSaved), true);
   is("only totals, never who", /never who/.test(en.totalsOnly), true);

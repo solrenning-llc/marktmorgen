@@ -15,8 +15,8 @@ import { PollComposer, emptyPoll, pollAsked } from "@/components/email-poll-comp
 import { MAX_POLL_DAYS, MAX_POLL_OPTIONS, POLL_DEFAULT_DAYS } from "@/lib/email-poll-rules";
 import { done, is, part } from "./check";
 
-const draw = (value: ReturnType<typeof emptyPoll>, on = true) =>
-  renderToStaticMarkup(createElement(PollComposer, { on, value, onToggle: () => {}, onChange: () => {} }));
+const draw = (value: ReturnType<typeof emptyPoll>, on = true, touched = true) =>
+  renderToStaticMarkup(createElement(PollComposer, { on, value, onToggle: () => {}, onChange: () => {}, touched }));
 
 part("Off: one checkbox, nothing else");
 const off = draw(emptyPoll(), false);
@@ -40,6 +40,13 @@ const full = draw({ ...filled, options: Array.from({ length: MAX_POLL_OPTIONS },
 is("no add button at the most", /Add an answer/.test(full), false);
 const two = draw({ ...filled, options: ["A", "B"] });
 is("remove buttons disabled at two answers", (two.match(/<button(?=[^>]*disabled="")[^>]*>Remove answer \d<\/button>/g) ?? []).length, 2);
+
+part("Problems said when they help (review, LOW)");
+const fresh = draw(emptyPoll(), true, false);
+is("a poll just opened: nothing marked wrong yet", /aria-invalid="true"/.test(fresh), false);
+is("the hints are live regions, so a problem is announced when it appears", (fresh.match(/<span id="poll-(question|options)-hint"[^>]*aria-live="polite"/g) ?? []).length, 2);
+const both = draw({ ...emptyPoll(), question: "", options: ["A", "A"] });
+is("each field says its own problem, both at once", /Write the question\./.test(both) && /different answers/.test(both), true);
 
 part("What is sent: what the server reads, or nothing");
 is("a new poll: the default days, two empty answers", emptyPoll(), { question: "", options: ["", ""], days: POLL_DEFAULT_DAYS });

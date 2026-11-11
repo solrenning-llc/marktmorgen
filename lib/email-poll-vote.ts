@@ -7,8 +7,9 @@
  *
  * In this order, so that a link that is not someone's costs nothing:
  *   1. the link is checked against the broadcast's id, with no read at all;
- *   2. the broadcast is read: it must keep a poll, have gone out ("sending"
- *      or "sent"), and its list must reach the link's place;
+ *   2. the broadcast is read: it must keep a poll and have already been
+ *      sent to the link's place (its first `sent` places, whatever its
+ *      status since);
  *   3. the poll must be open (from sendAt, kept in seconds, for its days);
  *   4. the store is read and POLL_VOTE_REQUEST_UNITS of its month's public
  *      requests are taken (lib/buyer-actions.ts takeBuyerRead): past its
@@ -52,9 +53,10 @@ export async function votePoll(
     return "unknown";
   }
   if (!broadcast || !broadcast.poll) return "invalid";
-  if (broadcast.status !== "sending" && broadcast.status !== "sent") return "invalid";
-  if (!nonnegative(broadcast.total) || !nonnegative(broadcast.sendAt)) return "unknown";
-  if (checked.recipient >= broadcast.total) return "invalid";
+  if (!nonnegative(broadcast.sent) || !nonnegative(broadcast.sendAt)) return "unknown";
+  // Whoever it reached, whatever it does since: it waits in daily portions, for a month's emails or a subject
+  // test, fails or is canceled part-way, with the first `sent` places of its list reached (review, ALTO).
+  if (checked.recipient >= broadcast.sent) return "invalid";
   // A broadcast keeps its times in seconds (createBroadcast); the poll's rules count in milliseconds.
   const sentAt = broadcast.sendAt * 1000;
   const step = voteStep({ method: "POST", option, poll: broadcast.poll, sentAt, now, recipient: "valid" });
@@ -98,9 +100,9 @@ export async function pollPage(input: { broadcastId: string; link: unknown; now:
     return { state: "unknown" };
   }
   if (!broadcast || !broadcast.poll) return { state: "invalid" };
-  if (broadcast.status !== "sending" && broadcast.status !== "sent") return { state: "invalid" };
-  if (!nonnegative(broadcast.total) || !nonnegative(broadcast.sendAt)) return { state: "unknown" };
-  if (checked.recipient >= broadcast.total) return { state: "invalid" };
+  if (!nonnegative(broadcast.sent) || !nonnegative(broadcast.sendAt)) return { state: "unknown" };
+  // Whoever it reached, whatever its status since (as votePoll).
+  if (checked.recipient >= broadcast.sent) return { state: "invalid" };
   // In seconds on the broadcast (createBroadcast), in milliseconds for the poll's rules.
   const sentAt = broadcast.sendAt * 1000;
   const state = pollState(sentAt, broadcast.poll.days, now);
@@ -117,3 +119,14 @@ export async function pollPage(input: { broadcastId: string; link: unknown; now:
   const sender = store.mail?.fromName || store.name;
   return { state, poll: broadcast.poll, sender, language: store.language, closesAt };
 }
+
+/** What the poll route answers when no page asked (app/api/mail/poll/route.ts). */
+export const POLL_ROUTE_WORDS: Record<PollVoteAnswer, { status: number; text: string }> = {
+  recorded: { status: 200, text: "Your answer is counted. You can change it or take it back from the same link while the poll is open." },
+  withdrawn: { status: 200, text: "Your answer is taken back. Nothing of yours is counted in this poll." },
+  closed: { status: 410, text: "This poll has closed, so answers can no longer be changed." },
+  invalid: { status: 404, text: "This poll link is not one we know. Nothing was counted." },
+  // takePublicRequest says no both past the figure and when it could not count: "just now", never "this month".
+  resting: { status: 503, text: "This store cannot take answers just now. Nothing was counted." },
+  unknown: { status: 503, text: "We could not save that just now. Nothing was counted. Please try again in a minute." },
+};

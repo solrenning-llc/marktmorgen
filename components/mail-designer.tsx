@@ -15,6 +15,8 @@ import {
   serializeMailBlocks,
 } from "@/lib/mail-body";
 import { readPicture } from "@/lib/mail-picture-rules";
+import { SaidLine, useSaid } from "@/components/said-line";
+import { endWords, movedWords } from "@/lib/move-words";
 
 /** The store's colour for a button in its emails (lib/store-look.ts), for the preview to draw what is sent. */
 export const MailAccent = createContext("#4c1d95");
@@ -26,6 +28,14 @@ const ADDABLE: { kind: MailBlock["kind"]; label: string }[] = [
   { kind: "button", label: "Button" },
   { kind: "divider", label: "Line" },
 ];
+
+/** A block's name, as its row says it and as a move says it: "Heading", "Text", "Line", "Picture"… */
+function blockName(block: MailBlock | undefined): string {
+  if (!block) return "This block";
+  if (block.kind === "divider") return "Line";
+  if (block.kind === "picture") return "Picture";
+  return ADDABLE.find((a) => a.kind === block.kind)?.label ?? "This block";
+}
 
 const fresh = (kind: MailBlock["kind"]): MailBlock => {
   switch (kind) {
@@ -67,6 +77,8 @@ export function MailBodyEditor({
   const accent = useContext(MailAccent);
   const [mode, setMode] = useState<"write" | "design">("write");
   const [blocks, setBlocks] = useState<MailBlock[]>(() => parseMailBlocks(body));
+  // Each move said for screen readers; an end button says the block is already there (WCAG 4.1.3; lib/move-words.ts).
+  const [said, say] = useSaid();
   const [written, setWritten] = useState(body);
   const box = useRef<HTMLTextAreaElement | null>(null);
   // The preview starts at a phone's width, where most emails are read (487 [IT4], pattern 7).
@@ -87,10 +99,17 @@ export function MailBodyEditor({
   const set = (i: number, change: Partial<MailBlock>) => update(blocks.map((b, j) => (j === i ? ({ ...b, ...change } as MailBlock) : b)));
   function move(i: number, by: -1 | 1) {
     const to = i + by;
-    if (to < 0 || to >= blocks.length) return;
+    const name = blockName(blocks[i]);
+    if (to < 0 || to >= blocks.length) {
+      say(endWords(name, by < 0 ? "first" : "last"));
+      return;
+    }
     const next = blocks.slice();
     [next[i], next[to]] = [next[to], next[i]];
     update(next);
+    say(movedWords(name, to, blocks.length));
+    // The blocks are keyed by place, so the focus would stay at the old place, on another block: it follows this one (WCAG 2.4.3).
+    requestAnimationFrame(() => document.getElementById(`mail-move-${to}-${by < 0 ? "up" : "down"}`)?.focus());
   }
   function design() {
     setWritten(body);
@@ -185,12 +204,12 @@ export function MailBodyEditor({
               {blocks.map((block, i) => (
                 <li key={i} className="rounded-2xl bg-paper p-3 ring-1 ring-line">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{block.kind === "divider" ? "Line" : block.kind === "picture" ? "Picture" : ADDABLE.find((a) => a.kind === block.kind)?.label}</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{blockName(block)}</span>
                     <span className="flex gap-1">
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label={`Move block ${i + 1} up`}>
+                      <button id={`mail-move-${i}-up`} type="button" className="btn btn-secondary btn-sm aria-disabled:opacity-40" onClick={() => move(i, -1)} aria-disabled={i === 0 || undefined} aria-label={`Move block ${i + 1} up`}>
                         Up
                       </button>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => move(i, 1)} disabled={i === blocks.length - 1} aria-label={`Move block ${i + 1} down`}>
+                      <button id={`mail-move-${i}-down`} type="button" className="btn btn-secondary btn-sm aria-disabled:opacity-40" onClick={() => move(i, 1)} aria-disabled={i === blocks.length - 1 || undefined} aria-label={`Move block ${i + 1} down`}>
                         Down
                       </button>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => update(blocks.filter((_, j) => j !== i))} aria-label={`Remove block ${i + 1}`}>
@@ -226,6 +245,7 @@ export function MailBodyEditor({
                 </li>
               ))}
             </ol>
+            <SaidLine said={said} />
             <div className="flex flex-wrap gap-2">
               {ADDABLE.map((a) => (
                 <button key={a.kind} type="button" className="btn btn-secondary btn-sm" onClick={() => update([...blocks, fresh(a.kind)])}>

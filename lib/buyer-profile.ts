@@ -40,6 +40,7 @@ import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
@@ -248,8 +249,11 @@ export async function removePersonNote(statsId: string, person: string, id: unkn
 /** Every note about every person, for a store that is being deleted. */
 export async function forgetPersonNotes(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const [raw] = await redisPipeline([["SMEMBERS", whoKey(statsId)]]);
-  const people = (Array.isArray(raw) ? (raw as unknown[]).map(String) : []).filter((p) => PERSON_KEY.test(p));
+  // Read exactly (rule 24; Claude 4 nuvem R on #2287): a reply in any other shape throws before anything is deleted,
+  // never "nobody", which deleted the index and left every person's notes unreachable.
+  const listed = stringList(repliesFor(await redisPipeline([["SMEMBERS", whoKey(statsId)]]), 1)?.[0]);
+  if (listed === null) throw new UnknownReplyError("the people with notes");
+  const people = listed.filter((p) => PERSON_KEY.test(p));
   for (let i = 0; i < people.length; i += 500) {
     await redisPipeline([["DEL", ...people.slice(i, i + 500).map((p) => notesKey(statsId, p))]]);
   }

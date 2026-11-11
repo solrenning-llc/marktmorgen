@@ -50,15 +50,17 @@ export function StudioApp() {
     const onPointer = () => keeper.pointerDown();
     const watch = new MutationObserver((records) => {
       let tree = false;
+      const added: (HTMLElement & KeptElement)[] = [];
       for (const record of records) {
         if (record.type === "childList") {
           tree = true;
+          for (const node of record.addedNodes) if (node instanceof HTMLElement) added.push(node as HTMLElement & KeptElement);
           continue;
         }
         const target = element(record.target);
         if (target) keeper.disabledChanged(target);
       }
-      if (tree) keeper.treeChanged();
+      if (tree) keeper.treeChanged(added);
     });
     watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled"] });
     document.addEventListener("focusin", onIn);
@@ -85,6 +87,9 @@ const STUDIO_PLACE: KeeperPlace = {
   firstControlIn: (part) => {
     if (!(part instanceof Element)) return null;
     const first = (selector: string) => [...part.querySelectorAll<HTMLElement>(selector)].find(shown) ?? null;
+    // The part itself may be the control (a button added on its own).
+    if (part instanceof HTMLElement && part.matches(`${FIELDS}, ${CONTROLS}`) && shown(part)) return part as HTMLElement & KeptElement;
     return (first(FIELDS) ?? first(CONTROLS)) as (HTMLElement & KeptElement) | null;
   },
+  contains: (outer, inner) => outer instanceof Node && inner instanceof Node && outer.contains(inner),
 };

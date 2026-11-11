@@ -12,10 +12,11 @@
  *    control is still on the page, so the focus goes back to it.
  * 3. Taken away: about twenty buttons on the studio's start page open an
  *    editor in their own place ("Add your profiles", "Change my address",
- *    "Offer a payment plan"…). The focus goes to the first control of the
- *    nearest part of the page that is still there, the editor that took the
- *    button's place; only inside the page's main content (`inMain`), never
- *    when the page itself was replaced by a navigation.
+ *    "Offer a payment plan"…). The focus goes to the first control of what
+ *    the change added in the nearest part of the page still there (the editor
+ *    that took the button's place), else to that part's first control; only
+ *    inside the page's main content (`inMain`), never when the page itself was
+ *    replaced by a navigation.
  *
  * It only acts while the focus is nowhere (the body, or no element). It never
  * takes the focus from anything else: a person who moved on keeps their
@@ -34,10 +35,11 @@ export type KeptElement = {
   focus: (options?: { preventScroll?: boolean }) => void;
 };
 
-/** Where to look once a control was taken away: whether a part of the page is inside its main content, and its first control. */
+/** Where to look once a control was taken away: whether a part of the page is inside its main content, its first control, and whether one element holds another. */
 export type KeeperPlace = {
   inMain: (element: KeptElement) => boolean;
   firstControlIn: (element: KeptElement) => KeptElement | null;
+  contains: (outer: KeptElement, inner: KeptElement) => boolean;
 };
 
 export type FocusKeeper = {
@@ -49,8 +51,8 @@ export type FocusKeeper = {
   pointerDown: () => void;
   /** An element's disabled attribute changed (a MutationObserver attributes record). */
   disabledChanged: (element: KeptElement) => void;
-  /** Elements were added or taken away somewhere (MutationObserver childList records). */
-  treeChanged: () => void;
+  /** Elements were added or taken away somewhere (MutationObserver childList records), with the elements added. */
+  treeChanged: (added?: KeptElement[]) => void;
 };
 
 /** `active` reads the document's active element; `body` is the page's body, where a browser leaves a lost focus. */
@@ -90,7 +92,7 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       waiting = null;
       if (element.isConnected && nowhere()) element.focus({ preventScroll: true });
     },
-    treeChanged() {
+    treeChanged(added = []) {
       if (last === null || !nowhere()) return;
       if (last.isConnected) {
         // Moved, not taken away. One that is off waits to be on again (disabledChanged).
@@ -103,7 +105,10 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
         if (!part.isConnected) continue;
         // The page itself was replaced: a navigation brings its own focus.
         if (!place.inMain(part)) return;
-        const next = place.firstControlIn(part);
+        // What the change added in that part comes first: the editor that took the control's place, which may sit
+        // after other controls of the same part (a product card's waitlist box before its shipping editor).
+        const fresh = added.filter((node) => node.isConnected && place.contains(part, node));
+        const next = fresh.map((node) => place.firstControlIn(node)).find((control) => control !== null) ?? place.firstControlIn(part);
         if (next && next !== lost) next.focus({ preventScroll: true });
         return;
       }

@@ -29,7 +29,7 @@ that no fault remains.
 | MM-SA-05 | Medium | Strangers typing addresses into a store's sign-up box, waitlists or affiliate form could spend the month's access emails, and buyers were then sent no link to what they had bought | Fixed: #567 |
 | MM-SA-06 | Low | The sign-in link's per-address throttle counts strangers' requests | Listed, not fixed |
 | MM-SA-07 | Low | Buyers' links (downloads, orders, a private feed) travel in query strings | Listed, not fixed |
-| MM-SA-08 | Low | Pictures (products, links, pages, emails, reviews) are kept outside the storage figure and never swept when unattached: what a store keeps of them grows month over month, and no line of the cost registry prices it | Owner's decision needed |
+| MM-SA-08 | Low | Pictures (products, links, pages, emails, reviews) are kept outside the storage figure and never swept when unattached: what a store keeps of them grows month over month, and no line of the cost registry prices it | Owner decided (507 [SG3]); being built, off; still open |
 | MM-SA-09 | Low | An affiliate's leads were decided by read, change and write without a lock: an approval racing a person's deletion wrote their address back, a deletion racing an approval wrote the lead back open, and an approval racing a reversal paid a lead marked fake | Fixed: #569 |
 | MM-SA-10 | Low | A body with no declared length was read whole before its ceiling was checked: the v1 API, the MCP server, the community's chat, push and messages doors (anybody can post to them), the weekly email's switch and the operator's Search Console form | Fixed: #570 |
 | MM-SA-11 | Info | Pacing by connection is per machine: many machines at once are the host firewall's to stop | Owner's step |
@@ -260,6 +260,20 @@ a door goes unused for a day, as the community's pictures have
 (`lib/community-picture-rules.ts`), with its own line in the registry. The
 audit recommends (a): one figure, already priced, and no visible limit
 lowered. Until one is chosen, MM-SA-08 stays open in this document.
+
+**The owner's decision (507 [SG3]).** Pictures get a figure of their own per
+plan, sized so that no plan loses room, and pictures attached to nothing are
+swept after a safe wait, with a notice to the creator first and never one in
+use. **State (11 November 2026): being built, all of it off, nothing on the
+site changed.** The figure and its worst-case cost are proposed in
+`docs/pictures-figure-proposal.md`; the counter that takes and gives back a
+place is in `lib/picture-figure.ts` (`PICTURE_FIGURE_ON` false); the sweep's
+rules are in `lib/picture-sweep-rules.ts` (`PICTURE_SWEEP_ON` false: a notice
+after 30 days attached to nothing, the sweep 14 days after it, nothing when a
+reading is unknown, at most 100 of each a run). Still to build: each picture
+door taking its place, the run that reads what is in use (sent emails
+included) and sends the notice, and the cost line in the registry. Until they
+are built, tested and switched on, MM-SA-08 stays open.
 
 ### MM-SA-09: affiliate lead approvals without a lock (fixed, #569)
 

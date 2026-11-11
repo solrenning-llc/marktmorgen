@@ -15,14 +15,17 @@
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
+import * as rules from "@/lib/template-text-rules";
 import { MAX_PART_SHOWN, bracketPartsIn, partIn, templateLeftMessage, templateTextIn } from "@/lib/template-text-rules";
 import { STARTER_PROMPTS, templateLeft } from "@/lib/template-text";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
 import { BLOCK_KINDS, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
 import { POST as savePage } from "@/app/api/store/page/route";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
+import { POST as productRoute } from "@/app/api/store/product/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -193,6 +196,34 @@ async function main(): Promise<void> {
     }
   }
   is("every words field of every kind is read, in either version", { fields: fields > 60, missed }, { fields: true, missed: [] });
+
+  part("Publishing a draft whose page has a part left (Revisor 2 on #3593)");
+  const stillDraft = async () => (await readListing((await storeForEmail(OWNER))!, draft.product.id))?.hidden;
+  const publish = () => post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: false });
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, marked] } });
+  const first = await publish();
+  is("refused, saying the product, the block and the part, and it stays a draft", [first.status, first.data.error, first.data.product, first.data.field, first.data.block, first.data.kind, first.data.part, await stillDraft()], [409, "placeholder", "Draft guide", "block", "text0002", "text", "⟦Add one sentence about who you are⟧", true]);
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why], variant: { id: "", blocks: [{ ...why, heading: "Why not" }, quote("Best bread course.", "⟦Their name⟧")] } } });
+  const inSecond = await publish();
+  is("a part in the second version is refused too", [inSecond.status, inSecond.data.error, inSecond.data.block, await stillDraft()], [409, "placeholder", "quote001", true]);
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why], seoTitle: "Bread", seoDescription: STARTER_PART } });
+  const inSearch = await publish();
+  is("and a campaign's part in the search line", [inSearch.status, inSearch.data.field, inSearch.data.block, inSearch.data.part], [409, "search", null, STARTER_PART]);
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
+  const clean = await publish();
+  is("once written in the creator's own words, it is published", [clean.status, clean.data.ok, await stillDraft()], [200, true, false]);
+  const publishMessage = (rules as Record<string, unknown>).templatePublishMessage as ((left: { field: string; kind: string | null; part: string }, product: string | null) => string) | undefined;
+  is("the message says the product, where the part is, and the way on", [
+    publishMessage?.({ field: "block", kind: "quotes", part: "⟦Their name⟧" }, "Draft guide"),
+    publishMessage?.({ field: "search", kind: null, part: "[Your product]" }, null),
+    publishMessage?.({ field: "test", kind: null, part: "⟦Say it⟧" }, "Guide"),
+  ], [
+    "“Draft guide” has a part for you to write on its sales page, in the Said elsewhere block: “⟦Their name⟧”. Open it under Sales pages, replace it with your own words, including the brackets, then publish it. Nothing was published.",
+    "This product has a part for you to write on its sales page, in the search title or line: “[Your product]”. Open it under Sales pages, replace it with your own words, including the brackets, then publish it. Nothing was published.",
+    "“Guide” has a part for you to write on its sales page, in the headline you are testing: “⟦Say it⟧”. Open it under Sales pages, replace it with your own words, including the brackets, then publish it. Nothing was published.",
+  ]);
+  const products = readFileSync("components/product-editor.tsx", "utf8");
+  is("the product list says it when publishing, and never carries the campaigns", [/data\.error === "placeholder"[\s\S]{0,600}templatePublishMessage\(/.test(products), /from "@\/lib\/(template-text|funnel-starters)"/.test(products)], [true, false]);
 
   part("The rule, alone");
   is("every campaign part is read, each once, none a link's words", [STARTER_PROMPTS.length > 50, new Set(STARTER_PROMPTS).size === STARTER_PROMPTS.length, STARTER_PROMPTS.includes(STARTER_PART), STARTER_PROMPTS.every((p) => /^\[[^\]\n]{2,}\]$/.test(p))], [true, true, true, true]);

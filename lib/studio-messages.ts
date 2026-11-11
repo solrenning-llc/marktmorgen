@@ -2,7 +2,8 @@
  * What every studio form says when the store's own checks turn a change
  * away (lib/studio-route.ts): each form's own words for these come first.
  */
-import { PLANS_ON_SALE } from "@/lib/opening";
+// Words only: the published constant, held equal to PLANS_ON_SALE by tests/opening-published.test.ts.
+import { PLANS_ON_SALE_PUBLISHED as PLANS_ON_SALE } from "@/lib/opening-published";
 import { SETUP_STORAGE_BYTES } from "@/lib/plan-standing";
 
 const GB = 1024 * 1024 * 1024;

@@ -206,6 +206,25 @@ part("A control moved under the focus");
   is("it gets the focus back", [move.focused, active === move], [1, true]);
 }
 
+part("A click on the control itself");
+{
+  // Claude 3 (cloud C)'s LOW on this PR: clicking the Save that already has the focus brings a pointerdown but no
+  // focusin, so it must not count as leaving it.
+  const k = fresh();
+  const main = el("main", null, { main: true });
+  const save = el("Save", main);
+  const icon = el("Save's icon", save);
+  active = save;
+  k.focusIn(save);
+  k.pointerDown(icon); // a click on its icon, inside it
+  save.disabled = true;
+  k.disabledChanged(save);
+  active = body;
+  save.disabled = false;
+  k.disabledChanged(save);
+  is("a click on the focused control, or inside it, is not leaving it", save.focused, 1);
+}
+
 part("It never takes the focus from anything else");
 {
   const k = fresh();

@@ -97,6 +97,7 @@ import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { inviteEmail, inviteMembers, keptAlready, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
+import { emailDocument } from "@/lib/email-document";
 
 export type ImportKind = "contacts" | "products" | "purchases" | "members";
 /** Where the file came from: any platform's spreadsheet, or ClickFunnels' own exports (lib/clickfunnels-csv.ts). */
@@ -1450,12 +1451,20 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
-/** A plain letter's HTML, a paragraph for each blank line of its text, marked with the store's language (WCAG 3.1.1). */
-function letterHtml(store: Pick<Store, "language">, text: string): string {
-  return `<div lang="${LANGUAGES[parseLanguage(store.language)].locale}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
-    .split("\n\n")
-    .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
-    .join("")}</div>`;
+/**
+ * A plain letter's HTML, a paragraph for each blank line of its text: a whole
+ * page in the store's language (WCAG 3.1.1) with the subject as its title (2.4.2).
+ */
+export function letterHtml(store: Pick<Store, "language">, text: string, subject: string): string {
+  const lang = LANGUAGES[parseLanguage(store.language)].locale;
+  return emailDocument({
+    lang,
+    title: subject,
+    body: `<div lang="${lang}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
+      .split("\n\n")
+      .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
+      .join("")}</div>`,
+  });
 }
 
 /** The one email a past buyer gets, when the creator ticked it: what moved, and how to open it. */
@@ -1538,7 +1547,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       to: (letter as { to?: string }).to ?? email,
       subject: letter.subject,
       text: letter.text,
-      html: letterHtml(store, letter.text),
+      html: letterHtml(store, letter.text, letter.subject),
       replyTo: store.email,
       tags,
     });
@@ -1889,7 +1898,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             to: letter.to,
             subject: letter.subject,
             text: letter.text,
-            html: letterHtml(store, letter.text),
+            html: letterHtml(store, letter.text, letter.subject),
             replyTo: store.email,
             tags: healthTags(store, false),
           },

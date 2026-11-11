@@ -36,6 +36,7 @@
 
 import type { Tier } from "@/lib/plan";
 import { ORDERS_INCLUDED, TRIAL_ORDERS } from "@/lib/order-rules";
+import { emailDocument } from "@/lib/email-document";
 
 const DAY_MS = 86_400_000;
 
@@ -390,14 +391,20 @@ const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;
  * words, one paragraph a block, links as their own text, dark text on white
  * (#1c1917 on #ffffff, about 17:1) and the footer at #44403c on #f7f5f0
  * (about 9.5:1), at 16px with a line height of 1.6, no image, no layout
- * table. `postal` is the company's address, drawn under it.
+ * table. `postal` is the company's address, drawn under it; `subject` is the
+ * page's title (WCAG 2.4.2), and the page says US English on <html> (3.1.1).
  */
-export function letterHtml(text: string, postal: string): string {
+export function letterHtml(text: string, postal: string, subject: string): string {
   const blocks = text.split(/\n\s*\n/).map((block) => block.replace(/\n/g, " ").trim()).filter(Boolean);
   const linked = (block: string) => escape(block).replace(/https?:\/\/[^\s<]+/g, (url) => `<a href="${url}" style="color:#4c1d95;text-decoration:underline">${url}</a>`);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:0;background:#f7f5f0">
+  return emailDocument({
+    lang: "en-US",
+    title: subject,
+    bodyStyle: "margin:0;padding:0;background:#f7f5f0",
+    body: `
 <div role="article" aria-roledescription="email" lang="en" style="max-width:560px;margin:0 auto;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
 <div style="background:#ffffff;border-radius:16px;padding:24px">${blocks.map((b) => `<p style="margin:0 0 16px">${linked(b)}</p>`).join("")}</div>
 <p style="margin:16px 8px 0;font-size:14px;line-height:1.6;color:#44403c">Marktmorgen, ${escape(postal)}</p>
-</div></body></html>`;
+</div>`,
+  });
 }

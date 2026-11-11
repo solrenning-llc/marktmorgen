@@ -128,7 +128,7 @@ async function takeCreditOrGiveBack(folder: string, n: number, certain: number):
 
 function message(store: Store, to: string, letter: BuyerLetter, postal: string): BatchMessage {
   const text = `${letter.text}\n\nMarktmorgen, ${postal}`;
-  return { from: NIMBUS_FROM, to, replyTo: store.email, subject: letter.subject, text, html: letterHtml(letter.text, postal), tags: { kind: "closing_notice" } };
+  return { from: NIMBUS_FROM, to, replyTo: store.email, subject: letter.subject, text, html: letterHtml(letter.text, postal, letter.subject), tags: { kind: "closing_notice" } };
 }
 
 /** Sends one batch; true when it went. */

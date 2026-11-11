@@ -264,8 +264,9 @@ export function leverToggleFor(spec: LeverSpec, facts: LeverFacts): LeverControl
       route,
       on,
       to: !on,
-      body: { enabled: !on, address },
-      undoBody: { enabled: on, address },
+      // Each with the state it expects to find, compared under the store's lock (lib/setting-expect.ts).
+      body: { enabled: !on, address, expect: { enabled: on, address } },
+      undoBody: { enabled: on, address, expect: { enabled: !on, address } },
       label,
       before: RECOVERY_BEFORE[on ? "off" : "on"],
       back: { label: backLabel, before: RECOVERY_BEFORE[on ? "on" : "off"] },
@@ -281,6 +282,8 @@ export function leverToggleFor(spec: LeverSpec, facts: LeverFacts): LeverControl
   }
   const words = NEXT_OFFER_WORDS.en;
   const name = storeName(facts.store);
+  /** What the route saves for the switch (lib/next-offer-rules.ts: the email line only while on). */
+  const after = { on: !on, email: on ? false : saved.email };
   return {
     ...base,
     kind: "toggle",
@@ -288,8 +291,8 @@ export function leverToggleFor(spec: LeverSpec, facts: LeverFacts): LeverControl
     route,
     on,
     to: !on,
-    body: { next: { on: !on, email: on ? false : saved.email } },
-    undoBody: { next: { on: saved.on, email: saved.email } },
+    body: { next: after, expect: { on: saved.on, email: saved.email } },
+    undoBody: { next: { on: saved.on, email: saved.email }, expect: after },
     label,
     before: nextBefore(!on, facts.addOn),
     back: { label: backLabel, before: nextBefore(on, facts.addOn, true) },
@@ -300,7 +303,8 @@ export function leverToggleFor(spec: LeverSpec, facts: LeverFacts): LeverControl
 /** What happened after the card sent a switch, read from the route's reply. */
 export type LeverOutcome =
   | { state: "saved"; text: string; undoBody: Record<string, unknown>; undoSeconds: number }
-  | { state: "refused"; text: string }
+  /** changed: the setting was changed elsewhere since the page read it; the card no longer knows it. */
+  | { state: "refused"; text: string; changed?: true }
   | { state: "unknown"; text: string };
 
 /**
@@ -325,6 +329,7 @@ const REFUSED: Record<string, string> = {
   store_gone: "This store is no longer open in your studio.",
   none: "The store could not be found.",
   invalid: "The request was not understood.",
+  changed: "It was changed in another tab or by someone else after this page loaded. Reload the page to see the saved setting.",
 };
 
 const UNSURE = "We could not confirm the change. Reload the page to see the saved setting before you try again.";
@@ -335,7 +340,8 @@ export function toggleOutcome(control: LeverSwitch, reply: unknown): LeverOutcom
   const value = reply as Record<string, unknown>;
   if (value.ok === false) {
     if (typeof value.error !== "string" || !Object.hasOwn(REFUSED, value.error)) return { state: "unknown", text: UNSURE };
-    return { state: "refused", text: `Nothing was changed. ${REFUSED[value.error]}` };
+    const text = `Nothing was changed. ${REFUSED[value.error]}`;
+    return value.error === "changed" ? { state: "refused", text, changed: true } : { state: "refused", text };
   }
   if (value.ok !== true) return { state: "unknown", text: UNSURE };
   const echoed = control.route === "/api/store/recovery" ? readRecovery(value.recovery)?.enabled : readNext(value.next)?.on;
@@ -402,6 +408,7 @@ export async function pressLever(
   }
   const outcome = toggleOutcome(active, reply);
   if (outcome.state === "saved") return { flipped: !view.flipped, undo: how === "switch", outcome };
-  if (outcome.state === "refused") return { ...view, outcome };
+  // Changed elsewhere: what the card shows is no longer what is saved, so it asks for a reload.
+  if (outcome.state === "refused") return outcome.changed ? { flipped: "unknown", undo: false, outcome } : { ...view, outcome };
   return { flipped: "unknown", undo: false, outcome };
 }

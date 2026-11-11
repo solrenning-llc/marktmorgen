@@ -168,6 +168,7 @@ import { type SitePage, parseSitePages, MAX_SITE_PAGES, slugProblem } from "@/li
 import { type AnswersSetting, NO_ANSWERS, parseAnswers } from "@/lib/answers-rules";
 import { type AssistantPlan, type AssistantSetting, NO_ASSISTANT, parseAssistant, parseAssistantPlan } from "@/lib/store-assistant-rules";
 import { type NextOfferSetting, NO_NEXT_OFFER, parseNextOffer } from "@/lib/next-offer-rules";
+import type { NextExpect, RecoveryExpect } from "@/lib/setting-expect";
 import { type AssistReminderSetting, NO_ASSIST_REMINDER, parseAssistReminder } from "@/lib/assistant-reminder-rules";
 import { DEFAULT_FAIR, type FairPricing, parseFair } from "@/lib/fair-price";
 import { DEFAULT_LANGUAGE, type LanguageCode, parseLanguage } from "@/lib/store-language";
@@ -2662,8 +2663,18 @@ export async function setTax(
 export async function setRecovery(
   email: string,
   recovery: RecoverySetting,
-): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" }> {
-  const next = await patchStore(email, (store) => ({ recovery: parseRecovery(recovery), statsId: store.statsId ?? newListId() }));
+  expect?: RecoveryExpect,
+): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "changed" }> {
+  let changed = false;
+  const next = await patchStore(email, (store) => {
+    // Compared with the lock held: a setting changed since the page read it is never written over (lib/setting-expect.ts).
+    if (expect && (store.recovery.enabled !== expect.enabled || store.recovery.address !== expect.address)) {
+      changed = true;
+      return null;
+    }
+    return { recovery: parseRecovery(recovery), statsId: store.statsId ?? newListId() };
+  });
+  if (changed) return { ok: false, reason: "changed" };
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 
@@ -4352,8 +4363,17 @@ export async function setAssistant(email: string, raw: unknown): Promise<Store |
 }
 
 /** Switches the Store assistant's next product after a purchase on or off, and its line in the confirmation email (lib/next-offer-rules.ts). */
-export async function setNextOffer(email: string, raw: unknown): Promise<Store | null> {
-  return patchStore(email, () => ({ nextOffer: parseNextOffer(raw) }));
+export async function setNextOffer(email: string, raw: unknown, expect?: NextExpect): Promise<Store | null | "changed"> {
+  let changed = false;
+  const next = await patchStore(email, (store) => {
+    // Compared with the lock held: a setting changed since the page read it is never written over (lib/setting-expect.ts).
+    if (expect && (store.nextOffer.on !== expect.on || store.nextOffer.email !== expect.email)) {
+      changed = true;
+      return null;
+    }
+    return { nextOffer: parseNextOffer(raw) };
+  });
+  return changed ? "changed" : next;
 }
 
 /** Switches the Store assistant's checkout reminder box on or off (lib/assistant-reminder-rules.ts). */

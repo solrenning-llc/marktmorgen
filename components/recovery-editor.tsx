@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   invalid: "That could not be read. Nothing was changed.",
+  changed: "Nothing was changed. These settings were changed in another tab or by someone else after this page loaded. Reload this page to see them before trying again.",
   server_error: "We could not confirm whether your checkout reminder settings were saved. Reload this page to check before trying again.",
 };
 
@@ -44,7 +45,8 @@ export function RecoveryEditor({
       const response = await fetch("/api/store/recovery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled, address }),
+        // What this page read, compared with what is saved: a change made since in another tab is refused, not overwritten.
+        body: JSON.stringify({ enabled, address, expect: { enabled: recovery.enabled, address: recovery.address } }),
       });
       const raw: unknown = await response.json();
       const data: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};

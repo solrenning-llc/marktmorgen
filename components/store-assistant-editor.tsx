@@ -19,6 +19,8 @@ import { assistReminderWords } from "@/lib/buyer-words/assistant-reminder";
 
 const DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 const FAILED = "It could not be saved just now. Try again in a moment.";
+/** The route compared what this page read with what is saved (lib/setting-expect.ts). */
+const CHANGED = "Nothing was changed. This was changed in another tab or by someone else after this page loaded. Reload this page to see it before trying again.";
 
 /** What the way back from Stripe, or a refusal, says (app/api/billing/assistant). */
 const NOTICES: Record<string, string> = {
@@ -95,9 +97,9 @@ export function StoreAssistantEditor({
     setError(null);
     try {
       const response = await fetch("/api/store/assistant-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!data.ok) {
-        setError(FAILED);
+        setError(data.error === "changed" ? CHANGED : FAILED);
         return;
       }
       toast(said);
@@ -247,7 +249,7 @@ export function StoreAssistantEditor({
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => void post({ next: { on: nextOn, email: nextOn && nextEmail } }, "next", nextOn ? "Saved. It shows after purchases while the add-on is paid for." : "Saved. No next product is suggested.")}
+            onClick={() => void post({ next: { on: nextOn, email: nextOn && nextEmail }, expect: { on: next.on, email: next.email } }, "next", nextOn ? "Saved. It shows after purchases while the add-on is paid for." : "Saved. No next product is suggested.")}
             disabled={busy !== null || !nextChanged}
             aria-busy={busy === "next"}
           >

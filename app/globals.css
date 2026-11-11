@@ -4276,6 +4276,9 @@ fieldset:disabled .cm-poll-row {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
+  /* As a flex box its text would not break inside a long word and would scroll sideways at 320 px (1.4.10). */
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .st-page label:has(> input[name="poll"]) {
   min-height: 2.75rem;

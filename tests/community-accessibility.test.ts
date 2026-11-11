@@ -19,6 +19,10 @@ import { readFileSync } from "node:fs";
  * - 2.5.5, with the room on: the tabs filled the bar's row and the name
  *   (min-w-0 flex-1) shrank to 24 px wide on the room, leaderboard and search
  *   pages at 1280 px. It now keeps at least 44 px of width too.
+ * - 1.4.10 (review of this change): as an inline-flex box the title's text is
+ *   an anonymous flex item whose min-width is its longest word, so a title
+ *   of one long word (a file name, an address) scrolled sideways at 320 px
+ *   (751 px wide). The link is held to its line and breaks anywhere.
  *
  * All from app/globals.css, so the components (open in several pull requests)
  * are not edited; the last test keeps the hooks honest.
@@ -37,6 +41,9 @@ test("2.5.5: the bar's name, the tabs, a post's title and the poll label are 44 
   const title = body(".cm-post h2 > a.st-title-link");
   assert.match(title, /display:\s*inline-flex;/);
   assert.match(title, /min-height:\s*2\.75rem;/);
+  // 1.4.10: never wider than its heading, however long a word in it.
+  assert.match(title, /max-width:\s*100%;/);
+  assert.match(title, /overflow-wrap:\s*anywhere;/);
   assert.match(body('.st-page label:has(> input[name="poll"])'), /min-height:\s*2\.75rem;/);
 });
 

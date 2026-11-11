@@ -175,6 +175,7 @@ const en = {
     `Other viewers are using this store's video time right now. Time they do not use comes back within about ${hours} ${plural(hours, "hour", "hours")}; then press Play lesson again.`,
   playKeptRest: "The video time this store has left this month is kept for its students.",
   playManyRest: "Lesson videos were started many times in the last hour. Try again within an hour.",
+  playPlayingRest: "A lesson video of yours is playing. You can start another one when it ends, in 30 minutes at most.",
   playPreviewsRest: "Many people are watching this store's free previews right now. Try again within an hour.",
   playAgainRest: "Press Play lesson again in a moment.",
   /**
@@ -514,6 +515,7 @@ const es: CoursesWords = {
     `Otras personas están usando ahora el tiempo de video de esta tienda. El tiempo que no usen vuelve en ${plural(hours, "aproximadamente una hora", `unas ${hours} horas`)}; luego pulsa Reproducir lección de nuevo.`,
   playKeptRest: "El tiempo de video que le queda a esta tienda este mes está reservado para sus estudiantes.",
   playManyRest: "Los videos de las lecciones se iniciaron muchas veces en la última hora. Vuelve a intentarlo dentro de una hora.",
+  playPlayingRest: "Se está reproduciendo un video de una de tus lecciones. Podrás iniciar otro cuando termine, en 30 minutos como máximo.",
   playPreviewsRest: "Muchas personas están viendo ahora las vistas previas gratuitas de esta tienda. Vuelve a intentarlo dentro de una hora.",
   playAgainRest: "Pulsa Reproducir lección de nuevo en un momento.",
   playBlockRest: (minutes) =>
@@ -832,6 +834,7 @@ const fr: CoursesWords = {
     `D'autres personnes utilisent en ce moment le temps vidéo de cette boutique. Le temps qu'elles n'utilisent pas revient d'ici environ ${hours}${S}${frPlural(hours, "heure", "heures")}${S}; appuyez ensuite de nouveau sur Lire la leçon.`,
   playKeptRest: "Le temps vidéo qu'il reste à cette boutique ce mois-ci est réservé à ses élèves.",
   playManyRest: "Des vidéos de leçons ont été lancées de nombreuses fois au cours de la dernière heure. Réessayez d'ici une heure.",
+  playPlayingRest: "Une vidéo de l'une de vos leçons est en cours de lecture. Vous pourrez en lancer une autre quand elle sera finie, dans 30 minutes au plus.",
   playPreviewsRest: "Beaucoup de personnes regardent en ce moment les aperçus gratuits de cette boutique. Réessayez d'ici une heure.",
   playAgainRest: "Appuyez de nouveau sur Lire la leçon dans un instant.",
   playBlockRest: (minutes) =>
@@ -1144,6 +1147,7 @@ const de: CoursesWords = {
     `Andere Personen nutzen gerade die Videozeit dieses Shops. Zeit, die sie nicht nutzen, steht in etwa ${plural(hours, "einer Stunde", `${hours} Stunden`)} wieder zur Verfügung; drücken Sie dann erneut auf „Lektion abspielen“.`,
   playKeptRest: "Die Videozeit, die diesem Shop in diesem Monat bleibt, ist für seine Teilnehmenden reserviert.",
   playManyRest: "Lektionsvideos wurden in der letzten Stunde sehr oft gestartet. Versuchen Sie es innerhalb einer Stunde erneut.",
+  playPlayingRest: "Ein Video einer Ihrer Lektionen läuft gerade. Sie können ein anderes starten, wenn es endet, spätestens in 30 Minuten.",
   playPreviewsRest: "Gerade sehen sich viele Personen die kostenlosen Vorschauen dieses Shops an. Versuchen Sie es innerhalb einer Stunde erneut.",
   playAgainRest: "Drücken Sie gleich erneut auf „Lektion abspielen“.",
   playBlockRest: (minutes) =>
@@ -1458,6 +1462,7 @@ const it: CoursesWords = {
     `Altre persone stanno usando ora il tempo video di questo negozio. Il tempo che non usano torna disponibile entro ${plural(hours, "circa un'ora", `circa ${hours} ore`)}; poi premi di nuovo Riproduci la lezione.`,
   playKeptRest: "Il tempo video che resta a questo negozio questo mese è riservato ai suoi studenti.",
   playManyRest: "I video delle lezioni sono stati avviati molte volte nell'ultima ora. Riprova entro un'ora.",
+  playPlayingRest: "È in riproduzione il video di una tua lezione. Potrai avviarne un altro quando finisce, entro 30 minuti al massimo.",
   playPreviewsRest: "Molte persone stanno guardando ora le anteprime gratuite di questo negozio. Riprova entro un'ora.",
   playAgainRest: "Premi di nuovo Riproduci la lezione tra un momento.",
   playBlockRest: (minutes) =>
@@ -1773,6 +1778,7 @@ const nl: CoursesWords = {
     `Andere kijkers gebruiken nu de videotijd van deze winkel. Tijd die zij niet gebruiken komt binnen ongeveer ${plural(hours, "een uur", `${hours} uur`)} terug; druk dan opnieuw op Les afspelen.`,
   playKeptRest: "De videotijd die deze winkel deze maand nog heeft, is bewaard voor de cursisten.",
   playManyRest: "Lesvideo's zijn het afgelopen uur heel vaak gestart. Probeer het binnen een uur opnieuw.",
+  playPlayingRest: "Er speelt nu een video van een van je lessen. Je kunt een andere starten als die afgelopen is, uiterlijk over 30 minuten.",
   playPreviewsRest: "Veel mensen bekijken nu de gratis voorproefjes van deze winkel. Probeer het binnen een uur opnieuw.",
   playAgainRest: "Druk zo opnieuw op Les afspelen.",
   playBlockRest: (minutes) =>
@@ -2088,6 +2094,7 @@ const pt: CoursesWords = {
     `Outras pessoas estão a usar agora o tempo de vídeo desta loja. O tempo que não usarem volta dentro de ${plural(hours, "cerca de uma hora", `cerca de ${hours} horas`)}; depois prima Reproduzir aula de novo.`,
   playKeptRest: "O tempo de vídeo que resta a esta loja este mês está reservado para os seus alunos.",
   playManyRest: "Os vídeos das aulas foram iniciados muitas vezes na última hora. Tente novamente dentro de uma hora.",
+  playPlayingRest: "O vídeo de uma das suas aulas está tocando. Você pode iniciar outro quando ele terminar, em no máximo 30 minutos.",
   playPreviewsRest: "Muitas pessoas estão a ver agora as pré-visualizações gratuitas desta loja. Tente novamente dentro de uma hora.",
   playAgainRest: "Prima Reproduzir aula de novo daqui a pouco.",
   playBlockRest: (minutes) =>

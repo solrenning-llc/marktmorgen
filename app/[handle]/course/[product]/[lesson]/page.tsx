@@ -143,6 +143,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
     ? w.playBusyRest(Number(busyHours[1]))
     : played === "kept" ? w.playKeptRest
     : played === "many" ? w.playManyRest
+    : played === "playing" ? w.playPlayingRest
     : played === "previews" ? w.playPreviewsRest
     : played === "error" ? w.playAgainRest
     : null;

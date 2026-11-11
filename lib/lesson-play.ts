@@ -7,8 +7,9 @@
  *   nl:learn:playing:<hash>    a signed-in person's live token in one store (and the lesson video it is for), while
  *                              it has PLAY_REUSE_MIN_SECONDS left, or their claim while a press of theirs holds
  *                              (PLAY_CLAIM_SECONDS): their next press of that lesson is given the same token, and of
- *                              another lesson a token for it ending with the live one, with nothing held again; so a
- *                              person holds one block at a time in a store, never one a lesson (review of #3402, M1)
+ *                              another lesson is told that one of theirs is playing, with nothing signed (the owner's
+ *                              decision B of 11 November 2026); so a person holds one block at a time in a store,
+ *                              never one a lesson (review of #3402, M1), and every token signed is held
  *
  * Neither is the token's only copy that matters: the token is the video service's, good until its own end whatever
  * is kept here. A reply in any other shape is nothing kept (CX-123 rule 24), and the press holds as usual.

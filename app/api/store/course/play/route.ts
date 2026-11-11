@@ -122,11 +122,13 @@ export async function POST(request: NextRequest) {
     else claim = place.claim;
   }
   const same = live !== null && live.pathname === video.pathname;
-  const got = live && same
+  // Another lesson while one of theirs is playing: nothing is signed, and the page says a lesson of theirs is playing
+  // until it ends (the owner's decision B of 11 November 2026, on Claude 6's MEDIUM on #3402: a token signed then had
+  // nothing held for it). One live token, one hold, a person a store.
+  if (live && !same) return back("playing");
+  const got = live
     ? { kind: "stream" as const, ...live.player }
-    : live
-      ? await lessonVideo(video, videoLimitFor(store), windowId(store), store, { until: live.expires })
-      : await lessonVideo(video, videoLimitFor(store), windowId(store), store, { anonymous });
+    : await lessonVideo(video, videoLimitFor(store), windowId(store), store, { anonymous });
   if (claim && got?.kind !== "stream") await dropPlayingClaim(who, folder ?? "", claim);
   switch (got?.kind) {
     case "stream": {

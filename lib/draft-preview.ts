@@ -16,6 +16,7 @@
  * fails, or a reply that is not exactly what Redis answers, throws: the caller
  * answers that it could not check, never with the draft (rules 24 and 30).
  */
+import { keepKey } from "@/lib/child-safety-holds";
 import { createHash, randomBytes } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
@@ -143,9 +144,14 @@ export async function readDraftPreview(code: string, now = Math.floor(Date.now()
   const { s, p, e } = record as Record<string, unknown>;
   if (typeof s !== "string" || !s || typeof p !== "string" || !p || typeof e !== "number" || !Number.isInteger(e)) return null;
   if (e <= now) return null;
-  const [current, down] = await exactly([["GET", pointerKey(s, p)], ["GET", downKey(s, p)]]);
+  // With its child-safety hold mark (lib/child-safety-holds.ts): a held product never opens by a link, whatever made it
+  // (Revisor 2, 11/11/2026). A mark that cannot be read throws, so the page says it could not check.
+  const [current, down, kept] = await exactly([["GET", pointerKey(s, p)], ["GET", downKey(s, p)], ["GET", keepKey({ statsId: s, handle: "" }, p)]]);
   if (stringOrNull(current, "pointer") !== hash) return null;
   // Taken down after a notice: whatever link was made before or since, it does not open.
   if (stringOrNull(down, "taken-down mark") !== null) return null;
+  const held = stringOrNull(kept, "child-safety hold mark");
+  if (held === "1") return null;
+  if (held !== null) throw new Error("A preview link's child-safety hold mark could not be read");
   return { statsId: s, productId: p, expiresAt: e };
 }

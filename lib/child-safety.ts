@@ -59,6 +59,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeForEmail, storeRef } from "@/lib/store";
 import { productIdFromAddress, productIds, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { revokeDraftPreview } from "@/lib/draft-preview";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
 import { heldIdsAmong, heldInCatalog, isHeldForReport, keepKey, touchesHeld } from "@/lib/child-safety-holds";
 import { imagePaths } from "@/lib/product-image";
@@ -260,8 +261,11 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     await redisPipeline([["ZADD", HIDE_DUE, now, member], ["EXPIRE", HIDE_DUE, KEEP_SECONDS]]).catch(() => console.error("a held product could not be queued to be taken off"));
     const done = await setProductHidden(storeRef(store), product.id, true);
     if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
-    // Confirmed off: it waits no more. If this is lost, the job confirms it off and lets it go.
-    await redisPipeline([["ZREM", HIDE_DUE, member]]).catch(() => console.error("a held product taken off could not leave the queue"));
+    // Off, and its draft preview link revoked (lib/draft-preview.ts): only then does it wait no more. A revocation not
+    // confirmed leaves it waiting, and the job revokes it (Revisor 2, 11/11/2026); if the ZREM is lost, the job lets it go.
+    if (await previewRevoked(store, product.id)) {
+      await redisPipeline([["ZREM", HIDE_DUE, member]]).catch(() => console.error("a held product taken off could not leave the queue"));
+    }
     return "held";
   } catch (error) {
     console.error("a child-safety hold could not be confirmed", error instanceof Error ? error.message : "unknown");
@@ -306,9 +310,27 @@ async function hideOne(member: string): Promise<"hidden" | "gone" | "waiting"> {
   const listing = await readListingExactly(store, productId);
   if (listing === "unknown") return "waiting";
   if (!listing) return "gone";
-  if (listing.hidden) return "hidden";
-  const done = await setProductHidden(storeRef(store), productId, true);
-  return done.ok && done.product.hidden ? "hidden" : "waiting";
+  if (!listing.hidden) {
+    const done = await setProductHidden(storeRef(store), productId, true);
+    if (!(done.ok && done.product.hidden)) return "waiting";
+  }
+  // Off: its draft preview link revoked too, confirmed, before it is let go.
+  return (await previewRevoked(store, productId)) ? "hidden" : "waiting";
+}
+
+/**
+ * Revokes a held product's draft preview link (lib/draft-preview.ts): true once Redis answered both steps, false when
+ * that is not confirmed, so the product keeps waiting in the queue. A store without a stats id never had a link.
+ */
+async function previewRevoked(store: Store, productId: string): Promise<boolean> {
+  if (!store.statsId) return true;
+  return revokeDraftPreview(store, productId).then(
+    () => true,
+    (error) => {
+      console.error("a held product's preview link could not be revoked", error instanceof Error ? error.message : "unknown");
+      return false;
+    },
+  );
 }
 
 /**

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readListingExactly } from "@/lib/catalog";
 import { isTakenDown, makeDraftPreview, revokeDraftPreview } from "@/lib/draft-preview";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * A draft's private preview link (754 [STN1], unit 4a; lib/draft-preview.ts).
@@ -32,6 +33,9 @@ export async function POST(request: NextRequest) {
     if (product === "unknown") throw new Error("The product could not be read");
     if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404, headers: noStore });
     if (!product.hidden) return Response.json({ ok: false, error: "not_draft" }, { status: 409, headers: noStore });
+    // Held for a child-safety report (lib/child-safety.ts): no link, for anyone; a mark that cannot be read is not a yes.
+    const held = await heldRefusal(guarded.store, product.id);
+    if (held) return held;
     // Taken down after a notice: no link until it is published again (lib/takedown.ts, the product route).
     if (await isTakenDown(guarded.store, product.id)) return Response.json({ ok: false, error: "taken_down" }, { status: 409, headers: noStore });
     const made = await makeDraftPreview(guarded.store, product.id);

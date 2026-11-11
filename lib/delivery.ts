@@ -305,26 +305,48 @@ export async function freeDeliveryPaused(folder: string): Promise<boolean> {
  * The key each of these folders' stores is kept under (lib/store.ts): the
  * owner's address for an account's first store, "#" and the store's id for
  * its others. Null for a folder nobody uploaded to through the studio.
+ *
+ * Read exactly (CX-123 rule 24): nil is that confirmed absence, a kept string
+ * is the key; any other answer, or a database that does not answer, throws
+ * and is never "no store". Each caller already catches it per folder.
  */
 export async function storeKeysOf(folders: string[]): Promise<(string | null)[]> {
   if (!isRedisConfigured() || folders.length === 0) return folders.map(() => null);
-  try {
-    const raw = await redisPipeline(folders.map((f) => ["GET", ownerKey(f)]));
-    return raw.map((v) => (typeof v === "string" && v ? v : null));
-  } catch (error) {
-    console.error("could not read which store a folder belongs to", error);
-    return folders.map(() => null);
-  }
+  return keptOwners(folders, "which store a folder belongs to");
 }
 
-/** The creators behind a set of folders, for the notice that goes to them. */
-export async function ownersOf(folders: string[]): Promise<(string | null)[]> {
+/**
+ * The creators behind a set of folders, for the notice that goes to them:
+ * the address, or null for a folder nobody uploaded to or whose key is an
+ * account's other store ("#" and its id, lib/store.ts storeRef), which holds
+ * no address. Read exactly: a read unknown as a whole (no reply, one of
+ * another length, a database that does not answer) throws, and is never "no
+ * address on file". One folder's answer that is neither (not text, "",
+ * whitespace, "not-an-owner": Codex Z on #3072) is undefined, that folder's
+ * owner unknown: not evidence that the store has no owner, so support is not
+ * told so and it is not recorded, and it costs no other folder its notice
+ * (Claude 1's decision on #3072, 1975a5cd).
+ */
+export async function ownersOf(folders: string[]): Promise<(string | null | undefined)[]> {
   if (!isRedisConfigured() || folders.length === 0) return folders.map(() => null);
-  try {
-    const raw = await redisPipeline(folders.map((f) => ["GET", ownerKey(f)]));
-    return raw.map((v) => (typeof v === "string" && v.includes("@") ? v : null));
-  } catch (error) {
-    console.error("could not read who a folder belongs to", error);
-    return folders.map(() => null);
-  }
+  const replies = repliesFor(await redisPipeline(folders.map((f) => ["GET", ownerKey(f)])), folders.length);
+  if (!replies) throw new UnknownReplyError("who a folder belongs to");
+  return replies.map((v) => {
+    if (v === null || (typeof v === "string" && OTHER_STORE_KEY.test(v))) return null;
+    return typeof v === "string" && v.includes("@") ? v : undefined;
+  });
+}
+
+/** An account's other store as kept under a folder: "#" and its id (lib/store.ts STORE_ID_PATTERN, extraRef). */
+const OTHER_STORE_KEY = /^#[0-9a-f]{32}$/;
+
+/** Each folder's kept owner key: a non-empty string, or null when none is kept; any other answer throws. */
+async function keptOwners(folders: string[], what: string): Promise<(string | null)[]> {
+  const replies = repliesFor(await redisPipeline(folders.map((f) => ["GET", ownerKey(f)])), folders.length);
+  if (!replies) throw new UnknownReplyError(what);
+  return replies.map((v) => {
+    if (v === null) return null;
+    if (typeof v === "string" && v) return v;
+    throw new UnknownReplyError(what);
+  });
 }

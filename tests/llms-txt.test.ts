@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     const listed = [...text.matchAll(/^- `([a-z_]+)`: /gm)].map((m) => m[1]);
     is("nothing is listed that the server does not serve", listed.filter((name) => !MCP_TOOLS.some((t) => t.name === name)), []);
     is("inputs are listed under their tool", text.includes("  - `days`: number (one of 7, 30, 90). The window; 30 when left out.") && text.includes("  - `cursor`: string"), true);
-    is("it says every tool reads only, because every one does", [MCP_TOOLS.every((t) => t.annotations.readOnlyHint), text.includes("Every tool reads only")], [true, true]);
+    is("it says which tools prepare a change and that nothing changes before the creator confirms", [MCP_TOOLS.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name), text.includes("nothing on the store changes until they do")], [["propose_product_description"], true]);
 
     part("The MCP server answers from the same list");
     const listedByServer = await mcp(new Request(`${SITE_URL}/api/mcp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) }));

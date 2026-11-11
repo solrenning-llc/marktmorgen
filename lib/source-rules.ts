@@ -78,9 +78,13 @@ const TAG_ALIASES: Record<string, string> = {
 /** The AI assistants a visit can come from, by the word it is counted under. */
 export const AI_SOURCES = new Set(["chatgpt", "perplexity", "claude", "gemini", "copilot", "deepseek", "grok"]);
 
-/** A utm_source as it is counted: the assistants' own tags under their usual word. */
+/**
+ * A utm_source as it is counted: the assistants' own tags under their usual word. Only the map's own entries: a tag
+ * is typed by whoever wrote the link, so "__proto__" or "constructor" stays its own word, never Object.prototype or
+ * Object (which made proxy.ts's touchFrom throw on a store page opened with it; tests/proto-keys.test.ts).
+ */
 export function sourceAlias(tag: string): string {
-  return TAG_ALIASES[tag] ?? tag;
+  return Object.hasOwn(TAG_ALIASES, tag) ? TAG_ALIASES[tag] : tag;
 }
 
 /**

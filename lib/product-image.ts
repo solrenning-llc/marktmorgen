@@ -92,6 +92,11 @@ export type ProductImage = {
    * every picture from before, and for one that has transparency.
    */
   tone?: string;
+  /**
+   * The picture was moved to new names after a notice took its product down (R44, lib/picture-withdraw.ts): no
+   * public page gives those names out while the product is off the store (picturedFrom). Absent for every other.
+   */
+  withdrawn?: true;
 };
 
 /** A picture's color as it is kept: # and six lowercase hex digits, nothing else. */
@@ -234,6 +239,7 @@ export function parseProductImage(raw: unknown): ProductImage | null {
     ...(thumb ? { thumb } : {}),
     ...(value.r2 === true ? { r2: true as const } : {}),
     ...(typeof value.tone === "string" && TONE_PATTERN.test(value.tone) ? { tone: value.tone } : {}),
+    ...(value.withdrawn === true ? { withdrawn: true as const } : {}),
   };
 }
 
@@ -268,4 +274,12 @@ function parseThumb(raw: unknown, path: string, width: number, small: SmallCopy 
 export function imagePaths(image: (Pick<ProductImage, "path" | "small"> & { thumb?: SmallCopy | null }) | null | undefined): string[] {
   if (!image) return [];
   return [image.path, ...(image.small ? [image.small.path] : []), ...(image.thumb ? [image.thumb.path] : [])];
+}
+
+/**
+ * Whether another page may show this product's picture (an offer after paying, and the funnel editor's choices and
+ * preview, which must agree): yes for a draft's, no for one moved after a notice while the product is off the store.
+ */
+export function picturedFrom(product: { hidden: boolean; image: Pick<ProductImage, "withdrawn"> | null }): boolean {
+  return Boolean(product.image) && !(product.hidden && product.image?.withdrawn);
 }

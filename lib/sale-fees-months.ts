@@ -164,10 +164,12 @@ export function saleFeesCsv(report: SaleFees, timeZone: string): string | null {
       ]),
     );
   }
-  for (const fees of report.accountFees) {
+  for (const accountFee of report.accountFees) {
+    // The account fees' own currency, as Stripe charged them: never the store's setting.
+    const own = accountFee.currency;
     for (const key of ["taxFees", "stripeFees"] as const) {
-      if (fees[key] === 0) continue;
-      lines.push(csvLine(["", ACCOUNT_FEE_WORDS[key], fees.currency.toUpperCase(), "", "", "", "", "", "", "", amountCell(fees[key], fees.currency)]));
+      if (accountFee[key] === 0) continue;
+      lines.push(csvLine(["", ACCOUNT_FEE_WORDS[key], own.toUpperCase(), "", "", "", "", "", "", "", amountCell(accountFee[key], own)]));
     }
   }
   return lines.join("\n");

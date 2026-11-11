@@ -765,7 +765,7 @@ export const COST_LINES: CostLine[] = [
   {
     id: "pause-restart-claim",
     feature: "A legacy pause is claimed once before its uncertain subscription restart",
-    monthlyUsd: () => request("light", 1, 4 * KB),
+    monthlyUsd: () => request("light", 1, 4_096),
     sources: [
       { file: "lib/plan-pause-rules.ts", names: ["PAUSE_EVERY_DAYS"] },
       { file: "lib/plan-pause.ts", names: ["forgetObserved(ref, stored.raw, \"claim\")", "PAUSE_WORKER_FORGET"] },

@@ -283,6 +283,9 @@ async function main(): Promise<void> {
   part("A creator's hourly count that cannot be read: a failure, and the retry is heard (Claude 2's and Claude 1's LOW on #3067)");
   // withinLimit throws for a count it cannot read; the route used to answer 500 with the message still marked seen,
   // so Resend's retry was dropped as a repeat.
+  process.env.MARKETING_FROM_DOMAIN = "mail.marktmorgen.com";
+  // The next hour: the flood above spent this store's hourly count.
+  for (const key of redis.keys().filter((k) => k.startsWith("nl:rl:creator-inbound:"))) redis.run(["DEL", key]);
   const realPipe = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const first = commands[0] ?? [];
@@ -296,6 +299,8 @@ async function main(): Promise<void> {
   is("answered with a failure, nothing sent", [unreadCount.status, sent.length - sentBeforeCount], [500, 0]);
   const countRetry = await POST(announce(countUnread, { id: "msg_count_unread" }));
   is("and the retry is heard and sent", [countRetry.status, ((await countRetry.json()) as { result?: string }).result, sent.length - sentBeforeCount], [200, "sent", 1]);
+  is("to the creator", sent.at(-1)?.body.to, ["ana@example.org"]);
+  delete process.env.MARKETING_FROM_DOMAIN;
 
   part("Names and addresses");
   is("a name and an address", parseSender('"Doe, Jane" <jane@example.com>'), { name: "Doe, Jane", address: "jane@example.com" });

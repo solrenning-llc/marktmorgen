@@ -110,7 +110,7 @@ export function CourseImportBox({
     if (answer.ok !== true || !answer.course) {
       setProblem(importProblem(answer, true));
       // Only a refusal made before any write is known to have saved nothing; anything else reads the course again.
-      if (!answer.error || answer.error === "server_error" || !["invalid", "not_new", "store_full", "busy", "too_large"].includes(answer.error)) onUnsure();
+      if (!answer.error || answer.error === "server_error" || !["invalid", "not_new", "store_full", "busy", "too_large", "studio_used", "unavailable"].includes(answer.error)) onUnsure();
       return;
     }
     const kept = answer.course as Course;

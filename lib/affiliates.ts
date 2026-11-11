@@ -2942,9 +2942,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       self: e.self,
       how: "partner" as const,
     }));
+  // Each payment read exactly (exactPayout): a row this code did not write throws instead of being dropped, which
+  // would show its commission as owed again and let payday pay it twice (Revisor 1 on #3719).
   const paid = payouts
-    .map(([, raw]) => parsePayout(raw))
-    .filter((p): p is Payout => p !== null && (!only || p.aff === only))
+    .map(([, raw]) => exactPayout(raw))
+    .filter((p) => !only || p.aff === only)
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.at - a.at);
 
   // Each payment of a membership or plan sold through a link, read from its invoice.

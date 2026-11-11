@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { apiAdder, apiError, apiOk, apiWriter, readApiBody } from "@/lib/api-guard";
 import { noticeCreator } from "@/lib/account-notice";
+import { addedEndpointWhere, endpointJustAdded } from "@/lib/webhook-added";
 import { MAX_ENDPOINT_URL, WebhookSettingsUnsureError, addEndpoint, removeEndpoint, webhooksView } from "@/lib/webhooks";
 
 /**
@@ -36,11 +37,15 @@ export async function POST(request: Request) {
   const url = typeof body.url === "string" ? body.url.slice(0, MAX_ENDPOINT_URL + 1) : "";
   try {
     // Kept with the key that added it, so it pauses and stops with that key (owner C3-100).
-    const result = await addEndpoint(writer.store, url, body.events, Date.now(), writer.keyId);
+    const now = Date.now();
+    const result = await addEndpoint(writer.store, url, body.events, now, writer.keyId);
     if (!result.ok) return apiError(ADD_ERRORS[result.reason], result.reason, result.message);
-    const added = result.view.endpoints[result.view.endpoints.length - 1];
-    if (!added) return apiError(502, "unavailable", "The endpoint could not be read back just now. Try again in a moment.");
-    later(() => noticeCreator(writer.store, { kind: "webhook-added", where: added.where }));
+    // R34: the address it added, from its own URL, so the notice never names an endpoint added at the same moment.
+    const addedWhere = addedEndpointWhere(url) ?? "a new address";
+    later(() => noticeCreator(writer.store, { kind: "webhook-added", where: addedWhere }));
+    // Its id is the one endpoint at that address added at that moment, never the last in the list; unknown gives no id.
+    const added = endpointJustAdded(result.view, addedWhere, now);
+    if (!added) return apiError(502, "unavailable", "The endpoint was added, but its id could not be read back just now. Remove it in your studio under Webhooks, then add it again.");
     return apiOk({ data: { id: added.id, where: added.where, events: added.events, secret: result.secret, added_at: added.addedAt } });
   } catch (error) {
     console.error("api: adding a webhook failed", error);

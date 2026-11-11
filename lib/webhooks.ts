@@ -68,6 +68,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 // The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -734,8 +735,16 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? [], true);
   if (!listening.length) return 0;
   const eventId = eventIdFor(statsId, type, seed);
-  const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
-  if (fresh === null) return 0;
+  // Made and sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an event already sent;
+  // "unknown" makes and sends nothing, lets go of the mark if it holds our own value (it may have landed; nothing was
+  // made on it), and throws, so the caller's retry is not told it went (Claude 2 on #3276).
+  const value = claimValue();
+  const fresh = await claimMark(eventKey(eventId), EVENT_SECONDS, value);
+  if (fresh === "taken") return 0;
+  if (fresh === "unknown") {
+    await releaseMark(eventKey(eventId), value);
+    throw new UnknownReplyError("a webhook event's once-only mark");
+  }
 
   // Every text cleaned and bounded where the message is made (cleanText), so what a delivery keeps is bounded.
   const body = JSON.stringify(cleanData({

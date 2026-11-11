@@ -3,6 +3,7 @@ import { noticeCreator } from "@/lib/account-notice";
 import { ensureStatsId, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
+import { addedEndpointWhere } from "@/lib/webhook-added";
 import { MAX_ENDPOINT_URL, WEBHOOK_SETTINGS_UNSURE_WORDS, WebhookSettingsUnsureError, addEndpoint, removeEndpoint, resendDelivery, rotateSecret, sendTest, setEndpointEvents, webhooksView } from "@/lib/webhooks";
 
 /**
@@ -23,12 +24,14 @@ export async function POST(request: NextRequest) {
     const action = text(guarded.body.action, 20);
     const id = text(guarded.body.id, 40);
     if (action === "add") {
-      const result = await addEndpoint(store, text(guarded.body.url, MAX_ENDPOINT_URL + 1), guarded.body.events);
+      const url = text(guarded.body.url, MAX_ENDPOINT_URL + 1);
+      const result = await addEndpoint(store, url, guarded.body.events);
       if (!result.ok) return Response.json({ ok: false, error: result.reason, message: result.message }, { status: result.reason === "unavailable" ? 503 : result.reason === "paused" ? 409 : 400 });
       // Buyers' details can leave through a webhook, so every new one is
-      // reported to the creator's inbox (lib/account-notice.ts).
-      const added = result.view.endpoints[result.view.endpoints.length - 1];
-      after(() => noticeCreator(store, { kind: "webhook-added", where: added?.where ?? "a new address" }));
+      // reported to the creator's inbox (lib/account-notice.ts), by the
+      // address it added, never the last one in the list (R34).
+      const addedWhere = addedEndpointWhere(url) ?? "a new address";
+      after(() => noticeCreator(store, { kind: "webhook-added", where: addedWhere }));
       return Response.json({ ok: true, secret: result.secret, view: result.view });
     }
     if (action === "events") {

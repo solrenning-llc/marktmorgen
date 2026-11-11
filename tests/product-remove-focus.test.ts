@@ -38,4 +38,12 @@ is("Add something to sell has an id, so the focus can go there after a removal",
 const effect = /useEffect\(\(\) => \{\s*const was = productRemovedLast\.current;\s*productRemovedLast\.current = removingId;\s*if \(was === removingId\) return;\s*if \(removingId !== null\) \{\s*productRemoveAsked\.current\?\.focus\(\);\s*return;\s*\}\s*if \(was === null\) return;\s*if \(productRemoveKept\.current\) \{\s*productRemoveKept\.current = false;\s*requestAnimationFrame\(\(\) => document\.getElementById\(`product-remove-\$\{was\}`\)\?\.focus\(\)\);\s*return;\s*\}\s*requestAnimationFrame\(\(\) => \{\s*const add = document\.getElementById\("product-add"\) as HTMLButtonElement \| null;\s*if \(add && !add\.disabled\) add\.focus\(\);\s*else document\.querySelector<HTMLElement>\(`\[id\^="product-edit-"\]:not\(#product-edit-\$\{was\}\)`\)\?\.focus\(\);\s*\}\);\s*\}, \[removingId\]\);/;
 is("the focus follows the question: onto it, back to Remove on Keep it, on to Add or the next Edit once removed", effect.test(main), true);
 
+// Claude 4 (cloud L)'s review of this PR: a removal the server refuses.
+const yesAt = main.indexOf('"Yes, remove it"');
+const yes = main.slice(main.lastIndexOf("<button", yesAt), yesAt);
+is("Yes, remove it is never turned off under the focus while it sends; it says it is busy", /(?<![-\w])disabled=\{/.test(yes), false);
+is("it is marked unavailable while it sends, and a press then does nothing", /aria-disabled=\{busy \|\| undefined\}/.test(yes) && /onClick=\{\(\) => \{\s*if \(busy\) return;/.test(yes), true);
+const questionBlock = main.slice(main.indexOf("{removingId === product.id ? (\n                  <div"), main.indexOf("{open ? (", askAt));
+is("a refused removal is said inside the question, which stays open", /\{error \? \(\s*<p className="notice notice-error mt-3" role="alert">\s*\{error\}\s*<\/p>\s*\) : null\}/.test(questionBlock), true);
+
 done();

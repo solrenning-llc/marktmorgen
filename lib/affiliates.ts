@@ -2187,9 +2187,14 @@ export async function addPayout(
 
 export async function removePayout(store: Store, id: string): Promise<boolean> {
   if (!store.statsId || !/^[0-9a-f]{12}$/.test(id)) return false;
-  const [held, removed] = await redisPipeline([["HGET", payoutsKey(store.statsId), id], ["HDEL", payoutsKey(store.statsId), id]]);
-  if (Number(removed) === 1 && typeof held === "string") await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
-  return Number(removed) === 1;
+  // Read exactly (rule 24): HGET answers text or null and HDEL 0 or 1; anything else throws (try again), never "not
+  // removed" for a payout that may be gone, and its room is given back only on a confirmed removal.
+  const replies = repliesFor(await redisPipeline([["HGET", payoutsKey(store.statsId), id], ["HDEL", payoutsKey(store.statsId), id]]), 2);
+  const held = replies?.[0];
+  const removed = replies?.[1];
+  if (!replies || (held !== null && typeof held !== "string") || (removed !== 0 && removed !== 1)) throw new UnknownReplyError("a payout removed");
+  if (removed === 1 && typeof held === "string") await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
+  return removed === 1;
 }
 
 /** Where what the creator says they paid their affiliates is counted in the store's data room (lib/store-data.ts). */
@@ -3115,17 +3120,21 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     const wait = stripeWait(deadline);
     if (wait === null) break;
     const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { data?: unknown; has_more?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as InvoiceLike[];
+    // Read exactly (rule 24): a list of another shape, or more listed after a row with no id, leaves the recurring
+    // commissions unchecked (complete false), never "read to the end, none".
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") break;
+    const rows = listed.data as InvoiceLike[];
     for (const invoice of rows) {
       const meta = invoice.parent?.subscription_details?.metadata ?? {};
       if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !handles.has(meta.store ?? "")) continue;
       found.push({ invoice, meta });
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (!listed.has_more) {
       complete = true;
       break;
     }
+    const last = rows[rows.length - 1];
+    if (!last || typeof last.id !== "string") break;
     after = last.id;
   }
   const ids = [...new Set(found.map((f) => f.meta.product).filter((id): id is string => Boolean(id)))];

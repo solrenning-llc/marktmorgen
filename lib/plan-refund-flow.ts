@@ -466,7 +466,12 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // our stop is taken back at once and the note goes.
     const notMade = async (reason: Exclude<PlanRefundFlow, { ok: true }>["reason"], maybe: boolean): Promise<PlanRefundFlow> => {
       if (!maybe) {
-        if (note.m === 1 && (await takeBackStop(id))) note = { ...note, m: 0 };
+        if (note.m === 1 && (await takeBackStop(id))) {
+          // Said before the note goes: if its removal is lost, a later run must not take back a stop the creator
+          // set themselves since (comment 6807195181 on #3585).
+          note = { ...note, m: 0 };
+          await writeNote(store.sid, note);
+        }
         if (note.m === 0) {
           await dropNote(store.sid);
           return { ok: false, reason, stopLeft: false };
@@ -617,12 +622,18 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         console.error(`plan-refund: the refund asked for store ${sid} could not be decided in ${GIVE_UP_DAYS} days; its stop is taken back and its note dropped`);
       }
       // None was made: our stop goes, the plan goes on as it was.
-      if (note.m === 1 && !(await takeBackStop(note.s))) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+      if (note.m === 1) {
+        if (!(await takeBackStop(note.s))) {
+          if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
+            counts.left += 1;
+            continue;
+          }
+          console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
+        } else {
+          // Our stop is gone: the note says so before it is dropped, so a lost removal never lets a later run take back
+          // a stop the creator set themselves since (comment 6807195181 on #3585).
+          await writeNote(sid, { ...note, m: 0 });
         }
-        console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
       }
       await dropNote(sid);
       // The creator saw "nothing was refunded" or "we check within a day": the outcome reaches them by email.

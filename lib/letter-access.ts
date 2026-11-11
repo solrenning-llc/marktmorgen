@@ -98,8 +98,9 @@ export async function holdsLetter(store: Store, letter: Letter, email: string): 
   // handling; falling back would restore access to the abandoned address.
   const moved = await readMovedIndex(sid, email);
   if (moved.movedTo) return false;
+  if (moved.movedFrom.length > MAX_MOVED_INTO) throw new UnknownReplyError("too many moved addresses to read completely");
   if (await holds(email)) return true;
-  const olds = moved.movedFrom.slice(0, MAX_MOVED_INTO);
+  const olds = moved.movedFrom;
   if (!olds.length) return false;
   // Each old address is one more reading, paid before it is made: no room is unknown, never "holds none".
   if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length))) throw new UnknownReplyError("the store's room to read moved purchases");

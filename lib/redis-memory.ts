@@ -943,6 +943,32 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/purchase-move-index.ts MOVE_APPLY: guards and both writes in one step.
+        if (key.startsWith("-- marktmorgen:purchase-move-apply:v2\n") && args[0] === "4" && args.length === 9) {
+          const [, marked, into, holding, destination, text, from, id, rawMax] = args;
+          const held = this.run(["GET", marked]);
+          if (held !== null && typeof held !== "string") throw new Error("ERR purchase-move-apply: the mark");
+          if (held !== null) {
+            if (held !== text) return "elsewhere";
+            return this.run(["HGET", into, from]) === id ? "moved" : "unknown";
+          }
+          const away = this.run(["GET", destination]);
+          if (away !== null && typeof away !== "string") throw new Error("ERR purchase-move-apply: destination");
+          if (away !== null) return "destination-moved";
+          const sourceCount = this.run(["HLEN", holding]);
+          if (typeof sourceCount !== "number" || !Number.isSafeInteger(sourceCount) || sourceCount < 0) throw new Error("ERR purchase-move-apply: source holdings");
+          if (sourceCount > 0) return "holds-moved";
+          const total = this.run(["HLEN", into]);
+          const line = this.run(["HGET", into, from]);
+          const max = Number(rawMax);
+          if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(max) || max < 1) throw new Error("ERR purchase-move-apply: capacity");
+          if (line !== null && line !== id) return "unknown";
+          if (line === null && total >= max) return "too-many";
+          const lined = this.run(["HSET", into, from, id]);
+          if (lined !== 0 && lined !== 1) throw new Error("ERR purchase-move-apply: the line");
+          if (this.run(["SET", marked, text]) !== "OK") throw new Error("ERR purchase-move-apply: the mark");
+          return "moved";
+        }
         // lib/purchase-moves.ts MOVE_DAY_COUNT: INCR then EXPIRE in one step; the new count.
         if (key.startsWith("-- marktmorgen:purchase-move-day:v1\n") && args[0] === "1" && args.length === 3) {
           const made = this.run(["INCR", args[1]]);

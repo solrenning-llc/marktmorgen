@@ -170,7 +170,7 @@ async function main(): Promise<void> {
 
   part("Concurrent moves cannot overfill one destination");
   const concurrentInto = "parallel.new@example.com";
-  const concurrentIds = [];
+  const concurrentIds: string[] = [];
   for (let i = 0; i < MAX_MOVED_INTO + 2; i += 1) concurrentIds.push(await move(`parallel.old${i}@example.com`, concurrentInto));
   const applied = await Promise.all(concurrentIds.map((moveId) => applyPurchaseMove(store, moveId)));
   is("exactly the existing capacity moves", applied.filter((result) => result.state === "moved").length, MAX_MOVED_INTO);

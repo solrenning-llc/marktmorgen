@@ -17,7 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DEEMED_SUPPLIER_RECORDS, type DeemedSupplierRecord } from "@/lib/deemed-supplier";
-import { NOT_A_SALE, SALE_OPENINGS, openingCalls, openingsWithoutRefusal } from "@/lib/sale-openings";
+import { COVERED_OPENINGS, NOT_A_SALE, SALE_OPENINGS, openingCalls, openingsWithoutRefusal } from "@/lib/sale-openings";
 import { done, is, part } from "./check";
 
 const ROOT = process.cwd();
@@ -34,7 +34,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 }
 
 const files = [...sourceFiles("lib"), ...sourceFiles("app")];
-const listed = new Set([...SALE_OPENINGS, ...NOT_A_SALE].map((entry) => entry.file));
+const listed = new Set([...SALE_OPENINGS, ...NOT_A_SALE, ...COVERED_OPENINGS].map((entry) => entry.file));
 
 part("The scanner itself, on synthetic sources");
 {
@@ -44,6 +44,11 @@ part("The scanner itself, on synthetic sources");
   is("expiring a session opens nothing", openingCalls(`onAccount("POST", a, "/checkout/sessions/" + id + "/expire", body)`).length, 0);
   is("a read opens nothing", openingCalls(`onAccount("GET", a, "/checkout/sessions", undefined)`).length, 0);
   is("capturing opens nothing new", openingCalls(`onAccount("POST", a, "/payment_intents/" + id + "/capture")`).length, 0);
+  // PayPal opens an order on the creator's PayPal account (Claude 4 and Claude 3 on #3682, MEDIUM).
+  is("a PayPal order is found", openingCalls(`const made = await call("POST", "/v2/checkout/orders", {`), ["/v2/checkout/orders"]);
+  is("capturing a PayPal order opens nothing new", openingCalls(`await call("POST", \`/v2/checkout/orders/\${encodeURIComponent(order)}/capture\`, {})`).length, 0);
+  // A provider chosen at run time, with onAccount as the default (LEVE on #3682).
+  is("onAccount as a default provider is found", openingCalls(`await (runtime.provider ?? onAccount)("POST", claim.row.accountId, "/checkout/sessions", body)`), ["/checkout/sessions"]);
 }
 
 part("Every real opening is listed, and every listed file still opens one");
@@ -58,11 +63,14 @@ part("Every real opening is listed, and every listed file still opens one");
   is("no file opens a checkout or a payment on a creator's account without being in lib/sale-openings.ts", unlisted, []);
   const stale = [...listed].filter((file) => !found.has(file));
   is("every file in lib/sale-openings.ts still opens one", stale, []);
-  for (const entry of [...SALE_OPENINGS, ...NOT_A_SALE]) {
+  for (const entry of [...SALE_OPENINGS, ...NOT_A_SALE, ...COVERED_OPENINGS]) {
     is(`${entry.file} opens ${entry.opens}`, found.get(entry.file)?.includes(entry.opens) ?? false, true);
   }
   is("no file is listed twice", new Set(SALE_OPENINGS.map((entry) => entry.file)).size, SALE_OPENINGS.length);
   is("a file is a sale or not, never both", SALE_OPENINGS.some((entry) => NOT_A_SALE.some((other) => other.file === entry.file)), false);
+  is("PayPal's order is a sale opening", SALE_OPENINGS.some((entry) => entry.file === "lib/paypal-sales.ts" && entry.opens === "/v2/checkout/orders"), true);
+  is("an opening covered by another is covered by a listed sale opening, and is not one itself", COVERED_OPENINGS.every((entry) => SALE_OPENINGS.some((sale) => sale.file === entry.by) && !SALE_OPENINGS.some((sale) => sale.file === entry.file)), true);
+  is("the confirmation outbox's session is reached only from createCheckout", COVERED_OPENINGS.map((entry) => [entry.file, entry.by]), [["lib/order-confirmation-outbox.ts", "lib/store-checkout.ts"]]);
 }
 
 part("Nothing opens a checkout or a payment past onAccount");
@@ -84,11 +92,14 @@ part("A refuse-consumers record must cover every sale opening");
     evidence: "tests/synthetic.test.ts",
     ...over,
   });
-  const wired = (file: string) => `import { checkoutLocationDecision } from "@/lib/jurisdiction-refusal-rules";\n// ${file}`;
+  const wired = (file: string) => `import { checkoutLocationDecision } from "@/lib/jurisdiction-refusal-rules";\nconst decided = checkoutLocationDecision(pieces); // ${file}`;
+  // Only a call counts, never the name alone (Claude 3 on #3682, LEVE).
+  const named = (file: string) => `import { checkoutLocationDecision } from "@/lib/jurisdiction-refusal-rules";\n// ${file} calls checkoutLocationDecision(pieces) one day\n/* checkoutLocationDecision(x) */`;
   const bare = () => "// nothing here";
 
   is("every opening named and calling the decision passes", openingsWithoutRefusal([record({})], wired), []);
   is("openings that never call checkoutLocationDecision are each named", openingsWithoutRefusal([record({})], bare).length, SALE_OPENINGS.length);
+  is("an import or a comment is not a call: each opening is still a gap", openingsWithoutRefusal([record({})], named).length, SALE_OPENINGS.length);
   const short = record({ implementedIn: SALE_OPENINGS.slice(1).map((entry) => entry.file).join(", ") });
   is("an opening left out of the record is named", openingsWithoutRefusal([short], wired), [`EU: ${SALE_OPENINGS[0].file} is not named in implementedIn`]);
   is("a collect record is not a refusal, so this check leaves it to its own", openingsWithoutRefusal([record({ treatment: "collect" })], bare), []);

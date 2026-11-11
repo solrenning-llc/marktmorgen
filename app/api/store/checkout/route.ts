@@ -32,6 +32,7 @@ import { readPage } from "@/lib/sales-page-store";
 import { readCountry } from "@/lib/fair-price";
 import { pageShown, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
+import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
 import { markFromReferer } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
@@ -356,6 +357,8 @@ export async function POST(request: NextRequest) {
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
+    // Stripe says the account cannot take card payments: written down, and said, since trying again will not help.
+    if (await chargesOffAfterRefusal(store, error)) return away(`/@${store.handle}?status=nocharges`);
     return away(`/@${store.handle}?status=error`);
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { initBotId } from "botid/client/core";
+import { startBrowserCheck } from "@/lib/browser-check-client";
 import { Icon } from "@/components/icons";
 import { EmailSuggestion } from "@/components/email-suggestion";
 import { EmailCodeForm } from "@/components/email-code-form";
@@ -38,9 +38,9 @@ const MESSAGES: Record<string, string> = {
 let plainFetch: typeof fetch | null = null;
 
 function startChallenge() {
-  if (plainFetch || process.env.NODE_ENV !== "production") return;
-  plainFetch = window.fetch.bind(window);
-  initBotId({ protect: [{ path: "/api/auth/request", method: "POST" }] });
+  // Once for the whole window, with the store's counts too (lib/browser-check-client.ts): a second initBotId in one
+  // window never gets the host's challenge, so a form opened after a store page would wait for ever.
+  plainFetch = startBrowserCheck();
 }
 
 /** The shape of an address, checked as the person types; the server checks it again. */

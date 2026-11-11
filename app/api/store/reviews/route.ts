@@ -1,7 +1,7 @@
 import { type NextRequest, after } from "next/server";
 import { StoreFullError } from "@/lib/store-full";
 import { setReviewAsk } from "@/lib/store";
-import { refreshStoreQuotes } from "@/lib/store-quotes";
+import { dropReviewQuote, refreshStoreQuotes } from "@/lib/store-quotes";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_REPLY_TEXT, REVIEW_ID_PATTERN, isHideReason, markSeen, setHidden, setReply, setReviewPhoto } from "@/lib/reviews";
 import { dropReviewPhoto } from "@/lib/review-photo";
@@ -109,6 +109,8 @@ export async function POST(request: NextRequest) {
     if (done === "missing") return Response.json({ ok: false, error: "missing" }, { status: 404 });
     // A review hidden or shown again changes what the store page may quote (lib/store-quotes.ts).
     if (action === "hide") after(() => refreshStoreQuotes(store));
+    // A hidden one's words leave those quotes before ok is answered, whatever that refresh later reads.
+    if (action === "hide" && done.hidden) await dropReviewQuote(store, done);
     return Response.json({ ok: true });
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).

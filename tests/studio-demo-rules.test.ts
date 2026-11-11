@@ -86,7 +86,8 @@ const kinds = Object.keys(DEMO_AI_EXAMPLES) as DemoAiExampleKind[];
 is("the label says it is an example and no AI is called", DEMO_AI_LABEL, "Example answer — the demo does not call the AI");
 is("every example comes with the label", kinds.map((k) => demoAiExample(k).label), kinds.map(() => DEMO_AI_LABEL));
 is("no example states a figure, a deal or urgency", kinds.filter((k) => /\d|%|\$|free|now|today|only|limited|hurry|best|guarantee/i.test(DEMO_AI_EXAMPLES[k])), []);
-const seed = readFileSync("lib/demo-seed.ts", "utf8");
+// The demo store's seed and the product and call data it seeds from (lib/demo-catalog.ts).
+const seed = readFileSync("lib/demo-seed.ts", "utf8") + readFileSync("lib/demo-catalog.ts", "utf8");
 is("the products the examples name are the demo store's own", ["Weekly Meal Planner", "Grocery List Pack", "Harbor Kitchen"].map((n) => seed.includes(`"${n}"`)), [true, true, true]);
 is("the turned-off buttons say why and what they do in a real studio", [/off in the demo/.test(DEMO_OFF_WORDS.send), /off in the demo/.test(DEMO_OFF_WORDS.publish), /your own studio/.test(DEMO_OFF_WORDS.send + DEMO_OFF_WORDS.publish)], [true, true, true]);
 is("the end leads to sign-up", DEMO_SIGN_UP.href, "/signin?from=demo");

@@ -103,7 +103,7 @@ async function main(): Promise<void> {
   const titles = ["Glaze Workshop Replay", "Free Glaze Guide", "Studio Call With Ana"];
 
   const ask = (path: string, query: Query) => answering(new NextRequest(`https://marktmorgen.com/${handle}${path}${Object.keys(query).length ? `?${new URLSearchParams(query)}` : ""}`));
-  const pages: { name: string; path: string; query: Query; run: (query: Query) => Promise<unknown>; meta: () => Promise<{ title?: unknown }> }[] = [
+  const pages: { name: string; path: string; query: Query; run: (query: Query) => Promise<unknown>; meta: () => Promise<{ title?: unknown; robots?: unknown }> }[] = [
     { name: "the booking page of a call", path: `/book/${call.product.id}`, query: {}, run: (q) => BookPage({ params: Promise.resolve({ handle, product: call.product.id }), searchParams: Promise.resolve(q) }), meta: () => bookMeta({ params: Promise.resolve({ handle, product: call.product.id }), searchParams: Promise.resolve({}) }) },
     { name: "the free copy's page", path: "/free", query: { status: "sent", product: free.product.id }, run: (q) => FreePage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(q) }), meta: () => freeMeta({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) }) },
     { name: "the sign-up box's page", path: "/join", query: { status: "sent" }, run: (q) => JoinPage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(q) }), meta: () => joinMeta({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) }) },
@@ -129,8 +129,12 @@ async function main(): Promise<void> {
     const drawn = await html(out);
     is(`${page.name} shows none of the store's products, prices or forms`, [titles.some((t) => drawn.includes(t)), drawn.includes("$29") || drawn.includes("$45"), drawn.includes("<form")], [false, false, false]);
     ask(page.path, {});
-    const title = String((await page.meta()).title ?? "");
+    const meta = await page.meta();
+    const title = String(meta.title ?? "");
     is(`${page.name}'s title names no product and not the store`, [titles.some((t) => title.includes(t)), title.includes("Glaze Works")], [false, false]);
+    // Its robots.txt is now 404 (crawl allowed), so each page drawn at 200 asks on its own not to be indexed.
+    const robotsMeta = meta.robots as { index?: unknown } | undefined;
+    is(`${page.name} asks not to be indexed while the store is switched off`, robotsMeta?.index, false);
   }
   is("the store's app manifest is not given, kept by no cache", await file(manifest, "/manifest.webmanifest"), [404, "no-store"]);
   is("nor the rules for crawlers on its own domain", await file(robots, "/store-robots"), [404, "no-store"]);

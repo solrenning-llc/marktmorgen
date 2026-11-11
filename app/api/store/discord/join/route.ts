@@ -6,7 +6,7 @@ import { fromAnotherSite, limited, clientAddress } from "@/lib/request-guard";
 import { readOrder } from "@/lib/store-checkout";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { authorizeUrl, isDiscordConfigured, redirectUri } from "@/lib/discord";
-import { readServer, startTrip } from "@/lib/discord-store";
+import { readServerOrThrow, startTrip } from "@/lib/discord-store";
 import { storeKey } from "@/lib/learn";
 
 /**
@@ -33,12 +33,23 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
   const page = (status: string) => new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/discord?status=${status}`, "Cache-Control": "no-store" } });
-  if (!isDiscordConfigured() || !store.sid || !(await readServer(storeKey(store)))) return page("off");
+  if (!isDiscordConfigured() || !store.sid) return page("off");
+  // The connected server read exactly (rule 24): none kept is "off"; a reply that does not read is "failed" (try again).
+  let server: Awaited<ReturnType<typeof readServerOrThrow>>;
+  try {
+    server = await readServerOrThrow(storeKey(store));
+  } catch (error) {
+    console.error("reading the connected Discord server failed", error);
+    return page("failed");
+  }
+  if (!server) return page("off");
   if (!(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("failed");
 
   let email: string | null = null;
   if (sessionId) {
     const order = await readOrder(store, sessionId);
+    // Stripe could not be asked: unknown, so "failed" (try again), never "no purchase".
+    if (order.state === "error") return page("failed");
     email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
   } else if (token) {
     email = await ordersGrant(store, token);

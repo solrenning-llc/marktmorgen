@@ -77,6 +77,12 @@ for (const label of [
   "What is the Instagram password?",
   "What's your Instagram password?",
   "Do you mind entering your password?",
+  // Claude 4 (cloud H), probes of the sentence-by-sentence rule: none of these may slip through it.
+  "How about your password?",
+  "Do you have your password handy? Type it here",
+  "Describe your password",
+  "Can I get your password?",
+  "What's the wifi password?",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -116,6 +122,8 @@ for (const label of [
   "How many of your accounts share a password?",
   "Share your thoughts on passwords",
   "What is the best password?",
+  "When did you last change your password?",
+  "Why do you reuse your password?",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");

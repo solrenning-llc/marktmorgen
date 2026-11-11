@@ -9,6 +9,7 @@
  * a subscription should treat the person paying for it. Each is sent once per
  * charge, and says the date, the amount and the one click that stops it.
  */
+import { claimMark } from "@/lib/claim-mark";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
@@ -321,8 +322,10 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
     if (!due) return true;
     // Claimed before anything is done, so a second run never writes twice.
     const key = `nl:remind:failed:${due.invoice}`;
-    const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
-    if (claimed === null) return true;
+    // Ours, someone else's (told already), or unknown: no email on a guess, read again on the next run (rule 24).
+    const claimed = await claimMark(key, 90 * DAY);
+    if (claimed === "taken") return true;
+    if (claimed !== "ours") return false;
     try {
       // A renewal's email says what has stopped, so it is written down
       // first (lib/billing-sync.ts); a failure waits for the next run.
@@ -368,8 +371,10 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
       const reminder = dueReminder(subscription, nowSeconds);
       if (!reminder) return true;
       const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-      const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
-      if (claimed === null) return true;
+      // Ours, someone else's (sent already), or unknown: no email on a guess, read again on the next run (rule 24).
+      const claimed = await claimMark(key, 60 * DAY);
+      if (claimed === "taken") return true;
+      if (claimed !== "ours") return false;
       const { subject, text } = reminderEmail(reminder);
       const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
       if (ok) {

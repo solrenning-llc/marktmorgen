@@ -191,6 +191,7 @@ async function main(): Promise<void> {
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",
     "link-image del(result.removed.path)": "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
+    "ai-file deleteFile(pathname)": "only the PDF this request just drew and wrote under a fresh random name (lib/ai-file.ts saveAiFile), when it could not be kept on the draft; never a name the browser sent",
     "course del(files)": "handed-in work of a removed assignment, read from its own records",
     "course del(file.pathname)": "lesson files the course no longer holds, after it was written",
     "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",

@@ -104,6 +104,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/affiliates/paypal": row("money", never(MONEY)),
   "POST store/agreements": row("buyers", execute),
   "POST store/ai": row("pages", draft, "The writing help: its text comes back to the creator, nothing is saved by it."),
+  "POST store/ai-file": row("products", draft, "A draft product's file written with AI: the plan and the parts come back to the creator, and the PDF is kept only after the creator checks the text; the product stays a draft."),
   "POST store/announcement": row("pages", draft),
   "POST store/answers": row("pages", draft),
   "POST store/api-keys": row("access", never(ACCESS)),

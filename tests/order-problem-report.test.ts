@@ -202,3 +202,54 @@ test("a request from another site is refused", async () => {
   const answer = await problemRoute(new NextRequest(`${ORIGIN}/api/store/order-problem`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: "https://evil.example", "sec-fetch-site": "cross-site" }, body: "handle=mara" }));
   assert.equal(answer.status, 403);
 });
+
+test("review: a full note in any language is sent, never refused as too large", async () => {
+  const { store, product, token } = await shop();
+  sessions = [paid("accents", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  const answer = await post({ handle: "mara", token, ref, reason: "not_as_described", note: "é".repeat(500) + "ж".repeat(500) });
+  assert.equal(answer.status, 303);
+  assert.equal(stateOf(answer), "filed");
+  assert.equal((await readInbox(store.statsId!)).length, 1);
+});
+
+test("review: a case is kept as an order problem, so a block never stops the buyer answering in it", async () => {
+  const { store, product, token } = await shop();
+  sessions = [paid("sourceorder", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, reason: "not_received" })), "filed");
+  assert.equal((await readInbox(store.statsId!))[0].source, "order");
+});
+
+test("review: the creator's email keeps the due date even with the longest note", async () => {
+  const { product, token } = await shop();
+  sessions = [paid("longnote", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, reason: "not_received", note: "a ".repeat(500).trim() })), "filed");
+  assert.ok(mails[0]?.text.includes("Please answer by"), mails[0]?.text);
+});
+
+test("review: a report that loses the race for the order's mark takes no room", async () => {
+  const { store } = await shop();
+  const ref = "cs_test_racedforthemark0000000";
+  const key = orderProblemKey(store.sid!, ref);
+  await redis.pipeline([["SET", key, "pending", "EX", ORDER_PROBLEM_PENDING_SECONDS]]);
+  const before = (await dataUsed(store))?.used;
+  const real = redis.pipeline.bind(redis);
+  let firstGet = true;
+  (redis as { pipeline: typeof redis.pipeline }).pipeline = async (commands) => {
+    // The first read of the mark sees nothing, as if the other report had not claimed it yet.
+    if (firstGet && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === key) {
+      firstGet = false;
+      return [null];
+    }
+    return real(commands);
+  };
+  try {
+    const outcome = await reportOrderProblem(store, { reference: ref, title: "The Butter Course", paidAt: 1_780_000_000 }, BUYER, { reason: "not_received", note: "", reference: ref });
+    assert.equal(outcome, "busy");
+  } finally {
+    (redis as { pipeline: typeof redis.pipeline }).pipeline = real;
+  }
+  assert.equal((await dataUsed(store))?.used, before);
+});

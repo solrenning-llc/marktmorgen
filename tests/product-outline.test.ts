@@ -9,8 +9,10 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/product/route";
-import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductPage, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { parsePage } from "@/lib/sales-page";
+import { writePage } from "@/lib/sales-page-store";
 import { writeAbout, aboutBlocks, cleanAbout } from "@/lib/product-about";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, PRODUCT_OUTLINE_PROMPTS, productOutlineMessage, productPromptsLeft } from "@/lib/product-outline";
@@ -34,7 +36,7 @@ async function main(): Promise<void> {
   const cookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;
   const call = async (body: Record<string, unknown>) => {
     const response = await POST(new NextRequest("https://marktmorgen.com/api/store/product", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie }, body: JSON.stringify(body) }));
-    return { status: response.status, data: (await response.json()) as { ok: boolean; error?: string; left?: string; product?: { id: string } | string } };
+    return { status: response.status, data: (await response.json()) as { ok: boolean; error?: string; left?: string; product?: { id: string } | string; field?: string; kind?: string; part?: string } };
   };
   const refused = await call({ action: "add", title: "Recipe Pack", summary: "Thirty dinners.", price: "19", about: PRODUCT_OUTLINE });
   is("adding with prompts left: refused, naming the first, nothing added", [refused.status, refused.data.error, refused.data.left, (await storeForEmail(OWNER))!.catalog.items.length], [409, "outline_left", PRODUCT_OUTLINE_PROMPTS[0], 0]);
@@ -53,11 +55,29 @@ async function main(): Promise<void> {
   const publish = await call({ action: "visibility", id: draft.product.id, hidden: false });
   is("published with prompts left: refused, naming the product and the first part, still a draft", [publish.data.error, publish.data.product, publish.data.left, (await readListing((await storeForEmail(OWNER))!, draft.product.id))?.hidden], ["outline_left", "Draft Pack", PRODUCT_OUTLINE_PROMPTS[0], true]);
 
+  const markedPart = "⟦Add one sentence about who you are⟧";
+  await writeAbout(fresh.statsId!, draft.product.id, mine, fresh);
+  await writePage(
+    fresh.statsId!,
+    draft.product.id,
+    parsePage({ blocks: [{ id: "text0001", kind: "text", heading: "About this", body: `I teach bread. ${markedPart}` }] }),
+    fresh,
+    true,
+  );
+  if (!(await setProductPage(OWNER, draft.product.id, true)).ok) throw new Error("no draft page");
+  const pagePublish = await call({ action: "visibility", id: draft.product.id, hidden: false });
+  is(
+    "a draft page with a marked part is refused at publish and stays hidden",
+    [pagePublish.status, pagePublish.data.error, pagePublish.data.field, pagePublish.data.kind, pagePublish.data.part, (await readListing((await storeForEmail(OWNER))!, draft.product.id))?.hidden],
+    [409, "placeholder", "block", "text", markedPart, true],
+  );
+
   part("In the editor");
   const editor = readFileSync("components/product-editor.tsx", "utf8");
   is("offered when adding a product with no description, decided when the form opens; only into an empty description; the focus moved, the first part selected", [editor.includes("useState(() => !product && !draft.about.trim())"), editor.includes("if (draft.about.trim()) return;"), editor.includes('field.setSelectionRange(start, PRODUCT_OUTLINE.indexOf("]", start) + 1);')], [true, true, true]);
   is("the refusal in words for each case, true for each", [productOutlineMessage("add", "[x]", null), productOutlineMessage("save", null, null), productOutlineMessage("publish", "[x]", "Draft Pack")], ["Replace each part in [brackets] from the outline with your own words, including the brackets, before you add it: it goes on your store at once. The first one left: [x]", "This product is on your store, so it cannot be saved with a part in [brackets] from the outline. Replace each one with your own words, including the brackets.", "“Draft Pack” still has a part in [brackets] from the outline. Press Edit, replace each one with your own words, including the brackets, then publish it. The first one left: [x]"]);
   is("chosen by what was pressed, with the route's first part and product", [editor.includes('productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"'), editor.includes("outline_left: PRODUCT_OUTLINE_LEFT,"), PRODUCT_OUTLINE_LEFT === productOutlineMessage("add", null, null)], [true, true, true]);
+  is("the product list says where a page part was left", [editor.includes('data.error === "placeholder"'), editor.includes('templateLeftMessage({ field, part: left.part }')], [true, true]);
   is("once the description has words, a sentence instead of a button that does nothing; after the field's own help", [editor.includes("The outline goes only into an empty description. Clear the description to use it."), editor.indexOf("data-product-outline") > editor.indexOf('? "Reading what you wrote…"'), editor.indexOf("data-product-outline") < editor.indexOf("<TermsCheckPanel")], [true, true, true]);
   const bundle = readFileSync("app/api/store/bundle/route.ts", "utf8");
   is("a bundle, on the store at once, is refused the same way, with words for it", [bundle.includes('if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });'), readFileSync("components/bundle-editor.tsx", "utf8").includes("outline_left: PRODUCT_OUTLINE_LEFT,")], [true, true]);

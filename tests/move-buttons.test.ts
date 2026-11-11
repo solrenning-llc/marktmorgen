@@ -13,6 +13,10 @@
  * already first or last, and every move is said in a polite status line.
  */
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { BundleEditor, type PickerProduct } from "@/components/bundle-editor";
 import { endWords, movedWords } from "@/lib/move-words";
 import { done, is, part } from "./check";
 
@@ -33,5 +37,13 @@ for (const file of files) {
   is(`${file}: a polite status line says each move`, src.includes('<SaidLine said={said} />') && /const \[said, say\] = useSaid\(\);/.test(src), true);
   is(`${file}: the moves use the shared words`, src.includes("movedWords(") && src.includes("endWords("), true);
 }
+
+part("A bundle as drawn (review LOW: not only the source)");
+const items: PickerProduct[] = ["Bread", "Soup", "Cake"].map((title, i) => ({ id: `product_${i}`, title, priceCents: 1000, what: "Download", hidden: false, why: null }));
+const html = renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {} } as never }, createElement(BundleEditor, { mode: "edit", owner: { id: "bundle", title: "Recipes", priceCents: 2000 }, initial: items, currency: "usd" } as never)));
+const drawn = [...html.matchAll(/<button\b([^>]*aria-label="Move [^"]*"[^>]*)>/g)].map((m) => m[1]);
+is("an up and a down for each product", drawn.length, 6);
+is("only the first up and the last down are unavailable, and none is turned off", drawn.map((a) => [/aria-disabled="true"/.test(a), /(?<![-\w])disabled=""/.test(a)]), drawn.map((_, i) => [i === 0 || i === 5, false]));
+is("the status line is drawn, empty until a move", /<p role="status" class="sr-only"><\/p>/.test(html), true);
 
 done();

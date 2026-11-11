@@ -1560,7 +1560,11 @@ async function lookUp(
     const statsId = store.statsId;
     const productId = keys.find((id) => importedReference(statsId, email, id) === reference);
     if (!productId) return null;
-    const [raw] = await redisPipeline([["HGET", key, productId]]);
+    // Read exactly too: nil is an entry deleted since its id was read, text is the entry, anything else unknown.
+    const entry = repliesFor(await redisPipeline([["HGET", key, productId]]), 1);
+    const raw = entry?.[0];
+    if (raw === null) return null;
+    if (typeof raw !== "string") throw new UnknownReplyError("HGET of an address's imported purchase");
     const [given] = importedFrom([productId, raw]);
     if (!given || !inList(given.items ?? [], want.pid)) return null;
     // What was brought over holds one bundle at the most: its own.

@@ -63,6 +63,7 @@ import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recor
  * again for RECHECK_DAYS: measuring is the dear part of a look, and nearly
  * every store whose plan ended fits.
  */
+import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import { createHash } from "node:crypto";
 import { observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
 import { readAllListings } from "@/lib/catalog";
@@ -498,7 +499,9 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       "    and tasks are not in it, and are deleted after your store closes, within the time above;",
       "  - tell your students to download their course certificates: they can until that day,",
       "    and not after;",
-      "  - give your buyers another way to what they bought if you sell elsewhere.",
+      "  - give your buyers another way to what they bought if you sell elsewhere;",
+      `  - if your store is moving somewhere else, give its new address in your studio: for ${EXIT_NOTICE_DAYS} days`,
+      "    after your store closes, its old address here shows a link to it, to anyone who opens it.",
       "",
       studio,
       "",

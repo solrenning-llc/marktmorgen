@@ -8,7 +8,7 @@
  *   nl:pm:c:<id>:<side>      string  that address confirmed, and when (a mark, taken once)
  *   nl:pm:done:<id>          string  the request was claimed for its move (a mark, taken once)
  *   nl:pm:day:<fingerprint>  string  how many requests an address started today, under a one-way fingerprint
- *   nl:pm:retry:<fingerprint> string  the request id reused by a same-day retry, under a one-way fingerprint
+ *   nl:pm:retry:<fingerprint> string  the chosen request id and private claim nonce for a same-day retry
  *
  * Everything ends by itself: the request, its links and its confirmations
  * when its day is up (MOVE_CONFIRM_SECONDS), the claim and the day's count

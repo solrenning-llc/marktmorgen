@@ -1560,6 +1560,7 @@
     "components/share-panel.tsx",
     "components/share-row.tsx",
     "components/shipping-editor.tsx",
+    "components/short-links-off-notice.tsx",
     "components/short-links.tsx",
     "components/side-panel-switch.tsx",
     "components/signin-form.tsx",

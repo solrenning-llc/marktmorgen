@@ -109,7 +109,7 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
           window.setTimeout(listen, 4000);
         }
       }
-      if (event.target.closest("form[data-checkout] button, form[data-checkout] [type=submit]")) started = true;
+      if (event.target.closest("form[data-checkout] button:not([data-no-checkout]), form[data-checkout] [type=submit]:not([data-no-checkout])")) started = true;
     };
     const listen = () => {
       for (const frame of document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe")) {

@@ -494,6 +494,8 @@ export function StorePixels({
     const onSubmit = (e: SubmitEvent) => {
       const form = e.target instanceof HTMLFormElement ? e.target : null;
       if (!form || !form.hasAttribute("data-checkout") || form.dataset.sent === "1") return;
+      // Asking for a returning-buyer code's link is not starting a checkout (components/returning-code-box.tsx).
+      if (e.submitter instanceof HTMLElement && e.submitter.hasAttribute("data-no-checkout")) return;
       if (typeof form.requestSubmit !== "function") {
         track(w, pixels, { type: "checkout" }, restricted);
         return;

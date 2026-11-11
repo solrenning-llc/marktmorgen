@@ -16,6 +16,7 @@
  *
  * Synthetic data only.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setReturningCodes, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -71,9 +72,21 @@ async function main(): Promise<void> {
   is("and its note, which says how the code is checked", new RegExp(`<input id="${codeId}"[^>]*aria-describedby="${codeId.replace("-code", "-note")}"`).test(box), true);
   is("the email box has a visible label tied to it", box.includes(`<label for="${codeId.replace("-code", "-email")}" class="st-label">The email of your earlier order</label>`), true);
   is("the email box says what is done with it, and for how long it is kept", box.includes("it gets a link that works once, for 30 minutes. We keep it only for those 30 minutes."), true);
-  is("asking for the link is its own button, which the buying boxes do not hold back", /<button type="submit" formNoValidate=""[^>]*>Email me the link<\/button>/.test(box), true);
+  const ask = /<button[^>]*>Email me the link<\/button>/.exec(box)?.[0] ?? "";
+  is("asking for the link is its own button, which the buying boxes do not hold back", [/type="submit"/.test(ask), /formNoValidate=""/.test(ask)], [true, true]);
+  is("it alone asks for the link (rask), and is not counted as a checkout started", [/name="rask"/.test(ask), /value="1"/.test(ask), /data-no-checkout=""/.test(ask)], [true, true, true]);
   is("no link in the address: no hidden link field", box.includes('name="rtoken"'), false);
   is("no reason is said before anything was tried", box.includes('role="alert"'), false);
+
+  part("Only in the product page's own buy box");
+  {
+    const store = (await storeForEmail(OWNER))!;
+    const product = (await readListing(store, made.product.id))!;
+    const draw = (extra: Record<string, unknown>) => renderToStaticMarkup(createElement(BuyBox, { store, product, related: [], remaining: null, writes: true, selling: true, ...extra } as Parameters<typeof BuyBox>[0]));
+    is("not in an exit offer's box, a store card's, or the embedded checkout", [draw({ place: "x-" }).includes('name="rcode"'), draw({ stepped: true }).includes('name="rcode"'), draw({ embed: { site: "https://example.com", back: "" } }).includes('name="rcode"')], [false, false, false]);
+  }
+  is("PayPal from the same form refuses a code it cannot take", /withCode\) return away\(`\/@\$\{store\.handle\}\/p\/\$\{product\.id\}\?returning=other#returning`\)/.test(readFileSync("app/api/store/paypal/checkout/route.ts", "utf8")), true);
+  is("the pixels and the page's depth leave the link button out", [readFileSync("components/store-pixels.tsx", "utf8").includes('e.submitter.hasAttribute("data-no-checkout")'), readFileSync("components/page-depth.tsx", "utf8").includes(":not([data-no-checkout])")], [true, true]);
 
   part("Not where the buyer names the price");
   const store = (await storeForEmail(OWNER))!;

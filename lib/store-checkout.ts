@@ -836,7 +836,7 @@ export async function createCheckout(
       // Only a refusal that names this coupon is about it: Stripe's sentence for a
       // coupon used up, ended or deleted carries its id; a refusal of the
       // reminder's consent or of the tax documents does not, and is put right below.
-      if (extras.returning && body.get("discounts[0][coupon]") === extras.returning.coupon && error instanceof StripeError && error.status === 400 && error.stripeMessage.includes(extras.returning.coupon)) {
+      if (extras.returning && body.get("discounts[0][coupon]") === extras.returning.coupon && error instanceof StripeError && error.status === 400 && (error.stripeMessage.includes(extras.returning.coupon) || error.code === "coupon_expired" || (/\bcoupon\b/i.test(error.stripeMessage) && !/consent|tax|invoice|price/i.test(error.stripeMessage)))) {
         // The code's coupon is used up, ended or gone on the creator's
         // account: the buyer typed it for a discount, so no checkout opens at
         // a price they did not ask for. They are told on the form.

@@ -6,7 +6,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, redeemReturningLink, requestReturningLink } from "@/lib/returning-code";
+import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, redeemReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import { type ReturningCode, readTypedCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
@@ -145,7 +145,9 @@ export async function POST(request: NextRequest) {
     remind = form.get("remind") === "yes";
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
-    typedCode = read("rcode", 40).trim();
+    // Only the field's own "Email me the link" button asks for a link (rask);
+    // a code left typed in the field never stops the buy button from buying.
+    typedCode = form.get("rask") === "1" ? read("rcode", 40).trim() : "";
     typedEmail = typedCode ? read("remail", MAX_EMAIL_LENGTH + 1) : "";
     linkToken = read("rtoken", 80).trim();
   } catch {
@@ -226,7 +228,8 @@ export async function POST(request: NextRequest) {
   const consentBack = from
     ? `/@${store.handle}/${from}/${product.id}?consent=needed`
     : `/@${store.handle}/p/${product.id}?consent=needed${giftTo.trim() && !preorder ? "&gift=consent#gift" : people.trim() && !preorder ? "&group=consent#group" : preorder ? "#preorder" : "#buy"}`;
-  if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(consentBack);
+  // Sent back for the box, a buyer who came from the emailed link keeps it, so the code still goes on.
+  if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(linkToken && !from ? `/@${store.handle}/p/${product.id}?consent=needed&rtoken=${encodeURIComponent(linkToken)}#returning` : consentBack);
 
   if (linkToken) {
     const redeemed = await redeemReturningLink(store, product.id, linkToken);
@@ -351,6 +354,9 @@ export async function POST(request: NextRequest) {
       }),
     );
     if (!held.ok) return away(`/@${store.handle}?status=${held.reason}`);
+    // The link is spent only once its checkout exists: going back from Stripe's
+    // page and pressing buy again before that still has it.
+    if (returning) await spendReturningLink(linkToken);
     // Written down before the buyer leaves, so the plan — or a membership that
     // ends after a set number of payments — is given its end whether or not
     // they come back from paying.

@@ -232,7 +232,6 @@ export function readPageMark(statsId: string, person: string, mark: unknown, now
   return generation;
 }
 
-/** The person's generation as it is now (generationKey): what a page reads with them, and a save from it carries. */
 /**
  * A generation exactly as GET answers it (rule 24): null is a person never
  * deleted (0), a decimal string of a safe whole number is that generation;
@@ -247,6 +246,7 @@ function generationOf(raw: unknown): number {
   return Number.isSafeInteger(n) ? n : -1;
 }
 
+/** The person's generation as it is now (generationKey): what a page reads with them, and a save from it carries. */
 export async function readGeneration(statsId: string | null, person: string): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
   const replies = await redisPipeline([["GET", generationKey(statsId, person)]]);
@@ -270,12 +270,16 @@ export async function readGenerations(statsId: string, persons: string[]): Promi
  * throws (a mark that stays only refuses more).
  *
  * `at` is when the person did it, in milliseconds, from the server's own
- * record of the act (the payment's time, when the sign-up, the place or the
- * copy was asked for), never from a request. The mark goes
- * only when that is after the deletion, compared in one step with the mark
- * as it is (MARK_RETURNED): an order paid before the deletion and listed only
- * after it (a late job, a thanks page opened again), or an old link used
- * again, is not a return (Codex D, #2287). An unknown time keeps the mark.
+ * record of the act (for a paid order, when its checkout was opened; when the
+ * sign-up, the place or the copy was asked for), never from a request. The
+ * mark goes only when that is after the deletion, compared in one step with
+ * the mark as it is (MARK_RETURNED): an order paid before the deletion and
+ * listed only after it (a late job, a thanks page opened again), or an old
+ * link used again, is not a return (Codex D, #2287). An unknown time keeps the
+ * mark. So does a checkout opened before the deletion and paid after it, and
+ * an order at a store with no mailing list, which is never listed
+ * (lib/buyer-list.ts): both keep refusing field saves until the mark lapses,
+ * 31 days at the most; never the other way round (review of #2287, LOW 3).
  */
 export async function personReturned(statsId: string | null, email: string, at: number): Promise<void> {
   if (!statsId || !email || !Number.isSafeInteger(at) || at <= 0 || !isRedisConfigured()) return;

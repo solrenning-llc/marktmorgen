@@ -112,7 +112,9 @@ export async function putOnList(store: Store, order: ListedOrder): Promise<"done
       }
     }
     // A paid order: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125),
-    // only if it was paid after they were deleted: one listed late is not a return (Codex D, #2287). Taken only once the
+    // only if its checkout was opened after they were deleted: one listed late is not a return (Codex D, #2287). `created`
+    // is the checkout's opening, so one opened before the deletion and paid after it keeps the mark too, until it lapses
+    // (review of #2287, LOW 3); so does an order at a store with no list, which returns "skip" above. Taken only once the
     // order is on the list, so a run that fails part way leaves the mark for the run that lists it.
     await personReturned(store.statsId, order.email, order.created * 1000);
     await redisPipeline([["SET", key, "done", "EX", DONE_SECONDS]]);

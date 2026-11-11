@@ -1635,7 +1635,8 @@ export default async function StudioPage({
                 {(async () => {
                   const meta = metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null);
                   const voice = store ? readVoice(store).catch(() => null) : undefined;
-                  const chosen = team && store ? weeklyTeam(store.handle).catch(() => []) : null;
+                  // A list that could not be read is not drawn (null), never as nobody chosen: a tick would replace everyone chosen.
+                  const chosen = team && store ? weeklyTeam(store.handle).catch(() => null) : null;
                   const goal = readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }));
                   const chat = may("settings") ? chatSetup(store.statsId).catch(() => null) : undefined;
                   return (
@@ -1665,14 +1666,12 @@ export default async function StudioPage({
                           : [],
                       }}
                       weeklyAi={may("settings") && aiAvailableFor(store) && store ? store.weeklyAi : undefined}
-                      weeklyTeam={
-                        team && store
-                          ? {
-                              members: team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()),
-                              chosen: (await chosen) ?? [],
-                            }
-                          : null
-                      }
+                      weeklyTeam={await (async () => {
+                        const picked = await chosen;
+                        return team && picked
+                          ? { members: team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()), chosen: picked }
+                          : null;
+                      })()}
                       goal={(await goal).cents}
                       chat={await chat}
                       chatSales={store.chatSales}

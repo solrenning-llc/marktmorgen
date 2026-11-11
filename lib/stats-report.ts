@@ -338,8 +338,11 @@ export const MAX_WEEKLY_TEAM = 5;
 
 export async function weeklyTeam(handle: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", teamKey(handle)]]);
-  return Array.isArray(members) ? (members as unknown[]).map(String).sort() : [];
+  // Read exactly (rule 24): a reply of another shape is unknown, never "nobody chosen", which the studio's picker
+  // would draw unticked so that the next tick replaced everyone else chosen.
+  const members = repliesFor(await redisPipeline([["SMEMBERS", teamKey(handle)]]), 1)?.[0];
+  if (!Array.isArray(members) || !members.every((m): m is string => typeof m === "string")) throw new UnknownReplyError("who gets the weekly email");
+  return [...members].sort();
 }
 
 export async function setWeeklyTeam(handle: string, emails: string[]): Promise<void> {

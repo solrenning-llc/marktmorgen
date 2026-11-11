@@ -14,7 +14,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const DAY = 86_400_000;
-const BC = "bc0123456789abcdef";
+const BC = "0123456789abcdef01234567";
 const key = `nl:mail:bc:${BC}:poll`;
 const now = Date.now();
 const closesAt = now + 7 * DAY;
@@ -34,7 +34,7 @@ const closesAt = now + 7 * DAY;
   const ttl = Number(redis.run(["TTL", key]));
   const until = Math.ceil((closesAt + POLL_RESULTS_DAYS * DAY - now) / 1000);
   is("kept until the end and the days after it, not longer", ttl > until - 5 && ttl <= until + 1, true);
-  is("no votes yet: an exact zero", await pollResults("bc_none_00000000000", 2), { known: true, counts: [0, 0], votes: 0 });
+  is("no votes yet: an exact zero", await pollResults("fedcba9876543210fedcba98", 2), { known: true, counts: [0, 0], votes: 0 });
 
   part("Refused");
   is("a place that is not one", await recordVote(BC, -1, 0, closesAt, now), "invalid");
@@ -56,5 +56,9 @@ const closesAt = now + 7 * DAY;
   redis.run = run;
   redis.run(["HSET", key, "11", "x"]);
   is("a kept vote that does not read: unknown, never left out", await pollResults(BC, 3), { known: false });
+  part("Only a broadcast's own id, as lib/broadcasts.ts makes it (Claude 3 on #3673, LEVE)");
+  is("an id in another shape keeps no vote", await recordVote("bc0123456789abcdef", 3, 1, closesAt, now), "invalid");
+  is("and reads no totals", await pollResults("bc0123456789abcdef", 2), { known: false });
+
   done();
 })();

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { MAX_HELP_QUESTION } from "@/lib/ai-rules";
 import { NewTab } from "@/components/new-tab";
-import { MAX_SUPPORT_TEXT, MIN_SUPPORT_TEXT, SUPPORT_EMAILS_PER_REQUEST, supportDraft } from "@/lib/help-support-rules";
+import { MAX_SUPPORT_TEXT, MIN_SUPPORT_TEXT, SUPPORT_EMAILS_PER_REQUEST, supportDraft, supportNumberOf } from "@/lib/help-support-rules";
 
 type Answer = { answer: string; sources: { id: string; q: string }[]; asked?: string };
 
@@ -102,6 +102,10 @@ ${answer.answer}`} question={answer.asked ?? ""} answer={answer.answer} /> : nul
 
 type Sent = { number: string; copied: boolean };
 
+/** No answer could be read from the server: the request may have gone, so the words never say it did not. */
+const unconfirmed = (number: string) =>
+  `We could not confirm that your request reached support, so it may or may not have been sent. Sending it again keeps the same request number, ${number}, so support can tell it is one request.`;
+
 /**
  * "Send this to support" (lib/help-support.ts): after an answer, the question and the answer go to a person in
  * one press, as words the creator sees and can change first. Nothing is sent before "Send to support"; the
@@ -110,6 +114,8 @@ type Sent = { number: string; copied: boolean };
 export function SupportHandoff({ question, answer, startOpen = false }: { question: string; answer: string; startOpen?: boolean }) {
   const [open, setOpen] = useState(startOpen);
   const [draft, setDraft] = useState(() => supportDraft(question, answer));
+  // One number for this request, sent with every try: a try whose answer was lost and the next are one request (Codex U on #3617).
+  const [number] = useState(() => supportNumberOf(crypto.getRandomValues(new Uint8Array(5))));
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<Sent | null>(null);
   const [note, setNote] = useState("");
@@ -137,7 +143,7 @@ export function SupportHandoff({ question, answer, startOpen = false }: { questi
       const response = await fetch("/api/store/help/support", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: draft, screen: window.location.pathname }),
+        body: JSON.stringify({ text: draft, screen: window.location.pathname, number }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: Sent; words?: string };
       if (data.ok && data.value) {
@@ -145,9 +151,10 @@ export function SupportHandoff({ question, answer, startOpen = false }: { questi
         focusNext.current = "result";
         return;
       }
-      setNote(data.words || "We could not send your request just now, so nothing was sent. Try again in a moment.");
+      setNote(data.words || unconfirmed(number));
     } catch {
-      setNote("We could not send your request just now, so nothing was sent. Try again in a moment.");
+      // No answer read: the request may have reached support, so it is never said unsent.
+      setNote(unconfirmed(number));
     } finally {
       setBusy(false);
     }

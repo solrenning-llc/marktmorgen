@@ -128,11 +128,11 @@ async function main() {
     "",
     words,
   ].join("\n"));
-  is("its own idempotency key", inbox.key, `help-support-${value.number}`);
+  is("its own idempotency key, scoped to the store", [inbox.key?.startsWith("help-support:"), inbox.key?.endsWith(`:${value.number}`)], [true, true]);
   is("the copy goes to the person who sent it", recipients(copy.body), email);
   is("and replies to it reach support", replyOf(copy.body), "support@marktmorgen.com");
   is("the copy names the number and repeats the words", [copy.body.subject.includes(value.number), copy.body.text.includes(words)], [true, true]);
-  is("the copy has a key of its own", copy.key, `help-support-${value.number}-copy`);
+  is("the copy has a key of its own", copy.key, `${inbox.key}:copy`);
 
   part("A screen from outside the studio is never written into the email");
   sent.length = 0;
@@ -190,7 +190,8 @@ async function main() {
   is("so the words never say nothing was sent", String(unsure.data.words).includes("nothing was sent"), false);
   is("they say it could not be confirmed, with the request's number", [unsure.status, unsure.data.error, String(unsure.data.words).includes("could not confirm"), String(unsure.data.words).includes(number)], [502, "unconfirmed", true, true]);
   const again = await send(otherCookie, { text: "A question whose answer is lost.", number });
-  is("sending again: the same number", [again.status, (again.data.value as { number: string }).number], [200, number]);
+  is("sending again: the same number, still said unconfirmed while the first answer is unknown", [again.status, again.data.error, again.data.number], [502, "unconfirmed", number]);
+  is("and the provider is not asked a second time under that key", calls, 1);
   is("and support has one request, under one key", [sent.filter((s) => recipients(s.body) === "support@marktmorgen.com").length, new Set(sent.filter((s) => recipients(s.body) === "support@marktmorgen.com").map((s) => s.key)).size], [1, 1]);
   const bad = await send(otherCookie, { text: "A question with a made-up number.", number: "help-support-x" });
   is("a number not in the shape is never used: a fresh one", [bad.status, SUPPORT_NUMBER.test((bad.data.value as { number: string }).number), (bad.data.value as { number: string }).number === "help-support-x"], [200, true, false]);

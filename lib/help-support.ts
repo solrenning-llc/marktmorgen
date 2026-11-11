@@ -11,7 +11,9 @@
  * No buyer's data is ever attached: nothing here reads an order, a list or a contact.
  *
  * Nothing is kept. The request is two emails on the company's meter (the support inbox, and the copy to the creator),
- * each under its own idempotency key, so a retry of one send never sends it twice. At most SUPPORT_PER_DAY requests a
+ * each under its own idempotency key made from the store and the request's number. The form makes the number once and
+ * sends it with every try, so a try whose answer was lost and the next one are one request, never two (Codex U on
+ * #3617); an email that did not confirm is said unconfirmed, never "nothing was sent" (rule 24). At most SUPPORT_PER_DAY requests a
  * store in 24 hours, counted before anything is sent, with a counter that says no when it cannot be read
  * (lib/request-guard.ts, essentialLimitState): a count that cannot be read is never "room left" (rule 24).
  */
@@ -26,45 +28,45 @@ import {
   MAX_SUPPORT_TEXT,
   MIN_SUPPORT_TEXT,
   SUPPORT_PER_DAY,
+  SUPPORT_NUMBER,
   SUPPORT_WINDOW_SECONDS,
   cleanSupportText,
+  supportNumberOf,
   supportScreen,
 } from "@/lib/help-support-rules";
 
 export * from "@/lib/help-support-rules";
 
-const BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/** A fresh number from 5 random bytes: 40 bits, five at a time by shifts and masks, so each symbol is as likely. */
+/** A fresh number from 5 random bytes (supportNumberOf). */
 export function supportNumber(bytes: Uint8Array = randomBytes(5)): string {
-  if (bytes.length < 5) throw new Error("a support request number needs 5 random bytes");
-  let buffer = 0;
-  let held = 0;
-  let out = "";
-  for (let i = 0; i < 5; i++) {
-    buffer = ((buffer << 8) | bytes[i]) & 0xfff;
-    held += 8;
-    while (held >= 5) {
-      held -= 5;
-      out += BASE32[(buffer >> held) & 31];
-    }
-  }
-  return `SR-${out.slice(0, 4)}-${out.slice(4, 8)}`;
+  return supportNumberOf(bytes);
 }
 
-export type SupportProblem = "short" | "long" | "busy" | "unknown" | "unsent";
+export type SupportProblem = "short" | "long" | "busy" | "unknown" | "unconfirmed";
 
-export const SUPPORT_PROBLEMS: Record<SupportProblem, string> = {
+export const SUPPORT_PROBLEMS: Record<Exclude<SupportProblem, "unconfirmed">, string> = {
   short: "Write a few words about what you need first.",
   long: `That is too long to send. Keep it under ${MAX_SUPPORT_TEXT.toLocaleString("en-US")} characters.`,
   busy: `Your store has sent ${SUPPORT_PER_DAY} requests to support in the last 24 hours, the most a day. Try again tomorrow, or write to ${SUPPORT_EMAIL}.`,
   unknown: `We could not check how many requests your store sent today, so nothing was sent. Try again in a moment, or write to ${SUPPORT_EMAIL}.`,
-  unsent: `We could not send your request just now, so nothing was sent. Try again in a moment, or write to ${SUPPORT_EMAIL}.`,
 };
 
-export type SupportResult = { ok: true; number: string; copied: boolean } | { ok: false; problem: SupportProblem; words: string };
+/**
+ * The inbox's email did not confirm. A false from sendEmail may be a refusal or an email taken whose answer was lost,
+ * so it is never said "nothing was sent" (rule 24): it is said unconfirmed, with the number a try again keeps.
+ */
+export function unconfirmedWords(number: string): string {
+  return `We could not confirm that your request reached support, so it may or may not have been sent. Sending it again keeps the same request number, ${number}, so support can tell it is one request. Or write to ${SUPPORT_EMAIL} and give that number.`;
+}
 
-const refuse = (problem: SupportProblem): SupportResult => ({ ok: false, problem, words: SUPPORT_PROBLEMS[problem] });
+export type SupportResult = { ok: true; number: string; copied: boolean } | { ok: false; problem: SupportProblem; words: string; number?: string };
+
+const refuse = (problem: Exclude<SupportProblem, "unconfirmed">): SupportResult => ({ ok: false, problem, words: SUPPORT_PROBLEMS[problem] });
+
+/** The number the form sent for this request when it has the shape of one; otherwise a fresh one. */
+export function requestNumber(raw: unknown): string {
+  return typeof raw === "string" && SUPPORT_NUMBER.test(raw) ? raw : supportNumber();
+}
 
 /**
  * Sends one request to the support inbox and its copy to the person who sent it. The text is the creator's own,
@@ -88,15 +90,17 @@ export async function sendSupportRequest(
     `Screen: ${supportScreen(input.screen)}`,
     `From: ${input.from}`,
   ];
+  // Scoped to the store: a number chosen in the browser only ever names this store's own request.
+  const key = `help-support:${input.store.sid || input.store.handle}:${number}`;
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
     replyTo: input.from,
     subject: `Support request ${number} from @${input.store.handle}`.slice(0, 200),
     text: [...facts, "", text].join("\n"),
-    idempotencyKey: `help-support-${number}`,
+    idempotencyKey: key,
   }).catch(() => false);
-  if (!sent) return refuse("unsent");
+  if (!sent) return { ok: false, problem: "unconfirmed", words: unconfirmedWords(number), number };
   const copied = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: input.from,
@@ -109,7 +113,7 @@ export async function sendSupportRequest(
       "",
       text,
     ].join("\n"),
-    idempotencyKey: `help-support-${number}-copy`,
+    idempotencyKey: `${key}:copy`,
   }).catch(() => false);
   return { ok: true, number, copied };
 }

@@ -30,6 +30,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
 const TOKEN_SECONDS = 60 * 86_400;
@@ -216,9 +217,17 @@ const owedKey = (report: string) => reportKey(`${report}:n`);
 const MAX_OWED = 50;
 /**
  * `applied`: the content was confirmed taken down (apply returned true and this mark was confirmed). Steps written
- * before this field existed have none, and are read as not confirmed.
+ * before this field existed have none, and are read as not confirmed. `picture`: a product's old picture names, kept
+ * before its record is pointed at the copies (lib/picture-withdraw.ts), so a later press deletes those files and
+ * never moves the picture twice; absent until then.
  */
-type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean };
+type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean; picture?: PictureNames };
+
+/** Kept picture names, exactly: a path, and a smaller copy's path or null. */
+const pictureNames = (value: unknown): value is PictureNames => {
+  const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return Boolean(v && typeof v.path === "string" && v.path && (v.small === null || (typeof v.small === "string" && v.small)));
+};
 
 /**
  * A takedown's steps, or null only when Redis itself answers null (no steps). A pipeline that answers nothing, or a
@@ -233,10 +242,12 @@ async function readSteps(key: string): Promise<Steps | null> {
   const value: unknown = JSON.parse(raw);
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" || typeof v.at !== "string" || !/^\d+$/.test(v.at) ||
-      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean") {
+      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean" ||
+      (v.picture !== undefined && !pictureNames(v.picture))) {
     throw new Error("a takedown's steps could not be read");
   }
-  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent };
+  const picture = pictureNames(v.picture) ? { path: v.picture.path, small: v.picture.small } : null;
+  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent, ...(picture ? { picture } : {}) };
 }
 
 /**
@@ -373,6 +384,8 @@ export async function sendOwedNotice(report: Report, store: Store, action: Exclu
       kept = { ...kept, applied: true };
       await writeSteps(key, kept);
     }
+    // The picture too, while the product is still off the store (R44); one the creator published again keeps it.
+    if (action.type === "product") kept = await withdrawPicture(storeRef(now), action.id, key, kept);
     return { done: await complete(report, now, action, origin, part, key, kept) };
   });
 }
@@ -425,7 +438,19 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
       await writeSteps(key, steps);
     }
   }
+  // A product's picture leaves the address its pages gave out before the creator is told it is down (R44).
+  if (action.type === "product") steps = await withdrawPicture(ref, action.id, key, steps);
   return complete(report, store, action, origin, part, key, steps);
+}
+
+/** Moves a product's picture (lib/picture-withdraw.ts), its old names kept with the steps first; the steps as they are now. */
+async function withdrawPicture(ref: string, id: string, key: string, steps: Steps): Promise<Steps> {
+  let kept = steps;
+  await withdrawProductPicture(ref, id, kept.picture ?? null, async (picture) => {
+    kept = { ...kept, picture };
+    await writeSteps(key, kept);
+  });
+  return kept;
 }
 
 /** Whether the store already keeps this strike (as lib/store.ts parseStrikes keeps it: report, time and words). */

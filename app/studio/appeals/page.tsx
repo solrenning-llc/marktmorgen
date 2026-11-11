@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { TakedownAppealForm, TakedownAppealSendAgain } from "@/components/takedown-appeal-form";
@@ -41,13 +41,7 @@ export default async function StudioAppealsPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <nav aria-label="Breadcrumb" className="text-sm text-ink-soft">
-            <ol className="flex flex-wrap gap-2">
-              <li><Link href={studioPath(store)} className="inline-flex min-h-11 items-center underline underline-offset-4">Studio</Link></li>
-              <li aria-hidden="true" className="inline-flex min-h-11 items-center">/</li>
-              <li aria-current="page" className="inline-flex min-h-11 items-center">Ask us to look again</li>
-            </ol>
-          </nav>
+          <StudioTrail store={store} here="Ask us to look again" />
           <h1 className="t-h2 mt-3">Ask us to look again</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             If you think we took something down by mistake, tell us why. A person at Marktmorgen reads every request. It is free, and you can send one request for each decision.

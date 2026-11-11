@@ -895,9 +895,9 @@ export default function TermsPage() {
           {ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`}{" "}
           after it ends, before the closing day, whatever the store&rsquo;s
           size. It holds your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts,
-          courses with every lesson&rsquo;s text, forms and their answers,
+          courses with every lesson&rsquo;s text, forms and their answers, your task list,
           contacts and your orders as a spreadsheet. Files and videos
-          download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio. Your students can download their
+          download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and CRM tasks stay in your studio. Your students can download their
           course certificates until the closing day, and not after.
         </p>
         <p>

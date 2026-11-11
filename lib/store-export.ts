@@ -155,7 +155,7 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
     // The store's own task list (IA2, lib/business-tasks.ts): one read, its words as the creator wrote them. A list that
     // cannot be read whole throws, and is said as a part not read (unreadPart), never as no tasks.
     async () => `,"tasks":${JSON.stringify(businessTaskCopy(await readBusinessTasks(statsId)))}`,
-    async () => `,"notIncluded":"Nothing else is in this file. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio. Download files and videos from their own pages in your studio."}\n`,
+    async () => `,"notIncluded":"Nothing else is in this file. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and CRM tasks stay in your studio. Download files and videos from their own pages in your studio."}\n`,
   ];
   // A store whose plan runs downloads again from its studio's figure, so "download again" is true for it. A store
   // whose plan has ended has ENDED_STORE_EXPORTS of this file, taken before it streams (app/api/store/export/route.ts):

@@ -38,7 +38,7 @@ import { reserveMoved } from "@/lib/imports";
 import { storeBase } from "@/lib/purchase-email";
 import { accessWords } from "@/lib/buyer-words/access";
 import { redisPipeline } from "@/lib/redis";
-import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
+import { essentialLimitState, withinLimit } from "@/lib/request-guard";
 import { takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_WRITE_UNITS } from "@/lib/store-allowance-rules";
@@ -224,7 +224,9 @@ export async function giveAccess(
   const already = (await importedFor({ ...store, statsId, pastBuyers: true }, email)).some((p) => p.productId === product.id);
   if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
-  if (!(await withinEssentialLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("unavailable");
+  // Past the day's gives is the documented 429 daily_limit; an unreadable count is 503 unavailable.
+  const gives = await essentialLimitState("api-give", store.sid, GIVES_PER_DAY, 86_400);
+  if (gives !== "within") return fail(gives === "exceeded" ? "daily_limit" : "unavailable");
   const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
   if (!taken.ok) return refusedFigure(taken);
   // Checked again where it is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since gets nothing.

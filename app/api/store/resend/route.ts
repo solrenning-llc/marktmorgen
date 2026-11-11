@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { resendPurchase } from "@/lib/purchase-email";
 
 /** How often one sale's email may be sent again in a day, and one store's in an hour. */
@@ -25,12 +25,11 @@ export async function POST(request: NextRequest) {
   if (!/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(reference)) {
     return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   }
-  if (
-    !(await withinEssentialLimit("resend-sale", reference, PER_SALE_PER_DAY, 24 * 60 * 60)) ||
-    !(await withinEssentialLimit("resend-store", store.sid || store.handle, PER_STORE_PER_HOUR, 60 * 60))
-  ) {
-    return Response.json({ ok: false, error: "limited" }, { status: 429 });
-  }
+  // Past either count is 429 "limited"; a count that cannot be read is 503 "unavailable", never "slow down".
+  const bySale = await essentialLimitState("resend-sale", reference, PER_SALE_PER_DAY, 24 * 60 * 60);
+  const byStore = bySale === "within" ? await essentialLimitState("resend-store", store.sid || store.handle, PER_STORE_PER_HOUR, 60 * 60) : bySale;
+  if (byStore === "exceeded") return Response.json({ ok: false, error: "limited" }, { status: 429 });
+  if (byStore === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   try {
     const outcome = await resendPurchase(store, reference);
     if (outcome === "sent") return Response.json({ ok: true });

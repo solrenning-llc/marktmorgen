@@ -32,7 +32,7 @@ import { after } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Store, storeForHandle, storeForId } from "@/lib/store";
 import { leadsKey } from "@/lib/contacts";
@@ -123,8 +123,11 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return { status: "email" };
   if (!isRedisConfigured() || !isSenderConfigured()) return { status: "error" };
   const email = normaliseEmail(raw);
-  if (!(await withinEssentialLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "error" };
-  if (!(await withinEssentialLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "error" };
+  // Past either hour is "limited"; a count that cannot be read is an error, said as one.
+  const byIp = await essentialLimitState("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600);
+  if (byIp !== "within") return { status: byIp === "exceeded" ? "limited" : "error" };
+  const byAddress = await essentialLimitState("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600);
+  if (byAddress !== "within") return { status: byAddress === "exceeded" ? "limited" : "error" };
   if (input.handle) {
     const store = await storeForHandle(input.handle).catch(() => null);
     if (store?.sid) {

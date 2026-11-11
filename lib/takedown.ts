@@ -21,7 +21,7 @@
 import { countNotice, countStep } from "@/lib/transparency";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, noteTakedown, removeStoreLink, setKit, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
@@ -47,7 +47,9 @@ export type FileResult = "sent" | "limited" | "error";
 /** Keeps a notice and sends it to the support inbox with the link that acts on it. */
 export async function fileReport(input: ReportInput, ip: string, origin: string): Promise<FileResult> {
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
-  if (!(await withinEssentialLimit("report", ip, 5, 3_600))) return "error";
+  // Past the hour is "limited"; a count that cannot be read is an error, said as one.
+  const allowance = await essentialLimitState("report", ip, 5, 3_600);
+  if (allowance !== "within") return allowance === "exceeded" ? "limited" : "error";
   const id = randomBytes(8).toString("hex");
   const token = randomBytes(24).toString("hex");
   const report: Report = { ...input, id, at: new Date().toISOString(), handle: handleIn(input.url) };

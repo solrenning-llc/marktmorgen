@@ -12,7 +12,7 @@ import {
   sendMoveLink,
 } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
-import { fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState, fromAnotherSite, limited } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
 import { hasSecondStep, holdsSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 
@@ -90,7 +90,9 @@ export async function POST(request: NextRequest) {
     // Never onto an address with ways in of its own: they would join this account's (checked again at the
     // tap). Asked only after the store, a recent login, the address's hourly count and the account's own
     // (five addresses an hour), so finding out which addresses have passkeys this way stays slow and limited.
-    if (!(await withinEssentialLimit("move-ask", normaliseEmail(email), MOVE_ASKS_PER_HOUR, 60 * 60))) return back("limited");
+    const asks = await essentialLimitState("move-ask", normaliseEmail(email), MOVE_ASKS_PER_HOUR, 60 * 60);
+    if (asks === "unknown") return back("error");
+    if (asks === "exceeded") return back("limited");
     if (await holdsSecondStep(wanted)) return back("has-login");
     await sendMoveLink(email, wanted, linkOrigin(request), session as string);
   } catch (error) {

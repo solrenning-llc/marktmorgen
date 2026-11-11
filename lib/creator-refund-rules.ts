@@ -104,12 +104,17 @@ export function refundIdempotencyKey(storeId: string, chargeId: string, actionTo
 
 export type RefundOutcome = "done" | "pending" | "failed" | "unknown";
 
-/** What Stripe's answer to a refund says, measured against what was asked. */
-export function refundOutcome(reply: unknown, asked: { chargeId: string; cents: number }): RefundOutcome {
+/**
+ * What Stripe's answer to a refund says, measured against what was asked:
+ * the same charge, the same amount in the same currency (the charge's, as
+ * refundableOf read it). An amount alone is not the same money.
+ */
+export function refundOutcome(reply: unknown, asked: { chargeId: string; cents: number; currency: string }): RefundOutcome {
   const r = record(reply);
   if (!r || r.object !== "refund" || typeof r.id !== "string" || !r.id) return "unknown";
   const charge = typeof r.charge === "string" ? r.charge : record(r.charge)?.id;
   if (charge !== asked.chargeId || r.amount !== asked.cents) return "unknown";
+  if (typeof asked.currency !== "string" || !/^[a-z]{3}$/.test(asked.currency) || r.currency !== asked.currency) return "unknown";
   if (r.status === "succeeded") return "done";
   if (r.status === "pending" || r.status === "requires_action") return "pending";
   if (r.status === "failed" || r.status === "canceled") return "failed";

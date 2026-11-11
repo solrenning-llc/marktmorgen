@@ -22,7 +22,8 @@ const question = editor.slice(editor.lastIndexOf("confirmClear ? (", askAt), edi
 
 is("the question is drawn where it was", askAt > 0 && question.length > 0, true);
 is("it is a group named by its own words", /role="group" aria-labelledby="clear-question"/.test(question) && /id="clear-question"[^>]*>\s*Back to the plain page\?/.test(question), true);
-is("Keep it holds a ref, so the focus can go to it", /<button ref=\{clearKeep\}[^>]*>\s*Keep it/.test(question), true);
+const keepAt = question.indexOf("Keep it\n");
+is("Keep it holds a ref, so the focus can go to it", keepAt > 0 && question.slice(question.lastIndexOf("<button", keepAt), keepAt).includes("ref={clearKeep}"), true);
 is("Keep it marks that the focus goes back, then closes the question", /onClick=\{\(\) => \{\s*clearBack\.current = true;\s*setConfirmClear\(false\);\s*\}\}/.test(question), true);
 is("Clear the page holds a ref, so the focus can come back to it", /<button ref=\{clearOpen\}[^>]*onClick=\{\(\) => setConfirmClear\(true\)\}/.test(question), true);
 

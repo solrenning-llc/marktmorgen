@@ -44,12 +44,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 // caller's own SET NX + INCR; "unknown" makes Redis throw on that counter only.
 type Mode = "full" | "unknown";
 const modes = new Map<string, Mode>();
+const filled = new Set<string>();
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   for (const [scope, mode] of modes) {
     const hit = commands.find((c) => String(c[1] ?? "").startsWith(`nl:rl:${scope}:`));
     if (!hit) continue;
     if (mode === "unknown") throw new Error("Redis timed out (synthetic)");
+    filled.add(String(hit[1]));
     await real([["SET", String(hit[1]), "1000000000", "EX", 86_400]]);
   }
   return real(commands);
@@ -63,6 +65,9 @@ async function under<T>(scope: string, mode: Mode, run: () => Promise<T>): Promi
     return { value: await run(), sent: sent - before };
   } finally {
     modes.clear();
+    // Each case starts from counters with room: a filled one never leaks into the next.
+    if (filled.size) await real([["DEL", ...filled]]);
+    filled.clear();
   }
 }
 

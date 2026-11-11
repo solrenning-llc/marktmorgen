@@ -90,7 +90,7 @@ export default async function StudioSitePage({ searchParams }: Params) {
               {selected && page ? (
                 <>
                   <SitePageSettings key={`settings-${selected.id}-${selected.slug}-${selected.title}`} page={selected} pages={pages} products={products} base={base} sid={store.sid} />
-                  <AiOn value={aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}>
+                  <AiOn value={aiAvailableFor(store) ? await aiLeft(store).then((left) => ({ on: true, left }), () => ({ on: true, left: 0, known: false as const })) : { on: false, left: 0 }}>
                     <PageEditor
                       key={selected.id}
                       site={{ id: selected.id, kinds: SITE_KINDS }}

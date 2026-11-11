@@ -216,7 +216,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
                 <p role="status" className="text-lg font-semibold tracking-[-0.02em] text-ink">{STUDIO_MESSAGES.page_unread}</p>
               </div>
             ) : (
-            <AiOn value={aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}>
+            <AiOn value={aiAvailableFor(store) ? await aiLeft(store).then((left) => ({ on: true, left }), () => ({ on: true, left: 0, known: false as const })) : { on: false, left: 0 }}>
             <PageEditor
               // One editor per product: a save keeps the editor as it is, with the
               // page as the server kept it (components/page-editor.tsx, send),

@@ -438,24 +438,36 @@ export function ReviewRow({ review }: { review: StudioReview }) {
 export function SeenAllButton({ count }: { count: number }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  // A refused or failed press is said beside the button, never dropped (VR, 11/11/2026): it came back with no word.
+  const [problem, setProblem] = useState<string | null>(null);
   if (count === 0) return null;
   return (
-    <button
-      type="button"
-      className="btn btn-secondary btn-sm"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        const problem = await post({ action: "seen", all: true });
-        setBusy(false);
-        if (!problem) {
+    <>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setProblem(null);
+          const said = await post({ action: "seen", all: true });
+          setBusy(false);
+          if (said) {
+            setProblem(said);
+            return;
+          }
           toast("All marked as seen.");
           router.refresh();
-        }
-      }}
-    >
-      <Icon name="check" size={15} />
-      {`Mark all ${count} as seen`}
-    </button>
+        }}
+      >
+        <Icon name="check" size={15} />
+        {`Mark all ${count} as seen`}
+      </button>
+      {problem ? (
+        <p className="notice notice-error mt-2 w-full" role="alert">
+          {problem}
+        </p>
+      ) : null}
+    </>
   );
 }

@@ -23,6 +23,7 @@ const REASONS: Record<string, string> = {
   short: "Write a little more before sending.",
   none: "That conversation is no longer kept.",
   limited: "That is a lot of answers today. Try again later.",
+  error: "Today's count of answers could not be checked just now, so nothing was sent. Try again in a minute.",
   assign: "That person cannot answer buyers. Give it to someone whose role can.",
   used: "This month's writing jobs are used up. They come back with your next billing month.",
   off: "The writing help is not on for this store.",

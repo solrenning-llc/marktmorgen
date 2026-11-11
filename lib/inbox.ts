@@ -33,7 +33,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, monthOf, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
+import { essentialLimitState, withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
@@ -174,7 +174,7 @@ async function trim(statsId: string): Promise<void> {
 type NewInput = { store: Store; email: unknown; name: unknown; text: unknown; source: Source; now?: number };
 
 /** A new conversation, its first message and the visitor's token. */
-async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; messages: Message[] } | { ok: false; reason: "email" | "short" | "limited" | "closed" }> {
+async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; messages: Message[] } | { ok: false; reason: "email" | "short" | "limited" | "closed" | "error" }> {
   const { store } = input;
   const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return { ok: false, reason: "closed" };
@@ -182,7 +182,9 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
   if (!email) return { ok: false, reason: "email" };
   const text = messageText(input.text);
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
-  if (!(await withinEssentialLimit("inbox-new", statsId, NEW_PER_DAY, 86_400))) return { ok: false, reason: "limited" };
+  // Past the day's new conversations is "limited"; a count that cannot be read is "error", said as one (rule 24).
+  const opened = await essentialLimitState("inbox-new", statsId, NEW_PER_DAY, 86_400);
+  if (opened !== "within") return { ok: false, reason: opened === "exceeded" ? "limited" : "error" };
   const now = input.now ?? Date.now();
   // One of the store's inbox messages for its window (lib/store-allowance-rules.ts), before it is written.
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
@@ -454,7 +456,7 @@ export async function openConversation(statsId: string, id: string, store?: Stor
   return { conversation: shown(conversation), messages: await readMessages(statsId, id) };
 }
 
-export type ReplyResult = { ok: true; thread: Thread; emailed: boolean } | { ok: false; reason: "short" | "none" | "limited" };
+export type ReplyResult = { ok: true; thread: Thread; emailed: boolean } | { ok: false; reason: "short" | "none" | "limited" | "error" };
 
 /** The store answers: the message is kept, shows in the visitor's chat, and is emailed to them in the store's language. */
 export async function replyTo(store: Store, id: string, by: string, textRaw: unknown, now = Date.now()): Promise<ReplyResult> {
@@ -464,7 +466,8 @@ export async function replyTo(store: Store, id: string, by: string, textRaw: unk
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
   const conversation = await readKept(statsId, id);
   if (!conversation) return { ok: false, reason: "none" };
-  if (!(await withinEssentialLimit("inbox-reply", statsId, 400, 86_400))) return { ok: false, reason: "limited" };
+  const answered = await essentialLimitState("inbox-reply", statsId, 400, 86_400);
+  if (answered !== "within") return { ok: false, reason: answered === "exceeded" ? "limited" : "error" };
   const message: Message = { at: now, from: "store", text, by };
   const next = await write(store, statsId, store.handle, { ...conversation, lastAt: now, lastFrom: "store", unread: 0 }, message, true, now);
   const w = chatWords(store.language);
@@ -489,7 +492,7 @@ export async function replyTo(store: Store, id: string, by: string, textRaw: unk
  */
 const AFFILIATE_MESSAGES_PER_DAY = 50;
 
-export type FirstMessageResult = { ok: true; thread: Thread; emailed: boolean } | { ok: false; reason: "email" | "short" | "limited" | "closed" };
+export type FirstMessageResult = { ok: true; thread: Thread; emailed: boolean } | { ok: false; reason: "email" | "short" | "limited" | "closed" | "error" };
 
 /**
  * The creator writes first, to one of their own affiliates (630 [HN6](5)).
@@ -526,7 +529,8 @@ export async function writeToAffiliate(
   if (!email) return { ok: false, reason: "email" };
   const text = messageText(textRaw);
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
-  if (!(await withinEssentialLimit("inbox-new", `${statsId}:affiliates`, AFFILIATE_MESSAGES_PER_DAY, 86_400))) return { ok: false, reason: "limited" };
+  const written = await essentialLimitState("inbox-new", `${statsId}:affiliates`, AFFILIATE_MESSAGES_PER_DAY, 86_400);
+  if (written !== "within") return { ok: false, reason: written === "exceeded" ? "limited" : "error" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
   const conversation: Kept = {

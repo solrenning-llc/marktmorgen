@@ -18,6 +18,7 @@ const MESSAGES: Record<string, string> = {
   page_unread: "This page could not be read just now, so no copy was made. Try again in a moment.",
   copy_conflict: "Your pages changed while the copy was being made, so none was made. Reload the page and try again.",
   copy_failed: "The page could not be saved just now. Reload to check your pages before trying again.",
+  copy_unknown: "We could not tell whether the copy was made. Reload to see your pages before trying again.",
   copy_full: "Your store has no room left for this page's blocks, so none was added. Remove something you no longer need first.",
   file: "That file is not a page from Marktmorgen, or it was changed so its blocks cannot be kept as they are. Nothing was added.",
   too_big: "That page is bigger than a page may be. Nothing was added.",

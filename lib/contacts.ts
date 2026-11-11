@@ -483,7 +483,13 @@ export async function importContacts(
       } catch (error) {
         // The store's data room is full: what was added stays and is said, the
         // rest is not written, and the caller still starts the ramp for those added.
-        if (!(error instanceof DataRoomError)) throw error;
+        if (!(error instanceof DataRoomError)) {
+          // The room could not be counted (unknown, never full): nothing of this batch was written and no room was
+          // taken. With nothing confirmed yet the caller is told it failed; with progress confirmed, that progress is
+          // answered and the ramp still starts for it, as with an unreadable batch above.
+          if (added === 0) throw error;
+          return { added, already: i - added, full, notImported: { left: emails.length - i, message: "The remaining contacts were not imported. Try again." } };
+        }
         const left = emails.length - i;
         return { added, already: i - added, full, roomFull: { left, message: error.message } };
       }

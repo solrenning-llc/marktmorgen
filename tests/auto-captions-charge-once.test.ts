@@ -55,8 +55,20 @@ let balanceTxns: BalanceTxn[] = [];
 let creditAnswerLost = false;
 /** The video service refuses to write captions. */
 let transcribeRefused = false;
+/** The languages the video service lists captions in for the video. */
+let serviceCaptions: string[] = [];
 
 class Died extends Error {}
+
+/** Every `metadata[...]` field of a request, as Stripe keeps it; null when there is none. */
+function metadataOf(body: URLSearchParams): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const [name, value] of body) {
+    const field = /^metadata\[(.+)\]$/.exec(name);
+    if (field) out[field[1]] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (dead) throw new Died("the process is gone");
@@ -69,7 +81,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       if (transcribeRefused) return json({ success: false, statusCode: 400 }, 400);
       return json({ success: true, statusCode: 200 });
     }
-    return json({ guid: VIDEO, status: 4, captions: [] });
+    return json({ guid: VIDEO, status: 4, captions: serviceCaptions.map((lang) => ({ srclang: lang, label: lang })) });
   }
   const path = url.pathname.replace(/^\/v1/, "");
   if (dieAt && `${method} ${path}`.endsWith(dieAt)) {
@@ -90,7 +102,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const history = /^\/customers\/([^/]+)\/balance_transactions$/.exec(path);
   if (history && method === "GET") return json({ object: "list", has_more: false, data: balanceTxns.filter((t) => t.customer === decodeURIComponent(history[1])).slice().reverse() });
   if (history && method === "POST") {
-    const made: BalanceTxn = { id: `cbtxn_Captions${String(balanceTxns.length + 1).padStart(6, "0")}`, object: "customer_balance_transaction", customer: decodeURIComponent(history[1]), amount: Number(body.get("amount")), currency: "usd", type: "adjustment", metadata: body.has("metadata[nl_captions_credit]") ? { nl_captions_credit: String(body.get("metadata[nl_captions_credit]")) } : null };
+    const made: BalanceTxn = { id: `cbtxn_Captions${String(balanceTxns.length + 1).padStart(6, "0")}`, object: "customer_balance_transaction", customer: decodeURIComponent(history[1]), amount: Number(body.get("amount")), currency: "usd", type: "adjustment", metadata: metadataOf(body) };
     balanceTxns.push(made);
     customerBalance += made.amount;
     if (creditAnswerLost) {
@@ -206,6 +218,7 @@ function reset(): void {
   balanceTxns = [];
   creditAnswerLost = false;
   transcribeRefused = false;
+  serviceCaptions = [];
   redis.run(["SET", `nl:stream:v:${VIDEO}`, JSON.stringify({ id: VIDEO, path: PATH, name: "Knife skills.mp4", type: "video/mp4", bytes: 1, state: "ready", at: Date.now(), seconds: 600, width: 1920, height: 1080, settled: true })]);
 }
 
@@ -444,6 +457,119 @@ async function main(): Promise<void> {
   is("the new, paid order is still queued once the slow settler is done", [raced, paidCount(), redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null], [true, 1, true]);
   for (let minutes = 20; minutes <= 60; minutes += 5) await sweepAutoCaptions(Number.POSITIVE_INFINITY, T + minutes * 60_000);
   is("and the sweep, which reads only the queue, refunds it in full, once", [paidCount(), refunds.length, kept()], [1, 1, 0]);
+
+  part("A charge given back to the credit balance is given back once, whichever path gives it (Claude 6's HIGH on #3286)");
+  reset();
+  customerBalance = -50_000;
+  transcribeRefused = true;
+  const credits = () => balanceTxns.filter((t) => t.amount < 0);
+  /** The record's DEL after a confirmed credit back does not land. */
+  redis.pipeline = async (commands) => {
+    const c = commands as unknown[][];
+    if (c.length === 1 && c[0][0] === "DEL" && c[0][1] === KEY) return [] as unknown[];
+    return realRun(commands);
+  };
+  const refusedOnce = await ask(T);
+  redis.pipeline = realRun;
+  is("the service refuses: credited once, the record left behind", [refusedOnce, customerBalance, credits().length, redis.run(["GET", KEY]) !== null], ["credited", -50_000, 1, true]);
+  transcribeRefused = false;
+  advance(50 * 3_600_000);
+  await syncAutoCaptions(VIDEO, T + 50 * 3_600_000);
+  await syncAutoCaptions(VIDEO, T + 51 * 3_600_000);
+  is("past GIVE_UP_HOURS the record left behind is settled with nothing credited twice", [customerBalance, credits().length, redis.run(["GET", KEY])], [-50_000, 1, null]);
+
+  reset();
+  customerBalance = -50_000;
+  transcribeRefused = true;
+  creditAnswerLost = true;
+  /** The write of what is owed does not land either. */
+  redis.pipeline = async (commands) => {
+    const c = commands as unknown[][];
+    if (c[0]?.[0] === "SET" && c[0][1] === KEY && String(c[0][2]).includes('"owed"')) return [] as unknown[];
+    return realRun(commands);
+  };
+  const twoFaults = await ask(T);
+  redis.pipeline = realRun;
+  creditAnswerLost = false;
+  transcribeRefused = false;
+  is("a credit whose answer was lost, and a write of what is owed that did not land", [twoFaults, customerBalance, credits().length], ["refund_pending", -50_000, 1]);
+  advance(50 * 3_600_000);
+  replays.clear();
+  await syncAutoCaptions(VIDEO, T + 50 * 3_600_000);
+  await syncAutoCaptions(VIDEO, T + 51 * 3_600_000);
+  is("the sweep reads the credit already made for this invoice and credits nothing twice", [customerBalance, credits().length, redis.run(["GET", KEY])], [-50_000, 1, null]);
+
+  reset();
+  customerBalance = -50_000;
+  is("paid from the credit, the captions asked for", await ask(T), "asked");
+  const paidInvoice = invoices[0].id;
+  // Half of it already went back to the credit balance, under another key (a path that has since been retried).
+  balanceTxns.push({ id: "cbtxn_Earlier000001", object: "customer_balance_transaction", customer: "cus_Store000003", amount: -6_000, currency: "usd", type: "adjustment", metadata: { nl_captions_credit: `nl-captions:${VIDEO}:earlier:refund`, invoice: paidInvoice } });
+  customerBalance -= 6_000;
+  advance(50 * 3_600_000);
+  await syncAutoCaptions(VIDEO, T + 50 * 3_600_000);
+  is("what is owed is capped by what this invoice already got back: nothing more than the price", [customerBalance, credits().reduce((sum, t) => sum + t.amount, 0)], [-50_000, -12_000]);
+
+  reset();
+  customerBalance = -50_000;
+  transcribeRefused = true;
+  // A row carrying the captions mark whose invoice cannot be read: what was given back is unknown.
+  balanceTxns.push({ id: "cbtxn_Unread000001", object: "customer_balance_transaction", customer: "cus_Store000003", amount: -12_000, currency: "usd", type: "adjustment", metadata: { nl_captions_credit: `nl-captions:${VIDEO}:other:refund` } });
+  is("a history row that does not read exactly: nothing credited, kept as owed", [await ask(T), credits().length], ["refund_pending", 1]);
+
+  part("A sweep that finds the video free never unqueues a newer order taken meanwhile (Claude 2 N1 on #3286)");
+  reset();
+  redis.run(["ZADD", "nl:stream:autoq", T, VIDEO]);
+  let between = false;
+  redis.pipeline = async (commands) => {
+    const c = commands as unknown[][];
+    const reply = await realRun(commands);
+    if (!between && c.length === 1 && c[0][0] === "GET" && c[0][1] === KEY && reply[0] === null) {
+      between = true;
+      // Between the sweep's read (nothing there) and its unqueue: a new order is charged, and its process dies.
+      dieAfterPay = true;
+      await ask(T);
+      dieAfterPay = false;
+      dead = false;
+    }
+    return reply;
+  };
+  await syncAutoCaptions(VIDEO, T);
+  redis.pipeline = realRun;
+  is("the new, paid order stays queued", [between, paidCount(), redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null], [true, 1, true]);
+  for (let minutes = 20; minutes <= 60; minutes += 5) await sweepAutoCaptions(Number.POSITIVE_INFINITY, T + minutes * 60_000);
+  is("and the sweep refunds it in full, once", [paidCount(), refunds.length, kept()], [1, 1, 0]);
+  reset();
+  redis.run(["ZADD", "nl:stream:autoq", T, VIDEO]);
+  is("a video with nothing there is still taken out of the queue", [await syncAutoCaptions(VIDEO, T), redis.run(["ZSCORE", "nl:stream:autoq", VIDEO])], ["none", null]);
+
+  part("A language delivered stays delivered, even once its captions are taken off (R47)");
+  reset();
+  is("charged by card and asked for", await ask(T), "asked");
+  serviceCaptions = ["en"];
+  await syncAutoCaptions(VIDEO, T + 5 * 60_000);
+  is("English arrives and is listed", (JSON.parse(String(redis.run(["GET", KEY]))) as { got: string[] }).got, ["en"]);
+  // The creator takes the English captions off; Spanish never comes.
+  serviceCaptions = [];
+  advance(50 * 3_600_000);
+  await syncAutoCaptions(VIDEO, T + 50 * 3_600_000);
+  is("past GIVE_UP_HOURS only the language never delivered is refunded", [refunds.map((r) => r.amount), kept(), redis.run(["GET", KEY])], [[PRICE / 2], PRICE / 2, null]);
+  reset();
+  customerBalance = -50_000;
+  is("paid from the credit and asked for", await ask(T), "asked");
+  serviceCaptions = ["en"];
+  await syncAutoCaptions(VIDEO, T + 5 * 60_000);
+  serviceCaptions = [];
+  advance(50 * 3_600_000);
+  await syncAutoCaptions(VIDEO, T + 50 * 3_600_000);
+  is("the same on the credit: only the language never delivered goes back", [customerBalance, credits().map((t) => t.amount)], [-44_000, [-6_000]]);
+  reset();
+  is("asked for", await ask(T), "asked");
+  serviceCaptions = ["en"];
+  await syncAutoCaptions(VIDEO, T + 5 * 60_000);
+  serviceCaptions = ["es"];
+  await syncAutoCaptions(VIDEO, T + 15 * 60_000);
+  is("each language delivered once, at a different look: all of it delivered, nothing refunded", [refunds.length, kept(), redis.run(["GET", KEY])], [0, PRICE, null]);
 
   done();
 }

@@ -3,6 +3,7 @@ import { sesObservation } from './mail-reservation-ses';
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from '@/lib/store';
 import { upsertContact } from '@/lib/contacts';
 import { test, beforeEach } from 'node:test';
+import { UnknownReplyError } from '@/lib/redis-reply';
 import assert from 'node:assert/strict';
 import { reserve, reserveDay, usedThisMonth, monthlyAllowance, sendTo, takeFromMonth } from '@/lib/mail';
 import { PRO_MONTHLY_EMAILS, SCALE_MONTHLY_EMAILS } from '@/lib/plan';
@@ -29,6 +30,11 @@ const store={listId:'a'.repeat(32),tier:'pro',subscriptionActive:true,trialEnds:
 beforeEach(()=>{memory.clear();reply=undefined;dayRead=undefined;pipelines=[];process.env.MARKETING_DAILY_CAP='100000';dispatch.calls=0;dispatch.listCalls=0;dispatch.notices.length=0;dispatch.outcome='retry';sesObservation.configured=true;sesObservation.room=100000;});
 test('paid list caps (raised 18 October 2026 with the new prices) are the actual runtime allowances',()=>{assert.equal(monthlyAllowance(store),7000);assert.equal(monthlyAllowance({...store,tier:'scale'}),10000);assert.equal(PRO_MONTHLY_EMAILS,7000);assert.equal(SCALE_MONTHLY_EMAILS,10000);});
 test('an acknowledged exact reservation consumes the monthly capacity',async()=>{assert.equal(await reserve(store,3),'ok');assert.equal(await usedThisMonth(store.listId),3);});
+test('a malformed monthly usage value is never reported as zero',async()=>{
+ const id=windowId(store);
+ await memory.pipeline([['SET',`nl:mail:used:${store.listId}:${id}`,'not-a-count']]);
+ await assert.rejects(usedThisMonth(store.listId,id),UnknownReplyError);
+});
 test('missing, partial or corrupt counter acknowledgements cannot authorize',async()=>{
  for(const value of [[],[1,1],[1,1,1],[1,1,1,1,1],[undefined,1,1,1],[true,1,1,1],['01',1,1,1],[-1,1,1,1],[0,1,1,1],[1.5,1,1,1],[NaN,1,1,1],[Infinity,1,1,1],[1,0,1,1],[1,1,1,0],[1,true,1,1]]){reply=value;assert.equal(await reserve(store,1),'unavailable');}
 });

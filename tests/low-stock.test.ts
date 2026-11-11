@@ -150,10 +150,14 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline2;
   is("its room still counted", roomOf() >= LOW_STOCK_BYTES, true);
 
-  part("A full data room writes nothing");
+  part("A full data room writes nothing for a product whose room is not taken yet");
+  const fresh = await addProduct("owner@example.com", "Vase", "", "30", null);
+  if (!fresh.ok) throw new Error("no product");
   await noteData(store, [{ slot: "filler", bytes: 10 ** 12, set: true }]);
-  is("refused", await setLowStock(store, pid, 5, 9), "full");
-  is("nothing written", redis.run(["HEXISTS", key, pid]), 0);
+  is("refused", await setLowStock(store, fresh.product.id, 5, 9), "full");
+  is("nothing written", redis.run(["HEXISTS", key, fresh.product.id]), 0);
+  // A product whose room is still counted from before (turned off, kept counted) takes nothing more to save again.
+  is("saved again within the room it already holds", await setLowStock(store, pid, 5, 9), "saved");
 
   part("Its family is counted, said on closing and bounded");
   is("counted in the room", COUNTED_FAMILIES.includes("nl:ls:"), true);

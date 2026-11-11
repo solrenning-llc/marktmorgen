@@ -134,7 +134,8 @@ part("The words: where, never why, and every count out of its whole");
 part("A clock or a time that cannot be right is never read as a result");
 {
   // Claude 3 (6795042817), Claude 1 (6799237269) and review 6804098197: an unreadable now made everyone "still going",
-  // and an impossible lastSeen (negative, zero, fractional or in the future) counted someone as stopped or going.
+  // and an impossible lastSeen (negative, zero or fractional) counted someone as stopped or going. A time ahead stays
+  // "still going", as the part above says (another server's clock).
   let threw = 0;
   for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5]) {
     try {
@@ -145,7 +146,7 @@ part("A clock or a time that cannot be right is never read as a result");
   }
   is("an unreadable clock is refused, never a confident map", threw, 5);
   const odd = lessonDropoff(lessons, [{ done: ["l1"], lastSeen: -1 }, { done: ["l1"], lastSeen: 0 }, { done: ["l1"], lastSeen: NOW - 2.5 }, { done: ["l1"], lastSeen: NOW + 30 * DAY }, { done: ["l1"], lastSeen: NOW - 20 * DAY }], NOW);
-  is("impossible times are unread, not stopped or going", [odd.unread, odd.stopped, odd.going, odd.students], [4, 1, 0, 1]);
+  is("impossible times are unread, not stopped or going", [odd.unread, odd.stopped, odd.going, odd.students], [3, 1, 1, 2]);
 }
 
 done();

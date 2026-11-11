@@ -61,14 +61,20 @@ export type DropoffMap = {
   tiedWith: number;
 };
 
+/**
+ * A student as kept, with a time that can be a real one: a whole number of milliseconds after 1970. A time ahead of
+ * now is still read (another server's clock), and counts as still going.
+ */
 function readable(student: unknown): student is DropoffStudent {
   if (!student || typeof student !== "object") return false;
   const { done, lastSeen } = student as { done?: unknown; lastSeen?: unknown };
-  return Array.isArray(done) && done.every((id) => typeof id === "string") && typeof lastSeen === "number" && Number.isFinite(lastSeen);
+  return Array.isArray(done) && done.every((id) => typeof id === "string") && typeof lastSeen === "number" && Number.isSafeInteger(lastSeen) && lastSeen > 0;
 }
 
 /** Where the students of a course stop, lesson by lesson, from what is kept of each. */
 export function lessonDropoff(lessons: readonly DropoffLesson[], students: readonly DropoffStudent[], now: number): DropoffMap {
+  // An unreadable clock is refused (rule 24): read as is, it made every student "still going".
+  if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError("lessonDropoff needs the time now as a whole number of milliseconds");
   const rows: LessonRow[] = lessons.map((lesson) => ({ id: lesson.id, title: lesson.title, done: 0, of: 0, stoppedHere: 0 }));
   const index = new Map(rows.map((row, i) => [row.id, i]));
   let read = 0;

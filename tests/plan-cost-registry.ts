@@ -1475,7 +1475,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
-      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD", "fencedBy", "CLOSING_FENCED", "FENCED_KEYS", "ownsAnother", "CLAIM_PAGES"] },
+      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD", "fencedBy", "CLOSING_FENCED", "FENCED_KEYS", "ownsAnother", "CLAIM_PAGES", "clearClaims", "servesAnother", "claimsLeft"] },
       { file: "lib/team.ts", names: ["memberStoresExact", "MEMBER_STORES_READ"] },
       { file: "lib/store.ts", names: ["storeForIdExact", "MAX_STORES_PER_ACCOUNT"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_STORE_EXPORTS"] },
@@ -1528,7 +1528,15 @@ export const KEY_NAME_BYTES = 128;
  * counted, though memberStores read up to fifty stores at three commands each.
  */
 export const SERVED_COMMANDS = 1 + 3 * MEMBER_STORES_READ + 2 + MAX_STORES_PER_ACCOUNT;
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS + 3) + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * CLAIM_PAGES + 10);
+/**
+ * Where a walk's preparation stopped in its hosts' claims (lib/closed-store-data.ts, clearClaims; Claude 4 on #3660):
+ * read once (GET), and written when the claims are more than a walk reads (the lock made to last, then the SET in one
+ * fenced step), deleted with the store's other keys (in a DEL already counted). A store whose hosts' claims are more
+ * than CLAIM_PAGES pages a host (more than the claims can be, plan-closing-rules.ts) waits a walk and is prepared again
+ * from where it stopped: each such walk is one more preparation at this count.
+ */
+export const CLAIMS_LEFT_COMMANDS = 3;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * CLAIM_PAGES + SERVED_COMMANDS + 3) + CLAIMS_LEFT_COMMANDS + 100 + 3 * (3 + 5) + 4 * 3 + 2 * ((1 + MAX_TEAM) * CLAIM_PAGES + 10);
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {

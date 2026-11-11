@@ -20,7 +20,7 @@
  * In-memory Redis; nothing real is sent.
  */
 import { createHash } from "node:crypto";
-import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
+import { DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -66,7 +66,6 @@ const line = (ref: string, from: number) => {
   const score = redis.run(["ZSCORE", DUE_KEY, ref]);
   return score === null ? "out" : Number(score) >= from + WALK_GAP_MS ? "moved back" : "in line";
 };
-const prepared = (ref: string) => redis.run(["HEXISTS", BATCH_KEY, ref]) === 1;
 /** The walk's keys of where a closing store's claims scan stopped (lib/closed-store-data.ts), whatever their name. */
 const claimProgress = () => (redis.run(["SCAN", "0", "MATCH", "nl:closed:claims:*", "COUNT", 100_000]) as [string, string[]])[1];
 /** The walk `k` walks after one at `at`: each a gap and a minute later, so a store moved back a walk is due again. */

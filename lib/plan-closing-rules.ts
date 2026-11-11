@@ -83,8 +83,18 @@ export const ERASE_WITHIN_DAYS = ERASE_EVERY_DAYS + 7;
  */
 export const DEL_BATCH = 4000;
 export const FOLLOW_BATCH = 1000;
-/** The most pages of a closing store's host's claims (HSCAN, 500 asked for a page) its preparation reads (lib/closed-store-data.ts, prepareStore); claims not at their end by then are unknown, never all of them. */
+/**
+ * The most pages of a closing store's host's claims (HSCAN, 500 asked for a page) one walk's preparation reads
+ * (lib/closed-store-data.ts, clearClaims); claims not at their end by then are never all of them: the store waits a
+ * walk and the next goes on from where this one stopped (Claude 4 on #3660). A host's claims are times that never
+ * overlap (lib/host-claims.ts, CLAIM_HOST_TIMES refuses one within the gap of another), of 15 minutes at the least
+ * (CALL_LENGTHS), from two days past to the call's horizon (90 days at the most, HORIZON_CHOICES): under 9,000, fewer
+ * than 18 pages, so one walk is enough. Not a proof (a paid claim is written whatever is there, confirmClaim, and
+ * COUNT is only a hint to Redis): past it, each further walk reads CLAIM_PAGES more pages a host, at the same cost.
+ */
 export const CLAIM_PAGES = 50;
+/** How long where a closing store's preparation stopped in its hosts' claims is kept between walks (clearClaims). */
+export const CLAIMS_LEFT_DAYS = ERASE_WITHIN_DAYS;
 export const RENEWALS_AT_ONCE = 25;
 
 /**

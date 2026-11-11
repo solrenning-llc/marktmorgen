@@ -49,7 +49,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
-  "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
+  "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:claims:", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:",
@@ -234,7 +234,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:chatsum:": E,
   "nl:cimg:": T("files"), "nl:cimg:doors": C, "nl:cimg:n:": E,
   "nl:closing:lock": C,
-  "nl:closed:batch": C, "nl:closed:due": C, "nl:closed:walk": C, "nl:closed:lock": C,
+  "nl:closed:batch": C, "nl:closed:claims:": C, "nl:closed:due": C, "nl:closed:walk": C, "nl:closed:lock": C,
   // Queue item 307 [EC1]: a store's closing emails, the addresses told and its members' last payments, named by its folder; the stores whose members are held.
   "nl:closing:credit:": E, "nl:closing:told:": E, "nl:closing:paid:": E, "nl:closing:held": I, "nl:closing:final": I, "nl:closing:work:": E, "nl:closing:refund:": C,
   // A plan paid for a store already closing, until it is ended and returned (company); a closed store's address, hashed, until it expires.

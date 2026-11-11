@@ -370,6 +370,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept 200 days by the booking", "call", 200, KB),
+  "nl:closed:claims:@lib/closed-store-data.ts": company("Where a closing store's preparation stopped in its hosts' claims, until it reaches their end", "The company's job: one key a closing store with more claims than a walk reads, deleted with the store and expiring by itself CLAIMS_LEFT_DAYS (14) after the last walk that wrote it (lib/closed-store-data.ts, clearClaims)."),
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),
   "nl:closed:due@lib/closed-store-data.ts": company("Closed stores waiting for the walk that deletes their records", "The company's job: a member a closed store, taken out when its walk begins."),
   "nl:closed:walk@lib/closed-store-data.ts": company("Where the walk that deletes closed stores' records is", "One key, the company's job."),

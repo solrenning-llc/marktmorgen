@@ -46,7 +46,11 @@ import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, pars
 
 /** People on one store's team, invitations still waiting included. */
 export const MAX_TEAM = 5;
-/** The most stores memberStores reads for one person: memberStoresExact throws past it (each is three reads). */
+/**
+ * The most stores memberStores reads for one person: memberStoresExact throws past it (each is three reads), and its
+ * caller takes that as not known, never as "no other store" (lib/closed-store-data.ts, servesAnother, which keeps the
+ * person's own calendar and lets the rest of the closing go on; Claude 4 on #3660: nothing bounds a person's index).
+ */
 export const MEMBER_STORES_READ = 50;
 /** How long an invitation works (kept in lib/team-roles.ts, so a page can say it). */
 export { INVITE_DAYS };
@@ -361,7 +365,9 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
  * serve no other (lib/closed-store-data.ts, prepareStore: a host's own calendar; Claude 6 on #3156). Nothing is left
  * out: a store whose team or record does not read, or an index of more than MEMBER_STORES_READ stores, throws
  * UnknownReplyError instead of being skipped, since a store skipped may be the live one they still serve. Only a team
- * read exactly without them, an id with no store (nil) or a store they own is not one. Reads only: the index's stale
+ * read exactly without them, an id with no store (nil) or a store they own is not one. Its one caller takes a throw as
+ * not known (servesAnother): the person's calendar is kept, and the closing store is still erased, never held back a
+ * walk for it (Claude 4 on #3660). Reads only: the index's stale
  * entries are dropped by memberStores, never here. memberStores itself is unchanged for its other callers (the
  * studio's store list, sign-in and alerts), where one unreadable store must not stop the person's own studio.
  */

@@ -68,6 +68,10 @@ async function main(): Promise<void> {
   is("a yes the cap no longer allows is refused, and the change stays", [await answerShareChange(await store(), q, true, await seen(q), NOW + 70, async () => false), (await read(q)).share?.percent, Boolean((await read(q)).terms?.change)], [{ ok: false, reason: "cap" }, 10, true]);
   is("saving the share in force withdraws the change", [await proposePartnerShare(await store(), q, { percent: 10, products: [A] }, NOW + 80), (await read(q)).terms?.change], [{ ok: true, state: "same" }, null]);
 
+  part("A change that would pass the cap is refused when it is asked, not only at the yes");
+  const overCap = await proposePartnerShare(await store(), q, { percent: 90, products: [A] }, NOW + 85);
+  is("refused with the cap's reason, and nothing waits", [overCap.ok, overCap.ok ? "" : overCap.reason, (await read(q)).terms?.change ?? null], [false, "cap", null]);
+
   part("An unanswered change lapses after 30 days");
   await proposePartnerShare(await store(), q, { percent: 15, products: [A] }, NOW + 90);
   is("too late to answer", await answerShareChange(await store(), q, true, await seen(q), NOW + 90 + CHANGE_WAITS_SECONDS, yes), { ok: false, reason: "none" });

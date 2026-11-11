@@ -7,6 +7,13 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 export const RESPONSES_KEY = "nl:creators:responses";
 
+/**
+ * The most answers the list keeps (MR): the form is public, and the per-address rate (5 an hour) is passed by many
+ * addresses together, so the list has a ceiling of its own. With each answer at most 20,000 bytes (the route's body
+ * limit), it never holds more than about 100 MB.
+ */
+export const MAX_RESEARCH_ANSWERS = 5_000;
+
 /** How long an answer is kept: 24 months. */
 const KEEP_MS = 730 * 24 * 60 * 60 * 1000;
 

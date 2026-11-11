@@ -103,7 +103,7 @@ import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff } from "@/lib/discount";
 import { createHash } from "node:crypto";
-import { type HostClaim, claimHosts, confirmClaim, hostId, isClaimId, isHostId, newClaimId, readClaims } from "@/lib/host-claims";
+import { type HostClaim, CLAIM_MARGIN_MS, claimHosts, confirmClaim, hostId, isClaimId, isHostId, newClaimId, readClaims } from "@/lib/host-claims";
 import { chosenTeam, hostChoices, parseTeamSetup, teamBookable } from "@/lib/team-scheduling-rules";
 import {
   type TeamBusy,
@@ -717,7 +717,7 @@ export async function releaseOwnHold(store: Store, session: string, { openedHere
     const team = teamOf(entry);
     if (team) await releaseClaim(team.hosts, team.claim).catch(() => {});
     const own = ownOf(entry);
-    if (own && ownAlone(store.callsId, { own, product: entry.p, start: entry.start })) await releaseClaim([ownerOf(store)], own).catch(() => {});
+    if (own && typeof entry.s === "number" && ownAlone(callsId, { own, product: entry.p, start: entry.s })) await releaseClaim([ownerOf(store)], own).catch(() => {});
   }
 }
 
@@ -1280,9 +1280,11 @@ export async function holdAndCheckout(input: {
       }
       if (!isBookable(setup, now, busy, start, product.id)) return { ok: false, reason: "taken" };
       if (setup.kind === "weekly") {
-        // Held as the diary holds it (HOLD_SECONDS, a minute past the checkout's close), counted from the lock, so it never
-        // outlives the diary's hold, and a time given back in the diary is never refused by its own lapsed claim.
-        const taken = await claimOwner(store, { id: product.id, call: setup }, start, end, now + HOLD_SECONDS * 1000, claims, now);
+        // Held as the diary holds it (HOLD_SECONDS, a minute past the checkout's close), counted from the lock, and a little
+        // more (CLAIM_MARGIN_MS), as a team hold's claim is (Claude 6's MEDIUM 1 on #3490): a buyer confirmed only by the
+        // mail job never leaves the owner free on other stores meanwhile. The store's own diary does not read it as busy
+        // while the hold stands (elsewhere), and a released hold lets it go at once (releaseOwnHold).
+        const taken = await claimOwner(store, { id: product.id, call: setup }, start, end, now + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS, claims, now);
         if (!taken.ok) return { ok: false, reason: taken.reason };
         owned = { claim: taken.claim, fresh: taken.fresh };
       }
@@ -1555,6 +1557,8 @@ export async function moveBooking(input: {
   // An ordinary weekly booking's claim on the store owner at its new time, and its old one when that is let go after.
   let ownMoved: string | null = null;
   let ownLetGo: string | null = null;
+  /** Whether the new time's claim on the owner was made by this move (so a refused move gives it back). */
+  let ownFresh = false;
   try {
     const now = Date.now();
     const recorded = (await readMoves([session])).get(session);
@@ -1621,16 +1625,26 @@ export async function moveBooking(input: {
       if (at.kind === "weekly") {
         const mine = busy.find((b) => b.session === session && b.own);
         const alone = mine && ownAlone(callsId, mine) ? (mine.own as string) : null;
-        // A one-seat booking's claim moves in place; a group seat joins the claim of its new time, and a booking made
-        // before the owner was claimed gets its first claim now.
-        const taken = await claimOwner(store, { id: product.id, call: at }, start, end, 0, claims, now, at.seats > 1 ? null : alone);
+        // The new time is claimed as a hold is, under a claim of its own (a group seat joins the claim of its new time),
+        // kept for good only once the move is written, and the old one let go only then (Claude 1's review 6799341330 of
+        // #3490, MEDIUM): a move refused after its claim was taken leaves the old time claimed and gives the new one back.
+        const taken = await claimOwner(store, { id: product.id, call: at }, start, end, now + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS, claims, now);
         if (!taken.ok) return { ok: false, reason: taken.reason };
         ownMoved = taken.claim;
+        ownFresh = taken.fresh;
         if (alone && alone !== taken.claim) ownLetGo = alone;
       }
     }
 
-    await writeMove(session, { s: start, e: end, n: from.moves + 1 });
+    try {
+      await writeMove(session, { s: start, e: end, n: from.moves + 1 });
+    } catch (error) {
+      // Refused: the new time's own claim goes back (a group claim other seats hold stays), the old one stays.
+      if (ownMoved && ownFresh) await releaseClaim([ownerOf(store)], ownMoved).catch(() => {});
+      throw error;
+    }
+    // Written: the owner's new time is kept for good (an answer not confirmed throws, and the move says it failed).
+    if (ownMoved) await confirmClaim([ownerOf(store)], ownMoved, start, end, `${callsId}:${product.id}`);
     // The seat moves in the diary too: whatever was written under this
     // checkout — a hold, a booking, one filed by its start before group calls
     // — gives way to one entry at the new time.

@@ -361,3 +361,173 @@ test('a timeout says the file\'s process group was ended, and no test file start
   const starting = files.filter(name => /detached\s*:\s*true|\bsetsid\b/.test(readFileSync(join('tests', name), 'utf8')));
   assert.deepEqual(starting, [], 'no test file starts a process in a group of its own');
 });
+
+// Claude 7 (CI team): the verify job's "Behavior regressions" step ran ~2,100 files one at a time (about 1,161 s on a
+// 4-vCPU runner). TEST_CONCURRENCY=N runs N at once, each file still alone in its own process and process group,
+// under the same limit, diagnostics and cleanup; its output is kept and printed whole, in file order; the files of
+// SERIAL_TEST_FILES run after, one at a time. Unset, the run is exactly the serial one above.
+type Write = (stream: 'out' | 'err', data: string | Uint8Array) => void;
+type Options = {files: string[], compile: (file: string) => Promise<unknown>, run: (file: string, bundle: string, next: () => string) => Promise<number | null>,
+  compileTimeoutMs?: number, concurrency?: number, serial?: readonly string[], write?: Write};
+const runFiles = runTestFiles as unknown as (options: Options) => Promise<number>;
+const say = (runner as unknown as {say: (text: string) => void}).say;
+const text = (chunks: Array<[string, string | Uint8Array]>) => chunks.map(([stream, data]) => `${stream}:${typeof data === 'string' ? data : Buffer.from(data).toString('utf8')}`).join('');
+
+test('TEST_CONCURRENCY: unset or empty is 1, a whole number from 1 to 32 is taken, anything else stops the run', () => {
+  const parse = (runner as unknown as {testConcurrency: (value: string | undefined) => number}).testConcurrency;
+  assert.equal(parse(undefined), 1);
+  assert.equal(parse(''), 1);
+  assert.equal(parse(' 3 '), 3);
+  assert.equal(parse('1'), 1);
+  assert.equal(parse('32'), 32);
+  for (const wrong of ['0', '33', '2.5', '-1', 'four', '4x', '1e1', '0x4', 'Infinity']) assert.throws(() => parse(wrong), /TEST_CONCURRENCY/, wrong);
+});
+
+test('side by side: never more than N files at once, every file runs once, every failure counts, and the files to run alone run after, alone', async () => {
+  const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const status: Record<string, number | null> = {a: 0, b: 7, c: 0, d: null, e: 0, f: 0, g: 1, h: 0};
+  let active = 0, most = 0;
+  const started: string[] = [];
+  const failed = await runFiles({files, concurrency: 3, serial: ['c', 'g', 'not-in-files'], write: () => {},
+    compile: async file => `${file}.cjs`,
+    run: async (file, bundle) => {
+      assert.equal(bundle, `${file}.cjs`);
+      active += 1; most = Math.max(most, active);
+      started.push(file);
+      if (file === 'c' || file === 'g') assert.equal(active, 1, `${file} runs alone`);
+      // Uneven lengths, so later files finish before earlier ones.
+      await new Promise(done => setTimeout(done, (files.length - files.indexOf(file)) * 5));
+      active -= 1;
+      return status[file];
+    }});
+  assert.equal(failed, 3, 'b (7), d (null) and g (1)');
+  assert.equal(most, 3);
+  assert.deepEqual([...started].sort(), files);
+  assert.deepEqual(started.slice(-2), ['c', 'g'], 'the files to run alone come last, in file order');
+});
+
+test('side by side: each file\'s output is printed whole and in file order, whichever finishes first', async () => {
+  const files = ['a', 'b', 'c', 'd'];
+  const out: Array<[string, string | Uint8Array]> = [];
+  const gates = Object.fromEntries(files.map(file => [file, deferred<void>()]));
+  const result = runFiles({files, concurrency: 4, write: (stream, data) => { out.push([stream, data]); },
+    compile: async file => file,
+    run: async file => {
+      say(`=== ${file} ===`);
+      await gates[file].promise;
+      say(`${file} done`);
+      return 0;
+    }});
+  await setImmediate();
+  for (const file of ['d', 'c', 'b']) { gates[file].resolve(); await setImmediate(); }
+  assert.deepEqual(out, [], 'nothing printed while the first file still runs');
+  gates.a.resolve();
+  assert.equal(await result, 0);
+  assert.equal(text(out), files.map(file => `out:=== ${file} ===\nout:${file} done\n`).join(''));
+});
+
+test('side by side, real processes: stdout and stderr kept per file, nonzero exits counted, and a descendant left holding the output does not hold the run', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'runner-side-'));
+  const owned: number[] = [];
+  try {
+    const grandPid = join(directory, 'grand.pid');
+    const grand = join(directory, 'grand.cjs');
+    writeFileSync(grand, `require('node:fs').writeFileSync(${JSON.stringify(grandPid)}, String(process.pid)); setInterval(() => {}, 1000); process.send('ready');`);
+    const workers: Record<string, string> = {
+      // Writes on both streams, several times, with waits between, so the files really overlap.
+      'one.test.ts': `let n = 0; const t = setInterval(() => { console.log('one out ' + n); console.error('one err ' + n); if (++n === 3) clearInterval(t); }, 20);`,
+      'two.test.ts': `console.log('two out'); setTimeout(() => { console.error('two err'); process.exitCode = 5; }, 30);`,
+      // Leaves a process of its group holding the inherited pipes, then ends: the runner must not wait for it.
+      'three.test.ts': `const c = require('node:child_process').fork(${JSON.stringify(grand)}, [], {stdio: ['inherit', 'inherit', 'inherit', 'ipc']}); c.once('message', () => { console.log('three out'); c.disconnect(); c.unref(); });`,
+    };
+    for (const [file, code] of Object.entries(workers)) writeFileSync(join(directory, file + '.cjs'), code);
+    const out: Array<[string, string | Uint8Array]> = [];
+    const started = Date.now();
+    const failed = await runFiles({files: Object.keys(workers), concurrency: 3, write: (stream, data) => { out.push([stream, data]); },
+      compile: async file => join(directory, file + '.cjs'),
+      run: async (file, bundle, next) => {
+        say(`=== ${file} ===`);
+        return (runBundle as (...args: unknown[]) => Promise<number>)(bundle, process.env, process.execPath, {timeoutMs: 20_000, label: file, diagnose: () => `next compile ${next()}`});
+      }});
+    try { owned.push(Number(readFileSync(grandPid, 'utf8'))); } catch { /* never started */ }
+    assert.equal(failed, 1, 'two exited with 5');
+    assert.ok(Date.now() - started < 15_000, 'the descendant left behind did not hold the run to its limit');
+    const all = text(out);
+    const one = all.indexOf('out:=== one.test.ts'), two = all.indexOf('out:=== two.test.ts'), three = all.indexOf('out:=== three.test.ts');
+    assert.ok(one === 0 && one < two && two < three, all);
+    const oneText = all.slice(one, two);
+    for (let n = 0; n < 3; n += 1) { assert.match(oneText, new RegExp(`out:one out ${n}\\n`)); assert.match(oneText, new RegExp(`err:one err ${n}\\n`)); }
+    assert.match(all.slice(two, three), /out:two out\n[\s\S]*err:two err\n/);
+    assert.match(all.slice(three), /out:three out\n/);
+    if (owned[0]) assert.equal(await gone(owned[0], 2000), true, 'the descendant ended with its file');
+  } finally {
+    for (const pid of owned) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    rmSync(directory, {recursive: true, force: true});
+  }
+});
+
+test('side by side: a timeout is said inside that file\'s own output, ends its group and counts as a failure; the others still pass', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'runner-side-timeout-'));
+  const pidFile = join(directory, 'pid');
+  try {
+    writeFileSync(join(directory, 'never.cjs'), `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); console.log('never started'); setInterval(() => {}, 1000);`);
+    writeFileSync(join(directory, 'quick.cjs'), `console.log('quick done');`);
+    const out: Array<[string, string | Uint8Array]> = [];
+    const lines: string[] = [];
+    const write = console.error;
+    console.error = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
+    let failed: number;
+    try {
+      failed = await runFiles({files: ['never.test.ts', 'quick.test.ts'], concurrency: 2, write: (stream, data) => { out.push([stream, data]); },
+        compile: async file => join(directory, file.replace('.test.ts', '.cjs')),
+        run: async (file, bundle, next) => (runBundle as (...args: unknown[]) => Promise<number>)(bundle, process.env, process.execPath, {timeoutMs: 600, label: file, diagnose: () => `next compile ${next()}`})});
+    } finally { console.error = write; }
+    assert.equal(failed, 1);
+    assert.deepEqual(lines, [], 'nothing goes around the kept output');
+    assert.match(text(out), /^out:never started\nerr:TIMEOUT: never\.test\.ts did not finish in 0\.6 s; exit not seen; [^\n]*next compile resolved; killed with its process group and counted as a failure\.\nout:quick done\n$/);
+    assert.equal(await gone(Number(readFileSync(pidFile, 'utf8'))), true);
+  } finally {
+    try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL'); } catch { /* already gone */ }
+    rmSync(directory, {recursive: true, force: true});
+  }
+});
+
+test('side by side: a failed compilation starts no further file, lets the running ones finish and print in order, then is thrown', async () => {
+  const broken = new Error('synthetic compilation failure');
+  const out: Array<[string, string | Uint8Array]> = [];
+  const runs: string[] = [];
+  const slow = deferred<number>();
+  const result = runFiles({files: ['a', 'b', 'c', 'd', 'e', 'f'], concurrency: 2, serial: ['f'], write: (stream, data) => { out.push([stream, data]); },
+    compile: async file => { if (file === 'c') throw broken; return file; },
+    run: async file => { runs.push(file); say(`ran ${file}`); return file === 'a' ? slow.promise : 0; }});
+  const rejected = assert.rejects(result, error => error === broken);
+  await setImmediate();
+  await setImmediate();
+  assert.deepEqual(out, [], 'a still runs, so nothing is printed yet');
+  slow.resolve(0);
+  await rejected;
+  assert.deepEqual(runs, ['a', 'b'], 'nothing after the failed file starts, the files to run alone included');
+  assert.equal(text(out), 'out:ran a\nout:ran b\n');
+});
+
+test('side by side: a compilation that never settles fails naming the file at the limit', async () => {
+  const outcome = await runFiles({files: ['a.test.ts', 'b.test.ts'], concurrency: 2, compileTimeoutMs: 300, write: () => {},
+    compile: async file => file === 'b.test.ts' ? new Promise(() => {}) : file,
+    run: async () => 0}).then(() => 'resolved', (error: Error) => error.message);
+  assert.match(outcome, /TIMEOUT: compiling b\.test\.ts/);
+});
+
+test('tests/run.mjs reads TEST_CONCURRENCY, prints each heading with the file\'s output, and every file to run alone exists', () => {
+  const run = readFileSync('tests/run.mjs', 'utf8');
+  assert.match(run, /const concurrency = testConcurrency\(process\.env\.TEST_CONCURRENCY\);/);
+  assert.match(run, /runTestFiles\(\{files, concurrency, serial: SERIAL_TEST_FILES, compileTimeoutMs: TEST_FILE_TIMEOUT_MS,/);
+  assert.match(run, /say\(`\\n=== \$\{file\} ===`\);/);
+  assert.doesNotMatch(run, /console\.log\(`\\n=== /);
+  const serial = (runner as unknown as {SERIAL_TEST_FILES: readonly string[]}).SERIAL_TEST_FILES;
+  assert.ok(Object.isFrozen(serial));
+  const present = new Set(readdirSync('tests'));
+  assert.deepEqual(serial.filter(file => !file.endsWith('.test.ts') || !present.has(file)), [], 'no stale name');
+  assert.equal(new Set(serial).size, serial.length);
+  // The runner's own file always runs alone: its children and guards are timed.
+  assert.ok(serial.includes('test-runner.test.ts'));
+});

@@ -13,12 +13,16 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { checkClientBundles } from "./client-bundles.mjs";
 import {testAliases,testEnvironment} from "./test-config.mjs";
-import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";
+import {runTestFiles,runBundle,say,testConcurrency,SERIAL_TEST_FILES,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";
 
+// TEST_CONCURRENCY=N runs N test files at once, each still in its own process; unset, one at a time as before.
+const concurrency = testConcurrency(process.env.TEST_CONCURRENCY);
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const out = mkdtempSync(join(tmpdir(), "nimbus-tests-"));
 let failed = 0;
+/** @type {string[]} */
+const failedFiles = [];
 
 try {
   const files = readdirSync(here).filter((f) => f.endsWith(".test.ts")).sort();
@@ -26,7 +30,8 @@ try {
     console.log("No tests found.");
     process.exit(0);
   }
-  failed = await runTestFiles({files, compileTimeoutMs: TEST_FILE_TIMEOUT_MS, compile: async file => {
+  if (concurrency > 1) console.log(`Running ${concurrency} test files at once, each printed whole in file order; then ${files.filter(file => SERIAL_TEST_FILES.includes(file)).length} that run alone (SERIAL_TEST_FILES in tests/test-runner.mjs).`);
+  failed = await runTestFiles({files, concurrency, serial: SERIAL_TEST_FILES, compileTimeoutMs: TEST_FILE_TIMEOUT_MS, compile: async file => {
     const bundle = join(out, `${file}.cjs`);
     await build({
       entryPoints: [join(here, file)],
@@ -39,8 +44,10 @@ try {
     });
     return bundle;
   }, run: async (file, bundle, next) => {
-    console.log(`\n=== ${file} ===`);
-    return runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file, diagnose: () => `next compile ${next()}`});
+    say(`\n=== ${file} ===`);
+    const status = await runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file, diagnose: () => `next compile ${next()}`});
+    if (status !== 0) failedFiles.push(file);
+    return status;
   }});
 } finally {
   rmSync(out, { recursive: true, force: true });
@@ -55,6 +62,8 @@ failed += clientBundles.failed;
 // The unref'd timer only fires if something (an esbuild service, a stray handle) still holds the process.
 if (failed) {
   console.log(`\n${failed} test file(s) failed.`);
+  // Named, so a failure is found without searching the log (files run side by side print far from where they ran).
+  if (failedFiles.length) console.log(`Failed: ${failedFiles.sort().join(", ")}`);
   process.exitCode = 1;
 } else {
   console.log("\nEverything passing.");

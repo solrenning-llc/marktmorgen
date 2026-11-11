@@ -254,7 +254,7 @@ export async function undoPipelineAccessCopy(store: DataStore, to: string, copy:
       await forceData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
     }
   }
-  const put = oneAnswer(await redisPipeline([copy.prior ? ["HSET", accessKey(statsId), after, copy.prior] : ["HDEL", accessKey(statsId), after]]));
+  const put = oneAnswer(await redisPipeline([copy.prior !== null ? ["HSET", accessKey(statsId), after, copy.prior] : ["HDEL", accessKey(statsId), after]]));
   if (put === null) throw new Error("putting back the new address's pipeline access could not be confirmed");
   if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
 }

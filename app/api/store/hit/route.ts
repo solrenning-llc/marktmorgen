@@ -10,6 +10,7 @@ import { productIdFor } from "@/lib/catalog";
 import { markCountGap, takeSignal } from "@/lib/traffic";
 import { HIT_STORE_LIMIT, shareAddress } from "@/lib/traffic-rules";
 import { affiliatesOn } from "@/lib/affiliates";
+import { browserProof } from "@/lib/bot-check";
 
 const MAX_BODY_BYTES = 1_500;
 
@@ -18,9 +19,10 @@ const done = () => new Response(null, { status: 204, headers: { "Cache-Control":
 /**
  * A store page saying it was opened, or that one of its links was.
  *
- * Sent by the page itself with sendBeacon, so a visit is counted only when a
- * real browser ran the page — not when a crawler or a link preview fetched
- * it. The answer is always empty: nothing here is worth telling the caller,
+ * Sent by the page itself (components/store-beacon.tsx), through the host's
+ * browser check, so a visit is counted only when a real browser ran the page
+ * — not when a crawler or a link preview fetched it, and not when a program
+ * sent the count on its own. The answer is always empty: nothing here is worth telling the caller,
  * and a caller probing for stores learns nothing either.
  */
 export async function POST(request: NextRequest) {
@@ -70,6 +72,12 @@ export async function POST(request: NextRequest) {
   if (!(await withinLimit(allowance[0], `${from}|${handle}`, allowance[1], 600))) return refused();
   // The store's own ten minutes for what is not a page (lib/traffic-rules.ts, HIT_STORE_LIMIT): views and pages are never under it.
   if (kind !== "v" && kind !== "p" && !(await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600))) return refused();
+  // A page opened (a visit, another page, a funnel's step) is counted only when the host's check says a person's
+  // browser sent this (lib/bot-check.ts, browserProof). A program, a check that failed or did not answer, is counted
+  // nowhere: not toward the visits the store's plan covers, never in its numbers as a visit. What pages cost is still
+  // bounded where they are drawn (lib/traffic.ts, isResting: every request against the store's window and its
+  // connection's share of the day). Asked before the store's record is read, so a program reads nothing more.
+  if ((kind === "v" || kind === "p" || kind === "f") && (await browserProof()) !== "human") return done();
   const store = await storeForHandle(handle).catch(() => null);
   if (!store) return done();
 

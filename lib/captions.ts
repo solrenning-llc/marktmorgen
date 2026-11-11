@@ -106,8 +106,9 @@ function words(line: string): string {
  * words. Recognized metadata — the header, a note, a style sheet, a region —
  * is left out, so the file kept holds captions and nothing else. Any other
  * untimed block is refused, never silently lost from a partial file. A timing
- * line that cannot be read, or that ends before it starts, refuses the
- * whole file: half a file of captions is worse than a clear no.
+ * line that cannot be read, that ends before it starts, or whose start goes
+ * back before an earlier cue's start refuses the whole file: half a file of
+ * captions is worse than a clear no.
  */
 export function toVtt(input: unknown): { ok: true; vtt: string; cues: number } | { ok: false; reason: CaptionProblem } {
   if (typeof input !== "string") return { ok: false, reason: "empty" };
@@ -116,6 +117,7 @@ export function toVtt(input: unknown): { ok: true; vtt: string; cues: number } |
   if (!text) return { ok: false, reason: "empty" };
 
   const out: string[] = [];
+  let previousStart = Number.NEGATIVE_INFINITY;
   for (const [index, block] of text.split(/\n{2,}/).entries()) {
     const lines = block.split("\n");
     const at = lines.findIndex((line) => line.includes("-->"));
@@ -131,7 +133,9 @@ export function toVtt(input: unknown): { ok: true; vtt: string; cues: number } |
     const timing = TIMING.exec(lines[at].trim());
     if (!timing) return { ok: false, reason: "format" };
     const [, from, to, rest = ""] = timing;
-    if (!(seconds(to) > seconds(from))) return { ok: false, reason: "format" };
+    const fromSeconds = seconds(from);
+    if (!(seconds(to) > fromSeconds) || fromSeconds < previousStart) return { ok: false, reason: "format" };
+    previousStart = fromSeconds;
     if (lines.slice(at + 1).some((line) => line.includes("-->"))) return { ok: false, reason: "format" };
     const said = lines
       .slice(at + 1)

@@ -4,6 +4,7 @@ import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, ses
 import { LockBusyError } from "@/lib/redis-lock";
 import { repairMove } from "@/lib/move-repair";
 import { isRedisConfigured } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith, unlessSetToGo } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
@@ -63,8 +64,18 @@ export async function POST(request: NextRequest) {
       const id = await openSession(email, "passkey", signed.id);
       // Removed between its check and this session (its wait ran out, applied here first, or it was removed
       // in the studio): the session it would have opened is closed again, as the removal closes what it opened.
-      const waiting = await pendingRemoval(email);
-      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) {
+      // What could not be read here (CX-123 rule 24) closes the session it would have opened, as a refusal does:
+      // the error below answers without a session cookie, and no session is left open behind it.
+      let waiting: Awaited<ReturnType<typeof pendingRemoval>>;
+      let listed: boolean;
+      try {
+        waiting = await pendingRemoval(email);
+        listed = (await listPasskeys(email)).some((p) => p.id === signed.id);
+      } catch (error) {
+        await endSession(id).catch((ended) => console.error("closing a passkey session that could not be checked failed", ended));
+        throw error;
+      }
+      if (!listed) {
         await endSession(id);
         return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
       }
@@ -101,6 +112,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Another change to the same passkeys held them past the wait (lib/passkeys.ts): said so, to try again.
     if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+    // A record that could not be read in its exact shape (lib/passkeys.ts, CX-123 rule 24): the login is refused, no
+    // session is opened, and the person is told, without detail, that it failed on our side and to try again.
+    if (error instanceof UnknownReplyError) {
+      console.error("logging in with a passkey was refused: a record could not be read", error);
+      return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    }
     console.error("logging in with a passkey failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

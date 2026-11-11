@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Every support-setting POST is intercepted; no message or store write occurs. */
 export async function checkTipsAcknowledgment({browser,LOCAL,fixture,axeSource,is}){
  const scenarios=[
@@ -39,6 +41,7 @@ export async function checkTipsAcknowledgment({browser,LOCAL,fixture,axeSource,i
    const toggle=form.getByRole("checkbox",{name:"Show Support my work on my store page",exact:true});
    const heading=form.getByLabel("Heading (optional)",{exact:true});const line=form.getByLabel("One line under it (optional)",{exact:true});
    const amountFields=[form.getByLabel("Amount 1",{exact:true}),form.getByLabel("Amount 2",{exact:true}),form.getByLabel("Amount 3",{exact:true})];
+   await waitForReactChangeHandler(page,toggle);
    const original=await toggle.isChecked();await toggle.setChecked(!original);
    for(const scenario of scenarios){
     await heading.fill("  Questions   about dinner  ");await line.fill("Écrivez   votre question.");

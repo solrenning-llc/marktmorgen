@@ -13,18 +13,18 @@
 
 /** Families counted in a store's data room. */
 export const COUNTED_FAMILIES: readonly string[] = [
-  "nl:ab:", "nl:adsrv:ctx:", "nl:adsrv:sent:", "nl:aff:",
+  "nl:ab:", "nl:adsrv:ctx:", "nl:adsrv:sent:", "nl:aff:", "nl:agent:book:",
   "nl:agree:p:", "nl:agree:r:", "nl:agree:s:", "nl:agree:v:", "nl:amem:", "nl:blog:body:", "nl:blog:meta:", "nl:blog:pub:",
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
   "nl:dc:mem:", "nl:dc:prod:", "nl:depth:", "nl:erased:", "nl:esync:tags:", "nl:form:r:", "nl:imp:buy:",
-  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:",
+  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:lnote:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:withdraw:",
   "nl:lib:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
   "nl:path:board:v1", "nl:path:board:owners:v1",
   "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
   "nl:payreq:due", "nl:payreq:o:", "nl:payreq:p:", "nl:payreq:r:", "nl:payreq:s:", "nl:person:",
   "nl:pfunnel:done:", "nl:pfunnel:seen:", "nl:pfunnels:", "nl:pkg:", "nl:pkg:s:", "nl:pkg:t:", "nl:pod:", "nl:pod:by:",
-  "nl:pod:t:", "nl:preview:", "nl:product:about:", "nl:product:note:", "nl:product:page:",
+  "nl:pod:t:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
   "nl:product:pages:", "nl:product:pics:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
@@ -37,12 +37,13 @@ export const COUNTED_FAMILIES: readonly string[] = [
 export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:keptstar:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
-  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:",
+  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:", "nl:agent:book:lock:",
   "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:amem:lock:", "nl:api:hold:", "nl:api:k:", "nl:api:keys:", "nl:api:used:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
   "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:moving:", "nl:auth:rec:",
   "nl:auth:second:",
+  "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
   "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
   "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
@@ -51,7 +52,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
-  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
+  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
@@ -66,7 +67,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:seen:", "nl:indexnow:sent", "nl:join:t:",
   "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:rate:addr:",
   "nl:learn:rate:ip:", "nl:leave:", "nl:letters:link:", "nl:letters:ok:", "nl:letters:rl:addr:", "nl:letters:rl:ip:", "nl:lib:joined:", "nl:lib:link:", "nl:list:try:", "nl:listed:", "nl:lostdispute:cursor:", "nl:mail-check:last",
-  "nl:mail-check:lock", "nl:mail:clk:", "nl:mail:day:", "nl:mail:drafts:", "nl:mail:flowq:lease",
+  "nl:mail-check:lock", "nl:mail-check:runs", "nl:mail:clk:", "nl:mail:day:", "nl:mail:drafts:", "nl:mail:flowq:lease",
   "nl:mail:flowstats:", "nl:mail:health:", "nl:mail:lock", "nl:mail:paused:", "nl:mail:queue",
   "nl:mail:ramp:", "nl:mail:segs:", "nl:mail:used:", "nl:manage:link:", "nl:manage:opens:",
   "nl:manage:portal:", "nl:meet:conn:", "nl:meet:lock:", "nl:meet:log:", "nl:meet:q", "nl:meet:r:",
@@ -77,14 +78,14 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
-  "nl:orders:open:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
-  "nl:pause:last:", "nl:pay:currencies:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
+  "nl:orders:open:", "nl:orders:pending:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
+  "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
-  "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan:closing:",
+  "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-withdraw:", "nl:plan:closing:",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending",
-  "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:ppsell:o:",
-  "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:sales:",
+  "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
+  "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:sales:",
   "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
   "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:recent:", "nl:recent:feed:",
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
@@ -102,12 +103,13 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
   "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:stamp:drop",
   "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
-  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors",
-  "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:",
+  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:taken:",
+  "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:s:", "nl:traffic:gap:", "nl:traffic:sc:", "nl:traffic:sp:", "nl:traffic:x:", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
   "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
@@ -117,6 +119,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
+  // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
+  "nl:tip:co:",
 ];
 
 /** Whether a key belongs to a family the room counts: the longest family name it starts with is one of COUNTED_FAMILIES. */
@@ -189,12 +193,13 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:2fa:": C, "nl:2fa:hold:": C, "nl:2fa:locked:": C, "nl:2fa:lock:": C, "nl:2fa:lockedset:": C, "nl:2fa:keptstar:": Cr(400), "nl:2fa:once:": C, "nl:2fa:rescue:": C, "nl:2fa:setup:": C,
   "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:link:": C,
   "nl:auth:rec:set:": C, "nl:auth:rec:until:": C, "nl:auth:second:": C, "nl:auth:session:": C, "nl:auth:sessions:": C,
+  "nl:auth:code:": C, "nl:auth:linkcode:": C, "nl:auth:lastcode:": C, "nl:rl:code-addr:": C, "nl:rl:code-day:": C, "nl:rl:code-ip:": C,
   "nl:pk:": C, "nl:pk:auth:": C, "nl:pk:cred:": C, "nl:pk:drop:": C, "nl:pk:lock:": C, "nl:pk:reg:": C, "nl:rl:address:": C, "nl:rl:signin:": C,
   "nl:account:stores:": D("prepare"),
   // ---------------------------------------------------------------- a-b
   "nl:ab:": E, "nl:ab:paid:": X(40),
   "nl:adsrv:": E, "nl:adsrv:ctx:": X(4), "nl:adsrv:last:": E, "nl:adsrv:sent:": X(3), "nl:adsrv:sub:": X(400),
-  "nl:aff:": E, "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:seen:": X(2), "nl:aff:session:": X(30),
+  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:seen:": X(2), "nl:aff:session:": X(30),
   "nl:affhub:": L, "nl:affhub:link:": Cr(1), "nl:affkit:": E,
   // Proposals and agreements (lib/agreement-store.ts): the store's lists go, and each agreement and its versions through them.
   "nl:agree:s:": E, "nl:agree:p:": E, "nl:agree:r:": T("nl:agree:s:", 400), "nl:agree:v:": T("nl:agree:s:", 400), "nl:agree:lock:": X(1),
@@ -248,6 +253,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:data:": E,
   "nl:dc:addr:": E, "nl:dc:due": I, "nl:dc:lock": C, "nl:dc:mem:": E, "nl:dc:ok:": E, "nl:dc:prod:": E, "nl:dc:srv:": E, "nl:dc:state:": X(1),
   "nl:depth:": E,
+  // Discount codes waiting for their start (511 [CK3], lib/discount-schedule.ts): go with the store; the due list loses its members.
+  "nl:dsched:": E, "nl:dsched:due": I, "nl:dsched:lock:": E,
   "nl:dir:listed": I, "nl:dir:page": Cr(1),
   "nl:domain:": T("prepare"),
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,
@@ -285,6 +292,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:join:t:": T("nl:erase:ix:", 7),
   "nl:keys:": E,
   "nl:lc:": E,
+  // A student's private lesson notes (290 [SQ1], lib/lesson-notes.ts), named by the store's statsId.
+  "nl:lnote:": E,
   "nl:learn:enr:": E, "nl:learn:link:": X(1), "nl:learn:paid:": E, "nl:learn:pass:": T("nl:learn:passes:", 90), "nl:learn:passes:": E,
   "nl:learn:rate:addr:": X(1), "nl:learn:rate:ip:": X(1),
   "nl:leave:": E,
@@ -292,7 +301,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:listed:": X(8),
   "nl:lostdispute:cursor:": X(30), // a job's place in a store's lost disputes (lib/refunds.ts), thirty days at the most
   // ---------------------------------------------------------------- m
-  "nl:mail-check:last": C, "nl:mail-check:lock": C,
+  "nl:mail-check:last": C, "nl:mail-check:lock": C, "nl:mail-check:runs": C,
+  // The public status page's count of an hour's requests (247 [SP4] unit 2, lib/status-page.ts), the company's, kept two hours.
+  "nl:status:views:": C,
   "nl:mail:bc:": T("nl:mail:bcs:"), "nl:mail:bcs:": E, "nl:mail:clk:": E, "nl:mail:day:": C, "nl:mail:drafts:": E, "nl:mail:enr:": E,
   "nl:mail:flowq": I, "nl:mail:flowq:lease": I, "nl:mail:flows:": E, "nl:mail:flowstats:": E, "nl:mail:health:": E, "nl:mail:lock": C,
   "nl:mail:mk:": T("nl:store:leads:", 400), "nl:mail:paused:": E, "nl:mail:queue": I, "nl:mail:ramp:": E, "nl:mail:segs:": E,
@@ -317,7 +328,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // to retain a closed store's payload without reviewed funding/cleanup.
   "nl:order-confirmation:closed:": C, "nl:order-confirmation:erased:": C, "nl:order-confirmation:due": C, "nl:order-confirmation:person:": C, "nl:order-confirmation:row:": C,
   "nl:order-confirmation:source:": C, "nl:order-confirmation:store:": C,
-  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E,
+  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:pending:": E,
   // Legacy marks expire in45days. The inactive original-window checkpoint
   // may retain its receipt for767days; this is not its legacy price envelope.
   "nl:orders:seen:": X(767),
@@ -326,12 +337,14 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:letters:s:": E, "nl:letters:i:": T("nl:letters:s:", 400),
   // Who may read an email kept for members (lib/letter-access.ts): an answer kept for minutes, a link and the counts of links asked, an hour each.
   "nl:letters:ok:": X(1), "nl:letters:link:": X(1), "nl:letters:rl:addr:": X(1), "nl:letters:rl:ip:": X(1),
+  // A buyer's withdrawal from an order (lib/withdrawal.ts, 588 [KB9]): the order and the time, gone by itself after 400 days.
+  "nl:withdraw:": X(400),
   // The owner's Path (lib/path.ts): deleted by the prepare step (forgetPath).
   "nl:path:": E,
   // Shared indexes survive; prepare/forgetPath removes only this store's member and reverse field.
   "nl:path:board:v1": D("prepare"), "nl:path:board:owners:v1": D("prepare"),
   "nl:pause:": E, "nl:pause:due": I, "nl:pause:last:": E,
-  "nl:pay:currencies:": E,
+  "nl:pay:currencies:": E, "nl:taxreg:": E,
   // Payment requests (lib/payment-request-store.ts): the store's lists go, and each request through them; its reminders and its place in the sweep's list are taken out.
   "nl:payreq:s:": E, "nl:payreq:o:": E, "nl:payreq:p:": E, "nl:payreq:r:": T("nl:payreq:s:", 400),
   "nl:payreq:due": I, "nl:payreq:stores": I, "nl:payreq:lock:": X(1), "nl:payreq:w:": X(1),
@@ -343,17 +356,17 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:pinv:": Cr(30),
   "nl:pkg:": T("nl:pkg:s:"), "nl:pkg:s:": E, "nl:pkg:t:": T("nl:pkg:s:"),
   "nl:held:stores": I, "nl:held:retry:": Cr(2), "nl:held:month:": Cr(400), "nl:held:walk": C,
-  // Deleted stores whose webhooks and keys are tried again (lib/store-forget-retry.ts): the line, and each month's counts.
+  // Deleted stores whose webhooks, keys and assistant notes are tried again (lib/store-forget-retry.ts): the line, and each month's counts.
   "nl:forget:q": C, "nl:forget:kept": C, "nl:forget:month:": Cr(400),
-  "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I,
+  "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan-withdraw:": Cr(400), "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I,
   "nl:plans:lock": C, "nl:plans:pending": I,
   "nl:pod:": E, "nl:pod:by:": E, "nl:pod:n:": X(2), "nl:pod:ok:": E, "nl:pod:t:": T("nl:pod:by:"),
-  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:stores": I,
+  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
-  "nl:ppsell:refunded:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E,
+  "nl:ppsell:refunded:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
   "nl:pre:": E, "nl:pre:give:": X(1), "nl:pre:jobs": I, "nl:pre:pi:": X(430),
   "nl:preview:": T("prepare", 400),
-  "nl:product:about:": E, "nl:product:note:": E, "nl:product:page:": E, "nl:product:pages:": E, "nl:product:pics:": E,
+  "nl:product:about:": E, "nl:product:landing:": E, "nl:product:note:": E, "nl:product:page:": E, "nl:product:pages:": E, "nl:product:pics:": E,
   "nl:pwyw:": E,
   // ---------------------------------------------------------------- q-s
   "nl:quiet:at:": C, "nl:quiet:lock": C, "nl:quiet:seen:": Cr(2), "nl:quiet:sent:": Cr(30),
@@ -391,6 +404,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
+  "nl:stamp:drop": C,
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:lock:": E,
   "nl:storage:pending:": X(1),
@@ -399,14 +413,17 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:store:owner:": T("prepare"), "nl:store:photo:": E,
   "nl:stream:auto:": E, "nl:stream:autoowed:": E, "nl:stream:autoq": I, "nl:stream:cap:": E, "nl:stream:col:": E, "nl:stream:due": I, "nl:stream:gone": C,
   "nl:stream:lock": C, "nl:stream:peek:": E, "nl:stream:v:": E,
-  "nl:stripe-check:last": C, "nl:stripe-check:lock": C,
+  "nl:stripe-check:last": C, "nl:stripe-check:lock": C, "nl:stripe-check:runs": C,
   "nl:sweep:cursor": C,
+  // The checkout sweep's place in one store's completed or expired checkouts of the day (lib/checkout-sweep.ts, walkDay):
+  // the five-minute job's own, like its cursor; two keys a store at most, each kept a day.
+  "nl:sweep:walk:": C,
   // ---------------------------------------------------------------- t-z
   // Consent state is token-keyed, encrypted, and expires after 600 seconds; the registry conservatively prices one day.
   "nl:teams:state:": X(1),
-  "nl:tasks:bytes:": E, "nl:tasks:doors": C,
+  "nl:tasks:bytes:": E, "nl:tasks:doors": C, "nl:tasks:taken:": X(1),
   "nl:team:": E, "nl:team:invite:": X(7), "nl:team:lock:": E, "nl:team:log:": E, "nl:team:of:": D("prepare"),
-  "nl:tier:": X(1), "nl:tier:price:": E,
+  "nl:tier:": X(1), "nl:tier:price:": E, "nl:tier:resume:": X(128),
   "nl:traffic:c:": E, "nl:traffic:day:": E, "nl:traffic:folders:": I, "nl:traffic:n:": E, "nl:traffic:r:": E, "nl:traffic:s:": E, "nl:traffic:gap:": { how: "erase", by: "handle" }, "nl:traffic:sc:": E, "nl:traffic:sp:": E, "nl:traffic:x:": E,
   "nl:upd:job:": X(120), "nl:upd:last:": E, "nl:upd:latest:": E, "nl:upd:off:": E, "nl:upd:stop:": T("nl:erase:ix:", 400), "nl:updq": I,
   // The creator's business card (lib/creator-card.ts): goes with the store.
@@ -429,6 +446,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:yearly-offer:": C, "nl:yearly:link:": X(30), "nl:yearly:price:": E,
   // A failed yearly renewal moved to monthly (lib/yearly-fallback.ts): its tries lapse; the daily job takes each entry out of its list.
   "nl:yearly:fallback:both": I, "nl:yearly:fallback:check": I, "nl:yearly:fallback:try:": X(2), "nl:yearly:fallback:void": I,
+  // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3): a hash names it, never the store; gone by itself in two days.
+  "nl:tip:co:": X(2),
 };
 
 /**

@@ -6,6 +6,12 @@
 
 Security audit finding MM-SA-08 (`docs/security-audit-2026-10-18.md`): pictures are kept outside the storage figure. That covers a product's, a link's, a page block's, one the AI writer made, an email's and a review's photo. One uploaded and never attached is never swept, and **no line of `tests/plan-cost-registry.ts` prices them**. They pile up month after month, so their cost has no ceiling, which fails the margin rule (MR). The owner chose (queue item 507) a figure of their own on each plan, sized so that no plan loses room, and a sweep of pictures attached to nothing, with a notice to the creator and never touching one in use. The item asks for the worst-case cost and a ceiling first. That is this unit.
 
+**What already bounds pictures, and what does not.** Since the audit, the picture door (`lib/picture-door.ts`) caps how fast pictures come in:
+- `PICTURE_DOORS_PER_HOUR` doors an hour;
+- at most `PICTURE_DOOR_MAX` signed and not yet put on anything.
+
+That bounds the pace, not what is kept. A picture stays in the file store until the store closes, put on something or not, so what a store keeps still grows month after month, and no cost line prices it.
+
 ## The proposed figure: the most a store can add in a month
 
 A picture door is a studio request (at most `MAX_IMAGE_BYTES`, 0 GB), and a review's photo is a buyer action (at most `MAX_REVIEW_PHOTO_BYTES`, 0 GB). An email's picture is smaller than a studio picture and is counted as one. So in one month a store can add at most:

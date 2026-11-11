@@ -14,6 +14,7 @@
  *   - words missing in a language a store sells in, or words that say a
  *     vote was counted when it was not.
  */
+import type { NextRequest } from "next/server";
 import { pollLinkPart } from "@/lib/email-poll-links";
 import { pollPage } from "@/lib/email-poll-vote";
 import * as route from "@/app/api/mail/poll/route";
@@ -109,7 +110,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   const press = async (query: string, form: Record<string, string>) => {
     const body = new FormData();
     for (const [k, v] of Object.entries(form)) body.set(k, v);
-    return route.POST(new Request(`https://marktmorgen.com/api/mail/poll?${query}`, { method: "POST", body }));
+    return route.POST(new Request(`https://marktmorgen.com/api/mail/poll?${query}`, { method: "POST", body }) as NextRequest);
   };
   const back = await press(`b=${ID}&k=${link(2).replace(/^2\./, "3.")}`, { a: "1", from: "page" });
   is("a 303 back to the page", back.status, 303);

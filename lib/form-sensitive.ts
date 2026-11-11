@@ -21,18 +21,29 @@ function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.
   // Keep the other secret in "your password manager's password" detectable.
   const request = label.replace(/\bpass(?:word|code|phrase)s?\s+(?=(?:manager|hints?|safety|courses?|lessons?|chapters?)\b)/gi, "");
-  // Explicit requests win over question wording such as "Could you share...".
+  // Explicit asks win over question wording, including "What's the password for Instagram?".
   if (/^(?:(?:please|kindly)\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:enter|provide|type(?:\s+in)?|input|write|share|send|tell|give|choose|create|confirm|re[-\s]?enter)\s+(?:(?:the|a|an)\s+)?(?:[\p{L}\p{N}'’\-]+\s+){0,5}pass(?:word|code|phrase)s?\b/iu.test(request)) return true;
+  if (/^(?:what(?:'s|\s+is)|which\s+is|where(?:'s|\s+is))\s+(?:the\s+)?pass(?:word|code|phrase)s?\s+(?:for|to)\s+(?:(?:your|my)\s+)?[\p{L}\p{N}'’\-]+/iu.test(request)) return true;
   // Exempt complete habit questions, not an arbitrary question prefix that
   // could hide a second request for the secret later in the same field.
   const about = /^(?:(?:do|did|does|have|has)\s+you\s+(?:reuse|change|reset|forget|forgot|remember|store|save|use)|how\s+(?:often|frequently)\s+(?:do|did|does)\s+you\s+(?:reuse|change|reset|rotate)|what\s+makes)\s+(?:your|my)\s+pass(?:word|code|phrase)s?\s*(?:(?:strong|secure|safe)|(?:last|this)\s+(?:month|week|year))?\s*[?.]?$/i.test(request);
   if (!about && /\b(?:your|my)\b(?:\s+[\p{L}\p{N}'’\-]+){0,5}\s+pass(?:word|code|phrase)s?\b/iu.test(request)) return true;
-  // A short field name can name any service and combine login credentials.
-  // Remove a suffix annotation only after the secret noun, then unwrap grouping.
-  const fieldName = request.replace(/(\bpass(?:word|code|phrase)s?)\s*\([^)]*\)(?=\s*[:*?]?$)/gi, "$1")
-    .replace(/[():&/+]/g, " ").replace(/\s+/g, " ").trim();
+
+  // Punctuation is a separator in ordinary credential labels ("Email, password"
+  // and "Gmail — password"), not a reason to let the secret through.
+  const normalized = request.replace(/[,:;|.–—():&/+]/g, " ").replace(/\s+/g, " ").trim();
+  // Short complete questions about a sign-in process do not ask the visitor
+  // to disclose a secret. Explicit questions for the actual password matched above.
+  const topicQuestion = /^(?:how|what|why|which|when|where|who|do|did|does|would|could|can|have|has|should|describe|feedback|opinion|thoughts|experience|review)\b/i.test(normalized);
+  const credentialPair = /\b(?:e-?mail|user\s*name|username|login)\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+pass(?:word|code|phrase)s?\b|\bpass(?:word|code|phrase)s?\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+\b(?:e-?mail|user\s*name|username|login)\b/iu.test(normalized);
+  if (credentialPair && !topicQuestion) return true;
+
+  // A short field name may name a service, or use "email and password" with
+  // a courtesy suffix. Narrow exceptions below keep ordinary password questions.
+  const fieldName = request.replace(/(\bpass(?:word|code|phrase)s?)\s*\([^)]*\)(?=\s*(?:please|here|below)?\s*[:*?]?$)/gi, "$1")
+    .replace(/[,:;|.–—():&/+]/g, " ").replace(/\s+/g, " ").trim();
   return !/^(?:how|what|why|which|when|where|who|do|did|does|would|could|can|have|has|should|rate|describe|feedback|opinion|thoughts|experience|review)\b/i.test(fieldName) &&
-    /^(?:(?:[\p{L}\p{N}'’\-]+|[&/+])\s+){0,3}pass(?:word|code|phrase)s?\s*[:*?]?$/iu.test(fieldName) ||
+    /^(?:(?:[\p{L}\p{N}'’\-]+|[&/+])\s+){0,3}pass(?:word|code|phrase)s?\s*(?:please|here|below)?\s*[:*?]?$/iu.test(fieldName) ||
     /^(?:(?:a|the|new|current|account|email|login)\s+)*pass(?:word|code|phrase)s?\b/i.test(request);
 }
 

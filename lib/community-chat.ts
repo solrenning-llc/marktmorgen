@@ -347,8 +347,10 @@ export function refusalWords(reason: ChatRefusal, slow: number, wait?: number): 
 
 /** How many messages the room holds right now. */
 export async function roomSize(id: string): Promise<number> {
-  const [n] = await redisPipeline([["ZCARD", roomKey(id)]]);
-  return Number(n) || 0;
+  // Read exactly (rule 24, MR): an erasure is paid for by this count, so an unknown reply throws, never 0.
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", roomKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the room's messages counted for a person's erasure");
+  return n;
 }
 
 /**

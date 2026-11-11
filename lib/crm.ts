@@ -24,7 +24,7 @@ import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf as replyCount, repliesFor } from "@/lib/redis-reply";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
@@ -963,6 +963,8 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
 /** How many deals the store keeps: what deleting a person reads (lib/person-erasure.ts). */
 export async function dealCount(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["HLEN", dealsKey(statsId)]]);
-  return Number(n) || 0;
+  // Read exactly (rule 24, MR): an erasure is paid for by this count, so an unknown reply throws, never 0.
+  const n = replyCount(repliesFor(await redisPipeline([["HLEN", dealsKey(statsId)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the deals counted for a person's erasure");
+  return n;
 }

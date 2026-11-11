@@ -623,6 +623,10 @@ export async function conversationsOf(id: string, who: string): Promise<{ reques
 
 /** How many conversations and requests one member is in: what deleting them goes through (lib/community-erasure.ts). */
 export async function dmCount(id: string, who: string): Promise<number> {
-  const [mine, asked] = await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]);
-  return (Number(mine) || 0) + (Number(asked) || 0);
+  // Read exactly (rule 24, MR): an erasure is paid for by this count, so an unknown reply throws, never 0.
+  const read = repliesFor(await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]), 2);
+  const mine = replyCount(read?.[0]);
+  const asked = replyCount(read?.[1]);
+  if (mine === null || asked === null) throw new UnknownReplyError("the direct messages counted for a person's erasure");
+  return mine + asked;
 }

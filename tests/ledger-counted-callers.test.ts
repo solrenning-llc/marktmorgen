@@ -474,7 +474,7 @@ async function main(): Promise<void> {
   const readNow = await buyerLedger(shop);
   const keptCopy = JSON.parse(String((await redisPipeline([["GET", ledgerKey]]))[0]));
   const ttl = Number((await redisPipeline([["TTL", ledgerKey]]))[0]);
-  is("read from Stripe, its copy is keptCopy an hour, with when it was read", [LEDGER_SECONDS, ttl > 600 && ttl <= 3_600, typeof readNow.at === "number" && readNow.at === keptCopy.t, stripeCalls > 0], [3_600, true, true, true]);
+  is("read from Stripe, its copy is kept an hour, with when it was read", [LEDGER_SECONDS, ttl > 600 && ttl <= 3_600, typeof readNow.at === "number" && readNow.at === keptCopy.t, stripeCalls > 0], [3_600, true, true, true]);
   stripeCalls = 0;
   const fromCopy2 = await buyerLedger(shop);
   is("read again from the copy: Stripe not read, and the same time", [stripeCalls, fromCopy2.at], [0, readNow.at]);

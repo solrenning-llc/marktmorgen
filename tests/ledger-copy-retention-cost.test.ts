@@ -18,7 +18,7 @@ const BUYER_LEDGER_COPY_KEPT = (registry as Record<string, unknown>).BUYER_LEDGE
 
 part("The one-hour copy's storage is in the reading's cost");
 const kept = BUYER_LEDGER_BYTES * DB_BYTE_MONTH * (LEDGER_SECONDS / (30 * 86_400));
-is("the copy is kept an hour", LEDGER_SECONDS, 3_600);
+is("the copy is kept an hour, the hour the registry prices", [LEDGER_SECONDS, registry.BUYER_LEDGER_COPY_SECONDS], [3_600, 3_600]);
 is("its storage is priced: the copy's bytes, at the GB-month rate, for LEDGER_SECONDS", typeof BUYER_LEDGER_COPY_KEPT === "number" && Math.abs(BUYER_LEDGER_COPY_KEPT - kept) < 1e-15, true);
 is("and is more than nothing", typeof BUYER_LEDGER_COPY_KEPT === "number" && BUYER_LEDGER_COPY_KEPT > 0, true);
 is("a reading of the buyers carries it", typeof BUYER_LEDGER_COPY_KEPT === "number" && BUYER_LEDGER >= BUYER_LEDGER_COPY_KEPT, true);

@@ -64,7 +64,9 @@ import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_
 import { giveImportRows, takeImportRows } from "@/lib/imports";
 import { rowsWords } from "@/lib/import-limits";
 import { type Held, LockBusyError, releaseLock } from "@/lib/redis-lock";
-import { DataRoomError, giveData, needData } from "@/lib/store-data";
+import { DataRoomError, dataUsed, needData } from "@/lib/store-data";
+import { contentRoomFor, dataFullWords } from "@/lib/store-data-rules";
+import { largerPlanFor } from "@/lib/larger-plan";
 import type { Store } from "@/lib/store";
 
 /** The rows a file sent here may have, the header apart: twice what a store holds, for the rows refused or already there. */
@@ -339,6 +341,17 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     if (snapshot.dealIds.size + deals.length > MAX_DEALS) return refuse("too_many", tooManyDealsSentence(deals.length, MAX_DEALS - snapshot.dealIds.size));
     if (!held) return { ok: true, summary };
 
+    // The room, from one cheap read, before anything is taken (Claude 1 on #2048): every change an import takes is
+    // by difference (importRoom), so their sum is exactly what it grows the store by. A file that cannot fit is
+    // refused here, before the month's rows and before the room's work for each deal, so sending it again and again
+    // costs a read each time. A room that cannot be read is unknown, never empty: refused as unavailable. The
+    // per-deal take below still decides, in one step; this only refuses what it would surely refuse.
+    const room = importRoom(snapshot.raw, pipelines, deals);
+    const grows = room.take.reduce((sum, change) => sum + change.bytes, 0);
+    const kept = await dataUsed(store, now);
+    if (!kept) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
+    if (grows > 0 && kept.used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(kept.used, kept.room, largerPlanFor(store, nowSeconds)));
+
     // The month's rows first, then the room: the room's work for each deal is done only for rows the month still has,
     // so a file refused for the month costs nothing per deal (Codex J on #2048). Nothing is written until both are taken.
     const rows = await takeImportRows(store, file.rows.length, now, options.bytes ?? 0);
@@ -347,7 +360,6 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
       return refuse("rows_month", `Your store can bring in ${rowsWords(rows.limit)} a month from files, and this file would go past that. Nothing was brought in. Bring it in when your next billing month starts, or bring in a smaller file.`, rows.limit);
     }
     counted = rows.counted;
-    const room = importRoom(snapshot.raw, pipelines, deals);
     await needData(store, room.take);
     await writeImport(statsId, held, snapshot.raw, pipelines, deals, store);
     counted = 0;

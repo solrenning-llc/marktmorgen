@@ -152,6 +152,18 @@ async function main(): Promise<void> {
   await real([["LREM", `nl:imports:list:${sid}`, 0, misfiled], ["DEL", `nl:import:${misfiled}`]]);
   is("healthy control: with it gone, the list reads again", (await storeImports(store))[0]?.id, running);
 
+  // Revisor 2 on #3686 (MEDIUM): a kept text that does not read as an import, and an entry of the list that is not an
+  // import id, are unknown, not left out of the studio's list (rule 30).
+  part("A kept text that is not an import, and an entry that is not an id, make the list unknown");
+  const unreadable = "d".repeat(24);
+  await real([["SET", `nl:import:${unreadable}`, "{not json"], ["LPUSH", `nl:imports:list:${sid}`, unreadable]]);
+  is("an unreadable kept text: storeImports throws UnknownReplyError", await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+  await real([["LREM", `nl:imports:list:${sid}`, 0, unreadable], ["DEL", `nl:import:${unreadable}`]]);
+  await real([["LPUSH", `nl:imports:list:${sid}`, "not-an-import-id"]]);
+  is("an entry that is not an import id: storeImports throws UnknownReplyError", await outcome(storeImports(store)), { threw: "UnknownReplyError" });
+  await real([["LREM", `nl:imports:list:${sid}`, 0, "not-an-import-id"]]);
+  is("healthy control: with both gone, the list reads again", (await storeImports(store))[0]?.id, running);
+
   part("Healthy control: the emails of an import are done only when its queue is empty");
   const mailing = (id: string): ImportJob => ({
     id,

@@ -160,6 +160,21 @@ export type MoveApplied =
 const stop = (state: Exclude<MoveApplied["state"], "moved">): MoveApplied => ({ state, told: null });
 
 /**
+ * Whether the store deleted either address: "deleted" once the index keeps nothing of them (forgetMovedPerson),
+ * "unknown" when that cannot be read or done, "none" when neither was deleted.
+ */
+async function dropDeleted(store: Store, addresses: string[]): Promise<"none" | "deleted" | "unknown"> {
+  try {
+    const found = await suppressedAmong(store.listId, addresses);
+    if (!found.size) return "none";
+    for (const address of found) await forgetMovedPerson(store, address);
+    return "deleted";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * Writes a move into the index, once both addresses confirmed: claimed once
  * through claimPurchaseMove, and on a later try of the same move (its claim
  * already taken, its request still there) finished where it stopped. Then
@@ -184,11 +199,9 @@ export async function applyPurchaseMove(store: Store, id: string, now = Date.now
   if (request.scope.kind !== "store" || request.scope.sid !== store.sid || request.appliedAt === null) return stop("gone");
 
   const { from, to } = request;
-  try {
-    if ((await suppressedAmong(store.listId, [from, to])).size > 0) return stop("deleted");
-  } catch {
-    return stop("unknown");
-  }
+  // An address the store deleted: refused, and anything an earlier try of this move wrote for it is taken out.
+  const deleted = await dropDeleted(store, [from, to]);
+  if (deleted !== "none") return stop(deleted);
 
   const mark: Mark = { id, to, at: request.appliedAt };
   const text = markText(mark);
@@ -220,6 +233,11 @@ export async function applyPurchaseMove(store: Store, id: string, now = Date.now
     if (error instanceof UnknownReplyError) return stop("unknown");
     throw error;
   }
+  // Read again once written: an erasure that ran between the check above and the write found nothing of the move
+  // yet, so the lines it would have taken are taken out here (Claude 1 on #3625). An erasure after this read finds
+  // them written, as forgetMovedPerson reads them.
+  const late = await dropDeleted(store, [from, to]);
+  if (late !== "none") return stop(late);
   return { state: "moved", told: await tellCreatorOfMove(store, id, { from, to }, now) };
 }
 
@@ -258,22 +276,30 @@ export async function forgetMovedPerson(store: Store, raw: string): Promise<numb
   if (!read) throw new UnknownReplyError(what);
   const mark = markOf(read[0], what);
   const lines = linesOf(read[1], what);
-  const commands: (string | number)[][] = [];
+  // In two steps, each checked before the next (Codex G on #3625): first what other keys hold of this address (the
+  // line under the address it moved to, the marks of the addresses that moved to it), then the two keys that point
+  // there. A try stopped in the first step keeps both pointers, so the next try finds every line again.
+  const others: (string | number)[][] = [];
+  const own: (string | number)[][] = [];
   const olds = new Set<string>();
   if (mark) {
-    commands.push(["DEL", movedKey(sid, address)], ["HDEL", intoKey(sid, mark.to), address]);
+    others.push(["HDEL", intoKey(sid, mark.to), address]);
+    own.push(["DEL", movedKey(sid, address)]);
     olds.add(address);
   }
   if (lines.size) {
-    commands.push(["DEL", intoKey(sid, address)]);
     for (const old of lines.keys()) {
-      commands.push(["DEL", movedKey(sid, old)]);
+      others.push(["DEL", movedKey(sid, old)]);
       olds.add(old);
     }
+    own.push(["DEL", intoKey(sid, address)]);
   }
-  if (!commands.length) return 0;
-  const done = repliesFor(await redisPipeline(commands), commands.length);
-  if (!done || done.some((reply) => typeof reply !== "number")) throw new UnknownReplyError(what);
+  if (!own.length) return 0;
+  for (const commands of [others, own]) {
+    if (!commands.length) continue;
+    const done = repliesFor(await redisPipeline(commands), commands.length);
+    if (!done || done.some((reply) => typeof reply !== "number")) throw new UnknownReplyError(what);
+  }
   await giveData(store, [...olds].map((old) => ({ slot: movedRoomSlot(sid, old), bytes: 0, set: true })));
   return (mark ? 2 : 0) + (lines.size ? 1 + lines.size : 0);
 }

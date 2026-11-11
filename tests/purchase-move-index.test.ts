@@ -60,7 +60,9 @@ redis.run = (c: (string | number)[]) => {
   return run(c);
 };
 
-const indexKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:moved:") || k.startsWith("nl:pm:into:")).sort();
+// Redis never keeps an empty hash (a key whose last field went is gone); the stand-in may keep one after a read, so it
+// is not counted as something the index keeps.
+const indexKeys = () => redis.keys().filter((k) => (k.startsWith("nl:pm:moved:") || k.startsWith("nl:pm:into:")) && !(redis.run(["TYPE", k]) === "hash" && redis.run(["HLEN", k]) === 0)).sort();
 const indexState = () => indexKeys().map((k) => `${k}=${JSON.stringify(redis.run(["TYPE", k]) === "hash" ? redis.run(["HGETALL", k]) : redis.run(["GET", k]))}`);
 
 async function main(): Promise<void> {

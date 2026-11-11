@@ -227,6 +227,10 @@ async function main(): Promise<void> {
   insights = "rows";
   is("a read does not say it read", await readMetaSpend(statsId, store.currency).catch((error: Error) => error.name), "error");
   insights = "auth";
+  // Changed with the merge of main (rule 23): the reading lock is let go by a checked script now (lib/claim-mark.ts
+  // releaseMark), which this part's bent replies answer in another shape too, so the read before keeps it, as a lost
+  // reply would; it is taken off here, as its expiry would, so this read reaches the connection's mark again.
+  await pipeline([["DEL", `nl:metaads:reading:${statsId}`]]);
   is("markBroken fails closed", await readMetaSpend(statsId, store.currency).then((v) => `ok ${v}`, (error: Error) => error.name), "UnknownReplyError");
   is("finishMeta fails closed", await fin().then((v) => `ok ${v.ok}`, (error: Error) => error.name), "UnknownReplyError");
   weird = undefined;

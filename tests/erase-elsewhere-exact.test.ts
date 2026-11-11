@@ -20,7 +20,7 @@
  * In-memory Redis; nothing real is sent.
  */
 import { createHash } from "node:crypto";
-import { DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
+import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -181,6 +181,41 @@ async function main(): Promise<void> {
     const at = await closing(X, "hostxa");
     const stores = await walkAt(at);
     is("control: on no other store's team (stale index): prepared, calendar gone", [stores, calendarKept(X)], [1, [0, 0, 0, 0]]);
+  }
+
+  part("MEDIUM (Claude 4 on #3660 at af59d74bde): one unreadable reply never keeps a host's calendar for good");
+  /** The batch's entries left: a store whose host's calendar is still to decide stays in it, set aside. */
+  const batchLeft = () => redis.run(["HLEN", BATCH_KEY]);
+  {
+    fresh();
+    // The owner serves no other store; their team index answers once in a shape that is not a list.
+    const at = await closing(OWNER, "transient");
+    replaced = [{ word: "SMEMBERS", key: teamIndexKey(OWNER), reply: "ERR synthetic transient" }];
+    const stores = await walkAt(walkTime(at, 0));
+    replaced = [];
+    is("first walk: prepared, out of line, record gone, calendar kept while unknown", [stores, line(OWNER, at), (await storeForEmail(OWNER)) === null, calendarKept(OWNER)], [1, "out", true, [1, 1, 1, 1]]);
+    is("... and the store stays in the batch, set aside, so its host's calendar is decided again", batchLeft(), 1);
+    for (let k = 1; k <= 3; k += 1) await walkAt(walkTime(at, k));
+    is("a later run reads it: the host serves no other store, so their calendar goes, and the store leaves the batch", [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
+  }
+  {
+    // Fifty-one stores in X's index, the live one among them, first: found among those read, so X is known to serve it.
+    fresh();
+    await claimHandle(Y, "owneryb", "Owner Y", "");
+    const b = (await ensureStoreId(Y))!;
+    if (!(await putMember(b, X, "admin"))) throw new Error("setup: X is not on Y's team");
+    for (let i = 0; i < 50; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`junk${i}`).digest("hex")]);
+    const at = await closing(X, "hostxa");
+    await walkAt(walkTime(at, 0));
+    is("more stores than are read, the live one found among them: the calendar kept and nothing left to decide", [calendarKept(X), batchLeft()], [[1, 1, 1, 1], 0]);
+  }
+  {
+    // The same, the live one past those read: still not known, so kept and decided again, but the store is told once.
+    const { at } = await teammate(50);
+    let told = 0;
+    const count = async () => { told += 1; };
+    for (let k = 0; k <= 2; k += 1) await eraseClosed(Date.now() + 60_000, count, walkTime(at, k));
+    is("the live one past those read: the calendar kept, still to decide, and the store's last mark written once", [calendarKept(X), batchLeft(), told], [[1, 1, 1, 1], 1, 1]);
   }
 
   part("LOW: a page of a host's claims that does not read is never their end");

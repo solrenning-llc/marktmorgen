@@ -83,29 +83,38 @@ export async function saveServer(room: string, server: DiscordServer): Promise<v
  * Both reads are exact (CX-123 rule 24, lib/redis-reply.ts): a reply that is not a list of strings, or a person kept
  * in another shape, throws UnknownReplyError before anything is deleted. Deleting the people while their addresses
  * are unknown would leave each buyer's address linked to their Discord id for good (Claude 6's proof,
- * tests/discord-forget-server.test.ts); kept whole, the next try forgets everything.
+ * tests/discord-forget-server.test.ts); kept whole, the next try forgets everything. The two lists must match, and
+ * only the people read are deleted, with their address links: the server goes only once nobody is left (Codex G).
  */
 export async function forgetServer(room: string, sid: string): Promise<number> {
   const people = stringList(oneReply(await redisPipeline([["HKEYS", membersKey(room)]]), "the people given Discord roles"));
   if (!people) throw new UnknownReplyError("the people given Discord roles");
   const rows = stringList(oneReply(await redisPipeline([["HVALS", membersKey(room)]]), "the addresses of the people given Discord roles"));
   if (!rows) throw new UnknownReplyError("the addresses of the people given Discord roles");
+  // One address a person, read as a whole (Codex G on #3017): a shorter list on either side, from a bent reply or a
+  // person joining or leaving between the two reads, is not known.
+  if (rows.length !== people.length) throw new UnknownReplyError("the addresses of the people given Discord roles");
   const addresses = rows.map((row) => {
     const email = parse<Partial<Member>>(row)?.e;
     if (typeof email !== "string" || !email) throw new UnknownReplyError("the addresses of the people given Discord roles");
     return email;
   });
-  await redisPipeline([
-    ["DEL", serverKey(room), productsKey(room), membersKey(room), ...addresses.map((e) => addressKey(room, e))],
-    ...(people.length ? [["ZREM", DUE_KEY, ...people.map((id) => `${sid}|${id}`)]] : []),
-  ]).then((replies) => {
-    // The deletes are read too, as forgetMember's (#2932, CX-123 rule 24): a missing, short, long or queued answer is not
-    // "forgotten", so nobody is counted and the disconnect is said as not done. DEL removes at most the keys it names
-    // (the server, the products' roles, the people, each address link) and ZREM at most the people it names.
-    const most = [3 + addresses.length, people.length];
-    const counts = repliesFor(replies, people.length ? 2 : 1)?.map(countOf);
-    if (!counts || !counts.every((count, i) => count !== null && count <= most[i])) throw new UnknownReplyError("the deletion of a Discord server and its people");
-  });
+  // Only the people read, with their address links and due entries, are deleted; then the list must be empty. Anybody
+  // left (a reading that missed somebody, a person who joined meanwhile) keeps the server for the next try, which
+  // forgets them with their address: no buyer's address is ever left linked to a Discord id with nobody to forget it.
+  const commands: (string | number)[][] = [
+    ...(people.length ? [["HDEL", membersKey(room), ...people], ["ZREM", DUE_KEY, ...people.map((id) => `${sid}|${id}`)]] : []),
+    ...(addresses.length ? [["DEL", ...addresses.map((e) => addressKey(room, e))]] : []),
+    ["HLEN", membersKey(room)],
+  ];
+  // The deletes are read too, as forgetMember's (#2932, CX-123 rule 24): a missing, short, long or queued answer is not
+  // "forgotten". HDEL and ZREM remove at most the people named, DEL at most the address links named.
+  const counts = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
+  const most = [...(people.length ? [people.length, people.length] : []), ...(addresses.length ? [addresses.length] : [])];
+  if (!counts || !most.every((limit, i) => counts[i] !== null && (counts[i] as number) <= limit)) throw new UnknownReplyError("the deletion of a Discord server's people");
+  if (counts[counts.length - 1] !== 0) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
+  const gone = repliesFor(await redisPipeline([["DEL", serverKey(room), productsKey(room), membersKey(room)]]), 1)?.map(countOf);
+  if (!gone || gone[0] === null || (gone[0] as number) > 3) throw new UnknownReplyError("the deletion of a Discord server");
   return people.length;
 }
 

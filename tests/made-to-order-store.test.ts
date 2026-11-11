@@ -38,6 +38,8 @@ const keys = async (pattern: string) => {
   const [scan] = await real([["SCAN", "0", "MATCH", pattern, "COUNT", 10_000]]);
   return Array.isArray(scan) && Array.isArray(scan[1]) ? (scan[1] as string[]) : [];
 };
+/** The made-to-order listing script (LIST_IF_ROOM), not the data-room script before it. */
+const listing = (commands: Commands) => commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:mto-list-if-room:v1\n");
 const reset = () => {
   redis.pipeline = real;
   redis.clear();
@@ -98,7 +100,7 @@ void (async () => {
   is("the store's list was written before the record, so it can be found", (await real([["ZCARD", list]]))[0], 1);
   is("the same sale kept again writes the record, without taking room twice", await keepMadeOrder(SHOP, { sale: sale(10), email: ANN, order }, NOW), "kept");
   reset();
-  redis.pipeline = (async (commands: Commands) => (commands[0][0] === "ZADD" ? [1, 0] : commands[0][0] === "EVAL" ? ["OK"] : real(commands))) as Pipeline;
+  redis.pipeline = (async (commands: Commands) => (commands[0][0] === "ZADD" ? [1, 0] : listing(commands) ? ["OK"] : real(commands))) as Pipeline;
   is("a list write that does not answer as it should", await keepMadeOrder(SHOP, { sale: sale(11), email: ANN, order }, NOW), "unknown");
   is("then no record is written", (await keys(`nl:mto:o:${STATS}:*`)).length, 0);
 
@@ -113,9 +115,14 @@ void (async () => {
   is("and her erasure deletes it", await forgetMadeOrdersPerson(SHOP, ANN, NOW), 1);
   is("nothing of hers is left", (await keys(`nl:mto:o:${STATS}:*`)).length, 0);
   reset();
-  await real([["SET", list, "not a list"]]);
-  is("a list key of another kind is unknown", await keepMadeOrder(SHOP, { sale: sale(25), email: ANN, order }, NOW), "unknown");
+  redis.pipeline = (async (commands: Commands) => (listing(commands) ? [-1] : real(commands))) as Pipeline;
+  is("the script finding a list key of another kind is unknown", await keepMadeOrder(SHOP, { sale: sale(25), email: ANN, order }, NOW), "unknown");
   is("and no record is written on it", (await keys(`nl:mto:o:${STATS}:*`)).length, 0);
+  reset();
+  redis.pipeline = (async (commands: Commands) => (listing(commands) ? [0] : real(commands))) as Pipeline;
+  is("the script finding the list full is full", await keepMadeOrder(SHOP, { sale: sale(26), email: ANN, order }, NOW), "full");
+  is("and no record is written then", (await keys(`nl:mto:o:${STATS}:*`)).length, 0);
+  redis.pipeline = real;
 
   part("A list longer than the cap is never read as complete");
   reset();

@@ -17,8 +17,10 @@
  *
  * How it is bounded, before anything is written:
  *   - at most MAX_KEPT_ORDERS records a store at once (expired ones are
- *     taken out of the list first), so a read of the queue, the copy or the
- *     erasure reads a known number of keys;
+ *     taken out of the list first), checked and listed in one script
+ *     (LIST_IF_ROOM), so keeps run at the same time never pass it, and a
+ *     read of the queue, the copy or the erasure reads a known number of
+ *     keys; a list found longer than that throws, never read as complete;
  *   - each record at most RECORD_MAX_BYTES, refused above it, and
  *     ROOM_BYTES counted in the store's data room (lib/store-data.ts) until
  *     the month its record ends, refused when the room is full;
@@ -53,6 +55,23 @@ const READ_BATCH = 100;
 /** A sale's reference: a checkout (cs_…) or a one-click payment (pi_…). */
 const SALE = /^(?:cs|pi)_[A-Za-z0-9_]{8,250}$/;
 const STATS_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Lists a record in its store's list only while the store has room, in one
+ * step: ended records out first, then the cap. ARGV: now (seconds), the cap,
+ * the record's end (its score), its id, the list's lifetime. Answers 1
+ * listed, 2 already listed, 0 full, -1 when the key holds something else.
+ */
+export const LIST_IF_ROOM = `-- marktmorgen:mto-list-if-room:v1
+local t=redis.call('TYPE',KEYS[1]).ok
+if t~='none' and t~='zset' then return -1 end
+redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',ARGV[1])
+if redis.call('ZSCORE',KEYS[1],ARGV[4]) then return 2 end
+if redis.call('ZCARD',KEYS[1])>=tonumber(ARGV[2]) then return 0 end
+redis.call('ZADD',KEYS[1],ARGV[3],ARGV[4])
+redis.call('EXPIRE',KEYS[1],ARGV[5])
+return 1
+`;
 
 const saleId = (sale: string) => createHash("sha256").update(`mto-sale:${sale}`).digest("hex").slice(0, 32);
 const listKey = (statsId: string) => `nl:mto:i:${statsId}`;
@@ -124,11 +143,14 @@ export async function keepMadeOrder(store: DataStore, input: { sale: string; ema
     // The room first, until the month the record ends: nothing is written when it does not fit or cannot be read.
     const taken = await takeData(store, [{ until: endsAt * 1000, bytes: ROOM_BYTES }], now);
     if (!taken.ok) return taken.reason === "full" ? "full" : "unknown";
-    // The store's list before the record, so every record written can be found by the copy and the erasure.
+    // The store's list before the record, so every record written can be found by the copy and the erasure;
+    // the cap checked again in the same step, so keeps at the same time never pass it. A place lost to
+    // another keep leaves the room counted until that month ends: the safe direction, nothing is paid.
     try {
-      const replies = repliesFor(await redisPipeline([["ZADD", list, endsAt, id], ["EXPIRE", list, KEEP_SECONDS]]), 2);
-      const added = replies ? countOf(replies[0]) : null;
-      if (!replies || added === null || added > 1 || replies[1] !== 1) return "unknown";
+      const replies = repliesFor(await redisPipeline([["EVAL", LIST_IF_ROOM, 1, list, nowSeconds, MAX_KEPT_ORDERS, endsAt, id, KEEP_SECONDS]]), 1);
+      const answer = replies ? replies[0] : null;
+      if (answer === 0) return "full";
+      if (answer !== 1 && answer !== 2) return "unknown";
     } catch {
       return "unknown";
     }
@@ -137,11 +159,15 @@ export async function keepMadeOrder(store: DataStore, input: { sale: string; ema
   return claimed === "ours" ? "kept" : claimed === "taken" ? "already" : "unknown";
 }
 
-/** The ids of a store's records not yet ended, at most MAX_KEPT_ORDERS; throws on a reply that does not read. */
+/**
+ * The ids of a store's records not yet ended, at most MAX_KEPT_ORDERS; throws
+ * on a reply that does not read and on a list longer than the cap, which is
+ * never read as complete.
+ */
 async function listedIds(statsId: string, nowSeconds: number): Promise<string[]> {
-  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", listKey(statsId), `(${nowSeconds}`, "+inf", "LIMIT", 0, MAX_KEPT_ORDERS]]), 1);
+  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", listKey(statsId), `(${nowSeconds}`, "+inf", "LIMIT", 0, MAX_KEPT_ORDERS + 1]]), 1);
   const ids = replies ? stringList(replies[0]) : null;
-  if (!ids || !ids.every((id) => /^[0-9a-f]{32}$/.test(id))) throw new UnknownReplyError("listing a store's made-to-order records");
+  if (!ids || ids.length > MAX_KEPT_ORDERS || !ids.every((id) => /^[0-9a-f]{32}$/.test(id))) throw new UnknownReplyError("listing a store's made-to-order records");
   return ids;
 }
 

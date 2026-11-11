@@ -334,6 +334,9 @@ function ProductForm({
   const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
   // The checks under an AI draft of the descriptions (756 [STN3]): null while no draft is waiting.
   const [aiChecks, setAiChecks] = useState<boolean[] | null>(null);
+  // The checks the form had before an idea filled it (cloud I on #3441), put back when the idea is taken out; undefined
+  // while no idea is in the form.
+  const checksBeforeIdea = useRef<boolean[] | null | undefined>(undefined);
   const [aiHeld, setAiHeld] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
@@ -441,6 +444,15 @@ function ProductForm({
           summary={draft.summary}
           titleFieldId={`product-title-${id}`}
           onUse={(next) => setDraft({ ...draft, title: next.title, summary: next.summary })}
+          onReviewChange={(checks) => {
+            if (checks === null) {
+              if (checksBeforeIdea.current !== undefined) setAiChecks(checksBeforeIdea.current);
+              checksBeforeIdea.current = undefined;
+              return;
+            }
+            if (checksBeforeIdea.current === undefined) checksBeforeIdea.current = aiChecks;
+            setAiChecks(checks);
+          }}
         />
       ) : null}
 

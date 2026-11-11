@@ -16,6 +16,7 @@ import { readListing } from "@/lib/catalog";
 import { stockLeft } from "@/lib/stock";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { sendBatch, type BatchMessage, type EmailMeter } from "@/lib/email";
+import { STOCK_ALERT_WORDS } from "@/lib/buyer-words/stock-alert";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -159,11 +160,33 @@ async function main(): Promise<void> {
   redis.run = run;
   is("sent once", first.calls.length, 1);
   is("the batch is kept", redis.run(["EXISTS", `${listKey}:job`]), 1);
+  // Codex U on #3620: the email goes before the clean-up, so it never says the address is already deleted.
+  const already: Record<string, RegExp> = {
+    en: /is now deleted|has been deleted/i,
+    es: /ya se ha borrado/i,
+    fr: /maintenant supprimée/i,
+    de: /ist jetzt daraus gelöscht/i,
+    it: /ora è stato cancellato/i,
+    nl: /er nu uit gewist/i,
+    pt: /já foi apagado/i,
+  };
+  is("the email sent while its clean-up was still to come never says the address is already deleted", [
+    redis.run(["HEXISTS", listKey, "fay@example.com"]),
+    already.en.test(first.calls[0].messages[0].text),
+  ], [1, false]);
+  is("in no language", Object.entries(already).filter(([lang, done]) => done.test(STOCK_ALERT_WORDS[lang as keyof typeof STOCK_ALERT_WORDS].backAfter)).map(([lang]) => lang), []);
   makeDue();
   const second = sender("sent");
   await runRestocks(Date.now() + 30_000, { ...real, send: second.send });
   is("tried again as the same batch under the same key, which the email service sends to nobody twice", second.calls[0]?.key, first.calls[0].key);
   is("then cleaned up", [redis.run(["HEXISTS", listKey, "fay@example.com"]), redis.run(["EXISTS", `${listKey}:job`])], [0, 0]);
+
+  part("The Portuguese words are Portugal's (the store's pt locale is pt-PT; Codex U on #3620)");
+  const pt = STOCK_ALERT_WORDS.pt;
+  const ptText = Object.values(pt).flatMap((v): string[] =>
+    typeof v === "string" ? [v] : typeof v === "function" ? [(v as (...a: string[]) => string)("Loja Lanterna", "Gravura Assinada", "40 €")] : Object.values(v as Record<string, { title: string; body: string }>).flatMap((n) => [n.title, n.body]),
+  ).join("\n");
+  is("no Brazilian forms", ["você", "estoque", "apert", "digitad", "deu errado", "me avise", "olhe no"].filter((w) => ptText.toLowerCase().includes(w)), []);
 
   part("A person erased while their batch waits is not written to");
   await place("gus@example.com");

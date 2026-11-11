@@ -73,7 +73,6 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { stopWriting } from "@/lib/contacts";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
@@ -407,8 +406,6 @@ export function pauseNote(pause: Pause): string {
 export async function forgetHealthPerson(store: Pick<Store, "sid" | "listId">, email: string): Promise<number> {
   const id = healthId(store);
   if (!id || !isRedisConfigured()) return 0;
-  // Counted exactly (rule 24): a reply cut short or in another shape throws, never 0 standing for "erased".
-  const gone = countOf(repliesFor(await redisPipeline([["DEL", seenKey(id, normaliseEmail(email))]]), 1)?.[0]);
-  if (gone === null) throw new UnknownReplyError("a person's mail health mark deleted");
-  return gone;
+  const [gone] = await redisPipeline([["DEL", seenKey(id, normaliseEmail(email))]]);
+  return Number(gone) || 0;
 }

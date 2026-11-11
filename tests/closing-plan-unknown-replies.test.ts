@@ -33,6 +33,10 @@ const world = {
   charges: new Map<string, number>(),
   refunds: [] as { id: string; charge: string; payment_intent: string; amount: number; status: string; key: string }[],
   customers: new Map<string, () => unknown>(),
+  /** A payment intent whose reply is replaced by this function's answer (rule 30, Claude 6 on #3628). */
+  piReply: new Map<string, (own: Record<string, unknown>) => unknown>(),
+  /** Refund rows of other charges answered alongside, as a list read that is not this charge's alone. */
+  strayRefunds: [] as Record<string, unknown>[],
 };
 const sent: { to: string; text: string }[] = [];
 
@@ -70,9 +74,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = world.charges.get(intent[1]);
     if (!amount) return json({ error: { message: "No such payment_intent" } }, 404);
     const refunded = world.refunds.filter((row) => row.payment_intent === intent[1] && row.status === "succeeded").reduce((sum, row) => sum + row.amount, 0);
-    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount, amount_refunded: refunded, disputed: false } });
+    const own = { id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, payment_intent: intent[1], currency: "usd", amount, amount_refunded: refunded, disputed: false } };
+    const odd = world.piReply.get(intent[1]);
+    return json(odd ? odd(own) : own);
   }
-  if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
+  if (path === "/refunds" && method === "GET") return json({ object: "list", data: [...world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), ...world.strayRefunds], has_more: false });
   if (path === "/refunds" && method === "POST") {
     const pi = String(form.get("payment_intent"));
     const kept = world.refunds.find((row) => row.key === key);
@@ -180,6 +186,32 @@ async function main() {
     world.customers.set(`cus_${name}`, () => answer(`cus_${name}`));
     is(`${label}: settled as before (the money is back; there is no address)`, await settleOne(one.id), true);
     is(`${label}: the $69 given back once`, refundsOf(one.pi), [6_900]);
+  }
+
+  part("The payment it gives back, read for its own intent and its own charge (rule 30, Claude 6 on #3628)");
+  for (const [label, odd] of [
+    ["an intent reply for another intent, refunded in full", (own: Record<string, unknown>) => ({ ...own, id: "pi_someoneelse01", latest_charge: { ...(own.latest_charge as object), id: "ch_someoneelse01", payment_intent: "pi_someoneelse01", amount_refunded: 6_900 } })],
+    ["an intent reply with no id", (own: Record<string, unknown>) => ({ latest_charge: own.latest_charge })],
+    ["a charge of another intent", (own: Record<string, unknown>) => ({ ...own, latest_charge: { ...(own.latest_charge as object), payment_intent: "pi_someoneelse02" } })],
+  ] as [string, (own: Record<string, unknown>) => unknown][]) {
+    const name = `pioth${label.replace(/\W/g, "").slice(0, 10)}`;
+    const one = await inLine(name, S(day) - 3_600, `${name}@example.com`);
+    world.piReply.set(one.pi, odd);
+    is(`${label}: not settled`, await settleOne(one.id), false);
+    is(`${label}: no letter says the payment was returned`, sent.some((m) => m.to === `${name}@example.com`), false);
+    is(`${label}: kept in line`, (await entryOf(one.id))?.done, undefined);
+    world.piReply.delete(one.pi);
+    is(`${label}: once Stripe answers for it, the $69 is given back once`, [await settleOne(one.id), refundsOf(one.pi)], [true, [6_900]]);
+  }
+  {
+    // A list answered with a succeeded refund of another charge: never counted as this charge's money back.
+    const one = await inLine("refstray01", S(day) - 3_600, "refstray01@example.com");
+    world.strayRefunds = [{ id: "re_stray000001", object: "refund", charge: "ch_someoneelse03", payment_intent: "pi_someoneelse03", amount: 6_900, status: "succeeded" }];
+    is("a refund row of another charge: not settled on it", await settleOne(one.id), false);
+    is("no letter says $69 was returned", sent.some((m) => m.to === "refstray01@example.com"), false);
+    is("kept in line", (await entryOf(one.id))?.done, undefined);
+    world.strayRefunds = [];
+    is("once the list is this charge's alone, the $69 is given back once", [await settleOne(one.id), refundsOf(one.pi)], [true, [6_900]]);
   }
 
   console.error = quiet;

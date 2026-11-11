@@ -67,6 +67,11 @@ const kept = made?.ok ? made.order : null;
 is("the order as written reads back the same", parseMadeOrder(JSON.parse(JSON.stringify(kept))), kept);
 is("missing is not an order", parseMadeOrder(null), null);
 is("no steps", parseMadeOrder({ paidAt: PAID, days: 10, steps: [] }), null);
+// Claude 3 on #3627: only what startOrder writes reads back.
+is("production days kept as text are not what this module writes", [parseMadeOrder({ paidAt: PAID, days: " 5 ", steps: [{ stage: "received", at: PAID }] }), parseMadeOrder({ paidAt: PAID, days: "5", steps: [{ stage: "received", at: PAID }] })], [null, null]);
+is("a payment time in milliseconds is not a time in seconds: never an order that is never late", parseMadeOrder({ paidAt: PAID * 1000, days: 5, steps: [{ stage: "received", at: PAID * 1000 }] }), null);
+is("a step time in milliseconds either", parseMadeOrder({ paidAt: PAID, days: 5, steps: [{ stage: "received", at: PAID }, { stage: "in_production", at: PAID * 1000 }] }), null);
+is("and startOrder refuses one", startOrder({ paidAt: PAID * 1000, days: 5 }), null);
 is("not starting as received", parseMadeOrder({ paidAt: PAID, days: 10, steps: [{ stage: "in_production", at: PAID }] }), null);
 is("a step going back", parseMadeOrder({ paidAt: PAID, days: 10, steps: [{ stage: "received", at: PAID }, { stage: "delivered", at: PAID + DAY }, { stage: "in_production", at: PAID + 2 * DAY }] }), null);
 is("a step before the payment", parseMadeOrder({ paidAt: PAID, days: 10, steps: [{ stage: "received", at: PAID - 1 }] }), null);

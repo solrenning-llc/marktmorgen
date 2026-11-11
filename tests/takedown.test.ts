@@ -131,6 +131,22 @@ async function main(): Promise<void> {
   const after = await makeDraftPreview(await store(), drafted.product.id);
   is("a link written after it never opens", await readDraftPreview(after.code), null);
 
+  part("A product hidden by its creator with no preview is not taken down");
+  const unsharedDraft = await addProduct(owner, "Unshared Draft", "", "9", null);
+  if (!unsharedDraft.ok) throw new Error("setup");
+  await setProductHidden(owner, unsharedDraft.product.id, true);
+  const strikesBeforeUnshared = (await store()).strikes.length;
+  const emailsBeforeUnshared = sent.length;
+  is(
+    "no preview means no takedown, strike, or creator notice",
+    [
+      await takeDown(report, await store(), { type: "product", id: unsharedDraft.product.id }, "https://marktmorgen.com"),
+      (await store()).strikes.length - strikesBeforeUnshared,
+      sent.length - emailsBeforeUnshared,
+    ],
+    [null, 0, 0],
+  );
+
   part("A draft still hidden, reported by its preview address, has its preview closed (Claude 6's focal on #3597)");
   const hiddenDraft = await addProduct(owner, "Quiet Draft", "", "9", null);
   if (!hiddenDraft.ok) throw new Error("setup");

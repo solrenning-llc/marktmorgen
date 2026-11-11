@@ -103,6 +103,9 @@ export function fixedRelease(wall: unknown, zone: unknown): { ok: true; release:
  * which one wins would be a guess.
  */
 export function scheduleProblem(unit: { dripDays: number; fixed: FixedRelease | null }, moduleFixed?: FixedRelease | null): ReleaseProblem | null {
+  // Days after joining that are not a whole number from zero up cannot be read: never taken as "no drip" (rule 24;
+  // Claude 3 and Codex G on #3653).
+  if (!Number.isInteger(unit.dripDays) || unit.dripDays < 0) return "format";
   if (unit.fixed && unit.dripDays > 0) return "both";
   if (unit.fixed && moduleFixed && unit.fixed.at < moduleFixed.at) return "before-module";
   return null;
@@ -111,7 +114,9 @@ export function scheduleProblem(unit: { dripDays: number; fixed: FixedRelease | 
 /**
  * When a lesson opens: its module's fixed date, or else the module's drip
  * date (lib/course.ts opensAt), and never before that even when the lesson
- * has a date of its own. Null when the schedule cannot be read.
+ * has a date of its own. Null when the schedule cannot be read: days after
+ * joining that are not a whole number from zero, or a drip time of zero or
+ * less (the caller passes lib/course.ts opensAt, never 0 for "open now").
  */
 export function releaseAt(input: {
   module: { dripDays: number; fixed: FixedRelease | null };
@@ -120,7 +125,9 @@ export function releaseAt(input: {
 }): number | null {
   if (scheduleProblem(input.module)) return null;
   const moduleAt = input.module.fixed ? input.module.fixed.at : input.dripOpensAt;
-  if (!Number.isFinite(moduleAt)) return null;
+  // A drip time is lib/course.ts opensAt: the time the student joined plus the days, always after 1970. Zero or less is
+  // a time that was not read (a missing field read as 0), never "open to everyone" (Claude 3 on #3653).
+  if (!Number.isFinite(moduleAt) || (!input.module.fixed && moduleAt <= 0)) return null;
   if (!input.lesson) return moduleAt;
   return Number.isFinite(input.lesson.at) ? Math.max(moduleAt, input.lesson.at) : null;
 }

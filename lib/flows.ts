@@ -713,9 +713,14 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
     const ended: string[] = [];
     for (const email of emails) {
       try {
-        const reply = await redisPipeline(queuedOf(store, target, [email]));
-        const fromQueue = Number(reply[0]) || 0;
-        const fromLease = Number(reply[1]) || 0;
+        // Read exactly (CX-123 rule 24, as erase reads its own): every ZREM answers a whole count, the queue's and the
+        // lease's in turn. A reply missing, cut short or of another shape is not a removal, nor proof that they were not
+        // there: it throws, and the step is deferred and tried again, never recorded as "not waiting".
+        const removal = queuedOf(store, target, [email]);
+        const counts = (repliesFor(await redisPipeline(removal), removal.length) ?? []).map(countOf);
+        if (counts.length !== removal.length || counts.some((count) => count === null)) throw new FlowWriteUnconfirmed();
+        const fromQueue = counts.reduce<number>((sum, count, i) => (i % 2 === 0 ? sum + (count as number) : sum), 0);
+        const fromLease = counts.reduce<number>((sum, count, i) => (i % 2 === 1 ? sum + (count as number) : sum), 0);
         if (fromQueue > 0) {
           ended.push(email);
           out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”.` });

@@ -9,7 +9,7 @@
  *   1. the link is checked against the broadcast's id, with no read at all;
  *   2. the broadcast is read: it must keep a poll, have gone out ("sending"
  *      or "sent"), and its list must reach the link's place;
- *   3. the poll must be open (from sendAt for its days);
+ *   3. the poll must be open (from sendAt, kept in seconds, for its days);
  *   4. the store is read and POLL_VOTE_REQUEST_UNITS of its month's public
  *      requests are taken (lib/buyer-actions.ts takeBuyerRead): past its
  *      figure the store is resting and nothing is kept;
@@ -55,10 +55,12 @@ export async function votePoll(
   if (broadcast.status !== "sending" && broadcast.status !== "sent") return "invalid";
   if (!nonnegative(broadcast.total) || !nonnegative(broadcast.sendAt)) return "unknown";
   if (checked.recipient >= broadcast.total) return "invalid";
-  const step = voteStep({ method: "POST", option, poll: broadcast.poll, sentAt: broadcast.sendAt, now, recipient: "valid" });
+  // A broadcast keeps its times in seconds (createBroadcast); the poll's rules count in milliseconds.
+  const sentAt = broadcast.sendAt * 1000;
+  const step = voteStep({ method: "POST", option, poll: broadcast.poll, sentAt, now, recipient: "valid" });
   if (step.step === "confirm") return "invalid";
   if (step.step !== "record" && step.step !== "withdraw") return step.step;
-  const closesAt = pollClosesAt(broadcast.sendAt, broadcast.poll.days);
+  const closesAt = pollClosesAt(sentAt, broadcast.poll.days);
   if (closesAt === null) return "unknown";
   try {
     const store = await deps.loadStore(broadcast.handle);

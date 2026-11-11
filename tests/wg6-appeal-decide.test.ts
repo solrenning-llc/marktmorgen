@@ -13,15 +13,22 @@ import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, takeDown } from "@/lib/takedown";
 import { DECIDE_PROBLEMS, MAX_TELL_TRIES, appealsOfNotice, decisionsOf, fileAppeal, readAppeals, sendAgain } from "@/lib/takedown-appeals";
 import { paidPeriod } from "./billing-period-fixture";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 type Sent = { to: string[] | string; subject: string; text: string };
 const sent: { body: Sent; key: string | null }[] = [];
 let mailDown = false;
+/** Runs once inside the next email send, before it answers: an email that is slow to come back. */
+let duringSend: (() => Promise<void>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
+    if (duringSend) {
+      const slow = duringSend;
+      duringSend = null;
+      await slow();
+    }
     if (mailDown) return new Response(JSON.stringify({ message: "down" }), { status: 500 });
     sent.push({ body: JSON.parse(String(init?.body)) as Sent, key: new Headers(init?.headers).get("Idempotency-Key") });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
@@ -166,6 +173,57 @@ async function main() {
   const unknown = await answer({ token: f.token, decision: f.decision.key, to: "under_review" });
   is("refused as unknown, nothing emailed", [unknown.status, sent.length], [503, 0]);
   is("and no hold is left behind", redis.keys().filter((k) => k.includes(":al:")).length, 0);
+
+  part("A request filed or answered after the notice's own link ran out is still answered (Claude 4, MEDIUM 1)");
+  const DAY = 86_400_000;
+  const inboxToken = (text: string | undefined) => text?.match(/\/takedown\/([0-9a-f]{48})/)?.[1] ?? "";
+  const g = await takenDown("decideshopg");
+  advance(61 * DAY);
+  sent.length = 0;
+  const gFiled = await fileAppeal(g.store, g.decision.key, { explanation: "I made this guide myself." }, new Date(Date.now() + 61 * DAY), ORIGIN);
+  is("filed on day 61, inside the six months: kept and told", gFiled.ok, true);
+  is("the notice's own link has run out", (await answer({ token: g.token, decision: g.decision.key, to: "under_review" })).status, 404);
+  const gLink = inboxToken(sent.find((m) => m.body.subject.startsWith("Request to look again"))?.body.text);
+  is("the inbox email links to a page that answers it, for as long as the request is kept", gLink.length, 48);
+  const gReview = await answer({ token: gLink, decision: g.decision.key, to: "under_review" });
+  is("and that link answers it", [gReview.status, gReview.data.state], [200, "under_review"]);
+  const h = await takenDown("decideshoph");
+  sent.length = 0;
+  const hFiled = await fileAppeal(h.store, h.decision.key, { explanation: "Please look again." }, new Date(), ORIGIN);
+  if (!hFiled.ok) throw new Error("appeal h");
+  const hLink = inboxToken(sent.find((m) => m.body.subject.startsWith("Request to look again"))?.body.text);
+  advance(200 * DAY);
+  const hUpheld = await answer({ token: hLink, decision: h.decision.key, to: "under_review" });
+  const hFinal = await answer({ token: hLink, decision: h.decision.key, to: "upheld", reason: "The notice names this exact guide." });
+  is("filed on day 0, decided on day 200: still answered, with its reason", [hUpheld.status, hFinal.status, hFinal.data.state], [200, 200, "upheld"]);
+  is("the request's link reaches only this notice's decisions", (await answer({ token: hLink, decision: g.decision.key, to: "under_review" })).status, 404);
+
+  part("An email slower than the hold never writes the old state over a final answer (Claude 4, MEDIUM 2)");
+  const i = await takenDown("decideshopi");
+  let decidedDuringSlowSend: number[] = [];
+  duringSend = async () => {
+    advance(31_000);
+    const review = await answer({ token: i.token, decision: i.decision.key, to: "under_review" });
+    const final = await answer({ token: i.token, decision: i.decision.key, to: "upheld", reason: "The notice names this exact guide." });
+    decidedDuringSlowSend = [review.status, final.status];
+  };
+  const iFiled = await fileAppeal(i.store, i.decision.key, { explanation: "Please look again." }, new Date(), ORIGIN);
+  is("a person decided while the inbox email was slow past the hold", decidedDuringSlowSend, [200, 200]);
+  const iKept = (await readAppeals(i.store)).get(i.decision.key)!;
+  is("the decision stays upheld, the creator's email of it kept", [iKept.appeal.state, iKept.creator?.state, iKept.creator?.told], ["upheld", "upheld", true]);
+  is("the slow send says what it knows: the inbox has it, though its mark could not land", iFiled.ok, true);
+  is("and no hold is left behind", redis.keys().filter((k) => k.startsWith(`nl:report:${i.report.id}:al:`)).length, 0);
+  const j = await takenDown("decideshopj");
+  const jFiled = await fileAppeal(j.store, j.decision.key, { explanation: "Please look again." }, new Date(), ORIGIN);
+  if (!jFiled.ok) throw new Error("appeal j");
+  let jFinal = 0;
+  duringSend = async () => {
+    advance(31_000);
+    jFinal = (await answer({ token: j.token, decision: j.decision.key, to: "upheld", reason: "Final." })).status;
+  };
+  const jReview = await answer({ token: j.token, decision: j.decision.key, to: "under_review" });
+  const jKept = (await readAppeals(j.store)).get(j.decision.key)!;
+  is("between two decisions too: the later final answer is kept, the slower one's email is not written over it", [jReview.status, jFinal, jKept.appeal.state, jKept.creator?.state], [200, 200, "upheld", "upheld"]);
 
   done();
 }

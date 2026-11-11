@@ -331,7 +331,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "What about refunds on the Marktmorgen subscription itself?",
         a: [
-          `Your first payment to us is refunded in full if you ask within ${REFUND_DAYS} days of it, for any reason or none. A yearly plan is refunded at any time for the months you have not started, with the months you used charged at the monthly price and Stripe's card fee on that payment kept, since Stripe does not give it back. You can cancel at any time and keep access until the end of the period you already paid for; a renewal is not refunded, except where the law requires it. The refund policy page has the exact wording.`,
+          `Within ${REFUND_DAYS} days of your first payment, it and every plan payment since for the same store are refunded in full when you ask, for any reason or none. The guarantee is given once per person, and a refund is never more than you paid. A yearly plan is refunded at any time for the months you have not started, with the months you used charged at the monthly price and Stripe's card fee on that payment kept, since Stripe does not give it back. After those ${REFUND_DAYS} days, a monthly renewal, a charge for switching plans and any other later charge are not refunded, except where applicable consumer law requires it. A refund ends that store's plan on the day it is made. In your studio, under "What you pay us", choose "Refund my payment": a review page shows the exact amount and what happens to your store before anything changes. If you can't use it, email support@marktmorgen.com. You can cancel at any time and keep access until the end of the period you already paid for. The refund policy page has the exact wording.`,
         ],
       },
       {

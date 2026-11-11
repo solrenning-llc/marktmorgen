@@ -66,6 +66,7 @@ export function PageFunnelEditor({
   base,
   paymentReview,
   formsHref,
+  ai,
 }: {
   saved: SavedFunnel[];
   choices: StepChoice[];
@@ -73,6 +74,8 @@ export function PageFunnelEditor({
   base: string;
   paymentReview?: FunnelPaymentReview;
   formsHref?: string | null;
+  /** AI writing for explaining each funnel check (26 [E9]): on only for a plan with it and a role that may edit pages. */
+  ai?: { on: boolean; left: number | null };
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -299,6 +302,7 @@ export function PageFunnelEditor({
                 settingsDisabled={locked || draft !== null}
                 onSettings={() => start(funnel)}
                 onNavigate={event => { if (flight.current || recovery.current) event.preventDefault(); }}
+                explain={ai?.on ? { funnelId: funnel.id, left: ai.left } : null}
               />
 
               <ol className="mt-4 space-y-2">

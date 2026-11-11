@@ -282,7 +282,7 @@ async function main(): Promise<void> {
   // An ended membership bought here, and a course order that can be reviewed (lib/purchase-cards.ts, as the orders page draws it).
   const ended = { reference: "cs_test_of1ended", kind: "sale", title: "Studio club", option: null, paidAt: started, member: true, ended: true, productId: clubId, courseProduct: null, main: null, items: null, added: [] } as unknown as Purchase;
   const reviewable = { reference: "cs_test_of1course", kind: "sale", title: "Glaze course", option: null, paidAt: started, member: false, ended: false, productId: courseId, courseProduct: courseId, main: null, items: null, added: [] } as unknown as Purchase;
-  const extras = { feeds: new Map(), keys: new Map(), reviewing: new Set([courseId]) };
+  const extras = { feeds: new Map(), keys: new Map(), reviewing: new Set([courseId]), progress: new Map() };
   const card = (purchase: Purchase) => renderToStaticMarkup(createElement(PurchaseCard, { card: cardOf(store, purchase, "t".repeat(64), extras), language: store.language }));
 
   const cw = coursesWords(store.language);

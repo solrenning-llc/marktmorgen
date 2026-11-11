@@ -16,7 +16,7 @@ export const LLC_COMPLIANCE_COST_IDS = [
  "us-form-5472", "us-pro-forma-1120", "br-irpf", "br-cbe", "vat-oss-and-local-compliance",
  "itin-and-acceptance-agent", "us-resident-representative", "us-business-address",
 ] as const;
-export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
+export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "account-moves", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
 export type FixedCostId = typeof LLC_FIXED_COST_IDS[number];
 export type FixedCostCeiling = { id: FixedCostId; fullMonthlyUsdCents: number | null; fullAnnualUsdCents: number | null; evidence: string; reserveReviewed: boolean };
 /** Public observations checked22 October2026; discounts/free periods never reduce worst-case cost. */
@@ -29,6 +29,12 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
   * a Class A for each object's deletion and two listings a run, Upstash at every command and byte the caps allow (200
   * SCAN pages a run at the most), no free quota. Not a reviewed ceiling: BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
  backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", approvedCeiling: false },
+ /** #2271 (Codex G's MEDIUM): moves of the sign-in address, a company cost admitted at most MOVES_PER_MONTH times a
+  * calendar month before any of their work (lib/auth.ts takeMoveRoom), their worst month priced from the registry's
+  * rates and measured on the real route (tests/move-cost.test.ts). Not a reviewed ceiling: MOVE_COST_UNKNOWNS are open
+  * (sessions, memberships, phone device lists, broken moves kept from earlier months, undo, repairs and asks before the
+  * room), and the owner has not approved a monthly cost. */
+ accountMoves: { currency: "USD", model: "tests/plan-cost-registry.ts MOVES_MONTH_COST", unknowns: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", checked: "2026-11-11", source: "tests/move-cost.test.ts", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

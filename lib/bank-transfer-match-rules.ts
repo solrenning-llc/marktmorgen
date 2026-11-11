@@ -26,6 +26,26 @@ const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const REFERENCE = new RegExp(`^MM-[${ALPHABET}]{10}$`);
 const IN_MEMO = new RegExp(`MM-[${ALPHABET}]{10}(?![${ALPHABET}])`, "g");
 
+/**
+ * A new reference for an invoice: MM- and ten characters drawn from the
+ * alphabet by the platform's cryptographic random source (about 49 bits).
+ * The caller stores it with the invoice only if no open invoice has it.
+ */
+export function newTransferReference(): string {
+  const bytes = new Uint8Array(10);
+  globalThis.crypto.getRandomValues(bytes);
+  // 256 is not a multiple of 31: drawing again past the last whole multiple keeps every character equally likely.
+  let out = "";
+  for (let i = 0; out.length < 10; i += 1) {
+    if (i >= bytes.length) {
+      globalThis.crypto.getRandomValues(bytes);
+      i = 0;
+    }
+    if (bytes[i] < 248) out += ALPHABET[bytes[i] % ALPHABET.length];
+  }
+  return `MM-${out}`;
+}
+
 export function isTransferReference(raw: unknown): raw is string {
   return typeof raw === "string" && REFERENCE.test(raw);
 }

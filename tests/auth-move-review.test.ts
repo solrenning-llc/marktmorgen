@@ -250,7 +250,7 @@ async function main() {
   // A key the old address made while that removal was under way (after removeMember's first sweep, before its team
   // write, so the making request's own check, afterMake, still found it on the team) is what the second sweep is for.
   // That sweep's read of the store's keys is refused `refusals` times from the team write on.
-  const sweepRefused = async (refusals: number, onTeam: { from: TeamRole; to?: TeamRole } = { from: "admin", to: "support" }, extra: Fault[] = []) => {
+  const sweepRefused = async (refusals: number, onTeam: { from: TeamRole; to?: TeamRole } = { from: "admin", to: "support" }, extra: Fault[] | ((from: string, sid: string) => Fault[]) = []) => {
     let key = "";
     let armed = false;
     let left = refusals;
@@ -272,7 +272,7 @@ async function main() {
           armed && left > 0 && commands.length === 3 && commands[0][0] === "HGETALL" && commands[0][1] === `nl:api:keys:${sid}`
             ? ((left -= 1), Promise.reject(new Error("the second sweep's read was refused")))
             : null;
-        return [...extra, makeMidway, refuseSweep];
+        return [...(typeof extra === "function" ? extra(from, sid) : extra), makeMidway, refuseSweep];
       },
       false,
       "",
@@ -319,6 +319,36 @@ async function main() {
       sweepStuck.mails.find((m) => m.to === sweepStuck.to)?.text.includes("may still work") ?? false,
     ],
     [true, true, true, true],
+  );
+
+  // Claude 4's review of #3326 at 3c422510 (MEDIUM, rule 24): a store whose sweep is to be repeated is never counted as
+  // swept when the clean-up cannot read it, or when anything there throws before the repeat is known to have finished.
+  const keyMail = (out: { mails: { subject: string; text: string }[]; from: string }) =>
+    Boolean(out.mails.find((m) => m.subject.startsWith("Some API keys for") && m.subject.endsWith("may still work"))?.text.includes(out.from));
+  /** Armed at the clean-up (dropMemberships): the second read of the old address's team index, after moveMemberships'. */
+  const atCleanUp = (from: string, hit: (commands: Command[]) => boolean, answer: (commands: Command[]) => Promise<unknown[]>): Fault => {
+    let indexReads = 0;
+    let spent = false;
+    return (commands) => {
+      if (commands.length === 1 && commands[0][0] === "SMEMBERS" && commands[0][1] === teamIndexKey(from)) indexReads += 1;
+      return !spent && indexReads >= 2 && hit(commands) ? ((spent = true), answer(commands)) : null;
+    };
+  };
+  const unreadStore = await sweepRefused(1, { from: "admin", to: "support" }, (from, sid) => [
+    atCleanUp(from, (commands) => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:store:id:${sid}`, (commands) => real(commands).then(() => [42])),
+  ]);
+  is(
+    "the clean-up cannot read the store whose sweep was left: the move says some keys may still work, never that all are held",
+    [unreadStore.location, unreadStore.toldFrom.includes("may still work")],
+    ["https://marktmorgen.com/studio?address=moved-keys-open", true],
+  );
+  const unreadTeam = await sweepRefused(1, { from: "admin", to: "support" }, (from, sid) => [
+    atCleanUp(from, (commands) => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:team:${sid}`, () => Promise.reject(new Error("the clean-up's team read was refused"))),
+  ]);
+  is(
+    "the clean-up reads the store, then its team read throws: said as keys open, and the store's owner is emailed",
+    [unreadTeam.location, keyMail(unreadTeam), unreadTeam.toldFrom.includes("may still work")],
+    ["https://marktmorgen.com/studio?address=moved-keys-open", true, true],
   );
 
   part("the studio's notices that ask for action: a status, a heading, a link that says where it goes");

@@ -869,11 +869,18 @@ export async function dropMemberships(email: string, unswept: ReadonlyMap<string
   // The index and the stores whose sweep is to be repeated: the latter may be out of the index already (its SREM ran,
   // and forgetting the pipeline access after it failed).
   for (const sid of [...new Set([...ids, ...unswept.keys()])].filter((id) => STORE_ID_PATTERN.test(id))) {
+    // A store whose sweep is to be repeated stays in `open` unless the repeat is known to have finished: a read that
+    // does not answer, or anything that throws before then, never passes as every key held (Claude 4's review of
+    // #3326, MEDIUM, rule 24). Its owner is emailed whenever the store itself was read.
+    let store: Store | null = null;
+    let finished = false;
+    let told = false;
     try {
-      const store = await storeForId(sid);
+      store = await storeForId(sid);
       // Not found, or not known: kept in the index for memberStores to drop on a confirmed absence, and said as unsettled.
       if (!store) {
         settled = false;
+        if (unswept.has(sid)) open.push(sid);
         continue;
       }
       const role = await roleIn(store, address);
@@ -882,21 +889,32 @@ export async function dropMemberships(email: string, unswept: ReadonlyMap<string
       // No role and no unfinished sweep: nothing of theirs there (a place carried, or taken off whole).
       if (!was) continue;
       const out = await takeOffSwept(store, address, role === null);
+      finished = out.swept;
+      if (!out.swept) {
+        settled = false;
+        open.push(sid);
+      }
       if (out.removed) {
         await logTeam(sid, { who: address, role: was, what: "Taken off the team: they moved their sign-in to another address, and their place could not go with it" });
       }
       if (out.swept) continue;
-      settled = false;
-      open.push(sid);
+      told = true;
+      await tellOwnerOfUnswept(store, address);
       await logTeam(sid, { who: address, role: was, what: `Some API keys ${address} made may still work: not all could be paused when they left the team. Revoke any you do not recognize` });
-      const { tellOwnerOfUnswept } = await import("@/lib/api-key-pause");
-      await tellOwnerOfUnswept(store, address).catch((error: unknown) => console.error("telling the owner that a former teammate's API keys may still work failed", error));
     } catch (error) {
       console.error("taking a moved address off a team failed", error);
       settled = false;
+      if (unswept.has(sid) && !finished && !open.includes(sid)) open.push(sid);
+      if (store && open.includes(sid) && !told) await tellOwnerOfUnswept(store, address);
     }
   }
   return { settled, unswept: open };
+}
+
+/** The owner of a store where a former teammate's API keys may still work is emailed; a failure is only logged. */
+async function tellOwnerOfUnswept(store: Store, address: string): Promise<void> {
+  const { tellOwnerOfUnswept: tell } = await import("@/lib/api-key-pause");
+  await tell(store, address).catch((error: unknown) => console.error("telling the owner that a former teammate's API keys may still work failed", error));
 }
 
 /**

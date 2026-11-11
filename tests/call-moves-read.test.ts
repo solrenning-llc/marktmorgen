@@ -2,12 +2,15 @@
  * The bookings' moves are read a hundred keys at an MGET, every MGET in one
  * trip (lib/call-records.ts, readMoves; C3-82, MR, 4 November 2026), with the
  * same answer the one-GET-a-booking reading gave: a move for each session that
- * has a readable one, nothing for a key that is gone, unreadable or not a move.
+ * has a readable one, nothing for a key that is gone or holds no string. A kept
+ * value that is not a move throws UnknownReplyError (CX-123 rule 24;
+ * tests/call-moves-read-exact.test.ts has every shape).
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { store as redis } from "./redis-stub";
 import { movedKey, readMoves, writeMove } from "@/lib/call-records";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
 
 /** Every pipeline the database is sent, as its commands. */
@@ -39,19 +42,18 @@ test("five hundred bookings: five MGETs of a hundred in one trip, and every move
   for (let i = 0; i < 500; i += 1) assert.deepEqual(moves.get(sessions[i]), i % 7 === 0 ? { s: 1_000 + i, e: 2_000 + i, n: i % 3 } : undefined, sessions[i]);
 });
 
-test("a key that is gone, unreadable, not a move or not a string is read as never moved; the others still are", async () => {
+test("a key that is gone or not a string is read as never moved; the others still are; a value that is not a move throws", async () => {
   const sessions = Array.from({ length: 250 }, (_, i) => session(i));
   await writeMove(sessions[0], { s: 10, e: 20, n: 1 });
   await writeMove(sessions[99], { s: 30, e: 40, n: 2 });
   await writeMove(sessions[100], { s: 50, e: 60, n: 0 });
   await writeMove(sessions[249], { s: 70, e: 80, n: 1 });
-  await redis.pipeline([
-    ["SET", movedKey(sessions[1]), "{not json"],
-    ["SET", movedKey(sessions[2]), JSON.stringify({ s: 20, e: 10, n: 1 })],
-    ["SET", movedKey(sessions[3]), JSON.stringify({ s: 10, e: 20, n: 1.5 })],
-    ["SET", movedKey(sessions[4]), "null"],
-    ["HSET", movedKey(sessions[5]), "s", "10"],
-  ]);
+  await redis.pipeline([["HSET", movedKey(sessions[5]), "s", "10"]]);
+  for (const value of ["{not json", JSON.stringify({ s: 20, e: 10, n: 1 }), JSON.stringify({ s: 10, e: 20, n: 1.5 }), "null"]) {
+    await redis.pipeline([["SET", movedKey(sessions[1]), value]]);
+    await assert.rejects(readMoves(sessions), UnknownReplyError, value);
+  }
+  await redis.pipeline([["DEL", movedKey(sessions[1])]]);
   trips.length = 0;
   const moves = await readMoves(sessions);
   assert.deepEqual(trips[0].map((c) => c[0]), ["MGET", "MGET", "MGET"]);

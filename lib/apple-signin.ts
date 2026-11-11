@@ -9,7 +9,8 @@ import { timed } from "@/lib/fetch-timeout";
 import { appleSignInReady } from "@/lib/apple-signin-policy";
 import { keepProviderSignInState, takeProviderSignInState, PROVIDER_STATE_SECONDS } from "@/lib/provider-signin-state";
 export { APPLE_SIGNIN_APPROVED } from "@/lib/apple-signin-policy";
-export const APPLE_STATE_COOKIE = "nl_asi";
+/** __Secure-: a SameSite=None cookie is only ever set and read over HTTPS (Claude 5 / Claude 1 LOW). */
+export const APPLE_STATE_COOKIE = "__Secure-nl_asi";
 export const APPLE_CALLBACK_PATH = "/api/integrations/apple/signin";
 const ISSUER = "https://appleid.apple.com";
 const STATE = /^asi\.[A-Za-z0-9_-]{43}$/;
@@ -52,7 +53,7 @@ export async function beginAppleSignIn(handle?: unknown): Promise<{url:string;co
 async function appleJson(path: "/auth/token" | "/auth/keys", init: RequestInit): Promise<Record<string,unknown>|null> {
   return timed(5000,async signal=>{
     const response = await fetch(`${ISSUER}${path}`,{...init,signal,redirect:"error",cache:"no-store"});
-    if (!response.ok || !response.body) return null;
+    if (!response.ok || !response.body) { await response.body?.cancel().catch(() => undefined); return null; }
     const reader=response.body.getReader(),chunks:Uint8Array[]=[];
     let bytes=0;
     try { for (;;) { const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>16384){await reader.cancel();return null;}chunks.push(value); } } finally { reader.releaseLock(); }

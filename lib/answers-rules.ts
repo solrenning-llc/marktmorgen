@@ -56,6 +56,14 @@ export const MAX_ANSWER_FACTS = 2_000;
 export const MAX_ANSWER = 600;
 /** How much of a page is read to the model, in characters: the longest page still costs a fraction of a cent. */
 export const MAX_FACTS_CHARS = 14_000;
+/**
+ * Told where the length cut left a part of the page out whole (lib/answers.ts,
+ * keptParts), so the model never reads what it was given as all the page
+ * says. While it is in the facts, no answer about terms is shown
+ * (heldToFacts, speaksOfTerms in lib/store-assistant-rules.ts): the part left
+ * out may hold a promise's condition.
+ */
+export const PAGE_GOES_ON = "(The page says more here; it is not repeated.)";
 /** Questions a page did not answer, kept for the creator: the newest this many, for this long. */
 export const MISSED_KEPT = 50;
 export const MISSED_SECONDS = 120 * 86_400;

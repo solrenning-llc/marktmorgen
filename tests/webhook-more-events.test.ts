@@ -7,7 +7,8 @@
  */
 import { readFileSync } from "node:fs";
 import { WEBHOOK_EVENTS, addEndpoint, isWebhookEvent, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
-import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -42,6 +43,8 @@ async function setup(listen: string[]) {
   await claimHandle("more-events@example.com", HANDLE, "More Events", "");
   await ensureStatsId("more-events@example.com");
   await setStripeAccount("more-events@example.com", account);
+  // A paid plan, so its messages are kept: a store whose month has no webhook deliveries keeps none (lib/webhooks.ts, emitEvent).
+  await setSubscription("more-events@example.com", { customerId: "cus_MoreEvents01", subscriptionId: "sub_MoreEventsPlan01", active: true, tier: "scale", cycle: "month", period: paidPeriod() });
   const store = (await storeForEmail("more-events@example.com"))!;
   is("an endpoint listening for them is kept", (await addEndpoint(store, "https://hooks.example.net/in", listen)).ok, true);
   asked.length = 0;

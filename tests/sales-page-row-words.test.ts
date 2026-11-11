@@ -15,7 +15,7 @@
 import { fastMoneyOnPage } from "@/lib/terms-check-rules";
 import { pageWords, withWords } from "@/lib/page-translate";
 import { copiedBlocks, emptyBlocksLeft } from "@/lib/store-copy-rules";
-import { MAX_HEADING, MAX_ITEM, MAX_ROW_LIST_ITEMS, MAX_ROW_PARAGRAPH, MAX_SUBHEADLINE, pageProblem, parsePage } from "@/lib/sales-page";
+import { MAX_CTA_LABEL, MAX_HEADING, MAX_ITEM, MAX_ROW_LIST_ITEMS, MAX_ROW_PARAGRAPH, MAX_SUBHEADLINE, pageProblem, parsePage } from "@/lib/sales-page";
 import { done, is, part } from "./check";
 
 const path = (n: number) => `images/${"a".repeat(24)}/${String(n).padStart(32, "0")}.webp`;
@@ -60,6 +60,16 @@ is(
 );
 const decorative = keep([[{ kind: "image", picture: picture(2, ""), decorative: true }, { kind: "icon", name: "star", label: "" }]]).page;
 is("a decorative picture and an icon with no words give no words", pageWords(decorative), []);
+{
+  // Unit 5: a video behind a button. The button's words are read first, then the window's title; the video is never words.
+  const windowed = keep([[{ kind: "video-window", video: youtube, title: "A tour of the planner", label: "Watch the tour" }]]).page;
+  is("a video in a window gives its button words, then its title", pageWords(windowed), ["Watch the tour", "A tour of the planner"]);
+  const es = withWords(windowed, ["ES Watch the tour", "ES A tour of the planner"]).blocks[0];
+  is("and a translation puts each back, the video untouched", es?.kind === "row" ? es.columns[0][0] : null, { kind: "video-window", video: youtube, title: "ES A tour of the planner", label: "ES Watch the tour" });
+  const left = emptyBlocksLeft();
+  const [copied] = copiedBlocks(windowed.blocks, (id) => id, (id) => id, left);
+  is("a copy into another store keeps it whole, nothing left out", [copied.kind === "row" ? copied.columns[0][0] : null, left.pictures], [{ kind: "video-window", video: youtube, title: "A tour of the planner", label: "Watch the tour" }, 0]);
+}
 
 part("A copy into another store leaves a row's pictures out");
 {
@@ -79,6 +89,8 @@ const cut: [string, unknown][] = [
   ["an icon's words too long", { kind: "icon", name: "clock", label: "x".repeat(200) }],
   ["a button's words too long", { kind: "button", label: "x".repeat(60), url: "" }],
   ["a video title too long", { kind: "video", video: youtube, title: "x".repeat(MAX_HEADING + 1) }],
+  ["a video window's title too long", { kind: "video-window", video: youtube, title: "x".repeat(MAX_HEADING + 1), label: "Watch" }],
+  ["a video window's button words too long", { kind: "video-window", video: youtube, title: "", label: "x".repeat(MAX_CTA_LABEL + 1) }],
   ["a picture's description too long", { kind: "image", picture: picture(3, "x".repeat(400)), decorative: false }],
   ["a picture's line too long", { kind: "image", picture: picture(4, "A cat", "x".repeat(400)), decorative: false }],
 ];

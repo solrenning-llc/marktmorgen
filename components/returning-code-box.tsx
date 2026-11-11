@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore } from "react";
 import { EmailField } from "@/components/email-field";
+import { keyTakenOut } from "@/components/store-pixels";
 import { returningCodeWords } from "@/lib/buyer-words/returning-code";
 import { type ReturningStatus, readLinkToken, readRefusal, readTypedCode } from "@/lib/returning-code-rules";
 
@@ -24,7 +25,12 @@ const stays = () => () => {};
 const query = () => new URLSearchParams(window.location.search);
 const statusHere = () => readRefusal(query().get("returning"));
 const codeHere = () => readTypedCode(query().get("rc"));
-const tokenHere = () => readLinkToken(query().get("rtoken"));
+/**
+ * The emailed link's token for this page: from its address, or, once the
+ * store's pixels have taken it out of the address so no ad script reads it
+ * (components/store-pixels.tsx, KEY_PARAMS), from what they took out.
+ */
+export const linkTokenHere = () => readLinkToken(query().get("rtoken") ?? keyTakenOut("rtoken"));
 const nothing = () => null;
 const empty = () => "";
 
@@ -33,7 +39,7 @@ export function ReturningCodeBox({ id, lang, className = "" }: { id: string; lan
   // Read from the address once the page is in the browser; on the server there is none.
   const status: ReturningStatus | null = useSyncExternalStore(stays, statusHere, nothing);
   const sentBack = useSyncExternalStore(stays, codeHere, empty);
-  const token = useSyncExternalStore(stays, tokenHere, empty);
+  const token = useSyncExternalStore(stays, linkTokenHere, empty);
   // What the buyer types wins; until then, the code that was sent back.
   const [typed, setTyped] = useState<string | null>(null);
   const code = typed ?? (status ? sentBack : "");
@@ -96,7 +102,7 @@ export function ReturningCodeBox({ id, lang, className = "" }: { id: string; lan
             </div>
             {/* Asking for the link is not buying: the boxes for buying are not checked for it. */}
             {/* name="rask": only this button asks for a link (the buy button never does); data-no-checkout: not a checkout started, for the pixels and the page's depth. */}
-            <button type="submit" name="rask" value="1" formNoValidate data-no-checkout="" className="btn st-btn-ghost min-h-11">
+            <button type="submit" name="rask" value="1" formNoValidate data-no-checkout="" className="btn st-btn-ghost inline-flex min-h-11 items-center justify-center">
               {w.send}
             </button>
           </div>

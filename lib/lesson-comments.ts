@@ -225,8 +225,10 @@ function deletionComment(raw: unknown, expectedId: string): LessonComment | null
 
 export async function commentsOn(courseId: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const [off] = await redisPipeline([["GET", offKey(courseId)]]);
-  return off === null || off === undefined;
+  // Rule 24: on only when the off mark is confirmed absent; a reply cut short or of another shape counts as off,
+  // so a course whose creator switched comments off never takes a public post on an unread mark.
+  const replies = plainList(await redisPipeline([["GET", offKey(courseId)]]));
+  return replies !== null && replies.length === 1 && replies[0] === null;
 }
 
 export async function setCommentsOn(courseId: string, on: boolean): Promise<void> {

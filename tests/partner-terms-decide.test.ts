@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   await setStripeAccount(owner, "acct_1Decidexxxxxxxxx", true);
   await setSubscription(owner, { customerId: "cus_decide", subscriptionId: "sub_decide", active: true, tier: "creator", period: paidPeriod() });
   const person = (id: string) => ({ id, email: `${id}@example.com`, code: `c${id}`, status: "approved", appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null });
-  const put = (record: object & { id: string }) => redis.pipeline([["HSET", `nl:aff:${statsId}:people`, record.id, JSON.stringify(record)]]);
+  const put = (record: { id: string } & Record<string, unknown>) => redis.pipeline([["HSET", `nl:aff:${statsId}:people`, record.id, JSON.stringify(record)]]);
   const store = async () => (await storeForEmail(owner))!;
   const read = async (id: string) => (await readAffiliate(await store(), id))!;
   const seen = async (id: string) => {
@@ -63,8 +63,9 @@ async function main(): Promise<void> {
   part("Taking someone out withdraws a change still waiting, in the history");
   const k = "acdcacdcacdc";
   await put(person(k));
-  await proposePartnerShare(await store(), k, { percent: 10, products: [B] }, T);
-  await proposePartnerShare(await store(), k, { percent: 25, products: [B] }, T + 5);
+  // Asked before the removal: the history is kept in the order of its moments.
+  await proposePartnerShare(await store(), k, { percent: 10, products: [B] }, T - 10);
+  await proposePartnerShare(await store(), k, { percent: 25, products: [B] }, T - 5);
   is("(a raise waits for their yes)", (await read(k)).terms?.change?.share?.percent, 25);
   await decide(await store(), k, "remove");
   is("removed, the change withdrawn and written down", [(await read(k)).status, (await read(k)).terms?.change ?? null, (await read(k)).terms?.history.at(-1)?.kind], ["removed", null, "withdrawn"]);

@@ -7,15 +7,16 @@
  * (lib/partner-share.ts MAX_COMMITTED_SHARE). "crowded": approving them would give a product more partners than it
  * may have (MAX_PARTNERS_PER_PRODUCT). "unavailable": it could not be checked or written just now; nothing was saved
  * for that person. "gone": they are no longer on the list. "used": the studio requests the change needs were not
- * taken (used up, or not counted just now), so nothing was read or written for them.
+ * taken (used up, or not counted just now), so nothing was read or written for them. "term": declining them would end
+ * a partnership with a last day that is still running, which ends only on that day or with their yes (630 [HN6](39)).
  */
 import { MAX_COMMITTED_SHARE, MAX_PARTNERS_PER_PRODUCT } from "@/lib/partner-share";
 
-export type HeldWhy = "cap" | "crowded" | "unavailable" | "gone" | "used";
+export type HeldWhy = "cap" | "crowded" | "unavailable" | "gone" | "used" | "term";
 /** `email` is empty when the server could not read who it is: the studio names them from its own list (readHeld). */
 export type HeldOne = { id: string; email: string; why: HeldWhy };
 
-const WHYS: readonly HeldWhy[] = ["cap", "crowded", "unavailable", "gone", "used"];
+const WHYS: readonly HeldWhy[] = ["cap", "crowded", "unavailable", "gone", "used", "term"];
 const TOO_MUCH = `would let partners and affiliates together take more than ${MAX_COMMITTED_SHARE}% of a sale.`;
 const NOT_NOW = "We could not check it just now. Try again in a moment.";
 const NOT_PAID = "This change needs more of your studio requests than are left, or they could not be counted just now, so nothing was changed for them.";
@@ -28,6 +29,7 @@ export function heldLines(held: readonly HeldOne[], what: "approve" | "rate"): s
     if (what === "approve") {
       if (one.why === "cap") return `${who} is still waiting. Approving them ${TOO_MUCH} Lower a partner's share or the commission first, then approve them.`;
       if (one.why === "crowded") return `${who} is still waiting. Approving them would give a product more than ${MAX_PARTNERS_PER_PRODUCT} partners. Lower the number of partners on it first, then approve them.`;
+      if (one.why === "term") return `${who} is still waiting. They hold a partnership with a last day that has not come yet. It ends on that day, or sooner if they say yes to ending it.`;
       return `${who} is still waiting. ${one.why === "used" ? NOT_PAID : NOT_NOW}`;
     }
     if (one.why === "cap" || one.why === "crowded") return `${who} keeps their share. The new one ${TOO_MUCH} Lower a partner's share first.`;

@@ -107,7 +107,7 @@ import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
-import { NO_TERMS, type PartnerTerms, type WaitingChange, changeNeeds, changeOpen, readTerms, settleTerms, stepOf, withStep } from "@/lib/partner-terms-rules";
+import { NO_TERMS, type PartnerTerms, type WaitingChange, changeNeeds, changeOpen, readTerms, settleTerms, shareRunning, stepOf, withStep } from "@/lib/partner-terms-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
@@ -1686,8 +1686,49 @@ export class ShareCapError extends Error {
  * not held: LockBusyError; nothing written either way.
  */
 export async function decide(store: Store, id: string, decision: Decision, charge: Charge = PAID): Promise<Affiliate | null> {
+  const done = await decideWhy(store, id, decision, Math.floor(Date.now() / 1000), charge);
+  return done.ok ? done.affiliate : null;
+}
+
+export type DecideResult = { ok: true; affiliate: Affiliate } | { ok: false; reason: "unknown" | "term" };
+
+/**
+ * Whether this partner's share runs to a set end date and still earns (630 [HN6](39)). Such a partnership is not
+ * ended by the store alone (lib/partner-terms-rules.ts): the store asks for the change, which the partner must
+ * accept, or waits for the end date. Only a share "until revoked", or one already over, can be.
+ */
+export function heldByTerm(affiliate: Pick<Affiliate, "share">, nowSeconds: number): boolean {
+  return affiliate.share !== null && affiliate.share.until !== undefined && shareRunning(affiliate.share, nowSeconds);
+}
+
+/** Thrown inside a decision's write when the record now holds a dated share in force: nothing is written. */
+class TermHeld extends Error {
+  constructor() {
+    super("a dated partner share is still in force");
+    this.name = "TermHeld";
+  }
+}
+
+/** The record's terms with any change still waiting taken back, written as such (630 [HN6](39)). */
+function withdrawnTerms(affiliate: Affiliate, nowSeconds: number): PartnerTerms {
+  const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
+  return terms.change ? { change: null, history: withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) } : terms;
+}
+
+/**
+ * decide, with why it was not done. Taking out (remove, decline) anyone whose dated share is still in force is
+ * refused ("term", heldByTerm), whatever their status, checked on the record read and again as it is written; a
+ * change still waiting is taken back and written down as withdrawn. `nowSeconds` is when the end date is read.
+ *
+ * TODO(#1924, 4 open points awaiting Claude 1, canal para-claude-1 11/11/2026): #1924 also ended a share "until
+ * revoked" when its partner was removed. Main keeps a removed partner's share on the record (it counts again, cap
+ * checked, if they are restored); that reading is kept until Claude 1 decides.
+ */
+export async function decideWhy(store: Store, id: string, decision: Decision, nowSeconds = Math.floor(Date.now() / 1000), charge: Charge = PAID): Promise<DecideResult> {
   const found = await readAffiliate(store, id);
-  if (!found) return null;
+  if (!found) return { ok: false, reason: "unknown" };
+  const takesOut = decision === "remove" || decision === "decline";
+  if (takesOut && heldByTerm(found, nowSeconds)) return { ok: false, reason: "term" };
   const status: AffiliateStatus =
     decision === "approve" || decision === "restore" ? "approved" : decision === "decline" ? "declined" : "removed";
   const counts = (a: Affiliate) => status === "approved" && a.status !== "approved" && a.share !== null;
@@ -1702,7 +1743,9 @@ export async function decide(store: Store, id: string, decision: Decision, charg
       if (checked !== undefined && JSON.stringify(now.share) !== JSON.stringify(checked)) {
         throw new LockBusyError("a partner's share changed while the decision was written");
       }
-      return { ...now, status, decidedAt: Date.now() };
+      if (takesOut && heldByTerm(now, nowSeconds)) throw new TermHeld();
+      const decided: Affiliate = { ...now, status, decidedAt: Date.now() };
+      return takesOut && now.terms?.change ? withTerms(decided, withdrawnTerms(now, nowSeconds)) : decided;
     });
     return changed?.next ? { affiliate: changed.before, next: changed.next } : null;
   };
@@ -1718,16 +1761,22 @@ export async function decide(store: Store, id: string, decision: Decision, charg
       }
       return write(now.share);
     });
-  const written = counts(found)
-    ? await locked()
-    : await write(undefined).catch((error: unknown) => {
-        if (error instanceof NeedsPartnerLock) return locked();
-        throw error;
-      });
-  if (!written) return null;
+  let written: { affiliate: Affiliate; next: Affiliate } | null;
+  try {
+    written = counts(found)
+      ? await locked()
+      : await write(undefined).catch((error: unknown) => {
+          if (error instanceof NeedsPartnerLock) return locked();
+          throw error;
+        });
+  } catch (error) {
+    if (error instanceof TermHeld) return { ok: false, reason: "term" };
+    throw error;
+  }
+  if (!written) return { ok: false, reason: "unknown" };
   const { affiliate, next } = written;
   if (decision === "approve" && affiliate.status === "pending") await tellApproved(store, affiliate);
-  return next;
+  return { ok: true, affiliate: next };
 }
 
 /** Thrown inside a change written with no partner lock that turns out to need it: the caller goes again under it. */
@@ -2065,7 +2114,13 @@ export async function decideMany(
 
   const plain: BatchWrite[] = [];
   const shared: string[] = [];
-  const decided = (now: Affiliate) => ({ ...now, status, decidedAt: Date.now() });
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  // Declining takes a change still waiting back (630 [HN6](39)); a dated share in force is never declined in bulk.
+  const decided = (now: Affiliate): Affiliate => {
+    const next: Affiliate = { ...now, status, decidedAt: Date.now() };
+    return status === "declined" && now.terms?.change ? withTerms(next, withdrawnTerms(now, nowSeconds)) : next;
+  };
+  const termHeld = (now: Affiliate) => status === "declined" && heldByTerm(now, nowSeconds);
   for (const id of valid) {
     const read = records.get(id);
     if (!read) {
@@ -2074,9 +2129,13 @@ export async function decideMany(
     }
     email.set(id, read.affiliate.email);
     if (read.affiliate.status !== "pending") continue;
+    if (termHeld(read.affiliate)) {
+      outcome.set(id, "term");
+      continue;
+    }
     // Over exactly the record read (its share was null then): one given a share meanwhile is not written.
     if (status === "approved" && read.affiliate.share) shared.push(id);
-    else plain.push({ id, raw: read.raw, change: (now) => (now.status === "pending" ? decided(now) : null) });
+    else plain.push({ id, raw: read.raw, change: (now) => (now.status === "pending" && !termHeld(now) ? decided(now) : null) });
   }
   const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0) + shared.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
   const writes = await takeOrWhy(charge, WRITE_COMMANDS * (plain.length + shared.length), writing);
@@ -2158,7 +2217,9 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
       id,
       raw: read.raw,
       change: (affiliate) =>
-        affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt
+        // Somebody given a share since is a partner now: sending them back to waiting would end it with no step in its
+        // history, so the undo leaves them as they are (630 [HN6](39)).
+        affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt || affiliate.share !== null || affiliate.terms?.change
           ? null
           : { ...affiliate, status: entry.status, decidedAt: entry.decidedAt },
     });

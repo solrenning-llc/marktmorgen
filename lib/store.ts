@@ -1850,6 +1850,38 @@ export async function createStore(
   return { ok: true, store };
 }
 
+/**
+ * One address of a deleted store held back for RELEASE_QUARANTINE_DAYS, only while its key still leads to that store
+ * (KEYS[1] holds exactly ARGV[1], the store's key): 1 held back now, 0 left as it is (already held back by the delete,
+ * or anything else). Never extends a quarantine already running, never touches an address someone else holds.
+ * Modelled by lib/redis-memory.ts.
+ */
+export const DELETED_HOLD = `-- marktmorgen:deleted-handle-hold:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+return 1`;
+
+/**
+ * What deleteStore does once a store's record is gone, done again by the closing walk when it admits the store
+ * (lib/closed-store-data.ts, admitDeleted), since a delete may have answered `unsure` and nothing else tries again
+ * (Claude 6's LOW 1 on #3670): its addresses held back (DELETED_HOLD) and its id out of its account's stores and the
+ * company's lists. Each step can run again. True only when every reply is Redis's own; false or a throw is unknown,
+ * and the walk tries again on its next run (rule 24).
+ */
+export async function settleDeletedStore(gone: { ref: string; sid: string; email: string; holds: string[] }): Promise<boolean> {
+  if (!STORE_ID_PATTERN.test(gone.sid) || gone.ref !== extraRef(gone.sid)) return false;
+  const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
+  const holds = gone.holds.map((handle) => ["EVAL", DELETED_HOLD, 1, handleKey(handle), gone.ref, released, RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]);
+  const removals = [
+    ["DEL", storeIdKey(gone.sid)],
+    ["SREM", await accountKey(gone.email), gone.sid],
+    ["ZREM", ENDED_INDEX, gone.ref],
+    ["SREM", SHARING_INDEX, gone.ref],
+  ];
+  const replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
+  return replies !== null && replies.every((reply, i) => (i < holds.length ? reply === 0 || reply === 1 : countOf(reply) !== null));
+}
+
 export type DeleteResult =
   /** `unsure`: the record is gone, but its addresses' holds and its places' release were not confirmed (rule 24). */
   | { ok: true; store: Store; unsure?: true }

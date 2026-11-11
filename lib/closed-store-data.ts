@@ -68,11 +68,12 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, storeExactly, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, accountStores, closeStoreRecord, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
+import { forgetBoth, queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
@@ -135,6 +136,8 @@ export type Batched = {
   deleted?: true;
   /** Waits for the next walk to begin (admitDeleted): it is never walked or finished by a walk already under way, which may have passed its keys. */
   queued?: true;
+  /** A deleted store's addresses that still led to it when it was deleted, held back again at its admission (settleDeletedStore). */
+  holds?: string[];
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -308,6 +311,7 @@ export async function queueDeleted(store: Store, now = Date.now()): Promise<Batc
     name: store.name,
     handle: store.handle,
     handles: [...saleHandles(store)],
+    holds: [store.handle, ...store.previousHandles],
     marks,
     endedAt: now,
     at: now,
@@ -345,12 +349,25 @@ async function swapEntry(ref: string, read: string, next: string): Promise<boole
  * one (Codex T and reviewer 2 on #3670). The old entry's hour then said nothing about the new delete, and dropping or
  * rewriting the field lost the fresh entry, so the deleted store's id-named keys stayed for good. A field that changed
  * meanwhile is left as it is, for the next walk to read again.
+ *
+ * Its record read gone (Redis's own nil), this exact read stands in for any the delete could not make, so what the
+ * delete does once the record is gone is done again here, before its entry joins the walk (Claude 6's two LOWs and
+ * reviewer C3 on #3670): its addresses held back and its places released (settleDeletedStore), which a delete that
+ * answered `unsure` never tried again; and its webhooks, API keys and assistant notes forgotten (forgetBoth), which a
+ * delete whose record went with a reply lost, and whose read after it failed too, never forgot, while its API key's
+ * lookup (family "prepare") is not erased by the walk. A forget that fails goes in the line the daily job tries again
+ * (queueStoreForget). Each step can run again; one not confirmed leaves the entry waiting and the run unsure.
  */
-async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, string>, now: number): Promise<{ admitted: number; sure: boolean }> {
+async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, string>, now: number, deadline: number): Promise<{ admitted: number; sure: boolean }> {
   let admitted = 0;
   let sure = true;
   for (const [ref, entry] of entries) {
     if (!entry.queued) continue;
+    // Past the run's time, the rest wait for the next run.
+    if (Date.now() > deadline) {
+      sure = false;
+      break;
+    }
     const read = raws.get(ref);
     if (read === undefined) {
       sure = false;
@@ -365,6 +382,29 @@ async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, str
       continue;
     }
     if (!standing) {
+      let settled: boolean;
+      try {
+        settled = await settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] });
+      } catch (error) {
+        console.error("a deleted store's addresses held back and its places released: not confirmed; its walk waits", error);
+        settled = false;
+      }
+      if (!settled) {
+        sure = false;
+        continue;
+      }
+      try {
+        await forgetBoth(entry.statsId ?? null, entry.sid);
+      } catch (error) {
+        console.error("forgetting a deleted store's webhooks, keys and assistant notes at its walk failed; put in line to try again", error);
+        try {
+          await queueStoreForget(entry.statsId ?? null, entry.sid);
+        } catch (queued) {
+          console.error("putting a deleted store's webhooks, keys and assistant notes in line failed; its walk waits", queued);
+          sure = false;
+          continue;
+        }
+      }
       const walkable: Batched = { ...entry };
       delete walkable.queued;
       const set = await swapEntry(ref, read, JSON.stringify(walkable));
@@ -856,7 +896,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     }
     // Deleted stores waiting since the last walk join this one, once their records are gone (admitDeleted).
     const read = await readBatch();
-    const waiting = await admitDeleted(read.entries, read.raws, now);
+    const waiting = await admitDeleted(read.entries, read.raws, now, deadline);
     report.stores += waiting.admitted;
     if (!waiting.sure) unsure = true;
     // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again; one

@@ -718,7 +718,7 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
   partly: {
     title: "The store was deleted, but a last step was not confirmed",
-    body: "Its content is gone. We could not confirm one last step, such as holding back its addresses for 30 days or taking it off its team's lists. Your other stores are as they were.",
+    body: "We could not confirm one last step, such as holding back its addresses for 30 days or taking it off its team's lists. Your other stores are as they were.",
   },
   confirm: {
     title: "Type the store's address to delete it",

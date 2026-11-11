@@ -31,7 +31,7 @@ import { readProduct } from "@/lib/catalog";
 import { ReturningCodeRefused, createCheckout } from "@/lib/store-checkout";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { parseReturningCodes, readLinkToken, readRefusal, readTypedCode, returningCodeFor, returningCodeOffered, type ReturningCode } from "@/lib/returning-code-rules";
-import { RETURNING_TRIES, paidHere, sendReturningLink } from "@/lib/returning-code";
+import { RETURNING_CLAIM_SECONDS, RETURNING_TRIES, otherDiscountWins, paidHere, sendReturningLink } from "@/lib/returning-code";
 import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -259,6 +259,25 @@ async function main(): Promise<void> {
   is("only one checkout is opened, with the coupon", [opened.length - openedBefore, opened.at(-1)?.get("discounts[0][coupon]")], [1, VIP.coupon]);
   is("one goes on to Stripe, the other back to the field as busy", both.map((x) => x.location).sort(), [back("busy"), "https://checkout.stripe.com/c/pay/test"].sort());
 
+  part("A spent link whose delete fails never opens a second checkout");
+  // Claude 3 (cloud K) LOW 1: the claim ran out after 120 s while the undeleted link still worked for its half hour.
+  const kept = await linkFor(PAST, productId);
+  const pipe = redis.pipeline.bind(redis);
+  (redis as unknown as { pipeline: typeof pipe }).pipeline = async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:rcode:link:") && !String(c[1]).endsWith(":claim"))) throw new Error("connection reset (synthetic)");
+    return pipe(commands);
+  };
+  try {
+    r = await post({ rtoken: kept }, "198.51.100.33");
+  } finally {
+    (redis as unknown as { pipeline: typeof pipe }).pipeline = pipe;
+  }
+  is("the first use opens its checkout", r.location, "https://checkout.stripe.com/c/pay/test");
+  const keptClaim = redis.keys().find((k) => k.startsWith("nl:rcode:link:") && k.endsWith(":claim") && Number(redis.run(["TTL", k])) > RETURNING_CLAIM_SECONDS);
+  is("its claim now lasts as long as the link could, so nothing reopens it", typeof keptClaim, "string");
+  r = await post({ rtoken: kept }, "198.51.100.34");
+  is("and a second use is told the link is spent, not opened", [r.location, r.session], [back("link"), null]);
+
   part("A link is for its product, and for a code still running");
   const second = await linkFor(PAST, productId);
   r = await post({ rtoken: second, product: otherId }, "198.51.100.17");
@@ -278,6 +297,9 @@ async function main(): Promise<void> {
   r = await post({ rcode: "THANKYOU", remail: PAST }, "198.51.100.40");
   is("a sale across the store: 'other', with no purchases read and no link", [r.location, r.session, r.reads, r.link], [back("other"), null, 0, false]);
   is("nor is the field offered while it runs", returningCodeOffered(store, (await readProduct(store, productId))!, nowS), false);
+  // Claude 3 (cloud K) LOW 2: the sale is not taken on a payment plan (lib/store-checkout.ts !plan), so a code still can.
+  const onSale = (await readProduct(store, productId))!;
+  is("paying in a plan, the sale does not apply, so the code is not refused for it", [otherDiscountWins(store, onSale, "", nowS), otherDiscountWins(store, onSale, "", nowS, { plan: true })], [true, false]);
   await setStoreSale(OWNER, { name: "Spring", percent: 0, starts: 0, ends: 0, all: true, products: [], coupon: "" });
   store = (await storeForEmail(OWNER))!;
 

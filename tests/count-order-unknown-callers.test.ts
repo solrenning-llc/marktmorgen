@@ -30,6 +30,7 @@ import { newUpsellKey, readUpsell, settleUpsells, takeUpsell } from "@/lib/upsel
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { shownRef } from "./upsell-ref-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_count_unknown_only";
 process.env.RESEND_API_KEY = "re_test_upsell_journey_only";
@@ -210,7 +211,8 @@ async function main(): Promise<void> {
     };
     return id;
   };
-  const take = (session: string) => takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+  // The step as the thanks page draws it (offerRef, main's #3373): an id alone is answered "changed" (Claude 1 on #3407).
+  const take = async (session: string) => takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
 
   part("A paid one-click offer (takeUpsell): control");
   {

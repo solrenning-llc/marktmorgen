@@ -149,6 +149,8 @@ export type ProductOption = {
    * their invitation, not yet kept, opens it (withInvitedOption,
    * lib/move-members.ts), and nothing else does.
    * Absent on every option written before this existed, which is on sale.
+   * Stored as anything but absent or exactly false (a shape it cannot read
+   * included), parseOptions reads it as off sale: it fails closed.
    */
   offSale?: true;
 };
@@ -164,6 +166,11 @@ export function parseDetails(raw: unknown): string[] {
     if (out.length === MAX_OPTION_DETAILS) break;
   }
   return out;
+}
+
+/** Whether a stored option is off sale: only an absent flag or exactly false reads as on sale (fail closed). */
+function readOffSale(value: Record<string, unknown>): boolean {
+  return value.offSale !== undefined && value.offSale !== false;
 }
 
 /** Whatever came back from storage, made safe to use. */
@@ -194,7 +201,11 @@ export function parseOptions(raw: unknown): ProductOption[] {
       details: parseDetails(value.details),
       // Only the first one marked counts: a page with two picks has none.
       best: value.best === true && !picked,
-      ...(value.offSale === true ? { offSale: true as const } : {}),
+      // This flag is what stops a charge, so it fails closed (reviewer C3 on #3598): absent or exactly false is on
+      // sale, and any other value, true or one it cannot read ("true", 1, null, {}), is off sale. The option is
+      // kept rather than dropped like an unreadable id or price: dropping the last one would leave a product with
+      // no options, which handsOver and the checkout would then sell at the product's own price.
+      ...(readOffSale(value as Record<string, unknown>) ? { offSale: true as const } : {}),
     });
     if (value.best === true) picked = true;
     if (options.length >= MAX_OPTIONS) break;
@@ -305,9 +316,13 @@ export function namedPriceOffered(product: Listing, optionId: string): boolean {
   return !optionId || sellableOptions(product).some((option) => option.id === optionId);
 }
 
-/** The option to have chosen when the page opens: the creator's pick, else the first. */
-export function startingOption(options: ProductOption[]): ProductOption | null {
-  return options.find((option) => option.best) ?? options[0] ?? null;
+/**
+ * The options in the order a buyer sees them: the creator's "Recommended" first, the others in the creator's order
+ * (487 [IT4], C1-20261106-0100-TODOS-1). Only the order: nothing here chooses an option for the buyer.
+ */
+export function optionsInPickOrder<T extends { best?: boolean }>(options: readonly T[]): T[] {
+  const pick = options.findIndex((option) => option.best === true);
+  return pick <= 0 ? [...options] : [options[pick], ...options.slice(0, pick), ...options.slice(pick + 1)];
 }
 
 /** Whether a set of options has enough said about them to be compared side by side. */

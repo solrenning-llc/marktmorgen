@@ -16,6 +16,7 @@ import { endLapsed, findStoreSubscriptions, isBillingConfigured } from "@/lib/bi
 import { forgetPath } from "@/lib/path";
 import { queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreCalendar } from "@/lib/calendar-sync";
+import { forgetMemory } from "@/lib/assistant-memory-store";
 
 /**
  * The studio's switcher, and the door out for a store.
@@ -74,18 +75,20 @@ export async function POST(request: NextRequest) {
       // Its webhooks (with the bodies sent, which can hold buyers' data) and its API keys: a failure is put in a
       // durable line that the daily closing job tries again, with a ceiling of tries, and counted for the owner's
       // report (lib/store-forget-retry.ts; review of #2556), never only a log line.
+      // The store assistant's notes too: an unconfirmed forgetting goes in the same line, never counted as done.
       const forgetHooksAndKeys = async () => {
         await forgetStoreWebhooks(result.store.statsId);
         await revokeAllKeys(result.store.sid);
+        await forgetMemory(result.store.statsId ?? null, result.store);
       };
       await Promise.all([
         Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
           console.error("forgetting a deleted store's integrations failed", error),
         ),
         forgetHooksAndKeys().catch(async (error: unknown) => {
-          console.error("forgetting a deleted store's webhooks and keys failed; put in line to try again", error);
+          console.error("forgetting a deleted store's webhooks, keys and assistant notes failed; put in line to try again", error);
           await queueStoreForget(result.store.statsId ?? null, result.store.sid).catch((queued: unknown) =>
-            console.error("putting a deleted store's webhooks and keys in line failed", queued),
+            console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued),
           );
         }),
       ]);

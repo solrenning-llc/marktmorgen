@@ -141,6 +141,34 @@ async function main(): Promise<void> {
   }
   redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify(benRecord)]);
 
+  part("Such an invitation is never said to be moved: its state is said to be unknown (Claude 4's MÉDIO on #2685)");
+  redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify({ ...benRecord, kept: "x" })]);
+  const unknownBefore = checkouts.length;
+  const unread = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  is("pressing it opens nothing and answers \"unknown\", never \"done\"", [unread.ok ? "opened" : unread.reason, checkouts.length - unknownBefore], ["unknown", 0]);
+  const notices = (language: Parameters<typeof moveWords>[0]) => moveWords(language).notices as Record<string, { title: string; body: string } | undefined>;
+  const html = (text: string) => text.replace(/'/g, "&#x27;");
+  const unknownNotice = notices("en").unknown;
+  for (const query of [{ k: ben.t }, { k: ben.t, status: "unknown" }, { k: ben.t, status: "done" }] as Record<string, string>[]) {
+    const unreadPage = await movePage("inviteoffsale", id, query);
+    is(
+      `its page (${JSON.stringify(query.status ?? "")}) says the state could not be checked, never that it was moved, with no button`,
+      [
+        Boolean(unknownNotice && unreadPage.includes(html(unknownNotice.title)) && unreadPage.includes(html(unknownNotice.body))),
+        unreadPage.includes(html(moveWords("en").notices.done.title)),
+        unreadPage.includes(html(moveWords("en").notices.done.body)),
+        unreadPage.includes(moveWords("en").keep),
+      ],
+      [true, false, false, false],
+    );
+  }
+  is("its notice says nothing was charged", unknownNotice?.body.includes("Nothing was charged") ?? false, true);
+  for (const language of ["es", "fr", "de", "it", "nl", "pt"] as const) {
+    const said = notices(language).unknown;
+    is(`said in ${language} too, in its own words`, Boolean(said && said.title.length > 0 && said.body.length > 0 && said.title !== unknownNotice?.title), true);
+  }
+  redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify(benRecord)]);
+
   part("Such an invitation is still the person's: copied and erased (Revisor 1 on #2685)");
   redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify({ ...benRecord, kept: "x" })]);
   const odd = await readInvite(statsId, benField);

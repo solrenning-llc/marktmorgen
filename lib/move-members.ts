@@ -46,6 +46,22 @@ export const INVITED_READ_BYTES = 40_000;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const FIELD_PATTERN = /^[0-9a-f]{32}:[A-Za-z0-9_-]{1,64}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
+/** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 10/11/2026). */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+
+/**
+ * Whether one subscription row is a live membership to this product: true or false only when the row reads (rule 24,
+ * Codex CX1's MEDIUM on #3598). A row that is not an object, a status Stripe has no name for, or metadata that is not
+ * a map of strings (missing, null, a product that is a number) is null, never "not a member". Empty metadata reads.
+ */
+function liveRow(sub: unknown, productId: string): boolean | null {
+  if (!sub || typeof sub !== "object" || Array.isArray(sub)) return null;
+  const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
+  if (typeof status !== "string" || !SUB_STATUSES.has(status)) return null;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  if (!Object.values(metadata).every((value) => typeof value === "string")) return null;
+  return LIVE.has(status) && (metadata as Record<string, string>).product === productId;
+}
 
 /** One member invited to keep their membership here. */
 export type Invite = {
@@ -103,6 +119,22 @@ export async function readInvite(statsId: string, field: string): Promise<Invite
 }
 
 /**
+ * One invitation as kept, for the person's data copy (619 [SZ3]): null is none
+ * kept; "unknown" is a reply in an unknown shape (a missing reply, anything but
+ * text or null) or a record that does not read, never taken as none, so the
+ * copy fails and is made again rather than leaving it out (CX-123 rule 24).
+ */
+export async function inviteForCopy(statsId: string, field: string): Promise<Invite | null | "unknown"> {
+  if (!FIELD_PATTERN.test(field) || !isRedisConfigured()) return null;
+  const replies: unknown = await redisPipeline([["HGET", invitesKey(statsId), field]]);
+  // The one reply, from the list's own data slot: a missing reply, a hole or a getter is unknown.
+  const slot = Array.isArray(replies) && replies.length === 1 ? Object.getOwnPropertyDescriptor(replies, "0") : undefined;
+  if (!slot || !Object.hasOwn(slot, "value")) return "unknown";
+  if (slot.value === null) return null;
+  return parseInvite(slot.value) ?? "unknown";
+}
+
+/**
  * Invites many members in one round trip: each one's record, link and
  * reminder. Returns, for each, the field it is kept under when it is new, or
  * null when that address was already invited to that membership.
@@ -112,7 +144,13 @@ export async function inviteMembers(
   job: string,
   rows: { email: string; productId: string; option: string; renews: number }[],
   now = Date.now(),
-): Promise<(string | null)[]> {
+  /**
+   * The store's prints key and how one address is printed (lib/suppression.ts), for an import: each record is then
+   * written only when its address was not deleted from the store, in the same step (INVITE_UNLESS_ERASED), and a
+   * deleted one answers false, nothing written. Throws when that step's answer is not exact (CX-123 rule 24).
+   */
+  erased: { key: string; print: (email: string) => string } | null = null,
+): Promise<(string | null | false)[]> {
   const statsId = store.statsId;
   if (!rows.length || !statsId || !store.sid || !isRedisConfigured()) return rows.map(() => null);
   const at = Math.floor(now / 1000);
@@ -132,9 +170,9 @@ export async function inviteMembers(
     { slot: INVITES_SLOT, bytes: made.reduce((sum, m) => sum + m.bytes, 0) },
     { until: now + longest * 1000, bytes: made.reduce((sum, m) => sum + m.link, 0) },
   ], now);
-  const answers = await redisPipeline(made.map(({ field, value }) => ["HSETNX", invitesKey(statsId), field, value]));
+  const answers = erased ? await invitedUnlessErased(statsId, made, erased) : await redisPipeline(made.map(({ field, value }) => ["HSETNX", invitesKey(statsId), field, value]));
   const fresh = made.filter((_, i) => Number(answers[i]) === 1);
-  // An address already invited to that membership was not written again: its room goes back.
+  // An address already invited to that membership, or deleted from the store, was not written: its room goes back.
   const already = made.filter((_, i) => Number(answers[i]) !== 1).reduce((sum, m) => sum + m.bytes, 0);
   if (already > 0) await giveData(store, [{ slot: INVITES_SLOT, bytes: already }], now);
   if (fresh.length) {
@@ -147,7 +185,41 @@ export async function inviteMembers(
       ...(reminders.length ? [["ZADD", DUE_KEY, ...reminders]] : []),
     ]);
   }
-  return made.map(({ field }, i) => (Number(answers[i]) === 1 ? field : null));
+  return made.map(({ field }, i) => (Number(answers[i]) === 1 ? field : Number(answers[i]) === -1 ? false : null));
+}
+
+/**
+ * Invitations written only for addresses not deleted from the store, in one
+ * step with the check (review of #3383, as lib/suppression.ts
+ * KEEP_UNLESS_ERASED): KEYS[1] the store's prints, KEYS[2] the store's
+ * invitations; ARGV, for each, its address's print, its field and its record.
+ * One HMGET; a print found writes nothing and answers -1, otherwise HSETNX
+ * (1 new, 0 already). Billed 1 + 1 + 1 an invitation at most, the same HSETNX
+ * as before; lib/redis-memory.ts runs it the same way.
+ */
+export const INVITE_UNLESS_ERASED = `-- marktmorgen:invite-unless-erased:v1
+local n = math.floor(#ARGV / 3)
+local prints = {}
+for i = 1, n do prints[i] = ARGV[3 * i - 2] end
+local found = redis.call("HMGET", KEYS[1], unpack(prints))
+local out = {}
+for i = 1, n do
+  if found[i] then
+    out[i] = -1
+  else
+    out[i] = redis.call("HSETNX", KEYS[2], ARGV[3 * i - 1], ARGV[3 * i])
+  end
+end
+return out`;
+
+/** Runs INVITE_UNLESS_ERASED; its answer read exactly, one of -1, 0 or 1 for each, or it throws. */
+async function invitedUnlessErased(statsId: string, made: { row: { email: string }; field: string; value: string }[], erased: { key: string; print: (email: string) => string }): Promise<number[]> {
+  const replies = await redisPipeline([["EVAL", INVITE_UNLESS_ERASED, 2, erased.key, invitesKey(statsId), ...made.flatMap(({ row, field, value }) => [erased.print(row.email), field, value])]]);
+  const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!Array.isArray(reply) || reply.length !== made.length || !reply.every((a) => a === -1 || a === 0 || a === 1)) {
+    throw new Error("the invitations could not be checked where they are written");
+  }
+  return reply as number[];
 }
 
 /** How many members a store invited, and how many kept their membership here. */
@@ -301,20 +373,37 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   return { to: invite.e, subject: m.reminderSubject(product.title).slice(0, 200), text };
 }
 
+/** How many customer records under one address keptAlready reads: more is not read whole, so it throws. */
+const KEPT_CUSTOMERS_READ = 10;
+
+/**
+ * A Stripe list page's items, only when the page says it is whole: its `data` a list, `has_more` exactly false and no
+ * more items than were asked for. Anything else is null, never an empty or complete list (B4, Claude 4 on #2685).
+ */
+function wholeList(page: Record<string, unknown>, limit: number): unknown[] | null {
+  return Array.isArray(page.data) && page.has_more === false && page.data.length <= limit ? page.data : null;
+}
+
 /** Whether this address has a live membership to this product on the creator's account now. */
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
   // CX-123 rule 24 (rule 30 of Claude 4's sweep, C4-2890): a list without its data is unknown, never "not kept": it
-  // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it.
-  const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
-  if (!Array.isArray(customers.data)) throw new Error("a member's customers did not read");
-  for (const customer of customers.data as { id?: unknown }[]) {
-    if (typeof customer.id !== "string") continue;
-    const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
-    if (!Array.isArray(subs.data)) throw new Error("a member's subscriptions did not read");
-    const list = subs.data as { status?: unknown; metadata?: Record<string, string> | null }[];
-    if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
+  // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it. So is a list
+  // cut short or that does not say it is whole (Claude 4's LEVE on #2685): a live membership may lie beyond it.
+  const customers = wholeList(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(KEPT_CUSTOMERS_READ) })}`), KEPT_CUSTOMERS_READ);
+  if (!customers) throw new Error("a member's customers did not read whole");
+  for (const customer of customers) {
+    const id = customer && typeof customer === "object" ? (customer as { id?: unknown }).id : undefined;
+    // A customer without its id is unknown, never skipped: its membership may be the live one.
+    if (typeof id !== "string" || !/^cus_[A-Za-z0-9]+$/.test(id)) throw new Error("a member's customer did not read");
+    const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
+    if (!subs) throw new Error("a member's subscriptions did not read whole");
+    for (const sub of subs) {
+      const live = liveRow(sub, productId);
+      if (live === null) throw new Error("a member's subscription did not read");
+      if (live) return true;
+    }
   }
   return false;
 }
@@ -352,7 +441,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" | "unknown" };
 
 /** The open mark's value once a try's outcome is not known (a checkout may exist): later presses say so. */
 const OPEN_UNKNOWN = "unknown";
@@ -370,7 +459,10 @@ export async function openMove(
   const invite = await readMove(store, productId, token);
   if (!invite) return { ok: false, reason: "expired" };
   // Kept already, or its state cannot be read (KEPT_UNKNOWN): the link opens nothing more, at any price, so one
-  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was moved.
+  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was moved only when it was;
+  // a state that cannot be read is said to be unknown, never moved (Claude 4's MÉDIO on #2685), so nobody lets
+  // their old membership lapse on our word.
+  if (invite.keptUnknown) return { ok: false, reason: "unknown" };
   if (invite.kept !== 0) return { ok: false, reason: "done" };
   const stored: Product | null = await readProduct(store, productId);
   // A price the creator has since taken off sale stays open to this member alone while the invitation is not yet
@@ -502,23 +594,19 @@ export const MOVE_STRIPE_PAGES = 1 + MOVE_CUSTOMERS_READ + 1;
 async function liveMembership(store: Store, email: string, productId: string): Promise<boolean | null> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return null;
-  const whole = (page: Record<string, unknown>, limit: number): unknown[] | null =>
-    Array.isArray(page.data) && page.has_more === false && page.data.length <= limit ? page.data : null;
   try {
     // At most MOVE_CUSTOMERS_READ records under the address: more is not read whole, so nothing opens (the cost bound).
-    const customers = whole(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(MOVE_CUSTOMERS_READ) })}`), MOVE_CUSTOMERS_READ);
+    const customers = wholeList(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(MOVE_CUSTOMERS_READ) })}`), MOVE_CUSTOMERS_READ);
     if (!customers) return null;
     for (const customer of customers) {
       const id = customer && typeof customer === "object" ? (customer as { id?: unknown }).id : undefined;
       if (typeof id !== "string" || !/^cus_[A-Za-z0-9]+$/.test(id)) return null;
-      const subs = whole(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
+      const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
       if (!subs) return null;
       for (const sub of subs) {
-        if (!sub || typeof sub !== "object") return null;
-        const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
-        if (typeof status !== "string") return null;
-        const product = metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>).product : undefined;
-        if (LIVE.has(status) && product === productId) return true;
+        const live = liveRow(sub, productId);
+        if (live === null) return null;
+        if (live) return true;
       }
     }
     return false;

@@ -197,8 +197,8 @@ export async function createAgreement(store: Store, draft: AgreementDraft, now =
 
 /**
  * One agreement by its id, or null. Read exactly (CX-123 rule 24): null only when the record is confirmed absent
- * (GET null) or its text does not read; any other reply throws UnknownReplyError, so a withdraw or a delete is never
- * told "gone" while the record may still be there.
+ * (GET null); any other reply, or a kept text that does not read as an agreement, throws UnknownReplyError, so a
+ * withdraw or a delete is never told "gone" while the record may still be there (Claude 5 on #3268).
  */
 export async function readAgreement(id: string): Promise<Agreement | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
@@ -206,11 +206,14 @@ export async function readAgreement(id: string): Promise<Agreement | null> {
   if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("reading an agreement");
   const raw = reply[0];
   if (raw === null) return null;
+  let agreement: Agreement | null = null;
   try {
-    return parseAgreement(JSON.parse(raw));
+    agreement = parseAgreement(JSON.parse(raw));
   } catch {
-    return null;
+    agreement = null;
   }
+  if (!agreement) throw new UnknownReplyError("reading an agreement");
+  return agreement;
 }
 
 /**
@@ -568,12 +571,22 @@ export async function deleteAgreement(store: Store, id: string, now = Date.now()
   return "deleted";
 }
 
+/**
+ * Deleted only on each removal's exact count (CX-123 rules 24 and 30, Claude 5 on #3268): DEL answers how many of the
+ * agreement's keys it removed, ZREM and SREM 0 or 1. Any other reply throws UnknownReplyError, so the studio says it
+ * could not be done instead of "deleted" while the record may still be kept.
+ */
 async function forget(a: Agreement): Promise<void> {
-  await redisPipeline([
-    ["DEL", ...agreementKeys(a.id)],
+  const keys = agreementKeys(a.id);
+  const replies = repliesFor(await redisPipeline([
+    ["DEL", ...keys],
     ["ZREM", storeKey(a.sid), a.id],
     ["SREM", personSet(a.sid, a.email), a.id],
-  ]);
+  ]), 3);
+  const [removed, unlisted, unnamed] = replies ? replies.map(countOf) : [];
+  if (removed == null || unlisted == null || unnamed == null || removed > keys.length || unlisted > 1 || unnamed > 1) {
+    throw new UnknownReplyError("deleting an agreement");
+  }
 }
 
 /** How many agreements one pass of an erasure deletes: their DEL and ZREM go in one pipeline. */

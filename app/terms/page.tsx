@@ -402,8 +402,9 @@ export default function TermsPage() {
           You may never upload, sell, share or link to any material that
           sexually exploits a child, or any intimate image of a person shared
           without their consent. When we learn of material that appears to be
-          child sexual abuse material, we take it off the store at once, keep it as the
-          law requires, and report it, with the account behind it, to the
+          child sexual abuse material, we take it off the store as soon as we
+          can, usually at once (when it does not come off by itself, we act on
+          it by hand), keep it as the law requires, and report it, with the account behind it, to the
           National Center for Missing &amp; Exploited Children (NCMEC), as
           United States law requires (18 U.S.C. § 2258A). The account is closed.
           We remove an intimate image shared without consent within 48 hours of

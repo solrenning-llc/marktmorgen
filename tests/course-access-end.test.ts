@@ -70,13 +70,13 @@ async function main(): Promise<void> {
   is("the form sends the end said, or none", [shownAccessEnd(c, NOW + DAY), shownAccessEnd(c, NOW + 30 * DAY), shownAccessEnd(course, NOW)], [String(NOW + 30 * DAY), "none", "none"]);
   is("what a form sent: nothing, none, an end, or bad", [readShownAccessEnd(null), readShownAccessEnd("none"), readShownAccessEnd(String(NOW)), readShownAccessEnd("1e9"), readShownAccessEnd("012"), readShownAccessEnd("")], [undefined, null, NOW, "bad", "bad", "bad"]);
   is("the stamp read off a session: only the exact shape", [accessEndStamp({ access_end: String(NOW) }), accessEndStamp({ access_end: "soon" }), accessEndStamp({ access_end: "-1" }), accessEndStamp({}), accessEndStamp(null)], [NOW, null, null, null, null]);
-  is("a stamped end is the later of the stamp and the date now", [stampedAccessEnd(c, NOW + DAY), stampedAccessEnd(c, NOW + 90 * DAY)], [NOW + 30 * DAY, NOW + 90 * DAY]);
-  is("the date taken off: no end", stampedAccessEnd(course, NOW + DAY), null);
-  is("before the end: open", accessEndState(c, NOW + 30 * DAY, NOW + 29 * DAY), "open");
-  is("at the end: ended", accessEndState(c, NOW + 30 * DAY, NOW + 30 * DAY), "ended");
-  is("no stamp: open, even long after", accessEndState(c, null, NOW + 900 * DAY), "open");
-  is("a clock that is not a time is unknown, never ended", accessEndState(c, NOW + 30 * DAY, Number.NaN), "unknown");
-  is("a stamp that is not a time is unknown, never ended", accessEndState(c, 1.5, NOW), "unknown");
+  is("a stamped end is the later of the stamp and the date now", [stampedAccessEnd(c, NOW + DAY, null), stampedAccessEnd(c, NOW + 90 * DAY, null)], [NOW + 30 * DAY, NOW + 90 * DAY]);
+  is("the date taken off: no end", stampedAccessEnd(course, NOW + DAY, null), null);
+  is("before the end: open", accessEndState(c, NOW + 30 * DAY, NOW + 29 * DAY, null), "open");
+  is("at the end: ended", accessEndState(c, NOW + 30 * DAY, NOW + 30 * DAY, null), "ended");
+  is("no stamp: open, even long after", accessEndState(c, null, NOW + 900 * DAY, null), "open");
+  is("a clock that is not a time is unknown, never ended", accessEndState(c, NOW + 30 * DAY, Number.NaN, null), "unknown");
+  is("a stamp that is not a time is unknown, never ended", accessEndState(c, 1.5, NOW, null), "unknown");
 
   part("said in the buyer's words, in UTC, with the time");
   is("English", accessEndWhen(NOW + 30 * DAY, "en"), "February 14, 2027, 8:00 AM UTC");

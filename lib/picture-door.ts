@@ -128,3 +128,25 @@ export async function dropTakenPictures(taken: Map<string, number>, paths: strin
   }
   if (ours.length) await del(ours).catch(() => {});
 }
+
+/**
+ * Whether a note was put back on the door once already (returnToDoor): its time carries half a millisecond. A picture
+ * taken with such a note is checked again only paid for as a studio request (lib/picture-check.ts pictureChecker).
+ */
+export const putBackOnce = (noted: number): boolean => !Number.isInteger(noted);
+
+/**
+ * Puts pictures this request took from the door back on it, each at the time given (ms), after a check of the file
+ * did not finish (Claude 2 on #2843, 6750890970): the file is kept, and a later save finds the picture and checks it
+ * again. Only a path with a door list; best effort, nothing here throws (a note not put back leaves a file nothing
+ * shows, kept: storage, never a picture deleted).
+ */
+export async function returnToDoor(entries: ReadonlyArray<readonly [string, number]>): Promise<void> {
+  const commands: (string | number)[][] = [];
+  for (const [path, at] of entries) {
+    const key = doorsKey(path);
+    if (!key || !Number.isFinite(at) || at <= 0) continue;
+    commands.push(["ZADD", key, at, path], ["EXPIRE", key, PICTURE_DOOR_SECONDS]);
+  }
+  if (commands.length && isRedisConfigured()) await redisPipeline(commands).catch(() => {});
+}

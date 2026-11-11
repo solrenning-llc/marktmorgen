@@ -97,8 +97,45 @@ function main(): void {
   for (const [what, raw] of broken) is(`unreadable: ${what}`, readFeeLine(raw), null);
   for (const bad of [null, undefined, 5, "txn_1", [], true]) is(`unreadable: ${JSON.stringify(bad) ?? "undefined"}`, readFeeLine(bad), null);
   is("a payout is not a sale and not a fee: other", readFeeLine(txn({ type: "payout", reporting_category: "payout", amount: -9000 })), "other");
-  is("an adjustment that is not a dispute is other", readFeeLine(txn({ type: "adjustment", reporting_category: "other_adjustment", amount: -5 })), "other");
   is("a transfer is other", readFeeLine(txn({ type: "transfer", reporting_category: "transfer", amount: -10 })), "other");
+  for (const type of ["payout_cancel", "payout_failure", "transfer_cancel", "transfer_failure", "topup", "topup_reversal"]) {
+    is(`${type} is named as no sale and no fee: other`, readFeeLine(txn({ type, reporting_category: "x", amount: 10 })), "other");
+  }
+
+  part("A type not named here is never dropped (rule 24)");
+  for (const type of ["payment_unreconciled", "application_fee_refund", "a_type_stripe_adds_later", "contribution", "issuing_transaction"]) {
+    is(`unreadable: ${type}`, readFeeLine(txn({ type, reporting_category: "x", amount: -700, source: "py_1" })), null);
+  }
+  is("unreadable: an adjustment that is not a dispute", readFeeLine(txn({ type: "adjustment", reporting_category: "other_adjustment", amount: -5 })), null);
+  const ach = txn({ type: "payment", reporting_category: "charge", amount: 10000, source: "py_ach1", created: T0 + 40, details: [{ amount: 80, type: "stripe_fee" }] });
+  is("a sale then an unknown type: the report is unavailable, never the old net", rowsOf(saleFees([ach, txn({ type: "payment_unreconciled", reporting_category: "x", amount: -10000, source: "py_ach1" })], { complete: true })), "unreadable");
+
+  part("A bank payment that bounced takes the sale back");
+  const reversal = (source: unknown) => txn({ type: "payment_reversal", reporting_category: "payment_reversal", amount: -10000, source });
+  for (const [what, source] of [["the payment id", "py_ach1"], ["the expanded payment", { id: "py_ach1", object: "charge" }], ["a refund-shaped source naming the payment", { id: "pyr_1", object: "refund", charge: "py_ach1" }]] as Array<[string, unknown]>) {
+    is(`a payment_reversal through ${what}: the creator kept -80`, rowsOf(saleFees([ach, reversal(source)], { complete: true })), [
+      { sale: "py_ach1", currency: "usd", at: T0 + 40, saleRead: true, gross: 10000, stripeFee: 80, feeTax: 0, applicationFee: 0, otherFee: 0, refunds: -10000, disputes: 0, net: -80 },
+    ]);
+  }
+  is("unreadable: a payment_reversal that names no sale", readFeeLine(reversal(null)), null);
+  is("unreadable: a payment_reversal whose source is a refund id only", readFeeLine(reversal("pyr_1")), null);
+
+  part("A fee on a payout, a transfer or a top-up is never dropped (Claude 6 on #3632)");
+  const instant = txn({ type: "payout", reporting_category: "payout", amount: -4800, details: [{ amount: 72, type: "stripe_fee" }] });
+  is("the payout's fee is a Stripe fee on the account", saleFees([sale("ch_p", 10000, 320), instant], { complete: true }).available ? (saleFees([sale("ch_p", 10000, 320), instant], { complete: true }) as { accountFees: unknown }).accountFees : null, [{ currency: "usd", taxFees: 0, stripeFees: -72 }]);
+  is("a payout with no fee is still left out", saleFees([txn({ type: "payout", reporting_category: "payout", amount: -4800 })], { complete: true }), { available: true, rows: [], accountFees: [] });
+
+  part("Sums past what a number holds exactly are unavailable, never rounded (Codex Cloud 1 on #3637)");
+  const big = (charge: string, amount: number) => txn({ type: "charge", reporting_category: "charge", amount, source: charge });
+  is("one sale's lines summing past MAX_SAFE_INTEGER", rowsOf(saleFees([big("ch_big", Number.MAX_SAFE_INTEGER), txn({ type: "refund", reporting_category: "refund", amount: 2, source: { id: "re_x", object: "refund", charge: "ch_big" } })], { complete: true })), "unreadable");
+  is("account fees summing past MAX_SAFE_INTEGER", rowsOf(saleFees([txn({ type: "stripe_fee", reporting_category: "fee", amount: -Number.MAX_SAFE_INTEGER }), txn({ type: "stripe_fee", reporting_category: "fee", amount: -2 })], { complete: true })), "unreadable");
+
+  part("Stripe's currency conversion fee is an account fee");
+  const fx = readFeeLine(txn({ type: "stripe_fx_fee", reporting_category: "fee", amount: -250 })) as FeeLine;
+  is("stripe_fx_fee is a Stripe fee on the account, with no sale", [fx.kind, fx.sale, fx.net], ["stripe_fee", null, -250]);
+  is("stripe_fx_fee is counted, never dropped", saleFees([txn({ type: "stripe_fx_fee", reporting_category: "fee", amount: -250 })], { complete: true }), {
+    available: true, rows: [], accountFees: [{ currency: "usd", taxFees: 0, stripeFees: -250 }],
+  });
 
   part("Each kind of money in its own column");
   const withAll = sale("ch_2", 10000, 320, [

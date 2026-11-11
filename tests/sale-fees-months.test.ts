@@ -121,6 +121,13 @@ function main(): void {
   is("an unknown time zone gives no file", saleFeesCsv(report, "Mars/Olympus"), null);
   is("nothing sold: the header alone", saleFeesCsv(saleFees([], { complete: true }), ZONE), SALE_FEES_CSV_HEADER.map((h) => `"${h}"`).join(","));
 
+  part("A month's sums past what a number holds exactly are unavailable, never rounded (Codex Cloud 1 on #3637)");
+  const huge = [sale("ch_h1", Number.MAX_SAFE_INTEGER, 0, NOV_5), sale("ch_h2", 2, 0, NOV_5)];
+  is("each sale reads alone", saleFees(huge, { complete: true }).available, true);
+  is("their month does not", saleFeeMonths(huge, { complete: true, since, at: AT }, ZONE), { available: false, why: "unreadable" });
+  is("a payout's fee lands in the month's account fees", monthOf(saleFeeMonths([txn({ type: "payout", category: "payout", amount: -4800, at: NOV_5, details: [{ amount: 72, type: "stripe_fee" }] })], { complete: true, since, at: AT }, ZONE), "2026-11"), {
+    month: "2026-11", state: "read", lines: [{ currency: "usd", sales: 0, gross: 0, stripeFee: 0, feeTax: 0, applicationFee: 0, otherFee: 0, refunds: 0, disputes: 0, accountFees: -72, net: -72 }],
+  });
   done();
 }
 

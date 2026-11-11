@@ -30,8 +30,8 @@ is("nothing: none", sensitiveTopics(""), []);
 
 part("What it says");
 is("one subject", sensitiveWarning(["health"]), "This draft is about health. Before you publish, have someone who knows the subject read it, such as a doctor, and do not promise a result.");
-is("two subjects", sensitiveWarning(["health", "money"]), "This draft is about health and money. Before you publish, have someone who knows each subject read it, such as a doctor or an accountant, and do not promise a result.");
-is("three subjects", sensitiveWarning(["health", "money", "law"]), "This draft is about health, money and the law. Before you publish, have someone who knows each subject read it, such as a doctor, an accountant or a lawyer, and do not promise a result.");
+is("two subjects", sensitiveWarning(["health", "money"]), "This draft is about health and money. Before you publish, have someone who knows each subject read it, such as a doctor or a financial advisor, and do not promise a result.");
+is("three subjects", sensitiveWarning(["health", "money", "law"]), "This draft is about health, money and the law. Before you publish, have someone who knows each subject read it, such as a doctor, a financial advisor or a lawyer, and do not promise a result.");
 is("none: nothing", sensitiveWarning([]), null);
 
 part("Drawn with the checks");
@@ -67,7 +67,7 @@ part("A draft in another store language is never left without the warning (MEDIU
 is("a Portuguese draft: the general warning", safely(() => draftTopics(draftStrings("Um plano para cuidar da sua saúde"), "pt")), "unread");
 is("a Spanish draft about nothing sensitive: still the general warning", safely(() => draftTopics(draftStrings("Pan casero"), "es")), "unread");
 is("a draft whose language was not said: the general warning", safely(() => draftTopics(draftStrings("Brot backen"), null)), "unread");
-is("the general warning says what to do and what is checked", safely(() => sensitiveWarning("unread")), "If this draft is about health, money or the law, have someone who knows the subject read it before you publish, such as a doctor, an accountant or a lawyer, and do not promise a result. We look for these subjects only in drafts written in English.");
+is("the general warning says what to do and what is checked", safely(() => sensitiveWarning("unread")), "If this draft is about health, money or the law, have someone who knows the subject read it before you publish, such as a doctor, a financial advisor or a lawyer, and do not promise a result. We look for these subjects only in drafts written in English.");
 is("the writing help says which language the draft is in", readAiAnswer(true, { ok: true, value: "Hola", left: 3, language: "es" }), { ok: true, value: "Hola", left: 3, language: "es" });
 is("a language that is not a store language is not passed on", readAiAnswer(true, { ok: true, value: "Hola", left: 3, language: "xx" }), { ok: true, value: "Hola", left: 3 });
 const route = readFileSync("app/api/store/ai/route.ts", "utf8");

@@ -36,7 +36,7 @@ import { ClearCart } from "@/components/store-cart";
 import { confirmCartStock, confirmStock } from "@/lib/stock";
 import { finishPlan } from "@/lib/plans";
 import { cookies, headers } from "next/headers";
-import { clientAddress } from "@/lib/request-guard";
+import { clientAddress, unknownLimit } from "@/lib/request-guard";
 import { isStorePeople } from "@/lib/visit";
 import { funnelMark } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
@@ -161,10 +161,12 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // one connection gets 60 in ten minutes per store: far more than a buyer
   // reloading, sharing and coming back ever makes, and short of a script
   // spending the creator's allowance with Stripe on made-up order numbers.
+  // A count that could not be read is not known (rule 24): never "too many", and never the error page after a payment
+  // (PF1, Claude 2 on #3068): the page says it could not check this order just now.
   const allowed = sessionId
-    ? await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer")
+    ? await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer").catch(unknownLimit)
     : true;
-  const order: Order | { state: "slow" } = allowed ? await readOrder(store, sessionId) : { state: "slow" };
+  const order: Order | { state: "slow" } = allowed === "unknown" ? { state: "error" } : allowed ? await readOrder(store, sessionId) : { state: "slow" };
 
   // A member moved from another platform kept their membership: the studio's count says so (lib/move-members.ts).
   if (order.state === "paid" && order.product.recurring && (order.record.metadata as Record<string, string> | null)?.moved === "yes") {
@@ -1429,10 +1431,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
  * purchases from it for a day, as the Stripe page does with its order.
  */
 async function PayPalThanks({ store, order }: { store: Store; order: string }) {
-  const allowed = await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer");
-  // A record or a mark that could not be read is unknown, never "not found" and never the error page (PF1): the
-  // buyer is told the payment could not be checked just now.
-  let unread = false;
+  const limit = await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer").catch(unknownLimit);
+  const allowed = limit === true;
+  // A record, a mark or the views' count that could not be read is unknown, never "not found", never "too many" and
+  // never the error page (PF1; Claude 2 on #3068): the buyer is told the payment could not be checked just now.
+  let unread = limit === "unknown";
   const paid = allowed
     ? await readPaid(order).catch(() => {
         unread = true;

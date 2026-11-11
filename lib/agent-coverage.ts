@@ -218,6 +218,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/pixels": row("settings", draft),
   "POST store/podcast": row("podcast", draft),
   "POST store/preorder": row("products", draft),
+  "POST store/draft-preview": row("products", never("A preview link is a secret that lets its holder see a draft; the creator makes it in the studio and shares it themselves.")),
   "GET store/preview": row("files", read),
   "POST store/preview": row("files", draft),
   "GET store/product": row("products", tool("get_product_description")),

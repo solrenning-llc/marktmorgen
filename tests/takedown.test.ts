@@ -9,7 +9,8 @@
  * counted on the public transparency page only once it reached the inbox: a
  * try that failed to send, and is sent again, never counts twice.
  */
-import { addProduct, addStoreLink, claimHandle, ensureStatsId, setJoin, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, addStoreLink, claimHandle, ensureStatsId, setJoin, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { isTakenDown, makeDraftPreview, readDraftPreview, revokeDraftPreview } from "@/lib/draft-preview";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, reportedProduct, takeDown } from "@/lib/takedown";
 import { canSell } from "@/lib/store-checkout";
@@ -111,6 +112,67 @@ async function main(): Promise<void> {
   is("its pages and sales off, and on the record", [Boolean(off.suspended), canSell(off), off.strikes.length], [true, false, 3]);
   await takeDown(report, off, { type: "store", on: false }, "https://marktmorgen.com");
   is("and back on, with the record kept", [(await store()).suspended, canSell(await store()), (await store()).strikes.length], ["", true, 3]);
+
+  // Claude 6 on #3439, MEDIUM 1 (and Codex M, review 5833044179): a product taken down after a notice kept opening
+  // through a draft preview link, and a notice about a preview address pointed at no product.
+  part("A product taken down closes its draft preview");
+  const drafted = await addProduct(owner, "Draft Pack", "", "9", null);
+  if (!drafted.ok) throw new Error("setup");
+  await setProductHidden(owner, drafted.product.id, true);
+  const early = await makeDraftPreview(await store(), drafted.product.id);
+  const previewNotice = { ...report, url: `https://marktmorgen.com/@noticeshop/preview/${early.code}` };
+  is("a notice about its preview address points at that product", (await reportedProduct(previewNotice, await store()))?.id, drafted.product.id);
+  is("a preview address of no link points at nothing", await reportedProduct({ ...report, url: `https://marktmorgen.com/@noticeshop/preview/${"B".repeat(22)}` }, await store()), null);
+  is("the link opens before", (await readDraftPreview(early.code))?.productId, drafted.product.id);
+  await setProductHidden(owner, drafted.product.id, false);
+  is("taken down by the real path", await takeDown(report, await store(), { type: "product", id: drafted.product.id }, "https://marktmorgen.com"), 'The product "Draft Pack", now unpublished');
+  is("the link made before no longer opens", await readDraftPreview(early.code), null);
+  is("the product is marked taken down", await isTakenDown(await store(), drafted.product.id), true);
+  const after = await makeDraftPreview(await store(), drafted.product.id);
+  is("a link written after it never opens", await readDraftPreview(after.code), null);
+
+  part("A draft still hidden, reported by its preview address, has its preview closed (Claude 6's focal on #3597)");
+  const hiddenDraft = await addProduct(owner, "Quiet Draft", "", "9", null);
+  if (!hiddenDraft.ok) throw new Error("setup");
+  await setProductHidden(owner, hiddenDraft.product.id, true);
+  const shared = await makeDraftPreview(await store(), hiddenDraft.product.id);
+  const draftNotice = { ...report, url: `https://marktmorgen.com/@noticeshop/preview/${shared.code}` };
+  is("its preview address points at the draft", (await reportedProduct(draftNotice, await store()))?.id, hiddenDraft.product.id);
+  is("the link opens before", (await readDraftPreview(shared.code))?.productId, hiddenDraft.product.id);
+  is(
+    "taken down while it stays a draft: its preview link is closed",
+    await takeDown(draftNotice, await store(), { type: "product", id: hiddenDraft.product.id }, "https://marktmorgen.com"),
+    'The preview link of the draft product "Quiet Draft", now closed',
+  );
+  is("the link made before no longer opens", await readDraftPreview(shared.code), null);
+  is("the draft is marked taken down", await isTakenDown(await store(), hiddenDraft.product.id), true);
+  is("it stays a draft", ((await store()).catalog.items.find((p) => p.id === hiddenDraft.product.id)?.kind ?? 0) & KIND.hidden, KIND.hidden);
+  const later = await makeDraftPreview(await store(), hiddenDraft.product.id);
+  is("a link written after it never opens", await readDraftPreview(later.code), null);
+  is("a second press finds nothing more to do", await takeDown(draftNotice, await store(), { type: "product", id: hiddenDraft.product.id }, "https://marktmorgen.com"), null);
+
+  // Revisor 2 on #3597: a draft with no preview link has nothing public to take down. Pressing "Unpublish" on it must
+  // stay "nothing to do": no strike towards suspension, no transparency count and no statement of reasons saying a link
+  // was closed (EU DSA Art. 17).
+  part("A draft with no preview link has nothing to take down (Revisor 2 on #3597)");
+  const bare = await addProduct(owner, "Bare Draft", "", "9", null);
+  if (!bare.ok) throw new Error("setup");
+  await setProductHidden(owner, bare.product.id, true);
+  const strikesBefore = (await store()).strikes.length;
+  const countedBefore = JSON.stringify(await transparencyCounts(Date.now()));
+  sent.length = 0;
+  is("a draft never given a link: nothing is done", await takeDown(report, await store(), { type: "product", id: bare.product.id }, "https://marktmorgen.com"), null);
+  is("no strike is written", (await store()).strikes.length, strikesBefore);
+  is("nothing is counted on the transparency page", JSON.stringify(await transparencyCounts(Date.now())), countedBefore);
+  is("the creator is sent nothing", sent.filter((mail) => [mail.to].flat().includes(owner)).length, 0);
+  is("and the draft is not marked taken down, so a link can still be made for it", await isTakenDown(await store(), bare.product.id), false);
+  const revoked = await addProduct(owner, "Revoked Draft", "", "9", null);
+  if (!revoked.ok) throw new Error("setup");
+  await setProductHidden(owner, revoked.product.id, true);
+  await makeDraftPreview(await store(), revoked.product.id);
+  await revokeDraftPreview(await store(), revoked.product.id);
+  is("a draft whose link was revoked: nothing is done either", await takeDown(report, await store(), { type: "product", id: revoked.product.id }, "https://marktmorgen.com"), null);
+  is("still no strike", (await store()).strikes.length, strikesBefore);
   done();
 }
 

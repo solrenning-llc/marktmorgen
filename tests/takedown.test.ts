@@ -173,6 +173,33 @@ async function main(): Promise<void> {
   await revokeDraftPreview(await store(), revoked.product.id);
   is("a draft whose link was revoked: nothing is done either", await takeDown(report, await store(), { type: "product", id: revoked.product.id }, "https://marktmorgen.com"), null);
   is("still no strike", (await store()).strikes.length, strikesBefore);
+
+  // Rule 24 (residual LOW of focal L on #3692): the draft's link and its taken-down mark, read in a shape Redis never
+  // gives, are unknown, never "no link": the takedown throws, and nothing is written, counted or sent.
+  part("A draft's link that does not read is never \"nothing to take down\" (rule 24)");
+  const unread = await addProduct(owner, "Unread Draft", "", "9", null);
+  if (!unread.ok) throw new Error("setup");
+  await setProductHidden(owner, unread.product.id, true);
+  await makeDraftPreview(await store(), unread.product.id);
+  const countedUnread = JSON.stringify(await transparencyCounts(Date.now()));
+  sent.length = 0;
+  const realPipeline = redis.pipeline;
+  redis.pipeline = async (commands: (string | number)[][]) =>
+    commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:dpv:p:")) ? commands.map(() => ({ unexpected: true })) : realPipeline.call(redis, commands);
+  let threw = "";
+  try {
+    await takeDown(report, await store(), { type: "product", id: unread.product.id }, "https://marktmorgen.com");
+  } catch (error) {
+    threw = (error as Error).message;
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  is("the takedown throws that the link could not be read, never answers \"nothing to do\"", /preview link .*could not be read/.test(threw), true);
+  is("no strike is written", (await store()).strikes.length, strikesBefore);
+  is("nothing is counted", JSON.stringify(await transparencyCounts(Date.now())), countedUnread);
+  is("the creator is sent nothing", sent.filter((mail) => [mail.to].flat().includes(owner)).length, 0);
+  is("the draft is not marked taken down", await isTakenDown(await store(), unread.product.id), false);
+  is("control: read again, its link is open, and the takedown closes it", (await takeDown(report, await store(), { type: "product", id: unread.product.id }, "https://marktmorgen.com")) !== null, true);
   done();
 }
 

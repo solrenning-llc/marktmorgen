@@ -6,7 +6,7 @@
  * read. An absent or null end still means no end. Synthetic store.
  */
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { listPartners } from "@/lib/affiliates";
+import { listPartners, notePartners } from "@/lib/affiliates";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -37,6 +37,13 @@ async function main(): Promise<void> {
   part("Only a share that reads exactly earns");
   const ids = (await listPartners((await storeForEmail(owner))!)).map((p) => p.id).sort();
   is("no end, a null end and a real end are partners; an end that does not read is not", ids, ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]);
+
+  part("And a sale credits only those (notePartners, with no list given)");
+  const now = Math.floor(Date.now() / 1000);
+  await notePartners((await storeForEmail(owner))!, { ref: "cs_test_read000001", pi: "pi_read1", at: now, product: A, title: "A", base: 10_000, total: 10_000, currency: "usd", buyer: "buyer@example.com" });
+  const [lines] = await redis.pipeline([["HKEYS", `nl:aff:${statsId}:shares`]]);
+  const credited = (Array.isArray(lines) ? lines.map(String) : []).map((key) => key.split(":").at(-1)).sort();
+  is("the sale's earnings go to the three that read, not to the three that do not", credited, ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]);
   console.error = quiet;
   done();
 }

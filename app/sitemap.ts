@@ -37,6 +37,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/mission", priority: 0.6 },
     { path: "/help", priority: 0.6 },
     { path: "/help/buyers", priority: 0.5 },
+    { path: "/help/trust-and-safety", priority: 0.5 },
     { path: "/developers", priority: 0.4 },
     { path: "/developers/checkout-script", priority: 0.4 },
     { path: "/creators", priority: 0.5 },

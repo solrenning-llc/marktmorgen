@@ -44,6 +44,7 @@ import { type BatchMessage, sendBatch, sendEmail } from "@/lib/email";
 import { type Door, fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { productSegment } from "@/lib/product-slug";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { notYetTaken } from "@/lib/ses";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { SITE_URL } from "@/lib/site-url";
 import { stockLeft } from "@/lib/stock";
@@ -215,6 +216,12 @@ function watching(written: { maybe: boolean }): typeof fetch {
   }) as typeof fetch;
 }
 
+/** Whether Amazon took anyone of this batch under its key: its markers, read exactly; unreadable counts as taken. */
+async function takenBySes(batchKey: string, messages: BatchMessage[]): Promise<boolean> {
+  const pending = await notYetTaken(batchKey, messages).catch(() => null);
+  return pending === null || pending.length < messages.length;
+}
+
 /**
  * The slowest stock count of one product: lib/stock.ts asks Stripe about at most five holds that ran out, two seconds
  * each (MAX_CHECKS × CHECK_MS there). A run starts a product only with this much of it left.
@@ -256,12 +263,20 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
       return { from: fromLine(store), to: email, subject: mail.subject, text: mail.text, html: mail.html, replyTo: store.email, headers: mail.headers };
     });
     const written = { maybe: false };
-    const outcome = await deps.send(messages, `stock-alert:${sid}:${product.id}:${job.at}`, { by: "store", store, kind: "email" }, undefined, { fetch: watching(written) });
+    const batchKey = `stock-alert:${sid}:${product.id}:${job.at}`;
+    const outcome = await deps.send(messages, batchKey, { by: "store", store, kind: "email" }, undefined, { fetch: watching(written) });
     if (outcome !== "sent") {
       await releaseDay(going.length);
       // "retry" also means known not sent (a 429, no sender, unreadable state): that keeps everything and waits, however
-      // long. Only a batch the service may really have taken, its answer lost, is written down once, with when.
-      if (outcome === "retry" && written.maybe && job.unknownSince === undefined) await writeJob(sid, product.id, { ...job, unknownSince: Date.now() });
+      // long. Only a batch the service may really have taken is written down, with when: its answer lost through the
+      // fetch handed over (Resend), or any address of it Amazon already took, by Amazon's own markers under this key
+      // (lib/ses.ts sends with its own fetch, so only those say so); markers that cannot be read count as taken.
+      // Asked again every run until the note is written, so a lost write is not forgotten.
+      if (outcome === "retry" && job.unknownSince === undefined && (written.maybe || (await takenBySes(batchKey, messages)))) {
+        if (!(await writeJob(sid, product.id, { ...job, unknownSince: Date.now() }).catch(() => false))) {
+          console.error("a back-in-stock batch that may be taken could not be written down; asked again next run");
+        }
+      }
       return { sent: 0, next: "later" };
     }
   }

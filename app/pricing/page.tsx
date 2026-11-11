@@ -10,6 +10,7 @@ import "./pricing.css";
 import { MorningHeader } from "@/components/morning-header";
 import { MORNING_FONTS } from "@/components/morning-fonts";
 import { ToolsCalculator } from "@/components/tools-calculator";
+import { PlanFitCalculator } from "@/components/plan-fit-calculator";
 import { SiteFooter } from "@/components/site-footer";
 import { PRICING_PLANS, PRICING_GROUPS, PRICING_ADDONS, PRICING_QUESTIONS, PRICING_OPEN } from "@/lib/pricing-page-data";
 
@@ -54,6 +55,7 @@ export default function PricingPage() {
   </section>
   <nav aria-label="Pricing sections" className="pricing-section-index">
    <a href="#plans">Plans</a>
+   <a href="#plan-fit-heading">Find your plan</a>
    <a href="#limits-heading">What&apos;s included</a>
    <a href="#addons-heading">Add-ons</a>
    <a href="#calculator-heading">Calculator</a>
@@ -75,6 +77,7 @@ export default function PricingPage() {
    <p className="mt-6">Permissions, consent, funding checks and feature availability still apply. <Link className="underline" href="/terms">Read the Terms</Link> and <Link className="underline" href="/platform">explore each feature</Link> for its operating rules.</p>
   </section>
   <section aria-labelledby="addons-heading" className="mt-20"><h2 id="addons-heading" className="t-h2">Optional add-ons, priced separately</h2><div className="mt-6 grid gap-6 md:grid-cols-2">{PRICING_ADDONS.map((addon,i)=><article key={addon.key} className={`hm-addon p-6 ${i%2?"hm-bg-green":"hm-bg-rose"}`}><h3 className="t-h3">{addon.title}</h3><p className="mt-3 font-medium">{addon.price}</p><p className="mt-3">{addon.body}</p><Link className="mt-4 inline-flex min-h-11 items-center underline" href={addon.href}>Read {addon.title} details</Link></article>)}</div></section>
+  <PlanFitCalculator />
   <div className="mt-20"><TrustChecks place="pricing" /></div>
   <ToolsCalculator />
   <section aria-labelledby="compare-heading" className="mt-20 max-w-3xl"><h2 id="compare-heading" className="t-h2">Compare the tools you actually need</h2><p className="mt-4">A subscription price alone does not include every processing fee, extra or usage limit. Our comparisons show source dates, conditions and where the other platform goes further.</p><Link className="mt-5 inline-flex min-h-11 items-center underline" href="/proof/comparisons">See the platform comparisons</Link></section>

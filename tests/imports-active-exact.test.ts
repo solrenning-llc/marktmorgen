@@ -15,7 +15,7 @@
  *     throws rather than tell the creator no import is running and "None yet".
  */
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { addRows, advanceImports, finishUpload, readJob, runImport, startImport, storeImports, type ImportJob } from "@/lib/imports";
+import { addRows, advanceImports, finishUpload, jobOf, readJob, runImport, startImport, storeImports, type ImportJob } from "@/lib/imports";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -163,6 +163,16 @@ async function main(): Promise<void> {
   is("an entry that is not an import id: storeImports throws UnknownReplyError", await outcome(storeImports(store)), { threw: "UnknownReplyError" });
   await real([["LREM", `nl:imports:list:${sid}`, 0, "not-an-import-id"]]);
   is("healthy control: with both gone, the list reads again", (await storeImports(store))[0]?.id, running);
+
+  // Revisor 2 on #3686 (MEDIUM): the GET of import B's key answering import A's record is not B (readJob, jobOf).
+  part("One import's key holding another import's record is not that import");
+  const mixed = "f".repeat(24);
+  const other = JSON.parse(String((await real([["GET", `nl:import:${running}`]]))[0]));
+  await real([["SET", `nl:import:${mixed}`, JSON.stringify(other)]]);
+  is("readJob throws UnknownReplyError", await outcome(readJob(mixed)), { threw: "UnknownReplyError" });
+  is("jobOf throws UnknownReplyError", await outcome(jobOf(store, mixed)), { threw: "UnknownReplyError" });
+  is("healthy control: an import under its own id reads", (await readJob(running))?.id, running);
+  await real([["DEL", `nl:import:${mixed}`]]);
 
   part("Healthy control: the emails of an import are done only when its queue is empty");
   const mailing = (id: string): ImportJob => ({

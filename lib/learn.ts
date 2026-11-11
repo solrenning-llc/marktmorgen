@@ -237,6 +237,7 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
     const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
@@ -509,10 +510,56 @@ export async function lastSeenMany(courseId: string, emails: string[]): Promise<
   return out;
 }
 
+/**
+ * The lessons one student marked done. An empty list is a student who marked
+ * none; any other reply than one list of names is unknown, never "no lesson
+ * done": it would refuse a finished student's certificate, show 0% and leave
+ * the lessons out of the person's data copy (CX-123 rule 24).
+ */
 export async function doneLessons(courseId: string, email: string): Promise<Set<string>> {
   if (!isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", doneKey(courseId, email)]]);
-  return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+  const names = stringList(repliesFor(await redisPipeline([["SMEMBERS", doneKey(courseId, email)]]), 1)?.[0]);
+  if (!names) throw new UnknownReplyError("a student's lessons done");
+  return new Set(names);
+}
+
+/** For a course page: the lessons done, or null when they could not be read just now, said as such on the page (rule 24). */
+export async function doneLessonsOrUnknown(courseId: string, email: string): Promise<Set<string> | null> {
+  try {
+    return await doneLessons(courseId, email);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  }
+}
+
+/**
+ * How far one person is in each of these courses, for their list of purchases
+ * (560 [AS1]): the lessons done among the lessons each course has now, all in
+ * one round trip. Each course asks only about its own lessons (SMISMEMBER),
+ * so what comes back is one 0 or 1 a lesson, MAX_LESSONS at the most, however
+ * many marks were kept for lessons since taken out. A course with no lessons
+ * is left out: there is nothing to count. A reply that is not exactly one 0 or
+ * 1 for each lesson asked is null for that course, said as "could not be
+ * checked", never as 0 done (CX-123 rule 24).
+ */
+export async function lessonsDoneIn(courses: Course[], email: string): Promise<Map<string, { done: number; total: number } | null>> {
+  const out = new Map<string, { done: number; total: number } | null>();
+  const asked = courses.flatMap((course) => {
+    const ids = lessonsInOrder(course).map(({ lesson }) => lesson.id);
+    return ids.length ? [{ course, ids }] : [];
+  });
+  if (!asked.length || !isRedisConfigured()) return out;
+  const rows = repliesFor(await redisPipeline(asked.map(({ course, ids }) => ["SMISMEMBER", doneKey(course.id, email), ...ids])), asked.length);
+  asked.forEach(({ course, ids }, i) => {
+    const flags = rows ? repliesFor(rows[i], ids.length) : null;
+    if (!flags || flags.some((flag) => flag !== 0 && flag !== 1)) {
+      out.set(course.id, null);
+      return;
+    }
+    out.set(course.id, { done: flags.filter((flag) => flag === 1).length, total: ids.length });
+  });
+  return out;
 }
 
 /** Where lessons marked done are counted in the store's data room (lib/store-data.ts). */
@@ -551,15 +598,22 @@ export async function courseProgress(store: Store, productId: string, emails: st
   const course = listing?.course ? await readCourse(listing.course.id) : null;
   if (!course) return out;
   const lessons = lessonsInOrder(course).map(({ lesson }) => lesson.id);
-  const rows = await redisPipeline([
-    ["HMGET", studentsKey(course.id), ...emails.map(emailKey)],
-    ...emails.map((email) => ["SMEMBERS", doneKey(course.id, email)]),
-  ]);
-  const seen = Array.isArray(rows[0]) ? (rows[0] as unknown[]) : [];
+  const rows = repliesFor(
+    await redisPipeline([["HMGET", studentsKey(course.id), ...emails.map(emailKey)], ...emails.map((email) => ["SMEMBERS", doneKey(course.id, email)])]),
+    emails.length + 1,
+  );
+  // One row for each address (null for one who never opened the course) and one list of lessons done for each; any
+  // other answer is unknown, never "not started" or "not finished": a workflow would send a student who finished the
+  // "hasn't finished" email on a guess (CX-123 rule 24). Thrown, the workflow step is put back for a later run.
+  const seen = rows ? repliesFor(rows[0], emails.length) : null;
+  if (!rows || !seen) throw new UnknownReplyError("where students are in a course");
   emails.forEach((email, i) => {
-    const done = new Set(Array.isArray(rows[i + 1]) ? (rows[i + 1] as string[]) : []);
+    const row = seen[i];
+    const names = stringList(rows[i + 1]);
+    if ((row !== null && (typeof row !== "string" || !row)) || !names) throw new UnknownReplyError("where students are in a course");
+    const done = new Set(names);
     out.set(email, {
-      started: typeof seen[i] === "string" && Boolean(seen[i]),
+      started: row !== null,
       finished: lessons.length > 0 && lessons.every((id) => done.has(id)),
     });
   });

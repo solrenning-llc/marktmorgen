@@ -7,6 +7,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { MemberDiscount } from "@/components/member-discount";
+import { MembershipByPrice } from "@/components/membership-by-price";
 import { LEAVE_NAMES, STAY_AGES, isLeaveReason, membershipNumbers } from "@/lib/membership-numbers";
 import { channelName } from "@/lib/channel-names";
 import { readListings } from "@/lib/catalog";
@@ -70,7 +71,10 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
   // One of the reasons the store's own page offers, or one the creator wrote (lib/leave-rules.ts).
   const reasonName = (reason: string) =>
     isLeaveReason(reason) ? LEAVE_NAMES[reason] : numbers?.leaving?.own[reason] ? `“${numbers.leaving.own[reason]}”` : "A reason you have since removed";
-  const titles = numbers ? new Map((await readListings(store, numbers.byProduct.map((p) => p.product))).map((p) => [p.id, p.title])) : new Map();
+  // The listings are read once: their titles name each membership, and their prices feed "By price" (MembershipByPrice).
+  const listings = numbers ? await readListings(store, numbers.byProduct.map((p) => p.product)) : [];
+  const listingsById = new Map(listings.map((p) => [p.id, p]));
+  const titles = new Map(listings.map((p) => [p.id, p.title]));
   const money = (cents: number) => formatMoney(cents, numbers?.currency ?? store.currency);
   const when = numbers
     ? new Date(numbers.at * 1000).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })
@@ -230,6 +234,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     </table>
                   </div>
                 )}
+                <MembershipByPrice numbers={numbers} listings={listingsById} />
               </section>
 
               {health && (health.members.length || health.unscored) ? (

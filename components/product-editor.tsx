@@ -1330,7 +1330,7 @@ function OptionsBlock({
                         count === null ? (
                           <p className="mt-1">
                             <Link href="/studio/memberships" className="font-bold underline underline-offset-4">
-                              See who still pays on this price in Memberships
+                              See how many members are on each price in Memberships
                             </Link>
                           </p>
                         ) : (

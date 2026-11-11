@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       const product = await readProduct(guarded.store, id);
       if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
       // At most OPTION_COUNT_BYTES of the kept reading is transferred (Codex Z on #2690): a bigger one is unknown here,
-      // and the Memberships page, which pays for its own reading, has it.
+      // and the Memberships page, which pays for its own reading, shows it per price (components/membership-by-price.tsx).
       const numbers = await keptNumbersWithin(guarded.store, OPTION_COUNT_BYTES).catch(() => null);
       const members = Object.fromEntries(product.options.map((option) => [option.id, membersOnOption(numbers, product.id, option.id)]));
       return Response.json({ ok: true, members });

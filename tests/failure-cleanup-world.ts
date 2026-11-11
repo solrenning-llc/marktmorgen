@@ -23,13 +23,24 @@ function missing(pathname: string): Error {
 
 // ---------------------------------------------------------------- lib/blob
 
+/** A passing file-store error on the next calls of a path, by kind and how many times (tests/page-picture-unknown-check.test.ts). */
+export const failNext = { head: new Map<string, number>(), get: new Map<string, number>() };
+function failing(kind: "head" | "get", pathname: string): boolean {
+  const left = failNext[kind].get(pathname) ?? 0;
+  if (left <= 0) return false;
+  failNext[kind].set(pathname, left - 1);
+  return true;
+}
+
 export async function head(pathname: string) {
   calls.head += 1;
+  if (failing("head", pathname)) throw new Error("fetch failed: ETIMEDOUT");
   return stat(pathname);
 }
 
 export async function get(pathname: string) {
   calls.get += 1;
+  if (failing("get", pathname)) throw new Error("fetch failed: ECONNRESET");
   const file = files.get(pathname);
   if (!file) return null;
   const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(file.bytes); controller.close(); } });

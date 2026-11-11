@@ -40,7 +40,7 @@ import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { IMAGE_SIZES } from "@/lib/product-image";
+import { IMAGE_SIZES, smallerCopies } from "@/lib/product-image";
 import { aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
 import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
@@ -117,9 +117,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   return product && !product.hidden ? { store, product, asked } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage> {
-  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : { ...EMPTY_PAGE, blocks: [] };
+async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
+  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage). One whose
+  // read is not known is "unread": said so, out of search, never shown as the product with no page
+  // (C4-20261106-2610-C6-153, unit B).
+  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
 }
 
 /**
@@ -148,6 +150,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
   const title = page.seoTitle || `${product.title} — ${store.name}`;
@@ -321,6 +324,18 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
     product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
   ]);
+  // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
+  if (savedPage === "unread") {
+    return (
+      <div lang={speech(store).lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+          <h1 className="font-display text-3xl font-semibold leading-tight">{product.title}</h1>
+          <p role="status" className="st-muted mt-4">{w.notAvailable}</p>
+          <Link href={`/@${store.handle}`} className="st-footer-link mt-6 inline-block rounded-lg py-3 text-sm font-semibold">{w.backTo(store.name)}</Link>
+        </main>
+      </div>
+    );
+  }
   const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
@@ -567,7 +582,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
               <img
                 src={servedImageUrl(product.image)}
                 srcSet={servedSrcSet(product.image)}
-                sizes={product.image.small ? IMAGE_SIZES.hero : undefined}
+                sizes={smallerCopies(product.image).length ? IMAGE_SIZES.hero : undefined}
                 alt={product.image.alt}
                 width={product.image.width}
                 height={product.image.height}

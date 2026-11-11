@@ -8,16 +8,17 @@
  *     narrower than the copies above it); a copy that fails is dropped and never written;
  *   - (2) it lives in the store's picture folder, so the storage meter counts it, and it goes with the picture when
  *     the picture is replaced or deleted, or copied to the pictures' own bucket (imagePaths);
- *   - (3) its cost is written down: every thumbnail upload needs its own studio request (studioAccess, counted against
- *     the plan's studio figure, a hard ceiling a month), so the line `picture-thumbnails` in tests/plan-cost-registry.ts
- *     counts its Blob operations at that ceiling, from the official price (vercel.com, read 6 Nov 2026);
+ *   - (3) its cost is written down: every thumbnail upload is its own studio request through the pictures' upload
+ *     route (studioAccess, counted against the plan's studio figure, a hard ceiling a month), which the line
+ *     `picture-uploads` already prices at the dearest upload request; the line `picture-thumbnails` in
+ *     tests/plan-cost-registry.ts counts what it adds to the attaching request, at that ceiling, from the official price
+ *     (vercel.com, read 6 Nov 2026);
  *   - (4) pictures from before have none and are served as they were.
  */
 import { readFileSync } from "node:fs";
 import { MAX_THUMB_BYTES, THUMB_LONG_SIDE, SMALL_LONG_SIDE, imagePaths, imageSrcSet, parseProductImage } from "@/lib/product-image";
 import { servedSrcSet } from "@/lib/picture-served";
 import { COST_LINES } from "./plan-cost-registry";
-import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { done, is, part } from "./check";
 
 const folder = "images/aaaaaaaaaaaaaaaaaaaaaaaa";
@@ -57,10 +58,35 @@ is("and checks its size, type and width as the smaller copy's", /copy\.size <= M
 part("Its cost, in the studio's one Blob line, from the official price");
 // Rule 23 (MR audit gap 1, C4-20261106-2790-C56-167): the thumbnail's own line multiplied the whole studio figure
 // again; its door and its check are now kinds of studio request in the single studio-blob line
-// (tests/picture-upload-costs.test.ts checks its formula), which counts the thumbnail's check at MAX_THUMB_BYTES.
+// (tests/picture-upload-costs.test.ts checks its formula), which counts every check, the thumbnail's too, at the dearer
+// MAX_IMAGE_BYTES.
 const line = COST_LINES.find((each) => each.id === "studio-blob");
 is("the studio's Blob line counts the thumbnail copy", Boolean(line) && (line?.sources ?? []).some((source) => source.names.includes("MAX_THUMB_BYTES")), true);
 is("and the thumbnail's own line is gone", COST_LINES.some((each) => each.id === "picture-thumbnails"), false);
-is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);
+// Rule 23 (#2801, CodeQL "Missing regular expression anchor"): the source was an unanchored pattern, which a longer
+// address holding it would also pass; it is now a whole word of the basis, the page's exact address, and the date as text.
+is("its source and date are said", (line?.basis ?? "").split(/[\s,]+/).includes("vercel.com/docs/vercel-blob/usage-and-pricing") && (line?.basis ?? "").includes("read on 6 November 2026"), true);
+is("the signing request is named among its sources", line?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
+// One typed CDN price only (Claude 4 on #2801, 6711058322, finding 2): the registry types no CDN request price of its
+// own; the studio-blob line's reads take traffic-cost's CDN_PER_REQUEST (tests/picture-upload-costs.test.ts).
+const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+is("the registry types no second CDN request price", /export const CDN_REQUEST\b/.test(registry), false);
+
+part("Its size is checked before its bytes are read, so the read is at most MAX_THUMB_BYTES (Claude 1 on #2801, finding 2)");
+// The upload token for any picture name allows MAX_IMAGE_BYTES, so a file sent under the thumbnail's name may be far
+// larger than MAX_THUMB_BYTES; the line counts one read of MAX_THUMB_BYTES, true only when no larger file is ever read.
+const thumbBlock = route.slice(route.indexOf("const copy = await head(thumbPath)"), route.indexOf("firstBytes(thumbPath)"));
+is("between the thumbnail's head and its read, its size is checked against MAX_THUMB_BYTES", route.includes("const copy = await head(thumbPath)") && /copy\.size <= MAX_THUMB_BYTES/.test(thumbBlock), true);
+// Rule 30: the smaller copy's read waits on its own size check the same way.
+const smallBlock = route.slice(route.indexOf("const copy = await head(smallPath)"), route.indexOf("firstBytes(smallPath)"));
+is("the smaller copy's size is checked before its bytes are read too", route.includes("const copy = await head(smallPath)") && /copy\.size <= MAX_IMAGE_BYTES/.test(smallBlock), true);
+
+part("A picture with only a thumbnail is offered at the size of its place (Claude 1 on #2801, finding 3)");
+// Without sizes the browser takes 100vw and never picks the 240w copy in a 56 px row.
+const storeProduct = readFileSync("components/store-product.tsx", "utf8");
+is("the store's product picture gives sizes whenever there is a smaller copy, not only the 800 px one", !/sizes=\{image\.small \?/.test(storeProduct) && /sizes=\{smallerCopies\(image\)\.length \?/.test(storeProduct), true);
+// Claude 4's focal 6711058322, LOW 1: the product page's own picture was still offered at 100vw when it has only a thumbnail.
+const productPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+is("the product page's picture gives sizes whenever there is a smaller copy, not only the 800 px one", !/sizes=\{product\.image\.small \?/.test(productPage) && /sizes=\{smallerCopies\(product\.image\)\.length \?/.test(productPage), true);
 
 done();

@@ -14,7 +14,8 @@
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, imageFolder, setProductPage, setSitePages } from "@/lib/store";
+import { addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, setProductImage, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
 import { MAX_PAGE_PICTURES, MAX_PICTURES } from "@/lib/sales-page";
 import { store as redis } from "./redis-stub";
 import { calls, files } from "./failure-cleanup-world";
@@ -22,6 +23,8 @@ import { done, is, part } from "./check";
 import { POST as door } from "@/app/api/store/image/upload/route";
 import { POST as pageRoute } from "@/app/api/store/page/route";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
+import { POST as productImage } from "@/app/api/store/image/route";
+import { POST as linkImage } from "@/app/api/store/link-image/route";
 
 const OWNER = "page.checks@example.com";
 const ORIGIN = "https://marktmorgen.com";
@@ -93,7 +96,10 @@ async function main(): Promise<void> {
   calls.head = 0;
   calls.get = 0;
   is("a page with it: refused", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0004", [notPicture]) }))), [400, "pictures"]);
-  is("checked once: a head and a get", [calls.head, calls.get], [1, 1]);
+  // Changed (rule 23, Claude 2 on #2843, 6750890970): a file that is not a picture is now deleted through
+  // dropTakenPictures, whose head checks it was stored after its note, so a file older than its note is kept; that
+  // clean-up head is the one the studio-blob line already counts with each check.
+  is("checked once: a head and a get, then the clean-up head before it is deleted", [calls.head, calls.get], [2, 1]);
   is("and deleted, since this save took it from the door and it is nobody else's", files.has(notPicture), false);
   files.set(notPicture, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
   is("the same name sent again, even with a picture there now: refused, it is neither fresh from the door nor this page's", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0004", [notPicture]) }))), [400, "pictures"]);
@@ -109,6 +115,55 @@ async function main(): Promise<void> {
   is("a page with one new picture through the door: saved", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0003", [one]) }))), [200, "ok"]);
   is("its picture was checked once: a head and a get", [calls.head, calls.get], [1, 1]);
   is("saved again as it is: nothing new to check", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0003", [one]) }))), calls.head + calls.get], [[200, "ok"], 2]);
+
+  // C1-20261107-1550-TODOS-10 (Claude 4 on #2848, 6711058709): a product's or a link's record is written only after its
+  // files passed every check, so a name it already shows, sent again and not fresh from the door, is answered from the
+  // record: the file store is not asked again. Every read is then of a file the request took from the door, once
+  // (tests/plan-cost-registry.ts, the studio-blob line).
+  part("A product's own picture and copies, sent again: answered from its record, not read again");
+  const shown = async () => (await readListing((await storeForEmail(OWNER))!, id))?.image ?? null;
+  const main = await upload({ productId: id });
+  const smaller = await upload({ productId: id });
+  const thumbnail = await upload({ productId: id });
+  const attachBody = { action: "attach", id, path: main, width: 1200, height: 800, alt: "A guide", small: { path: smaller, width: 800 }, thumb: { path: thumbnail, width: 240 } };
+  calls.head = 0;
+  calls.get = 0;
+  is("attached fresh from the door: each of its three files read once", [await result(await productImage(post("/api/store/image", session, attachBody))), calls.get], [[200, "ok"], 3]);
+  calls.head = 0;
+  calls.get = 0;
+  const again: unknown[] = [];
+  for (let i = 0; i < SAVES; i += 1) again.push(await result(await productImage(post("/api/store/image", session, attachBody))));
+  is("sent again and again: every time accepted", again.every((a) => JSON.stringify(a) === JSON.stringify([200, "ok"])), true);
+  is(`and the file store never asked about them again: ${calls.head} heads and ${calls.get} reads over ${SAVES} sends`, [calls.head, calls.get], [0, 0]);
+  const kept = await shown();
+  is("the record keeps the picture, both copies and their checked sizes", [kept?.path, kept?.bytes, kept?.small?.path, kept?.small?.bytes, kept?.thumb?.path, kept?.thumb?.bytes], [main, JPEG.length, smaller, JPEG.length, thumbnail, JPEG.length]);
+  is("a copy that would not fit its place is still left out (a kept thumbnail is not taken as wider than its picture)", await (async () => {
+    const answer = await result(await productImage(post("/api/store/image", session, { ...attachBody, thumb: { path: thumbnail, width: 1300 } })));
+    return [answer, (await shown())?.thumb ?? null];
+  })(), [[200, "ok"], null]);
+  // Rule 24: a record whose size cannot be read is not taken as checked, and not read on the browser's say-so either
+  // (a read the door did not pay for, repeatable on every send): refused, the record left as it was, nothing deleted.
+  if (kept) await setProductImage(OWNER, id, { ...kept, bytes: Number.NaN });
+  calls.head = 0;
+  calls.get = 0;
+  is("a record with no readable size: not taken as checked, refused without a read, the record and its files kept", [await result(await productImage(post("/api/store/image", session, { ...attachBody, small: undefined, thumb: undefined }))), calls.head + calls.get, (await shown())?.path, (await shown())?.bytes, files.has(main)], [[400, "invalid"], 0, main, 0, true]);
+
+  part("A link's picture: its own, sent again, not read again; one neither fresh nor its own refused before any read");
+  const linked = await addStoreLink(OWNER, "My podcast", "https://example.com/pod");
+  if (!linked.ok) throw new Error("setup");
+  const linkId = linked.store.links[0].id;
+  const linkPicture = await upload({ linkId });
+  const linkBody = (path: string) => ({ action: "attach", id: linkId, path, width: 320, height: 180 });
+  calls.head = 0;
+  calls.get = 0;
+  is("attached fresh from the door: read once", [await result(await linkImage(post("/api/store/link-image", session, linkBody(linkPicture)))), calls.get], [[200, "ok"], 1]);
+  calls.head = 0;
+  calls.get = 0;
+  for (let i = 0; i < SAVES; i += 1) await linkImage(post("/api/store/link-image", session, linkBody(linkPicture)));
+  is(`its own picture sent again: the file store never asked again (${calls.head} heads, ${calls.get} reads)`, [calls.head, calls.get], [0, 0]);
+  calls.head = 0;
+  calls.get = 0;
+  is("the product's picture named for the link: refused as another record's, and never read", [await result(await linkImage(post("/api/store/link-image", session, linkBody(main)))), calls.head, calls.get], [[400, "in_use"], 0, 0]);
   done();
 }
 

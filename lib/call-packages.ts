@@ -165,20 +165,27 @@ export async function spent(bought: Bought, at = now()): Promise<number> {
  * Adds to a package's record of paid sessions, with the package's own expiry,
  * and takes it away again when the package is gone for sure by then (a closing
  * store deletes its keys), so nothing is left behind for good. Any answer that
- * is not exactly "gone" keeps it (rule 24, Claude 4 on #3487). Throws when the
- * write itself is not answered for sure.
+ * is not exactly "gone" keeps it (rule 24, Claude 4 on #3487). Throws whenever
+ * a reply is not exactly what its command gives (Codex C2 and Claude 4).
  */
 async function writeUsed(bought: Bought, adds: string[]): Promise<void> {
   const key = usedKey(bought.token);
   const ttl = keep(bought);
-  const replies = await redisPipeline([["SADD", key, ...adds], ...(ttl.length ? [["EXPIRE", key, ttl[1]]] : []), ["EXISTS", tokenKey(bought.token)]]);
+  const commands: (string | number)[][] = [["SADD", key, ...adds], ...(ttl.length ? [["EXPIRE", key, ttl[1]]] : []), ["EXISTS", tokenKey(bought.token)]];
+  const replies = await redisPipeline(commands);
+  // Read exactly (rule 24; Codex C2 and Claude 4 on #3487): one reply a command, SADD a whole count of at most the
+  // members sent, EXPIRE 1, EXISTS 0 or 1. Any other shape is not "written down": it throws, so the confirmation is
+  // tried again rather than marked with no paid session in the package's record.
+  const added = Array.isArray(replies) && replies.length === commands.length ? replies[0] : undefined;
+  if (typeof added !== "number" || !Number.isSafeInteger(added) || added < 0 || added > adds.length) throw new Error("writing down a package's paid session gave no clear answer");
+  if (ttl.length && replies[1] !== 1) throw new Error("keeping a package's paid sessions as long as the package gave no clear answer");
   const has = replies[replies.length - 1];
   if (has === 0) {
     await redisPipeline([["DEL", key]]);
     return;
   }
-  if (typeof replies[0] !== "number") throw new Error("writing down a package's paid session gave no clear answer");
-  if (has !== 1) console.error("reading a package's token gave no clear answer; its paid sessions are kept");
+  // Kept on anything but an exact 0 (Claude 4's MEDIUM 2), and not taken as written either: the caller tries again.
+  if (has !== 1) throw new Error("reading a package's token gave no clear answer; its paid sessions are kept");
 }
 
 /**

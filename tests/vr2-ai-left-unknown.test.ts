@@ -252,8 +252,6 @@ test("editor tools control: a spent allowance is still 0 left, with every AI job
 const PENDING = new Set([
   "app/studio/page.tsx",
   "app/studio/email/page.tsx",
-  "app/studio/pages/page.tsx",
-  "app/studio/site/page.tsx",
   "app/studio/funnels/page.tsx",
   "app/studio/outreach/page.tsx",
   "app/studio/course/[product]/page.tsx",

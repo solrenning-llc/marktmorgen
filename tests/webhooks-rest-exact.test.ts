@@ -323,6 +323,22 @@ async function main(): Promise<void> {
     is(`read back as ${name} too: noticed again, its line in the log once`, (await logIds()).length, 1);
   }
 
+  part("A caller that emits only once (Codex C2's M1 on #3446): a line that landed, read back in another shape, is still queued");
+  for (const [name, write, value] of [["SET answered QUEUED, read back as 42", "QUEUED", 42], ['the call failed after the SET ran, read back as ["x"]', FAILS, ["x"]]] as [string, unknown, unknown][]) {
+    store = await setup();
+    landed = (c) => (c[0] === "SET" && isDelivery(c) && nx(c) ? { reply: write } : undefined);
+    swap = (c) => (c[0] === "GET" && isDelivery(c) ? { reply: value } : undefined);
+    const once = await outcome(emitEvent(store, "sale.completed", "cs_Once01", { amount_cents: 4900 }));
+    landed = null;
+    swap = null;
+    // Never emitted again: what finds the line now is the queue alone (deliverDue), as for free/download, join/confirm
+    // and the PayPal hand-over, which log the failure and do not emit again.
+    const id = `dlv_${createHash("sha256").update(`${eventIdFor(statsId, "sale.completed", "cs_Once01")}|${endpointId}`).digest("hex").slice(0, 24)}`;
+    is(`${name}: unknown, and the event's mark let go`, [once, await get(saleMarkKey("cs_Once01"))], ["unknown", null]);
+    is(`${name}: the line that landed is on the delivery queue, so a later run tries it`,
+      [typeof (await get(`nl:hooks:d:${id}`)), (await real([["ZSCORE", QUEUE_KEY, `${statsId}|${id}`]]))[0] !== null], ["string", true]);
+  }
+
   part("A message not kept: its line written in another shape is never counted as stored");
   const tooLarge = { notes: Array.from({ length: 300 }, () => "x".repeat(MESSAGE_TEXT_MAX)) };
   const lineWords = async () => {

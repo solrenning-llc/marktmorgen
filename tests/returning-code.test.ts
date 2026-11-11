@@ -26,7 +26,7 @@
  */
 import { NextRequest } from "next/server";
 import { afterTasks } from "./next-server-after-world";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setHasDiscounts, setProductLink, setReturningCodes, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setHasDiscounts, setProductLink, setReturningCodes, setStoreSale, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { ReturningCodeRefused, createCheckout } from "@/lib/store-checkout";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
@@ -254,6 +254,14 @@ async function main(): Promise<void> {
   r = await post({ rtoken: "f".repeat(64) }, "198.51.100.15");
   is("a link nobody was sent: 'link'", [r.location, r.session], [back("link"), null]);
 
+  part("Two uses of one link at once: one checkout with the code, never two");
+  // Review 6803880536 and Claude 1's review 6799154613 (LOW then MEDIUM): redemption read the link without claiming it.
+  const twice = await linkFor(PAST, productId);
+  const openedBefore = opened.length;
+  const both = await Promise.all([post({ rtoken: twice }, "198.51.100.30"), post({ rtoken: twice }, "198.51.100.31")]);
+  is("only one checkout is opened, with the coupon", [opened.length - openedBefore, opened.at(-1)?.get("discounts[0][coupon]")], [1, VIP.coupon]);
+  is("one goes on to Stripe, the other back to the field as busy", both.map((x) => x.location).sort(), [back("busy"), "https://checkout.stripe.com/c/pay/test"].sort());
+
   part("A link is for its product, and for a code still running");
   const second = await linkFor(PAST, productId);
   r = await post({ rtoken: second, product: otherId }, "198.51.100.17");
@@ -263,6 +271,17 @@ async function main(): Promise<void> {
   r = await post({ rtoken: third }, "198.51.100.19");
   is("the code stopped since: 'code'", [r.location, r.session], [back("code"), null]);
   await setReturningCodes(OWNER, [VIP, ENDED]);
+  store = (await storeForEmail(OWNER))!;
+
+  part("Another discount wins the checkout: refused as 'other' before anything is read or sent");
+  // Claude 1's review 6799154613 (MEDIUM): during a store sale the emailed link could never apply, yet it was sent.
+  const nowS = Math.floor(Date.now() / 1000);
+  await setStoreSale(OWNER, { name: "Spring", percent: 10, starts: nowS - 60, ends: nowS + 3_600, all: true, products: [], coupon: "cpn_Spring10" });
+  store = (await storeForEmail(OWNER))!;
+  r = await post({ rcode: "THANKYOU", remail: PAST }, "198.51.100.40");
+  is("a sale across the store: 'other', with no purchases read and no link", [r.location, r.session, r.reads, r.link], [back("other"), null, 0, false]);
+  is("nor is the field offered while it runs", returningCodeOffered(store, (await readProduct(store, productId))!, nowS), false);
+  await setStoreSale(OWNER, { name: "Spring", percent: 0, starts: 0, ends: 0, all: true, products: [], coupon: "" });
   store = (await storeForEmail(OWNER))!;
 
   part("A code the store does not have, or an address that is not one: nothing read");

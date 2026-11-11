@@ -6,7 +6,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, redeemReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
+import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import { type ReturningCode, readTypedCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
@@ -216,6 +216,9 @@ export async function POST(request: NextRequest) {
   const again = readTypedCode(typedCode);
   const backToField = (status: string) => away(`/@${store.handle}/p/${product.id}?returning=${status}${again ? `&rc=${again}` : ""}#returning`);
   if (linkToken || typedCode) {
+    // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
+    // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.
+    if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")))) return backToField("other");
     // Each try may read the creator's Stripe account or use a link: a few per connection.
     if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
     // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.
@@ -353,7 +356,11 @@ export async function POST(request: NextRequest) {
         ...(returning ? { returning: returning.code, email: returning.email } : {}),
       }),
     );
-    if (!held.ok) return away(`/@${store.handle}?status=${held.reason}`);
+    if (!held.ok) {
+      // No checkout opened: the link's claim is let go, so it can be used again.
+      if (returning) await releaseReturningLink(linkToken);
+      return away(`/@${store.handle}?status=${held.reason}`);
+    }
     // The link is spent only once its checkout exists: going back from Stripe's
     // page and pressing buy again before that still has it.
     if (returning) await spendReturningLink(linkToken);
@@ -380,6 +387,8 @@ export async function POST(request: NextRequest) {
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {
+    // No checkout opened: the link's claim is let go, so it can be used again.
+    if (returning) await releaseReturningLink(linkToken);
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked, or the page was from before its words

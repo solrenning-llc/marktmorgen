@@ -205,6 +205,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:closing:final@lib/closing-holds.ts": company("Stores whose closing day has begun, seen through to the end", "One sorted set for every store, a member a store from its closing day's start to its end (lib/plan-closing.ts)."),
   "nl:closing:final@lib/store.ts": company("The same final closing line, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Claude 6's P6/P7 on #3643)."),
   "nl:closing:held@lib/closing-holds.ts": company("Stores whose members' charges are held until they close or run again", "One sorted set for every store, a member a store; taken out when it closes or runs again (lib/closing-holds.ts)."),
+  "nl:closing:held@lib/store.ts": company("The same line of held stores, read only: a store in it keeps its address until its members are let go (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Claude 1's review on #3672)."),
   "nl:courses:lock@app/api/cron/courses/route.ts": lock("The courses job"),
   "nl:dc:lock@app/api/cron/discord/route.ts": lock("The Discord job"),
   "nl:imports:lock@app/api/cron/imports/route.ts": lock("The imports job"),

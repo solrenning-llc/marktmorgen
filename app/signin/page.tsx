@@ -66,10 +66,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one. Nothing was changed.",
   },
-  // A store in its closing keeps its address until its records are erased (lib/store.ts closingUnderway).
+  // A store in its closing, on a break (its pause is kept under its address) or whose plan just started again with its
+  // members still held keeps its address until that is over (lib/store.ts closingUnderway).
   "move-closing": {
-    title: "A closing store keeps its address",
-    body: "Your store's plan has ended, so the store is closing, and its sign-in address cannot change while it closes. Nothing was changed. To keep the store and move it, start a plan again before its closing day.",
+    title: "This store keeps its address for now",
+    body: "Your store is closing or on a break, or its plan just started again and its members' payments are still on hold. Until that is over, its sign-in address cannot change. Nothing was changed. To move it, start its plan again in your studio, before its closing day if it is closing. If you just did, try again tomorrow.",
   },
   "move-busy": {
     title: "Your account is in the middle of a move",

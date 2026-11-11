@@ -2150,12 +2150,13 @@ export type MoveResult =
   | { ok: false; reason: "none" | "same" | "taken" | "closing" };
 
 /**
- * The closing's final line and the walk's line, by value: the same keys as FINAL_INDEX (lib/closing-holds.ts) and
- * DUE_KEY (lib/closed-store-data.ts), which import this file; tests/closing-moved-owner.test.ts puts stores in them
- * by those names and fails when these differ.
+ * The closing's final line, the walk's line and the line of stores whose members are held, by value: the same keys as
+ * FINAL_INDEX and HELD_INDEX (lib/closing-holds.ts) and DUE_KEY (lib/closed-store-data.ts), which import this file;
+ * tests/closing-moved-owner.test.ts puts stores in them by those names and fails when these differ.
  */
 const CLOSING_FINAL_LINE = "nl:closing:final";
 const CLOSING_WALK_LINE = "nl:closed:due";
+const CLOSING_HELD_LINE = "nl:closing:held";
 
 /** A sorted set's score as Redis answers ZSCORE: nil, or a number (a string of one over REST). */
 const isScore = (reply: unknown): boolean =>
@@ -2169,13 +2170,16 @@ const isScore = (reply: unknown): boolean =>
  * its folder's holds, paid periods, notices and credit. A move gives it another ref, so the walk read the old one as
  * nil and dropped the store, the daily run took it out of every line as gone, and its record stayed at the new
  * address, never erased (Claude 6's probes P6 and P7 on #3643). Read under the store's own lock, so its plan cannot
- * change meanwhile, and a store whose plan runs enters neither line. A line that does not read is never "not in it"
- * (rule 24): it throws, and nothing moves.
+ * change meanwhile, and a store whose plan runs enters neither line. Its members are held under its ref too, from the
+ * day its plan ended (holdCharges, lib/closing-holds.ts): a plan that runs again is let go only by the daily
+ * releaseRestarted, which finds the store by that ref, so a store still in that line keeps its address until then; a
+ * move before it left the members paused for good and the buyers never told (Claude 1's review on #3672). A line that
+ * does not read is never "not in it" (rule 24): it throws, and nothing moves.
  */
 async function closingUnderway(store: Store): Promise<boolean> {
   if (!store.subscriptionActive && closesStore(Date.parse(store.planEndedAt))) return true;
   const ref = storeRef(store);
-  const scores = repliesFor(await redisPipeline([["ZSCORE", CLOSING_FINAL_LINE, ref], ["ZSCORE", CLOSING_WALK_LINE, ref]]), 2);
+  const scores = repliesFor(await redisPipeline([["ZSCORE", CLOSING_FINAL_LINE, ref], ["ZSCORE", CLOSING_WALK_LINE, ref], ["ZSCORE", CLOSING_HELD_LINE, ref]]), 3);
   if (!scores || !scores.every(isScore)) throw new UnknownReplyError("a store's place in the closing lines (ZSCORE)");
   return scores.some((score) => score !== null);
 }
@@ -2247,7 +2251,7 @@ export async function moveAccount(
   if (!isRedisConfigured()) return { ok: false, reason: "none" };
 
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
-    // A store in its closing keeps its address until its records are erased or its plan runs again (closingUnderway).
+    // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
     const [existing, theirs] = await redisPipeline([

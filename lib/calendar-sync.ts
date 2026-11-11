@@ -454,9 +454,13 @@ export async function ensureFeedToken(store: Store): Promise<void> {
 /** The store a subscription address belongs to, or null. */
 export async function storeIdForToken(token: string): Promise<{ statsId: string; handle: string; callsId: string | null; token: string } | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [statsId] = await redisPipeline([["GET", tokenKey(token)]]);
-  if (typeof statsId !== "string" || !statsId) return null;
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+  // Each read exactly (rule 24): nil is an address that is not one; a reply lost or in another shape is unknown.
+  const statsId = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1)?.[0];
+  if (statsId === null || statsId === "") return null;
+  if (typeof statsId !== "string") throw new UnknownReplyError("a calendar feed address");
+  const raw = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1)?.[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a calendar feed's settings");
   const config = parseConfig(raw);
   // A replaced token is deleted, and this second check covers a lookup that
   // raced the replacement.

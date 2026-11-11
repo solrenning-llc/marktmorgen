@@ -29,7 +29,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": String(seconds), "Cache-Control": "no-store" },
     });
   const token = raw.replace(/\.ics$/i, "");
-  const owner = await storeIdForToken(token).catch(() => null);
+  // An address read in another shape is unknown: the app is told to come back, never "Not found", which many
+  // calendar apps take as the end of the subscription (rule 24).
+  let owner: Awaited<ReturnType<typeof storeIdForToken>>;
+  try {
+    owner = await storeIdForToken(token);
+  } catch (error) {
+    console.error("reading a calendar feed's address failed", error);
+    return later(503, 900);
+  }
   if (!owner) return missing();
 
   try {

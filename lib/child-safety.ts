@@ -26,7 +26,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeRef } from "@/lib/store";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
-import { handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { canonicalAddress, handleIn, type ReportKind } from "@/lib/takedown-rules";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
 export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
@@ -102,15 +102,12 @@ function productIdIn(url: string, store: Store): string | null {
   }
 }
 
-/** Only a Marktmorgen address is shown in the urgent email; anything else is named, not quoted. */
+/**
+ * Only a Marktmorgen address is shown in the urgent email, as its page alone: a query or a fragment the reporter added
+ * may carry words, so it is never quoted (Revisor 2 on #3587). Anything else is named, not quoted.
+ */
 function where(url: string): string {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    if (host === "marktmorgen.com" || host === "www.marktmorgen.com") return url;
-  } catch {
-    // not an address: said below
-  }
-  return "an address outside Marktmorgen (see the notice email)";
+  return canonicalAddress(url) ?? "an address outside Marktmorgen (see the notice email)";
 }
 
 function deadline(ms: number): string {

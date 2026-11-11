@@ -41,6 +41,43 @@ export type ReportInput = {
   accurate: boolean;
 };
 
+/** What each kind of notice is called, in an email subject or a page title. */
+export const REPORT_TITLES: Record<ReportKind, string> = {
+  copyright: "Copyright notice",
+  other: "Notice of illegal content",
+  child_safety: "Child safety report",
+  intimate_image: "Request to remove an intimate image",
+};
+
+/**
+ * What the sender confirmed on the form (components/report-form.tsx), in the third person, for the inbox and the
+ * notice page; null for a child-safety report, which asks for no signature or statement at all (Revisor 2 on #3587:
+ * nobody stated "under penalty of perjury" there, and an intimate-image request's statements are its own).
+ */
+export function statedBySender(kind: ReportKind): string | null {
+  if (kind === "copyright") return "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.";
+  if (kind === "intimate_image") return "They stated, in good faith, that this intimate image of them was published without their consent, and that the request is accurate and that they are the person shown or authorized to act for them.";
+  if (kind === "other") return "They stated, in good faith, that the content described is illegal for the reasons they gave, and that the notice is accurate and complete to the best of their knowledge.";
+  return null;
+}
+
+/**
+ * Reports about a child or an intimate image: the reporter's words, and anything they added to the address, are never
+ * passed on to the creator, and the urgent email carries none of them (lib/child-safety.ts).
+ */
+export const privateReport = (kind: ReportKind): boolean => kind === "child_safety" || kind === "intimate_image";
+
+/** A Marktmorgen address as its page alone, https://marktmorgen.com/<path>, without a query or a fragment; null for any other address. */
+export function canonicalAddress(url: string): string | null {
+  try {
+    const at = new URL(url);
+    const host = at.hostname.toLowerCase();
+    return host === "marktmorgen.com" || host === "www.marktmorgen.com" ? `https://marktmorgen.com${at.pathname}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export type ReportProblem = "kind" | "url" | "work" | "name" | "email" | "contact" | "signature" | "statements";
 
 const EMAIL = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,190}\.[a-z]{2,24}$/i;

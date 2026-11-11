@@ -29,7 +29,7 @@ import { del } from "@/lib/blob";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
-import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { REPORT_TITLES, type ReportInput, type ReportKind, canonicalAddress, handleIn, privateReport, statedBySender } from "@/lib/takedown-rules";
 import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
@@ -59,21 +59,22 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
     replyTo: report.email,
-    subject: `${report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
+    subject: `${REPORT_TITLES[report.kind]}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
     text: [
-      `A ${report.kind === "copyright" ? "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))" : "notice of illegal content (EU Digital Services Act, Art. 16)"} was sent from ${origin}/report.`,
+      `A ${NOTICE_NAMES[report.kind]} was sent from ${origin}/report.`,
       "",
       `Where: ${report.url}`,
       report.handle ? `Store: @${report.handle}` : "Store: not named in the address; check it by hand.",
+      report.kind === "child_safety" ? "Do not open, download, forward or describe the reported content; the urgent email says what was done and docs/incident-response.md the steps." : "",
       "",
-      report.kind === "copyright" ? "The work, as they describe it:" : "Why it is illegal, as they say:",
-      report.work,
+      ...(report.work ? [WORK_HEADINGS[report.kind], report.work] : []),
       report.original ? `\nWhere the original is: ${report.original}` : "",
       "",
-      `From: ${report.name} <${report.email}>`,
+      // A child-safety report asks for no name, signature or statement: only what was given is said (Revisor 2 on #3587).
+      `From: ${report.name ? `${report.name} <${report.email}>` : report.email}`,
       report.contact ? `Address or telephone: ${report.contact}` : "",
-      `Signed: ${report.signature}`,
-      "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.",
+      statedBySender(report.kind) ? `Signed: ${report.signature}` : "",
+      statedBySender(report.kind) ?? "They were asked for no signature or sworn statement, so that nobody is put off reporting.",
       "",
       "Open it to act on it (the link works for 60 days):",
       `${origin}/takedown/${token}`,
@@ -88,6 +89,30 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
   // Only once it reached the inbox: a try that failed is sent again, and must not count twice.
   if (sent) await countNotice(report.kind);
   return sent ? "sent" : "error";
+}
+
+/** What each kind of notice is, in the first line of the email that brings it to the inbox. */
+const NOTICE_NAMES: Record<ReportKind, string> = {
+  copyright: "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))",
+  other: "notice of illegal content (EU Digital Services Act, Art. 16)",
+  child_safety: "report of child sexual exploitation",
+  intimate_image: "request to remove an intimate image shared without consent (TAKE IT DOWN Act)",
+};
+
+/** The heading over the sender's own words in that email. */
+const WORK_HEADINGS: Record<ReportKind, string> = {
+  copyright: "The work, as they describe it:",
+  other: "Why it is illegal, as they say:",
+  child_safety: "What they added to help find it (they were asked never to describe the images):",
+  intimate_image: "Which image, as they say:",
+};
+
+/**
+ * The address a notice names, as the creator is told it: a report about a child or an intimate image gives only the
+ * page, never a query or a fragment the reporter added to it (Revisor 2 on #3587).
+ */
+function addressForCreator(report: Report): string {
+  return privateReport(report.kind) ? (canonicalAddress(report.url) ?? "the address in the report") : report.url;
 }
 
 /** The product a notice's address points at (/@handle/p/<product>), when it points at one of this store's. */
@@ -329,7 +354,7 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
       to: store.email,
       replyTo: SUPPORT_EMAIL,
       subject: `Your store @${store.handle} is back on`,
-      text: [`Your store's pages and sales are switched back on, after the notice about ${report.url}.`, "", `Our policy: ${origin}/copyright.`].join("\n"),
+      text: [`Your store's pages and sales are switched back on, after the notice about ${addressForCreator(report)}.`, "", `Our policy: ${origin}/copyright.`].join("\n"),
       idempotencyKey: `takedown-${report.id}-restore-${Date.now()}`,
     }).catch(() => false);
     return "The store's pages and sales are back on.";
@@ -434,6 +459,30 @@ async function withdrawPicture(ref: string, id: string, key: string, steps: Step
   return kept;
 }
 
+/** What the creator's statement of reasons (EU DSA Art. 17(3)) says of each kind of notice: what came in, under which rule, on which ground. */
+const CREATOR_NOTICE: Record<ReportKind, { received: string; relied: string; ground: string }> = {
+  copyright: {
+    received: "a copyright notice",
+    relied: "a copyright notice under the US Digital Millennium Copyright Act (17 U.S.C. § 512(c)(3))",
+    ground: "Legal ground: copyright law. The notice says the content infringes the copyright in the work it names, and we took it down for that reason.",
+  },
+  other: {
+    received: "a notice that content on your store is illegal",
+    relied: "a notice of illegal content under Article 16 of the EU Digital Services Act",
+    ground: "Legal ground: the law the notice says the content breaks, for the reason it gives above. We took it down for that reason.",
+  },
+  child_safety: {
+    received: "a report that content on your store sexually exploits a child",
+    relied: "a report of child sexual exploitation, a notice of illegal content under Article 16 of the EU Digital Services Act",
+    ground: "Legal ground: the law against child sexual abuse material. The report says this content sexually exploits a child, and we took it down for that reason.",
+  },
+  intimate_image: {
+    received: "a request to remove an intimate image of a person shared without their consent",
+    relied: "a request to remove an intimate image shared without consent, under the US TAKE IT DOWN Act and as a notice of illegal content under Article 16 of the EU Digital Services Act",
+    ground: "Legal ground: the law against publishing intimate images without consent. The request says this is an intimate image of a person, published without their consent, and we took it down for that reason.",
+  },
+};
+
 /** Whether the store already keeps this strike (as lib/store.ts parseStrikes keeps it: report, time and words). */
 function heldStrike(store: Store, strike: { at: string; what: string; report: string }): boolean {
   return store.strikes.some((s) => s.report === strike.report.slice(0, 40) && s.at === strike.at.slice(0, 30) && s.what === strike.what.slice(0, 200));
@@ -465,20 +514,23 @@ async function complete(report: Report, store: Store, action: Exclude<TakedownAc
     replyTo: SUPPORT_EMAIL,
     subject: `Content taken down from your store @${store.handle}`,
     text: [
-      `We received a ${report.kind === "copyright" ? "copyright notice" : "notice that content on your store is illegal"} about ${report.url} and took this down:`,
+      `We received ${CREATOR_NOTICE[report.kind].received} about ${addressForCreator(report)} and took this down:`,
       "",
       what,
       "",
       "Where: everywhere. It is down for every visitor, in every country.",
       howLong,
       "",
-      report.kind === "copyright" ? `The notice was sent by ${report.name}, who says it uses: ${report.work.slice(0, 600)}` : `The notice says: ${report.work.slice(0, 600)}`,
-      "",
-      `What we relied on: that notice, sent through our form at ${origin}/report as ${report.kind === "copyright" ? "a copyright notice under the US Digital Millennium Copyright Act (17 U.S.C. § 512(c)(3))" : "a notice of illegal content under Article 16 of the EU Digital Services Act"}.`,
-      "We used no automated means to find this content or to decide: a person at Marktmorgen read the notice and made this decision.",
+      // A report about a child or an intimate image: the reporter's words are never passed on (Revisor 2 on #3587).
       report.kind === "copyright"
-        ? "Legal ground: copyright law. The notice says the content infringes the copyright in the work it names, and we took it down for that reason."
-        : "Legal ground: the law the notice says the content breaks, for the reason it gives above. We took it down for that reason.",
+        ? `The notice was sent by ${report.name}, who says it uses: ${report.work.slice(0, 600)}`
+        : privateReport(report.kind)
+          ? "To protect the people involved, we do not pass on the words of the report."
+          : `The notice says: ${report.work.slice(0, 600)}`,
+      "",
+      `What we relied on: that notice, sent through our form at ${origin}/report as ${CREATOR_NOTICE[report.kind].relied}.`,
+      "We used no automated means to find this content or to decide: a person at Marktmorgen read the notice and made this decision.",
+      CREATOR_NOTICE[report.kind].ground,
       `Our Terms do not allow content that is unlawful or that infringes someone else's rights: section 3, "Selling through a Marktmorgen store" (${origin}/terms#selling-through-a-marktmorgen-store), and section 4, "Acceptable use" (${origin}/terms#acceptable-use).`,
       "",
       report.kind === "copyright"

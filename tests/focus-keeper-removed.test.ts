@@ -151,6 +151,46 @@ part("A control taken away under the focus");
   is("what the change added in that part comes first: the editor that took its place", [price.focused, waitlist.focused], [1, 0]);
 }
 
+{
+  // Seen in Chromium: "Set a goal for the month" sits in a row of its own; its form is added a level above, beside the
+  // row, which is left with no control.
+  const k = fresh();
+  const main = el("main", null, { main: true });
+  const card = el("goal card", main);
+  const row = el("title row", card);
+  const opener = el("Set a goal for the month", row);
+  card.first = el("a control earlier in the card", card);
+  active = opener;
+  k.focusIn(opener);
+  opener.isConnected = false;
+  opener.parentElement = null;
+  const form = el("goal form", card);
+  const amount = el("Each month, in USD", form);
+  form.first = amount;
+  active = body;
+  k.treeChanged([form]);
+  is("the editor added a level up, beside the button's own row, gets the focus", [amount.focused, (card.first as El).focused], [1, 0]);
+}
+{
+  const k = fresh();
+  const main = el("main", null, { main: true });
+  const page = el("page column", main);
+  const a = el("a", page);
+  const b = el("b", a);
+  const c = el("c", b);
+  const d = el("d", c);
+  const notice = el("notice", d);
+  const dismiss = el("Dismiss", notice);
+  page.first = el("the page's first control", page);
+  active = dismiss;
+  k.focusIn(dismiss);
+  dismiss.isConnected = false;
+  notice.isConnected = false; // taken away with nothing in its place
+  active = body;
+  k.treeChanged([]);
+  is("with nothing added, it does not climb far to an unrelated control at the top", (page.first as El).focused, 0);
+}
+
 part("A control moved under the focus");
 {
   const k = fresh();

@@ -2518,17 +2518,27 @@ export function ProductEditor({
                       brought back; sales already made stay in your Stripe account.
                       {product.hidden ? null : " To take it off your store but keep it, unpublish it instead."}
                     </p>
+                    {/* A removal the server refused is said here, where the question stays open: the page's own error line
+                        is drawn only while no question is open (WCAG 3.3.1, 4.1.3). */}
+                    {error ? (
+                      <p className="notice notice-error mt-3" role="alert">
+                        {error}
+                      </p>
+                    ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        aria-busy={busy} disabled={busy}
-                        onClick={() =>
+                        aria-busy={busy}
+                        // Never turned off under the focus while it sends (WCAG 2.4.3): a press then does nothing.
+                        aria-disabled={busy || undefined}
+                        onClick={() => {
+                          if (busy) return;
                           run(
                             { action: "remove", id: product.id },
                             () => setRemovingId(null),
                             "Product removed.",
-                          )
-                        }
+                          );
+                        }}
                         className="btn btn-danger-solid btn-sm"
                       >
                         {busy ? "Removing…" : "Yes, remove it"}

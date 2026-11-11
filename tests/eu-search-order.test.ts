@@ -74,6 +74,9 @@ async function main(): Promise<void> {
     is(`${language}: a line tells the order of search results`, typeof line === "string" && line.includes(NAME), true);
   }
   is("each language has its own words", new Set(LANGUAGES.map(orderLine)).size, LANGUAGES.length);
+  // What the code guarantees is that Marktmorgen sells no placement, not that nobody can pay the creator for one
+  // (Claude 5's LEVE, Claude 1's LOW on #2850): every language says who cannot be paid.
+  for (const language of LANGUAGES) is(`${language}: it says Marktmorgen sells no placement`, orderLine(language)?.includes("Marktmorgen"), true);
 
   part("The store page shows it beside the results");
   for (const language of LANGUAGES) {

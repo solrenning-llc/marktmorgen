@@ -16,6 +16,7 @@ import { photoUrl } from "@/lib/photo-limits";
 import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import { windowOf, withConfirmations } from "@/lib/withdrawal";
 import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
+import { orderProblemWords } from "@/lib/buyer-words/order-problem";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
 import { type Extras, askBundle, askOlder, cardOf, extrasFor, ordersShared } from "@/lib/purchase-cards";
@@ -304,6 +305,15 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                     <p className="mt-7">
                       <Link href={`/@${store.handle}/orders/withdraw?${new URLSearchParams({ token })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
                         {withdrawalWords(store.language).withdrawLink}
+                      </Link>
+                    </p>
+                  ) : null}
+                  {/* "Report a problem with this order" (567 [GD1] (a)): one link, the same size whatever the list holds, to the page
+                      that lists the orders and sends the report to the creator's inbox. */}
+                  {purchases.length > 0 ? (
+                    <p className="mt-4">
+                      <Link href={`/@${store.handle}/orders/problem?${new URLSearchParams({ token })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+                        {orderProblemWords(store.language).title}
                       </Link>
                     </p>
                   ) : null}

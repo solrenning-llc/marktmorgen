@@ -459,6 +459,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/problem/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/problem",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/orders/withdraw/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/orders/withdraw",
@@ -1465,6 +1476,7 @@
     "components/offer-planning.tsx",
     "components/old-addresses.tsx",
     "components/older-purchases.tsx",
+    "components/order-problem-form.tsx",
     "components/orders-bundle.tsx",
     "components/orders-shared.tsx",
     "components/outreach-studio.tsx",
@@ -1880,6 +1892,7 @@
     "app/api/store/numbers-links/route.ts",
     "app/api/store/numbers/ask/route.ts",
     "app/api/store/option/route.ts",
+    "app/api/store/order-problem/route.ts",
     "app/api/store/order/route.ts",
     "app/api/store/orders/bundle/route.ts",
     "app/api/store/orders/older/route.ts",
@@ -2074,6 +2087,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

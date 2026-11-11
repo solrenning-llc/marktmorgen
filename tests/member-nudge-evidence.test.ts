@@ -1,6 +1,6 @@
 import { nudgeStore } from "@/lib/member-nudge";
 import type { Store } from "@/lib/store";
-import { memory, reset, sent } from "./member-nudge-world";
+import { failCount, memory, reset, sent } from "./member-nudge-world";
 import { done, is, part } from "./check";
 
 const store = {
@@ -35,6 +35,17 @@ async function main(): Promise<void> {
   is("a genuine first claim sends once", [await nudgeStore(store, Date.now() + 60_000, now), sent], [1, 1]);
   is("a genuine repeated claim sends nothing more", [await nudgeStore(store, Date.now() + 60_000, now), sent], [0, 1]);
   is("only the accepted notice is counted", await memory.pipeline([["GET", "nl:nudge:count:statsclub:2026-11"]]), ["1"]);
+
+  part("An accepted notice keeps its period mark when the monthly count fails (Codex I2 / Claude 1 MEDIUM)");
+  reset();
+  failCount();
+  let first: unknown;
+  try { first = await nudgeStore(store, Date.now() + 60_000, now); } catch { first = "threw"; }
+  is("the accepted notice is reported as sent", [first, sent], [1, 1]);
+  is("the period mark stays after the count fails", memory.keys().includes(key), true);
+  let second: unknown;
+  try { second = await nudgeStore(store, Date.now() + 60_000, now); } catch { second = "threw"; }
+  is("the next run sends nothing more in the same period", [second, sent], [0, 1]);
 }
 
 void main().then(done).catch(error => { console.error(error); process.exit(1); });

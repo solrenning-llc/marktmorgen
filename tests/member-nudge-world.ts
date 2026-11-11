@@ -21,10 +21,14 @@ export const sendEmail = async () => { sent += 1; return true; };
 
 let response: unknown;
 let override = false;
+let countFails = false;
 export function reset(reply?: unknown): void {
-  memory.clear(); sent = 0; response = reply; override = arguments.length > 0;
+  memory.clear(); sent = 0; response = reply; override = arguments.length > 0; countFails = false;
 }
+/** The monthly count's INCR throws, as a lost Redis answer would. */
+export function failCount(): void { countFails = true; }
 export async function redisPipeline(commands: (string | number)[][]): Promise<unknown[]> {
+  if (countFails && commands[0]?.[0] === "INCR") throw new Error("synthetic lost count reply");
   const results = await memory.pipeline(commands);
   if (override && commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:nudge:") && commands[0].includes("NX")) {
     return response as unknown[];

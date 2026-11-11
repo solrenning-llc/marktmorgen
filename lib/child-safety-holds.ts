@@ -73,23 +73,6 @@ export async function heldInCatalog(store: Pick<Store, "statsId" | "handle">, id
 }
 
 /**
- * Which of the products a public page is about to list are kept for a report
- * (Revisor 2 on #3588: a product whose taking off the store did not go through
- * after its mark was written is otherwise still listed), in one command
- * (heldInCatalog's MGET: up to MARKS_PER_READ ids), for a page, which must not
- * fail for it: a mark that cannot be read counts every id asked as held, so
- * nothing that may be held is shown.
- */
-export async function heldAmongShown(store: Pick<Store, "statsId" | "handle">, ids: readonly string[]): Promise<Set<string>> {
-  try {
-    return await heldInCatalog(store, ids);
-  } catch (error) {
-    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-    return new Set(ids);
-  }
-}
-
-/**
  * heldIdsAmong for a page, which must not fail for it: a hold that cannot be
  * read counts every id asked as held, so nothing that may be held is shown.
  */

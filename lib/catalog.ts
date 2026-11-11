@@ -53,7 +53,7 @@ import { type Intro, parseIntro } from "@/lib/intro-price";
 import { type Yearly, parseYearly } from "@/lib/yearly-price";
 import { type CallSetup, parseSetup } from "@/lib/call-setup";
 import { COURSE_ID_PATTERN } from "@/lib/course";
-import { heldAmongShown, offerableTargets } from "@/lib/child-safety-holds";
+import { offerableTargets } from "@/lib/child-safety-holds";
 import { type Bump, type Plan, bumpTargets, canBeBumped, isOneOff, parseBump, parseBumps, parsePlan, parseStock } from "@/lib/product-extras";
 import { type Funnel, funnelFromUpsell, parseFunnel } from "@/lib/funnel";
 import { type PayWhatYouWant, parsePwyw } from "@/lib/pay-what-you-want";
@@ -918,10 +918,7 @@ export async function readPage(
   const pages = Math.max(1, Math.ceil(total / STORE_PAGE_SIZE));
   const at = Math.min(Math.max(1, Math.floor(page) || 1), pages);
   const ids = visible.slice((at - 1) * STORE_PAGE_SIZE, at * STORE_PAGE_SIZE);
-  // Nor a product kept for a child-safety report whose taking off the store did not go through (lib/child-safety.ts):
-  // its mark, one MGET for the page; a mark that cannot be read leaves it off (Revisor 2 on #3588).
-  const [read, held] = await Promise.all([readListings(store, ids), heldAmongShown(store, ids)]);
-  const listings = read.filter((listing) => !held.has(listing.id));
+  const listings = await readListings(store, ids);
   const onPage = new Set(ids);
   const targets = [...new Set(listings.flatMap((l) => bumpTargets(l).filter((id) => !onPage.has(id))))];
   // A box never offers a product kept for a child-safety report, nor a bundle holding one (lib/child-safety-holds.ts).
@@ -960,10 +957,7 @@ export function matchesSearch(listing: Pick<Listing, "title" | "summary">, query
  */
 export async function searchStore(store: Store, query: string): Promise<{ listings: Listing[]; related: Listing[]; total: number }> {
   const all = await readListings(store, visibleIds(store));
-  const matching = all.filter((listing) => matchesSearch(listing, query));
-  // Not a product kept for a child-safety report, as on readPage (Revisor 2 on #3588): the matches' marks, one MGET.
-  const held = await heldAmongShown(store, matching.map((listing) => listing.id));
-  const found = matching.filter((listing) => !held.has(listing.id));
+  const found = all.filter((listing) => matchesSearch(listing, query));
   const listings = found.slice(0, STORE_SEARCH_LIMIT);
   const shown = new Set(listings.map((l) => l.id));
   const targets = [...new Set(listings.flatMap((l) => bumpTargets(l).filter((id) => !shown.has(id))))];

@@ -90,14 +90,8 @@ const PICTURES_ON_A_LATER_PAGE = 4;
  * allows for, which tests/traffic.test.ts holds the code under.
  */
 export const COMMANDS = {
-  /**
-   * Drawing the front page of a store that pays. Since November 11, 2026 one
-   * command more: the marks of the products it lists, in one MGET, so a
-   * product held for a child-safety report whose taking off the store did
-   * not go through is not listed (lib/catalog.ts readPage, Revisor 2 on
-   * #3588).
-   */
-  frontPage: 5,
+  /** Drawing the front page of a store that pays. */
+  frontPage: 4,
   /**
    * Counting it: the store's stats and the visit. Since October 11, 2026 the
    * view also counts its country and kind of device on the day's record
@@ -124,9 +118,9 @@ export const COMMANDS = {
    * product's own page that also counts the page's view (lib/stats.ts, added
    * 8 October 2026): two commands more, measured, and a third once a day.
    * Since November 11, 2026 a product's own page also reads its own mark of a
-   * child-safety hold and, in one MGET, the marks of the other products it
-   * shows (app/[handle]/p/[product]/page.tsx, Revisor 2 on #3588): two
-   * commands, inside what tests/traffic.test.ts measures under this figure.
+   * child-safety hold (app/[handle]/p/[product]/page.tsx, Revisor 2 on
+   * #3588): one GET, inside what tests/traffic.test.ts measures under this
+   * figure.
    */
   laterPage: 10,
   laterCount: 8,

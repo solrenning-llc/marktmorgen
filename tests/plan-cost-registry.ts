@@ -1782,6 +1782,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
   "picture-door": BURST("studio"),
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),
+  // A buyer's report of a problem with an order (567 [GD1] (a), app/api/store/order-problem): at most ORDER_PROBLEM_PER_DAY a buyer a store, each one inbox message from the store's figure (lib/inbox.ts, open) and its notice from the store's email figure (tellTeam).
+  "order-problem": BURST("inbox"),
   // Calls to other services: counted in the store's window as well (lib/metered-limits.ts, withinService).
   "meet-host": SERVICE, "meet-manage": SERVICE, "meet-start": SERVICE, "metaads-start": SERVICE, "discord-connect": SERVICE, esync: SERVICE,
   "paypal-connect": SERVICE, "paypal-pay": SERVICE, "paypal-sell-connect": SERVICE, "aff-kit": SERVICE, "aff-payto": SERVICE, "outreach-find": SERVICE,

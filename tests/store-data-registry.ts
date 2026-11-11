@@ -741,6 +741,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:agree:p:@lib/agreement-store.ts": room("One person's agreements in a store (at most MAX_PER_PERSON): an entry each, counted with its record", "lib/agreement-store.ts"),
   "nl:agree:lock:@lib/agreement-store.ts": short("An agreement being signed or given a new version, ten seconds", "request", 1, MARK, REQ("agreement-sign")),
   "nl:letters:i:@lib/letters.ts": room("An email published on the store: its subject and words as sent, counted with its entry before it is written, until it goes by itself (letterRoomBytes)", "lib/letters.ts"),
+  "nl:oprob:@lib/order-problem.ts": room("A buyer's open problem with an order (567 [GD1] (a)): \"pending\" or \"filed\" under the order's reference, written with SET NX after its bytes are counted, gone by itself after ORDER_PROBLEM_PENDING_SECONDS or ORDER_PROBLEM_REPLY_DAYS", "lib/order-problem.ts"),
   "nl:withdraw:@lib/withdrawal.ts": room("A buyer's withdrawal from an order (EU art. 11a): the order's reference and the time, written once with SET NX after its bytes are counted, gone by itself after WITHDRAWAL_KEEP_DAYS", "lib/withdrawal.ts"),
   "nl:letters:link:@lib/letter-access.ts": short("An emailed link to read an email kept for members, and its opens, an hour", "access", 1, LINK_BYTES, MAIL("letter link")),
   "nl:letters:ok:@lib/letter-access.ts": short("Whether a reader holds one of a published email's products, answered for minutes", "request", 1, KEY, REQ("page")),

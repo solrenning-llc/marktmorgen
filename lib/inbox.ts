@@ -260,6 +260,26 @@ export async function handOver(input: { store: Store; email: unknown; name: unkn
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
+export type FiledProblem = "filed" | "limited" | "full" | "error";
+
+/**
+ * A buyer's report of a problem with an order (567 [GD1] (a), lib/order-problem.ts):
+ * filed as a contact from the address the order was paid with, and the team
+ * told by email, as a chat is. One inbox message from the store's allowance,
+ * taken before it is written (open).
+ */
+export async function fileOrderProblem(input: { store: Store; email: string; text: string; now?: number }): Promise<FiledProblem> {
+  const { store } = input;
+  if (!store.statsId || !isRedisConfigured()) return "error";
+  const made = await open({ ...input, name: "", source: "contact" }).catch((error) => {
+    if (error instanceof DataRoomError) return { ok: false as const, reason: "full" as const };
+    throw error;
+  });
+  if (!made.ok) return made.reason === "limited" ? "limited" : made.reason === "full" ? "full" : "error";
+  await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a problem with an order failed", error));
+  return "filed";
+}
+
 async function fromToken(token: unknown): Promise<{ statsId: string; id: string; handle: string } | null> {
   if (typeof token !== "string" || !CHAT_TOKEN.test(token) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", tokenKey(token)]]);

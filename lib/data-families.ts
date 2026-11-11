@@ -18,7 +18,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
   "nl:dc:mem:", "nl:dc:prod:", "nl:depth:", "nl:erased:", "nl:esync:tags:", "nl:form:r:", "nl:imp:buy:",
-  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:lnote:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:withdraw:",
+  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:lnote:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:oprob:", "nl:withdraw:",
   "nl:lib:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
   "nl:path:board:v1", "nl:path:board:owners:v1",
   "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
@@ -338,6 +338,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // Who may read an email kept for members (lib/letter-access.ts): an answer kept for minutes, a link and the counts of links asked, an hour each.
   "nl:letters:ok:": X(1), "nl:letters:link:": X(1), "nl:letters:rl:addr:": X(1), "nl:letters:rl:ip:": X(1),
   // A buyer's withdrawal from an order (lib/withdrawal.ts, 588 [KB9]): the order and the time, gone by itself after 400 days.
+  "nl:oprob:": X(7),
   "nl:withdraw:": X(400),
   // The owner's Path (lib/path.ts): deleted by the prepare step (forgetPath).
   "nl:path:": E,

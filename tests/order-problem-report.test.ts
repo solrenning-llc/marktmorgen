@@ -24,6 +24,8 @@ const BUYER = "ana@example.com";
 const ORIGIN = "https://marktmorgen.com";
 const DAY = 86_400;
 
+process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
+
 let sessions: Record<string, unknown>[] = [];
 const mails: { to: string; subject: string; text: string }[] = [];
 
@@ -51,14 +53,14 @@ beforeEach(() => {
   mails.length = 0;
   afterTasks.length = 0;
   process.env.STRIPE_SECRET_KEY = "sk_test_order_problem_only_a_stand_in";
-  process.env.RESEND_API_KEY = "re_test_order_problem_only_a_stand_in";
+  process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
 });
 
 async function shop(): Promise<{ store: Store; product: string; token: string }> {
   await claimHandle(OWNER, "mara", "Mara's Kitchen", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestMara00001", true);
-  await setSubscription(OWNER, { customerId: "cus_mara00001", subscriptionId: "sub_mara00001", active: true, tier: "creator", period: paidPeriod() });
+  await setSubscription(OWNER, { customerId: "cus_mara00001", subscriptionId: "sub_mara00001", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
   const made = await addProduct(OWNER, "The Butter Course", "", "49", null);
   if (!made.ok) throw new Error("no product");
   await setProductLink(OWNER, made.product.id, "https://example.com/butter");

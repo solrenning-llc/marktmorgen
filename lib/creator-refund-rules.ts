@@ -8,7 +8,9 @@
  * - who may refund: only a role with the team's "payments" permission
  *   (lib/team-roles.ts), which today is the owner alone;
  * - what can still be refunded, read off the charge Stripe returns: the
- *   amount charged less what was refunded already. Anything unreadable (an
+ *   amount charged less what was refunded already, only on a charge captured
+ *   in full (a hold only authorized is not paid; one captured in part is
+ *   unreadable). Anything unreadable (an
  *   amount that is not whole, more refunded than charged, no currency, a paid
  *   or disputed flag that is not a boolean or says otherwise) is "unreadable":
  *   never zero, never the whole charge. A disputed charge is defended or lost
@@ -54,12 +56,16 @@ function whole(value: unknown): value is number {
 export function refundableOf(charge: unknown): Refundable {
   const c = record(charge);
   if (!c || c.object !== "charge" || typeof c.id !== "string" || !c.id) return UNREADABLE;
-  const { amount, amount_refunded: refunded, currency, disputed, paid, status } = c;
+  const { amount, amount_captured: captured, amount_refunded: refunded, currency, disputed, paid, status } = c;
   if (!whole(amount) || !whole(refunded) || refunded > amount) return UNREADABLE;
   if (typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return UNREADABLE;
-  if (typeof disputed !== "boolean" || typeof paid !== "boolean") return UNREADABLE;
+  if (typeof disputed !== "boolean" || typeof paid !== "boolean" || typeof c.captured !== "boolean" || !whole(captured)) return UNREADABLE;
   if (status === "pending" || status === "failed") return { ok: false, reason: "not_paid" };
   if (status !== "succeeded" || paid !== true) return UNREADABLE;
+  // Stripe says "succeeded" and paid of a charge only authorized too (lib/call-series-billing.ts holds them): an
+  // uncaptured hold was never paid, and one captured in part is not read here, so never the whole amount authorized.
+  if (c.captured !== true) return { ok: false, reason: "not_paid" };
+  if (captured !== amount) return UNREADABLE;
   if (disputed) return { ok: false, reason: "disputed" };
   if (refunded === amount) return { ok: false, reason: "fully_refunded" };
   return { ok: true, chargeId: c.id, currency, amountCents: amount, refundedCents: refunded, refundableCents: amount - refunded };

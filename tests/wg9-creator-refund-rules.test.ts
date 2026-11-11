@@ -51,10 +51,10 @@ is("all: exactly what is left", refundAmount({ full: true, typed: "" }, left), {
 is("a typed part, read as a price is read", [refundAmount({ full: false, typed: "12.5" }, left), refundAmount({ full: false, typed: " 38 " }, left)], [{ ok: true, cents: 1_250 }, { ok: true, cents: 3_800 }]);
 is("more than is left: refused, never cut down to fit", refundAmount({ full: false, typed: "38.01" }, left), { ok: false, reason: "over_refundable" });
 is("nothing typed, zero, or not one plain amount: refused", [refundAmount({ full: false, typed: "" }, left), refundAmount({ full: false, typed: "0" }, left), refundAmount({ full: false, typed: "$12" }, left), refundAmount({ full: false, typed: "1,200" }, left), refundAmount({ full: false, typed: "12.345" }, left), refundAmount({ full: false, typed: "-5" }, left)], [{ ok: false, reason: "empty" }, { ok: false, reason: "zero" }, { ok: false, reason: "not_an_amount" }, { ok: false, reason: "not_an_amount" }, { ok: false, reason: "not_an_amount" }, { ok: false, reason: "not_an_amount" }]);
-const yen = refundableOf(charge({ currency: "jpy", amount: 2_700 }));
+const yen = refundableOf(charge({ currency: "jpy", amount: 2_700, amount_captured: 2_700 }));
 if (!yen.ok) throw new Error("the yen charge reads");
 is("a zero-decimal currency is typed whole", [refundAmount({ full: false, typed: "1000" }, yen), refundAmount({ full: false, typed: "10.5" }, yen)], [{ ok: true, cents: 1_000 }, { ok: false, reason: "not_an_amount" }]);
-const other = refundableOf(charge({ currency: "xof", amount: 2_700 }));
+const other = refundableOf(charge({ currency: "xof", amount: 2_700, amount_captured: 2_700 }));
 if (!other.ok) throw new Error("a currency off the list still reads");
 is("a currency we do not price in: only all of it, never a typed part read as dollars", [refundAmount({ full: false, typed: "10" }, other), refundAmount({ full: true, typed: "" }, other)], [{ ok: false, reason: "currency_not_listed" }, { ok: true, cents: 2_700 }]);
 

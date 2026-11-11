@@ -23,6 +23,8 @@
 import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readPathMoney, soldOf } from "@/lib/path-facts";
+import { startPath, visitPath } from "@/lib/path";
+import { readAnswers } from "@/lib/path-rules";
 import { payPalSale } from "@/lib/stats";
 import { captureOrder, paypalPaymentId, readPayPalSales, watchPayPal, type Paid } from "@/lib/paypal-sales";
 import { store as redis } from "./redis-stub";
@@ -189,6 +191,23 @@ async function main(): Promise<void> {
     is("the refunded records' MGET off its shape: money null", read?.cents, null);
     is("the refunded records' MGET off its shape: no sale counted as kept", read?.real, 0);
     bend = null;
+  }
+
+  part("A reading whose refunds are unknown never replaces the kept one (Claude 4's LOW on #3443)");
+  {
+    const { store } = await setup();
+    const answers = readAnswers({ goalCents: 100_000, skills: "baking", subject: "sourdough", minutes: 30, audience: "instagram", timeZone: "America/Sao_Paulo" }, store.currency);
+    if (!answers.ok) throw new Error("answers");
+    const started = await startPath(store, answers.answers, now * 1000);
+    if (!started.ok) throw new Error("path");
+    const kept = await visitPath(store, started.record, now * 1000, async () => true);
+    is("a first visit keeps the reading: 2 sales kept, 4400", [kept.record.money?.real, kept.record.money?.cents], [2, 4400]);
+    // A day later the reading is stale, and the refunds' range comes back off its shape.
+    bend = bendFirst("nl:ppsell:refunded:", "ZRANGEBYSCORE", () => ["1"]);
+    const later = await visitPath(store, kept.record, now * 1000 + 86_400_000, async () => true);
+    bend = null;
+    is("the kept reading stays: the sales are not shown as none", [later.record.money?.real, later.record.money?.cents, later.record.money?.at], [2, 4400, kept.record.money?.at]);
+    is("and the facts read from it still count them", later.facts.realSales, 2);
   }
 
   part("M2 and L3: PayPal refunded part of a sale, or reversed it: the sale is taken off whole");

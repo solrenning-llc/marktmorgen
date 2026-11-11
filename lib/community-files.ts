@@ -209,19 +209,22 @@ export async function dropCommunityImage(path: string | undefined | null): Promi
 /**
  * Deletes a picture, then, once the file is gone, lets `forget` take away what names it (a held post's line), and only
  * once that is confirmed gives its place back: a picture whose file could not be deleted keeps its name where an
- * erasure finds it again (Codex G on #3020, 6751455863), and one tried again is never given back twice. True only when
- * the file and the name are both confirmed gone. Never throws.
+ * erasure finds it again (Codex G on #3020, 6751455863). `forget` answers true when this call took the name away (its
+ * own one-time right to give the place back), "gone" when the name was already gone (somebody else took it, and gave
+ * the place back), and false when that is not confirmed: only true gives the place back, so a picture deleted by two
+ * callers at once is given back once (Codex P on #3020). True when the file and the name are both confirmed gone.
+ * Never throws.
  */
-export async function removeCommunityImage(path: string, forget: () => Promise<boolean> = async () => true): Promise<boolean> {
+export async function removeCommunityImage(path: string, forget: () => Promise<boolean | "gone"> = async () => true): Promise<boolean> {
   try {
     await del(path);
   } catch (error) {
     console.error("could not delete a community picture", error);
     return false;
   }
-  const forgot = await forget().catch(() => false);
-  if (forgot) await givePicturePlace(path);
-  return forgot;
+  const forgot = await forget().catch(() => false as const);
+  if (forgot === true) await givePicturePlace(path);
+  return forgot !== false;
 }
 
 /**

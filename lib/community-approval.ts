@@ -432,10 +432,15 @@ function noteOf(held: Held, state: Exclude<HeldState, "held">, why: string, now:
 /**
  * A held item's picture deleted, and only then its line in the pictures list (removeCommunityImage): a file that could
  * not be deleted keeps its line, where its author's erasure finds it again (Codex G on #3020, 6751455863). True when
- * both are gone.
+ * both are gone. Only the HDEL that took the line away (1) gives the picture's place back; a 0 means another caller
+ * (a second erasure, or the creator's removal) took it and gave it back, and an unknown reply gives nothing back (Codex
+ * P on #3020): never fewer places counted than pictures kept.
  */
 async function dropHeldPicture(id: string, item: string, path: string): Promise<boolean> {
-  return removeCommunityImage(path, async () => countOf(repliesFor(await redisPipeline([["HDEL", picturesKey(id), item]]), 1)?.[0]) !== null);
+  return removeCommunityImage(path, async () => {
+    const taken = countOf(repliesFor(await redisPipeline([["HDEL", picturesKey(id), item]]), 1)?.[0]);
+    return taken === 1 ? true : taken === 0 ? "gone" : false;
+  });
 }
 
 /** Writes the note in the item's place, for what is left of its time; its picture is deleted, then its line. */

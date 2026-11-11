@@ -306,6 +306,45 @@ async function main(): Promise<void> {
     Date.now = realNow;
   }
 
+  part("Through the real sendBatch: a 429 for 21 hours keeps the list; an answer lost is settled, never sent twice");
+  redis.run(["DEL", listKey, `nl:sa:${sid}:${pid}:job`]);
+  await place("jo@example.com");
+  makeDue();
+  const busyFrom = batches.length;
+  try {
+    batchAnswer = 429;
+    is("the service says 429: nothing sent", await runRestocks(Date.now() + 30_000, real), 0);
+    Date.now = () => realNow() + 21 * 3_600_000;
+    makeDue();
+    is("still 429 at 21 hours: nothing sent", await runRestocks(Date.now() + 30_000, real), 0);
+    is("and the address stays", redis.run(["HEXISTS", listKey, "jo@example.com"]), 1);
+    batchAnswer = 200;
+    Date.now = () => realNow() + 22 * 3_600_000;
+    makeDue();
+    is("the service is back: one email", await runRestocks(Date.now() + 30_000, real), 1);
+    is("one batch delivered", batches.slice(busyFrom).flatMap((b) => b.batch.flatMap((m) => m.to)), ["jo@example.com"]);
+  } finally {
+    batchAnswer = 200;
+    Date.now = realNow;
+  }
+  redis.run(["DEL", listKey, `nl:sa:${sid}:${pid}:job`]);
+  await place("kit@example.com");
+  makeDue();
+  const lostFrom = batches.length;
+  try {
+    batchAnswer = "lost";
+    is("taken, the answer lost: counted as nothing sent yet", await runRestocks(Date.now() + 30_000, real), 0);
+    batchAnswer = 200;
+    Date.now = () => realNow() + 21 * 3_600_000;
+    makeDue();
+    await runRestocks(Date.now() + 30_000, real);
+    is("21 hours on: settled as sent, the address leaves", redis.run(["HEXISTS", listKey, "kit@example.com"]), 0);
+    is("written to once only", batches.slice(lostFrom).flatMap((b) => b.batch.flatMap((m) => m.to)), ["kit@example.com"]);
+  } finally {
+    batchAnswer = 200;
+    Date.now = realNow;
+  }
+
   done();
 }
 

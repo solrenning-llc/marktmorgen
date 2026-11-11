@@ -185,6 +185,36 @@ export type RestockDeps = {
 
 const DEFAULTS: RestockDeps = { load: storeForIdExactly, readProduct: readListing, left: (store, product) => stockLeft(store, product), send: sendBatch };
 
+/** The statuses lib/resend-fallback-transport.ts reads as "not accepted"; any other answer, or none, may be a batch taken. */
+const NOT_TAKEN = new Set([400, 401, 403, 404, 405, 413, 415, 422, 429]);
+
+/**
+ * The fetch handed to sendBatch for this batch: it changes nothing, and notes when a batch was really written to the
+ * email service with no answer that it was turned away (thrown, timed out, accepted, 409, 5xx). Only that may be a
+ * batch taken; a "retry" with no such write is known not sent.
+ */
+function watching(written: { maybe: boolean }): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    let write = true;
+    try {
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+      write = method !== "GET" && method !== "HEAD" && path.endsWith("/emails/batch");
+    } catch {
+      // Not read exactly: counted as a write.
+    }
+    if (!write) return fetch(input, init);
+    try {
+      const response = await fetch(input, init);
+      if (response.ok || !NOT_TAKEN.has(response.status)) written.maybe = true;
+      return response;
+    } catch (error) {
+      written.maybe = true;
+      throw error;
+    }
+  }) as typeof fetch;
+}
+
 /** What became of one product this run: "done" leaves the job, "later" waits RESTOCK_WAIT_MS, "again" is due again at once. */
 type Turn = { sent: number; next: "done" | "later" | "again" };
 
@@ -219,11 +249,13 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
       const mail = backEmail(store, product, leave);
       return { from: fromLine(store), to: email, subject: mail.subject, text: mail.text, html: mail.html, replyTo: store.email, headers: mail.headers };
     });
-    const outcome = await deps.send(messages, `stock-alert:${sid}:${product.id}:${job.at}`, { by: "store", store, kind: "email" });
+    const written = { maybe: false };
+    const outcome = await deps.send(messages, `stock-alert:${sid}:${product.id}:${job.at}`, { by: "store", store, kind: "email" }, undefined, { fetch: watching(written) });
     if (outcome !== "sent") {
       await releaseDay(going.length);
-      // A refusal sent nothing. "retry" may mean taken with the answer lost: written down once, with when.
-      if (outcome === "retry" && job.unknownSince === undefined) await writeJob(sid, product.id, { ...job, unknownSince: Date.now() });
+      // "retry" also means known not sent (a 429, no sender, unreadable state): that keeps everything and waits, however
+      // long. Only a batch the service may really have taken, its answer lost, is written down once, with when.
+      if (outcome === "retry" && written.maybe && job.unknownSince === undefined) await writeJob(sid, product.id, { ...job, unknownSince: Date.now() });
       return { sent: 0, next: "later" };
     }
   }

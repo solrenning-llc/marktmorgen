@@ -143,19 +143,27 @@ function applicationWorld(credential: SyntheticResendCredential, usageCredential
   if (!binding.sendingCredentialSha256s.includes(hash(credential))) binding.sendingCredentialSha256s.push(hash(credential));
   return world;
 }
+/** A caller that only watches its own requests (lib/stock-alert-send.ts) hands a runtime with `fetch` and nothing else:
+ * it gets the same synthetic account as one that hands none, its provider requests going through its own fetch. */
+function onlyFetch(runtime: ResendTransportRuntime): runtime is { fetch: typeof fetch } {
+  const keys = Object.keys(runtime);
+  return keys.length === 1 && keys[0] === "fetch" && typeof runtime.fetch === "function";
+}
 export function currentResendFallbackProofIsMissing(runtime: ResendTransportRuntime = {}) {
-  if (Object.keys(runtime).length) return realProofIsMissing(runtime);
+  if (Object.keys(runtime).length && !onlyFetch(runtime)) return realProofIsMissing(runtime);
   const credential = syntheticResendCredential(process.env.RESEND_API_KEY?.trim());
   const usageCredential = syntheticResendCredential(process.env.RESEND_READ_API_KEY?.trim() || credential);
   if (!credential || !usageCredential) return true;
   return realProofIsMissing(applicationWorld(credential, usageCredential).runtime);
 }
 export async function guardedResendPost(input: ResendPost, runtime: ResendTransportRuntime = {}) {
-  if (Object.keys(runtime).length) return realPost(input, runtime);
+  if (Object.keys(runtime).length && !onlyFetch(runtime)) return realPost(input, runtime);
   const credential = syntheticResendCredential(input.credential);
   const usageCredential = syntheticResendCredential(input.usageCredential);
   if (!credential || !usageCredential) return { kind: "blocked" as const };
   const world = applicationWorld(credential, usageCredential);
   await world.ready;
-  return realPost(input, world.runtime);
+  if (!onlyFetch(runtime)) return realPost(input, world.runtime);
+  const own = runtime.fetch, theirs = world.runtime.fetch!;
+  return realPost(input, { ...world.runtime, fetch: ((request, init) => new URL(String(request)).pathname === "/usage" ? theirs(request, init) : own(request, init)) as typeof fetch });
 }

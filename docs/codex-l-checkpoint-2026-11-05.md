@@ -1173,3 +1173,42 @@ console.log(JSON.stringify({scope:"extracted exact source function bodies, synth
 3. Concluir2514/3667 (C1 evidência/execução necessária), privacidade3624; #3632 já corrigido pelo autor, só retorno focal/CI novo sem duplicar; continuar tarefaspendentes3579..3632 quandoevidênciapermitir; nenhumitemnovoantesdelotesconcluídos.
 4. Push de PR só comfreshMVvazia eTODOS108<=150, máximo3PRs/h poragente. Último gate antes deste preparo:issues=[],queued163 (TRANSITÓRIO; não confundircomMVOPEN). Checkpoint documental separado: confirmado pela busca que seu ramo não tem PR OPEN e lidos TODOS9 workflows nesse ramo, push somente branches:[main], nenhum gatilho push para este ramo. Portanto salvar só o checkpoint não dispara os workflows de PR/main e não é novo envio de PR/unidade/junção; essa distinção corrige a retenção excessiva do preparo anterior. Canal também não é envio de PR. Não encerrar nem duplicar a única continuidade por esse limite; semvigiaemfundo. Automatização/período não alterados.
 5. A publicação deste texto só é confirmada pelo recibo de escrita+readback externo; nenhum resultado de execução é criado por salvar este registro. Prefixo anterior161970 preservado INTEIRO. Nenhum409novodesta rodada; históricos1712/1811e05h11continuamNÃOPUBLICADOS.
+
+
+## 11/11/2026 — adendo final da primeira triagem completa C1-1026
+
+- PRIMEIRO checkpoint canônico FULL; agora este adendo supera a fotografia de10ready/29PRscomnota, sem apagar nada. Todos53OPEN3579..3632 têm comentário individual EN do L nesta rodada e readback EXATO. TRIAGEM concluída; CONSERTOS/JUNÇÕES/FOCAIS NÃOconcluídos. #3581nãoOPEN na coleta. Nenhum itemnovo da fila.
+- Houve24reports adicionais, cadaumcomGETdireto dohead/base/mergeability e discussãofresh +checks doheadexato. As anotaçõesantecedentes/testespertencem aosrevisores nomeados, não aL. Nenhumtesteexecutado, nenhumCIrerun/close/enqueue/merge/refprodutonovo. Trêsproduto-refupdatesanteriores2517/3626/3600 continuam osÚNICOS.
+- Total12ready reports SEMenqueue: os10anteriores + #3619@42c8c7f25afee2a0115cf499105c7ea81bbbce1b (6798432840) e #3595@59c2597d5c25b2c6c2e450b24f94395541a0e9c0 (6798436379). Ambos9/9AllchecksSUCCESS/44completed/noextraFAIL/baseMAIN/APItrueclean. Li diffinteiro atual de ambos. #3619LOWassertsizespushes[2]vs[4]continuaOPEN, nãoholdALTO/MED. C2MED6787518784/C4focal6787295472créditos. #3595correção do inventário anterior: SEGUNDAmoneyjáEXISTIA emC2#6780626207 noMESMOhead, alémC1#6787404827; portanto não é necessário inventar terceira revisão. Não escrevi código de comissão.
+- Catorzeleiturasmergeable=null/unknown ficaramUNKNOWN, nãoCONFLITO e nãoREADY. #3631GREEN/APIclean masLOWcondicionalRES/SU7requerdono; #3608/#3583GREENempilhadosaguardambases; #3621MEDVidentidaderequestcontinuaC1 e replacement3659OPEN/unmergedfreshd12ef6f0d7486966b740d25c2e82414c2fa5e3ac, nãoMERGED. #3599HOLDfinanceiro/TODOS99continua apesarCIverde.
+- #3598autor295b0615f74463e0a1763e13707a01e743af9897 tem7/9agregadoresSUCCESS,4subjobspendentes; #3588autor9f62167940e3bb05105ea9da85deedbc7105922a tem1/9SUCCESS e10subjobspendentes. SemFAIL nessasfotografias, NÃO9GREEN. #3589autor ee5933e19dfd47a09e74a07c0a032b6f3d9b0282 temverify130559807393FAIL eproduct-checksFAIL,7/9SUCCESS,CodeQLJSemcurso. TentativaFULLlogsemstructuredpayloaddisponívelàanálise; registro localdoprocessamento rejeitou valor não serializável, portanto NÃO afirmar Transportclosed desse novo job nemdiagnóstico. Comentário6798439073preserva limitee pede arquivo real; TODOproto nãoécausa. Jtambémtemgrantnominal3589, não duplicarfixdele/autor.
+- Correção explícita emPR3583: primeira versão do comentário6798441692 copiou errado 'null/unknown'; body foi EDITADO para APItrueclean/baseclaude4/cd1-submission-buyer/#3574, focalC1#6780516222dizempilhado/semfila. Bodycorrigido relidoEXATO. Nenhuma fonte/ref alterada.
+- ROOTrotacionadoLEGITIMAMENTE2026-11-11-1425UTC; FULLfresh1190944b53e41bfb7ef43a7b63e215b3337ec2c4/310830codeunits, prefixocomsnapshotanteriordiverge30844 porrotação. NÃOrestaurarsnapshot375816. PróximacanalescritapreservaFULLnovo. Nosso pontoCXL-LOTES-CP1continuanocanal. NovaC3-111sobre1496/2271éOUTROescopo/nãoLgrant: cortar custo/nãosubirtetos. Novosfocais2912/V3405nãomudamnossoscandidatos.
+- Últimogatefresh issuesmain-vermelho=[], queued156>150: HOLD deenvioPR/TODOS108, nãoMVOPEN. Teto3PRs/hatingido. DocumentaçãoCPsemPR/workflowsmain-only confirmadaconformesecçãoanterior. #2794intocado; mesmoúnicocontínuo/sembackground/semnovaautomação. Próximasretomadas continuamesteslotes e retornosnominais, não reiniciamtriagem nemrepetem53comentários.
+
+| PR | Head confirmado nesta passagem | base | API | Comentário L (readback EXATO) |
+|---|---|---|---|---|
+| #3631 | e0a915e268ff3930eae633967ac5788e9a350a4e | main | true/clean | 6798431460 |
+| #3629 | 72da1c8d95e5e198f80a2749aa86e8fd6573eeac | main | null/unknown | 6798431925 |
+| #3621 | 78b875b8c97c8eb309ded025828beb6a304d7cb0 | claude4/wp10-move-purchases-store | true/clean | 6798432363 |
+| #3619 | 42c8c7f25afee2a0115cf499105c7ea81bbbce1b | main | true/clean | 6798432840 |
+| #3608 | bc6bcadb63bf8d66ab9d8a0c7d91cbbcd0ba0bad | claude4/wp10-move-purchases-rules | true/clean | 6798433283 |
+| #3603 | eea23dc30b0625ce396f17de81912dbfd878a2b9 | main | null/unknown | 6798433775 |
+| #3602 | 3cff7f1816ea4b65177394d7483b638d96990479 | main | null/unknown | 6798434254 |
+| #3599 | bc599016f831590ed3e762e2209fcf562c0c919f | main | true/clean | 6798434773 |
+| #3598 | 295b0615f74463e0a1763e13707a01e743af9897 | main | true/blocked | 6798435267 |
+| #3597 | b67f46397564d7d03249142ebf2ce4a2e30b18bf | main | null/unknown | 6798435941 |
+| #3595 | 59c2597d5c25b2c6c2e450b24f94395541a0e9c0 | main | true/clean | 6798436379 |
+| #3593 | 34d7b1238d088d85cd4321cb4ac993200d5c587c | main | null/unknown | 6798436771 |
+| #3592 | fa87f05db3c504117cffc3af7bf7a1b0ed80f59e | main | null/unknown | 6798437274 |
+| #3591 | 223f2b0e4616e04a3fc4a4b941f2256c757c7f66 | main | null/unknown | 6798437862 |
+| #3590 | 65fc2ec76538e69de1452026d6c7d04e1c8951c7 | main | null/unknown | 6798438462 |
+| #3589 | ee5933e19dfd47a09e74a07c0a032b6f3d9b0282 | claude3/fix-2685-option-off-sale | true/unstable | 6798439073 |
+| #3588 | 9f62167940e3bb05105ea9da85deedbc7105922a | claude2/child-safety-keep | true/unstable | 6798439659 |
+| #3587 | 50316b14ef83faf5515f64fa8ff7fcc2ff6026bb | main | null/unknown | 6798440122 |
+| #3585 | fcbbbc22ceab865e8adc184232875baa2005d3c8 | main | null/unknown | 6798440651 |
+| #3584 | 1e25d697a27292fc6c566de9fc75590fbbc6b9d3 | main | null/unknown | 6798441170 |
+| #3583 | e006f15bf7ef395dcb5693a53d198859e7d5395a | claude4/cd1-submission-buyer | true/clean | 6798441692 |
+| #3582 | e03e50374b8c4d658938b11e412c3f9ac68b413f | main | null/unknown | 6798442248 |
+| #3580 | 901d481c4b3f538902521f567154a661a45f97d2 | main | null/unknown | 6798442866 |
+| #3579 | 8cfb65bd2086d73fa523612b7eb5080d5f083cd5 | main | null/unknown | 6798443292 |

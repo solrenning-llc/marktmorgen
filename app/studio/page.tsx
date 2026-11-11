@@ -2093,7 +2093,7 @@ export default async function StudioPage({
                   const cardsRead = storeCards(store);
                   // The answers' month and the assistant's need only the store: they are sent with the cards, and each
                   // is still shown where it was, under the same condition.
-                  const answers = may("page") && aiAvailableFor(store) ? { used: answersUsed(store).catch(() => 0), missed: missedQuestions(store).catch(() => []) } : null;
+                  const answers = may("page") && aiAvailableFor(store) ? { used: answersUsed(store).catch(() => null), missed: missedQuestions(store).catch(() => []) } : null;
                   const assistant = may("page")
                     ? early((async () => {
                         // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).

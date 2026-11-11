@@ -72,8 +72,14 @@ export function answersAllowance(store: Store, now = Date.now()): number {
 export async function answersUsed(store: Store, now = Date.now()): Promise<number> {
   const key = monthKey(store, new Date(now));
   if (!store.statsId || !isRedisConfigured() || !key) return 0;
-  const [used] = await redisPipeline([["GET", key]]);
-  return Math.max(0, Number(used) || 0);
+  const reply = repliesFor(await redisPipeline([["GET", key]]), 1);
+  // Exact (rule 24): a key not there yet is 0; a count in another shape, or a missing reply, is unknown, never 0.
+  if (!reply) throw new UnknownReplyError("the answers used this month");
+  if (reply[0] === null) return 0;
+  const used = reply[0];
+  const n = typeof used === "string" && /^(0|[1-9][0-9]{0,15})$/.test(used) ? Number(used) : typeof used === "number" && Number.isSafeInteger(used) && used >= 0 ? used : null;
+  if (n === null) throw new UnknownReplyError("the answers used this month");
+  return n;
 }
 
 /** How a product is handed over, in a sentence that is true of every store here. */

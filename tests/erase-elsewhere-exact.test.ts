@@ -6,10 +6,14 @@
  *   whether the host serves another store through accountStores (lib/store.ts), which reads an account set that does
  *   not answer as a list as "no other store", and through memberStores (lib/team.ts), which leaves out a store whose
  *   team or record does not read and stops at fifty: an owner with a live extra store, or a teammate on another live
- *   store, lost their calendar when one of those reads failed. Now each is read exactly; one that does not read
- *   throws UnknownReplyError, and the store waits a walk with its host's calendar kept.
+ *   store, lost their calendar when one of those reads failed. Now each is read exactly, and one that does not read
+ *   is unknown: the host's own calendar is kept and the rest of the store is erased (Claude 4's review of #3660:
+ *   until then such a read moved the store back a walk, and a host whose team index held more than fifty stores
+ *   made every closing store they host unerasable, forever). Only a known "no other store" deletes the calendar.
  * - LOW: a page of a host's claims (HSCAN) that does not read was taken as their end, and fifty pages not at their
- *   end as all of them: the closing store's claims stayed while it was reported erased. Now each is unknown.
+ *   end as all of them: the closing store's claims stayed while it was reported erased. Now each is unknown, and
+ *   the scan goes on from where it stopped on the next walk, CLAIM_PAGES pages a walk, until it reaches its end
+ *   (Claude 4 on #3660: until then a host with more than fifty pages of claims made the store unerasable, forever).
  * - LOW: a store in line whose record is there but does not read as a store, or is not a string at all, left the line
  *   as "gone", so a closed store with a damaged record was never erased. Now it waits a walk; only Redis's nil is gone.
  *
@@ -35,14 +39,18 @@ const accountStoresKey = (email: string) => `nl:account:stores:${sha(`nimbus-acc
 const teamIndexKey = (email: string) => `nl:team:of:${sha(`nimbus-team-of:${email.toLowerCase()}`)}`;
 const teamKey = (sid: string) => `nl:team:${sid}`;
 
-/** Replies replaced: every command `word` on a key `key` answers `reply` instead of what the database said. */
+/**
+ * Replies replaced: every command `word` on a key `key` answers `reply` instead of what the database said, or what
+ * `reply` answers for the command when it is a function.
+ */
 let replaced: { word: string; key: string; reply: unknown }[] = [];
 redis.pipeline = (async (commands: Command[]) => {
   const real = await realPipeline(commands);
   if (!replaced.length) return real;
   return real.map((reply: unknown, i: number) => {
     const swap = replaced.find((r) => commands[i][0] === r.word && String(commands[i][1]) === r.key);
-    return swap ? swap.reply : reply;
+    if (!swap) return reply;
+    return typeof swap.reply === "function" ? (swap.reply as (command: Command) => unknown)(commands[i]) : swap.reply;
   });
 }) as typeof redis.pipeline;
 
@@ -59,6 +67,10 @@ const line = (ref: string, from: number) => {
   return score === null ? "out" : Number(score) >= from + WALK_GAP_MS ? "moved back" : "in line";
 };
 const prepared = (ref: string) => redis.run(["HEXISTS", BATCH_KEY, ref]) === 1;
+/** The walk's keys of where a closing store's claims scan stopped (lib/closed-store-data.ts), whatever their name. */
+const claimProgress = () => (redis.run(["SCAN", "0", "MATCH", "nl:closed:claims:*", "COUNT", 100_000]) as [string, string[]])[1];
+/** The walk `k` walks after one at `at`: each a gap and a minute later, so a store moved back a walk is due again. */
+const walkTime = (at: number, k: number) => at + k * (WALK_GAP_MS + 60_000);
 
 /** A fresh database, the walk idle, a store closed as the closing job leaves it and in line, its host's calendar written. */
 async function closing(email: string, handle: string, before: () => Promise<void> = async () => {}): Promise<number> {
@@ -83,7 +95,7 @@ async function extraStore(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  part("MEDIUM: an owner with a live extra store keeps their calendar when their account's stores do not read");
+  part("MEDIUM: an owner with a live extra store keeps their calendar when their account's stores do not read, and the closing store is erased");
   {
     fresh();
     // The owner's first store closes; their extra store stays live.
@@ -92,12 +104,9 @@ async function main(): Promise<void> {
     replaced = [{ word: "SMEMBERS", key: accountStoresKey(OWNER), reply: "ERR synthetic unreadable reply" }];
     const stores = await walkAt(at);
     replaced = [];
-    is("the closing store is not prepared", [stores, prepared(OWNER)], [0, false]);
-    is("the owner's calendar is kept", calendarKept(OWNER), [1, 1, 1, 1]);
-    is("the closing store's record is still there, in line, moved back a walk", [(await storeForEmail(OWNER)) !== null, line(OWNER, at)], [true, "moved back"]);
-    const again = await walkAt(at + WALK_GAP_MS + 60_000);
-    is("control: once the account's stores read, it is prepared and out of line", [again, line(OWNER, at)], [1, "out"]);
-    is("control: the calendar is kept, since the extra store is live", calendarKept(OWNER), [1, 1, 1, 1]);
+    is("the closing store is prepared and out of line", [stores, line(OWNER, at)], [1, "out"]);
+    is("the owner's calendar is kept (unknown is never \"no other store\")", calendarKept(OWNER), [1, 1, 1, 1]);
+    is("the closing store's record is gone; the extra store is still there", [(await storeForEmail(OWNER)) === null, redis.run(["SCARD", accountStoresKey(OWNER)])], [true, 1]);
   }
   {
     fresh();
@@ -107,7 +116,7 @@ async function main(): Promise<void> {
     replaced = [{ word: "GET", key: ownerKey(extra), reply: 42 }];
     const stores = await walkAt(at);
     replaced = [];
-    is("an extra store whose record does not read: not prepared, calendar kept, moved back", [stores, calendarKept(OWNER), line(OWNER, at)], [0, [1, 1, 1, 1], "moved back"]);
+    is("an extra store whose record does not read: prepared, out of line, calendar kept", [stores, line(OWNER, at), calendarKept(OWNER)], [1, "out", [1, 1, 1, 1]]);
   }
   {
     fresh();
@@ -130,15 +139,13 @@ async function main(): Promise<void> {
     return { at: await closing(X, "hostxa"), sid: b.sid };
   }
 
-  part("MEDIUM: a teammate on another live store keeps their calendar when that store's team does not read");
+  part("MEDIUM: a teammate on another live store keeps their calendar when that store's team does not read; the closing store is erased");
   {
     const { at, sid } = await teammate();
     replaced = [{ word: "GET", key: teamKey(sid), reply: 42 }];
     const stores = await walkAt(at);
     replaced = [];
-    is("not prepared, calendar kept, moved back a walk", [stores, prepared(X), calendarKept(X), line(X, at)], [0, false, [1, 1, 1, 1], "moved back"]);
-    const again = await walkAt(at + WALK_GAP_MS + 60_000);
-    is("control: once it reads, prepared and out of line, calendar kept", [again, line(X, at), calendarKept(X)], [1, "out", [1, 1, 1, 1]]);
+    is("prepared, out of line, calendar kept", [stores, line(X, at), calendarKept(X)], [1, "out", [1, 1, 1, 1]]);
   }
   part("MEDIUM: ... or when that store's record does not read");
   {
@@ -146,13 +153,22 @@ async function main(): Promise<void> {
     replaced = [{ word: "GET", key: ownerKey(Y), reply: 42 }];
     const stores = await walkAt(at);
     replaced = [];
-    is("not prepared, calendar kept, moved back a walk", [stores, calendarKept(X), line(X, at)], [0, [1, 1, 1, 1], "moved back"]);
+    is("prepared, out of line, calendar kept", [stores, line(X, at), calendarKept(X)], [1, "out", [1, 1, 1, 1]]);
   }
-  part("MEDIUM: ... or when the stores they are on are more than are read");
+  part("MEDIUM (Claude 4 on #3660): a host on more stores than are read never makes a closing store unerasable");
   {
     const { at } = await teammate(50);
     const stores = await walkAt(at);
-    is("fifty-one stores in the index: not prepared, calendar kept, moved back a walk", [stores, calendarKept(X), line(X, at)], [0, [1, 1, 1, 1], "moved back"]);
+    is("fifty-one stores in the index, the live one among them: the closing store is erased, at the first walk", [stores, line(X, at), (await storeForEmail(X)) === null], [1, "out", true]);
+    is("... and the host's calendar is kept", calendarKept(X), [1, 1, 1, 1]);
+  }
+  {
+    fresh();
+    await claimHandle(Y, "owneryb", "Owner Y", "");
+    for (let i = 0; i < 51; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`junk${i}`).digest("hex")]);
+    const at = await closing(X, "hostxa");
+    const stores = await walkAt(at);
+    is("fifty-one ids, none a live store: erased, the calendar kept (more than are read is unknown, never \"none\")", [stores, line(X, at), calendarKept(X)], [1, "out", [1, 1, 1, 1]]);
   }
   {
     const { at } = await teammate(49);
@@ -203,6 +219,56 @@ async function main(): Promise<void> {
     const stores = await walkAt(at);
     replaced = [];
     is("fifty pages not at their end: not prepared, its claim kept, moved back", [stores, redis.run(["HEXISTS", key, "claim1"]), line(OWNER, at)], [0, 1, "moved back"]);
+  }
+
+  part("LOW (Claude 4 on #3660): more pages of claims than a walk reads go on from where they stopped, to their end");
+  /** A host's claims as 121 pages: cursor n answers n + 1 and nothing, and the last page the claim, with cursor 0. */
+  function pages(key: string, asked: string[], failAt = -1): void {
+    const value = redis.run(["HGET", key, "claim1"]);
+    let failed = false;
+    replaced = [{
+      word: "HSCAN",
+      key,
+      reply: (command: Command) => {
+        const cursor = Number(command[2]);
+        asked.push(String(command[2]));
+        if (cursor === failAt && !failed) {
+          failed = true;
+          return "ERR synthetic unreadable reply";
+        }
+        return cursor >= 120 ? ["0", ["claim1", value]] : [String(cursor + 1), []];
+      },
+    }];
+  }
+  {
+    const { at, key } = await claimed();
+    const asked: string[] = [];
+    pages(key, asked);
+    const first = await walkAt(walkTime(at, 0));
+    is("first walk: fifty pages read, not prepared, claim kept, moved back", [first, asked.length, asked[0], redis.run(["HEXISTS", key, "claim1"]), line(OWNER, walkTime(at, 0))], [0, 50, "0", 1, "moved back"]);
+    asked.length = 0;
+    const second = await walkAt(walkTime(at, 1));
+    is("second walk: goes on at the page where the first stopped", [second, asked.length, asked[0]], [0, 50, "50"]);
+    asked.length = 0;
+    const third = await walkAt(walkTime(at, 2));
+    replaced = [];
+    is("third walk: reaches the end, deletes the claim and erases the store", [third, asked[0], asked.at(-1), redis.run(["HEXISTS", key, "claim1"]), line(OWNER, at), (await storeForEmail(OWNER)) === null], [1, "100", "120", 0, "out", true]);
+    is("where the scan stopped is not kept once the store is prepared", claimProgress(), []);
+  }
+  {
+    const { at, key } = await claimed();
+    const asked: string[] = [];
+    pages(key, asked, 70);
+    await walkAt(walkTime(at, 0));
+    asked.length = 0;
+    const second = await walkAt(walkTime(at, 1));
+    is("an unreadable page on the second walk: not prepared, moved back", [second, asked.at(-1), line(OWNER, walkTime(at, 1))], [0, "70", "moved back"]);
+    asked.length = 0;
+    const third = await walkAt(walkTime(at, 2));
+    is("... and the third walk reads that page again, losing nothing", [third, asked[0], asked.length], [0, "70", 50]);
+    const fourth = await walkAt(walkTime(at, 3));
+    replaced = [];
+    is("the fourth walk reaches the end and erases the store", [fourth, redis.run(["HEXISTS", key, "claim1"]), line(OWNER, at), claimProgress()], [1, 0, "out", []]);
   }
 
   part("LOW: a store in line whose record does not read waits a walk; only nil is gone");

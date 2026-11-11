@@ -6,6 +6,7 @@ import { MAX_CART } from "@/lib/cart-rules";
 import type { LanguageCode } from "@/lib/store-language";
 import { AssistReminderBox } from "@/components/assistant-reminder-box";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { WithdrawalWhere } from "@/components/withdrawal-where";
 
 /**
  * A store's cart (lib/cart-rules.ts), kept in the visitor's own browser and
@@ -512,8 +513,8 @@ export function CartButton({
                     <p className="st-note text-sm" role="alert" data-cart-unpriced="">{c.unchecked}</p>
                   )}
                   {remind ? <AssistReminderBox id={`r-cart-${handle}`} lang={lang} store={remind} /> : null}
-                  {/* Asked when anything in the cart is handed over digitally; a cart of shipped products only has nothing to start at once. */}
-                  {digital ? <DigitalConsentBox id={`dc-cart-${handle}`} lang={lang} refused={notice === "consent"} /> : null}
+                  {/* Asked when anything in the cart is handed over digitally; a cart of shipped products only has nothing to start at once, and is told in its place where the withdrawal function is (art. 6(1)(h)). */}
+                  {digital ? <DigitalConsentBox id={`dc-cart-${handle}`} lang={lang} refused={notice === "consent"} /> : <WithdrawalWhere lang={lang} />}
                   <button type="submit" className="btn st-btn btn-block">{current && total ? c.checkout(total) : c.checkoutUnpriced}</button>
                   <p className="st-muted text-xs">{c.note}</p>
                 </form>

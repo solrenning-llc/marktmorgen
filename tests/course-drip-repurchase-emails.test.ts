@@ -52,18 +52,25 @@ async function run(now: number): Promise<string[]> {
 }
 const subject = (title: string) => `Now open in Drip course: ${title}`;
 
-/** Replies of this shape, once, for the commands `match` picks; every other reply as Redis gives it. */
-let odd: { match: (command: (string | number)[]) => boolean; reply: unknown } | null = null;
+/**
+ * Replies of this shape, once, for the commands `match` picks; every other reply as Redis gives it. `lost`: the
+ * picked command never reached Redis, so nothing it would write is there (a mark's claim that is really unknown:
+ * lib/claim-mark.ts reads the mark back, and a write that landed under an odd reply is read back as ours).
+ */
+let odd: { match: (command: (string | number)[]) => boolean; reply: unknown; lost?: boolean } | null = null;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = async (commands) => {
-  const replies = await real(commands);
-  if (!odd) return replies;
-  const hit = commands.findIndex(odd.match);
-  if (hit < 0) return replies;
-  const out = [...replies];
-  out[hit] = odd.reply;
+  const picked = odd;
+  const hit = picked ? commands.findIndex(picked.match) : -1;
+  if (!picked || hit < 0) return real(commands);
   odd = null;
-  return out;
+  if (!picked.lost) {
+    const out = [...(await real(commands))];
+    out[hit] = picked.reply;
+    return out;
+  }
+  const replies = await real(commands.filter((_, i) => i !== hit));
+  return [...replies.slice(0, hit), picked.reply, ...replies.slice(hit)];
 };
 
 async function fresh(sessions: Record<string, unknown>[]) {
@@ -119,9 +126,15 @@ async function main() {
   await openedOn(first);
   odd = { match: (c) => c[0] === "SISMEMBER" && String(c[1]).endsWith(":blocked"), reply: "maybe" };
   is("whether the student was taken off unknown: nothing is sent", await run(first + 30 * DAY), []);
-  odd = { match: (c) => c[0] === "SET" && String(c[1]).includes(":dripmail:"), reply: "QUEUED" };
+  odd = { match: (c) => c[0] === "SET" && String(c[1]).includes(":dripmail:"), reply: "QUEUED", lost: true };
   is("the mark's claim unknown: nothing is sent", await run(first + 30 * DAY), []);
   is("the next run sends it, never skipped", await run(first + 31 * DAY), [subject("Month 1")]);
+  await fresh([session("cs_test_once", first, false)]);
+  await recordEnrollment(store, buyer, product.id, first);
+  await openedOn(first);
+  odd = { match: (c) => c[0] === "SET" && String(c[1]).includes(":dripmail:"), reply: "QUEUED" };
+  is("the mark's reply odd but our own value read back: sent", await run(first + 30 * DAY), [subject("Month 1")]);
+  is("and once", await run(first + 31 * DAY), []);
 
   part("Stripe does not answer: the start is unknown, never the thanks page's alone");
   await fresh([session("cs_test_once", first, false)]);

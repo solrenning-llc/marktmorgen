@@ -268,6 +268,15 @@ async function main(): Promise<void> {
   } finally { redis.pipeline = roomRealPipeline; }
   is("a full store's file sent three times: refused each time, with no room work per deal", [resent, slotWork], [["store_full", "store_full", "store_full"], 0]);
   is("and still nothing written", await dealCount(roomyId), 0);
+  // A month's hold already over is not counted, as TAKE_DATA does not count it (Revisor 2 on #2048): a store whose
+  // raw total is full only because of last month's holds still takes a file that fits.
+  const lapsed = await paidStore("hubslapse");
+  const lapsedUsed = (await dataUsed(lapsed.store))?.used ?? 0;
+  const lastMonth = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15);
+  await noteData(lapsed.store, [{ until: lastMonth, bytes: contentRoomFor(lapsed.store) - lapsedUsed - 100 }], lastMonth);
+  is("(its raw total is nearly full with last month's hold)", ((await dataUsed(lapsed.store))?.used ?? 0) > contentRoomFor(lapsed.store) - 200, true);
+  const afterLapse = await importHubSpotDeals(lapsed.store, { header: HEADER, rows: [row("7201", "One", "New", "Sales"), row("7202", "Two", "New", "Sales")] }, { write: true });
+  is("a file that fits once last month's hold is let go is brought in, never refused as full", [afterLapse.ok, afterLapse.ok ? afterLapse.summary.written : afterLapse.reason], [true, true]);
 
   part("One import at a time");
   const held = await takeCrmLock(statsId);

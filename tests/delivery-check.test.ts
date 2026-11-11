@@ -211,6 +211,22 @@ async function main() {
     ]);
   }
 
+  part("A page too long to read whole: fine only with a status that says so (Codex C2 on #3623)");
+  {
+    const bigWith = (status?: number) => addressReader(async () => {
+      throw new SafeFetchError("too_big", "The answer is larger than we read.", status);
+    });
+    is("a long 200 page is its status", await bigWith(200)("https://example.com/a"), { status: 200 });
+    is("a long 404 page is its status, so a gone page is a problem", await bigWith(404)("https://example.com/a"), { status: 404 });
+    is("a long 3xx answer was not followed: its status says nothing about where it lands", await bigWith(301)("https://example.com/a"), { problem: "too_big" });
+    is("a long answer whose status was lost stays without one", await bigWith(undefined)("https://example.com/a"), { problem: "too_big" });
+    const say = (answer: Parameters<typeof addressVerdict>[2]) => addressVerdict("Your link", "https://example.com/a", answer).state;
+    is("so long 404/410 are problems, 403/500 not checked, 200 fine", [404, 410, 403, 500, 200].map((status) => say({ status })), ["problem", "problem", "not-checked", "not-checked", "ok"]);
+    is("and a long answer with no status is never called fine", say({ problem: "too_big" }), "not-checked");
+    const fetchSource = readFileSync("lib/safe-fetch.ts", "utf8");
+    is("lib/safe-fetch.ts gives the status it already has with every too_big of an answer", (fetchSource.match(/new SafeFetchError\("too_big", [^)]*\)/g) ?? []).map((m) => m.includes("response.statusCode")), [true, true, true]);
+  }
+
   part("The route: the product known first, the studio requests taken before anything is read");
   {
     const route = readFileSync("app/api/store/delivery-check/route.ts", "utf8");

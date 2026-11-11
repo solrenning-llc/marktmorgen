@@ -8,7 +8,7 @@ import type { Store } from "@/lib/store";
  * The tasks agenda on the studio's buyers page (639 [GL7](6), unit 3). Tasks
  * are kept under a person's key, never their address (lib/crm.ts), so the
  * agenda finds who each one is about among the store's buyers, read from the
- * creator's Stripe account (`buyerLedger`, kept ten minutes), and keeps
+ * creator's Stripe account (`buyerLedger`, kept an hour), and keeps
  * nothing new. Someone who is not among those buyers (a list subscriber, or a
  * buyer past what one reading reaches) is said to be so, never guessed.
  */

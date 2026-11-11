@@ -174,7 +174,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
-                        ? "That person is not among the buyers read from your Stripe account just now. Look their address up below."
+                        ? "That person is not among your buyers as last read from your Stripe account, which can be up to an hour ago. Look their address up below."
                         : "That sale is not one of this store's, or it has no email address on it."}
                 </p>
               ) : null}

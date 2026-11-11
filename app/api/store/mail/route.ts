@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
       if (!isNarrowed(narrow) && body.channels !== true) {
         return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who), undefined, label)).length });
       }
-      // Counted before it is read: the ten-minute copy by its size, or Stripe, PayPal and the imported buyers again.
+      // Counted before it is read: the one-hour copy by its size, or Stripe, PayPal and the imported buyers again.
       const counting = countLedger(store);
       const ledger = await buyerLedger(store, counting.count).catch((error) => {
         if (error instanceof LedgerNotCounted) return error;
@@ -185,6 +185,8 @@ export async function POST(request: NextRequest) {
         // How many of the store's buyers are of each kind (270 [GR1], unit 3c), from the same ledger: no extra read.
         kinds: Object.fromEntries(rfmSummary(ledger.buyers.values(), now).map((k) => [k.id, k.buyers])),
         partial: ledger.partial,
+        // When these buyers were read (ms; the copy is kept an hour, C3-80 (b)): the studio says "as of" that time.
+        ...(typeof ledger.at === "number" ? { asOf: ledger.at } : {}),
       });
     }
 

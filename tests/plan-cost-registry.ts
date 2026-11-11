@@ -709,7 +709,7 @@ export const COMPANIES_PAGE_READ = request("heavy", 4 + 2 * TAKE_COMMANDS, MAX_C
 export const STUDIO_UNIT_SENT = STUDIO_UNIT_SENT_BYTES * ORIGIN_PER_BYTE;
 /**
  * One reading of a store's buyers from the creator's Stripe account at the
- * most (lib/segments.ts, buyerLedger), when its ten-minute copy ran out: its
+ * most (lib/segments.ts, buyerLedger), when its one-hour copy ran out: its
  * pages of sales, renewals, refunds, disputes and invoice payments read side
  * by side, the longest ALL_TIME_PAGES pages one after another, each waited
  * on at 2 GB (EXPORT_PAGE_SECONDS); and the copy of up to two rows a sale

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/logo";
-import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
+import { usePreviewLine } from "@/components/preview-line";
 import { moveFocus } from "@/lib/menu-keys";
 
 type MenuItem = {
@@ -189,6 +189,7 @@ const PLAIN_LINKS = [
 ];
 
 export function SiteNav() {
+  const preview = usePreviewLine();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -351,13 +352,15 @@ export function SiteNav() {
         Skip to the page content
       </a>
       {/* What the site is today, before anything else it says
-          (lib/opening.ts). It scrolls away with the page; the menu stays. */}
-      {PLANS_ON_SALE ? null : (
+          (lib/opening.ts, decided on the server by the root layout and
+          handed over finished: components/preview-line.tsx). It scrolls
+          away with the page; the menu stays. */}
+      {preview === null ? null : (
         <div className="bg-ink text-white" data-preview-bar="">
           <p className="container-page py-2.5 text-center text-[0.8125rem] leading-snug sm:text-sm">
-            {PREVIEW_LINE}{" "}
-            <Link prefetch={false} href={PREVIEW_LINK.href} className="whitespace-nowrap font-semibold underline underline-offset-2">
-              {PREVIEW_LINK.label}
+            {preview.line}{" "}
+            <Link prefetch={false} href={preview.href} className="whitespace-nowrap font-semibold underline underline-offset-2">
+              {preview.label}
             </Link>
           </p>
         </div>

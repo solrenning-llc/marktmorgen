@@ -90,7 +90,10 @@ async function main(): Promise<void> {
 
   part("What every public page says");
   const nav = readFileSync("components/site-nav.tsx", "utf8");
-  is("the line is above the menu, only while it is true", nav.includes("{PLANS_ON_SALE ? null : (") && nav.includes('data-preview-bar=""') && nav.includes("{PREVIEW_LINE}"), true);
+  // Decided on the server by the root layout and handed to the menu finished, so no browser runs the review
+  // (components/preview-line.tsx; rendered both ways through the real layout in tests/site-nav-bundle.test.ts).
+  const layout = readFileSync("app/layout.tsx", "utf8");
+  is("the line is above the menu, only while it is true", layout.includes("<PreviewLineProvider value={PLANS_ON_SALE ? null : { line: PREVIEW_LINE, href: PREVIEW_LINK.href, label: PREVIEW_LINK.label }}>") && nav.includes("{preview === null ? null : (") && nav.includes('data-preview-bar=""') && nav.includes("{preview.line}"), true);
   is("it names what can be done and what cannot", [PREVIEW_LINE.includes("still being built"), PREVIEW_LINE.includes("open a store"), PREVIEW_LINE.includes("not on sale yet")], [true, true, true]);
   is("and leads to both lists", PREVIEW_LINK.href, "/mission");
   is("the way past the menu is still the first thing a keyboard reaches", nav.indexOf("Skip to the page content") < nav.indexOf("data-preview-bar"), true);

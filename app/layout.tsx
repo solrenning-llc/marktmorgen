@@ -7,7 +7,8 @@ import { SITE_URL } from "@/lib/site-url";
 import { SITE_OG_IMAGE } from "@/lib/site-og";
 import { REVEAL_ON, REVEAL_WATCH } from "@/lib/reveal-scripts";
 import { feeWords } from "@/lib/fee-words";
-import { PLANS_ON_SALE, PREVIEW_LINE } from "@/lib/opening";
+import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
+import { PreviewLineProvider } from "@/components/preview-line";
 
 /* Optional font display avoids a late font swap shifting a cold mobile page.
    Creator-selected faces below retain their existing choices and behavior.
@@ -142,7 +143,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             __html: REVEAL_ON,
           }}
         />
-        {children}
+        {/* The preview line, decided here on the server, for the site menu (components/preview-line.tsx). */}
+        <PreviewLineProvider value={PLANS_ON_SALE ? null : { line: PREVIEW_LINE, href: PREVIEW_LINK.href, label: PREVIEW_LINK.label }}>
+          {children}
+        </PreviewLineProvider>
         {/*
           And the thing that brings them back, at the end of the body.
 

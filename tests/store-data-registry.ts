@@ -1010,6 +1010,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sa:@lib/stock-alert-send.ts": short("A back-in-stock batch written down before it is sent (623 [SZ7]), its addresses and when: one email of the store's own each, deleted once sent and ending by itself within a day", "own", 1, 330),
   "nl:sa:due@lib/stock-alerts.ts": company("Products with a confirmed back-in-stock address, for the restock job (623 [SZ7])", "One sorted set for every store; a member leaves when its list has done its job or is gone, its store is gone, or its product left the store."),
   "nl:sa:t:@lib/stock-alerts.ts": room("A back-in-stock list's confirm link (a week) and leave link (as long as the list), taken from the room before they are written", "lib/stock-alerts.ts"),
+  "nl:ls:@lib/low-stock.ts": room("A limited product's low-stock number and the units last seen (623 [SZ7]): one field a product, the largest it can become taken from the room before it is written and given back when turned off", "lib/low-stock.ts"),
   "nl:watch:due@lib/watch.ts": company("Stores whose video watching to read", "One sorted set for every store."),
   "nl:watch:folders:@lib/watch.ts": company("Stores that had any watching, a month", "One set a month for every store."),
   "nl:watch:last:@lib/watch.ts": { what: "Each video's total when last read", room: ["app/api/store/stream/route.ts"] },

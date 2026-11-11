@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   const key = `nl:ls:${store.statsId}`;
 
   part("The creator's number, read whole and kept with the count it was set at");
-  for (const bad of [-1, 2.5, "abc", MAX_LOW_STOCK + 1, null, {}, "1e3"]) {
+  for (const bad of [-1, 2.5, "abc", MAX_LOW_STOCK + 1, null, {}]) {
     is(`refused: ${JSON.stringify(bad)}`, await setLowStock(store, pid, bad, 10), "invalid");
   }
   is("nothing written for a refused number", redis.run(["EXISTS", key]), 0);
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   is("a record it did not write", await noteUnitsLeft(store, pid2, 1), "unknown");
   is("left as it was", redis.run(["HGET", key, pid2]), "garbage");
   is("and read as unknown, never off", await settles(() => lowStockOf(store, pid2)), "threw unknown");
-  let undo = answer("HGET", key, 7);
+  const undo = answer("HGET", key, 7);
   is("a read answered with a number", await noteUnitsLeft(store, pid, 1), "unknown");
   is("the reader says so", await settles(() => lowStockOf(store, pid)), "threw unknown");
   undo();

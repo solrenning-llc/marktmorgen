@@ -16,10 +16,10 @@ export async function POST(request: NextRequest) {
   const to = guarded.body.to;
   if (to !== undefined && to !== null && typeof to !== "string") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   try {
+    // A store no longer closing (null) may still take its notice away, never give one (review of #3730).
     const closing = await closingOf(guarded.store);
-    if (!closing) return Response.json({ ok: false, error: "not_closing" }, { status: 409 });
     const result = await chooseExitNotice(guarded.ref, to ?? "", closing);
-    if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "not_closing" || result.reason === "none" ? 409 : 400 });
+    if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "not_closing" || result.reason === "none" || result.reason === "suspended" ? 409 : 400 });
     return Response.json({ ok: true, to: result.store.exitNotice?.to ?? null }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("keeping a closing store's new address failed", error);

@@ -69,10 +69,12 @@ const root = process.cwd();
   is("the old address carries it", exitFromReleased(value)?.to, "https://example.com/new-shop");
 
   part("Taken away at any time before the closing day, closing or not (review of #3730)");
-  await chooseExitNotice(ref, "https://example.com/new-shop", closing, now);
-  is("a store no longer closing (closing null) can still take it away", (await chooseExitNotice(ref, "", null, now)).ok, true);
-  is("nothing kept", (await storeForEmail("chooser@example.com"))?.exitNotice, undefined);
-  is("but a store no longer closing cannot give one", await chooseExitNotice(ref, "https://example.com/new-shop", null, now), { ok: false, reason: "not_closing" });
+  is("a third store is made", (await claimHandle("remover@example.com", "removing-shop", "Removing", "")).ok, true);
+  const gaveUp = storeRef((await storeForEmail("remover@example.com"))!);
+  is("it chose a notice while closing", (await chooseExitNotice(gaveUp, "https://example.com/new-shop", closing, now)).ok, true);
+  is("no longer closing (closing null), it can still take it away", (await chooseExitNotice(gaveUp, "", null, now)).ok, true);
+  is("nothing kept", (await storeForEmail("remover@example.com"))?.exitNotice, undefined);
+  is("but no longer closing, it cannot give one", await chooseExitNotice(gaveUp, "https://example.com/new-shop", null, now), { ok: false, reason: "not_closing" });
 
   part("A suspended store: never a notice (review of #3730)");
   is("a second store is made", (await claimHandle("suspended@example.com", "suspended-shop", "Suspended", "")).ok, true);

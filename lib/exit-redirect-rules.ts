@@ -232,6 +232,16 @@ export function exitAnswerForValue(raw: unknown, now: number): ExitAnswer {
  * owner chose is shown instead of the store. Read from the record the page
  * already has; a notice that does not read gives none.
  */
-export function exitAnswerForStore(store: { exitNotice?: unknown }, now: number): ExitAnswer {
-  return exitAnswer({ record: store.exitNotice === undefined ? null : readExitNotice(store.exitNotice), holder: "released", now });
+export function exitAnswerForStore(
+  store: { exitNotice?: unknown; suspended?: boolean },
+  closing: { day: number; today?: boolean } | null | "unknown",
+  now: number,
+): ExitAnswer {
+  // Only a store whose closing day has really begun (lib/plan-closing.ts closingOf, today): never one that gave up
+  // closing (null), whose closing could not be read, whose day moved later, or that is suspended. Its 90 days run
+  // from the day it really closed, not the one known when the address was chosen (review of #3730).
+  if (store.suspended === true || store.exitNotice === undefined) return { kind: "none" };
+  if (!closing || closing === "unknown" || closing.today !== true || !Number.isFinite(closing.day)) return { kind: "none" };
+  const record = readExitNotice(store.exitNotice);
+  return exitAnswer({ record: record ? { ...record, closedAt: closing.day } : null, holder: "released", now });
 }

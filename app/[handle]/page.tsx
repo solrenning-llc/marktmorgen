@@ -2,6 +2,7 @@ import { MovedNotice } from "@/components/moved-notice";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 import { exitAnswerForStore, exitAnswerForValue } from "@/lib/exit-redirect-rules";
+import { closingOf } from "@/lib/plan-closing";
 import { VisitUsBlock } from "@/components/visit-us-block";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
@@ -109,9 +110,17 @@ async function load(raw: string) {
   return store ? { store, asked } : null;
 }
 
-/** The moved notice of a store that has closed but whose record is not yet deleted, by the rule's own clock. */
-function closingNotice(store: Store) {
-  const answer = exitAnswerForStore(store, Date.now());
+/**
+ * The moved notice of a store that has closed but whose record is not yet
+ * deleted: only once its closing day has really begun, read from its closing
+ * (two commands, and only for a store with a notice that is not suspended).
+ * A closing given up, moved later or not readable shows the store as always
+ * (review of #3730).
+ */
+async function closingNotice(store: Store) {
+  if (!store.exitNotice || store.suspended) return null;
+  const closing = await closingOf(store).catch(() => "unknown" as const);
+  const answer = exitAnswerForStore(store, closing, Date.now());
   return answer.kind === "moved" ? answer : null;
 }
 
@@ -137,6 +146,9 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
     return { title: "Not found — Marktmorgen" };
   }
   const { store } = found;
+  // A closed store showing its moved notice is never indexed (review of #3730).
+  const closedNotice = await closingNotice(store);
+  if (closedNotice) return { title: "This store has moved — Marktmorgen", robots: { index: false, follow: false } };
 
   // A store on its own live domain names that as its address for search engines.
   const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}/` : null;
@@ -217,7 +229,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   // A store whose closing day has come, while its record is not yet deleted:
   // the moved notice its owner chose, from the record already read
   // (97 [D2-OPEN-EXIT]). Before that day, or with none, the store as always.
-  const closedNotice = closingNotice(found.store);
+  const closedNotice = await closingNotice(found.store);
   if (closedNotice) {
     return (
       <div className="flex min-h-screen flex-col bg-paper text-ink">

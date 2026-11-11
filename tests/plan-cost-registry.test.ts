@@ -45,10 +45,11 @@ import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, SENT_LINK_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { SENT_LINK_REQUEST_UNITS } from "@/lib/sent-link-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
@@ -267,6 +268,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A click on a changeable link of a sent email is SENT_LINK_REQUEST_UNITS public requests, taken before its changes are read.
+  assert.ok(SENT_LINK_REQUEST_UNITS * laterPageCost() >= SENT_LINK_READ, `${SENT_LINK_REQUEST_UNITS} x ${laterPageCost()} < ${SENT_LINK_READ}`);
+  console.log(`a click on a changeable email link: $${SENT_LINK_READ.toFixed(6)} at most, counted as ${SENT_LINK_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // An affiliate's own page and the store's map take requests sized by what they read (lib/public-read-rules.ts, 4 November 2026):
   // at every size, from an empty program or store to the largest, the requests cost more than the reads.
   const sizes = [0, 1, 15, 16, 17, 31, 32, 33, 149, 150, 151, 500, 1_000, 5_000, 50_000, 1_000_000];

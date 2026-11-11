@@ -48,7 +48,7 @@ const query = (n: number, original = GUIDE) => {
   part("Nothing changed: where it was written to go, after the click is counted");
   taken = 0;
   is("goes", await followSentLink({ sid: SID, id: ID, n: "2", query: query(2), now: 1 }, deps()), { kind: "go", to: GUIDE });
-  is("one public request taken first", taken, 1);
+  is("the store's public requests taken first, once", taken, 1);
 
   part("Changed: the newest change");
   redis.run(["HSET", LINKS_KEY(ID), "2", JSON.stringify([{ to: "https://example.com/guide-v2", at: 5 }, { to: "https://example.com/old", at: 3 }])]);

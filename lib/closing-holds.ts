@@ -47,8 +47,8 @@ import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { type Store, saleHandles, storeFolder, storeForEmail, storeRef, storeRefGone } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
 import { forgetCredit } from "@/lib/closing-credit";
@@ -529,8 +529,9 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
   const out: Released[] = [];
   const flat: string[] = [];
   for (let from = 0; from < 100_000; from += 500) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500]]);
-    const page = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+    // Read exactly (rule 24): a page cut short or of another shape is an error, never "nobody is held".
+    const page = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500]]), 1)?.[0]);
+    if (!page || page.length % 2 !== 0 || page.length > 1000) throw new UnknownReplyError("a page of the held stores");
     flat.push(...page);
     if (page.length < 1000) break;
   }
@@ -538,8 +539,21 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
     if (Date.now() > deadline) break;
     const key = flat[i];
     const endedAt = Number(flat[i + 1]);
-    const store = await storeForEmail(key).catch(() => null);
+    // Gone only when its owner key is confirmed absent (rule 24): a record that does not read, or a read that fails,
+    // keeps the entry for the next day, so its paused members are released once it reads again.
+    let store: Store | null;
+    try {
+      store = await storeForEmail(key);
+    } catch (error) {
+      console.error("a held store could not be read; it is kept for the next day", error);
+      out.push({ key, state: "held" });
+      continue;
+    }
     if (!store) {
+      if (!(await storeRefGone(key).catch(() => false))) {
+        out.push({ key, state: "held" });
+        continue;
+      }
       await redisPipeline([["ZREM", HELD_INDEX, key]]);
       out.push({ key, state: "gone" });
       continue;

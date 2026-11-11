@@ -1227,6 +1227,17 @@ export const storeForPage = cache(storeForHandle);
  * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of
  * another shape is not "gone" (CX-123 rule 24), so what would be deleted because the store is gone is kept.
  */
+/**
+ * Whether the store an owner reference (an address, or an extra store's ref) names is confirmed gone: its owner key's
+ * EXISTS answers exactly 0. Anything else, a reply cut short or of another shape, is not "gone" (rule 24); for a walk
+ * that must keep an entry until its store is known to be deleted (lib/closing-holds.ts, releaseRestarted).
+ */
+export async function storeRefGone(ref: string): Promise<boolean> {
+  if (!ref || !isRedisConfigured()) return false;
+  const reply = repliesFor(await redisPipeline([["EXISTS", await ownerKey(ref)]]), 1);
+  return reply !== null && countOf(reply[0]) === 0;
+}
+
 export async function storeIdGone(sid: string): Promise<boolean> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
   const reply = repliesFor(await redisPipeline([["EXISTS", storeIdKey(sid)]]), 1);

@@ -55,6 +55,9 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { MAIL_GAP_COMMANDS_PER_CHECK, mailGapCheckLimit } from "@/lib/mail-frequency";
+/** A gap mark moved: a key under 80 characters with a time or a claim value, rounded up (tests/store-data-registry.ts, MARK). */
+const MAIL_GAP_MARK_BYTES = 160;
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -963,6 +966,15 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/mail.ts", names: ["reserve", "takeFromMonth"] },
     ],
     basis: "Every monthly email sent, at the most an email costs.",
+  },
+  {
+    id: "mail-gap",
+    feature: "Nobody gets too many emails (374 [SU7], 11 November 2026): each person checked against the store's gap before a list email or automation",
+    monthlyUsd: (tier) => 2 * mailGapCheckLimit(tier) * (MAIL_GAP_COMMANDS_PER_CHECK * COMMAND + 2 * MAIL_GAP_MARK_BYTES * DB_BYTE),
+    sources: [
+      { file: "lib/mail-frequency.ts", names: ["MAIL_GAP_CHECKS_PER_EMAIL", "MAIL_GAP_COMMANDS_PER_CHECK", "takeChecks", "mailGapCheckLimit", "if (count > limit) return false"] },
+    ],
+    basis: "Checks are taken from the store's calendar month before any read, at most MAIL_GAP_CHECKS_PER_EMAIL for each monthly email of the plan (none on Store); a billing month touches two calendar months. Each check costs at most MAIL_GAP_COMMANDS_PER_CHECK commands (the count, its give-back, the read, the claim, its read-back and the record) and moves two marks; what the marks keep for seven days is in the data room's families nl:mgap:*. A send past the checks reads nothing.",
   },
   {
     id: "transactional-email",

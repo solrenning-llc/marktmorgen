@@ -73,7 +73,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:manage:portal:", "nl:meet:conn:", "nl:meet:lock:", "nl:meet:log:", "nl:meet:q", "nl:meet:r:",
   "nl:meet:refresh:", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:read:", "nl:metaads:reading:",
-  "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
+  "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mgap:checks:", "nl:mgap:gate:", "nl:mgap:last:", "nl:mnum:", "nl:monthly:lock",
   "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
@@ -313,6 +313,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:meet:state:": X(1), "nl:meet:stores": I, "nl:meet:test:": E, "nl:meet:user:": I, "nl:meet:zoomseen:": C,
   "nl:member:status:": E,
   "nl:metaads:conn:": E, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
+  // The per-person email gap (374 [SU7], lib/mail-frequency.ts): records end by themselves within seven days, the month's count within forty.
+  "nl:mgap:checks:": X(40), "nl:mgap:gate:": X(7), "nl:mgap:last:": X(7),
   "nl:mnum:": E,
   "nl:monthly:lock": C, "nl:monthly:sent:": Cr(62),
   "nl:mv:": E, "nl:mv:due": I, "nl:mv:link:": T("nl:mv:"),

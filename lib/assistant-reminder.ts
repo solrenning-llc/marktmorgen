@@ -19,6 +19,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
@@ -155,10 +156,14 @@ export async function keepAssistReminder(input: { store: Store; session: string;
 export async function forgetAssistReminderPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const who = whoKey(statsId, email);
-  const [members] = await redisPipeline([["SMEMBERS", who]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
-  const [gone] = await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]);
-  return Number(gone) || 0;
+  // Read exactly (rule 24): a note cut short or of another shape throws before anything is deleted, so the erasure is
+  // tried again, never the note alone deleted with the consents and the typed address kept for a queued reminder.
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the checkouts a person asked a reminder for");
+  const sessions = members.filter((s) => SESSION.test(s));
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("a person's reminder consents deleted");
+  return gone;
 }
 
 /**

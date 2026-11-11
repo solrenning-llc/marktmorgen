@@ -16,7 +16,8 @@ import { holdState } from "@/lib/child-safety";
  *
  * Every word on it is on the page it links to, so a shared card can never
  * promise what the page does not. A product without a picture gets the same
- * card in its store's colours.
+ * card in its store's colours. A store switched off after notices gets the
+ * plain card a missing product gets, with no product on it.
  *
  * Product pictures are kept as WebP or JPEG (lib/product-image.ts). The card
  * drawer reads JPEG itself; a WebP picture is turned into JPEG first by
@@ -72,7 +73,11 @@ export default async function OpengraphImage({ params }: Params) {
     // An address with a broken escape in it names no store: the plain card.
   }
   const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
-  const found = store ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
+  // A store switched off after notices (lib/takedown.ts) shows no product on
+  // its pages, so its card is the plain one a missing product gets. A store
+  // that cannot be read is already null above: the plain card too.
+  const found =
+    store && !store.suspended ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
   // A draft has no picture to share either, nor a product held for a child-safety report (lib/child-safety.ts),
   // even when taking it off the store did not go through; a hold that cannot be read is not a yes.
   const product = found && store && !found.hidden && (await holdState(store, found.id)) === "free" ? found : null;

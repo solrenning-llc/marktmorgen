@@ -13,6 +13,7 @@ import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
+import { readCountry } from "@/lib/fair-price";
 
 /**
  * Starts a purchase paid with PayPal, into the creator's own PayPal account
@@ -51,12 +52,12 @@ export async function POST(request: NextRequest) {
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
-  if (product.bundle) {
-    // A bundle holding a product kept for a child-safety report is not sold; a hold that cannot be read refuses.
-    const held = await heldIdsAmong(store, product.bundle).catch(() => null);
-    if (!held) return away(`/@${store.handle}?status=error`);
-    if (deliverableItems(product, await readListings(store, product.bundle), held).length < MIN_BUNDLE_ITEMS) return away(`/@${store.handle}`);
-  }
+  // Nothing kept for a child-safety report is sold: the product's own mark (its hidden write may not have landed,
+  // Claude 6's MEDIUM on #3471) and, for a bundle, its items'. A hold that cannot be read refuses.
+  const held = await heldIdsAmong(store, [...new Set([product.id, ...(product.bundle ?? [])])]).catch(() => null);
+  if (!held) return away(`/@${store.handle}?status=error`);
+  if (held.has(product.id)) return away(`/@${store.handle}`);
+  if (product.bundle && deliverableItems(product, await readListings(store, product.bundle), held).length < MIN_BUNDLE_ITEMS) return away(`/@${store.handle}`);
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the
   // buyer, if one did (lib/affiliates.ts). A lookup that fails never stops the sale.
@@ -72,7 +73,10 @@ export async function POST(request: NextRequest) {
       return { ...(page.source ? { utm_source: page.source } : {}), ...(page.medium ? { utm_medium: page.medium } : {}), ...(page.campaign ? { utm_campaign: page.campaign } : {}) };
     })(),
   };
-  const opened = await openOrder(store, product, linkOrigin(request, store), { meta, via: via && via.rate > 0 ? { aff: via.aff, rate: via.rate } : null, digitalConsent });
+  // Where the buyer's connection is, for the fair price the page showed them: from the edge, as the Stripe
+  // checkout reads it (app/api/store/checkout/route.ts), never from the form.
+  const visitor = { ...store, visitorCountry: readCountry(request.headers.get("x-vercel-ip-country")) };
+  const opened = await openOrder(visitor, product, linkOrigin(request, store), { meta, via: via && via.rate > 0 ? { aff: via.aff, rate: via.rate } : null, digitalConsent });
   if (!opened.ok && opened.reason === "consent") return away(`/@${store.handle}/p/${product.id}?consent=needed#buy`);
   if (!opened.ok) return away(opened.reason === "paused" ? `/@${store.handle}?status=paused` : `/@${store.handle}/p/${product.id}?paypal=error`);
   after(() => countHit(request, store, { kind: "checkout", id: product.id }));

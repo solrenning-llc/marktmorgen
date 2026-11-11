@@ -168,10 +168,12 @@ export async function createCartCheckout(
   if (deal > 0) body.set("metadata[cart_deal]", String(deal));
   let discounted = deal > 0;
   const lines: { key: string | null; cents: number; id: string }[] = [];
-  // A bundle holding a product kept for a child-safety report is not sold (lib/child-safety-holds.ts): one read for
-  // every bundle in the cart; a hold that cannot be read throws, so nothing reaches Stripe.
+  // Nothing kept for a child-safety report is sold (lib/child-safety-holds.ts): one read for every product in the
+  // cart and every bundle's items. A product carrying its own mark is refused although not hidden (its hidden write
+  // may not have landed, Claude 6's MEDIUM on #3471); a hold that cannot be read throws, so nothing reaches Stripe.
   const inBundles = products.flatMap((product) => product.bundle ?? []);
-  const held = inBundles.length ? await heldIdsAmong(store, inBundles) : undefined;
+  const held = await heldIdsAmong(store, [...new Set([...products.map((product) => product.id), ...inBundles])]);
+  if (products.some((product) => held.has(product.id))) throw new Error("A product in the cart is kept for a report");
   for (const [i, product] of products.entries()) {
     const key = i === 0 ? null : BUMP_KEYS[i - 1];
     // A bundle's list is written onto the order as it is now, as for any bundle sold.

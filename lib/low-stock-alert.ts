@@ -11,9 +11,10 @@
  *
  * Bounded: at most LOW_STOCK_EMAILS_A_DAY a day per product, whatever the
  * restocks and sales in between, claimed exactly (lib/claim-mark.ts) before
- * anything is sent. The email is the company's (the same meter as the
- * store's other alerts, lib/store-alerts.ts) and stops with the numbers
- * emails (lib/stats-report.ts, weeklyOff). A count, a record or a claim that
+ * anything is sent, and at most LOW_STOCK_ALERTS_A_STORE_DAY a day for the
+ * whole store, counted before anything is sent. The email is taken from the
+ * store's own emails (meter "store", kind "email") before it goes, and
+ * stops with the numbers emails (lib/stats-report.ts, weeklyOff). A count, a record or a claim that
  * cannot be read sends nothing (rule 24); a crossing whose day's claim could
  * not be read is not said, never said twice.
  *
@@ -28,13 +29,22 @@ import { alertCreator } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
 import type { Store } from "@/lib/store";
+import { redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 
 /** The most low-stock emails one product sends its creator in a day (UTC). */
 export const LOW_STOCK_EMAILS_A_DAY = 1;
+/**
+ * The most low-stock alerts (phone and email) a whole store gets in a day,
+ * however many products cross (Claude 1 and Claude 3 on #3725): a fixed
+ * bound, not one that grows with the catalog.
+ */
+export const LOW_STOCK_ALERTS_A_STORE_DAY = 3;
 /** How long a day's claim is kept: past the day it names. */
 const TOLD_SECONDS = 2 * 86_400;
 
 const toldKey = (statsId: string, productId: string, day: string) => `nl:alert:${statsId}:low:${productId}:${day}`;
+const storeDayKey = (statsId: string, day: string) => `nl:alert:${statsId}:lowday:${day}`;
 
 export type LowStockTold = "told" | "no" | "off" | "unknown";
 
@@ -54,6 +64,16 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   const claimed = await claimMark(key, TOLD_SECONDS);
   if (claimed === "unknown") return "unknown";
   if (claimed !== "ours") return "no";
+  // The store's own daily bound, counted before anything is sent; a count that cannot be read sends nothing.
+  let count: number | null = null;
+  try {
+    const replies = repliesFor(await redisPipeline([["INCR", storeDayKey(store.statsId, day)], ["EXPIRE", storeDayKey(store.statsId, day), TOLD_SECONDS]]), 2);
+    count = replies && (replies[1] === 0 || replies[1] === 1) ? countOf(replies[0]) : null;
+  } catch {
+    count = null;
+  }
+  if (count === null || count < 1) return "unknown";
+  if (count > LOW_STOCK_ALERTS_A_STORE_DAY) return "no";
 
   let low: number | null = null;
   try {
@@ -70,7 +90,8 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   if (isSenderConfigured() && !(await weeklyOff(store.handle))) {
     const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(weeklyToken(store.handle))}`;
     await sendEmail({
-      meter: { by: "company" },
+      // The store's own emails, taken before it goes (Claude 1 and Claude 3 on #3725): one that does not fit is not sent.
+      meter: { by: "store", store, kind: "email" },
       from: NIMBUS_FROM,
       to: store.email,
       subject: title,

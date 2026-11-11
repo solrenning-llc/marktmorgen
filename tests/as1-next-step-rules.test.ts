@@ -58,6 +58,21 @@ test("the line is refused, never cut or rewritten, when it presses, promises a d
   for (const point of [0x206a, 0x206f, 0xfff9, 0xfffb, 0xe0001, 0xe0020, 0xe0067, 0xe007f, 0x1d173, 0x1d17a, 0x110bd, 0x13430]) {
     assert.equal(lineProblem(`Join n${String.fromCodePoint(point)}ow`), "hidden", `U+${point.toString(16)} is refused`);
   }
+  // Every default-ignorable code point outside the marks, assigned or not, and every unassigned one tried here
+  // (third review of #3523, MEDIUM: U+2065 and the Hangul fillers drew nothing and passed): refused, all of them.
+  const KEPT = new Set([0x200c, 0x200d, 0x200e, 0x200f, 0x61c]);
+  const passed: string[] = [];
+  for (let point = 0; point <= 0x10ffff; point++) {
+    if (point >= 0xd800 && point <= 0xdfff) continue;
+    const ch = String.fromCodePoint(point);
+    if (KEPT.has(point) || /\p{M}/u.test(ch) || !/\p{DI}/u.test(ch)) continue;
+    if (lineProblem(`Join n${ch}ow`) !== "hidden") passed.push(point.toString(16));
+  }
+  assert.deepEqual(passed.slice(0, 12), [], "no default-ignorable code point carries a word past the checks");
+  for (const point of [0x2065, 0x115f, 0x1160, 0x3164, 0xffa0, 0xfff0, 0xe0000, 0xe01f0, 0x0378, 0x10ffff]) {
+    assert.equal(lineProblem(`Get a dis${String.fromCodePoint(point)}count`), "hidden", `U+${point.toString(16)} is refused`);
+  }
+  assert.notEqual(lineProblem("A calm line ❤️"), "hidden", "an emoji's variation selector is a mark, not hidden");
   for (const point of [0x200c, 0x200d, 0x200e, 0x200f, 0x61c]) assert.notEqual(lineProblem(`A calm line${String.fromCodePoint(point)}`), "hidden", `U+${point.toString(16)} is kept`);
   assert.equal(lineProblem("Join n\u200dow"), "pressure", "a joiner inside a word does not hide it");
   assert.equal(lineProblem("Join n\u200cow"), "pressure");

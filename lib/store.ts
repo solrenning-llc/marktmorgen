@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1113,6 +1113,22 @@ export async function storeForEmailSeen(
   return store;
 }
 
+/**
+ * A store's record read exactly (rule 24): the store, or null only on Redis's
+ * own nil. Any other reply, or a record that does not parse, throws
+ * UnknownReplyError, never "no store": the closing walk never takes a deleted
+ * store whose record may still stand (lib/closed-store-data.ts, admitDeleted).
+ */
+export async function storeExactly(ref: string): Promise<Store | null> {
+  const read = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's record");
+  if (raw === null) return null;
+  const store = parseStore(raw);
+  if (!store) throw new UnknownReplyError("a store's record");
+  return store;
+}
+
 /** One bounded read for the funded restart's final source check.
  * It cannot migrate, save, infer absence from an oversized/partial answer,
  * or turn a current-source observation into permission for another POST. */
@@ -1849,26 +1865,43 @@ export type DeleteResult =
  * is — dark for a month before anyone else may take them — so a link
  * already shared leads nowhere rather than to a stranger. An account's first
  * store is its home, and is never deleted here.
+ *
+ * Its records named by its ids (its page photo, its list, its data room...)
+ * are erased as a closed store's are, by the closing walk (Claude 6's probe
+ * P3 on #3643, rule 30): `queue` is handed the store under its lock before
+ * anything goes and writes the walk's entry (lib/closed-store-data.ts,
+ * queueDeleted), or throws with nothing deleted, so the person can try
+ * again (rule 24). Then the record goes, only while the lock is still this
+ * call's, so a product added once the lock ran out is never deleted with it;
+ * a delete not known to be done goes on only when Redis says the record is
+ * gone, and the walk never takes a store whose record stands. Then its
+ * addresses are held back and its places released, each on Redis's own
+ * answer, or this throws.
  */
-export async function deleteStore(email: string): Promise<DeleteResult> {
+export async function deleteStore(email: string, queue: (store: Store) => Promise<unknown>): Promise<DeleteResult> {
   // Under the store's lock, so a product added in the same instant is either
   // seen here or never written.
-  const result = await withStore<DeleteResult>(email, async (store) => {
+  const result = await withStore<DeleteResult>(email, async (store, _save, held) => {
     if (!store.extra) return { ok: false, reason: "first" };
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
     if (store.domain) return { ok: false, reason: "domain" };
 
+    await queue(store);
+    const owner = await ownerKey(storeRef(store));
+    if (!(await deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner)])) && (await storeExactly(storeRef(store)))) throw new StoreBusyError();
     const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
-    const handles = [store.handle, ...store.previousHandles];
-    await redisPipeline([
-      ...handles.map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
-      ["DEL", await ownerKey(storeRef(store))],
+    const holds = [store.handle, ...store.previousHandles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]);
+    const removals = [
       ["DEL", storeIdKey(store.sid)],
       ["SREM", await accountKey(store.email), store.sid],
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
-    ]);
+    ];
+    const replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
+    if (!replies || replies.some((reply, i) => (i < holds.length ? reply !== "OK" : countOf(reply) === null))) {
+      throw new UnknownReplyError("a deleted store's addresses held back and its places released");
+    }
     return { ok: true, store };
   });
   return result ?? { ok: false, reason: "none" };

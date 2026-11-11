@@ -6,6 +6,7 @@ import { away, creatorFrom, storeCookie } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { forgetStoreWorkflows } from "@/lib/flows";
 import { deleteStore } from "@/lib/store";
+import { queueDeleted } from "@/lib/closed-store-data";
 import { dropTeam } from "@/lib/team";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetStorePhones } from "@/lib/phone-alerts";
@@ -60,7 +61,9 @@ export async function POST(request: NextRequest) {
       // a store with a plan in good standing there is not deleted either.
       const found = isBillingConfigured() ? await findStoreSubscriptions(store) : null;
       if (found?.live) return away(origin, studio("stores=paying"));
-      const result = await deleteStore(ref);
+      // Its keys named by its ids (its page photo, its list, its data room...) are erased by the closing walk, as a
+      // closed store's are: its entry is written before its record goes (lib/closed-store-data.ts, queueDeleted).
+      const result = await deleteStore(ref, queueDeleted);
       if (!result.ok) return away(origin, studio(`stores=${result.reason}`));
       // One that is not paying but could still be charged ends with the store.
       if (found?.lapsed.length) {

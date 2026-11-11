@@ -27,11 +27,12 @@ function checkout(meta: Record<string, string>, o: Opts = {}) {
   return { created: created === null ? now : created * 1000, cents: typeof row.amount_total === "number" ? row.amount_total : 0, currency, upsell: false, row };
 }
 /** A one-click offer charge (PaymentIntent, metadata kind=upsell). */
-function offer(o: { amount?: unknown; currency?: string; created?: number } = {}) {
+function offer(o: { amount?: unknown; currency?: string; created?: number; afterNo?: unknown } = {}) {
   const created = o.created ?? seconds(now - 7_200_000);
   const currency = o.currency ?? "usd";
   const row: Record<string, unknown> = { object: "payment_intent", status: "succeeded", currency, created, metadata: { kind: "upsell", store: "s" } };
   if (o.amount !== undefined) row.amount = o.amount;
+  if (o.afterNo !== undefined) (row.metadata as Record<string, unknown>).after_no = o.afterNo;
   return { created: created * 1000, cents: typeof o.amount === "number" ? o.amount : 0, currency, upsell: true, row };
 }
 const measured = (row: LeverReading["rows"][LeverKey] | undefined) => {
@@ -81,14 +82,35 @@ test("a bundle earns the whole paid order whose product is a bundle; an order wi
   assert.equal(bundle.left, 1);
 });
 
-test("downsell, checkout recovery and next offer are not recognizable in today's records: not measured, never zero", () => {
+test("a downsell is an offer whose payment says it followed a No thanks: counted apart from Upsell, and always as at least (752 [CD3] (b) unit 2)", () => {
+  const reading = leverEarnings(
+    [offer({ amount: 900, afterNo: "yes" }), offer({ amount: 400, afterNo: "yes" }), offer({ amount: 1500 }), offer({ amount: 700, afterNo: "no" }), offer({ amount: 300, afterNo: 1 }), offer({ afterNo: "yes" })],
+    "usd",
+    false,
+    now,
+  );
+  const downsell = measured(reading.rows.downsell);
+  assert.deepEqual(downsell.amounts, [{ currency: "usd", cents: 1300, orders: 2 }]);
+  assert.equal(downsell.left, 1);
+  // Only the exact mark: any other value is an upsell, as every offer was before the mark existed.
+  assert.deepEqual(measured(reading.rows.upsell).amounts, [{ currency: "usd", cents: 2500, orders: 3 }]);
+  // Older downsells carry no mark and stay under Upsell, so the downsell figure is a lower bound, said so.
+  const clean = leverEarnings([offer({ amount: 900, afterNo: "yes" })], "usd", false, now);
+  assert.equal(leverEarnedWords(clean.rows.downsell, "downsell", clean.complete).line, "Earned in the last 30 days: at least $9 from 1 order.");
+  assert.match(leverEarnedWords(clean.rows.downsell, "downsell", true).how, /No thanks/);
+  assert.match(leverEarnedWords(clean.rows.downsell, "downsell", true).how, /under Upsell/);
+  assert.match(leverEarnedWords(clean.rows.upsell, "upsell", true).how, /Downsell/);
+  assert.equal(leverEarnedWords(clean.rows.upsell, "upsell", true).line, "Earned in the last 30 days: $0 from 0 orders.");
+});
+
+test("checkout recovery and next offer are not recognizable in today's records: not measured, never zero", () => {
   const reading = leverEarnings(
     [checkout({ product: "p1" }, { extra: { recovered_from: "cs_test_old" } }), offer({ amount: 500 })],
     "usd",
     false,
     now,
   );
-  for (const key of ["downsell", "recovery", "next"] as const) {
+  for (const key of ["recovery", "next"] as const) {
     const row = reading.rows[key] as LeverEarned;
     assert.equal(row.measured, false, key);
     assert.equal("amounts" in row, false, key);

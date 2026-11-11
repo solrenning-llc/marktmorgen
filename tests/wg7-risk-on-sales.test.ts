@@ -66,6 +66,8 @@ async function main(): Promise<void> {
         metadata: { kind: "upsell", store: store.handle, title: "Extra" }, latest_charge: charge("ch_u", { risk_level: "highest" }) },
       { id: "pi_upsell_plain", object: "payment_intent", status: "succeeded", created: now - 11, amount: 900, currency: "usd",
         metadata: { kind: "upsell", store: store.handle, title: "Extra two" }, latest_charge: "ch_unexpanded" },
+      { id: "pi_upsell_wrongobj", object: "customer", status: "succeeded", created: now - 14, amount: 900, currency: "usd",
+        metadata: { kind: "upsell", store: store.handle, title: "Extra three" }, latest_charge: charge("ch_w", { risk_level: "highest" }) },
     ] };
 
     part("The risk comes from the reads the list already makes");
@@ -93,6 +95,7 @@ async function main(): Promise<void> {
     is("another kind of object in the payment's place (Codex C2 on #3647)", risk.get("cs_test_customerobj"), "not_available");
     is("a payment that does not say what it is", risk.get("cs_test_noobject"), "not_available");
     is("an extra whose charge was not expanded", risk.get("pi_upsell_plain"), "not_available");
+    is("an extra row that is not a payment, with a charge in it (Codex G on #3647)", risk.get("pi_upsell_wrongobj"), "not_available");
 
     part("A free trial charged nothing, so it shows no risk");
     is("trial has no risk", risk.get("cs_test_trial"), null);

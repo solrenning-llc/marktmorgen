@@ -143,6 +143,9 @@ is("no meaning by color alone: no color-only danger text", !/text-danger/.test(h
 
 part("Where it is shown");
 const panel = readFileSync("components/share-panel.tsx", "utf8");
+// Only the optional variant looks personal (Claude 1's LOW on #3194): the sentence names the variant, never the name.
+const variantRefused = renderToStaticMarkup(createElement(CampaignQr, { url: page, title: "Knife skills", campaign: "spring-fair", content: "call 85 99999-1234" }));
+is("a variant that looks like a phone number: no code, and the sentence names the variant, not the campaign name", [variantRefused.includes("<svg"), variantRefused.includes("No QR code for this variant"), variantRefused.includes("No QR code for this name")], [false, true, false]);
 is("the share panel shows it beside the campaign link", panel.includes('import { CampaignQr } from "@/components/campaign-qr";') && panel.includes("<CampaignQr url={url} title={title} campaign={post} content={postContent} />"), true);
 const lib = readFileSync("lib/campaign-qr.ts", "utf8") + readFileSync("components/campaign-qr.tsx", "utf8");
 is("drawn locally: no network, no store write", !/fetch\(|@\/lib\/redis|https:\/\/api\./.test(lib), true);

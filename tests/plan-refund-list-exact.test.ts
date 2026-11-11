@@ -163,6 +163,26 @@ async function main() {
   await finishPlanRefunds(Date.now() + 10_000, NOW + SETTLE_SECONDS + 60);
   is("the stop taken back", live.sub().cancel_at_period_end, false);
   is("the letter says the plan goes on", world.emails.filter((e) => /goes on as before/.test(e.text)).length, 1);
+
+  part("None was made, the stop could not be taken back, the note older than the give-up: kept, never told the plan goes on (Claude 1 on #3190)");
+  const stuck = await shop();
+  await redisPipeline([["HSET", ENDING_KEY, stuck.sid, JSON.stringify({ s: stuck.subId, at: NOW, t: NOW, m: 1, p: one(stuck.charge) })]]);
+  world.subs.get(stuck.subId)!.cancel_at_period_end = true;
+  world.stopDown = true;
+  world.emails = [];
+  await finishPlanRefunds(Date.now() + 10_000, NOW + 8 * 86_400);
+  world.stopDown = false;
+  is("no letter says the plan goes on or renews while our stop is still set", world.emails.filter((e) => /goes on as before|renews as usual/.test(e.text)).length, 0);
+  is("the stop still set, the note kept for tomorrow", [stuck.sub().cancel_at_period_end, (await stuck.note()) !== null], [true, true]);
+
+  part("Refunds that failed or were canceled are no money given, whatever their amount reads (R1 on #3190)");
+  for (const status of ["failed", "canceled"] as const) {
+    for (const [label, over] of [["no amount", { amount: undefined }], ["an amount in another shape", { amount: "6900" }], ["no currency", { currency: undefined }]] as const) {
+      const s = await shop();
+      refund(s.charge, s.sid, { status, ...over });
+      is(`${status}, ${label}: none, never unknown`, (await partsOutcome(s.sid, one(s.charge))).kind, "none");
+    }
+  }
   delete process.env.RESEND_API_KEY;
   done();
 }

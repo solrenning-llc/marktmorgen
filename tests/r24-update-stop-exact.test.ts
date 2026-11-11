@@ -38,7 +38,7 @@ for (const [label, reply] of [["no reply", []], ["a number", [7]], ["two replies
 test("the stop's write not confirmed: not \"no such link\"", async () => {
   redis.clear();
   await pipeline([["SET", `nl:upd:stop:${TOKEN}`, GRANT]]);
-  redis.pipeline = (async (b: Batch) => (b.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:upd:off:")) ? b.map(() => null) : pipeline(b))) as typeof redis.pipeline;
+  redis.pipeline = (async (b: Batch) => (b.some((c) => c.some((part) => String(part).startsWith("nl:upd:off:"))) ? b.map(() => null) : pipeline(b))) as typeof redis.pipeline;
   try {
     const outcome = await stopUpdates(TOKEN).then((done) => String(done), () => "threw");
     assert.equal(outcome, "threw");

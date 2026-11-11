@@ -105,7 +105,7 @@ export function draftTopics(texts: readonly string[], language: string | null | 
 }
 
 const TOPIC_WORDS_SAID: Record<SensitiveTopic, string> = { health: "health", money: "money", law: "the law" };
-const TOPIC_READER: Record<SensitiveTopic, string> = { health: "a doctor", money: "an accountant", law: "a lawyer" };
+const TOPIC_READER: Record<SensitiveTopic, string> = { health: "a doctor", money: "a financial advisor", law: "a lawyer" };
 
 const listed = (words: readonly string[], last: "and" | "or") =>
   words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} ${last} ${words[words.length - 1]}`;
@@ -118,7 +118,7 @@ export function sensitiveLabel(topics: DraftTopics): string {
 /** What the checks say about those subjects, or null when there are none. */
 export function sensitiveWarning(topics: DraftTopics): string | null {
   if (topics === "unread") {
-    return "If this draft is about health, money or the law, have someone who knows the subject read it before you publish, such as a doctor, an accountant or a lawyer, and do not promise a result. We look for these subjects only in drafts written in English.";
+    return "If this draft is about health, money or the law, have someone who knows the subject read it before you publish, such as a doctor, a financial advisor or a lawyer, and do not promise a result. We look for these subjects only in drafts written in English.";
   }
   if (!topics.length) return null;
   const subjects = listed(topics.map((topic) => TOPIC_WORDS_SAID[topic]), "and");

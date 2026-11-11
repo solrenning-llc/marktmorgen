@@ -99,7 +99,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/imported-purchases.ts", how: "erased", only: "person", what: "What an import from another platform gave them here. Nothing was paid here for it, so they lose access to it" },
   { file: "lib/imported-purchases.ts", how: "kept", only: "team", what: "What an import from another platform gave them here", why: "It is how they keep what they bought on your old platform. They can delete it themselves, from your store's privacy link." },
   { file: "lib/move-members.ts", how: "erased", what: "The invitations an import gave them to keep a membership here, with their links and reminders" },
-  { file: "lib/reviews.ts", how: "erased", only: "person", what: "Their reviews, with their photos; their stars leave your averages" },
+  { file: "lib/reviews.ts", how: "erased", only: "person", what: "Their reviews, with their photos; their stars leave your averages, and their name and words leave your store page's quotes" },
   { file: "lib/reviews.ts", how: "kept", only: "team", what: "Reviews they wrote, under the name they chose, without their address", why: "A store may not take down a review by deleting its writer (the FTC's rule on consumer reviews). They can delete it themselves, or delete themselves from your store's privacy link." },
   { file: "lib/review-proof.ts", how: "erased", via: "lib/erasure-index.ts", what: "The links that let them write a review" },
 
@@ -175,6 +175,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/team.ts", how: "account", what: "A store's team and invitations" },
   { file: "lib/pipeline-access.ts", how: "account", what: "What each teammate may do with each sales pipeline, under the teammate's sign-in address; it goes when they leave the team" },
   { file: "lib/store.ts", how: "account", what: "Which stores an account owns" },
+  { file: "lib/account-exists.ts", how: "account", what: "Reads, never writes, whether an address already owns a store, from the same records lib/store.ts keeps, when a team invitation is taken" },
   { file: "lib/phone-alerts.ts", how: "account", what: "The creator's own phone, and one-way marks of events already told" },
   { file: "lib/path.ts", how: "account", what: "The store owner's own Path: their four answers, days, best level, cached facts and optional mission-board token/count/time; private record downloadable only by the owner through /api/store/path, board removed when Path/store is deleted, nothing about a buyer" },
   { file: "lib/stats-report.ts", how: "none", what: "Weekly reports to the store's own team; no buyer's address" },

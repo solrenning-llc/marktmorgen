@@ -23,7 +23,7 @@ import {
 } from "@/lib/assignment-rules";
 import { deleteFile, headFile } from "@/lib/file-store";
 import { plain, serveFile } from "@/lib/serve-file";
-import { fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState, fromAnotherSite, limited } from "@/lib/request-guard";
 import { noteIfFinished } from "@/lib/course-finish";
 import { takeBuyerAction, takeBuyerRead } from "@/lib/buyer-actions";
 import { speech } from "@/lib/buyer-words";
@@ -59,7 +59,10 @@ export async function POST(request: NextRequest) {
     const on = await studentOnTask(body.handle, body.product, body.lesson, await cookies());
     if (!on.ok) return no(on.reason === "unknown" ? "unknown" : "closed", on.reason === "unknown" ? 404 : 403);
     const { store, product, course, lesson, task, who, email } = on;
-    if (!(await withinEssentialLimit("task-hand-in", who, HAND_INS_PER_HOUR, 3_600))) return no("slow", 429);
+    // Past the hour's hand-ins, "slow"; a count that cannot be read is "unavailable", never "slow down" (rule 24).
+    const tries = await essentialLimitState("task-hand-in", who, HAND_INS_PER_HOUR, 3_600);
+    if (tries === "exceeded") return no("slow", 429);
+    if (tries === "unknown") return no("unavailable", 503);
     // A hand-in is one of the store's buyer actions (lib/buyer-actions.ts).
     if (!(await takeBuyerAction(store))) return no("resting", 503);
 

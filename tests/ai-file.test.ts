@@ -17,6 +17,10 @@
  *   - a run allows one save; the save draws a tagged PDF into the store's own
  *     folder for that product, attaches it, never publishes it, and undoes
  *     whatever fails on the way;
+ *   - the save reserves its room, then one upload of the month, both at the
+ *     most a file may be, before it draws the PDF: a full storage takes no
+ *     upload, and a refusal of either draws nothing; the run's save comes back
+ *     only after a save that drew nothing, so one run draws one PDF at most;
  *   - only a draft that hands over nothing yet may take such a file.
  */
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
@@ -36,8 +40,10 @@ import {
   MAX_SECTION_TITLE,
   SECTION_END,
   SECTION_POINTS,
+  type FileDraft,
   type FileOutline,
 } from "@/lib/ai-file-rules";
+import * as file from "@/lib/ai-file";
 import { type FileSaveIo, fileTargetProblem, grantFileSave, outlineRequest, saveAiFile, sectionRequests, takeFileSave, writeFileOutline, writeFileSections } from "@/lib/ai-file";
 import { ownsVaultPath } from "@/lib/vault-rules";
 import type { Listing } from "@/lib/catalog";
@@ -47,6 +53,8 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 // The same module lib/ai.ts reads as @/lib/ai-spend (tests/aliases/ai-file.test.ts.json), so its count is the reservations made.
 import { refuse, reservations as spent } from "./ai-steps-spend-stub";
+// The same module lib/ai-file.ts reads as @/lib/ai-file-pdf, so its count is the PDFs drawn.
+import { drawings } from "./ai-file-pdf-count-stub";
 
 const PLAN = { title: "Weeknight Dinners", sections: [{ title: "Start here", points: ["What to buy", "Tools"] }, { title: "Week one", points: [] }] };
 const partText = (n: number) => `Part ${n}. Cook the rice first, then the beans.\n\nServe it warm with greens.\n\n${SECTION_END}`;
@@ -249,7 +257,7 @@ async function main(): Promise<void> {
   const pdf = good.log.written[0]?.bytes ?? new Uint8Array();
   is("a real PDF, under the most a file may be", [new TextDecoder().decode(pdf.slice(0, 5)), pdf.byteLength > 0 && pdf.byteLength <= MAX_AI_FILE_BYTES], ["%PDF-", true]);
   is("attached as this product's file, named by its title", good.log.attached.map((f) => f?.name), ["Weeknight Dinners.pdf"]);
-  is("its room reserved at its size, then released", [good.log.room, good.log.released.length], [[String(pdf.byteLength)], 1]);
+  is("its room reserved, then released", [good.log.room.length, good.log.released.length], [1, 1]);
 
   const full = fake({ reserveRoom: async () => null });
   is("storage full: nothing written or attached", [await saveAiFile(store, "prod000001", draft, full.io), full.log.written.length, full.log.attached.length], [{ ok: false, error: "storage_full" }, 0, 0]);
@@ -276,6 +284,78 @@ async function main(): Promise<void> {
   is("a file that arrived meanwhile is put back, and this one removed", [changed, raced.log.attached[1]?.name, raced.log.removed.length], [{ ok: false, error: "changed" }, "mine.pdf", 1]);
   const unreadable = fake();
   is("letters the PDF cannot draw: nothing made", [await saveAiFile(store, "prod000001", { ...draft, title: "東京の料理" }, unreadable.io), unreadable.log.written.length], [{ ok: false, error: "letters" }, 0]);
+
+  part("Room and an upload before the PDF is drawn; the run's save given back only when nothing was drawn");
+  // What each part of a save saw: the PDFs drawn before it, and the bytes it asked for.
+  type Seen = { step: string; drawnBefore: number; bytes?: number };
+  const watched = (change: Partial<FileSaveIo> = {}) => {
+    const seen: Seen[] = [];
+    const base = fake(change);
+    const at = drawings.count;
+    const io: FileSaveIo = {
+      ...base.io,
+      folder: async () => {
+        seen.push({ step: "folder", drawnBefore: drawings.count - at });
+        return base.io.folder();
+      },
+      reserveRoom: async (f, bytes) => {
+        seen.push({ step: "reserveRoom", drawnBefore: drawings.count - at, bytes });
+        return base.io.reserveRoom(f, bytes);
+      },
+      reserveUpload: async (bytes) => {
+        seen.push({ step: "reserveUpload", drawnBefore: drawings.count - at, bytes });
+        return base.io.reserveUpload(bytes);
+      },
+    };
+    return { io, log: base.log, seen, drawn: () => drawings.count - at };
+  };
+  // At this head the route gives the run's save back after every refusal but "changed" (app/api/store/ai-file/route.ts).
+  const givenBack = (error: string): boolean => {
+    const rule = (file as Record<string, unknown>).saveGivenBack;
+    return typeof rule === "function" ? (rule as (e: string) => boolean)(error) : error !== "changed";
+  };
+
+  const kept = watched();
+  is("kept", (await saveAiFile(store, "prod000001", draft, kept.io)).ok, true);
+  is("room first, then the upload, both before the drawing", kept.seen.map((s) => [s.step, s.drawnBefore]), [["folder", 0], ["reserveRoom", 0], ["reserveUpload", 0]]);
+  is("both at the most a file may be, since its size is not known before it is drawn", kept.seen.filter((s) => s.bytes !== undefined).map((s) => s.bytes), [MAX_AI_FILE_BYTES, MAX_AI_FILE_BYTES]);
+  is("drawn once", kept.drawn(), 1);
+
+  const noRoom = watched({ reserveRoom: async () => null });
+  const noRoomResult = await saveAiFile(store, "prod000001", draft, noRoom.io);
+  is("storage full: refused, with no upload of the month taken and nothing drawn", [noRoomResult, noRoom.seen.map((s) => s.step), noRoom.drawn()], [{ ok: false, error: "storage_full" }, ["folder", "reserveRoom"], 0]);
+  const noUpload = watched({ reserveUpload: async () => false });
+  const noUploadResult = await saveAiFile(store, "prod000001", draft, noUpload.io);
+  is("no upload left: refused, nothing drawn, the room given back", [noUploadResult, noUpload.drawn(), noUpload.log.released.length], [{ ok: false, error: "upload_budget_unavailable" }, 0, 1]);
+
+  // Every way a save can end without a file: the run's save comes back only when that save drew nothing.
+  let firstAttach = true;
+  const endings: [string, ReturnType<typeof watched>, FileDraft][] = [
+    ["letters", watched(), { ...draft, title: "東京の料理" }],
+    ["storage full", noRoom, draft],
+    ["no upload left", noUpload, draft],
+    ["a write that fails", watched({ write: async () => false }), draft],
+    ["a file measured otherwise", watched({ measure: async () => ({ size: 1, contentType: "application/pdf" }) }), draft],
+    ["an attach that fails", watched({ attach: async () => ({ ok: false, reason: "gone" }) }), draft],
+    ["a file store that throws", watched({ rememberOwner: async () => { throw new Error("down"); } }), draft],
+    [
+      "a file that arrived meanwhile",
+      watched({
+        attach: async () => {
+          if (!firstAttach) return { ok: true, removed: null };
+          firstAttach = false;
+          return { ok: true, removed: other };
+        },
+      }),
+      draft,
+    ],
+  ];
+  for (const [name, save, text] of endings) {
+    const result = save === noRoom ? noRoomResult : save === noUpload ? noUploadResult : await saveAiFile(store, "prod000001", text, save.io);
+    if (result.ok) throw new Error(`${name}: kept`);
+    is(`${name} (${result.error}): the run's save comes back only when nothing was drawn`, givenBack(result.error), save.drawn() === 0);
+  }
+  is("a file that came out too big was drawn: its save does not come back", givenBack("too_big"), false);
 
   done();
 }

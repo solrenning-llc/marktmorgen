@@ -9,7 +9,11 @@
  *     first, each part as it starts and ends, then the file, and the run then
  *     allows one save;
  *   - a save waits for the three checks under the AI draft (756 [STN3]) and
- *     for a run that allows it; a run id that is not one is refused.
+ *     for a run that allows it; a run id that is not one is refused;
+ *   - a save refused before its PDF is drawn draws nothing and gives the
+ *     run's save back;
+ *   - a run whose save could not be confirmed says so in its last line, with
+ *     the parts it wrote.
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -17,9 +21,11 @@ import { addProduct, claimHandle, ensureStatsId, setProductHidden, setSubscripti
 import { readListing } from "@/lib/catalog";
 import { SECTION_END } from "@/lib/ai-file-rules";
 import { POST } from "@/app/api/store/ai-file/route";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+// The same module lib/ai-file.ts reads as @/lib/ai-file-pdf (tests/aliases/ai-file-route.test.ts.json), so its count is the PDFs drawn.
+import { drawings } from "./ai-file-pdf-count-stub";
 
 const OWNER = "file.route@example.com";
 const ORIGIN = "https://marktmorgen.com";
@@ -32,6 +38,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const text = String(body.system).startsWith("You plan a guide") ? JSON.stringify(PLAN) : `Cook the rice first.\n\nThen the beans.\n\n${SECTION_END}`;
   return new Response(JSON.stringify({ content: [{ type: "text", text }] }));
 }) as typeof fetch;
+
+let unknownFor: ((command: (string | number)[]) => boolean) | null = null;
+const realPipeline = redis.pipeline.bind(redis);
+redis.pipeline = async (commands: (string | number)[][]) => {
+  const replies = await realPipeline(commands);
+  return commands.map((command, i) => (unknownFor?.(command) ? { unexpected: true } : replies[i]));
+};
 
 const VAULT = { R2_ACCOUNT_ID: "c".repeat(32), R2_ACCESS_KEY_ID: "FILEROUTEKEY0000001", R2_SECRET_ACCESS_KEY: "s".repeat(40), R2_BUCKET: "marktmorgen-files" };
 
@@ -94,6 +107,24 @@ async function main(): Promise<void> {
   is("a text not read exactly: refused", await json(await ask({ action: "save", product: draft.product.id, run, draft: { ...text, html: "<b>" }, checks: [true, true, true] })), [400, { ok: false, error: "invalid" }]);
   is("a published product: refused before anything", await json(await ask({ action: "save", product: shown.product.id, run, draft: text, checks: [true, true, true] })), [409, { ok: false, error: "published" }]);
   is("the draft product is still a draft, with no file", [(await readListing(store, draft.product.id))?.hidden, (await readListing(store, draft.product.id))?.file], [true, null]);
+
+  part("A save refused before its PDF is drawn draws nothing, and the run keeps its save");
+  // No file store answers here, so the room or the month's upload cannot be had. A minute later, past the per-minute limit.
+  advance(61_000);
+  const drawnBefore = drawings.count;
+  const [refusedStatus, refused] = await json(await ask({ action: "save", product: draft.product.id, run, draft: text, checks: [true, true, true] }));
+  is("refused for room or for an upload", [refusedStatus === 409 || refusedStatus === 503, refused.error === "storage_full" || refused.error === "upload_budget_unavailable"], [true, true]);
+  is("no PDF drawn", drawings.count - drawnBefore, 0);
+  is("the run's save is given back", redis.run(["GET", `nl:ai:file:${store.statsId}:${run}`]), "1");
+
+  part("A run whose save could not be confirmed says so in its last line");
+  const unsaved = "fileroutenomark01";
+  unknownFor = (c) => c[0] === "SET" && String(c[1]) === `nl:ai:file:${store.statsId}:${unsaved}`;
+  const markless = await ask({ action: "sections", product: draft.product.id, outline: PLAN, run: unsaved, notes: "" });
+  const tail = (await markless.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>).pop() as { ok?: boolean; value?: { sections?: unknown[] }; saveable?: unknown };
+  unknownFor = null;
+  // The mark's reply could not be read: it may or may not be kept, so the run cannot say that it can be saved.
+  is("the parts written still come back, said as not to be made into a file", [tail.ok, tail.value?.sections?.length, tail.saveable], [true, 2, false]);
 
   done();
 }

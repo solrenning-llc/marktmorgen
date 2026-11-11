@@ -1,1 +1,1 @@
-{ "@/lib/ai-spend": "ai-steps-spend-stub.ts" }
+{ "@/lib/ai-spend": "ai-steps-spend-stub.ts", "@/lib/ai-file-pdf": "ai-file-pdf-count-stub.ts" }

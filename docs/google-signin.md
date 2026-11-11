@@ -1,6 +1,6 @@
 # Entrar com o Google — 276 [H3-1]
 
-Registro de 01/11/2026 (Fortaleza). Estado (VR): **desligado pelas travas**, construído e testado num PR; não está disponível ao cliente. `GOOGLE_SIGNIN_APPROVED` é `false` em `lib/google-signin.ts`. Nada foi feito no Google Cloud, nenhuma conta, termo ou configuração foi tocada.
+Registro de 01/11/2026 (Fortaleza). Estado (VR): **desligado pelas travas**, construído e testado num PR; não está disponível ao cliente. `GOOGLE_SIGNIN_APPROVED` é `false` em `lib/google-signin.ts`. Nenhum agente fez nada no Google Cloud nem tocou em conta, termo ou configuração; o que o dono já conferiu lá está registrado abaixo (passos 2 a 7).
 
 ## O que foi construído
 
@@ -40,14 +40,14 @@ Registro de 01/11/2026 (Fortaleza). Estado (VR): **desligado pelas travas**, con
 ## Custos
 
 - **Custos nossos (por login):** duas operações no Redis para o estado, a contagem de tentativas e uma chamada ao endpoint de tokens do Google. Estão classificados como guarda de conta, como a passkey (`tests/plan-cost-registry.ts`, `"google-signin": ACCOUNT`).
-- **Preço do Google para o login com OAuth:** **não conferido em fonte oficial nesta sessão**, porque a rede recusa developers.google.com e cloud.google.com. Custo desconhecido não é zero. Conferir antes de ligar, no passo 1 abaixo.
+- **Preço do Google para o login com OAuth:** **desconhecido, não conferido em fonte oficial** (Claude 1, 05/11/2026; texto corrigido pela revisão E2 do Codex, 07/11/2026). Nenhuma página oficial lida até hoje dá o preço deste fluxo: nenhuma diz que o OAuth/OpenID Connect do Google Auth Platform é gratuito, e nenhuma diz que é cobrado por chamada. Não se sabe, então, se há cobrança por chamada. A tabela do Identity Platform, que cobra por usuário ativo e tem faixa grátis, é de outro produto e não se aplica a este fluxo. O custo por login continua como está no registro (`tests/plan-cost-registry.ts`, `"google-signin": ACCOUNT`); se o Google publicar um preço para este fluxo, ele entra nos custos antes de ligar para todos.
 
 ## O que o dono precisa fazer no Google Cloud (projeto nimbus-labs-509912, conta 072)
 
-Nada disto foi feito por agente. Os nomes dos menus mudam com o tempo. Como a documentação do Google não pôde ser lida hoje, confira cada nome na própria tela no dia.
+Nada disto foi feito por agente. O dono conferiu os passos 2 a 7 em 05/11/2026 (relato ao Claude 1, 15h49 Fortaleza); o que ele viu está em cada passo. Os nomes dos menus mudam com o tempo: confira cada nome na própria tela no dia.
 
-1. **Conferir o preço.** Na documentação oficial do Google Identity, confira se o login com OAuth/OpenID Connect tem custo, e registre a data e a fonte nesta página. Se houver custo, ele entra nos custos da LLC antes de ligar.
-2. **Abrir o projeto.** Em console.cloud.google.com, entrando com a conta 072, escolha o projeto **nimbus-labs-509912**, o mesmo das chaves `GOOGLE_OAUTH_CLIENT_ID` e `GOOGLE_OAUTH_CLIENT_SECRET` que já estão na Vercel para o Google Calendar e o Search Console.
+1. **Preço:** desconhecido, não conferido em fonte oficial (veja Custos acima). Se uma página oficial passar a dar um preço para o login com OAuth/OpenID Connect, registre aqui a data e a fonte, e o custo entra nos custos da LLC antes de ligar para todos.
+2. **Projeto** (conferido em 05/11/2026): **nimbus-labs-509912**, agora com o nome "Marktmorgen". Em console.cloud.google.com, entrando com a conta 072, é o mesmo das chaves `GOOGLE_OAUTH_CLIENT_ID` e `GOOGLE_OAUTH_CLIENT_SECRET` que já estão na Vercel para o Google Calendar e o Search Console.
 3. **Identidade do app** ("Google Auth Platform" → "Branding", antes chamado "OAuth consent screen"):
    - nome **Marktmorgen**;
    - e-mail de suporte support@marktmorgen.com;
@@ -56,11 +56,11 @@ Nada disto foi feito por agente. Os nomes dos menus mudam com o tempo. Como a do
    - termos https://marktmorgen.com/terms;
    - domínio autorizado marktmorgen.com.
 
-   O nome aparece para a pessoa na página do Google.
-4. **Escopos** ("Data access"): confira se `openid` e `.../auth/userinfo.email` estão na lista. Os escopos do Calendar e do Search Console já existentes ficam como estão.
-5. **Público** ("Audience"): confira se o app está **"In production"**. Em "Testing", só os usuários de teste conseguem entrar. Veja também o estado da verificação: os escopos do Calendar são sensíveis e podem exigir verificação do app. Registre aqui o que a tela disser sobre o login só com `openid email`.
-6. **Cliente** ("Clients"): no cliente Web cujo ID é o `GOOGLE_OAUTH_CLIENT_ID` da Vercel, confira se `https://marktmorgen.com/api/integrations/google/callback` está em "Authorized redirect URIs". Já deve estar, porque o Calendar usa esse endereço. Não é preciso acrescentar nenhum outro.
-7. **Marca do botão:** confira, nas diretrizes de marca do Google para o login, se o botão de texto "Continue with Google" sem o logotipo é aceito. Se o logotipo for exigido, ele deve entrar como imagem com texto alternativo, nunca como imagem de texto (AX274, 1.4.9).
+   O nome aparece para a pessoa na página do Google. **Conferido em 05/11/2026:** marca verificada; nome do app Marktmorgen; página inicial, privacidade, termos e domínio marktmorgen.com certos.
+4. **Escopos** ("Data access"): `openid` e `.../auth/userinfo.email` estão na lista (**conferido em 05/11/2026**). Os escopos do Calendar e do Search Console já existentes ficam como estão.
+5. **Público** ("Audience"): **"Em produção", tipo Externo** (conferido em 05/11/2026). Em "Testing", só os usuários de teste conseguem entrar. Veja também o estado da verificação: os escopos do Calendar são sensíveis e podem exigir verificação do app. Registre aqui o que a tela disser sobre o login só com `openid email`.
+6. **Cliente** ("Clients"): o cliente Web, agora chamado "Marktmorgen web", tem `https://marktmorgen.com/api/integrations/google/callback` em "Authorized redirect URIs" (**conferido em 05/11/2026**). Já deve estar, porque o Calendar usa esse endereço. Não é preciso acrescentar nenhum outro.
+7. **Marca do botão:** as diretrizes de marca do Google para o login (developers.google.com/identity/branding-guidelines, lidas pelo Claude 1 em 05/11/2026, sem data na página) dizem que o botão "must always include the standard color for the Google 'G'", sobre fundo branco, sem mudar tamanho nem cor. Feito: o botão "Continue with Google" leva o G oficial nas quatro cores padrão, sobre fundo branco, como imagem decorativa (`aria-hidden`, sem texto alternativo), e o nome do botão continua o texto visível (AX274, 1.4.9: nenhuma imagem de texto). O alvo tem 44 px e o foco é visível (`components/google-signin.tsx`, `tests/google-signin-button.test.ts`).
 8. **Ligar:**
    - para um teste com o seu próprio Gmail, defina `GOOGLE_SIGNIN_LIVE=1` na Vercel e abra https://marktmorgen.com/signin?google=test. Com essa variável, o botão aparece **somente** nesse endereço de teste, nunca na página normal de login, e a política de privacidade não muda. Assim nenhum criador encontra um botão que o Google ainda pode recusar;
    - o teste só funciona em marktmorgen.com, porque o endereço de volta é fixo. Em www.marktmorgen.com ou num endereço de pré-visualização da Vercel, o botão não aparece, e um início vindo de lá é mandado para marktmorgen.com/signin;

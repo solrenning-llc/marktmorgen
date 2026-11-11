@@ -25,7 +25,7 @@ import {
   findLesson,
   lessonCount,
   lessonsInOrder,
-  readBody,
+  readBodyExact,
   readCourse,
   saveBody,
   saveCourse,
@@ -77,7 +77,10 @@ export async function GET(request: NextRequest) {
   if (request.nextUrl.searchParams.get("quiz") === "1") {
     return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
   }
-  return Response.json({ ok: true, text: await readBody(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+  // Read exactly: an unknown reply is said as such, never handed to the editor as an empty lesson (rule 24).
+  const lessonText = await readBodyExact(course.id, lessonId).catch(() => null);
+  if (lessonText === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  return Response.json({ ok: true, text: lessonText }, { headers: { "Cache-Control": "no-store" } });
 }
 
 /**

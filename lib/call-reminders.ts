@@ -62,12 +62,11 @@ function when(mark: "24" | "1"): string {
   return mark === "24" ? "Tomorrow" : "In 1 hour";
 }
 
-async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark: "24" | "1", origin: string): Promise<boolean> {
+async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark: "24" | "1", origin: string, room: string | null): Promise<boolean> {
   if (!product || !isCallProduct(product) || !call.email) return false;
   const setup = product.call;
   const tz = isTimeZone(call.buyerTz) ? call.buyerTz : setup.tz;
-  // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
-  const room = setup.place ? null : await roomOf(store.callsId, { product: product.id, setup, session: call.session, start: call.start, end: call.end });
+  // Room evidence was resolved before either once-only reminder mark.
   const minutes = Math.round((call.end - call.start) / 60_000);
   // In the store's language (lib/buyer-words/booking.ts), times in its locale.
   const b = bookingWords(store.language);
@@ -94,11 +93,10 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
   });
 }
 
-async function remindCreator(store: Store, product: Listing, paid: PaidCall[], call: PaidCall, mark: "24" | "1"): Promise<boolean> {
+async function remindCreator(store: Store, product: Listing, paid: PaidCall[], call: PaidCall, mark: "24" | "1", room: string | null): Promise<boolean> {
   if (!product || !isCallProduct(product)) return false;
   const setup = product.call;
-  // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
-  const room = setup.place ? null : await roomOf(store.callsId, { product: product.id, setup, session: call.session, start: call.start, end: call.end });
+  // Room evidence was resolved before either once-only reminder mark.
   const people = paid.filter((c) => c.product === call.product && c.start === call.start);
   const emails = people.map((c) => c.email ?? "a buyer who gave no address");
   const seats = seatsAt(setup, call.start);
@@ -238,6 +236,11 @@ export async function sendCallReminders(
           counts.dropped += 1;
           continue;
         }
+        // Unknown room evidence leaves both email attempts unclaimed and this
+        // queue member available for a later run. Share the resolved room.
+        const room = product.call.place ? null : await roomOf(store.callsId, {
+          product: product.id, setup: product.call, session: call.session, start: call.start, end: call.end,
+        });
         const [fresh, freshCreator] = await redisPipeline([
           ["SET", sentKey(call.session, call.start, item.mark), "1", "NX", "EX", SENT_SECONDS],
           ["SET", creatorKey(callsId, call.product, call.start, item.mark), "1", "NX", "EX", SENT_SECONDS],
@@ -246,7 +249,7 @@ export async function sendCallReminders(
         // tried again on the next run, while the reminder is still of use.
         let again = false;
         if (fresh !== null) {
-          if (await remindBuyer(store, product, call, item.mark, origin)) counts.reminded += 1;
+          if (await remindBuyer(store, product, call, item.mark, origin, room)) counts.reminded += 1;
           else if (call.email) {
             await redisPipeline([["DEL", sentKey(call.session, call.start, item.mark)]]);
             again = true;
@@ -254,7 +257,7 @@ export async function sendCallReminders(
         }
         // A booking found on its own is counted among the people booked, too.
         const booked = paid.some((c) => c.session === call.session) ? paid : [...paid, call];
-        if (freshCreator !== null && !(await remindCreator(store, product, booked, call, item.mark))) {
+        if (freshCreator !== null && !(await remindCreator(store, product, booked, call, item.mark, room))) {
           await redisPipeline([["DEL", creatorKey(callsId, call.product, call.start, item.mark)]]);
           again = true;
         }

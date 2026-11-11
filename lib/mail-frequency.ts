@@ -26,8 +26,11 @@
  * gone by itself after MAIL_GAP_KEEP_SECONDS.
  *
  * The ceiling before any read (MR): each person checked takes one check
- * from the store's calendar month, at most mailGapCheckLimit(tier):
- * MAIL_GAP_CHECKS_PER_EMAIL for each monthly email of the plan. A plan with
+ * from the store's calendar month, at most mailGapCheckLimit(tier, trial):
+ * MAIL_GAP_CHECKS_PER_EMAIL for each monthly email of the plan, or of the
+ * free trial while the store is in it (MAIL_GAP_TRIAL_CHECKS). Each send
+ * refused at the ceiling still costs its count's three commands; the
+ * wiring's caller bounds its attempts (runs, studio requests) and counts them. A plan with
  * no list email (Store) checks nobody. A send that would pass the ceiling
  * reads nothing, gives its checks back and says it was refused; an
  * unreadable count is refused too. Unknown is never "never sent" (rule 24):
@@ -40,7 +43,7 @@
  */
 import { claimValue } from "@/lib/claim-mark";
 import { MAIL_GAP_KEEP_MS, markValue, planSend, readLastSent, type LastSent, type MailGapSetting, type MailKind, type SendPlan } from "@/lib/mail-frequency-rules";
-import { monthlyEmails, type Tier } from "@/lib/plan";
+import { TRIAL_MONTHLY_EMAILS, monthlyEmails, type Tier } from "@/lib/plan";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { personKey } from "@/lib/person-key";
@@ -61,9 +64,18 @@ export const MAIL_GAP_KEEP_SECONDS = MAIL_GAP_KEEP_MS / 1000;
 /** How long the month's count of checks lives: longer than any calendar month. */
 export const MAIL_GAP_CHECK_WINDOW_SECONDS = 40 * 86_400;
 
-/** The checks a store on this plan may make in a calendar month. */
-export function mailGapCheckLimit(tier: Tier): number {
-  return MAIL_GAP_CHECKS_PER_EMAIL * monthlyEmails(tier);
+/** The checks a store in its free trial may make in a calendar month: at the trial's emails, whatever its plan. */
+export const MAIL_GAP_TRIAL_CHECKS = MAIL_GAP_CHECKS_PER_EMAIL * TRIAL_MONTHLY_EMAILS;
+
+/**
+ * The checks a store on this plan may make in a calendar month. In its free
+ * trial a store keeps its plan's tier but sends only the trial's emails
+ * (lib/mail.ts, monthlyAllowance), so it checks at the trial's figure, never
+ * more than its plan's (the Store plan checks nobody either way).
+ */
+export function mailGapCheckLimit(tier: Tier, trial: boolean): number {
+  const paid = MAIL_GAP_CHECKS_PER_EMAIL * monthlyEmails(tier);
+  return trial ? Math.min(MAIL_GAP_TRIAL_CHECKS, paid) : paid;
 }
 
 export type AdmitPlan = SendPlan & { refused: boolean };
@@ -77,8 +89,8 @@ async function pipeline(commands: (string | number)[][]): Promise<unknown[] | nu
 }
 
 /** Takes `count` checks from the store's month; false when refused or unknown. */
-async function takeChecks(store: string, tier: Tier, count: number, now: number): Promise<boolean> {
-  const limit = mailGapCheckLimit(tier);
+async function takeChecks(store: string, tier: Tier, trial: boolean, count: number, now: number): Promise<boolean> {
+  const limit = mailGapCheckLimit(tier, trial);
   if (count > limit) return false;
   const key = `nl:mgap:checks:${store}:${new Date(now).toISOString().slice(0, 7)}`;
   const replies = await pipeline([
@@ -99,12 +111,14 @@ async function takeChecks(store: string, tier: Tier, count: number, now: number)
 export async function admitForSend(input: {
   store: string;
   tier: Tier;
+  /** Whether the store is in its free trial (lib/mail.ts reads it off trialEnds); anything but a boolean is refused. */
+  trial: boolean;
   kind: MailKind;
   people: readonly string[];
   setting: MailGapSetting;
   now: number;
 }): Promise<AdmitPlan> {
-  const { store, tier, kind, people, setting, now } = input;
+  const { store, tier, trial, kind, people, setting, now } = input;
   const unknownAll = (): Map<string, LastSent> => new Map();
   if (kind === "service") return { ...planSend(kind, people, unknownAll(), now, setting), refused: false };
 
@@ -112,7 +126,9 @@ export async function admitForSend(input: {
   const asUnknown = (refused: boolean): AdmitPlan => ({ ...planSend(kind, people, unknownAll(), Number.NaN, setting), refused });
   if (!unique.length) return asUnknown(false);
   if (!Number.isSafeInteger(now) || now <= 0) return asUnknown(false);
-  if (!(await takeChecks(store, tier, unique.length, now))) return asUnknown(true);
+  // Not knowing whether the store pays is not the paid figure: refused before anything is asked.
+  if (typeof trial !== "boolean") return asUnknown(true);
+  if (!(await takeChecks(store, tier, trial, unique.length, now))) return asUnknown(true);
 
   // The person as lib/person-key.ts makes it: the address normalised first, so one person in two letter cases is one.
   const hashes = new Map(unique.map((p) => [p, personKey(store, p)] as const));

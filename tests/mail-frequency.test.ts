@@ -54,8 +54,8 @@ const admit = (people: string[], now: number, over: Partial<Parameters<typeof ad
 async function main(): Promise<void> {
   part("The ceiling's figures");
   is("two checks for every monthly email of the plan", MAIL_GAP_CHECKS_PER_EMAIL, 2);
-  is("Studio's checks", mailGapCheckLimit("pro"), 2 * monthlyEmails("pro"));
-  is("the Store plan has no list email, so no checks", mailGapCheckLimit("creator"), 0);
+  is("Studio's checks", mailGapCheckLimit("pro", false), 2 * monthlyEmails("pro"));
+  is("the Store plan has no list email, so no checks", mailGapCheckLimit("creator", false), 0);
   is("records live as long as the longest gap", MAIL_GAP_KEEP_SECONDS * 1000, MAIL_GAP_KEEP_MS);
   is("the month's count outlives a calendar month", MAIL_GAP_CHECK_WINDOW_SECONDS >= 31 * 86_400, true);
 
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
   is("the Store plan: nobody checked, nobody sent, said as refused", [none.send, none.unknown, none.refused], [[], ["a@x.test"], true]);
   is("and nothing read", sent.filter((c) => c[0] === "GET").length, 0);
   reset();
-  const limit = mailGapCheckLimit("pro");
+  const limit = mailGapCheckLimit("pro", false);
   const many = Array.from({ length: limit + 1 }, (_, i) => `p${i}`);
   const over = await admit(many, T0);
   is("a send larger than the month's checks: refused, all unknown", [over.refused, over.send.length, over.unknown.length], [true, 0, limit + 1]);

@@ -39,7 +39,8 @@ export async function POST(request: NextRequest) {
   const { body } = guarded;
   const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
   // What takes something away for good (a field with every person's answers, a pipeline, a deal) waits while
-  // the session was let in without its second step (lib/two-step.ts), as the other deleting routes do.
+  // the session was let in without its second step (lib/two-step.ts): guardStoreWrite refuses those actions
+  // (LOCKED_ACTIONS.orders) before this route runs, as for the other deleting routes.
   try {
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return refuse("unavailable", 503);

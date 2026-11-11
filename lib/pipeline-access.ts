@@ -156,9 +156,11 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   const raw = await fieldOf(statsId, before);
   const old = await fieldOf(statsId, after);
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([after, v], 1) : 0);
-  if (raw === null || raw === "") {
-    // No restriction to carry: a field the new address had from before (someone else's, long gone) must not
-    // restrict them, so it goes, and gives its room back.
+  if (raw === null) {
+    // No restriction to carry (the field was never set): a field the new address had from before (someone else's,
+    // long gone) must not restrict them, so it goes, and gives its room back. Any stored text, an empty one
+    // included, is carried as it is: a record that cannot be read opens nothing (mapOf), and moving it must not
+    // turn it into no restriction (Claude 1, #2036).
     if (weight(old) === 0) return UNCHANGED;
     const deleted = oneAnswer(await redisPipeline([["HDEL", accessKey(statsId), after]]).catch(() => null));
     // Not confirmed: it may have landed, so what the new address held is carried, for the caller to put it back.

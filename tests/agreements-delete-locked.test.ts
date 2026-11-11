@@ -203,7 +203,9 @@ async function main(): Promise<void> {
       r = await studioRoute(new NextRequest("https://marktmorgen.com/api/store/agreements", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "delete", id: agreement.id }) }));
     });
     const body = (await r!.json()) as { ok?: boolean; error?: string; message?: string };
-    is("the studio: busy, the same sentence a withdraw answers (never ok)", [r!.status, body.ok, body.error, body.message], [409, false, "busy", "Someone is signing it right now. Try again in a moment."]);
+    // Only an agreement no longer open can be deleted, so whoever holds its lock is rarely a signer (a second click, a
+    // signed copy being noted): the sentence says it is being changed, never that someone is signing it (Claude 1 on #3467).
+    is("the studio: busy, in words true whoever holds the lock (never ok)", [r!.status, body.ok, body.error, body.message], [409, false, "busy", "This agreement is being changed right now. Try again in a moment."]);
     is("a busy delete is not logged as a failure", logged, 0);
     is("the record, its version, the store's list and the person's set all stay", [(await readAgreement(agreement.id))?.id, keptKeys(agreement.id).length, (await indexIds(store)).includes(agreement.id), await inPersonSet(agreement.id)], [agreement.id, 2, true, true]);
     is("the other holder's lock is untouched", (await realPipeline([["GET", `nl:agree:lock:${agreement.id}`]]))[0], "someone-elses-token");

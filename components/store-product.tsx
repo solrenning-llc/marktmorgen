@@ -1,7 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
-import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
+import { lengthList, listedLengths } from "@/lib/call-lengths";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
@@ -58,19 +58,9 @@ export function productPath(store: Store, product: Listing): string {
   return `/@${store.handle}/p/${productSegment(product)}`;
 }
 
-/** The figure on the price pill: "$27", "from €9 a month", "¥500+", "Free", in the store's currency and language. */
-export function pricePill(store: Store, product: Listing): string {
-  const { w, money } = speech(store);
-  if (isFree(product)) return w.free;
-  if (activePwyw(product)) return `${money(product.priceCents)}+`;
-  const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
-  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
-  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
-  if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));
-  const price = `${money(fromPriceCents(product))}${every}`;
-  return options.length > 1 ? w.fromPrice(price) : price;
-}
+// The figure on the price pill, kept in lib/price-pill.ts so mail code can read it without this page's browser components.
+export { pricePill } from "@/lib/price-pill";
+import { pricePill } from "@/lib/price-pill";
 
 
 /** "Subscribe — $5 the first month", for a membership with an introductory price (lib/intro-price.ts); null without one. */

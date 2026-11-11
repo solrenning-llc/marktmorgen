@@ -72,7 +72,7 @@ import { scheduleReviewAsk } from "@/lib/review-ask";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds, isBundle } from "@/lib/bundle-rules";
 import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
-import { pricePill } from "@/components/store-product";
+import { pricePill } from "@/lib/price-pill";
 import { productSegment } from "@/lib/product-slug";
 
 /** The fixed sentence as a receipt carries it, with the address of the Terms that explain its limit (queue item 307 EC1). */

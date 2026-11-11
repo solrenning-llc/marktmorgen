@@ -111,4 +111,22 @@ is("the clock it reads in the new zone", moved.wall, "2027-01-11T15:00");
 is("the new zone is kept", moved.zone, "Europe/Berlin");
 is("a zone that does not exist keeps the old one", inZone(jan, "Mars/Olympus"), jan);
 
+part("Only a named zone that follows the clocks there, and \"UTC\" (Claude 3 and Codex G on #3653, LEVE)");
+is("a fixed offset is not a zone: it never follows summer time", fixedRelease("2027-01-11T09:00", "+05:00"), { ok: false, problem: "zone" });
+is("an abbreviation is not a zone: EST is not New York in July", fixedRelease("2027-01-11T09:00", "EST"), { ok: false, problem: "zone" });
+is("UTC is", fixedRelease("2027-01-11T09:00", "UTC").ok, true);
+is("moving a date to an offset keeps its zone", inZone(jan, "+05:00"), jan);
+
+part("Calendar edges, measured (Claude 3 on #3653, LEVE)");
+is("29 February in a leap year", fixedRelease("2028-02-29T09:00", "UTC").ok, true);
+is("29 February 2100 does not exist", fixedRelease("2100-02-29T09:00", "UTC"), { ok: false, problem: "format" });
+is("the first and last years taken", [fixedRelease("2000-01-01T00:00", "Pacific/Kiritimati").ok, fixedRelease("2100-12-31T23:59", "Pacific/Pago_Pago").ok], [true, true]);
+is("a whole day Samoa skipped (30 December 2011) is refused", fixedRelease("2011-12-30T09:00", "Pacific/Apia"), { ok: false, problem: "skipped" });
+
+part("An instant outside what a date can hold is unknown, never a throw (Claude 3 and Codex G on #3653, LEVE)");
+is("wallIn past the date range: null", wallIn(8.64e12 + 1, "UTC"), null);
+is("words for a kept date past the range: null", releaseWords({ at: 8.64e12 + 1, zone: "UTC", wall: "x" }), null);
+is("words for a kept zone that is not one: null", releaseWords({ ...jan, zone: "Mars/Olympus" }), null);
+is("moving a date past the range keeps it as it was", inZone({ ...jan, at: 8.64e12 + 1 }, "Europe/Berlin"), { ...jan, at: 8.64e12 + 1 });
+
 done();

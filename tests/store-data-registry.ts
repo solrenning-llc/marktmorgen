@@ -742,7 +742,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pause:due@lib/contract-funding.ts": company("Read-only existing break due membership for intent ownership", "Same sorted set owned by plan-pause.ts; no new entry, allocation or mutation from the claim."),
   "nl:pause:last:@lib/contract-funding.ts": { what: "Read-only annual eligibility evidence for the existing pause", parts: [capped(KEY, "Same one-per-store annual marker as plan-pause.ts; no new marker or expiry.")] },
   "nl:pause:@lib/plan-pause.ts": { what: "A store's break and when it was last taken", parts: [capped(4 * KB, "One a store.")] },
-  "nl:pause:due@lib/plan-pause.ts": company("Breaks due", "One sorted set for every store."),
+  "nl:pause:due@lib/plan-pause.ts": company("Breaks due", "One sorted set for every store. A legacy restart reuses its existing member as a one-shot attempt marker; no additional member or storage is allocated. Global cardinality and retention remain unknown."),
   "nl:pause:last:@lib/plan-pause.ts": { what: "When a break was last taken", parts: [capped(KEY, "One a store.")] },
   "nl:plan:ended@lib/plan-standing.ts": company("Stores whose plan ended, by the day", "One sorted set for every store."),
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),

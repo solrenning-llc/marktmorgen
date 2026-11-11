@@ -763,6 +763,16 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's access emails, each at the most an email costs and its count; taken from the store's window before sending, refused past it.",
   },
   {
+    id: "pause-restart-claim",
+    feature: "A legacy pause is claimed once before its uncertain subscription restart",
+    monthlyUsd: () => request("light", 1, 4 * KB),
+    sources: [
+      { file: "lib/plan-pause-rules.ts", names: ["PAUSE_EVERY_DAYS"] },
+      { file: "lib/plan-pause.ts", names: ["forgetObserved(ref, stored.raw, \"claim\")", "PAUSE_WORKER_FORGET"] },
+    ],
+    basis: "A pause can be taken at most once per PAUSE_EVERY_DAYS. The due member's exact raw record (at most 4 KB) is claimed by one additional atomic Redis request; charge the full request in any billing month it occurs, with no annual discount.",
+  },
+  {
     id: "store-email",
     feature: "The store's own emails outside the monthly ones: inbox notices and replies, a purchase sent again, contact-form and inbound-mail notices, checkout reminders, come-back, welcome and yearly offers, payment and pause notices to members, community events, affiliates, team invites (17 October 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "email"),

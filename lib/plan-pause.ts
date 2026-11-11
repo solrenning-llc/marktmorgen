@@ -68,7 +68,6 @@ import {
 
 const DAY = 86_400;
 /** Days a restart that failed for a reason other than the card is tried again. */
-const RETRY_DAYS = 3;
 
 /** Whether Stripe refused because of the card or the bank, which trying again will not change. */
 function declined(error: unknown): boolean {
@@ -364,7 +363,7 @@ export async function pausePlan(store: Store, months: PauseMonths, nowSeconds = 
  * An ambiguous reply keeps the evidence and never falls back to DEL/ZREM.
  * Creator-initiated undo/drop keep their existing separate semantics. */
 export const PAUSE_WORKER_FORGET = `-- marktmorgen:pause-worker-forget:v1
-if #KEYS~=2 or #ARGV~=3 or KEYS[1]==KEYS[2] then return 0 end
+if #KEYS~=2 or #ARGV~=4 or KEYS[1]==KEYS[2] then return 0 end
 local current
 if ARGV[2]=='known' then
  current=redis.call('GETRANGE',KEYS[1],0,4096)
@@ -372,22 +371,33 @@ if ARGV[2]=='known' then
 else
  current=redis.call('GET',KEYS[1])
 end
+local action=ARGV[4]
 if ARGV[2]=='missing' then
- if current then return 0 end
+ if current or action~='forget' then return 0 end
  redis.call('ZREM',KEYS[2],ARGV[1])
  return 1
 end
 if ARGV[2]~='known' or current~=ARGV[3] then return 0 end
 local ok,p=pcall(cjson.decode,current)
 if not ok or type(p)~='table' or p.funding~=nil or type(p['until'])~='number' then return 0 end
-if redis.call('ZSCORE',KEYS[2],ARGV[1])~=tostring(p['until']) then return 0 end
+local score=redis.call('ZSCORE',KEYS[2],ARGV[1])
+if action=='claim' then
+ if score~=tostring(p['until']) then return 0 end
+ return redis.call('ZREM',KEYS[2],ARGV[1])
+end
+if action=='claimed' then
+ if score then return 0 end
+ redis.call('DEL',KEYS[1])
+ return 1
+end
+if action~='forget' or score~=tostring(p['until']) then return 0 end
 redis.call('DEL',KEYS[1])
 redis.call('ZREM',KEYS[2],ARGV[1])
 return 1
 `;
-async function forgetObserved(ref: string, raw: string | null): Promise<boolean> {
+async function forgetObserved(ref: string, raw: string | null, action: "forget" | "claim" | "claimed" = "forget"): Promise<boolean> {
   try {
-    const reply = await redisPipeline([["EVAL", PAUSE_WORKER_FORGET, 2, recordKey(ref), DUE, ref, raw === null ? "missing" : "known", raw ?? ""]]);
+    const reply = await redisPipeline([["EVAL", PAUSE_WORKER_FORGET, 2, recordKey(ref), DUE, ref, raw === null ? "missing" : "known", raw ?? "", action]]);
     if (!Array.isArray(reply) || reply.length !== 1) return false;
     const ack = Object.getOwnPropertyDescriptor(reply, "0");
     return Boolean(ack && Object.hasOwn(ack, "value") && ack.value === 1);
@@ -671,7 +681,7 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
     }
     if (!record) {
       // The explicit pause miss above proves this is only a stale due member.
-      if (!(await forgetObserved(ref, stored.raw))) { counts.failed += 1; continue; }
+      if (!(await forgetObserved(ref, stored.raw, record.funding ? "forget" : "claimed"))) { counts.failed += 1; continue; }
       counts.dropped += 1;
       continue;
     }
@@ -728,13 +738,19 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       counts.failed += 1;
       continue;
     }
+    // Claim the exact legacy generation before the only POST. Removing its due
+    // member is the durable one-shot marker; an unknown ACK never authorizes a POST.
+    if (!record.funding && !(await forgetObserved(ref, stored.raw, "claim"))) {
+      counts.failed += 1;
+      continue;
+    }
     try {
       const started = await restartPlan({
         store,
         customerId: record.customer,
         paymentMethod: record.paymentMethod,
         tier: record.tier,
-        idempotencyKey: `restart:${record.subscription}:${record.until}:classic`,
+        idempotencyKey: `restart:${record.subscription}:${record.until}`,
         ...(record.funding ? { funding: { statsId: store.statsId ?? "", sourceSubscriptionId: record.subscription, sourceGrantId: record.funding.grantId, ref, paused: stored.raw ?? "" } } : {}),
       });
       if(started.fundedPublication===true){
@@ -762,14 +778,15 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
       // The funded protocol retains every uncertain source/intent. It must not
       // enter the legacy retry window, forget its evidence, or announce success.
       if (record.funding) { counts.failed += 1; continue; }
-      // Stripe or the network failing is not the card failing: tried again on
-      // the next run, for a few days, before the creator is told it did not work.
-      if (!declined(error) && nowSeconds - record.until < RETRY_DAYS * DAY) {
+      // A definitive card decline proves the payment was refused; an unknown
+      // transport/provider result stays held and is never retried or deleted.
+      if (!declined(error)) {
+        await tell(store, "unconfirmed", record).catch(() => false);
         counts.failed += 1;
         continue;
       }
-      if (!(await forgetObserved(ref, stored.raw))) { counts.failed += 1; continue; }
-      await tell(store, declined(error) ? "failed" : "unconfirmed", record).catch(() => false);
+      if (!(await forgetObserved(ref, stored.raw, "claimed"))) { counts.failed += 1; continue; }
+      await tell(store, "failed", record).catch(() => false);
       counts.failed += 1;
     }
   }

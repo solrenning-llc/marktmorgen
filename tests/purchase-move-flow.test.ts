@@ -19,7 +19,7 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccou
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { suppressCommand } from "@/lib/suppression";
-import { readPurchaseMove } from "@/lib/purchase-moves";
+import { readMoveLink, readPurchaseMove } from "@/lib/purchase-moves";
 import { MAX_MOVES_PER_ADDRESS_DAY } from "@/lib/purchase-move-rules";
 import { PURCHASE_MOVE_DELIVERED } from "@/lib/purchase-move-open";
 import { moveWords } from "@/lib/purchase-move-words";
@@ -305,11 +305,51 @@ async function main(): Promise<void> {
     is("retry reads and sends within the reserved public-request ceiling", retryCommands <= MOVE_ASK_COMMANDS, true);
     is("retry resends the same request", retry, "sent");
     const originalLink = linkIn(mails[m].text);
-    is("a retry reuses the exact confirmation link that may already be in the inbox", [
+    const retryFromLink = linkIn(mails[retryStart]?.text ?? "");
+    const retryToLink = linkIn(mails[retryStart + 1]?.text ?? "");
+    is("a retry reuses the old-address confirmation link that may already be in the inbox", [
       originalLink,
-      linkIn(mails[retryStart]?.text ?? ""),
-      linkIn(mails[retryStart + 1]?.text ?? ""),
-    ], [originalLink, originalLink, originalLink]);
+      retryFromLink,
+    ], [originalLink, originalLink]);
+    const fromGrant = await readMoveLink(retryFromLink ?? "");
+    const toGrant = await readMoveLink(retryToLink ?? "");
+    is("the new-address link stays distinct but belongs to the same request and to-side grant", [
+      retryFromLink !== retryToLink,
+      fromGrant?.id === toGrant?.id,
+      fromGrant?.side,
+      toGrant?.side,
+    ], [true, true, "from", "to"]);
+
+    const furtherStart = mails.length;
+    is("a further exact retry is sent", await askToMovePurchases({ store: moss, token: one, to: "lost.new@example.com", origin: ORIGIN }), "sent");
+    is("both grants are reused on the further retry", [
+      linkIn(mails[furtherStart]?.text ?? ""),
+      linkIn(mails[furtherStart + 1]?.text ?? ""),
+    ], [retryFromLink, retryToLink]);
+
+    part("Concurrent exact asks select one live request identity");
+    {
+      const raceToken = await signIn("race.buyer@example.com");
+      const raceStart = mails.length;
+      odd = { command: "GET", prefix: "nl:pm:retry:", reply: null, times: 2, skip: 0 };
+      const answers = await Promise.all([
+        askToMovePurchases({ store: moss, token: raceToken, to: "race.new@example.com", origin: ORIGIN }),
+        askToMovePurchases({ store: moss, token: raceToken, to: "race.new@example.com", origin: ORIGIN }),
+      ]);
+      odd = null;
+      const raceMails = mails.slice(raceStart);
+      const oldLinks = raceMails.filter((mail) => mail.to === "race.buyer@example.com").map((mail) => linkIn(mail.text));
+      const newLinks = raceMails.filter((mail) => mail.to === "race.new@example.com").map((mail) => linkIn(mail.text));
+      is("both concurrent callers can safely resend", answers, ["sent", "sent"]);
+      is("both callers use one old and one new grant", [
+        oldLinks.length,
+        newLinks.length,
+        oldLinks[0] === oldLinks[1],
+        newLinks[0] === newLinks[1],
+        oldLinks[0] !== newLinks[0],
+      ], [2, 2, true, true, true]);
+      is("only one live request record was created", moveKeys().filter((key) => key.startsWith("nl:pm:r:")).length, 1);
+    }
     const two = await signIn("lost2.buyer@example.com");
     const m2 = mails.length;
     ackLost = { skip: 1, times: 1 };

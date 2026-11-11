@@ -288,16 +288,30 @@ export async function daysCounts(statsId: string, from: string, to: string): Pro
 export async function viewsBefore(store: Store, days: number, now = Date.now()): Promise<number[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
   const dates = lastDays(now - 86400_000, days);
-  const replies = await redisPipeline(dates.map((d) => ["HGET", countsKey(store.statsId as string, d), "v"]));
-  return replies.map((r) => Number(r) || 0);
+  // Read exactly (rule 24): nil is a day with no views; a reply lost or of another shape is unknown, never zero, so
+  // the busy-day email never compares today with a fortnight nobody read (lib/stats-report.ts, maybeBusyAlert).
+  const replies = repliesFor(await redisPipeline(dates.map((d) => ["HGET", countsKey(store.statsId as string, d), "v"])), dates.length);
+  if (!replies) throw new UnknownReplyError("the store page's views of the last days");
+  return replies.map((r) => {
+    if (r === null) return 0;
+    const n = typeof r === "string" && /^\d{1,15}$/.test(r) ? Number(r) : NaN;
+    if (!Number.isSafeInteger(n)) throw new UnknownReplyError("the store page's views of a day");
+    return n;
+  });
+}
+
+/** One HGETALL of a day's counts, read exactly (rule 24; exactPairs): unknown throws, never "none counted". */
+async function dayCountsExact(statsId: string, day: string): Promise<[string, number][]> {
+  const replies = repliesFor(await redisPipeline([["HGETALL", countsKey(statsId, day)]]), 1);
+  if (!replies) throw new UnknownReplyError("a day's counts");
+  return exactPairs(replies[0]);
 }
 
 /** Today's channels by views so far, biggest first. */
 export async function sourcesToday(store: Store, now = Date.now()): Promise<Ranked> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", countsKey(store.statsId, dayKey(now))]]);
   const tally = new Tally();
-  for (const [field, count] of pairs(raw)) if (field.startsWith("r:")) tally.add(field, count);
+  for (const [field, count] of await dayCountsExact(store.statsId, dayKey(now))) if (field.startsWith("r:")) tally.add(field, count);
   return tally.window(0).sources;
 }
 
@@ -326,14 +340,21 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
   const empty: Today = { date, visitors: 0, views: 0, checkouts: 0, sources: [], sales: null };
   if (!store.statsId || !isRedisConfigured()) return empty;
   const statsId = store.statsId;
-  const [raw, people, cached] = await redisPipeline([
+  // Read exactly (rule 24): a reply lost or of another shape throws, and the studio says today could not be read
+  // (app/api/store/live/route.ts answers it as null), never "0 visitors" as a real number.
+  const replies = repliesFor(await redisPipeline([
     ["HGETALL", countsKey(statsId, date)],
     ["PFCOUNT", visitorsKey(statsId, date)],
     ["GET", todaySalesKey(statsId, date)],
-  ]);
+  ]), 3);
+  if (!replies) throw new UnknownReplyError("today's numbers");
+  const [raw, people, cached] = replies;
+  const visitors = countOf(people);
+  if (visitors === null) throw new UnknownReplyError("today's visitors");
+  if (cached !== null && typeof cached !== "string") throw new UnknownReplyError("today's sales kept");
   const tally = new Tally();
-  for (const [field, count] of pairs(raw)) tally.add(field, count);
-  const window = tally.window(Number(people) || 0);
+  for (const [field, count] of exactPairs(raw)) tally.add(field, count);
+  const window = tally.window(visitors);
   let sales: Today["sales"] = null;
   if (typeof cached === "string") {
     try {
@@ -384,11 +405,14 @@ export async function readLive(store: Store, now = Date.now()): Promise<Live> {
   const empty: Live = { visitors: 0, sources: [] };
   if (!store.statsId || !isRedisConfigured()) return empty;
   const key = liveKey(store.statsId);
-  const [, members] = await redisPipeline([
+  // Read exactly (rule 24): members and their scores in pairs, or unknown, never "nobody here" (the live route
+  // answers a throw as not read).
+  const replies = repliesFor(await redisPipeline([
     ["ZREMRANGEBYSCORE", key, 0, now - 30 * 60_000],
     ["ZRANGEBYSCORE", key, now - LIVE_MINUTES * 60_000, "+inf", "WITHSCORES"],
-  ]);
-  const flat = Array.isArray(members) ? (members as unknown[]).map(String) : [];
+  ]), 2);
+  const flat = replies ? stringList(replies[1]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("who is on the store now");
   const latest = new Map<string, { source: string; at: number }>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const [who, source] = flat[i].split("|");

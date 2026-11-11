@@ -12,6 +12,8 @@ is("campaign and variant reach history",html.includes("Campaign: launch")&&html.
 is("partial scope explicit",html.includes("Showing 1 of 350")&&html.includes("newest loaded entries"),true);
 is("existing full export retained as destination",html.includes("Download everything (CSV)"),true);
 is("record is not a new sale",html.includes("1 commission record")&&!html.includes("1 sale"),true);
+is("the record's commission is shown as exactly $1",html.includes("1 commission record · $1 (USD)"),true);
+is("the row keeps the $10 base and 10% rate",html.includes("$10 before tax · 10%"),true);
 is("legacy missing labels not invented",render([{...line,promotion:null}],1).includes("No campaign labels recorded"),true);
 is("partial tags preserve missing values",render([{...line,promotion:{source:"",campaign:"launch",content:""}}],1).includes("Source: Not recorded")&&render([{...line,promotion:{source:"",campaign:"launch",content:""}}],1).includes("Variant: Not recorded"),true);
 is("bonus and tier two are records",render([{...line,how:"bonus"},{...line,ref:"b",how:"tier2"}],2).includes("not additional purchases"),true);
@@ -23,6 +25,7 @@ is("incomplete invoices remain explicit",render([line],1,{invoicesChecked:false}
 is("refund caveat remains explicit",render([line],1,{refundsChecked:false}).includes("Refunds and chargebacks could not all be checked"),true);
 is("titles escaped",html.includes("&lt;script&gt;Course&lt;/script&gt;")&&!html.includes("<script>"),true);
 is("refund status remains visible",render([{...line,status:"refunded",refunded:1000,commission:0}],1).includes("Refunded"),true);
+is("the refunded amount is shown as $10",render([{...line,status:"refunded",refunded:1000,commission:0}],1).includes("$10 refunded"),true);
 is("invalid date does not invent a calendar date",render([{...line,at:0}],1).includes("Date unavailable"),true);
 is("no payment controls introduced",/Pay now|Record payout|<form|<button/.test(html),false);
 done();

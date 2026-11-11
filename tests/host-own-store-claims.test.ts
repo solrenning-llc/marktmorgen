@@ -13,7 +13,8 @@ import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, release
 import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
 import { putMember } from "@/lib/team";
 import type { TeamHost } from "@/lib/team-scheduling-rules";
-import { claimsKey, hostId, readClaims } from "@/lib/host-claims";
+import { CLAIM_MARGIN_MS, claimsKey, hostId, readClaims } from "@/lib/host-claims";
+import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { writeTeam } from "@/lib/team-booking";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -116,6 +117,10 @@ async function main(): Promise<void> {
   const T = weekdayAt(4, 660);
   const first = await hold(lantern.store, lantern.product, T);
   is("held in her own store", first.ok, true);
+  // Claude 6's MEDIUM 1 (confirmed by Claude 1, 6799341330): the owner's hold claim lapsed with the hold itself, with
+  // no CLAIM_MARGIN_MS, so a buyer confirmed only by the mail job left her free on other stores meanwhile.
+  const heldUntil = ((await readClaims([hostId(MAYA)])).get(hostId(MAYA)) ?? []).find((c) => c.start === T)?.until ?? 0;
+  is("her hold claim outlasts the hold by the team holds' margin", heldUntil >= Date.now() + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS - 60_000, true);
   is("Harbor's team no longer offers Maya at that hour", await offered(harbor.store, harbor.product, T), false);
   const second = await hold(harbor.store, harbor.product, T);
   is("and a Harbor buyer cannot hold her for it", second.ok ? "held" : second.reason, "taken");

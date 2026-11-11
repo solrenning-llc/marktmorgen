@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useRef, useState } from "react";
+import { createContext, useContext, useId, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { MailPictureButton } from "@/components/mail-picture-button";
 import {
@@ -79,6 +79,8 @@ export function MailBodyEditor({
   const [blocks, setBlocks] = useState<MailBlock[]>(() => parseMailBlocks(body));
   // Each move said for screen readers; an end button says the block is already there (WCAG 4.1.3; lib/move-words.ts).
   const [said, say] = useSaid();
+  // A sequence draws one editor per email step on one page: each editor names its Move buttons from its own id (review of #3795).
+  const moveIds = useId();
   const [written, setWritten] = useState(body);
   const box = useRef<HTMLTextAreaElement | null>(null);
   // The preview starts at a phone's width, where most emails are read (487 [IT4], pattern 7).
@@ -109,7 +111,7 @@ export function MailBodyEditor({
     update(next);
     say(movedWords(name, to, blocks.length));
     // The blocks are keyed by place, so the focus would stay at the old place, on another block: it follows this one (WCAG 2.4.3).
-    requestAnimationFrame(() => document.getElementById(`mail-move-${to}-${by < 0 ? "up" : "down"}`)?.focus());
+    requestAnimationFrame(() => document.getElementById(`${moveIds}-move-${to}-${by < 0 ? "up" : "down"}`)?.focus());
   }
   function design() {
     setWritten(body);
@@ -206,10 +208,10 @@ export function MailBodyEditor({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{blockName(block)}</span>
                     <span className="flex gap-1">
-                      <button id={`mail-move-${i}-up`} type="button" className="btn btn-secondary btn-sm aria-disabled:opacity-40" onClick={() => move(i, -1)} aria-disabled={i === 0 || undefined} aria-label={`Move block ${i + 1} up`}>
+                      <button id={`${moveIds}-move-${i}-up`} type="button" className="btn btn-secondary btn-sm aria-disabled:opacity-40" onClick={() => move(i, -1)} aria-disabled={i === 0 || undefined} aria-label={`Move block ${i + 1} up`}>
                         Up
                       </button>
-                      <button id={`mail-move-${i}-down`} type="button" className="btn btn-secondary btn-sm aria-disabled:opacity-40" onClick={() => move(i, 1)} aria-disabled={i === blocks.length - 1 || undefined} aria-label={`Move block ${i + 1} down`}>
+                      <button id={`${moveIds}-move-${i}-down`} type="button" className="btn btn-secondary btn-sm aria-disabled:opacity-40" onClick={() => move(i, 1)} aria-disabled={i === blocks.length - 1 || undefined} aria-label={`Move block ${i + 1} down`}>
                         Down
                       </button>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => update(blocks.filter((_, j) => j !== i))} aria-label={`Remove block ${i + 1}`}>

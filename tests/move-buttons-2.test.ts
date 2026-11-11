@@ -16,10 +16,10 @@ const src = readFileSync("components/mail-designer.tsx", "utf8");
 const up = src.slice(src.lastIndexOf("<button", src.indexOf("aria-label={`Move block ${i + 1} up`}")), src.indexOf(">", src.indexOf("aria-label={`Move block ${i + 1} up`}")));
 const down = src.slice(src.lastIndexOf("<button", src.indexOf("aria-label={`Move block ${i + 1} down`}")), src.indexOf(">", src.indexOf("aria-label={`Move block ${i + 1} down`}")));
 
-is("each Move button has an id by place and direction", up.includes("id={`mail-move-${i}-up`}") && down.includes("id={`mail-move-${i}-down`}"), true);
+is("each Move button has an id by place and direction", up.includes("id={`${moveIds}-move-${i}-up`}") && down.includes("id={`${moveIds}-move-${i}-down`}"), true);
 is("none is turned off at an end", [up, down].some((b) => /(?<![-\w])disabled=\{/.test(b)), false);
 is("each is marked unavailable at its end instead", /aria-disabled=\{i === 0 \|\| undefined\}/.test(up) && /aria-disabled=\{i === blocks\.length - 1 \|\| undefined\}/.test(down), true);
-is("the focus follows the block to its new place, on the same button", src.includes("requestAnimationFrame(() => document.getElementById(`mail-move-${to}-${by < 0 ? \"up\" : \"down\"}`)?.focus());"), true);
+is("the focus follows the block to its new place, on the same button", src.includes("requestAnimationFrame(() => document.getElementById(`${moveIds}-move-${to}-${by < 0 ? \"up\" : \"down\"}`)?.focus());"), true);
 is("each move is said, with the shared words", src.includes("say(movedWords(name, to, blocks.length));") && src.includes('say(endWords(name, by < 0 ? "first" : "last"));'), true);
 is("a polite status line is drawn", src.includes("<SaidLine said={said} />") && /const \[said, say\] = useSaid\(\);/.test(src), true);
 

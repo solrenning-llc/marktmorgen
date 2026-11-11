@@ -69,7 +69,14 @@ export async function POST(request: NextRequest) {
       if (found?.lapsed.length) {
         await endLapsed(found.lapsed).catch((error: unknown) => console.error("ending a deleted store's lapsed subscription failed", error));
       }
-      await dropTeam(result.store);
+      // From here its record is gone: nothing below may skip the forgetting, which a retry could never do, since it
+      // finds no store (Claude 6's Q5 on #3670). A step not confirmed is told to the owner after it, never as
+      // "nothing was deleted".
+      let unsure = result.unsure === true;
+      await dropTeam(result.store).catch((error: unknown) => {
+        console.error("dropping a deleted store's team failed", error);
+        unsure = true;
+      });
       // Nothing of a deleted store is kept that could still reach anyone: the
       // sealed key to its email platform, its phones' push addresses, the
       // notes its team wrote about buyers (lib/buyer-profile.ts), its
@@ -96,7 +103,7 @@ export async function POST(request: NextRequest) {
         }),
       ]);
       // Back to the owner's first store, and the switcher forgets this one.
-      const response = away(origin, "/studio?stores=deleted");
+      const response = away(origin, unsure ? "/studio?stores=partly" : "/studio?stores=deleted");
       response.headers.append("Set-Cookie", storeCookie("", request).replace(/Max-Age=\d+/, "Max-Age=0"));
       return response;
     } catch (error) {

@@ -1851,7 +1851,8 @@ export async function createStore(
 }
 
 export type DeleteResult =
-  | { ok: true; store: Store }
+  /** `unsure`: the record is gone, but its addresses' holds and its places' release were not confirmed (rule 24). */
+  | { ok: true; store: Store; unsure?: true }
   | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" };
 
 /**
@@ -1876,7 +1877,10 @@ export type DeleteResult =
  * a delete not known to be done goes on only when Redis says the record is
  * gone, and the walk never takes a store whose record stands. Then its
  * addresses are held back and its places released, each on Redis's own
- * answer, or this throws.
+ * answer. Once the record is known gone this never throws: one of those not
+ * confirmed answers `unsure`, so the caller still forgets what reaches the
+ * store (its API keys, webhooks...), which a retry could never do, since it
+ * finds no store (Claude 6's Q5 on #3670, rule 24).
  */
 export async function deleteStore(email: string, queue: (store: Store) => Promise<unknown>): Promise<DeleteResult> {
   // Under the store's lock, so a product added in the same instant is either
@@ -1898,9 +1902,15 @@ export async function deleteStore(email: string, queue: (store: Store) => Promis
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
     ];
-    const replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
+    let replies: unknown[] | null = null;
+    try {
+      replies = repliesFor(await redisPipeline([...holds, ...removals]), holds.length + removals.length);
+    } catch (error) {
+      console.error("a deleted store's addresses held back and its places released: not confirmed", error);
+    }
     if (!replies || replies.some((reply, i) => (i < holds.length ? reply !== "OK" : countOf(reply) === null))) {
-      throw new UnknownReplyError("a deleted store's addresses held back and its places released");
+      console.error(new UnknownReplyError("a deleted store's addresses held back and its places released"));
+      return { ok: true, store, unsure: true };
     }
     return { ok: true, store };
   });

@@ -194,7 +194,7 @@ async function main() {
     ["an intent reply with no id", (own: Record<string, unknown>) => ({ latest_charge: own.latest_charge })],
     ["a charge of another intent", (own: Record<string, unknown>) => ({ ...own, latest_charge: { ...(own.latest_charge as object), payment_intent: "pi_someoneelse02" } })],
   ] as [string, (own: Record<string, unknown>) => unknown][]) {
-    const name = `pioth${label.replace(/\W/g, "").slice(0, 10)}`;
+    const name = `pioth${String(label.length).padStart(3, "0")}${label.charCodeAt(label.length - 1)}`;
     const one = await inLine(name, S(day) - 3_600, `${name}@example.com`);
     world.piReply.set(one.pi, odd);
     is(`${label}: not settled`, await settleOne(one.id), false);

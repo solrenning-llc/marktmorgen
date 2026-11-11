@@ -472,9 +472,13 @@ type ChargeOutcome = { settled: boolean; returned: number; disputed: number; cur
  */
 async function giveBack(id: string, key: string, intent: string, least = 1): Promise<ChargeOutcome | null> {
   if (!OBJECT_ID.test(intent)) return { settled: false, returned: 0, disputed: 0, currency: "" };
-  const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
-  const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
+  const pi: unknown = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
+  // Read for this payment only (rule 30, Claude 6 on #3628): a reply for another intent, or a charge of another
+  // intent, says nothing of this one; settling on it could write "we returned your payment" with nothing returned.
+  if (!plainObject(pi) || ownField(pi, "id") !== intent) throw new Error(`Stripe answered the payment of ${key} for another payment`);
+  const charge = ownField(pi, "latest_charge") as Record<string, unknown> | null | undefined;
   if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
+  if (ownField(charge, "payment_intent") !== intent) throw new Error(`Stripe answered the charge of ${key} for another payment`);
   // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
   // settleOne keeps the plan in line, never settled as refunded with nothing given back.
   const amount = ownField(charge, "amount");
@@ -490,7 +494,9 @@ async function giveBack(id: string, key: string, intent: string, least = 1): Pro
   // Read in full or not at all: a refund missed on an unknown list would be asked for twice (settleOne keeps it on the throw).
   // Each row in Stripe's own domain: a refund's amount is above zero and its status one of Stripe's. A negative one
   // would ask for more than was paid, an unknown one for a second refund: either throws before anything is asked for.
-  const refunds = await allRows("/refunds", new URLSearchParams({ charge: charge.id, limit: "100" }), (row) => REFUND_STATUSES.has(ownField(row, "status")) && wholeAtLeast(ownField(row, "amount"), 1), 5);
+  // Each row this charge's own (rule 30): a refund of another charge is never counted as this one's money back.
+  const chargeId = charge.id;
+  const refunds = await allRows("/refunds", new URLSearchParams({ charge: chargeId, limit: "100" }), (row) => ownField(row, "charge") === chargeId && REFUND_STATUSES.has(ownField(row, "status")) && wholeAtLeast(ownField(row, "amount"), 1), 5);
   const sum = (status: string) => refunds.filter((row) => row.status === status).reduce((total, row) => total + (Number(row.amount) || 0), 0);
   const succeeded = sum("succeeded");
   const pending = sum("pending") + sum("requires_action");

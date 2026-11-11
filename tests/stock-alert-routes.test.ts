@@ -83,7 +83,8 @@ async function main(): Promise<void> {
   part("An address asks on a sold-out product");
   const asked = await ask("Reader@Example.com");
   is("303 to the list's page, sent", [asked.status, asked.headers.get("location")], [303, `https://marktmorgen.com/@harbor/back-in-stock?product=${pid}&status=sent`]);
-  is("the address is not in the page's address", asked.headers.get("location")!.includes("example.com"), false);
+  // The typed address's own part, in any case or escaped: never in the page's address (no URL substring check on a host).
+  is("the address is not in the page's address", /reader/i.test(decodeURIComponent(asked.headers.get("location")!)), false);
   is("one email", mails.length, 1);
   const mail = mails[0];
   is("to the address typed", mail.to, ["Reader@Example.com"]);

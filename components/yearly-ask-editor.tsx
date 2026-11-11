@@ -15,7 +15,7 @@ const MESSAGES: Record<string, string> = {
 };
 
 /** The one email offering monthly members the yearly price (lib/yearly-ask.ts, lib/yearly-switch-rules.ts). */
-export function YearlyAskEditor({ ask, suggestedAddress, sent, offersYearly }: { ask: YearlyAsk; suggestedAddress: string; sent: number; offersYearly: boolean }) {
+export function YearlyAskEditor({ ask, suggestedAddress, sent, offersYearly }: { ask: YearlyAsk; suggestedAddress: string; sent: number | null; offersYearly: boolean }) {
   const router = useRouter();
   const [saved, setSaved] = useState(ask);
   const [on, setOn] = useState(ask.on);
@@ -77,7 +77,7 @@ export function YearlyAskEditor({ ask, suggestedAddress, sent, offersYearly }: {
           None of your memberships has a yearly price yet. Give a monthly membership one in its product settings, under “Or pay yearly”, and its members can switch.
         </p>
       )}
-      {saved.on ? <p className="mt-3 text-sm text-ink">{`Sent this month: ${sent}`}</p> : null}
+      {saved.on ? <p className="mt-3 text-sm text-ink">{sent === null ? "How many were sent this month could not be counted just now. Reload the page in a minute to see it." : `Sent this month: ${sent}`}</p> : null}
       <form
         className="mt-5 space-y-4"
         onSubmit={(event) => {

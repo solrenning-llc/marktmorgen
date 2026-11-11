@@ -2215,7 +2215,7 @@ export default async function StudioPage({
                         <YearlyAskEditor
                           ask={store.yearlyAsk}
                           suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""}
-                          sent={await yearlyAsksThisMonth(store).catch(() => 0)}
+                          sent={await yearlyAsksThisMonth(store).catch(() => null)}
                           offersYearly={(await recurring).some((p) => activeYearly(p, store.tiers) !== null)}
                         />
                       );
@@ -2227,7 +2227,7 @@ export default async function StudioPage({
                         winback={store.winback}
                         connected={Boolean(current?.stripeAccountId)}
                         suggestedAddress={store.recovery.address || store.mail?.address || ""}
-                        sent={await winbacksSent(store).catch(() => 0)}
+                        sent={await winbacksSent(store).catch(() => null)}
                       />
                     ))()}
                   </>

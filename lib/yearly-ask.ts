@@ -20,7 +20,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { types } from "node:util";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
@@ -176,8 +176,13 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
 /** How many yearly offers a store sent this month. */
 export async function yearlyAsksThisMonth(store: Store, now = Date.now()): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["GET", countKey(store.statsId, monthOf(now))]]);
-  return Number(n) || 0;
+  // Read exactly (VR 2, rule 24): none counted is 0; a reply cut short or of another shape throws, and the studio
+  // says the count could not be read, never "0".
+  const read = repliesFor(await redisPipeline([["GET", countKey(store.statsId, monthOf(now))]]), 1);
+  const raw = read?.[0];
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError("the yearly offers sent this month");
+  return Number(raw);
 }
 
 /** The daily run: every store with it on, from where the last run stopped. */

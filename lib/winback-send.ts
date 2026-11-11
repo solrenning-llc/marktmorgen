@@ -298,8 +298,13 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 /** How many come-back emails a store has sent. */
 export async function winbacksSent(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["GET", countKey(store.statsId)]]);
-  return Number(n) || 0;
+  // Read exactly (VR 2, rule 24): none counted is 0; a reply cut short or of another shape throws, and the studio
+  // says the count could not be read, never "0".
+  const read = repliesFor(await redisPipeline([["GET", countKey(store.statsId)]]), 1);
+  const raw = read?.[0];
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError("the come-back emails sent");
+  return Number(raw);
 }
 
 /** The daily run: every store with the offer on, from where the last run stopped. */

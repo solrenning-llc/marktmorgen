@@ -9,12 +9,13 @@
  *   - app/api/store/affiliates/apply: no link is emailed and nothing is
  *     counted or written;
  *   - app/api/store/affiliates/join: no buyer joins after an order, the order
- *     is not read from the creator's Stripe account and nothing of the program
- *     is written;
+ *     is not read from the creator's Stripe account and nothing is counted or
+ *     written (the route asks buyersJoin before its rate limit);
  *   - app/api/store/affiliates/open: a link for an address the store has no
  *     affiliate under makes no application, and the creator's invitation
  *     (grant.k) approves nobody, each kept for when the store is back; nor does
- *     the store's partnership offer accepted in a creator's studio;
+ *     the store's partnership offer accepted in a creator's studio; nothing is
+ *     counted or written (the route asks linkOpens before its rate limit);
  *   - a link of an affiliate it already has still signs them in.
  *
  * Each refusal sends the browser to the page with the existing "unavailable"
@@ -63,8 +64,6 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   for (const command of commands) if (!READS.has(String(command[0]).toUpperCase())) writes.push(`${command[0]} ${command[1]}`);
   return real(commands);
 }) as typeof redis.pipeline;
-/** A write of the program's own records (affiliates, addresses, codes, links, sessions), not a rate counter. */
-const programWrites = (list: string[]) => list.filter((w) => w.split(" ")[1]?.startsWith("nl:aff:"));
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const linkKey = (token: string) => `nl:aff:link:${sha(`nimbus-aff-link:${token}`).slice(0, 40)}`;
@@ -150,22 +149,22 @@ async function main(): Promise<void> {
   part("app/api/store/affiliates/join: a buyer's direct POST after an order makes no affiliate");
   const joined = await measured(() => post(joinRoute, "join", { handle: HANDLE, order: "cs_test_of1buyer000001" }));
   is("the browser goes back to the page as unavailable, signed in to nothing", [joined.status, joined.location, joined.signedIn], [303, REFUSED, false]);
-  is("no email is sent, the order is not read from Stripe and nothing of the program is written", [joined.emails, joined.stripe, programWrites(joined.writes)], [0, 0, []]);
+  is("no email is sent, the order is not read from Stripe and nothing is counted or written", [joined.emails, joined.stripe, joined.writes], [0, 0, []]);
   is("no affiliate is made for the buyer", await status("buyer@example.test"), null);
 
   part("app/api/store/affiliates/open: a direct POST makes no application and approves nobody");
   const fresh = await emailed("newcomer@example.test");
   const opening = await measured(() => post(openRoute, "open", { handle: HANDLE, token: fresh }));
   is("a link for a new address goes back to the page as unavailable, signed in to nothing", [opening.status, opening.location, opening.signedIn], [303, REFUSED, false]);
-  is("no email is sent and nothing of the program is written", [opening.emails, programWrites(opening.writes)], [0, []]);
+  is("no email is sent and nothing is counted or written", [opening.emails, opening.writes], [0, []]);
   is("no application is made, and the link is kept", [await status("newcomer@example.test"), (await real([["EXISTS", linkKey(fresh)]]))[0]], [null, 1]);
   const invited = await invitation("partner@example.test");
   const accepting = await measured(() => post(openRoute, "open", { handle: HANDLE, token: invited }));
-  is("the creator's invitation approves nobody, signs in nobody and writes nothing of the program", [await status("partner@example.test"), accepting.location, accepting.signedIn, accepting.emails, programWrites(accepting.writes)], ["pending", REFUSED, false, 0, []]);
+  is("the creator's invitation approves nobody, signs in nobody and counts or writes nothing", [await status("partner@example.test"), accepting.location, accepting.signedIn, accepting.emails, accepting.writes], ["pending", REFUSED, false, 0, []]);
   is("and is kept for when the store is back", (await real([["EXISTS", linkKey(invited)]]))[0], 1);
   const guestInvited = await invitation("guest@example.test");
   const guest = await measured(() => post(openRoute, "open", { handle: HANDLE, token: guestInvited }));
-  is("nor makes a partner of a new address", [await status("guest@example.test"), guest.signedIn, guest.emails, programWrites(guest.writes)], [null, false, 0, []]);
+  is("nor makes a partner of a new address, counting or writing nothing", [await status("guest@example.test"), guest.signedIn, guest.emails, guest.writes], [null, false, 0, []]);
   writes = [];
   const studio = await acceptPartnership(await load(), "studio@example.test", { percent: 10, products: [course.product.id] });
   is("nor does a creator accepting the store's partnership offer in their own studio, with nothing written", [studio.ok, studio.ok ? "" : studio.reason, await status("studio@example.test"), writes], [false, "unavailable", null, []]);

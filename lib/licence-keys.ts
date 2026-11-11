@@ -55,6 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -229,17 +230,30 @@ function usable(store: Store, product: Listing): boolean {
  */
 export async function keyOfSale(store: Store, product: Listing, reference: string): Promise<SaleKey | null> {
   if (!store.statsId || !isRedisConfigured() || !reference) return null;
-  const [key, waiting] = await redisPipeline([
-    ["HGET", saleKey(store, product), reference],
-    ["HEXISTS", waitingKey(store, product), reference],
-  ]);
+  // Each reply read in its exact shape (CX-123 rule 24): the sale's key as text or none, whether it waits as 0 or 1.
+  // Any other is not known, never "no key yet": it throws, and each caller says the key could not be read.
+  const line = repliesFor(
+    await redisPipeline([
+      ["HGET", saleKey(store, product), reference],
+      ["HEXISTS", waitingKey(store, product), reference],
+    ]),
+    2,
+  );
+  const [key, waiting] = line ?? [];
+  if (!line || (key !== null && typeof key !== "string") || (waiting !== 0 && waiting !== 1)) throw new UnknownReplyError("a sale's license key");
   if (typeof key === "string" && key) {
-    const [raw] = await redisPipeline([["HGET", infoKey(store, product), key]]);
+    const reply = repliesFor(await redisPipeline([["HGET", infoKey(store, product), key]]), 1);
+    const raw = reply?.[0];
+    // No record at all is not revoked, exactly: nothing revokes a key without its record (setRevoked refuses). A
+    // record that does not read is not known, never a good key.
+    if (!reply || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a license key's record");
+    if (raw === null) return { state: "issued", key, revoked: false };
     const info = parseInfo(key, raw);
-    return { state: "issued", key, revoked: Boolean(info?.revokedAt) };
+    if (!info) throw new UnknownReplyError("a license key's record");
+    return { state: "issued", key, revoked: Boolean(info.revokedAt) };
   }
   // Still waiting only while the product hands out keys: one switched off gives none.
-  return Number(waiting) === 1 && activeKeys(product) ? { state: "waiting" } : null;
+  return waiting === 1 && activeKeys(product) ? { state: "waiting" } : null;
 }
 
 /**

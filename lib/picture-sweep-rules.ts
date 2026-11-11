@@ -14,7 +14,9 @@
  * already sent (a sent email still shows it in the reader's inbox) and a
  * review. Any reading that is unknown (the pictures, what is in use or the
  * notices) gives "unknown": no notice and no sweep (rule 24). An added time or
- * a notice that cannot be read keeps the picture. Only a picture's own place,
+ * a notice that cannot be read (or is at time 0, a missing notice read as a
+ * number) keeps the picture, and so does a picture listed twice with two added
+ * times. Only a picture's own place,
  * images/<folder>/<name>, is ever named, and a run names at most
  * MAX_SWEEP_PER_RUN of each, so its cost is bounded.
  *
@@ -65,10 +67,15 @@ export function sweepPlan(
   const notice: string[] = [];
   const sweep: string[] = [];
   const clearNotice: string[] = [];
-  const seen = new Set<string>();
+  // A picture listed twice must say the same added time; if not, the reading
+  // disagrees and the picture is kept (independent review).
+  const added = new Map<string, number | null>();
   for (const { path, addedAt } of pictures) {
-    if (seen.has(path)) continue;
-    seen.add(path);
+    const before = added.get(path);
+    added.set(path, before === undefined || Object.is(before, addedAt) ? addedAt : null);
+  }
+  for (const [path, addedAt] of added) {
+    if (addedAt === null) continue;
     if (!PICTURE_PATH.test(path) || path.includes("..")) continue;
     const told = noticedAt.get(path);
     if (used.has(path)) {
@@ -80,7 +87,7 @@ export function sweepPlan(
       if (notice.length < MAX_SWEEP_PER_RUN) notice.push(path);
       continue;
     }
-    if (!readable(told, now) || now - told < NOTICE_DAYS * DAY_SECONDS) continue;
+    if (!readable(told, now) || told === 0 || now - told < NOTICE_DAYS * DAY_SECONDS) continue;
     if (sweep.length < MAX_SWEEP_PER_RUN) sweep.push(path);
   }
   return { notice, sweep, clearNotice };

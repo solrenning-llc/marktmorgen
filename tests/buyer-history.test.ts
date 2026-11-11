@@ -11,8 +11,9 @@
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setInboxSetting, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { REFUND_HISTORY_LIST, REFUND_HISTORY_PER_DAY, historyFrom, refundHistory } from "@/lib/buyer-history";
+import { REFUND_HISTORY_LIST, REFUND_HISTORY_PER_DAY, REFUND_HISTORY_UNITS, historyFrom, refundHistory } from "@/lib/buyer-history";
 import { readInbox, startChat } from "@/lib/inbox";
+import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { POST as inboxRoute } from "@/app/api/store/inbox/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -143,16 +144,29 @@ async function main(): Promise<void> {
   const told = await route(OWNER, { action: "history", id: conversation.id });
   is("told, for this conversation's address", told, { status: 200, body: { ok: true, history: { state: "known", checked: 5, refunded: 2, partly: 1, disputed: 2, more: false, unchecked: 0 } } });
   const keysAfter = redis.keys().filter((key) => !before.has(key));
-  is("nothing kept but the day's count of checks", keysAfter.every((key) => key.startsWith("nl:rl:")), true);
+  // Besides the sign-in of this test and the studio request counted in the store's figure (lib/store-request.ts).
+  is("nothing kept but the day's count of checks", keysAfter.filter((key) => !/^nl:(auth|allow:studio):/.test(key)).map((key) => key.split(":").slice(0, 3).join(":")), ["nl:rl:refund-history"]);
+  const studioKey = keysAfter.find((key) => key.startsWith("nl:allow:studio:")) ?? "";
+  const used = async () => Number((await redis.pipeline([["GET", studioKey]]))[0]);
+  is("the request and one more for each Stripe read are counted in the store's studio figure", await used(), 1 + REFUND_HISTORY_UNITS);
+  is("one for each spelling of the address", REFUND_HISTORY_UNITS, 2);
   is("the address is not in any key's name", keysAfter.some((key) => key.toLowerCase().includes("buyer")), false);
   is("another store cannot ask about this conversation", (await route(OTHER, { action: "history", id: conversation.id })).status, 404);
   is("an unknown conversation", (await route(OWNER, { action: "history", id: "zzzzzzzzzzzz" })).status, 404);
   replies = { "buyer@example.com": { status: 500, body: { error: { type: "api_error" } } } };
   is("could not check: said, not shown as none", await route(OWNER, { action: "history", id: conversation.id }), { status: 503, body: { ok: false, error: "unknown" } });
 
+  part("A studio figure used up is refused before Stripe is asked");
+  await redis.pipeline([["SET", studioKey, String(STORE_ALLOWANCES.pro.studio - 1)]]);
+  calls = [];
+  is("room for the request, not for its reads: refused by the check itself", await route(OWNER, { action: "history", id: conversation.id }), { status: 429, body: { ok: false, error: "studio_used" } });
+  is("Stripe is not asked", calls.length, 0);
+  await redis.pipeline([["SET", studioKey, "3"]]);
+
   part("A day's checks are bounded before Stripe is asked");
   replies = { "buyer@example.com": { status: 200, body: mixed } };
-  for (let n = 2; n < REFUND_HISTORY_PER_DAY; n += 1) await route(OWNER, { action: "history", id: conversation.id });
+  // Three asked so far today: the one told, the one Stripe refused and the one without room.
+  for (let n = 3; n < REFUND_HISTORY_PER_DAY; n += 1) await route(OWNER, { action: "history", id: conversation.id });
   calls = [];
   is("past the day's checks: refused", await route(OWNER, { action: "history", id: conversation.id }), { status: 429, body: { ok: false, error: "limited" } });
   is("and Stripe is not asked", calls.length, 0);

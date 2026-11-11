@@ -6,6 +6,9 @@ import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { assignTo, conversationOf, openConversation, readInbox, replyTo, setStatus, suggestReply } from "@/lib/inbox";
 import { blockPerson, blockedState, unblockPerson } from "@/lib/buyer-block";
+import { REFUND_HISTORY_PER_DAY, REFUND_HISTORY_UNITS, refundHistory } from "@/lib/buyer-history";
+import { withinLimit } from "@/lib/request-guard";
+import { countStudio } from "@/lib/studio-route";
 import { CONVERSATION_ID, parseInboxSetting } from "@/lib/inbox-rules";
 
 /**
@@ -23,6 +26,8 @@ import { CONVERSATION_ID, parseInboxSetting } from "@/lib/inbox-rules";
  *   { action: "blocked", id }              whether the person of a conversation is blocked, and why (567 [GD1] (f))
  *   { action: "block", id, reason }        blocks them in the store's messages, the reason kept for the creator alone
  *   { action: "unblock", id }              lets them write again
+ *   { action: "history", id }              their past refunds and disputes in this store, read now from
+ *                                          the creator's own Stripe account (567 [GD1] (f), unit 3)
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, (body) => (body.action === "chat" ? "settings" : "orders"), 40_000);
@@ -85,6 +90,16 @@ export async function POST(request: NextRequest) {
         }
         const removed = await unblockPerson(store, conversation.email);
         return removed === "error" ? refuse("error", 503) : answer({ ok: true, blocked: false });
+      }
+      case "history": {
+        const conversation = id ? await conversationOf(store.statsId, id) : null;
+        if (!conversation) return refuse("none", 404);
+        // Bounded before Stripe is asked: each check is at most two reads (lib/buyer-history.ts).
+        if (!(await withinLimit("refund-history", store.statsId, REFUND_HISTORY_PER_DAY, 86_400))) return refuse("limited", 429);
+        const paid = await countStudio(store, null, REFUND_HISTORY_UNITS);
+        if (!paid.ok) return refuse("studio_used", 429);
+        const history = await refundHistory(store, conversation.email);
+        return history.state === "unknown" ? refuse("unknown", 503) : answer({ ok: true, history });
       }
       default:
         return refuse("invalid");

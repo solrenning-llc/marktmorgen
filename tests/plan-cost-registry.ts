@@ -1250,6 +1250,10 @@ export const COST_LINES: CostLine[] = [
       // A discount code scheduled ahead (511 [CK3]) takes SCHEDULE_UNITS more studio requests before Stripe is asked, one for each try the
       // five-minute job may make to switch it on (each one call to the creator's Stripe account, which bills none, and a few commands).
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },
+      // A creator's look at a buyer's past refunds and disputes in the store (567 [GD1] (f), unit 3): at most REFUND_HISTORY_PER_DAY a store a day, each
+      // taking REFUND_HISTORY_UNITS more studio requests, one for each read of the creator's Stripe account (which bills none), before Stripe is asked.
+      { file: "app/api/store/inbox/route.ts", names: ["countStudio(store, null, REFUND_HISTORY_UNITS)", "withinLimit(\"refund-history\""] },
+      { file: "lib/buyer-history.ts", names: ["REFUND_HISTORY_UNITS", "REFUND_HISTORY_PER_DAY", "REFUND_HISTORY_LIST"] },
       { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES", "MAX_SCHEDULED_CODES"] },
       { file: "app/api/cron/imports/route.ts", names: ["activateScheduledCodes("] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
@@ -1780,7 +1784,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
-  "picture-door": BURST("studio"),
+  "picture-door": BURST("studio"), "refund-history": BURST("studio"),
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),
   // A buyer's report of a problem with an order (567 [GD1] (a), app/api/store/order-problem): at most ORDER_PROBLEM_PER_DAY a buyer a store, each one inbox message from the store's figure (lib/inbox.ts, open) and its notice from the store's email figure (tellTeam).
   "order-problem": BURST("inbox"),

@@ -132,3 +132,30 @@ test("dropReviews read exactly hands back the photo to delete", async () => {
   await photoFixture;
   assert.deepEqual(await dropReviews(statsId, PHOTO_PRODUCT), [`${PHOTO_PATH}`]);
 });
+
+// recount (after every save or creator change): a product's reviews read in another shape never rewrite or delete
+// its public summary (the stars and the count a store page shows), which was HDEL'd on an empty-looking reply.
+const SUMMARY = `nl:rev:sum:${statsId}`;
+for (const [label, alter] of [
+  ["no reply", () => []],
+  ["a number", () => [7]],
+  ["null", () => [null]],
+  ["an odd count", (r: unknown[]) => [[...(r[0] as unknown[]), "extra"]]],
+] as [string, (r: unknown[]) => unknown[]][]) {
+  test(`recount: the reviews read as ${label} leave the public summary as it was`, async () => {
+    await fixture;
+    const [before] = await pipeline([["HGET", SUMMARY, "synthbread01"]]);
+    assert.equal(typeof before, "string", "(the product has a summary)");
+    redis.pipeline = (async (batch: Batch) => {
+      const real = await pipeline(batch);
+      return batch.length === 1 && batch[0][0] === "HGETALL" && batch[0][1] === `nl:rev:${statsId}:synthbread01` ? alter(real) : real;
+    }) as typeof redis.pipeline;
+    try {
+      await review("synthbread01", "ana@example.com").catch(() => null);
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    const [after] = await pipeline([["HGET", SUMMARY, "synthbread01"]]);
+    assert.equal(after, before, "the stars and the count are kept");
+  });
+}

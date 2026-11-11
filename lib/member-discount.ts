@@ -38,6 +38,16 @@ const MAX_CUSTOMERS = 20;
 /** A customer's subscriptions, read page by page up to this many; past it the memberships are not known. */
 const SUB_PAGE = 100;
 const MAX_SUB_PAGES = 5;
+/**
+ * The most Stripe pages one find (or one apply) waits on, the customers' page
+ * included: the base's worst, one page of memberships a customer at the most
+ * customers read, so the one studio request the route takes still covers it
+ * (tests/plan-cost-registry.ts prices a Stripe page waited on). Memberships are
+ * read 100 to a page, Stripe's largest, so a customer with more than one page
+ * is followed while the budget lasts (and up to MAX_SUB_PAGES); past it the
+ * answer is unknown.
+ */
+const STRIPE_PAGES = 1 + MAX_CUSTOMERS;
 
 /** One of a member's running memberships of this store, as the studio shows it. */
 export type MemberSub = {
@@ -80,11 +90,16 @@ const legibleSub = (row: Record<string, unknown>): boolean => {
   return typeof status === "string" && STRIPE_STATUSES.has(status) && plainObject(ownField(row, "metadata"));
 };
 
-/** Every row of a Stripe list read to its end, every row readable; otherwise StripeListUnreadable. */
-async function readWhole(account: string, path: string, limit: number, maxPages: number, pattern: RegExp, legible?: (row: Record<string, unknown>) => boolean): Promise<StripeRow[]> {
+/** The Stripe pages one find may still wait on (STRIPE_PAGES at its start). */
+type PageBudget = { left: number };
+
+/** Every row of a Stripe list read to its end, every row readable, within the find's page budget; otherwise StripeListUnreadable. */
+async function readWhole(account: string, path: string, limit: number, maxPages: number, pattern: RegExp, budget: PageBudget, legible?: (row: Record<string, unknown>) => boolean): Promise<StripeRow[]> {
   const rows: StripeRow[] = [];
   let after = "";
   for (let page = 0; page < maxPages; page += 1) {
+    if (budget.left <= 0) throw new StripeListUnreadable(`more than ${STRIPE_PAGES} Stripe pages for one address's memberships`);
+    budget.left -= 1;
     const read = readStripePage(await onAccount("GET", account, `${path}&limit=${limit}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`, undefined, API_VERSION), legible, pattern);
     if (read.unreadable > 0) throw new StripeListUnreadable(`${read.unreadable} row(s) could not be read`);
     rows.push(...read.rows);
@@ -137,10 +152,12 @@ export async function memberSubRows(store: Store, email: string): Promise<{ row:
   if (!account) return null;
   const handles = saleHandles(store);
   try {
-    const customers = await readWhole(account, `/customers?email=${encodeURIComponent(email)}`, MAX_CUSTOMERS, 1, CUSTOMER_PATTERN);
+    // One budget for the whole find, the customers' page included.
+    const budget: PageBudget = { left: STRIPE_PAGES };
+    const customers = await readWhole(account, `/customers?email=${encodeURIComponent(email)}`, MAX_CUSTOMERS, 1, CUSTOMER_PATTERN, budget);
     const out: { row: MemberSub; raw: Raw }[] = [];
     for (const customer of customers) {
-      const subs = await readWhole(account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all`, SUB_PAGE, MAX_SUB_PAGES, SUB_PATTERN, legibleSub);
+      const subs = await readWhole(account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all`, SUB_PAGE, MAX_SUB_PAGES, SUB_PATTERN, budget, legibleSub);
       for (const sub of subs) {
         const row = readMemberSub(sub, handles);
         if (row) out.push({ row, raw: sub });

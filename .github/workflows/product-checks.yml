@@ -70,6 +70,10 @@ jobs:
         run: npm run lint
       - name: Behavior regressions
         run: npm test
+        env:
+          # Four test files at once on the 4-vCPU runner, each still in its own process; the files in
+          # SERIAL_TEST_FILES (tests/test-runner.mjs) run alone afterwards. Same 2,106 files as serial.
+          TEST_CONCURRENCY: "4"
       - name: Production build and route types
         run: node scripts/ci-build.mjs
       - name: Verify reviewed development dependencies stay outside runtime

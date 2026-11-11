@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext, useId, useState } from "react";
+import { useContext, useId, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { FILLABLE, REWRITABLE, REWRITE_STYLES, type RewriteStyle, blockText } from "@/lib/block-rewrite-rules";
@@ -14,6 +14,7 @@ const MESSAGES: Record<string, string> = {
   off: "The writing help is not available right now.",
   forbidden: "Your role on this store cannot do this.",
   notes: "Write something in this block first: it rewrites your words, it does not start from nothing.",
+  changed: "You changed this block while it was being rewritten, so your words were kept and the rewrite was not used. Started attempts count toward the monthly allowance.",
 };
 
 /**
@@ -37,6 +38,12 @@ export function BlockRewrite({
   const [busy, setBusy] = useState<RewriteStyle | "fill" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [before, setBefore] = useState<PageBlock | null>(null);
+  // The block as the AI left it: Undo is offered only while the block is still exactly that, so it never throws
+  // away words typed after the rewrite.
+  const [applied, setApplied] = useState<string | null>(null);
+  // The block as the editor holds it now, read when a rewrite comes back.
+  const latest = useRef(block);
+  latest.current = block;
   const [left, setLeft] = useState(allowanceOf(ai));
   const allowanceId = useId();
   // An allowance that could not be read (null) keeps the buttons off and is said in words, never "0 left".
@@ -49,6 +56,7 @@ export function BlockRewrite({
   async function run(style: RewriteStyle | "fill") {
     setBusy(style);
     setError(null);
+    const sent = JSON.stringify(block);
     try {
       const response = await fetch("/api/store/ai", {
         method: "POST",
@@ -57,9 +65,15 @@ export function BlockRewrite({
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: PageBlock; left?: number; error?: string };
       if (data.ok && data.value) {
-        setBefore(block);
-        onChange(data.value);
         if (typeof data.left === "number") setLeft(data.left);
+        // Typed in while it ran: the creator's words win, and the rewrite is not used.
+        if (JSON.stringify(latest.current) !== sent) {
+          setError(MESSAGES.changed);
+          return;
+        }
+        setBefore(block);
+        setApplied(JSON.stringify(data.value));
+        onChange(data.value);
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? (style === "fill" ? MESSAGES.unwritten : MESSAGES.failed));
@@ -95,13 +109,14 @@ export function BlockRewrite({
             {busy === style.id ? "Rewriting…" : style.label}
           </button>
         ))}
-        {before ? (
+        {before && applied === JSON.stringify(block) ? (
           <button
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => {
               onChange(before);
               setBefore(null);
+              setApplied(null);
             }}
           >
             <Icon name="refresh" size={14} />

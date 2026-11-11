@@ -101,7 +101,7 @@ async function main(): Promise<void> {
     await settle(); await settle();
     is("the rewrite is in", h.block, rewritten);
     is("Undo is offered right after it", h.has(/Undo/), true);
-    const edited = { ...rewritten, body: rewritten.body + " Every Saturday." } as PageBlock;
+    const edited = { ...rewritten, body: (rewritten as { body: string }).body + " Every Saturday." } as PageBlock;
     h.type(edited);
     h.press(/Undo/);
     is("the edit made after the rewrite is still there", h.block, edited);

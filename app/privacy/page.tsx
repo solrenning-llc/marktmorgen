@@ -972,6 +972,19 @@ export default function PrivacyPage() {
           that store&apos;s checkout without being typed. It holds the code and
           nothing else, and is sent to no other store.
         </p>
+        <p id="returning-codes" className="scroll-mt-24">
+          <strong className="text-black">
+            Codes for returning buyers.
+          </strong>{" "}
+          A store may have a discount code only for people who bought from it
+          before. Someone who types one on a product&apos;s page types the
+          email of their earlier order with it. We use that email once, to
+          look up their earlier orders on the creator&apos;s own Stripe
+          account, and their checkout then opens with it. We do not keep it.
+          At most six tries are taken from one connection in ten minutes;
+          they are counted for those ten minutes under a one-way fingerprint
+          of the network address and the store, and nothing else.
+        </p>
         <p id="cart">
           <strong className="text-black">A store&apos;s cart.</strong>{" "}
           What someone adds to a store&apos;s cart is kept in their own

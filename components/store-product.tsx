@@ -31,6 +31,8 @@ import { pickWords } from "@/lib/buyer-words/pick";
 import { PickBundleForm } from "@/components/pick-bundle-form";
 import { AddToCart } from "@/components/store-cart";
 import { AssistReminderBox } from "@/components/assistant-reminder-box";
+import { ReturningCodeBox } from "@/components/returning-code-box";
+import { returningCodeOffered } from "@/lib/returning-code-rules";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
 import { WithdrawalWhere } from "@/components/withdrawal-where";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
@@ -919,6 +921,8 @@ export function BuyBox({
       ) : null}
       {/* Starts unchecked: one reminder if this checkout is left unpaid, only when asked for here (lib/assistant-reminder.ts). */}
       {assistReminderOffered(store, product) ? <AssistReminderBox id={`r-${place}${product.id}`} lang={store.language} store={store.name} className="mb-4" /> : null}
+      {/* Closed and empty: a code only for people who bought here before, checked by the server against the email typed with it (lib/returning-code.ts). */}
+      {returningCodeOffered(store, product) ? <ReturningCodeBox id={`rc-${place}${product.id}`} lang={store.language} className="mb-4" /> : null}
       {digitalHere || digitalAdded ? <DigitalConsentBox id={`dc-${place}${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain} required={digitalHere} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
       <button type="submit" className="btn st-btn btn-block">
         <span className="bump-off">

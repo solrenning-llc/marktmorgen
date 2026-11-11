@@ -143,7 +143,7 @@ export function returningDecision(code: ReturningCode | null, owned: ReadonlySet
 export function returningCodeOffered(
   store: { returningCodes: readonly ReturningCode[]; stripeAccountId: string | null },
   product: { pwyw?: unknown },
-  nowSeconds: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
 ): boolean {
   if (!store.stripeAccountId || product.pwyw) return false;
   return store.returningCodes.some((entry) => entry.endsAt === null || entry.endsAt > nowSeconds);

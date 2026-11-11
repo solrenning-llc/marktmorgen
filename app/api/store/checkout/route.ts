@@ -7,6 +7,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, type ReturningCheck, checkReturningCode } from "@/lib/returning-code";
+import { readTypedCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
@@ -209,7 +210,11 @@ export async function POST(request: NextRequest) {
   // leaves nothing behind. The buyer goes back to the form with the reason;
   // nothing is charged, and they can still buy without it.
   let returning: Extract<ReturningCheck, { ok: true }> | null = null;
-  const refusedCode = (reason: string) => away(`/@${store.handle}/p/${product.id}?returning=${reason}#returning`);
+  // The code goes back with the reason, so the field is filled in again (WCAG 3.3.7); the email never goes in an address.
+  const refusedCode = (reason: string) => {
+    const again = readTypedCode(typedCode);
+    return away(`/@${store.handle}/p/${product.id}?returning=${reason}${again ? `&rc=${again}` : ""}#returning`);
+  };
   if (typedCode) {
     // Each try reads what an email bought from the creator's Stripe account:
     // a few per connection, so nobody can try address after address.

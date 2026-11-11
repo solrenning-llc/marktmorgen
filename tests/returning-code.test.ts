@@ -143,7 +143,8 @@ async function main(): Promise<void> {
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com", "x-forwarded-for": ip } }));
     return { location: response.headers.get("location") ?? "", session: opened.length > before ? opened.at(-1)! : null, reads: reads.length - readsBefore };
   };
-  const back = (reason: string) => `https://marktmorgen.com/@returnshop/p/${productId}?returning=${reason}#returning`;
+  // The code goes back with the reason, so the field is filled in again; the email never does.
+  const back = (reason: string, code = "THANKYOU") => `https://marktmorgen.com/@returnshop/p/${productId}?returning=${reason}&rc=${code}#returning`;
 
   part("Typed on the buy form by someone who bought here before");
   let r = await post({ rcode: "thankyou", remail: " Past.Buyer@Example.com " });
@@ -165,7 +166,7 @@ async function main(): Promise<void> {
 
   part("A code the store does not have, or one that ended: nothing is read from Stripe");
   r = await post({ rcode: "NOPE", remail: PAST }, "198.51.100.11");
-  is("refused as a code, with no purchases read", [r.location, r.session, r.reads], [back("code"), null, 0]);
+  is("refused as a code, with no purchases read", [r.location, r.session, r.reads], [back("code", "NOPE"), null, 0]);
   store = (await storeForEmail(OWNER))!;
   const ended = await checkReturningCode(store, "OLDTHANKS", PAST, 1_790_000_100_000);
   is("an ended code is a code that is not one", ended, { ok: false, reason: "code" });
@@ -177,7 +178,8 @@ async function main(): Promise<void> {
   part("Too many tries from one connection");
   let last = "";
   for (let i = 0; i <= RETURNING_TRIES; i += 1) last = (await post({ rcode: "NOPE", remail: PAST }, "198.51.100.13")).location;
-  is("the try after the limit is told to wait", last, back("busy"));
+  is("the try after the limit is told to wait", last, back("busy", "NOPE"));
+  is("the email is never in the address", /past\.buyer|%40|@example/i.test(last), false);
 
   part("A coupon Stripe will not take any more");
   refuseCoupon = true;

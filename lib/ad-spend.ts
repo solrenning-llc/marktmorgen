@@ -14,6 +14,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type AdSpend, MAX_SPEND_ENTRIES, readSpend } from "@/lib/ad-spend-rules";
 import { metaLines } from "@/lib/meta-ads";
 
@@ -67,13 +68,16 @@ export async function addSpend(
     ["HSET", key(statsId), id, JSON.stringify(read.spend)],
     ["EXPIRE", key(statsId), KEEP_SECONDS],
   ]);
-  const spends = await typedSpends(statsId);
-  const [count] = await redisPipeline([["HLEN", key(statsId)]]);
-  if (Number(count) > MAX_SPEND_ENTRIES) {
-    const keep = new Set(spends.map((s) => s.id));
-    const [all] = await redisPipeline([["HKEYS", key(statsId)]]);
-    const drop = (Array.isArray(all) ? (all as unknown[]).map(String) : []).filter((field) => !keep.has(field));
-    if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
+  // Over the cap, the oldest are trimmed only from lines read exactly (rule 24): a reply cut short or of another shape
+  // trims nothing this time, never "keep none", which deleted every typed line, the new one too.
+  const kept = repliesFor(await redisPipeline([["HGETALL", key(statsId)], ["HLEN", key(statsId)], ["HKEYS", key(statsId)]]), 3);
+  const flat = stringList(kept?.[0]);
+  const count = countOf(kept?.[1]);
+  const all = stringList(kept?.[2]);
+  if (flat && flat.length % 2 === 0 && count !== null && all && count > MAX_SPEND_ENTRIES) {
+    const keep = new Set(parseSpends(flat).map((s) => s.id));
+    const drop = all.filter((field) => !keep.has(field));
+    if (drop.length && keep.size > 0) await redisPipeline([["HDEL", key(statsId), ...drop]]);
   }
   return { ok: true, spends: await readSpends(statsId) };
 }

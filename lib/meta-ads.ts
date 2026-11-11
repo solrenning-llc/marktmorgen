@@ -622,7 +622,11 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     // range) would show a cost lower than Meta's, so the read is not taken.
     const said = rows.reduce((sum, row) => sum + minorUnits(row.spend, account.currency), 0);
     if (!Number.isSafeInteger(said) || said !== fresh.reduce((sum, line) => sum + line.cents, 0)) throw new MetaError("busy", "Meta's ad spend did not add up");
-    const [rawKept] = await redisPipeline([["GET", linesKey(statsId)]]);
+    // The kept lines read exactly (rule 24): only GET's exact null is "none kept"; another shape stops this read, never
+    // an empty history merged with the window and written over the kept one.
+    const keptRead = repliesFor(await redisPipeline([["GET", linesKey(statsId)]]), 1);
+    const rawKept = keptRead?.[0];
+    if (!keptRead || (rawKept !== null && typeof rawKept !== "string")) throw new MetaError("busy", "the ad spend kept could not be read");
     const merged = mergeLines(parseLines(rawKept), fresh, window.from, window.to);
     const still = await readConnection(statsId);
     if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return "none";

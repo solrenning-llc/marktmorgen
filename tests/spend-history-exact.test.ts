@@ -15,29 +15,19 @@ import { spendWithin, typedOverlap } from "@/lib/ad-spend-rules";
 import {
   accountToUse,
   beginMeta,
-  chooseAccount,
-  disconnectMeta,
   finishMeta,
-  forgetMetaUser,
   graphVersion,
   linesKey,
   metaView,
-  readMetaDue,
   readMetaSpend,
-  signedUser,
   takeMeta,
 } from "@/lib/meta-ads";
 import { addSpend, readSpends } from "@/lib/ad-spend";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
-import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeForId } from "@/lib/store";
+import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { sourceAlias } from "@/lib/source-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { NextRequest } from "next/server";
-import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { startMeta, finishMetaConnect } from "@/lib/meta-routes";
-import { allowanceUsed } from "@/lib/store-allowance";
-import { paidPeriod } from "./billing-period-fixture";
 
 const SECRET = "meta-app-secret-for-tests-0123456789";
 process.env.META_APP_ID = "123456789012345";
@@ -50,8 +40,8 @@ const USER = "10150000000000001";
 const today = new Date().toISOString().slice(0, 10);
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 
-let accounts: Record<string, unknown>[] = [{ id: "act_111", account_id: "111", name: "Harbor Ads", currency: "USD", account_status: 1 }];
-let refuse = false;
+const accounts: Record<string, unknown>[] = [{ id: "act_111", account_id: "111", name: "Harbor Ads", currency: "USD", account_status: 1 }];
+const refuse = false;
 let adsRead = true;
 const revoked: string[] = [];
 const proofs: boolean[] = [];
@@ -199,7 +189,8 @@ async function main(): Promise<void> {
   const [before] = await pipeline([["HLEN", `nl:stats:${statsId}:spend`]]);
   redis.pipeline = (async (b: Batch) => {
     const real = await pipeline(b);
-    return b.length === 1 && b[0][0] === "HGETALL" && b[0][1] === `nl:stats:${statsId}:spend` ? [7] : real;
+    // The typed lines' HGETALL answered as a number, in whichever request it is sent.
+    return b.map((c, i) => (c[0] === "HGETALL" && c[1] === `nl:stats:${statsId}:spend` ? 7 : real[i]));
   }) as typeof redis.pipeline;
   try {
     await addSpend(statsId, { channel: "podcast", cents: 999, from: today, to: today }).catch(() => null);

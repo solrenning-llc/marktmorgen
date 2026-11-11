@@ -1,3 +1,7 @@
+import { MovedNotice } from "@/components/moved-notice";
+import { SiteFooter } from "@/components/site-footer";
+import { SiteNav } from "@/components/site-nav";
+import { exitAnswerForValue } from "@/lib/exit-redirect-rules";
 import { VisitUsBlock } from "@/components/visit-us-block";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
@@ -47,7 +51,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
-import { type Listing, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Listing, handleForPage, normaliseHandle, storeForPage } from "@/lib/store";
 import { KIND, readPage, sellsAny, visibleCount } from "@/lib/catalog";
 import { groupBySection } from "@/lib/store-sections";
 import { offeredItems } from "@/lib/bundles";
@@ -105,12 +109,27 @@ async function load(raw: string) {
   return store ? { store, asked } : null;
 }
 
+/**
+ * A closed store's moved notice at its old address (97 [D2-OPEN-EXIT]), read
+ * from the same one read of the address the page already made
+ * (handleForPage), never a second one.
+ */
+async function moved(raw: string) {
+  const decoded = decodeURIComponent(raw);
+  if (!decoded.startsWith("@")) return null;
+  const answer = exitAnswerForValue((await handleForPage(normaliseHandle(decoded))).released, Date.now());
+  return answer.kind === "moved" ? answer : null;
+}
+
 export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
   const { handle } = await params;
   // A search's results are not a page of their own for search engines.
   const searched = typeof (searchParams ? await searchParams : {}).q === "string";
   const found = await load(handle);
-  if (!found) return { title: "Not found — Marktmorgen" };
+  if (!found) {
+    if (await moved(handle)) return { title: "This store has moved — Marktmorgen", robots: { index: false, follow: false } };
+    return { title: "Not found — Marktmorgen" };
+  }
   const { store } = found;
 
   // A store on its own live domain names that as its address for search engines.
@@ -152,7 +171,19 @@ export default async function StorePage({ params, searchParams }: Params) {
   const query = searchParams ? await searchParams : {};
   const asking = typeof query.page === "string" && /^\d{1,4}$/.test(query.page) ? Number(query.page) : 1;
   const found = await load(handle);
-  if (!found) notFound();
+  if (!found) {
+    const notice = await moved(handle);
+    if (notice) {
+      return (
+        <div className="flex min-h-screen flex-col bg-paper text-ink">
+          <SiteNav />
+          <MovedNotice to={notice.to} host={notice.host} until={notice.until} />
+          <SiteFooter />
+        </div>
+      );
+    }
+    notFound();
+  }
   const { asked } = found;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = await forVisitor(found.store);

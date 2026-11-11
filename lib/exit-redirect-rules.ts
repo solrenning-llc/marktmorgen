@@ -211,3 +211,14 @@ export function exitFromReleased(raw: unknown): ExitNotice | null {
   if (!at || !Number.isFinite(Date.parse(at))) return null;
   return readExitNotice(raw.slice(split + EXIT_PART.length));
 }
+
+/**
+ * What a visitor to an old address is shown, from the one value the visit
+ * already read for it (lib/store.ts, handleLookup): a released value is held
+ * for nobody, so its notice, if it has one, is the closed store's own.
+ * Anything else, a live store's value or nothing read, gives no notice.
+ */
+export function exitAnswerForValue(raw: unknown, now: number): ExitAnswer {
+  const released = typeof raw === "string" && raw.startsWith(RELEASED);
+  return exitAnswer({ record: released ? exitFromReleased(raw) : null, holder: released ? "released" : "unknown", now });
+}

@@ -1452,6 +1452,7 @@
     "components/member-discount.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
+    "components/moved-notice.tsx",
     "components/mrr-chart.tsx",
     "components/new-tab.tsx",
     "components/next-offer-box.tsx",

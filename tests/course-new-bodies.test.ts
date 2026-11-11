@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   is("cleanBody keeps a clean text as it is", cleanBody("Line one\nLine two"), "Line one\nLine two");
 
   part("A full store gets nothing written");
-  const small: DataStore = { ...ROOM, sid: "room-small-store", tier: "free", subscriptionActive: false, subscriptionId: "" };
+  const small: DataStore = { ...ROOM, sid: "room-small-store", tier: "creator", subscriptionActive: false, subscriptionId: "" };
   const room = (await dataUsed(small))!.room;
   const filled = await takeData(small, [{ slot: "test:fill", bytes: room - 100, set: true }]);
   is("filled", filled.ok, true);

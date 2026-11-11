@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { done, is, part } from "./check";
 
 const ID = "0123456789abcdef01234567";
+const SID = "aaaabbbbccccddddeeeeffff00001111";
 const sign = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 32);
 const verify = (text: string, s: string) => s === sign(text);
 
@@ -38,18 +39,20 @@ for (const [what, raw] of [
 ] as [string, unknown][]) is(`refused: ${what}`, readSentLinkTarget(raw).ok, false);
 
 part("The link in the email: the same for every reader, signed");
-const path = sentLinkPath(ID, 2, "https://example.com/guide", sign);
-is("its path", path, `/r/${ID}/2?u=${encodeURIComponent("https://example.com/guide")}&s=${sign(`${ID}|2|https://example.com/guide`)}`);
+const path = sentLinkPath(SID, ID, 2, "https://example.com/guide", sign);
+is("its path: the store, the email, the number, the address and the signature", path, `/r/${SID}/${ID}/2?u=${encodeURIComponent("https://example.com/guide")}&s=${sign(`${SID}|${ID}|2|https://example.com/guide`)}`);
 is("no reader in it", /reader|email|@|mk=/.test(path ?? ""), false);
-is("no signature, no link", sentLinkPath(ID, 2, "https://example.com/guide", () => null), null);
-is("past the most links in one email, none", sentLinkPath(ID, MAX_SENT_LINKS, "https://example.com/guide", sign), null);
+is("no signature, no link", sentLinkPath(SID, ID, 2, "https://example.com/guide", () => null), null);
+is("past the most links in one email, none", sentLinkPath(SID, ID, MAX_SENT_LINKS, "https://example.com/guide", sign), null);
 const u = encodeURIComponent("https://example.com/guide");
-is("read back", readSentLinkPath(ID, "2", { u: "https://example.com/guide", s: sign(`${ID}|2|https://example.com/guide`) }, verify), { ok: true, n: 2, original: "https://example.com/guide" });
-is("another address under the same signature: refused (no open redirect)", readSentLinkPath(ID, "2", { u: "https://evil.example/", s: sign(`${ID}|2|https://example.com/guide`) }, verify).ok, false);
-is("another number: refused", readSentLinkPath(ID, "3", { u: "https://example.com/guide", s: sign(`${ID}|2|https://example.com/guide`) }, verify).ok, false);
-is("another email: refused", readSentLinkPath("fedcba9876543210fedcba98", "2", { u: "https://example.com/guide", s: sign(`${ID}|2|https://example.com/guide`) }, verify).ok, false);
-is("no signature: refused", readSentLinkPath(ID, "2", { u: "https://example.com/guide" }, verify).ok, false);
-is("a number that is not one: refused", readSentLinkPath(ID, "02", { u: "https://example.com/guide", s: "x" }, verify).ok, false);
+is("read back", readSentLinkPath(SID, ID, "2", { u: "https://example.com/guide", s: sign(`${SID}|${ID}|2|https://example.com/guide`) }, verify), { ok: true, n: 2, original: "https://example.com/guide" });
+is("another address under the same signature: refused (no open redirect)", readSentLinkPath(SID, ID, "2", { u: "https://evil.example/", s: sign(`${SID}|${ID}|2|https://example.com/guide`) }, verify).ok, false);
+is("another number: refused", readSentLinkPath(SID, ID, "3", { u: "https://example.com/guide", s: sign(`${SID}|${ID}|2|https://example.com/guide`) }, verify).ok, false);
+is("another email: refused", readSentLinkPath(SID, "fedcba9876543210fedcba98", "2", { u: "https://example.com/guide", s: sign(`${SID}|${ID}|2|https://example.com/guide`) }, verify).ok, false);
+is("no signature: refused", readSentLinkPath(SID, ID, "2", { u: "https://example.com/guide" }, verify).ok, false);
+is("a number that is not one: refused", readSentLinkPath(SID, ID, "02", { u: "https://example.com/guide", s: "x" }, verify).ok, false);
+is("another store: refused", readSentLinkPath("bbbbbbbbccccddddeeeeffff00001111", ID, "2", { u: "https://example.com/guide", s: sign(`${SID}|${ID}|2|https://example.com/guide`) }, verify).ok, false);
+is("a store id that is not one: no link", sentLinkPath("nope", ID, 2, "https://example.com/guide", sign), null);
 is("an encoded address read as the browser gives it", u.length > 0, true);
 
 part("Where it goes");

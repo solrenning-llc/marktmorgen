@@ -60,9 +60,10 @@ redis.run = (c: (string | number)[]) => {
   return run(c);
 };
 
-const indexKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:moved:") || k.startsWith("nl:pm:into:")).sort();
-// Redis has no empty hash key; read-created empty hashes are a fixture artifact.
-const indexState = () => indexKeys().map((k) => `${k}=${JSON.stringify(redis.run(["TYPE", k]) === "hash" ? redis.run(["HGETALL", k]) : redis.run(["GET", k]))}`).filter((line) => !line.endsWith("=[]"));
+// Redis never keeps an empty hash (a key whose last field went is gone); the stand-in may keep one after a read, so it
+// is not counted as something the index keeps.
+const indexKeys = () => redis.keys().filter((k) => (k.startsWith("nl:pm:moved:") || k.startsWith("nl:pm:into:")) && !(redis.run(["TYPE", k]) === "hash" && redis.run(["HLEN", k]) === 0)).sort();
+const indexState = () => indexKeys().map((k) => `${k}=${JSON.stringify(redis.run(["TYPE", k]) === "hash" ? redis.run(["HGETALL", k]) : redis.run(["GET", k]))}`);
 
 async function main(): Promise<void> {
   redis.clear();
@@ -311,6 +312,53 @@ async function main(): Promise<void> {
     is("nothing left of that move", (await readMovedIndex(moss.sid, "flow.new@example.com")).movedFrom, []);
     is("neither deleted address is written anywhere in the index now", ["ana.new@example.com", "flow.old@example.com"].map((a) => indexState().join("\n").includes(a)), [false, false]);
     is("an address never moved: nothing", await forgetMovedPerson(moss, "nobody@example.com"), 0);
+  }
+
+  part("An erasure stopped after its first delete is finished by the next try: the raw address is never left (Codex G on #3625)");
+  {
+    const OLD = "half.old@example.com";
+    const NEW = "half.new@example.com";
+    const request = await asked(OLD, NEW);
+    is("moved", (await applyPurchaseMove(moss, request.id)).state, "moved");
+    // The reverse line's delete answers out of shape (not done) while the mark's delete goes through.
+    odd = { command: "HDEL", prefix: "nl:pm:into:", reply: "not a count", times: 1 };
+    let threw = false;
+    try {
+      await forgetMovedPerson(moss, OLD);
+    } catch (error) {
+      threw = error instanceof UnknownReplyError;
+    }
+    odd = null;
+    is("the first try is unknown", threw, true);
+    await forgetMovedPerson(moss, OLD);
+    is("the next try finds it and the deleted address is kept nowhere in the index", indexState().some((line) => line.includes(OLD)), false);
+  }
+
+  part("An address deleted between the move's check and its write is never left in the index (Claude 1 on #3625)");
+  {
+    const OLD = "race.old@example.com";
+    const NEW = "race.new@example.com";
+    const request = await asked(OLD, NEW);
+    const plain = redis.run;
+    let erased = false;
+    redis.run = (c: (string | number)[]) => {
+      if (!erased && String(c[0]).toUpperCase() === "EVAL" && String(c[1]).startsWith("-- marktmorgen:purchase-move-apply:")) {
+        erased = true;
+        // The store deletes the new address now: its erasure finds nothing of the move yet.
+        plain(suppressCommand(moss.listId!, NEW, Math.floor(Date.now() / 1000)));
+      }
+      return plain(c);
+    };
+    let result: Awaited<ReturnType<typeof applyPurchaseMove>> | null = null;
+    try {
+      result = await applyPurchaseMove(moss, request.id);
+    } finally {
+      redis.run = plain;
+    }
+    is("the deletion landed in between", erased, true);
+    is("the move is refused as deleted", result?.state, "deleted");
+    is("the deleted address is kept nowhere in the index", indexState().some((line) => line.includes(NEW)), false);
+    is("the old address keeps its purchases", (await readMovedIndex(moss.sid, OLD)).movedTo, null);
   }
 
   done();

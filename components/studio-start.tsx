@@ -102,6 +102,8 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
  * The studio's sections, one tap away, on every width. On a phone the row
  * scrolls sideways; its right edge fades out, so it is plain there is more,
  * and a little room after the last one lets it come clear of the fade.
+ * Each link is a 44 × 44 px target (WCAG 2.5.5 AAA, AX274), even a short one
+ * like "API" (tests/studio-nav-targets.test.ts).
  */
 export function StudioNav({ items }: { items: { href: string; label: string }[] }) {
   return (
@@ -111,7 +113,7 @@ export function StudioNav({ items }: { items: { href: string; label: string }[] 
           <li key={item.href} className="shrink-0">
             <Link
               href={item.href}
-              className="inline-flex h-9 items-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
             >
               {item.label}
             </Link>

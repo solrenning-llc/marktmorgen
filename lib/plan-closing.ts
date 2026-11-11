@@ -1253,6 +1253,10 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
     if (settled !== null && settled !== "changed" && settled !== "unavailable") {
       // The creator's account answered on this step: a run of silence or refusals is over (Claude 6's N1 on #3463).
       if (settled.answered) await answered();
+      // Answered after the renewals step lapsed on the account's silence or refusal on this run (Claude 1's review of
+      // #3463, MEDIUM): the silence was not the creator's, so the lapse is undone and the store held, its renewals
+      // asked again on the next run with the count started again. Never removed as lapsed with them unstopped.
+      if (settled.answered && lapsed && !next.renewals) return { key, state: "held", note: "the renewals it sold are not all stopped yet", overdue: "other" };
       const left = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending");
       if (settled.failed > 0 || left.length > 0) {
         // Rows past one request or the run's time are progress, carried on tomorrow. Refunds Stripe failed lapse only

@@ -2,7 +2,7 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, type Charge, affiliateCookieName, linkOpens, openAffiliateLink, takesNewAffiliates } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, type Charge, affiliateCookieName, affiliatesOn, linkOpens, openAffiliateLink, takesNewAffiliates } from "@/lib/affiliates";
 import { forcePublicRequests, givePublicRequests, holdPublicRequests } from "@/lib/traffic";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -38,6 +38,11 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
 
   const page = `${origin}/@${store.handle}/affiliates`;
+  // A program switched off opens no link at all (openAffiliateLink starts with affiliatesOn): refused at once, before
+  // any read, so an uncounted POST costs nothing (Claude 4, cloud N, on #3573).
+  if (!affiliatesOn(store)) {
+    return new Response(null, { status: 303, headers: { Location: `${page}?status=unavailable`, "Cache-Control": "no-store" } });
+  }
   // Taking nobody new (lib/affiliates.ts takesNewAffiliates, as a store switched off after notices about its content):
   // only a plain link of an affiliate the store already has goes on to sign them in (linkOpens, reads only); any
   // other is refused before anything is counted or written, the link kept. A read that failed is said as an error.

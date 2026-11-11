@@ -1,0 +1,1095 @@
+{
+  "authority": "Codex P; C1-20261111-1026-codexP-2; GitHub integration only; TODOS-107/108/110/111/112",
+  "observedAt": "2026-11-11T14:42:10Z",
+  "scope": "Continuation of batch triage; exact-head own readiness/security and limited corrective-delta source review, no new global approval",
+  "main": "039b197ce8df79c0e4f182725064aa03f82b51a1",
+  "queue": 178,
+  "batchDelta": [
+    {
+      "n": 3020,
+      "head": "a0329c01d0b0a73543b2004405240bb284f9db61",
+      "old": "baaa18ed8e9003eabbc8bd4e7fa76bf1bd9caacd",
+      "title": "543 [CM2] unit 1: optional approval of community posts and comments before they publish"
+    },
+    {
+      "n": 3022,
+      "head": "df4a75e8368f52a3990e5f510d41e80536cb31f7",
+      "old": "0838662d83cca8ccedb2f207035850492a60b218",
+      "title": "BX2 unit 2: the year reading (twelve months within the sales reading, unknown never zero)"
+    }
+  ],
+  "batchHeads": [
+    {
+      "number": 3017,
+      "head": "5b7a26d40625d6f2917ac433c0b3d6d9c7b83d5c",
+      "branch": "claude5/fix-discord-forget-server"
+    },
+    {
+      "number": 3020,
+      "head": "a0329c01d0b0a73543b2004405240bb284f9db61",
+      "branch": "claude5/cm2-post-approval"
+    },
+    {
+      "number": 3021,
+      "head": "cab993b0274d8ec808cbd4056ebe1c1f0ea72db0",
+      "branch": "claude5/sz4-u2-product-page"
+    },
+    {
+      "number": 3022,
+      "head": "df4a75e8368f52a3990e5f510d41e80536cb31f7",
+      "branch": "claude5/bx2-u2-year-read"
+    },
+    {
+      "number": 3023,
+      "head": "e008c6003b9324d60db70962ac4cf771e6ae2986",
+      "branch": "claude5/kb22-u3-receipt-batch"
+    },
+    {
+      "number": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "branch": "claude5/kb22-u12-directory-socials"
+    },
+    {
+      "number": 3026,
+      "head": "e5d60ff04648ce0c9c6c1e36354223d326c0b7a4",
+      "branch": "claude5/sz4-u3-studio"
+    },
+    {
+      "number": 3027,
+      "head": "5d2e9d9eba6e695615133fc7ed9abb99f7af899c",
+      "branch": "claude5/ck3-u2-failure-notice"
+    },
+    {
+      "number": 3029,
+      "head": "3c0a62845d3c50c70e097a3d0eb804492528e995",
+      "branch": "claude5/sz2-u3-display"
+    },
+    {
+      "number": 3033,
+      "head": "b9c0e9c7074b1dbc2805c07f045c0352aa3c2bf3",
+      "branch": "claude5/cm2-u2-daily-notice"
+    },
+    {
+      "number": 3034,
+      "head": "fd6ea6de1e69f551d930cb9e5d469267c589af60",
+      "branch": "claude5/f2-edit-sent-links"
+    },
+    {
+      "number": 3035,
+      "head": "479bd9d69e8e0198d9a6c6ef29d91d06e698c3f3",
+      "branch": "claude5/h3-4-bulk-students"
+    },
+    {
+      "number": 3036,
+      "head": "3496dde7a207e157bff578dd8befd32cddbad743",
+      "branch": "codex/q-file-admission-refusals"
+    },
+    {
+      "number": 3037,
+      "head": "585f5d333a8c5f951d1e013c6492cca55844dee0",
+      "branch": "claude4/ci-merge-group"
+    },
+    {
+      "number": 3051,
+      "head": "2c45b6b27d1df5cecf1d3ea291e143504d5e926e",
+      "branch": "claude5/affiliate-book-exact"
+    },
+    {
+      "number": 3062,
+      "head": "b2f741a62298c6b24ee31ad18c57297e280ea008",
+      "branch": "claude4/directory-assembly-ceiling"
+    },
+    {
+      "number": 3066,
+      "head": "745ce60a03b3819d6dca6f530f48faaf9940ef72",
+      "branch": "claude4/store-all-exact"
+    },
+    {
+      "number": 3067,
+      "head": "c631abe65f48939136faef03b49fe57139fdf765",
+      "branch": "claude4/within-limit-unknown"
+    },
+    {
+      "number": 3068,
+      "head": "801e021dd203bbf3006e097bb9528e6699bc9178",
+      "branch": "claude4/public-request-unknown"
+    },
+    {
+      "number": 3069,
+      "head": "7e98f9186bb0734fc0e8d081b011a7e6dac332c4",
+      "branch": "claude4/meta-view-exact"
+    },
+    {
+      "number": 3070,
+      "head": "92b02aa03f346da12fe8e08cfde835a8869f2aa2",
+      "branch": "claude4/meta-reads-exact"
+    },
+    {
+      "number": 3073,
+      "head": "e988e105b1528780310c1dd6a696500025645727",
+      "branch": "claude4/store-callers-exact"
+    },
+    {
+      "number": 3075,
+      "head": "e532048c4fb76d45d07bff171aeea227c7d8614d",
+      "branch": "claude3/card-contact-return"
+    },
+    {
+      "number": 3079,
+      "head": "fbea9ffa6d3bd661f2d18afc6d3a61d3de5dbb73",
+      "branch": "claude2/calendar-batch-reads"
+    },
+    {
+      "number": 3086,
+      "head": "e0ede3c13d76f5a64c1fee8e5c32a6e59667247b",
+      "branch": "claude3/plans-finish-identity"
+    },
+    {
+      "number": 3095,
+      "head": "5e748c7b48c35d177bd7c4b660a932bdf0ca697d",
+      "branch": "claude6/r24-erasure-counts"
+    },
+    {
+      "number": 3101,
+      "head": "a3430542c7549c5a79adad3c77399ee669aa76ba",
+      "branch": "claude4/sales-file-cheaper"
+    },
+    {
+      "number": 3107,
+      "head": "a46dd30840a7f44dbddf9d3141fd56211f1bd3c4",
+      "branch": "claude3/sub-identity-posts"
+    },
+    {
+      "number": 3118,
+      "head": "1a8913d01f4b11d08310e9cf3a466de651c536c7",
+      "branch": "claude4/directory-every-15min"
+    },
+    {
+      "number": 3129,
+      "head": "365d627e6da31aef0ff4688ea90a11142a5abf69",
+      "branch": "claude4/sales-file-summary"
+    },
+    {
+      "number": 3156,
+      "head": "9ebc7b7de17b8fc731280cdd9db0ee6834525a6e",
+      "branch": "claude3/erase-reactivated-store"
+    },
+    {
+      "number": 3158,
+      "head": "db19fcb9252ce41e4c9d58f6a9ae660077d1f2e7",
+      "branch": "claude4/host-calendar-unknown"
+    },
+    {
+      "number": 3159,
+      "head": "d824cc0a413b5273d11388382dbc3e51d37ad9de",
+      "branch": "claude4/buyer-profile-partial"
+    },
+    {
+      "number": 3160,
+      "head": "26be932d6e6ffffdbe7afde926ce0ec438cf7868",
+      "branch": "claude4/payment-refunds-unverified"
+    },
+    {
+      "number": 3171,
+      "head": "90fb5f74fb4e20dccfeb3f9060673ee8188e8733",
+      "branch": "claude4/uploader-refusals"
+    },
+    {
+      "number": 3173,
+      "head": "adf09726af8a925b71f6bd040601b302454ec14f",
+      "branch": "claude4/meet-connect-unknown"
+    },
+    {
+      "number": 3189,
+      "head": "bd0e13d753de1b79311136394fc2ae02045f6253",
+      "branch": "claude4/affiliate-refunds-exact"
+    },
+    {
+      "number": 3190,
+      "head": "b7c4f15c2aba07c054a007f876ff680a7a9adc7c",
+      "branch": "claude4/plan-refund-amount-exact"
+    },
+    {
+      "number": 3193,
+      "head": "0df0c467c70533ba18e55fb19eb852e001117588",
+      "branch": "claude3/of1-suspended-visitor-pages"
+    },
+    {
+      "number": 3194,
+      "head": "bc3ddc1501464830cd93f8d3dde3a3c8738ecb2a",
+      "branch": "claude3/aa2-campaign-qr"
+    },
+    {
+      "number": 3203,
+      "head": "881caed76deeac4cd39e6bbbc87bb125d0d4a837",
+      "branch": "claude3/of1-suspended-buyer-pages"
+    },
+    {
+      "number": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "branch": "codex/v-scoped-leases-next"
+    },
+    {
+      "number": 3213,
+      "head": "208c078026bf16f22781a91be79bf03787b2fec3",
+      "branch": "claude4/community-member-page-exact"
+    },
+    {
+      "number": 3215,
+      "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+      "branch": "claude4/dunning-cursor-after-send"
+    },
+    {
+      "number": 3225,
+      "head": "e02db96854a1e15240670506ea66dddb4879058a",
+      "branch": "claude3/mcp-tools-unknown-sweep-2"
+    },
+    {
+      "number": 3226,
+      "head": "3c7c19af5b2a2da03a8421d15b10776e6e69cbb0",
+      "branch": "claude3/ledger-hour-asof"
+    },
+    {
+      "number": 3247,
+      "head": "453256f5a529329c7366d79c2bee2f0f51a6e4ed",
+      "branch": "claude6/r24-payment-recovery"
+    },
+    {
+      "number": 3252,
+      "head": "ba0727f2382849244fb0b497d4c11a069f0a91b2",
+      "branch": "claude6/r24-discount-list"
+    },
+    {
+      "number": 3261,
+      "head": "ed1ce6d5b55ee607f3613025ba41c97ca46a3ffa",
+      "branch": "claude6/r24-inbound-seen"
+    },
+    {
+      "number": 3267,
+      "head": "91aecfa183d72f9dd9499d4c26f2b6fb448f4e49",
+      "branch": "claude6/calendar-team-unknown"
+    },
+    {
+      "number": 3271,
+      "head": "aaee666db197a2738ed12b00bfedbb4738debf4c",
+      "branch": "claude4/bk1-cost-sources-runbook"
+    },
+    {
+      "number": 3272,
+      "head": "ef8922f9e64073a38808620dfff700b850b29de7",
+      "branch": "claude4/claim-exact-paypal-twostep"
+    },
+    {
+      "number": 3273,
+      "head": "f970f05fd9ec09a6cbaf7922c0c19f3710b9e4e5",
+      "branch": "claude4/bk1-cron-lock"
+    }
+  ],
+  "own": [
+    {
+      "number": 3515,
+      "head": "4b0de90a7a614740969944ea9970ed7d856c5716",
+      "rawMergeable": true,
+      "rawMergeState": "clean",
+      "checks": [
+        {
+          "id": 129647520511,
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051085/job/129647520511"
+        },
+        {
+          "id": 129643751433,
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051047/job/129643751433"
+        },
+        {
+          "id": 129640836416,
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050842/job/129640836416"
+        },
+        {
+          "id": 129639726076,
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050834/job/129639726076"
+        },
+        {
+          "id": 129639611301,
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050916/job/129639611301"
+        },
+        {
+          "id": 129639245064,
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050805/job/129639245064"
+        },
+        {
+          "id": 129639127564,
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050788/job/129639127564"
+        },
+        {
+          "id": 129638196558,
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051116/job/129638196558"
+        },
+        {
+          "id": 129636256617,
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050794/job/129636256617"
+        },
+        {
+          "id": 129636058366,
+          "name": "CodeQL",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/runs/129636058366",
+          "output": {
+            "title": "No new alerts in code changed by this pull request",
+            "summary": "[View all branch alerts](/solrenning-llc/marktmorgen/security/code-scanning?query=pr%3A3515+tool%3ACodeQL+is%3Aopen).",
+            "text": null,
+            "annotations_count": 0,
+            "annotations_url": "https://api.github.com/repos/solrenning-llc/marktmorgen/check-runs/129636058366/annotations"
+          }
+        },
+        {
+          "id": 129636042785,
+          "name": "Public AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050842/job/129636042785"
+        },
+        {
+          "id": 129636042755,
+          "name": "Public AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050842/job/129636042755"
+        },
+        {
+          "id": 129636042740,
+          "name": "Public AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050842/job/129636042740"
+        },
+        {
+          "id": 129636024568,
+          "name": "Studio AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051116/job/129636024568"
+        },
+        {
+          "id": 129636024521,
+          "name": "Studio AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051116/job/129636024521"
+        },
+        {
+          "id": 129636024500,
+          "name": "Studio AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051116/job/129636024500"
+        },
+        {
+          "id": 129635882418,
+          "name": "audit",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050794/job/129635882418"
+        },
+        {
+          "id": 129635615136,
+          "name": "Real reader entry (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050788/job/129635615136"
+        },
+        {
+          "id": 129635615089,
+          "name": "Real reader entry (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050788/job/129635615089"
+        },
+        {
+          "id": 129635459998,
+          "name": "CodeQL (javascript-typescript)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051047/job/129635459998"
+        },
+        {
+          "id": 129635459921,
+          "name": "CodeQL (actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051047/job/129635459921"
+        },
+        {
+          "id": 129635448817,
+          "name": "Signup action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050805/job/129635448817"
+        },
+        {
+          "id": 129635448771,
+          "name": "Signup action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050805/job/129635448771"
+        },
+        {
+          "id": 129635448735,
+          "name": "Signup action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050805/job/129635448735"
+        },
+        {
+          "id": 129635355768,
+          "name": "Product action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050916/job/129635355768"
+        },
+        {
+          "id": 129635355442,
+          "name": "Product action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050916/job/129635355442"
+        },
+        {
+          "id": 129635355430,
+          "name": "Product action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050916/job/129635355430"
+        },
+        {
+          "id": 129635321771,
+          "name": "Buyer action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050834/job/129635321771"
+        },
+        {
+          "id": 129635321729,
+          "name": "Buyer action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050834/job/129635321729"
+        },
+        {
+          "id": 129635321721,
+          "name": "Buyer action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050834/job/129635321721"
+        },
+        {
+          "id": 129635317454,
+          "name": "Mobile render (candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051085/job/129635317454"
+        },
+        {
+          "id": 129635317408,
+          "name": "Cross-browser (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051085/job/129635317408"
+        },
+        {
+          "id": 129635317390,
+          "name": "form-opportunity-redis",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051085/job/129635317390"
+        },
+        {
+          "id": 129635317363,
+          "name": "verify",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051085/job/129635317363"
+        },
+        {
+          "id": 129635317361,
+          "name": "Cross-browser (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051085/job/129635317361"
+        },
+        {
+          "id": 129633734034,
+          "name": "Documentation scope (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051116/job/129633734034"
+        },
+        {
+          "id": 129633733079,
+          "name": "Documentation scope (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051085/job/129633733079"
+        },
+        {
+          "id": 129633732254,
+          "name": "Documentation scope (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757051047/job/129633732254"
+        },
+        {
+          "id": 129633730284,
+          "name": "Documentation scope (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050916/job/129633730284"
+        },
+        {
+          "id": 129633729208,
+          "name": "Documentation scope (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050788/job/129633729208"
+        },
+        {
+          "id": 129633729155,
+          "name": "Documentation scope (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050834/job/129633729155"
+        },
+        {
+          "id": 129633729078,
+          "name": "Documentation scope (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050842/job/129633729078"
+        },
+        {
+          "id": 129633729043,
+          "name": "Documentation scope (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050805/job/129633729043"
+        },
+        {
+          "id": 129633729004,
+          "name": "Documentation scope (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "4b0de90a7a614740969944ea9970ed7d856c5716",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/42757050794/job/129633729004"
+        }
+      ],
+      "comment": 6798770379
+    },
+    {
+      "number": 3516,
+      "head": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+      "rawMergeable": true,
+      "rawMergeState": "blocked",
+      "checks": [
+        {
+          "id": 130586589970,
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271824/job/130586589970"
+        },
+        {
+          "id": 130583959683,
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271717/job/130583959683"
+        },
+        {
+          "id": 130569658342,
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271893/job/130569658342"
+        },
+        {
+          "id": 130569179637,
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271911/job/130569179637"
+        },
+        {
+          "id": 130568913792,
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271792/job/130568913792"
+        },
+        {
+          "id": 130568058103,
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271687/job/130568058103"
+        },
+        {
+          "id": 130565428821,
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271790/job/130565428821"
+        },
+        {
+          "id": 130563223983,
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271681/job/130563223983"
+        },
+        {
+          "id": 130562187935,
+          "name": "CodeQL",
+          "status": "completed",
+          "conclusion": "failure",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/runs/130562187935",
+          "output": {
+            "title": "1 new alert including 1 high severity security vulnerability",
+            "summary": "### New alerts in code changed by this pull request\n\nSecurity Alerts:\n * 1 high\n\n\nSee annotations below for details.\n\n[View all branch alerts](/solrenning-llc/marktmorgen/security/code-scanning?query=pr%3A3516+tool%3ACodeQL+is%3Aopen).",
+            "text": null,
+            "annotations_count": 1,
+            "annotations_url": "https://api.github.com/repos/solrenning-llc/marktmorgen/check-runs/130562187935/annotations"
+          }
+        },
+        {
+          "id": 130561391890,
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271784/job/130561391890"
+        },
+        {
+          "id": 130558364834,
+          "name": "Buyer action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271893/job/130558364834"
+        },
+        {
+          "id": 130558364373,
+          "name": "Buyer action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271893/job/130558364373"
+        },
+        {
+          "id": 130558364346,
+          "name": "Buyer action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271893/job/130558364346"
+        },
+        {
+          "id": 130557998035,
+          "name": "Product action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271911/job/130557998035"
+        },
+        {
+          "id": 130557997999,
+          "name": "Product action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271911/job/130557997999"
+        },
+        {
+          "id": 130557997997,
+          "name": "Product action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271911/job/130557997997"
+        },
+        {
+          "id": 130556918733,
+          "name": "Public AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271792/job/130556918733"
+        },
+        {
+          "id": 130556918658,
+          "name": "Public AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271792/job/130556918658"
+        },
+        {
+          "id": 130556918533,
+          "name": "Public AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271792/job/130556918533"
+        },
+        {
+          "id": 130556780517,
+          "name": "Signup action AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271687/job/130556780517"
+        },
+        {
+          "id": 130556780450,
+          "name": "Signup action AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271687/job/130556780450"
+        },
+        {
+          "id": 130556780394,
+          "name": "Signup action AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271687/job/130556780394"
+        },
+        {
+          "id": 130556566368,
+          "name": "Cross-browser (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271824/job/130556566368"
+        },
+        {
+          "id": 130556566339,
+          "name": "Cross-browser (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271824/job/130556566339"
+        },
+        {
+          "id": 130556566317,
+          "name": "Mobile render (candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271824/job/130556566317"
+        },
+        {
+          "id": 130556566268,
+          "name": "verify",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271824/job/130556566268"
+        },
+        {
+          "id": 130556566210,
+          "name": "form-opportunity-redis",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271824/job/130556566210"
+        },
+        {
+          "id": 130556330519,
+          "name": "CodeQL (javascript-typescript)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271717/job/130556330519"
+        },
+        {
+          "id": 130556330469,
+          "name": "CodeQL (actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271717/job/130556330469"
+        },
+        {
+          "id": 130556205831,
+          "name": "audit",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271784/job/130556205831"
+        },
+        {
+          "id": 130555975700,
+          "name": "Real reader entry (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271681/job/130555975700"
+        },
+        {
+          "id": 130555975697,
+          "name": "Real reader entry (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271681/job/130555975697"
+        },
+        {
+          "id": 130555882228,
+          "name": "Studio AAA (firefox)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271790/job/130555882228"
+        },
+        {
+          "id": 130555882131,
+          "name": "Studio AAA (webkit)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271790/job/130555882131"
+        },
+        {
+          "id": 130555881806,
+          "name": "Studio AAA (chromium)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271790/job/130555881806"
+        },
+        {
+          "id": 130555216214,
+          "name": "Documentation scope (dependency-security)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271784/job/130555216214"
+        },
+        {
+          "id": 130555215496,
+          "name": "Documentation scope (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271681/job/130555215496"
+        },
+        {
+          "id": 130555215096,
+          "name": "Documentation scope (product-checks)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271824/job/130555215096"
+        },
+        {
+          "id": 130555214899,
+          "name": "Documentation scope (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271893/job/130555214899"
+        },
+        {
+          "id": 130555214891,
+          "name": "Documentation scope (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271792/job/130555214891"
+        },
+        {
+          "id": 130555214665,
+          "name": "Documentation scope (codeql)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271717/job/130555214665"
+        },
+        {
+          "id": 130555214640,
+          "name": "Documentation scope (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271911/job/130555214640"
+        },
+        {
+          "id": 130555214112,
+          "name": "Documentation scope (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271687/job/130555214112"
+        },
+        {
+          "id": 130555214075,
+          "name": "Documentation scope (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "d22e651499a32d2351eb28818a87adcf1b456f1e",
+          "details_url": "https://github.com/solrenning-llc/marktmorgen/actions/runs/43030271790/job/130555214075"
+        }
+      ],
+      "comment": 6798765753,
+      "codeqlLogJob": 130556330519,
+      "codeqlLogReadFullChars": 1617491,
+      "codeqlLogTail": "2026-11-11T14:26:54.8306806Z Exporting results to SARIF...\n2026-11-11T14:26:55.2264960Z Exported results to SARIF (396ms).\n2026-11-11T14:26:55.2718502Z ##[endgroup]\n2026-11-11T14:26:55.2719135Z To speed up pull request analysis, file coverage information is only enabled when analyzing the default branch and protected branches.\n2026-11-11T14:26:55.2729339Z Post-processing sarif files: [\"/home/runner/work/marktmorgen/results/javascript.sarif\"]\n2026-11-11T14:26:55.3060007Z Adding fingerprints to SARIF file. See https://docs.github.com/en/code-security/reference/code-scanning/sarif-support-for-code-scanning#data-for-preventing-duplicated-alerts for more information.\n2026-11-11T14:26:55.3111231Z ##[group]Uploading code scanning results\n2026-11-11T14:26:55.3931836Z Uploading results\n2026-11-11T14:26:56.7733823Z Successfully uploaded results\n2026-11-11T14:26:56.7734720Z ##[endgroup]\n2026-11-11T14:26:56.7871810Z ##[group]Waiting for processing to finish\n2026-11-11T14:27:02.2098588Z Analysis upload status is complete.\n2026-11-11T14:27:02.2099358Z ##[endgroup]\n2026-11-11T14:27:02.6491279Z Post job cleanup.\n2026-11-11T14:27:02.9607553Z Post job cleanup.\n2026-11-11T14:27:03.2792253Z CodeQL job status was success.\n2026-11-11T14:27:03.2864995Z Sending status report for init-post step.\n2026-11-11T14:27:03.7423700Z Status report sent for init-post step.\n2026-11-11T14:27:03.7953270Z Post job cleanup.\n2026-11-11T14:27:03.8862786Z [command]/usr/bin/git version\n2026-11-11T14:27:03.8911646Z git version 2.56.0\n2026-11-11T14:27:03.8952143Z Temporarily overriding HOME='/home/runner/work/_temp/b44c14e3-c8fa-47fb-8dd1-da5e2cda4957' before making global git config changes\n2026-11-11T14:27:03.8954098Z Adding repository directory to the temporary git global config as a safe directory\n2026-11-11T14:27:03.8958408Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/marktmorgen/marktmorgen\n2026-11-11T14:27:03.8998937Z Removing SSH command configuration\n2026-11-11T14:27:03.9007413Z [command]/usr/bin/git config --local --name-only --get-regexp core\\.sshCommand\n2026-11-11T14:27:03.9056439Z [command]/usr/bin/git submodule foreach --recursive sh -c \"git config --local --name-only --get-regexp 'core\\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\"\n2026-11-11T14:27:03.9509314Z Removing HTTP extra header\n2026-11-11T14:27:03.9510588Z [command]/usr/bin/git config --local --name-only --get-regexp http\\.https\\:\\/\\/github\\.com\\/\\.extraheader\n2026-11-11T14:27:03.9561835Z [command]/usr/bin/git submodule foreach --recursive sh -c \"git config --local --name-only --get-regexp 'http\\.https\\:\\/\\/github\\.com\\/\\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\"\n2026-11-11T14:27:03.9992095Z Removing includeIf entries pointing to credentials config files\n2026-11-11T14:27:03.9997863Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\\.gitdir:\n2026-11-11T14:27:04.0047976Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url\n2026-11-11T14:27:04.0521305Z Cleaning up orphan processes\n",
+      "unsupported": [
+        "check-runs/130562187935/annotations",
+        "code-scanning/alerts?ref=refs/pull/3516/head"
+      ],
+      "disposition": "Hold: do not infer alert file/rule/false positive from summary"
+    }
+  ],
+  "finding3020": {
+    "head": "a0329c01d0b0a73543b2004405240bb284f9db61",
+    "scope": "b6aad8bd corrective delta and current exact source; not original full 26-file diff or G's nominal closure",
+    "severity": "MEDIUM; source-inferred residual storage accounting/concurrency; no executed reproduction and no newly introduced regression claimed",
+    "locations": [
+      "lib/community-approval.ts:437-438",
+      "lib/community-approval.ts:729-795",
+      "lib/community-files.ts:110-118",
+      "lib/community-files.ts:214-224"
+    ],
+    "schedule": [
+      "Seed two retained pictures P and Q in the same folder and a kept-picture count of 2. P belongs to a held item, Q remains retained.",
+      "Start two forgetHeldPerson calls for the held item's author. Both read the same P recovery line before either reaches deletion; this function has no claim lock.",
+      "Let both Blob deletions of P resolve; deletion of an already absent file is a successful idempotent provider result in the intended helper contract.",
+      "Run first HDEL on P's recovery line ->1, second HDEL ->0.",
+      "dropHeldPicture accepts either count as !==null; removeCommunityImage therefore calls givePicturePlace twice.",
+      "Two DECR operations lower the folder count 2->1->0 while Q still exists. A later takePicturePlace can accept an additional picture under the unchanged stored-picture cap."
+    ],
+    "requiredRegression": "Synthetic provider and Redis with deterministic barriers; assert P's recovery reference remains on provider failure, both erasures can complete after success, only one release occurs, and Q stays counted. Include HDEL unknown/applied-lost ACK; do not release on unknown. This regression is proposed, NOT executed.",
+    "direction": "Separate deletion/completion confirmation from authority to release space; exact positive one-time removal/claim evidence grants release, HDEL=0 does not grant another release; unknown stays conservative. Preserve G's retained-reference retry correction.",
+    "sources": [
+      {
+        "content": "/**\n * The real file store behind lib/community-image.ts: Vercel Blob, private,\n * the same one product pictures and paid files live in. Kept apart from the\n * checks so they can be tried against a stand-in without a network.\n *\n * Since 18 October 2026 the pictures a community keeps have a figure\n * (lib/community-picture-rules.ts): each door given takes one place, at the\n * most a picture may weigh, before the picture can be sent; a picture taken\n * out of a post, a post deleted and a door never used (deleted a day on, by\n * the courses job) give it back.\n *\n *   nl:cimg:<hash of path>   who was given the door, for a day\n *   nl:cimg:n:<folder>       pictures the community keeps, doors not yet used included\n *   nl:cimg:doors            doors given and not yet used in a post, by when; and, as\n *                            ?<path>#<nonce>, a door whose note could not be confirmed\n */\nimport { createHash, randomBytes } from \"node:crypto\";\nimport { isProxy } from \"node:util/types\";\nimport { del, get, head } from \"@/lib/blob\";\nimport { isRedisConfigured, redisPipeline } from \"@/lib/redis\";\nimport { UnknownReplyError, countOf, repliesFor, stringList } from \"@/lib/redis-reply\";\nimport type { ImageStore } from \"@/lib/community-image\";\n\nasync function firstBytes(path: string): Promise<Uint8Array | null> {\n  const found = await get(path, { access: \"private\" });\n  if (!found || found.statusCode !== 200 || !found.stream) return null;\n  const reader = found.stream.getReader();\n  const chunks: Uint8Array[] = [];\n  let length = 0;\n  while (length < 16) {\n    const { done, value } = await reader.read();\n    if (done || !value) break;\n    chunks.push(value);\n    length += value.length;\n  }\n  await reader.cancel().catch(() => {});\n  const bytes = new Uint8Array(length);\n  let at = 0;\n  for (const chunk of chunks) {\n    bytes.set(chunk, at);\n    at += chunk.length;\n  }\n  return bytes;\n}\n\nexport const blobImages: ImageStore = {\n  async head(path) {\n    const found = await head(path);\n    return { size: found.size, contentType: found.contentType };\n  },\n  firstBytes,\n  async del(path) {\n    await del(path);\n  },\n};\n\n/** A day: the door is open five minutes, the post can be written later. */\nconst UPLOAD_TTL_SECONDS = 24 * 60 * 60;\n\nfunction uploadKey(path: string): string {\n  return `nl:cimg:${createHash(\"sha256\").update(path).digest(\"hex\").slice(0, 32)}`;\n}\n\nconst countKey = (folder: string) => `nl:cimg:n:${folder}`;\nconst DOORS_KEY = \"nl:cimg:doors\";\n/**\n * A door whose note could not be confirmed (openCommunityDoor), listed on the doors' list beside the paths: no door\n * was given for it, so no file was sent through it, and the sweep only gives its place back, never deletes a file.\n * One for each request, so two such requests for one path give two places back. It sorts before every path at the\n * same time (\"?\" before \"c\"), so the sweep always reads it before the path its note may have listed.\n */\nconst doubtOf = (path: string) => `?${path}#${randomBytes(8).toString(\"hex\")}`;\nconst doubtPath = (member: string) => (member.startsWith(\"?\") && member.includes(\"#\") ? member.slice(1, member.lastIndexOf(\"#\")) : \"\");\n/** The community's folder a picture's path is in: community/<folder>/<file>. */\nconst folderOf = (path: string) => (/^community\\/([0-9a-f]{24})\\//.exec(path) ?? [])[1] ?? \"\";\n\n/**\n * Takes one of the pictures a community may keep, before its door is given:\n * false when they are all taken, or cannot be counted.\n */\nexport async function takePicturePlace(path: string, limit: number): Promise<boolean> {\n  const folder = folderOf(path);\n  if (!folder || !Number.isSafeInteger(limit) || limit <= 0 || !isRedisConfigured()) return false;\n  try {\n    const reply = await redisPipeline([[\"INCR\", countKey(folder)]]);\n    if (\n      typeof reply !== \"object\" ||\n      reply === null ||\n      isProxy(reply) ||\n      !Array.isArray(reply) ||\n      Object.getPrototypeOf(reply) !== Array.prototype ||\n      reply.length !== 1\n    )\n      return false;\n    const keys = Reflect.ownKeys(reply);\n    if (keys.length !== 2 || !keys.includes(\"0\") || !keys.includes(\"length\")) return false;\n    const slot = Object.getOwnPropertyDescriptor(reply, \"0\");\n    if (!slot || !Object.hasOwn(slot, \"value\")) return false;\n    const count = slot.value;\n    if (typeof count !== \"number\" || !Number.isSafeInteger(count) || count <= 0) return false;\n    if (count <= limit) return true;\n    await redisPipeline([[\"DECR\", countKey(folder)]]);\n  } catch (error) {\n    console.error(\"could not count a community picture\", error);\n  }\n  return false;\n}\n\n/** Gives a picture's place back: it is deleted. Best effort: never throws. */\nasync function givePicturePlace(path: string): Promise<void> {\n  const folder = folderOf(path);\n  if (!folder || !isRedisConfigured()) return;\n  try {\n    const [left] = await redisPipeline([[\"DECR\", countKey(folder)]]);\n    if (Number(left) < 0) await redisPipeline([[\"SET\", countKey(folder), 0]]);\n  } catch (error) {\n    console.error(\"could not give a community picture's place back\", error);\n  }\n}\n\n/** The pictures a community keeps now, doors not yet used included, for the studio. */\nexport async function picturesKept(communityFolder: string): Promise<number> {\n  if (!/^[0-9a-f]{24}$/.test(communityFolder) || !isRedisConfigured()) return 0;\n  try {\n    const [raw] = await redisPipeline([[\"GET\", countKey(communityFolder)]]);\n    const n = Number(raw);\n    return Number.isSafeInteger(n) && n > 0 ? n : 0;\n  } catch {\n    return 0;\n  }\n}\n\n/** A community whose pictures were all removed (lib/plan-closing.ts) keeps none. */\nexport async function forgetPictures(communityFolder: string): Promise<void> {\n  if (!/^[0-9a-f]{24}$/.test(communityFolder) || !isRedisConfigured()) return;\n  await redisPipeline([[\"DEL\", countKey(communityFolder)]]);\n}\n\n/**\n * Notes who was given the door for a picture's path, and lists the path for the sweep, read exactly (CX-123 rule 24):\n * true once this member's door is noted (\"OK\") and the path is on the sweep's list (ZADD NX: 1 added, 0 there\n * already); false when the path already had a door (\"OK\" not given: SET NX answered null). Any other answer throws\n * UnknownReplyError: the door may or may not be noted, and the path may or may not be listed.\n */\nexport async function noteCommunityUpload(path: string, author: string, now = Date.now()): Promise<boolean> {\n  const replies = repliesFor(\n    await redisPipeline([\n      [\"SET\", uploadKey(path), author, \"NX\", \"EX\", UPLOAD_TTL_SECONDS],\n      [\"ZADD\", DOORS_KEY, \"NX\", Math.floor(now / 1000), path],\n    ]),\n    2,\n  );\n  const added = replies ? countOf(replies[1]) : null;\n  if (!replies || (replies[0] !== \"OK\" && replies[0] !== null) || (added !== 0 && added !== 1)) throw new UnknownReplyError(\"a community picture's door\");\n  return replies[0] === \"OK\";\n}\n\n/**\n * Notes a door for a picture's path before it is given (app/api/store/community/upload): true only when it is\n * noted for this member and listed for the sweep, so a file sent through it is deleted, and its place given back, if\n * it is never put in a post. The caller has taken the door's place (takePicturePlace) and gives no door otherwise.\n *\n * - The path already had a door: that one keeps its own place and listing; the place taken for this one goes back.\n * - The note answered in another shape, or threw: its doubt is listed (doubtOf), read exactly, so the sweep gives\n *   this request's place back once, a day on, unless the note's own listing of the path is there to give it back;\n *   never given back here, where that listing may already be there as well. The path itself is never listed here: it\n *   may be a picture already in a post (its door used, and no longer listed), which the sweep would delete (Codex Z\n *   on #3305). A doubt that cannot be confirmed either leaves the place counted: never fewer than kept. The note's\n *   error is thrown on, so no door is given.\n */\nexport async function openCommunityDoor(path: string, author: string, now = Date.now()): Promise<boolean> {\n  let noted: boolean;\n  try {\n    noted = await noteCommunityUpload(path, author, now);\n  } catch (error) {\n    console.error(\"could not confirm a community picture's door; none given\", error);\n    const answered = await redisPipeline([[\"ZADD\", DOORS_KEY, \"NX\", Math.floor(now / 1000), doubtOf(path)]]).then((replies) => repliesFor(replies, 1), () => null);\n    if (!answered || countOf(answered[0]) !== 1) console.error(\"could not list an unconfirmed community picture door for the sweep; its place stays counted\");\n    throw error;\n  }\n  if (!noted) await givePicturePlace(path);\n  return noted;\n}\n\n/**\n * Whether this picture was sent by this member and not used yet; it is then\n * theirs for this one post only. Somebody else's picture, or one already in\n * a post, is refused and left alone.\n */\nexport async function takeCommunityUpload(path: string, author: string): Promise<boolean> {\n  const [held] = await redisPipeline([[\"GETDEL\", uploadKey(path)]]);\n  if (held === author) {\n    // In a post now: no longer a door to sweep.\n    await redisPipeline([[\"ZREM\", DOORS_KEY, path]]).catch(() => null);\n    return true;\n  }\n  if (typeof held === \"string\" && held) {\n    await redisPipeline([[\"SET\", uploadKey(path), held, \"NX\", \"EX\", UPLOAD_TTL_SECONDS]]).catch(() => null);\n  }\n  return false;\n}\n\n/** Deletes a picture a post no longer needs, and gives its place back. Best effort: never throws. */\nexport async function dropCommunityImage(path: string | undefined | null): Promise<void> {\n  if (!path) return;\n  await removeCommunityImage(path);\n}\n\n/**\n * Deletes a picture, then, once the file is gone, lets `forget` take away what names it (a held post's line), and only\n * once that is confirmed gives its place back: a picture whose file could not be deleted keeps its name where an\n * erasure finds it again (Codex G on #3020, 6751455863), and one tried again is never given back twice. True only when\n * the file and the name are both confirmed gone. Never throws.\n */\nexport async function removeCommunityImage(path: string, forget: () => Promise<boolean> = async () => true): Promise<boolean> {\n  try {\n    await del(path);\n  } catch (error) {\n    console.error(\"could not delete a community picture\", error);\n    return false;\n  }\n  const forgot = await forget().catch(() => false);\n  if (forgot) await givePicturePlace(path);\n  return forgot;\n}\n\n/**\n * Gives back the place of a request whose note could not be confirmed (doubtOf), once its doubt is off the list:\n * only when the path is confirmed not listed (ZSCORE null), since a listed path gives the place back itself when it\n * is swept. Nothing is deleted: no door was given for it. A read in another shape leaves the place counted.\n */\nasync function giveDoubtedPlace(path: string): Promise<void> {\n  const answered = await redisPipeline([[\"ZSCORE\", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);\n  const score = answered ? answered[0] : undefined;\n  if (score === null) return givePicturePlace(path);\n  if (typeof score === \"string\" && /^\\d+$/.test(score)) return;\n  console.error(\"could not tell whether an unconfirmed community picture door is listed; its place stays counted\");\n}\n\n/**\n * Pictures whose door was given more than a day ago and that were never put\n * in a post: deleted, and their places given back. A few hundred a run at\n * most, for the courses job.\n */\nexport async function sweepCommunityUploads(now = Date.now(), limit = 300): Promise<number> {\n  if (!isRedisConfigured()) return 0;\n  const before = Math.floor(now / 1000) - UPLOAD_TTL_SECONDS;\n  // Read exactly (CX-123 rule 24): a list in another shape is unknown, never \"none to sweep\".\n  const found = repliesFor(await redisPipeline([[\"ZRANGEBYSCORE\", DOORS_KEY, 0, before, \"LIMIT\", 0, limit]]), 1);\n  const paths = found ? stringList(found[0]) : null;\n  if (!paths) throw new UnknownReplyError(\"the community pictures to sweep\");\n  let swept = 0;\n  for (const path of paths) {\n    // Taken off the list first, so a run that stops halfway never gives a place back twice.\n    // A throw (a timeout after it was sent) may have taken it off as well: unknown, the same as an odd answer.\n    const answered = await redisPipeline([[\"ZREM\", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);\n    const removed = answered ? countOf(answered[0]) : null;\n    if (removed === 0) continue;\n    const doubted = doubtPath(path);\n    if (doubted) {\n      // A door whose note could not be confirmed: never re-listed when its removal is unknown, and the run stops here,\n      // before the path its note may have listed (sorted after it) gives a place back: the next run reads it first.\n      if (removed !== 1) {\n        console.error(\"could not tell whether an unconfirmed community picture door was taken off the list; the sweep stops here\");\n        return swept;\n      }\n      await giveDoubtedPlace(doubted);\n      continue;\n    }\n    if (removed !== 1) {\n      // It may have been taken off the list: put back, so a later sweep deletes it and gives its place back once.\n      // Its door ran out a day ago (UPLOAD_TTL_SECONDS), so nobody can have put it in a post since.\n      console.error(\"could not tell whether an unused community picture was taken off the list; listed again\");\n      await redisPipeline([[\"ZADD\", DOORS_KEY, before, path]]).catch(() => null);\n      continue;\n    }\n    try {\n      // A door never used may never have been sent a file: deleting nothing is fine.\n      await del(path);\n    } catch (error) {\n      console.error(\"could not delete an unused community picture\", error);\n      await redisPipeline([[\"ZADD\", DOORS_KEY, before, path]]).catch(() => null);\n      continue;\n    }\n    await givePicturePlace(path);\n    swept += 1;\n  }\n  return swept;\n}\n",
+        "encoding": "utf-8",
+        "sha": "7cddb33ee70ddef63bf0815a4bc549afe8405a52",
+        "display_url": "https://github.com/solrenning-llc/marktmorgen/blob/a0329c01d0b0a73543b2004405240bb284f9db61/lib/community-files.ts",
+        "display_title": "community-files.ts"
+      },
+      {
+        "content": "/**\n * 543 [CM2]: approval of posts and comments before they publish, a choice\n * the creator makes per space (added 6 November 2026).\n *\n * For each space, separately for posts and for comments: publish right away\n * (the default, as before), approve the first 1 to 5 of each new member, or\n * approve every one. The creator is never held.\n *\n * What waits is kept apart from the community's posts and comments, never in\n * the feed, a space, a post's comments or the search index (lib/community.ts),\n * so nothing that reads the community can show it to anybody: only its author\n * (heldOf, marked \"Waiting for approval\") and the creator's queue in the\n * studio (heldQueue) read it. Approving writes it into the community through\n * createPost or addComment, as if it had just been sent; removing keeps a short\n * note for the author, with the creator's sentence; waiting HELD_DAYS without\n * an answer refuses it by itself, with a note too. Nothing is deleted without\n * the author being told.\n *\n * Kept under the community's own id:\n *\n *   nl:cm:<id>:ap:r          the rule of each space: space -> rule (hash)\n *   nl:cm:<id>:ap:q          what waits, by when it was sent (sorted set)\n *   nl:cm:<id>:ap:i:<item>   one item waiting, or the note left for its\n *                            author once it was removed or expired; gone by\n *                            itself KEEP_DAYS after it was sent\n *   nl:cm:<id>:ap:w:<who>    one member's items and notes (sorted set)\n *   nl:cm:<id>:ap:n          how many of each member's posts (\"<who>:p\")\n *                            and comments (\"<who>:c\") were approved (hash)\n *   nl:cm:<id>:ap:f          the picture of each held post still on the\n *                            queue: item -> its author and path (hash)\n *\n * A held post's picture is listed apart from its record, which runs out by\n * itself: an item swept, removed or erased after its record ran out still\n * has its picture deleted (review of #3020, finding 3). A line goes when its\n * item leaves the queue, so the list is never longer than the queue.\n *\n * Bounded: at most MAX_HELD waiting in a community and MAX_MINE items and\n * notes per member; a hold past either is refused, and nothing of it stays.\n * Each hold first sweeps a few items that expired (HOLD_SWEEP), more than\n * the one it adds, so what expired never piles up on the queue, and only\n * what still waits counts toward MAX_HELD (finding 4).\n * Each item takes its room in the store's data room before it is written,\n * counted until it is gone by itself (lib/store-data.ts); each member's count\n * takes its room the first time it is written.\n *\n * Every reply is read in its exact shape (CX-123 rule 24): an unknown reply\n * is thrown, so a rule never reads as \"publish right away\", a queue never\n * reads as empty, and a held item is never published on a reply that was\n * not exactly the item. Approving and removing claim the item by taking it\n * off the queue first (one ZREM, which only one caller can win), so two\n * moderators never publish it twice (rule 25).\n *\n * Deleting a person deletes what they had waiting and their counts\n * (forgetHeldPerson, from lib/community-erasure.ts); the copy of their data\n * includes it (lib/person-copy.ts).\n */\nimport { redisPipeline } from \"@/lib/redis\";\nimport { UnknownReplyError, countOf, repliesFor, stringList } from \"@/lib/redis-reply\";\nimport { CREATOR, type Comment, type CommunityImage, type NewPost, type Post, addComment, createPost, newItemId, readComment, readPost } from \"@/lib/community\";\nimport { type Poll, parsePoll } from \"@/lib/community-polls\";\nimport { ITEM_ID, MAX_COMMENT_TEXT, MAX_POST_TEXT, MAX_POST_TITLE, cleanLine } from \"@/lib/community-text\";\nimport { removeCommunityImage } from \"@/lib/community-files\";\nimport { DataRoomError, type DataStore, needData } from \"@/lib/store-data\";\nimport { dataBytes } from \"@/lib/store-data-rules\";\nimport { MAX_ALT_LENGTH } from \"@/lib/product-image\";\nimport { HELD_DAYS, KEEP_DAYS, MAX_FIRST, MAX_HELD, MAX_MINE, MAX_WHY, TOLD_DAYS } from \"@/lib/community-approval-rules\";\n\nexport { HELD_DAYS, KEEP_DAYS, MAX_FIRST, MAX_HELD, MAX_MINE, MAX_WHY, TOLD_DAYS } from \"@/lib/community-approval-rules\";\n\nconst DAY = 86_400;\nconst KEEP_SECONDS = KEEP_DAYS * DAY;\n/** What a note keeps of what was written, for its author to recognize it. */\nconst NOTE_SNIP = 140;\n/** How many expired items one sweep refuses, so a sweep is never long. */\nconst SWEEP_BATCH = 50;\n/** How many a member's hold sweeps first: a few, so sending stays quick. */\nconst HOLD_SWEEP = 5;\n/** The slot members' approved counts are counted in (lib/store-data.ts). */\nconst COUNT_SLOT = \"cm:ap:n\";\n\nexport type ApprovalMode = \"off\" | \"first\" | \"all\";\n/** `n` is how many first posts are approved (\"first\" only); `since` when \"first\" was chosen, in seconds. */\nexport type ApprovalRule = { mode: ApprovalMode; n: number; since: number };\nexport type SpaceApproval = { posts: ApprovalRule; comments: ApprovalRule };\n\nconst OFF: ApprovalRule = { mode: \"off\", n: 0, since: 0 };\nexport const PUBLISH_RIGHT_AWAY: SpaceApproval = { posts: OFF, comments: OFF };\n\nexport type HeldState = \"held\" | \"removed\" | \"expired\" | \"gone\";\n\nexport type Held = {\n  id: string;\n  kind: \"post\" | \"comment\";\n  /** Its author's member key. */\n  a: string;\n  /** When it was sent, in seconds. */\n  at: number;\n  /** The space it was sent to (a post), or the space of the post it answers (a comment). */\n  sp: string;\n  /** The post a comment answers; \"\" for a post. */\n  post: string;\n  /** The comment a comment answers, or \"\". */\n  parent: string;\n  title: string;\n  text: string;\n  img: CommunityImage | null;\n  poll: Poll | null;\n  /**\n   * \"held\" waits; \"removed\" was not published by the creator, with `why`;\n   * \"expired\" waited HELD_DAYS without an answer; \"gone\" answered a post that\n   * was deleted before it was approved.\n   */\n  state: HeldState;\n  why: string;\n  /** When it stopped waiting, in seconds; 0 while it waits. */\n  done: number;\n};\n\nconst base = (id: string) => `nl:cm:${id}`;\nconst rulesKey = (id: string) => `${base(id)}:ap:r`;\nconst queueKey = (id: string) => `${base(id)}:ap:q`;\nconst itemKey = (id: string, item: string) => `${base(id)}:ap:i:${item}`;\nconst mineKey = (id: string, who: string) => `${base(id)}:ap:w:${who}`;\nconst countKey = (id: string) => `${base(id)}:ap:n`;\nconst picturesKey = (id: string) => `${base(id)}:ap:f`;\n\nconst nowSeconds = () => Math.floor(Date.now() / 1000);\n\n// ------------------------------------------------------------------ rules\n\nfunction parseRule(raw: unknown): ApprovalRule | null {\n  if (!raw || typeof raw !== \"object\" || Array.isArray(raw)) return null;\n  const v = raw as Record<string, unknown>;\n  const since = v.s === undefined ? 0 : v.s;\n  if (typeof since !== \"number\" || !Number.isSafeInteger(since) || since < 0) return null;\n  if (v.m === \"off\") return OFF;\n  if (v.m === \"all\") return { mode: \"all\", n: 0, since: 0 };\n  if (v.m === \"first\" && typeof v.n === \"number\" && Number.isInteger(v.n) && v.n >= 1 && v.n <= MAX_FIRST) return { mode: \"first\", n: v.n, since };\n  return null;\n}\n\n/** A space's rule as it is kept, or null for anything else: never read as \"publish right away\". */\nexport function parseSpaceApproval(raw: unknown): SpaceApproval | null {\n  if (typeof raw !== \"string\") return null;\n  try {\n    const v = JSON.parse(raw) as Record<string, unknown>;\n    if (!v || typeof v !== \"object\" || Array.isArray(v)) return null;\n    const posts = parseRule(v.p);\n    const comments = parseRule(v.c);\n    return posts && comments ? { posts, comments } : null;\n  } catch {\n    return null;\n  }\n}\n\nfunction writeRule(rule: ApprovalRule): Record<string, unknown> {\n  return rule.mode === \"first\" ? { m: \"first\", n: rule.n, s: rule.since } : { m: rule.mode };\n}\n\n/** One space's rule. Never set is \"publish right away\"; anything not read exactly is thrown. */\nexport async function approvalFor(id: string, space: string): Promise<SpaceApproval> {\n  const replies = repliesFor(await redisPipeline([[\"HGET\", rulesKey(id), space]]), 1);\n  if (!replies) throw new UnknownReplyError(\"a space's approval rule\");\n  const [raw] = replies;\n  if (raw === null) return PUBLISH_RIGHT_AWAY;\n  const rule = parseSpaceApproval(raw);\n  if (!rule) throw new UnknownReplyError(\"a space's approval rule\");\n  return rule;\n}\n\n/** Every space's rule, for the studio. */\nexport async function approvalsOf(id: string, spaces: string[]): Promise<Map<string, SpaceApproval>> {\n  const out = new Map<string, SpaceApproval>();\n  for (const space of spaces) out.set(space, await approvalFor(id, space));\n  return out;\n}\n\nexport type WantedRule = { mode: unknown; n: unknown };\n\nfunction wantedRule(wanted: WantedRule, before: ApprovalRule, now: number): ApprovalRule {\n  if (wanted.mode === \"off\") return OFF;\n  if (wanted.mode === \"all\") return { mode: \"all\", n: 0, since: 0 };\n  if (wanted.mode === \"first\" && typeof wanted.n === \"number\" && Number.isInteger(wanted.n) && wanted.n >= 1 && wanted.n <= MAX_FIRST) {\n    // Who counts as new is decided once, when \"first\" is chosen: changing the\n    // number later does not make everybody who joined since then new again.\n    return { mode: \"first\", n: wanted.n, since: before.mode === \"first\" ? before.since : now };\n  }\n  throw new RangeError(\"approval rule\");\n}\n\n/**\n * Sets one space's rule. `spaces` are the community's spaces now: a space it\n * does not have is refused, and the rules of spaces since removed are\n * dropped, so the hash never holds more than the community's spaces.\n */\nexport async function setApproval(\n  id: string,\n  space: string,\n  wanted: { posts: WantedRule; comments: WantedRule },\n  spaces: string[],\n  now = nowSeconds(),\n): Promise<SpaceApproval> {\n  if (!ITEM_ID.test(space) || !spaces.includes(space)) throw new RangeError(\"unknown space\");\n  const before = await approvalFor(id, space).catch((error) => {\n    // A rule that cannot be read is replaced by the one chosen now, which is what the creator sees saved.\n    if (error instanceof UnknownReplyError) return PUBLISH_RIGHT_AWAY;\n    throw error;\n  });\n  const next: SpaceApproval = { posts: wantedRule(wanted.posts, before.posts, now), comments: wantedRule(wanted.comments, before.comments, now) };\n  const replies = repliesFor(\n    await redisPipeline([\n      [\"HSET\", rulesKey(id), space, JSON.stringify({ p: writeRule(next.posts), c: writeRule(next.comments) })],\n      [\"HKEYS\", rulesKey(id)],\n    ]),\n    2,\n  );\n  const fields = replies ? stringList(replies[1]) : null;\n  if (!replies || countOf(replies[0]) === null || !fields) throw new UnknownReplyError(\"saving a space's approval rule\");\n  const stale = fields.filter((field) => !spaces.includes(field));\n  if (stale.length) await redisPipeline([[\"HDEL\", rulesKey(id), ...stale]]);\n  return next;\n}\n\n/**\n * Whether what this member sends now waits for approval, under this rule.\n * \"first\": a member who joined before the rule was chosen is not new; one\n * with no record is held. The creator is never asked about (the route does\n * not ask for them). An approved count not read exactly is thrown.\n */\nexport async function mustHold(id: string, rule: ApprovalRule, kind: \"p\" | \"c\", member: { k: string; at: number } | null): Promise<boolean> {\n  if (rule.mode === \"off\") return false;\n  if (rule.mode === \"all\" || !member) return true;\n  if (member.at < rule.since) return false;\n  const replies = repliesFor(await redisPipeline([[\"HGET\", countKey(id), `${member.k}:${kind}`]]), 1);\n  if (!replies) throw new UnknownReplyError(\"a member's approved count\");\n  const raw = replies[0];\n  const count = raw === null ? 0 : typeof raw === \"string\" && /^(0|[1-9][0-9]{0,8})$/.test(raw) ? Number(raw) : countOf(raw);\n  if (count === null) throw new UnknownReplyError(\"a member's approved count\");\n  return count < rule.n;\n}\n\n// ------------------------------------------------------------------ items\n\nfunction parseImage(raw: unknown): CommunityImage | null | undefined {\n  if (raw === null) return null;\n  if (!raw || typeof raw !== \"object\") return undefined;\n  const v = raw as Record<string, unknown>;\n  const side = (n: unknown) => typeof n === \"number\" && Number.isInteger(n) && n > 0 && n <= 10_000;\n  if (typeof v.path !== \"string\" || !side(v.w) || !side(v.h) || typeof v.alt !== \"string\") return undefined;\n  return { path: v.path, w: v.w as number, h: v.h as number, alt: v.alt.slice(0, MAX_ALT_LENGTH) };\n}\n\nconst STATES = new Set<HeldState>([\"held\", \"removed\", \"expired\", \"gone\"]);\nconst time = (n: unknown) => typeof n === \"number\" && Number.isSafeInteger(n) && n >= 0;\n\n/** One item as it is kept, or null for anything else. */\nexport function parseHeld(raw: unknown): Held | null {\n  if (typeof raw !== \"string\") return null;\n  try {\n    const v = JSON.parse(raw) as Record<string, unknown>;\n    if (!v || typeof v !== \"object\" || Array.isArray(v)) return null;\n    if (typeof v.id !== \"string\" || !ITEM_ID.test(v.id)) return null;\n    if (v.kind !== \"post\" && v.kind !== \"comment\") return null;\n    if (typeof v.a !== \"string\" || !v.a || v.a === CREATOR) return null;\n    if (!time(v.at) || !time(v.done)) return null;\n    if (typeof v.sp !== \"string\" || typeof v.post !== \"string\" || typeof v.parent !== \"string\") return null;\n    if (v.kind === \"comment\" ? !ITEM_ID.test(v.post) : v.post !== \"\") return null;\n    if (v.parent && !ITEM_ID.test(v.parent)) return null;\n    if (typeof v.title !== \"string\" || typeof v.text !== \"string\" || typeof v.why !== \"string\") return null;\n    if (typeof v.state !== \"string\" || !STATES.has(v.state as HeldState)) return null;\n    const img = parseImage(v.img);\n    if (img === undefined) return null;\n    const poll = v.poll === null ? null : parsePoll(v.poll);\n    if (v.poll !== null && !poll) return null;\n    return {\n      id: v.id,\n      kind: v.kind,\n      a: v.a,\n      at: v.at as number,\n      sp: v.sp,\n      post: v.post,\n      parent: v.parent,\n      title: v.title.slice(0, MAX_POST_TITLE),\n      text: v.text.slice(0, MAX_POST_TEXT),\n      img,\n      poll,\n      state: v.state as HeldState,\n      why: v.why.slice(0, MAX_WHY),\n      done: v.done as number,\n    };\n  } catch {\n    return null;\n  }\n}\n\n/** The one reply of a GET of an item: the item, null when there is none, or thrown. */\nfunction itemOf(raw: unknown, item: string): Held | null {\n  if (raw === null) return null;\n  const held = parseHeld(raw);\n  if (!held || held.id !== item) throw new UnknownReplyError(\"a held community item\");\n  return held;\n}\n\nasync function readItem(id: string, item: string): Promise<Held | null> {\n  const replies = repliesFor(await redisPipeline([[\"GET\", itemKey(id, item)]]), 1);\n  if (!replies) throw new UnknownReplyError(\"a held community item\");\n  return itemOf(replies[0], item);\n}\n\nexport type HoldResult = { ok: true; held: Held } | { ok: false; reason: \"full\" | \"mine\" };\n\n/**\n * Keeps what a member sent for the creator to approve. Its room is taken\n * first (refused: DataRoomError, nothing written); past the community's or\n * the member's ceiling it is refused and nothing of it stays.\n */\nasync function hold(id: string, held: Held, room: DataStore, now: number): Promise<HoldResult> {\n  if (held.a === CREATOR) throw new RangeError(\"the creator is never held\");\n  // A few that expired go first, so they never pile up on the queue. Best\n  // effort: a sweep that failed never stops a member's post, which counts\n  // only what still waits anyway.\n  await sweepHeld(id, now, HOLD_SWEEP).catch((error) => console.error(\"sweeping expired held community items failed\", error));\n  const json = JSON.stringify(held);\n  const picture = held.img ? JSON.stringify({ a: held.a, p: held.img.path }) : null;\n  // The record and its places (and its picture's line), kept until it is gone by itself.\n  await needData(room, [{ until: (now + KEEP_SECONDS) * 1000, bytes: dataBytes([json, picture], picture ? 4 : 3) }]);\n  const written = repliesFor(await redisPipeline([[\"SET\", itemKey(id, held.id), json, \"EX\", KEEP_SECONDS, \"NX\"]]), 1);\n  if (!written || written[0] !== \"OK\") throw new UnknownReplyError(\"writing a held community item\");\n  const replies = repliesFor(\n    await redisPipeline([\n      // Its picture is listed before the item is on the queue, so nothing on the queue has a picture nobody can find.\n      ...(picture ? [[\"HSET\", picturesKey(id), held.id, picture]] : []),\n      [\"ZREMRANGEBYSCORE\", mineKey(id, held.a), \"-inf\", now - KEEP_SECONDS],\n      [\"ZADD\", queueKey(id), held.at, held.id],\n      // Only what still waits takes the community's room: what expired was already refused (finding 4).\n      [\"ZCOUNT\", queueKey(id), `(${now - HELD_DAYS * DAY}`, \"+inf\"],\n      [\"ZADD\", mineKey(id, held.a), held.at, held.id],\n      [\"ZCARD\", mineKey(id, held.a)],\n      [\"EXPIRE\", mineKey(id, held.a), KEEP_SECONDS],\n    ]),\n    picture ? 7 : 6,\n  );\n  const counts = replies?.slice(picture ? 1 : 0).map(countOf);\n  if (!replies || !counts || counts.some((n) => n === null) || counts[1] !== 1 || counts[3] !== 1 || (picture && countOf(replies[0]) === null)) {\n    throw new UnknownReplyError(\"placing a held community item\");\n  }\n  // Added first and counted after: two sent at once at the ceiling are both\n  // refused rather than both kept, and the queue is never left past it.\n  const over = (counts[2] as number) > MAX_HELD ? \"full\" : (counts[4] as number) > MAX_MINE ? \"mine\" : null;\n  if (over) {\n    await redisPipeline([\n      [\"ZREM\", queueKey(id), held.id],\n      [\"ZREM\", mineKey(id, held.a), held.id],\n      [\"DEL\", itemKey(id, held.id)],\n      // The picture is the route's to delete, as it was never held.\n      ...(picture ? [[\"HDEL\", picturesKey(id), held.id]] : []),\n    ]);\n    return { ok: false, reason: over };\n  }\n  return { ok: true, held };\n}\n\n/** Holds a member's post. The caller has checked everything it checks for a post that publishes. */\nexport async function holdPost(id: string, input: NewPost, room: DataStore, now = nowSeconds()): Promise<HoldResult> {\n  return hold(\n    id,\n    {\n      id: newItemId(),\n      kind: \"post\",\n      a: input.author,\n      at: now,\n      sp: input.space,\n      post: \"\",\n      parent: \"\",\n      title: input.title,\n      text: input.text,\n      img: input.img,\n      poll: input.poll,\n      state: \"held\",\n      why: \"\",\n      done: 0,\n    },\n    room,\n    now,\n  );\n}\n\n/** Holds a member's comment on a post they can see. */\nexport async function holdComment(\n  id: string,\n  input: { post: string; space: string; parent: string; author: string; text: string },\n  room: DataStore,\n  now = nowSeconds(),\n): Promise<HoldResult> {\n  return hold(\n    id,\n    {\n      id: newItemId(),\n      kind: \"comment\",\n      a: input.author,\n      at: now,\n      sp: input.space,\n      post: input.post,\n      parent: ITEM_ID.test(input.parent) ? input.parent : \"\",\n      title: \"\",\n      text: input.text.slice(0, MAX_COMMENT_TEXT),\n      img: null,\n      poll: null,\n      state: \"held\",\n      why: \"\",\n      done: 0,\n    },\n    room,\n    now,\n  );\n}\n\n/** The note an item leaves for its author when it stops waiting: a few words of it, and why. */\nfunction noteOf(held: Held, state: Exclude<HeldState, \"held\">, why: string, now: number): Held {\n  return {\n    ...held,\n    title: held.title.slice(0, NOTE_SNIP),\n    text: held.text.slice(0, NOTE_SNIP),\n    img: null,\n    poll: null,\n    state,\n    why: cleanLine(why, MAX_WHY),\n    done: now,\n  };\n}\n\n/**\n * A held item's picture deleted, and only then its line in the pictures list (removeCommunityImage): a file that could\n * not be deleted keeps its line, where its author's erasure finds it again (Codex G on #3020, 6751455863). True when\n * both are gone.\n */\nasync function dropHeldPicture(id: string, item: string, path: string): Promise<boolean> {\n  return removeCommunityImage(path, async () => countOf(repliesFor(await redisPipeline([[\"HDEL\", picturesKey(id), item]]), 1)?.[0]) !== null);\n}\n\n/** Writes the note in the item's place, for what is left of its time; its picture is deleted, then its line. */\nasync function leaveNote(id: string, note: Held, picture: string | null | undefined, now: number): Promise<void> {\n  // At most TOLD_DAYS from now, and never past the record's own end.\n  const left = Math.min(note.at + KEEP_SECONDS - now, TOLD_DAYS * DAY);\n  await redisPipeline([left > 0 ? [\"SET\", itemKey(id, note.id), JSON.stringify(note), \"EX\", left, \"XX\"] : [\"DEL\", itemKey(id, note.id)]]);\n  if (picture) await dropHeldPicture(id, note.id, picture);\n}\n\n/** One line of the pictures list: whose post it was and its path, or null for anything else. */\nfunction pictureOf(raw: unknown): { a: string; p: string } | null {\n  if (typeof raw !== \"string\") return null;\n  try {\n    const v = JSON.parse(raw) as Record<string, unknown>;\n    return v && typeof v.a === \"string\" && v.a && typeof v.p === \"string\" && v.p ? { a: v.a, p: v.p } : null;\n  } catch {\n    return null;\n  }\n}\n\n/**\n * The picture of an item that left the queue with no record to read (it ran\n * out by itself, KEEP_DAYS): found in the pictures list, deleted, and its\n * line with it (finding 3). Nothing when it had none.\n */\nasync function dropListedPicture(id: string, item: string): Promise<void> {\n  const replies = repliesFor(await redisPipeline([[\"HGET\", picturesKey(id), item]]), 1);\n  if (!replies) throw new UnknownReplyError(\"a held community picture\");\n  if (replies[0] === null) return;\n  const path = pictureOf(replies[0])?.p;\n  // A line that does not read names no file: it goes; otherwise the file first, then the line.\n  if (!path) await redisPipeline([[\"HDEL\", picturesKey(id), item]]);\n  else await dropHeldPicture(id, item, path);\n}\n\n/** Whether an item has waited HELD_DAYS: refused by itself, as its author already reads it (heldOf). */\nconst isDue = (held: Pick<Held, \"at\">, now: number) => held.at <= now - HELD_DAYS * DAY;\n\n/** Refuses one item that waited HELD_DAYS, when this caller takes it: a note for its author, its picture deleted. */\nasync function expire(id: string, held: Held, now: number): Promise<void> {\n  if (await claim(id, held.id)) await leaveNote(id, noteOf(held, \"expired\", \"\", now), held.img?.path, now);\n}\n\n/** Takes the item off the queue: true only for the one caller who took it. */\nasync function claim(id: string, item: string): Promise<boolean> {\n  const replies = repliesFor(await redisPipeline([[\"ZREM\", queueKey(id), item]]), 1);\n  const taken = replies ? countOf(replies[0]) : null;\n  if (taken === null || taken > 1) throw new UnknownReplyError(\"taking a held community item off the queue\");\n  return taken === 1;\n}\n\n/**\n * Refuses, by themselves, the items that waited HELD_DAYS without an answer:\n * each leaves a note for its author. At most `limit` a call, so a sweep is\n * never long; what it did not reach is still never approved nor shown as\n * waiting, since the queue is read and acted on by age too (finding 1).\n */\nexport async function sweepHeld(id: string, now = nowSeconds(), limit = SWEEP_BATCH): Promise<number> {\n  const replies = repliesFor(await redisPipeline([[\"ZRANGEBYSCORE\", queueKey(id), \"-inf\", now - HELD_DAYS * DAY, \"LIMIT\", 0, limit]]), 1);\n  const due = replies ? stringList(replies[0]) : null;\n  if (!due) throw new UnknownReplyError(\"the held items that are due\");\n  let swept = 0;\n  for (const item of due) {\n    const held = ITEM_ID.test(item) ? await readItem(id, item) : null;\n    if (!(await claim(id, item))) continue;\n    swept += 1;\n    if (held?.state === \"held\") await leaveNote(id, noteOf(held, \"expired\", \"\", now), held.img?.path, now);\n    // Its record ran out: its picture is found in the list (finding 3).\n    else await dropListedPicture(id, item);\n  }\n  return swept;\n}\n\n/**\n * The creator's queue: what waits, oldest first. Only what was sent less than\n * HELD_DAYS ago, however many expired ones the sweep has not reached yet.\n */\nexport async function heldQueue(id: string, now = nowSeconds()): Promise<Held[]> {\n  await sweepHeld(id, now);\n  const replies = repliesFor(await redisPipeline([[\"ZRANGEBYSCORE\", queueKey(id), `(${now - HELD_DAYS * DAY}`, \"+inf\", \"LIMIT\", 0, MAX_HELD]]), 1);\n  const ids = replies ? stringList(replies[0]) : null;\n  if (!ids) throw new UnknownReplyError(\"the held community queue\");\n  if (!ids.length) return [];\n  if (ids.some((item) => !ITEM_ID.test(item))) throw new UnknownReplyError(\"the held community queue\");\n  const rows = repliesFor(await redisPipeline([[\"MGET\", ...ids.map((item) => itemKey(id, item))]]), 1);\n  const values = rows && Array.isArray(rows[0]) ? repliesFor(rows[0], ids.length) : null;\n  if (!values) throw new UnknownReplyError(\"the held community items\");\n  const out: Held[] = [];\n  const stale: string[] = [];\n  ids.forEach((item, i) => {\n    const held = itemOf(values[i], item);\n    if (held?.state === \"held\") out.push(held);\n    else stale.push(item);\n  });\n  // An entry whose record is gone, or no longer waits, is not waiting: taken\n  // off by whoever takes it, with the picture it may have left (finding 3).\n  for (const item of stale) if (await claim(id, item)) await dropListedPicture(id, item);\n  return out;\n}\n\n/**\n * One member's own items, newest first: what waits, and the notes about what\n * was not published. Only theirs: the list is kept under their own key and\n * each record is checked to be theirs. An item past HELD_DAYS reads as\n * expired here even before a sweep has written its note.\n */\nexport async function heldOf(id: string, who: string, now = nowSeconds()): Promise<Held[]> {\n  // Read on every visit of a member to the community, so one read and no\n  // write: what ran out is left out here, and pruned by the member's next\n  // hold (and by the list's own expiry), not by every visit (finding 5).\n  const replies = repliesFor(await redisPipeline([[\"ZREVRANGEBYSCORE\", mineKey(id, who), \"+inf\", `(${now - KEEP_SECONDS}`, \"LIMIT\", 0, MAX_MINE]]), 1);\n  const ids = replies ? stringList(replies[0]) : null;\n  if (!ids || ids.some((item) => !ITEM_ID.test(item))) throw new UnknownReplyError(\"a member's held community items\");\n  if (!ids.length) return [];\n  const rows = repliesFor(await redisPipeline([[\"MGET\", ...ids.map((item) => itemKey(id, item))]]), 1);\n  const values = rows && Array.isArray(rows[0]) ? repliesFor(rows[0], ids.length) : null;\n  if (!values) throw new UnknownReplyError(\"a member's held community items\");\n  const out: Held[] = [];\n  const stale: string[] = [];\n  ids.forEach((item, i) => {\n    const held = itemOf(values[i], item);\n    if (!held || held.a !== who) {\n      stale.push(item);\n      return;\n    }\n    out.push(held.state === \"held\" && held.at <= now - HELD_DAYS * DAY ? noteOf(held, \"expired\", \"\", held.at + HELD_DAYS * DAY) : held);\n  });\n  if (stale.length) await redisPipeline([[\"ZREM\", mineKey(id, who), ...stale]]);\n  return out;\n}\n\n/** Whole days, rounded up and at least one, before a waiting item is refused by itself. */\nexport function heldDaysLeft(held: Pick<Held, \"at\">, now = nowSeconds()): number {\n  return Math.max(1, Math.ceil((held.at + HELD_DAYS * DAY - now) / DAY));\n}\n\nexport type ApproveResult =\n  | { ok: true; held: Held; post: Post; comment: Comment | null }\n  | { ok: false; reason: \"gone\" | \"full\" | \"post\" };\n\n/** Puts a claimed item back on the queue, when it could not be published after all, with its picture's line. */\nasync function putBack(id: string, held: Held): Promise<void> {\n  await redisPipeline([\n    ...(held.img ? [[\"HSET\", picturesKey(id), held.id, JSON.stringify({ a: held.a, p: held.img.path })]] : []),\n    [\"ZADD\", queueKey(id), held.at, held.id],\n  ]);\n}\n\ntype Published = { post: Post; comment: Comment | null };\n\n/**\n * The post or comment this item was already published as, or null. It is\n * published under the item's own id, so a write whose reply was lost after\n * Redis applied it is found here, and never written twice (finding 2).\n */\nasync function publishedAs(id: string, held: Held): Promise<Published | null> {\n  if (held.kind === \"post\") {\n    const post = await readPost(id, held.id);\n    return post && post.a === held.a ? { post, comment: null } : null;\n  }\n  const above = await readPost(id, held.post);\n  const comment = above ? await readComment(id, above.id, held.id) : null;\n  return above && comment && comment.a === held.a ? { post: above, comment } : null;\n}\n\n/** Writes the item into the community, under its own id: \"full\" when there is no room, \"post\" when the post it answers is gone. */\nasync function publish(id: string, held: Held, room: DataStore): Promise<Published | \"full\" | \"post\"> {\n  if (held.kind === \"post\") {\n    const input: NewPost = { space: held.sp, author: held.a, title: held.title, text: held.text, img: held.img, kind: \"post\", poll: held.poll, id: held.id };\n    const made = await createPost(id, input, room);\n    return made.ok ? { post: made.post, comment: null } : \"full\";\n  }\n  const above = await readPost(id, held.post);\n  if (!above) return \"post\";\n  let made = await addComment(id, above.id, { parent: held.parent, author: held.a, text: held.text, id: held.id }, room);\n  // The comment it answered is gone: it goes straight under the post.\n  if (!made.ok && made.reason === \"parent\") made = await addComment(id, above.id, { parent: \"\", author: held.a, text: held.text, id: held.id }, room);\n  return made.ok ? { post: above, comment: made.comment } : \"full\";\n}\n\n/**\n * The creator approves: the item is published as its author wrote it, through\n * createPost or addComment, and counted toward its author's approved ones.\n * Published only when its record was read exactly, it was sent less than\n * HELD_DAYS ago, and this call took it off the queue; anything else\n * publishes nothing. Published once: under the item's own id, found again\n * when a write's reply was lost.\n */\nexport async function approveHeld(id: string, item: string, room: DataStore, now = nowSeconds()): Promise<ApproveResult> {\n  if (!ITEM_ID.test(item)) return { ok: false, reason: \"gone\" };\n  await sweepHeld(id, now);\n  const held = await readItem(id, item);\n  if (!held || held.state !== \"held\") return { ok: false, reason: \"gone\" };\n  // Its author already reads it as not published, swept or not (finding 1).\n  if (isDue(held, now)) {\n    await expire(id, held, now);\n    return { ok: false, reason: \"gone\" };\n  }\n  const field = `${held.a}:${held.kind === \"post\" ? \"p\" : \"c\"}`;\n  // The count's room, before anything is published (lib/store-data.ts).\n  const exists = repliesFor(await redisPipeline([[\"HEXISTS\", countKey(id), field]]), 1);\n  const there = exists ? countOf(exists[0]) : null;\n  if (there === null || there > 1) throw new UnknownReplyError(\"a member's approved count\");\n  if (there === 0) await needData(room, [{ slot: COUNT_SLOT, bytes: dataBytes([field, \"99\"], 1) }]);\n  if (!(await claim(id, item))) return { ok: false, reason: \"gone\" };\n\n  let made: Published | \"full\" | \"post\";\n  try {\n    // Its picture is the post's from now on, no longer one to delete with what waits.\n    if (held.img) await redisPipeline([[\"HDEL\", picturesKey(id), item]]);\n    // An earlier approval whose reply was lost may have published it already.\n    made = (await publishedAs(id, held)) ?? (await publish(id, held, room));\n  } catch (error) {\n    // A write whose reply was lost (a timeout) may have been applied all the\n    // same: then it is published, and said so. It waits again only when it\n    // was not found; a later approval looks for it first, so even a write\n    // applied after this look is never published twice (finding 2).\n    const found = error instanceof DataRoomError ? null : await publishedAs(id, held).catch(() => null);\n    if (!found) {\n      await putBack(id, held).catch(() => {});\n      throw error;\n    }\n    made = found;\n  }\n  if (made === \"full\") {\n    await putBack(id, held);\n    return { ok: false, reason: \"full\" };\n  }\n  if (made === \"post\") {\n    // The post it answered was deleted while it waited: told, never published.\n    await leaveNote(id, noteOf(held, \"gone\", \"\", now), null, now);\n    return { ok: false, reason: \"post\" };\n  }\n  const { post, comment } = made;\n  try {\n    await redisPipeline([\n      [\"DEL\", itemKey(id, item)],\n      [\"ZREM\", mineKey(id, held.a), item],\n      [\"HINCRBY\", countKey(id), field, 1],\n    ]);\n  } catch (error) {\n    // Published all the same; what is left over goes by itself (KEEP_DAYS).\n    console.error(\"tidying an approved community item failed\", error);\n  }\n  return { ok: true, held, post, comment };\n}\n\n/**\n * The creator removes: never published, and its author is told, with the\n * creator's sentence when they wrote one. The picture it carried is deleted.\n */\nexport async function removeHeld(id: string, item: string, why: string, now = nowSeconds()): Promise<{ ok: true; held: Held } | { ok: false; reason: \"gone\" }> {\n  if (!ITEM_ID.test(item)) return { ok: false, reason: \"gone\" };\n  await sweepHeld(id, now);\n  const held = await readItem(id, item);\n  if (!held || held.state !== \"held\") return { ok: false, reason: \"gone\" };\n  // Already refused by itself: its author keeps reading \"expired\" (finding 1).\n  if (isDue(held, now)) {\n    await expire(id, held, now);\n    return { ok: false, reason: \"gone\" };\n  }\n  if (!(await claim(id, item))) return { ok: false, reason: \"gone\" };\n  await leaveNote(id, noteOf(held, \"removed\", why, now), held.img?.path, now);\n  return { ok: true, held };\n}\n\n/**\n * Its author takes back what waits, or puts away a note: only their own.\n * \"done\" when it went, \"gone\" when there was nothing of theirs.\n */\nexport async function withdrawHeld(id: string, item: string, who: string): Promise<\"done\" | \"gone\"> {\n  if (!ITEM_ID.test(item)) return \"gone\";\n  const held = await readItem(id, item);\n  if (!held || held.a !== who) return \"gone\";\n  if (held.state === \"held\" && !(await claim(id, item))) return \"gone\";\n  await redisPipeline([\n    [\"DEL\", itemKey(id, item)],\n    [\"ZREM\", mineKey(id, who), item],\n  ]);\n  // Its picture, then its line: a file not deleted keeps the line its author's erasure finds it by.\n  if (held.state === \"held\" && held.img?.path) await dropHeldPicture(id, item, held.img.path);\n  return \"done\";\n}\n\n/**\n * Deletes one person's items, waiting or not, their pictures, their list and\n * their approved counts (lib/community-erasure.ts). Answers how many records\n * went. Anything not read exactly is thrown, so the erasure says it did not\n * finish rather than leaving something behind quietly.\n */\nexport async function forgetHeldPerson(id: string, who: string): Promise<number> {\n  const replies = repliesFor(\n    await redisPipeline([\n      [\"ZRANGEBYSCORE\", mineKey(id, who), \"-inf\", \"+inf\"],\n      [\"ZRANGEBYSCORE\", queueKey(id), \"-inf\", \"+inf\", \"LIMIT\", 0, MAX_HELD * 2],\n      [\"HGETALL\", picturesKey(id)],\n    ]),\n    3,\n  );\n  const mine = replies ? stringList(replies[0]) : null;\n  const queued = replies ? stringList(replies[1]) : null;\n  const lines = replies ? stringList(replies[2]) : null;\n  if (!mine || !queued || !lines || lines.length % 2) throw new UnknownReplyError(\"a member's held community items\");\n  // Their pictures still listed, found even when the record ran out (finding 3).\n  const pictures = new Map<string, string>();\n  for (let i = 0; i < lines.length; i += 2) {\n    const line = pictureOf(lines[i + 1]);\n    if (line?.a === who && ITEM_ID.test(lines[i])) pictures.set(lines[i], line.p);\n  }\n  const candidates = [...new Set([...mine, ...queued])].filter((item) => ITEM_ID.test(item));\n  const theirs: Held[] = [];\n  const listed = new Set(mine);\n  if (candidates.length) {\n    const rows = repliesFor(await redisPipeline([[\"MGET\", ...candidates.map((item) => itemKey(id, item))]]), 1);\n    const values = rows && Array.isArray(rows[0]) ? repliesFor(rows[0], candidates.length) : null;\n    if (!values) throw new UnknownReplyError(\"a member's held community items\");\n    candidates.forEach((item, i) => {\n      const held = itemOf(values[i], item);\n      if (held?.a === who) theirs.push(held);\n      else if (!held && listed.has(item)) theirs.push({ id: item } as Held);\n    });\n  }\n  for (const item of pictures.keys()) if (!theirs.some((h) => h.id === item)) theirs.push({ id: item } as Held);\n  const items = theirs.map((h) => h.id);\n  // Each picture once, by the item it is held for: from the list, or from the record while it waits. One the record\n  // names and the list does not is written into the list with the records' deletion, so it is never left unnamed.\n  const held = new Map<string, string>(pictures);\n  const unlisted: [string, string][] = [];\n  for (const h of theirs) {\n    if (h.state === \"held\" && h.img?.path && !held.has(h.id)) {\n      held.set(h.id, h.img.path);\n      unlisted.push([h.id, h.img.path]);\n    }\n  }\n  const kept = items.length ? 4 : 2;\n  const done = repliesFor(\n    await redisPipeline([\n      ...(items.length ? [[\"ZREM\", queueKey(id), ...items], [\"DEL\", ...items.map((item) => itemKey(id, item))]] : []),\n      [\"DEL\", mineKey(id, who)],\n      [\"HDEL\", countKey(id), `${who}:p`, `${who}:c`],\n      ...unlisted.map(([item, path]) => [\"HSET\", picturesKey(id), item, JSON.stringify({ a: who, p: path })]),\n    ]),\n    kept + unlisted.length,\n  );\n  const counts = done?.map(countOf);\n  if (!counts || counts.some((n) => n === null)) throw new Error(\"Community held items erasure was not confirmed\");\n  // The pictures last, each file before its line (Codex G on #3020, 6751455863): one that could not be deleted keeps\n  // its line, and the erasure says it did not finish, so the next one deletes it.\n  let left = 0;\n  for (const [item, path] of held) if (!(await dropHeldPicture(id, item, path))) left += 1;\n  if (left) throw new Error(\"Community held items erasure: a picture could not be deleted\");\n  // The records, the member's list and their counts that went (a picture's line is not a record of its own).\n  const tail = counts.slice(items.length ? 1 : 0, kept) as number[];\n  return tail.reduce((sum, n) => sum + n, 0);\n}\n\n/** What a member reads about one of their items, for the copy of their data. */\nexport function heldCopy(held: Held): { kind: string; space: string; post: string; title: string; text: string; sent: string; state: HeldState; why: string } {\n  return {\n    kind: held.kind,\n    space: held.sp,\n    post: held.post,\n    title: held.title,\n    text: held.text,\n    sent: new Date(held.at * 1000).toISOString(),\n    state: held.state,\n    why: held.why,\n  };\n}\n",
+        "encoding": "utf-8",
+        "sha": "f21e92522873661b1f57aa88782680e4780f26e6",
+        "display_url": "https://github.com/solrenning-llc/marktmorgen/blob/a0329c01d0b0a73543b2004405240bb284f9db61/lib/community-approval.ts",
+        "display_title": "community-approval.ts"
+      },
+      {
+        "content": "/**\n * Codex G on #3020 @baaa18ed (6751455863, MEDIUM, privacy): when a held post's picture could not be deleted (the file\n * store did not answer), the line that names it (the pictures list) was dropped all the same, so a later erasure of its\n * author had nothing left to find it by, and the file stayed. The line goes only once the file is gone; an erasure that\n * cannot delete one says it did not finish, and a later one deletes it through that line.\n *\n * The test environment has no Blob token, so every deletion fails here, as an outage would.\n */\nimport { forgetHeldPerson, holdPost, removeHeld, withdrawHeld } from \"@/lib/community-approval\";\nimport { store as redis } from \"./redis-stub\";\nimport { ROOM } from \"./data-room\";\nimport { done, is, part } from \"./check\";\n\nconst id = \"c\".repeat(32);\nconst SPACE = \"aaaaaaaaaaaa\";\nconst ada = \"a\".repeat(31) + \"1\";\nconst folder = \"f\".repeat(24);\nconst picture = (n: number) => ({ path: `community/${folder}/held-${n}.png`, w: 100, h: 100, alt: \"A drawing\" });\nconst withPicture = (n: number) => ({ space: SPACE, author: ada, title: \"\", text: \"\", img: picture(n), kind: \"post\" as const, poll: null });\n\n// The test environment has no Blob token: every attempt to delete a picture\n// ends in dropCommunityImage's log line, which is what is counted here.\nlet attempts = 0;\nconst realError = console.error;\nconsole.error = (...args: unknown[]) => {\n  if (typeof args[0] === \"string\" && args[0].startsWith(\"could not delete a community picture\")) {\n    attempts += 1;\n    return;\n  }\n  realError(...args);\n};\n\nasync function main(): Promise<void> {\n  const t0 = 1_800_000_000;\n  const line = async (item: string) => (await redis.pipeline([[\"HGET\", `nl:cm:${id}:ap:f`, item]]))[0];\n\n  for (const [what, leave] of [\n    [\"the creator removes it\", (item: string) => removeHeld(id, item, \"\", t0 + 5).then(() => undefined)],\n    [\"its author takes it back\", (item: string) => withdrawHeld(id, item, ada).then(() => undefined)],\n  ] as const) {\n    part(`A held post with a picture, ${what}, and the file store does not answer`);\n    redis.clear();\n    const held = await holdPost(id, withPicture(1), ROOM, t0);\n    if (!held.ok) throw new Error(\"not held\");\n    attempts = 0;\n    await leave(held.held.id);\n    is(`${what}: its picture was tried`, attempts, 1);\n    is(`${what}: and the line that names it is kept, so it can be found again`, typeof (await line(held.held.id)), \"string\");\n    attempts = 0;\n    const erased = await forgetHeldPerson(id, ada).then(() => \"finished\", () => \"not finished\");\n    is(`${what}: its author's erasure tries the picture again, through that line`, attempts, 1);\n    is(`${what}: and says it did not finish, the line still there for the next one`, [erased, typeof (await line(held.held.id))], [\"not finished\", \"string\"]);\n  }\n  done();\n}\n\nvoid main();\n",
+        "encoding": "utf-8",
+        "sha": "f514f76dcaf779581b0acd475e611c782c909217",
+        "display_url": "https://github.com/solrenning-llc/marktmorgen/blob/a0329c01d0b0a73543b2004405240bb284f9db61/tests/cm2-picture-reference-kept.test.ts",
+        "display_title": "cm2-picture-reference-kept.test.ts"
+      }
+    ],
+    "originalFinding": 6751455863,
+    "authorFixComment": 6798265200,
+    "existingPermanentTest": "cm2-picture-reference-kept covers only provider failures without configured Blob credentials; no concurrent successful release coverage",
+    "noRuntime": "Zero new runtime tests, Redis/HTTP/provider IO, build, types, lint or scanner. Existing author/reviewer executions are credited only to their authors."
+  },
+  "heldCandidates": [
+    {
+      "pr": 3070,
+      "parent": "92b02aa03f346da12fe8e08cfde835a8869f2aa2",
+      "candidate": "025fd33c8a8bbb34061672c639981979c43687cd"
+    },
+    {
+      "pr": 3073,
+      "parent": "e988e105b1528780310c1dd6a696500025645727",
+      "candidate": "1cc894511d0d8b2eac8c0a7ee84c3e1ce5f7fab4"
+    }
+  ],
+  "limits": "No product ref updates, main merges, reruns, merge-queue mutations or merges. No forbidden commercial/account/gate/limit/reservation changes. Weekly quota owner report TODOS-112: 25% used, renews in5days; not independently visible in this session."
+}

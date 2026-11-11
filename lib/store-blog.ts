@@ -26,7 +26,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
 import { slugOf } from "@/lib/product-slug";
 import { blogReadArray, blogReadBody } from "@/lib/blog-read-replies";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;
@@ -228,8 +228,10 @@ export async function savePost(
     before = parseMeta(raw);
     if (!before) return { ok: false, reason: "unknown" };
   } else {
-    const [count] = await redisPipeline([["HLEN", metaKey(statsId)]]);
-    if ((Number(count) || 0) >= MAX_POSTS) return { ok: false, reason: "full" };
+    // Read exactly (rule 24, MR): a count cut short or of another shape is unknown, never under the cap.
+    const count = countOf(repliesFor(await redisPipeline([["HLEN", metaKey(statsId)]]), 1)?.[0]);
+    if (count === null) throw new UnknownReplyError("the store's blog posts counted for the cap");
+    if (count >= MAX_POSTS) return { ok: false, reason: "full" };
   }
   const postId = before?.id ?? newId();
   const publishedAt = input.draft ? before?.publishedAt ?? 0 : before?.publishedAt || now;

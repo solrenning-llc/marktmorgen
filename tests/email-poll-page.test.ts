@@ -26,11 +26,13 @@ import { done, is, part } from "./check";
 
 const DAY = 86_400_000;
 const now = Date.now();
+/** A broadcast keeps its times in seconds, as createBroadcast writes them. */
+const sec = (ms: number) => Math.floor(ms / 1000);
 const ID = "0123456789abcdef01234567";
 const poll = { question: "Which class next?", options: ["Glazing", "Trimming", "Firing"], days: 7 };
 const record = (extra: Record<string, unknown> = {}) => ({
   id: ID, listId: "list1", handle: "clayhouse", subject: "News", body: "Hello", productId: null, notProductId: null,
-  who: "all", narrow: null, status: "sent", createdAt: now - DAY, sendAt: now - DAY, finishedAt: now - DAY + 60_000,
+  who: "all", narrow: null, status: "sent", createdAt: sec(now - DAY), sendAt: sec(now - DAY), finishedAt: sec(now - DAY + 60_000),
   total: 10, sent: 10, note: "", failures: 0, listed: true, tagged: true, test: null, poll, ...extra,
 });
 const put = (extra: Record<string, unknown> = {}) => redis.run(["SET", `nl:mail:bc:${ID}`, JSON.stringify(record(extra))]);
@@ -53,13 +55,13 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   part("An open poll: shown, nothing kept");
   taken = 0;
   const open = await pollPage({ broadcastId: ID, link: link(2), now }, deps());
-  is("open, with the poll, who sent it, its language and its end", open, { state: "open", poll, sender: "Ana at Clay House", language: "fr", closesAt: now - DAY + 7 * DAY });
+  is("open, with the poll, who sent it, its language and its end", open, { state: "open", poll, sender: "Ana at Clay House", language: "fr", closesAt: sec(now - DAY) * 1000 + 7 * DAY });
   is("the store's month taken from first, once", taken, 1);
   is("opening keeps no vote", votes(), []);
   redis.run(["HSET", `nl:mail:bc:${ID}:poll`, "2", "1"]);
   await pollPage({ broadcastId: ID, link: link(2), now }, deps());
   is("opening again changes no vote", votes(), ["2", "1"]);
-  is("the store's name when it has no sender name", (await pollPage({ broadcastId: ID, link: link(2), now }, deps({ loadStore: async () => ({ ...shop, mail: undefined }) }))), { state: "open", poll, sender: "Clay House", language: "fr", closesAt: now - DAY + 7 * DAY });
+  is("the store's name when it has no sender name", (await pollPage({ broadcastId: ID, link: link(2), now }, deps({ loadStore: async () => ({ ...shop, mail: undefined }) }))), { state: "open", poll, sender: "Clay House", language: "fr", closesAt: sec(now - DAY) * 1000 + 7 * DAY });
 
   part("Refused with no read of the database");
   let calls = 0;
@@ -80,8 +82,8 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("not gone out", await pollPage({ broadcastId: ID, link: link(2), now }, deps()), { state: "invalid" });
 
   part("Closed: said so, with its words");
-  put({ sendAt: now - 8 * DAY });
-  is("closed", await pollPage({ broadcastId: ID, link: link(2), now }, deps()), { state: "closed", poll, sender: "Ana at Clay House", language: "fr", closesAt: now - 8 * DAY + 7 * DAY });
+  put({ sendAt: sec(now - 8 * DAY) });
+  is("closed", await pollPage({ broadcastId: ID, link: link(2), now }, deps()), { state: "closed", poll, sender: "Ana at Clay House", language: "fr", closesAt: sec(now - 8 * DAY) * 1000 + 7 * DAY });
 
   part("Resting and unknown");
   put();
@@ -90,7 +92,7 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("the store could not be read", await pollPage({ broadcastId: ID, link: link(2), now }, deps({ loadStore: async () => null })), { state: "unknown" });
   redis.run(["SET", `nl:mail:bc:${ID}`, "{not json"]);
   is("the record could not be read", await pollPage({ broadcastId: ID, link: link(2), now }, deps()), { state: "unknown" });
-  put({ sendAt: now + DAY });
+  put({ sendAt: sec(now + DAY) });
   is("a send time after now", await pollPage({ broadcastId: ID, link: link(2), now }, deps()), { state: "unknown" });
 
   part("Words in every language a store sells in");

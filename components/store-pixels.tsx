@@ -122,14 +122,16 @@ function sentBefore(keys: string[]): boolean {
  * (506 [SG1], finding E-2): whoever has one opens what it names. The thanks
  * page's checkout (session_id) and PayPal order (paypal), the free page's
  * download token (token), a call package's booking link (pkg), a call's
- * new-time link (move), the gift of support's checkout (session_id on /tip)
- * and an order handed to the affiliate page (order). Every ad script reads
+ * new-time link (move), the gift of support's checkout (session_id on /tip),
+ * an order handed to the affiliate page (order) and the emailed one-time link
+ * for a returning buyer's code (rtoken, which opens the checkout with the
+ * code for that address: lib/returning-code.ts). Every ad script reads
  * the page's own address with each event it sends (Meta's `dl`, Google's
  * page_location, TikTok's, Pinterest's, X's and Reddit's page URL) and the
  * page it came from (Meta's `rl`, Google's `dr`), so none of them may be on
  * either when one starts.
  */
-export const KEY_PARAMS = ["session_id", "paypal", "token", "pkg", "move", "order"] as const;
+export const KEY_PARAMS = ["session_id", "paypal", "token", "pkg", "move", "order", "rtoken"] as const;
 
 /** The address without its keys, and the keys taken out, in order. */
 export function withoutKeys(href: string): { href: string; keys: [string, string][] } {
@@ -148,6 +150,22 @@ const keptKeysKey = (path: string) => `nl_px_keys:${path}`;
 let leaving = false;
 /** The keys' values taken out of this page's address, for the marks of purchases sent before ids were derived. */
 let taken: string[] = [];
+/** The keys taken out of this page's address, by name, with the page they were taken from (keyTakenOut). */
+let takenKeys: { path: string; keys: [string, string][] } = { path: "", keys: [] };
+
+/**
+ * A key this page's own code still needs after the pixels took it out of the
+ * address (the code field sends the emailed link's rtoken with the buy
+ * button): its value, only on the page it was taken from; null otherwise.
+ */
+export function keyTakenOut(name: string): string | null {
+  try {
+    if (takenKeys.path !== location.pathname) return null;
+    return takenKeys.keys.find(([key]) => key === name)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Whether Next's router has wrapped history.replaceState (an own property of
@@ -192,6 +210,7 @@ function hideKeys(): string[] | null {
     if (withoutKeys(location.href).keys.length) return null;
     const values = keys.map(([, value]) => value);
     taken = [...taken, ...values];
+    takenKeys = { path: location.pathname, keys: takenKeys.path === location.pathname ? [...takenKeys.keys, ...keys] : keys };
     return values;
   } catch {
     return null;
@@ -428,6 +447,7 @@ export function StorePixels({
   // from this one is not told the key as where it came from.
   useEffect(() => {
     taken = [];
+    takenKeys = { path: "", keys: [] };
     leaving = restoreKeys();
     if (!leaving) hideKeys();
   }, []);

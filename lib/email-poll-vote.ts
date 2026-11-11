@@ -7,8 +7,9 @@
  *
  * In this order, so that a link that is not someone's costs nothing:
  *   1. the link is checked against the broadcast's id, with no read at all;
- *   2. the broadcast is read: it must keep a poll, have gone out ("sending"
- *      or "sent"), and its list must reach the link's place;
+ *   2. the broadcast is read: it must keep a poll and have already been
+ *      sent to the link's place (its first `sent` places, whatever its
+ *      status since);
  *   3. the poll must be open (from sendAt, kept in seconds, for its days);
  *   4. the store is read and POLL_VOTE_REQUEST_UNITS of its month's public
  *      requests are taken (lib/buyer-actions.ts takeBuyerRead): past its
@@ -52,9 +53,10 @@ export async function votePoll(
     return "unknown";
   }
   if (!broadcast || !broadcast.poll) return "invalid";
-  if (broadcast.status !== "sending" && broadcast.status !== "sent") return "invalid";
-  if (!nonnegative(broadcast.total) || !nonnegative(broadcast.sendAt)) return "unknown";
-  if (checked.recipient >= broadcast.total) return "invalid";
+  if (!nonnegative(broadcast.sent) || !nonnegative(broadcast.sendAt)) return "unknown";
+  // Whoever it reached, whatever it does since: it waits in daily portions, for a month's emails or a subject
+  // test, fails or is canceled part-way, with the first `sent` places of its list reached (review, ALTO).
+  if (checked.recipient >= broadcast.sent) return "invalid";
   // A broadcast keeps its times in seconds (createBroadcast); the poll's rules count in milliseconds.
   const sentAt = broadcast.sendAt * 1000;
   const step = voteStep({ method: "POST", option, poll: broadcast.poll, sentAt, now, recipient: "valid" });

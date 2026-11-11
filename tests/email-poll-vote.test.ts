@@ -130,8 +130,8 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("a record that does not read: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
   put({ sendAt: "soon" });
   is("a send time that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
-  put({ total: -1 });
-  is("a list size that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
+  put({ sent: -1 });
+  is("a count of those reached that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
 
   part("The route: only a POST with an answer, plain words, never a vote from a bad link");
   is("no GET: opening a link never votes", Object.keys(route).sort(), ["POST"]);

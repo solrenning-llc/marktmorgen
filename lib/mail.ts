@@ -464,6 +464,8 @@ export function render(
   tag?: MailTag,
   /** The reader's link key, when they allowed their link use to be seen (lib/mail-clicks.ts): their links carry it, and the foot says how to stop it. */
   readerKey?: string,
+  /** A block of this reader's own after the creator's words (a poll's signed links, lib/email-poll-rules.ts pollEmailBlock), already escaped for HTML. */
+  extra?: { text: string; html: string },
 ): Rendered {
   const fromName = store.mail?.fromName || store.name;
   const address = store.mail?.address ?? "";
@@ -490,7 +492,7 @@ export function render(
   const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title><meta name="color-scheme" content="${t.scheme}"><meta name="supported-color-schemes" content="${t.scheme}"></head><body style="margin:0;padding:0;background:${t.page}">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:${t.bodyFont};font-size:16px;line-height:1.6;color:${t.text};background:${t.page}">
 ${header}
-<div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, t.button.fill, t)}</div>
+<div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, t.button.fill, t)}${extra ? extra.html : ""}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:${t.muted}">
 <p style="margin:0 0 8px">${escape(why)}</p>
 <p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:${t.muted};text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
@@ -500,6 +502,7 @@ ${address ? `<p style="margin:0 0 8px">${escape(fromName)} · ${escape(address)}
 </div></div></body></html>`;
   const text = [
     bodyText(body).trim(),
+    ...(extra ? ["", extra.text.trim()] : []),
     "",
     "—",
     why,
@@ -575,6 +578,8 @@ export async function sendTo(
   keyBase: string,
   /** Which email this is, so a sale from one of its links can be counted for it (lib/mail-links.ts). */
   tag?: MailTag,
+  /** A block of each reader's own, by their index in `emails` (a poll's signed links, lib/broadcasts.ts). */
+  extraFor?: (index: number) => { text: string; html: string },
 ): Promise<SendOutcome> {
   const done: string[] = [];
   // A store whose addresses turned out to be bad ones waits its week out
@@ -613,10 +618,11 @@ export async function sendTo(
     }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
-      .filter((email) => tokens.has(email))
-      .map((email) => {
+      .map((email, j) => ({ email, index: i + j }))
+      .filter(({ email }) => tokens.has(email))
+      .map(({ email, index }) => {
         const token = tokens.get(email)!;
-        const r = render(store, subject, body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined);
+        const r = render(store, subject, body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined, extraFor?.(index));
         return { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags };
       });
     if (messages.length) await paced();

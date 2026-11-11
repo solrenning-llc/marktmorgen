@@ -36,7 +36,9 @@ import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
 import { BUYER_LEDGER_UNITS, LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadBytes, ledgerReadingUnits, ledgerUnits, readNarrow, readsBuyers } from "@/lib/segments";
 import { sameNarrow } from "@/lib/segments-rules";
-import { type EmailPoll, readPollInput } from "@/lib/email-poll-rules";
+import { type EmailPoll, pollEmailBlock, pollState, readPollInput } from "@/lib/email-poll-rules";
+import { pollLinkPart } from "@/lib/email-poll-links";
+import { SITE_URL } from "@/lib/site-url";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
 
@@ -196,6 +198,8 @@ export function readsSpentNote(waiting: string): string {
 
 /** The longest note a broadcast's record was given room for (createBroadcast). */
 export const NOTE_ROOM = 300;
+/** Why an email with a poll waits: its links could not be signed (lib/email-poll-links.ts). */
+export const POLL_KEY_NOTE = "This email's poll links could not be signed just now, so nothing more was sent. It will be tried again automatically.";
 const QUEUE = "nl:mail:queue";
 const bcKey = (id: string) => `nl:mail:bc:${id}`;
 const toKey = (id: string) => `nl:mail:bc:${id}:to`;
@@ -765,6 +769,18 @@ export async function advanceBroadcast(
         b = { ...b, status: "waiting", note: "The recipient list could not be read completely. Nothing more was sent. It will be checked again automatically." };
         break;
       }
+      // A poll goes with each reader's own signed links, for their place in
+      // the list (b.sent + their index in this batch), while it is open; a
+      // closed one is left out rather than shown and not working.
+      const first = b.sent;
+      // sendAt is kept in seconds; the poll's rules count in milliseconds.
+      const sentAt = b.sendAt * 1000;
+      const poll = b.poll && pollState(sentAt, b.poll.days, Date.now()) === "open" ? b.poll : null;
+      if (poll && pollLinkPart(id, first) === null) {
+        // With no key to sign them, nobody's links could be checked: nothing goes out until there is one.
+        b = { ...b, status: "waiting", note: POLL_KEY_NOTE };
+        break;
+      }
       const result = await sendTo(
         store,
         emails,
@@ -774,6 +790,7 @@ export async function advanceBroadcast(
         // Only an email made since links were tagged: one scheduled before
         // goes out exactly as it was written and scheduled.
         b.tagged ? { medium: "broadcast", campaign } : undefined,
+        poll ? (index) => pollEmailBlock(poll, (option) => `${SITE_URL}/poll?b=${id}&k=${pollLinkPart(id, first + index)}&a=${option}`, sentAt, store.language) : undefined,
       );
       // Whatever went before a stop counts, so the next run starts after it.
       const processed = emails.length - result.rest.length;

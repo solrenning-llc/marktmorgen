@@ -24,6 +24,8 @@ import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
 
 const DAY = 86_400_000;
+/** A broadcast keeps its times in seconds, as createBroadcast writes them. */
+const sec = (ms: number) => Math.floor(ms / 1000);
 const poll = { question: "Which class next?", options: ["Glazing", "Trimming", "Firing"], days: 7 };
 
 async function main() {
@@ -41,7 +43,7 @@ async function main() {
   mail.configure();
   await mail.setReady(true, { max24: 50_000, rate: 100 });
   const id = "222222222222222222222222", key = "nl:mail:bc:" + id, toKey = key + ":to";
-  const base = { id, listId: store.listId, handle: store.handle, subject: "Subject", body: "Message", productId: null, notProductId: null, who: "all", narrow: null, status: "sending", createdAt: Date.now() - 60_000, sendAt: Date.now() - 60_000, finishedAt: 0, total: 3, sent: 0, note: "", failures: 0, listed: true, tagged: true, test: null };
+  const base = { id, listId: store.listId, handle: store.handle, subject: "Subject", body: "Message", productId: null, notProductId: null, who: "all", narrow: null, status: "sending", createdAt: sec(Date.now() - 60_000), sendAt: sec(Date.now() - 60_000), finishedAt: 0, total: 3, sent: 0, note: "", failures: 0, listed: true, tagged: true, test: null };
   const seed = async (over: Record<string, unknown> = {}) => {
     mail.clearCaptured();
     for (const k of [`bc:${id}:0:0:3`]) mail.clearBatch(k, emails);
@@ -70,7 +72,7 @@ async function main() {
   }
 
   part("A closed poll: no links, the email still goes");
-  await seed({ poll, sendAt: Date.now() - 8 * DAY, createdAt: Date.now() - 8 * DAY });
+  await seed({ poll, sendAt: sec(Date.now() - 8 * DAY), createdAt: sec(Date.now() - 8 * DAY) });
   const late = await advance();
   is("sent", late?.sent, 3);
   is("no poll link in any of them", mail.ses.every((m) => !m.text.includes("/poll?") && !m.html.includes("/poll?")), true);

@@ -23,6 +23,9 @@
  * Pure: no storage, no network.
  */
 
+import { pollWords } from "@/lib/buyer-words/polls";
+import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+
 export const MIN_POLL_OPTIONS = 2;
 export const MAX_POLL_OPTIONS = 5;
 export const MAX_POLL_QUESTION = 200;
@@ -129,21 +132,27 @@ export function tallyPoll(optionCount: number, votes: readonly unknown[] | null)
   return { known: true, counts, votes: votes.length };
 }
 
-const DATE = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+const HTML: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const html = (text: string) => text.replace(/[&<>"']/g, (c) => HTML[c]);
 
 /**
- * The poll as plain text in the email: the question, each answer with its
- * own link, and what voting means. `linkFor` gives the recipient's link for
- * an answer.
+ * The poll in a recipient's email, in the store's language: the question,
+ * each answer as its own link named by its words, what answering means and
+ * when it closes. `linkFor` gives this recipient's link for an answer. The
+ * HTML takes the email's own text color, so its links read as the rest of
+ * the email does (lib/email-theme.ts, 7:1); each answer is a target of at
+ * least 44 px.
  */
-export function pollEmailLines(poll: EmailPoll, linkFor: (option: number) => string, sentAt: number): string[] {
+export function pollEmailBlock(poll: EmailPoll, linkFor: (option: number) => string, sentAt: number, language: unknown): { text: string; html: string } {
+  const w = pollWords(language);
   const closes = pollClosesAt(sentAt, poll.days);
-  return [
-    poll.question,
-    ...poll.options.map((option, i) => `${option}: ${linkFor(i)}`),
-    "",
-    "Pick an answer: a page opens, and your answer is counted only when you press Confirm there. Opening the link alone counts nothing.",
-    ...(closes === null ? [] : [`You can change or take back your answer until ${DATE.format(closes)} (UTC).`]),
-    "The sender sees only the totals, never who answered what.",
-  ];
+  const locale = LANGUAGES[parseLanguage(language)].locale;
+  const until = closes === null ? null : w.until(`${new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(closes)} (UTC)`);
+  const notes = [w.emailHow, ...(until ? [until] : []), w.totalsOnly];
+  const text = [poll.question, ...poll.options.map((option, i) => `${option}: ${linkFor(i)}`), "", ...notes].join("\n");
+  const answers = poll.options
+    .map((option, i) => `<li style="margin:0 0 8px"><a href="${html(linkFor(i))}" style="display:inline-block;min-height:20px;padding:12px 16px;border:1px solid currentColor;border-radius:8px;color:inherit;text-decoration:underline">${html(option)}</a></li>`)
+    .join("");
+  const block = `<div style="margin:24px 0 0;padding:16px 0 0;border-top:1px solid currentColor"><p style="margin:0 0 12px;font-weight:700">${html(poll.question)}</p><ul style="list-style:none;margin:0 0 12px;padding:0">${answers}</ul>${notes.map((n) => `<p style="margin:0 0 8px;font-size:14px">${html(n)}</p>`).join("")}</div>`;
+  return { text, html: block };
 }

@@ -3460,3 +3460,27 @@ Own#3516 remains443016ff77b193a41fd5a42f62e030d577c83f09/OPEN; priorreadyreceipt
 
 Channel publication: initial409wroteNOTHING. Freshmetadata→FULLretry preservedprefix. Commit29510a1a8a2e96e33e95f3a8387b65072c30eba4/blob934b0c35849835101ab41e4bee39b754e1f53855 FULL397868 EXACTprefix+singleownrepairresultline confirmed. No channelPONTOspam.
 At17:36:45UTC GitHub primary API rate limit403 began during finalcheckpoint fetch_blob. Freshcheckpointmetadata stillsame54d12b... as FIRSTfull600027; this append uses that verifiedidenticalcachedUTF8 withCAS. Transientrate limit: do not disable continuation, do not retry-loop or invent tests/state. Publication/PRcomment/channel/provenance alreadydurable/readbackEXACT. Next FIRST checkpoint+root, apply116 notobsoleteholds, confirmnew3515CI; no second push whileCIactive, no newglobalreview whiletypes/lint/scannerpending, no fakebackgroundwatcher.
+
+### PONTO DE PARADA — 11/11/2026 15h35 Fortaleza — CXP-20261111-1535
+
+FIRST current checkpoint metadata→FULL609912/blobd99a135a5d672e48f683c0cdc6347aab0b595ffc succeeded, so prior4b9551bd contents are now FULL-readback verified (previous run's missing readback closed). Authorized channel metadata→FULL453411/blob46a536445918e2ab9e876a6ee20fdbf3122cf3da. Read latest PONTO and directed P/current orders. GitHubONLY/no runtime/PC/terminal/browser/subagents; sourcepublication policy116 remains, queue size not a stop gate. No automation disabled for transientrate limit.
+
+Own#3515 current a2c342c49b85fe6b271ffebe673fee4aecf9fdf5 OPEN/mergeable/auto_mergefalse. New independent Claude4cloudA nominalfocal6803773579 closes C2LOW6759467753 at exacthead; own18/18 and actualmutatedoldproductRED17/18 executed by THEM, ESLintclean and fulltsc only6knownLayoutPropserrors. Credit without Pexecution or duplicate review. TwootherC1LOWs remainunreadmembers/filter-sort work, noimporter. Freshhostedchecksnapshot42checks:7distinctaggregatesSUCCESS,0FAIL; product/codeqlaggregatesnotyetvisible. Not9greens/notqueue-ready. No secondpush whileCIactive.
+
+Own#3516 current443016ff77b193a41fd5a42f62e030d577c83f09 OPEN/mergeable/auto_mergefalse. Fresh44checks9/9aggregatesSUCCESS,0FAIL; priorreadiness6801489121/qualifieddelta6799683545 retainedhistorically. Prepared next EXISTINGLOW no-list regression, NOT product repair:
+- ownbranch codex/p-stn11-no-list-regression
+- test-onlycommit b293e6c17a7f54dce3a86de3e8e96f087536956e /tree7923ad76a67bf7510df6a06dd3c796deebdae9e2
+- parent exact reviewed443016ff77; ahead1/behind0; exactlyonechangedpath tests/email-usage-page.test.ts.
+- testblob429800158d974acdd9b32bebe525751dff0848cc FULLreadbackEXACT.
+- page blobb3a26a2c2cdf08d0bc5292e9e99406eda30c77f4 verifiedbyte-identical; allproduction unchanged; PRhead NOTmoved and no newPR.
+- Newhealthy-no-listcase explicitlynull list+knownmonth+configuredRedis expects known0,0counterreads and preservedDrafteditor, even when would-be counter throws/isnull. Missingmonth/config remainsunknown evenwithnolist. Existing validcountandunreadcounterassertionsretained. Previous combined list=nullunknowncase SPLIT into explicitknownabsence/unknownprereqcontrols per reviewerLOW, notsilentlydropped. Proposedcontract preserves allpubliclimits and neverguessesunreadexistingcounter0.
+- This is testPRECURSOR, NOT executedRED/GREEN. Source tracing predicts healthy-no-listcasefailsunchangedpage unknown/reload; no productguard hasbeenwritten/applied beforeactualRED.
+- PRcomment6804114087 published with cause/scope/commit/executionlimits and request to ALREADYassigned Claude3cloudH testexecutor to run exactregression againstunchangedproduction andreportactualREDbeforeP repair. No branchmutation/duplicateproductfix requested. Newcasesassert0counterreads; donotborrow/reset frozenfamilybudgets.
+- Commentwrite returnedID; finalcommentREADBACKwasblockedbyratelimit, so doNOT claim verifiedcommenttext.
+- Need durableactualREDbeforeapplyingpagefix, then oneconsolidatedpublication afterfreshhead/CIgates; no askinguserpermission.
+
+Read source page/test/world/summarysuite/helper exact443 head throughGitHub. ZEROnewruntime/tests/types/lint/scanner/build/providerIO executed byP. No production PRpush orCIrerun/enqueue/merge this run; only own testprecursorbranchcreated. Sourceandtestcode fullreadback verified before rate limit.
+
+At18:34:30UTC API primaryratelimit403 returned during five-pageopeninventory/rawPR snapshot. Therefore no fresh53-headinventory/oldfourmergedreconfirmation couldbecompleted; doNOT inheritpriorinventoryasfresh. Latestownheads/7and9CIreceiptsabovewerefreshBEFORE403. Initialqueue843; main7b04206e79d142e08472329247876e9e649420e3. No old150/100HOLD applied. No foreign source/branch/PRmutation; previous3070/3073 authorhandoffstanding, notPPushwork.
+
+At18:35:13UTC even freshcheckpointmetadata403. This finalessentialcheckpointwrite uses FIRSTcompleteUTF8 plus its initialblobSHA asCAS; ifchanged, toolmustreject, never restoreanotherwriter. No sharedchannelwrite attempted withoutfreshFULL; initialrootmayrotateandmustnotberestored. Priorchannel/PRreviewprovenance alreadydurable. Stoprepeatedquerieson403; preserve continuation because temporaryrate limit. Do notdisableautomation. NextFIRSTreadCPandroot, verifythischeckpoint ifreadbackblocked, then get authorized testexecution reply/actualRED and ownCI; no fakebackgroundwatcher or completion claim.

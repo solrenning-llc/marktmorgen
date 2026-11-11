@@ -10,7 +10,7 @@ export * from "../lib/studio-route";
 
 let shop: Store;
 let post: Post;
-let failure: "list" | "post" | "both" | "absent" | "none" = "none";
+let failure: "list" | "post" | "both" | "absent" | "none" | "empty" | "past" = "none";
 export function configure(store: Store, value: Post, mode: typeof failure) { shop = store; post = value; failure = mode; }
 export async function storeForPage() { return shop; }
 export async function studioView() { return { ok: true, view: { store: shop, role: "owner", stores: [shop], owned: [] } }; }
@@ -21,6 +21,10 @@ export function notFound(): never { throw new Error("SYNTHETIC_NOT_FOUND"); }
 export function redirect(): never { throw new Error("SYNTHETIC_REDIRECT"); }
 export function permanentRedirect(): never { throw new Error("SYNTHETIC_REDIRECT"); }
 export async function allPosts() { if (failure === "list" || failure === "both") throw new Error("Synthetic list unavailable"); return [post]; }
+export async function publishedPosts() {
+  if (failure === "list" || failure === "both") throw new Error("Synthetic list unavailable");
+  return { posts: failure === "empty" || failure === "past" ? [] : [post], total: failure === "empty" ? 0 : 1 };
+}
 export async function readPost() { if (failure === "post" || failure === "both") throw new Error("Synthetic post unavailable"); return failure === "absent" ? null : post; }
 export async function isResting() { return false; }
 export function aiAvailableFor() { return false; }

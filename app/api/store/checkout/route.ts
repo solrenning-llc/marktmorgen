@@ -6,7 +6,8 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, type ReturningCheck, checkReturningCode } from "@/lib/returning-code";
+import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, redeemReturningLink, requestReturningLink } from "@/lib/returning-code";
+import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
@@ -103,6 +104,8 @@ export async function POST(request: NextRequest) {
   // (lib/returning-code.ts): read only when a code was typed; never kept.
   let typedCode = "";
   let typedEmail = "";
+  // Or the link emailed to that address, which alone opens the checkout with the code.
+  let linkToken = "";
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
   try {
@@ -144,6 +147,7 @@ export async function POST(request: NextRequest) {
     remindVersion = remind ? read("remind_v", 40) : "";
     typedCode = read("rcode", 40).trim();
     typedEmail = typedCode ? read("remail", MAX_EMAIL_LENGTH + 1) : "";
+    linkToken = read("rtoken", 80).trim();
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -197,6 +201,24 @@ export async function POST(request: NextRequest) {
   if (noKeys === null) return away(`/@${store.handle}?status=error`);
   if (noKeys) return away(`/@${store.handle}?status=soldout`);
 
+  // A code only for people who already bought here (554 [DS1], unit 2;
+  // lib/returning-code.ts), handled before anything is written down or held.
+  // A typed code and email only ask for a link, answered "sent" the same for
+  // every address; asking is not buying, so it comes before the box to start
+  // access at once. The emailed link alone opens the checkout with the code,
+  // for that address, after that box like any purchase. Every other answer
+  // goes back to the field with its reason; nothing is charged, and the
+  // buyer can still buy without it.
+  let returning: { code: ReturningCode; email: string } | null = null;
+  const backToField = (status: string) => away(`/@${store.handle}/p/${product.id}?returning=${status}#returning`);
+  if (linkToken || typedCode) {
+    // Each try may read the creator's Stripe account or use a link: a few per connection.
+    if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
+    // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.
+    if (giftTo.trim() || people.trim() || wantsPreorder) return backToField("other");
+    if (!linkToken) return backToField(await requestReturningLink({ store, productId: product.id, productTitle: product.title, code: typedCode, email: typedEmail, origin: linkOrigin(request, store) }));
+  }
+
   // Asked before a gift or a group is written down, so a refused yes leaves
   // nothing behind; the charge itself checks again, with what was added.
   const consentBack = from
@@ -204,19 +226,10 @@ export async function POST(request: NextRequest) {
     : `/@${store.handle}/p/${product.id}?consent=needed${giftTo.trim() && !preorder ? "&gift=consent#gift" : people.trim() && !preorder ? "&group=consent#group" : preorder ? "#preorder" : "#buy"}`;
   if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(consentBack);
 
-  // A code only for people who already bought here (554 [DS1], unit 2):
-  // checked before anything is written down or held, so a refused code
-  // leaves nothing behind. The buyer goes back to the form with the reason;
-  // nothing is charged, and they can still buy without it.
-  let returning: Extract<ReturningCheck, { ok: true }> | null = null;
-  const refusedCode = (reason: string) => away(`/@${store.handle}/p/${product.id}?returning=${reason}#returning`);
-  if (typedCode) {
-    // Each try reads what an email bought from the creator's Stripe account:
-    // a few per connection, so nobody can try address after address.
-    if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return refusedCode("busy");
-    const checked = await checkReturningCode(store, typedCode, typedEmail);
-    if (!checked.ok) return refusedCode(checked.reason);
-    returning = checked;
+  if (linkToken) {
+    const redeemed = await redeemReturningLink(store, product.id, linkToken);
+    if (!redeemed.ok) return backToField(redeemed.reason);
+    returning = redeemed;
   }
 
   // A gift: written down before its checkout opens, and its checkout is one
@@ -366,7 +379,7 @@ export async function POST(request: NextRequest) {
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
     // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
-    if (error instanceof ReturningCodeRefused) return refusedCode("code");
+    if (error instanceof ReturningCodeRefused) return away(`/@${store.handle}/p/${product.id}?returning=${error.reason}#returning`);
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));

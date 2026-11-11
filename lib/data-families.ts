@@ -78,7 +78,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
-  "nl:orders:open:", "nl:orders:pending:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
+  "nl:orders:open:", "nl:orders:pending:", "nl:rcode:link:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
   "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
@@ -328,7 +328,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // to retain a closed store's payload without reviewed funding/cleanup.
   "nl:order-confirmation:closed:": C, "nl:order-confirmation:erased:": C, "nl:order-confirmation:due": C, "nl:order-confirmation:person:": C, "nl:order-confirmation:row:": C,
   "nl:order-confirmation:source:": C, "nl:order-confirmation:store:": C,
-  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:pending:": E,
+  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:rcode:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:pending:": E,
   // Legacy marks expire in45days. The inactive original-window checkpoint
   // may retain its receipt for767days; this is not its legacy price envelope.
   "nl:orders:seen:": X(767),

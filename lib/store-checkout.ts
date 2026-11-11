@@ -140,9 +140,12 @@ export function fromPriceCents(product: Listing): number {
 
 /** A code only for people who bought here before that Stripe would not take on this checkout (lib/returning-code.ts). */
 export class ReturningCodeRefused extends Error {
-  constructor() {
-    super("Stripe would not take this code's coupon");
+  /** "code": Stripe would not take its coupon (used up, ended, deleted); "other": the code cannot go on this checkout. */
+  readonly reason: "code" | "other";
+  constructor(reason: "code" | "other") {
+    super(reason === "code" ? "Stripe would not take this code's coupon" : "This code cannot go on this checkout");
     this.name = "ReturningCodeRefused";
+    this.reason = reason;
   }
 }
 
@@ -279,7 +282,9 @@ export async function createCheckout(
      * `email` bought: its coupon comes off, for that email only, with no box
      * beside it. Like a code from a link, it never stacks: a come-back or
      * welcome offer, a membership's introductory price, a fair price or a
-     * sale across the store already applied wins.
+     * sale across the store already applied wins, and then the checkout is
+     * refused (ReturningCodeRefused "other") rather than opened without the
+     * code the buyer asked for.
      */
     returning?: ReturningCode;
     /**
@@ -556,6 +561,10 @@ export async function createCheckout(
       body.set("allow_promotion_codes", "true");
     }
   }
+  // A code for returning buyers that did not go on (another discount already
+  // applies, or the buyer names the price): never opened without the code
+  // the buyer asked for, and never two discounts.
+  if (extras.returning && body.get("discounts[0][coupon]") !== extras.returning.coupon) throw new ReturningCodeRefused("other");
   if (extras.email) body.set("customer_email", extras.email);
 
   if (extras.gift) {
@@ -824,11 +833,14 @@ export async function createCheckout(
         named = false;
         continue;
       }
-      if (extras.returning && body.get("discounts[0][coupon]") === extras.returning.coupon && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
+      // Only a refusal that names this coupon is about it: Stripe's sentence for a
+      // coupon used up, ended or deleted carries its id; a refusal of the
+      // reminder's consent or of the tax documents does not, and is put right below.
+      if (extras.returning && body.get("discounts[0][coupon]") === extras.returning.coupon && error instanceof StripeError && error.status === 400 && error.stripeMessage.includes(extras.returning.coupon)) {
         // The code's coupon is used up, ended or gone on the creator's
         // account: the buyer typed it for a discount, so no checkout opens at
         // a price they did not ask for. They are told on the form.
-        throw new ReturningCodeRefused();
+        throw new ReturningCodeRefused("code");
       }
       if (body.has("discounts[0][promotion_code]") && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
         // The code from the link is real but not for this sale — a minimum,

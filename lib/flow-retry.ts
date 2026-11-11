@@ -6,12 +6,17 @@
  * at the turn of the store's allowance window, the company's daily room at
  * the next UTC day, a pause on the store's email at the pause's end.
  * A store switched off after notices about its content (lib/takedown.ts) has
- * no known end: its looks are spread evenly over what is left of the
- * MAX_WAIT_DAYS_PER_STEP days the step may wait, given the waits the run has
- * left, so a run still waits after weeks and its last look is on the last of
- * those days (a look a day would end it in about four). Same number of tries,
- * same commands per try; once the store is back on, the step goes on at its
- * next look.
+ * no known end, and nothing pulls a waiting step forward when the store is
+ * switched back on: the step goes on at its next look. So, with a look to
+ * spare, the first comes a day after the step began to wait
+ * (SWITCHED_OFF_FIRST_LOOK_SECONDS), and a store switched back on within the
+ * day (a notice cleared the same day) holds it a day at most, not a third of
+ * 35 days (Claude 1's MEDIUM on #3416). The looks left share what is left of
+ * the MAX_WAIT_DAYS_PER_STEP days the step may wait, given the waits the run
+ * has left, so a run still waits after weeks and its last look is on the last
+ * of those days (a look a day would end it in about four). A run with one
+ * look left has it on that last day: one look cannot both come soon and keep
+ * the step waiting 35 days. Same number of tries, same commands per try.
  * Anything else (the sender's ceiling, a portion of a new list, a read that
  * did not answer, the deals board) is tried again after a delay that grows
  * threefold each time: 10 minutes, 30, 90, 4.5 hours, 13.5, then a day.
@@ -30,6 +35,8 @@ import { MAX_WAIT_DAYS_PER_STEP, MAX_WAITS_PER_RUN } from "@/lib/flow-limits";
 export type WaitReason = "allowance" | "day" | "paused" | "sender" | "portion" | "retry" | "board" | "email_off" | "switched_off";
 
 export const FIRST_DELAY_SECONDS = 600;
+/** A switched-off step's first look, from when it began to wait, when the run has a look to spare after it. */
+export const SWITCHED_OFF_FIRST_LOOK_SECONDS = 86_400;
 export const LONGEST_DELAY_SECONDS = 86_400;
 /** A known end is tried a minute after it, so the new window is surely open. */
 const AFTER_END_SECONDS = 60;
@@ -50,10 +57,12 @@ export function nextTry(reason: WaitReason, n: number, nowSeconds: number, known
   if (reason === "allowance" && known.windowEnd && known.windowEnd > nowSeconds) return Math.max(soonest, known.windowEnd + AFTER_END_SECONDS);
   if (reason === "paused" && known.pauseUntil && known.pauseUntil > nowSeconds) return Math.max(soonest, known.pauseUntil + AFTER_END_SECONDS);
   if (reason === "switched_off") {
-    // What is left of the step's days, shared by the looks the run has left (this one's included): the last is on
-    // the step's last day. A start in the future, or none, counts from now.
+    // A start in the future, or none, counts from now. With a look to spare, the first comes a day after the step
+    // began to wait, so a short switch-off holds it a day at most; after that (or with one look left), what is left of
+    // the step's days is shared by the looks the run has left (this one's included): the last is on its last day.
     const since = known.since && known.since > 0 && known.since <= nowSeconds ? known.since : nowSeconds;
     const looksLeft = Math.max(1, MAX_WAITS_PER_RUN - Math.max(1, Math.floor(n)) + 1);
+    if (looksLeft > 1 && since + SWITCHED_OFF_FIRST_LOOK_SECONDS > nowSeconds) return Math.max(soonest, since + SWITCHED_OFF_FIRST_LOOK_SECONDS);
     return Math.max(soonest, nowSeconds + Math.floor((since + MAX_WAIT_DAYS_PER_STEP * 86_400 - nowSeconds) / looksLeft));
   }
   if (reason === "day") return Math.max(soonest, (Math.floor(nowSeconds / 86_400) + 1) * 86_400 + 5 * AFTER_END_SECONDS);

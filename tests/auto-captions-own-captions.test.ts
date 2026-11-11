@@ -11,7 +11,13 @@
  *     request is settled, is added as before;
  *   - a change by hand in flight holds its language, so no request for it
  *     starts meanwhile, and a language the AI delivered stays delivered;
- *   - a read that does not say what holds the video refuses (rule 24).
+ *   - a change by hand whose answer was lost, but which the service took, is
+ *     never charged as the AI's once its hold runs out: an order reads the
+ *     service's own list of the video's captions and refuses a language it
+ *     lists (Claude 2's MEDIUM on #3427);
+ *   - a read that does not say what holds the video refuses (rule 24), and a
+ *     second change by hand in a language being changed is told so, not that
+ *     the videos are down (Claude 2's LOW on #3427).
  *
  * The fake video service lists every caption it holds, whoever sent it, as
  * the real one does; the fake Stripe keeps its invoices and replays an
@@ -304,6 +310,45 @@ async function main(): Promise<void> {
   is("the hold run out: asked", [holds().length, await ask(T + 121_000)], [0, "asked"]);
   is("a change by hand with a known answer lets go of its hold", [await added("fr"), holds().length], ["added", 0]);
 
+  part("A change by hand the service took, but whose answer was lost: never charged as the AI's (Claude 2's MEDIUM on #3427)");
+  reset();
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (/\/captions\/es$/.test(url.pathname) && (init?.method ?? "GET") === "POST") {
+      // The service takes the Spanish file, and its answer is lost.
+      byHand.push("add es");
+      if (!delivered.includes("es")) delivered.push("es");
+      return new Response("", { status: 503 });
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+  is("told the videos cannot be taken in just now; the service holds Spanish, and so does the hold", [await added("es"), delivered, holds()], ["unavailable", ["es"], ["es"]]);
+  globalThis.fetch = realFetch;
+  advance(121_000);
+  is("the hold run out: an order for English and Spanish is refused as a language the video has, nothing charged, the video free", [holds().length, await ask(T + 121_000), invoices.length, record()], [0, "language", 0, null]);
+  is("the studio now lists the Spanish the player offers", redis.run(["HGET", `nl:stream:cap:${VIDEO}`, "es"]) !== null, true);
+  await sweepAt(T, [1, 24, 49, 50]);
+  is("nothing kept on the card, nothing to give back", [keptOnCard(), refunds.length], [0, 0]);
+  clock = Math.floor((T + 51 * HOUR) / 1000);
+  const english = await requestAutoCaptions(store, PATH, "en", [], T + 51 * HOUR);
+  is("an order for English alone is asked, charged once, for one language", [english.ok, invoices.length, invoices[0]?.amount_due], [true, 1, PRICE / 2]);
+
+  part("An order that cannot read the service's list of the video's captions exactly charges nothing (rule 24)");
+  for (const [name, answer] of [
+    ["no answer", () => new Response("", { status: 503 })],
+    ["a list in no known shape", () => new Response(JSON.stringify({ guid: VIDEO, captions: [{ label: "Spanish" }] }), { status: 200 })],
+    ["no list", () => new Response(JSON.stringify({ guid: VIDEO }), { status: 200 })],
+  ] as const) {
+    reset();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      return url.hostname === "video.bunnycdn.com" && (init?.method ?? "GET") === "GET" && url.pathname.endsWith(`/videos/${VIDEO}`) ? answer() : realFetch(input, init);
+    }) as typeof fetch;
+    const refused = await ask(T);
+    globalThis.fetch = realFetch;
+    is(`${name}: refused, nothing charged, the video free`, [refused, invoices.length, record()], ["unavailable", 0, null]);
+  }
+
   part("A read that does not say what holds the video refuses, and sends nothing");
   reset();
   redis.run(["SET", KEY, "charging"]);
@@ -314,7 +359,12 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline;
   is("a reply in another shape", [unread, byHand, holds().length], ["unavailable", [], 0]);
   redis.run(["SET", `nl:stream:auto:${VIDEO}:own:es`, "another", "EX", 120]);
-  is("Spanish already held by another change by hand", [await added("es"), byHand], ["unavailable", []]);
+  is("Spanish already held by another change by hand: told it is being changed, not that the videos are down", [await added("es"), await removed("es"), byHand], ["changing", "changing", []]);
+  redis.run(["DEL", `nl:stream:auto:${VIDEO}:own:es`]);
+  redis.pipeline = ((commands: (string | number)[][]) => (String(commands[0]?.[1]) === `nl:stream:auto:${VIDEO}:own:es` ? Promise.resolve([{ unexpected: true }]) : pipeline(commands))) as typeof redis.pipeline;
+  const unclaimed = await added("es");
+  redis.pipeline = pipeline;
+  is("a hold whose claim cannot be read: unavailable, nothing sent", [unclaimed, byHand], ["unavailable", []]);
 
   part("A look whose answer from the service is unknown changes nothing of what was delivered");
   reset();

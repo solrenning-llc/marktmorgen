@@ -944,7 +944,7 @@ export class MemoryRedis {
           return 1;
         }
         // lib/purchase-moves.ts MOVE_RETRY_CREATE: select one tuple identity and write its request and two grants atomically.
-        if (key.startsWith("-- marktmorgen:purchase-move-retry-create:v1\\n") && args[0] === "4" && args.length === 10) {
+        if (key.startsWith("-- marktmorgen:purchase-move-retry-create:v1\n") && args[0] === "4" && args.length === 10) {
           const [, retry, request, from, to, indexValue, requestValue, fromValue, toValue, ttl] = args;
           const current = this.run(["GET", retry]);
           if (typeof current === "string") return [0, current];

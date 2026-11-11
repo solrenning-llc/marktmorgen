@@ -10,6 +10,8 @@ import { type Currency, fieldPrefix, formatMoney, priceExample, readMoney } from
 import { MAX_BUNDLE_ITEMS, MIN_BUNDLE_ITEMS, MIN_PICK } from "@/lib/bundle-rules";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { SaidLine, useSaid } from "@/components/said-line";
+import { endWords, movedWords } from "@/lib/move-words";
 
 /** A product as the picker shows it. */
 export type PickerProduct = {
@@ -69,6 +71,8 @@ export function BundleEditor({
   const router = useRouter();
   const studioHref = useStudioHref();
   const [items, setItems] = useState<PickerProduct[]>(initial);
+  // Each move said for screen readers; an end button says it is already there (WCAG 4.1.3, 2.4.3; lib/move-words.ts).
+  const [said, say] = useSaid();
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [price, setPrice] = useState("");
@@ -132,13 +136,18 @@ export function BundleEditor({
   const dirty = mode !== "edit" || items.map((p) => p.id).join(",") !== initialIds || sentPick !== (owner?.pick ?? null);
 
   function move(index: number, by: -1 | 1) {
+    const to = index + by;
+    const name = items[index]?.title ?? "This product";
+    if (to < 0 || to >= items.length) {
+      say(endWords(name, by < 0 ? "first" : "last"));
+      return;
+    }
     setItems((current) => {
       const next = [...current];
-      const to = index + by;
-      if (to < 0 || to >= next.length) return current;
       [next[index], next[to]] = [next[to], next[index]];
       return next;
     });
+    say(movedWords(name, to, items.length));
   }
 
   async function post(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; id?: string }> {
@@ -292,18 +301,18 @@ export function BundleEditor({
                   <button
                     type="button"
                     onClick={() => move(i, -1)}
-                    disabled={i === 0}
+                    aria-disabled={i === 0 || undefined}
                     aria-label={`Move ${p.title} up`}
-                    className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30"
+                    className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30 aria-disabled:opacity-30"
                   >
                     <Icon name="chevron-down" size={16} className="rotate-180" />
                   </button>
                   <button
                     type="button"
                     onClick={() => move(i, 1)}
-                    disabled={i === items.length - 1}
+                    aria-disabled={i === items.length - 1 || undefined}
                     aria-label={`Move ${p.title} down`}
-                    className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30"
+                    className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-30 aria-disabled:opacity-30"
                   >
                     <Icon name="chevron-down" size={16} />
                   </button>
@@ -320,6 +329,7 @@ export function BundleEditor({
             ))}
           </ol>
         )}
+        <SaidLine said={said} />
       </div>
 
       <div className="mt-5 rounded-2xl bg-white p-4 ring-1 ring-line">

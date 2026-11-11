@@ -1114,6 +1114,24 @@ export async function storeForEmailSeen(
   return store;
 }
 
+/**
+ * The store kept under one ref, read exactly (rule 24), for a caller that takes the store out of a line when it is
+ * gone: null only when Redis answers nil for its key. A reply of another shape, a record that does not parse or a
+ * record under that key for another owner throws UnknownReplyError, and a request that fails throws as it did; none
+ * of them is "no store" (releaseRestarted, lib/closing-holds.ts; Codex G on #3672).
+ */
+export async function storeForRefExact(ref: string): Promise<Store | null> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("a store's record (no Redis)");
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record (GET)");
+  if (reply[0] === null) return null;
+  const store = typeof reply[0] === "string" ? parseStore(reply[0]) : null;
+  if (!store || typeof store.email !== "string" || storeRef(store).toLowerCase() !== ref.toLowerCase()) {
+    throw new UnknownReplyError("a store's record (unreadable, or another owner's)");
+  }
+  return store;
+}
+
 /** One bounded read for the funded restart's final source check.
  * It cannot migrate, save, infer absence from an oversized/partial answer,
  * or turn a current-source observation into permission for another POST. */

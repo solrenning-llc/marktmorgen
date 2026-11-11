@@ -1,4 +1,12 @@
-"""PV8(b): reuse only complete PR coverage of the identical checked-out tree."""
+"""PV8(b): a push to main reuses only complete coverage of the identical code.
+
+Two proofs, either one enough, both read again on every push and both refused on any doubt:
+- the merge queue (C1-0305-C4-28): main only fast-forwards to the merge queue's commit, so the
+  merge_group runs GitHub already made are on main's HEAD itself; every expected workflow's
+  latest run there passed with every expected job (prove_merge_group);
+- the pull request: complete PR coverage of a merge commit with HEAD's tree (prove_full_tree).
+Only on a push to main (schedule and workflow_dispatch always run everything), and never for
+CodeQL: it is in no reuse path, so its push run on main always analyzes the code for real."""
 import json
 import os
 import re
@@ -23,13 +31,14 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 WORKFLOWS = {
     "product-checks": {"verify", "form-opportunity-redis", "Mobile render (candidate)", "Cross-browser (firefox)", "Cross-browser (webkit)"},
     "dependency-security": {"audit"},
-    "codeql": {"CodeQL (javascript-typescript)", "CodeQL (actions)"},
     "accessibility-real-readers": {"Real reader entry (windows-latest)", "Real reader entry (macos-latest)"},
 }
 for key, label in [("buyer-actions", "Buyer action"), ("product-actions", "Product action"),
                    ("public-matrix", "Public"), ("signup-actions", "Signup action"),
                    ("studio-matrix", "Studio")]:
     WORKFLOWS["accessibility-" + key] = {label + " AAA (" + browser + ")" for browser in ("chromium", "firefox", "webkit")}
+# CodeQL is deliberately absent: no proof covers it and its own push run is never skipped.
+NEVER_REUSED = {"codeql"}
 # Every workflow ends with its final check (scripts/ci_all_checks.py), which must have passed too.
 for workflow in WORKFLOWS:
     WORKFLOWS[workflow] = WORKFLOWS[workflow] | {"All checks (" + workflow + ")"}
@@ -64,18 +73,59 @@ def prove_full_tree(candidate, tree, api):
         if (commit.get("sha") != tested or commit.get("tree", {}).get("sha") != tree
                 or len(parents) != 2 or parents[1].get("sha") != candidate):
             return False
-        run_id = run.get("id")
-        if type(run_id) is not int or run_id <= 0:
-            return False
-        jobs_reply = api("actions/runs/" + str(run_id) + "/jobs?filter=latest&per_page=100")
-        jobs = jobs_reply.get("jobs", [])
-        names = expected | {"Documentation scope (" + workflow + ")"}
-        if (jobs_reply.get("total_count") != len(jobs) or len(jobs) != len(names)
-                or {j.get("name") for j in jobs} != names
-                or any(j.get("status") != "completed" or j.get("conclusion") != "success"
-                       or not j.get("started_at") or not j.get("completed_at") for j in jobs)):
+        if not all_jobs_passed(run, workflow, expected, api):
             return False
     return True
+
+def all_jobs_passed(run, workflow, expected, api):
+    """Every expected job of the run's latest attempt, and nothing else, completed with success."""
+    run_id = run.get("id")
+    if type(run_id) is not int or run_id <= 0:
+        return False
+    jobs_reply = api("actions/runs/" + str(run_id) + "/jobs?filter=latest&per_page=100")
+    jobs = jobs_reply.get("jobs", [])
+    names = expected | {"Documentation scope (" + workflow + ")"}
+    return not (type(jobs_reply.get("total_count")) is not int or jobs_reply.get("total_count") != len(jobs)
+                or not isinstance(jobs, list) or len(jobs) != len(names)
+                or {j.get("name") for j in jobs} != names
+                or any(j.get("status") != "completed" or j.get("conclusion") != "success"
+                       or not j.get("started_at") or not j.get("completed_at") for j in jobs))
+
+def prove_merge_group(head, api):
+    """Every expected workflow's newest merge_group run on HEAD itself, in main's merge queue, passed."""
+    if not SHA.fullmatch(head):
+        return False
+    listing = api("actions/runs?head_sha=" + head + "&event=merge_group&per_page=100")
+    runs = listing.get("workflow_runs", [])
+    if type(listing.get("total_count")) is not int or not isinstance(runs, list) or listing.get("total_count") != len(runs) or len(runs) > 100:
+        return False
+    for workflow, expected in WORKFLOWS.items():
+        path = ".github/workflows/" + workflow + ".yml"
+        # The newest run of the file decides, whatever it is: an older success never hides it.
+        matches = [r for r in runs if r.get("path") == path]
+        if not matches or any(type(r.get("id")) is not int for r in matches):
+            return False
+        run = max(matches, key=lambda r: r["id"])
+        branch = run.get("head_branch")
+        if (run.get("event") != "merge_group" or run.get("head_sha") != head
+                or type(branch) is not str or not branch.startswith("gh-readonly-queue/main/")
+                or run.get("status") != "completed" or run.get("conclusion") != "success"
+                or run.get("repository", {}).get("id") != REPO_ID
+                or run.get("head_repository", {}).get("id") != REPO_ID
+                or run.get("display_title") != "PV8 source " + head):
+            return False
+        if not all_jobs_passed(run, workflow, expected, api):
+            return False
+    return True
+
+WORKFLOW_REF = re.compile(r"(.+)/\.github/workflows/([a-z0-9-]+)\.yml@refs/heads/main\Z")
+
+def reusable_workflow(env=os.environ):
+    """The running workflow, only when it is one of this repository's reusable ones (never CodeQL)."""
+    match = WORKFLOW_REF.fullmatch(env.get("GITHUB_WORKFLOW_REF", ""))
+    if not match or match.group(1) != REPO or match.group(2) not in WORKFLOWS:
+        return None
+    return match.group(2)
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, message, headers, url):
@@ -96,11 +146,13 @@ def github_api(path):
 
 def can_reuse_main():
     if (os.environ.get("CI_EVENT") != "push" or os.environ.get("CI_REF") != "refs/heads/main"
-            or os.environ.get("CI_REPOSITORY") != REPO):
+            or os.environ.get("CI_REPOSITORY") != REPO or reusable_workflow() is None):
         return False
     try:
         def git(*args):
             return subprocess.check_output(["git", *args], timeout=15).decode().strip()
+        if prove_merge_group(git("rev-parse", "HEAD"), github_api):
+            return True
         parents = git("rev-list", "--parents", "-n", "1", "HEAD").split()
         if len(parents) != 3:
             return False

@@ -43,7 +43,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { REFUND_CHECK_UNITS } from "@/lib/payment-requests";
-import { REFUND_CHECK_READ } from "./plan-cost-registry";
+import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD, REFUND_CHECK_READ } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
@@ -328,6 +328,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(REFUND_CHECK_UNITS * UNIT_COST.studio < REFUND_CHECK_READ, `${REFUND_CHECK_UNITS} x ${UNIT_COST.studio} >= ${REFUND_CHECK_READ}: lower REFUND_CHECK_UNITS`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
+  // A store's own plan invoices are one billing request of the day, priced as a heavy request (studio line) and two Stripe GETs
+  // (platform-subscription-search): more than one Stripe list waited on to its ceiling, with room (601 [KB22] U5).
+  const billingRequest = request("heavy", 40, 200_000) + PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD;
+  assert.ok(billingRequest >= 1.05 * PLAN_INVOICES_READ, `${billingRequest} < 1.05 x ${PLAN_INVOICES_READ}`);
+  console.log(`a store's plan invoices: $${PLAN_INVOICES_READ.toFixed(6)} at most, inside one billing request priced at $${billingRequest.toFixed(6)}`);
   // Making a store's count of its tasks again reads every task once, after tasksRecountUnits(people) studio requests are taken:
   // more than four commands and what that many people can keep cost, at a whole studio request's shape (lib/crm.ts).
   for (const people of [1, 3, 49, 50, 51, MAX_STORE_TASKS]) {

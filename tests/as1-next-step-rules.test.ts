@@ -69,7 +69,7 @@ test("the line is refused, never cut or rewritten, when it presses, promises a d
     if (lineProblem(`Join n${ch}ow`) !== "hidden") passed.push(point.toString(16));
   }
   assert.deepEqual(passed.slice(0, 12), [], "no default-ignorable code point carries a word past the checks");
-  for (const point of [0x2065, 0x115f, 0x1160, 0x3164, 0xffa0, 0xfff0, 0xe0000, 0xe01f0, 0x0378, 0x10fffd]) {
+  for (const point of [0x2065, 0x115f, 0x1160, 0x3164, 0xffa0, 0xfff0, 0xe0000, 0xe01f0, 0x0378, 0x10ffff]) {
     assert.equal(lineProblem(`Get a dis${String.fromCodePoint(point)}count`), "hidden", `U+${point.toString(16)} is refused`);
   }
   assert.notEqual(lineProblem("A calm line ❤️"), "hidden", "an emoji's variation selector is a mark, not hidden");

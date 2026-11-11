@@ -208,6 +208,9 @@ export function p90(values) {
   return sorted[Math.ceil(0.9 * sorted.length) - 1];
 }
 
+/** A CodeQL language as codeql.yml's matrix names one: lowercase letters, digits and hyphens. */
+const LANGUAGE_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
 /**
  * The CodeQL languages whose analyze jobs' p90, in minutes, is above CODEQL_SHARE of the timeout. Each
  * job is "CodeQL (<language>)"; skipped ones are left out, canceled ones kept. Times that do not read throw.
@@ -219,7 +222,9 @@ export function codeqlSlow(jobs, timeout) {
   for (const job of jobs) {
     const j = /** @type {Record<string, unknown>} */ (job);
     const language = typeof j?.name === "string" ? /^CodeQL \((.+)\)$/.exec(j.name)?.[1] : undefined;
-    if (!language || j.conclusion === "skipped" || j.started_at === null || j.completed_at === null) continue;
+    // A pull request's run of codeql.yml names its own matrix: only a plain CodeQL language name (actions,
+    // javascript-typescript, c-cpp, ...) is ever written into the issue, never a link, a mention or markup.
+    if (!language || !LANGUAGE_NAME.test(language) || j.conclusion === "skipped" || j.started_at === null || j.completed_at === null) continue;
     const minutes = Math.round((time(j.completed_at, "job end") - time(j.started_at, "job start")) / MINUTE);
     byLanguage.set(language, [...(byLanguage.get(language) ?? []), minutes]);
   }

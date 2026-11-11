@@ -63,6 +63,20 @@ async function main(): Promise<void> {
   is("the day's visitors still expire", kept(await ttl(VISITORS)), true);
   is("an unknown answer never says when the all-time record started", (await real([["HGET", LIFE, "started"]]))[0], null);
 
+  part("A day's first view whose count came back in a shape that cannot be read: each expiry sent once");
+  redis.clear();
+  garbleFirstEval("shape");
+  const sent: string[] = [];
+  const garbled = redis.pipeline;
+  redis.pipeline = (async (commands: Parameters<Pipe>[0]) => {
+    for (const c of commands) if (c[0] === "EXPIRE") sent.push(String(c[1]));
+    return garbled(commands);
+  }) as Pipe;
+  await recordHit(store, view, NOW);
+  redis.pipeline = real;
+  is("no key's expiry is sent twice", sent.length, new Set(sent).size);
+  is("(the visitors' expiry is among them)", sent.includes(VISITORS), true);
+
   part("A day's first view whose answer was lost after the write");
   redis.clear();
   garbleFirstEval("lost");

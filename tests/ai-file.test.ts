@@ -43,8 +43,7 @@ import {
   type FileDraft,
   type FileOutline,
 } from "@/lib/ai-file-rules";
-import * as file from "@/lib/ai-file";
-import { type FileSaveIo, fileTargetProblem, grantFileSave, outlineRequest, saveAiFile, sectionRequests, takeFileSave, writeFileOutline, writeFileSections } from "@/lib/ai-file";
+import { type FileSaveIo, fileTargetProblem, grantFileSave, outlineRequest, saveAiFile, saveGivenBack, sectionRequests, takeFileSave, writeFileOutline, writeFileSections } from "@/lib/ai-file";
 import { ownsVaultPath } from "@/lib/vault-rules";
 import type { Listing } from "@/lib/catalog";
 import type { ProductFile } from "@/lib/product-file";
@@ -262,7 +261,7 @@ async function main(): Promise<void> {
   const full = fake({ reserveRoom: async () => null });
   is("storage full: nothing written or attached", [await saveAiFile(store, "prod000001", draft, full.io), full.log.written.length, full.log.attached.length], [{ ok: false, error: "storage_full" }, 0, 0]);
   const noUploads = fake({ reserveUpload: async () => false });
-  is("no upload left: no room reserved, nothing written", [await saveAiFile(store, "prod000001", draft, noUploads.io), noUploads.log.room.length, noUploads.log.written.length], [{ ok: false, error: "upload_budget_unavailable" }, 0, 0]);
+  is("no upload left: its room given back, nothing written", [await saveAiFile(store, "prod000001", draft, noUploads.io), noUploads.log.room.length, noUploads.log.released.length, noUploads.log.written.length], [{ ok: false, error: "upload_budget_unavailable" }, 1, 1, 0]);
   const unwritten = fake({ write: async () => false });
   is("a write that fails: nothing attached, room released", [await saveAiFile(store, "prod000001", draft, unwritten.io).then((r) => r.ok), unwritten.log.attached.length, unwritten.log.released.length], [false, 0, 1]);
   const mismeasured = fake({ measure: async () => ({ size: 1, contentType: "application/pdf" }) });
@@ -309,11 +308,8 @@ async function main(): Promise<void> {
     };
     return { io, log: base.log, seen, drawn: () => drawings.count - at };
   };
-  // At this head the route gives the run's save back after every refusal but "changed" (app/api/store/ai-file/route.ts).
-  const givenBack = (error: string): boolean => {
-    const rule = (file as Record<string, unknown>).saveGivenBack;
-    return typeof rule === "function" ? (rule as (e: string) => boolean)(error) : error !== "changed";
-  };
+  // The rule app/api/store/ai-file/route.ts gives the run's save back by.
+  const givenBack = saveGivenBack;
 
   const kept = watched();
   is("kept", (await saveAiFile(store, "prod000001", draft, kept.io)).ok, true);

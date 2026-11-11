@@ -5,7 +5,7 @@ import { AI_PER_MINUTE, MAX_AI_NOTES } from "@/lib/ai-rules";
 import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepLine } from "@/lib/ai-steps";
 import { AI_FILE_SAVE_BYTES, readFileDraft, readOutlineInput } from "@/lib/ai-file-rules";
 import { reviewDone } from "@/lib/ai-draft-review";
-import { fileTargetProblem, grantFileSave, saveAiFile, sectionRequests, takeFileSave, writeFileOutline, writeFileSections, type FileSaveIo } from "@/lib/ai-file";
+import { fileTargetProblem, grantFileSave, saveAiFile, saveGivenBack, sectionRequests, takeFileSave, writeFileOutline, writeFileSections, type FileSaveIo } from "@/lib/ai-file";
 import { readListing } from "@/lib/catalog";
 import { costPauseCode, standingOf } from "@/lib/plan-standing";
 import { isVaultConfigured, writeVault } from "@/lib/vault";
@@ -81,13 +81,15 @@ export async function POST(request: NextRequest) {
         let last: AiStepLine = { done: true, ok: false, error: "failed" };
         try {
           const done = await writeFileSections(store, input, { run, onStep: (step, state) => send({ step, state }) });
-          // What this run wrote may be made into a PDF once; a mark that could not be kept says so instead of a draft that cannot be saved.
+          // What this run wrote may be made into a PDF once; a mark that could not be confirmed is said (saveable: false) with the parts, before the creator checks them.
           const wrote = done.ok || ("value" in done && done.value !== undefined);
-          if (wrote && !(await grantFileSave(store, run))) console.error("a file's save could not be allowed");
+          const unsaveable = wrote && !(await grantFileSave(store, run).catch(() => false));
+          if (unsaveable) console.error("a file's save could not be allowed");
+          const said = unsaveable ? { saveable: false as const } : {};
           last = done.ok
-            ? { done: true, ok: true, value: done.value, left: done.left }
+            ? { done: true, ok: true, value: done.value, left: done.left, ...said }
             : "returned" in done
-              ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left, ...(done.value !== undefined ? { value: done.value } : {}) }
+              ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left, ...(done.value !== undefined ? { value: done.value, ...said } : {}) }
               : { done: true, ok: false, error: done.reason };
         } catch (error) {
           console.error("a file written step by step failed", error);
@@ -139,8 +141,8 @@ export async function POST(request: NextRequest) {
   };
   const saved = await saveAiFile(store, product.id, draft, io);
   if (!saved.ok) {
-    // Nothing was kept: the run's one save is given back, so the creator can try again with the same text.
-    if (saved.error !== "changed") await grantFileSave(store, run).catch(() => false);
+    // Nothing was kept. The run's one save comes back only when this save drew nothing (a refusal before the PDF), so one run draws one PDF at the most.
+    if (saveGivenBack(saved.error)) await grantFileSave(store, run).catch(() => false);
     return fail(saved.error, saved.error === "failed" ? 502 : saved.error === "upload_budget_unavailable" ? 503 : 409);
   }
   return Response.json({ ok: true, file: { name: saved.file.name, bytes: saved.file.bytes }, pages: saved.pages });

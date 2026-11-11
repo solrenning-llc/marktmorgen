@@ -136,6 +136,17 @@ function main(): void {
   is("a stop's value of nothing is not a line", readStepLine('{"done":true,"ok":false,"error":"stopped","returned":2,"left":30,"value":null}'), null);
   is("a value with nothing given back is not a line", readStepLine('{"done":true,"ok":false,"error":"stopped","returned":0,"left":30,"value":{}}'), null);
 
+  part("A run whose save could not be confirmed says so beside what it wrote");
+  is("a file, not to be made into a PDF", readStepLine('{"done":true,"ok":true,"value":{"title":"T"},"left":3,"saveable":false}'), { done: true, ok: true, value: { title: "T" }, left: 3, saveable: false });
+  is(
+    "the parts a stop brought back, the same",
+    readStepLine('{"done":true,"ok":false,"error":"stopped","returned":2,"left":30,"value":{"title":"T"},"saveable":false}'),
+    { done: true, ok: false, error: "stopped", returned: 2, left: 30, value: { title: "T" }, saveable: false },
+  );
+  is("only false", readStepLine('{"done":true,"ok":true,"value":{"title":"T"},"left":3,"saveable":true}'), null);
+  is("never without what was written", readStepLine('{"done":true,"ok":false,"error":"failed","saveable":false}'), null);
+  is("never on a step", readStepLine('{"step":"section-1","state":"done","saveable":false}'), null);
+
   done();
 }
 

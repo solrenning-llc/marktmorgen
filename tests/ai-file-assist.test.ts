@@ -58,6 +58,8 @@ function main(): void {
   is("nothing animates", /\banimate-/.test(source), false);
   is("every button is at least 44 by 44 pixels", (source.match(/<button[\s\S]*?className="([^"]*)"/g) ?? []).every((b) => /min-h-11/.test(b)), true);
   is("it posts only to its own route and the writing help's stop", (source.match(/fetch\("([^"]+)"/g) ?? []).sort(), ['fetch("/api/store/ai"', 'fetch("/api/store/ai-file"'].sort());
+  is("a run whose save could not be confirmed is said before the parts are checked", /line\.saveable === false \? " We could not confirm that this text can be made into a file\./.test(source), true);
+  is("a save that failed after drawing says to write the parts again, not to try again", source.includes('data?.error === "failed" ? SAVE_FAILED') && /SAVE_FAILED = "[^"]*Write the parts again to make one\."/.test(source), true);
   is("it says what the PDF holds and that nothing is published", source.includes("The PDF has headings and paragraphs only: no lists, pictures or links. Nothing is published."), true);
 
   done();

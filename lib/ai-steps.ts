@@ -60,10 +60,11 @@ export const AI_STEP_EXTRA_BYTES = 1_536;
 export type AiStepLine =
   | { step: AiStepId; state: AiStepState }
   // `returned`: the jobs of a step that never reached the model, given back while the draft still came (null when not confirmed).
-  | { done: true; ok: true; value: unknown; left: number; returned?: number | null }
+  // `saveable: false`: what was written came back, but the one save it allows could not be confirmed (a file's run, 758 [STN5] unit 3).
+  | { done: true; ok: true; value: unknown; left: number; returned?: number | null; saveable?: false }
   // A step that never reached the model, given back: "stopped" when the creator asked, "empty" when the PDF gave nothing to write from, "failed" otherwise;
   // with `value`, what the steps that ran wrote (a file's parts already written, 758 [STN5] unit 3).
-  | { done: true; ok: false; error: AiGivenBack; returned: number | null; left: number | null; value?: unknown }
+  | { done: true; ok: false; error: AiGivenBack; returned: number | null; left: number | null; value?: unknown; saveable?: false }
   | { done: true; ok: false; error: string };
 
 /** Why a job told in steps ended with a step's jobs given back. */
@@ -85,7 +86,15 @@ export function readStepLine(text: string): AiStepLine | "pad" | null {
     return null;
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const line = raw as Record<string, unknown>;
+  const { saveable, ...line } = raw as Record<string, unknown>;
+  // Only `false`, and only beside what was written; the line is otherwise read as without it.
+  if ("saveable" in raw && (saveable !== false || line.done !== true || line.value === undefined || line.value === null)) return null;
+  const read = readStepFields(line);
+  if (!("saveable" in raw) || !read || read === "pad" || !("done" in read)) return read;
+  return read.ok || "returned" in read ? { ...read, saveable: false } : null;
+}
+
+function readStepFields(line: Record<string, unknown>): AiStepLine | "pad" | null {
   const keys = Object.keys(line).sort().join(",");
   if (keys === "pad") return typeof line.pad === "string" ? "pad" : null;
   if (keys === "state,step") {

@@ -11,8 +11,11 @@
  * bound of that very request from the store's automatic AI ceiling before it
  * is sent; the jobs come from the month's AI_MONTHLY before the first call.
  * Nothing here adds a credit or a limit. Making the PDF calls no model: it is
- * allowed once for each run of parts (a mark kept AI_FILE_KEEP_SECONDS), so
- * its cost is bounded by the writing jobs that came before it.
+ * allowed once for each run of parts (a mark kept AI_FILE_KEEP_SECONDS), and
+ * a save draws it only after its room and the month's upload are reserved;
+ * the mark comes back only after a save that drew nothing (saveGivenBack), so
+ * one run draws one PDF at the most and its cost is bounded by the writing
+ * jobs that came before it.
  *
  * Never published: the file is attached only to a product the store does not
  * show (a draft), and stays a draft until the creator publishes it themselves.
@@ -246,48 +249,61 @@ export type FileSaveIo = {
 
 export type FileSaveResult = { ok: true; file: ProductFile; pages: number } | { ok: false; error: "letters" | "too_big" | "upload_budget_unavailable" | "storage_full" | "failed" | "changed" };
 
+/** The refusals that come before the PDF is drawn: only after one of these does the run get its one save back. */
+const UNDRAWN: ReadonlySet<string> = new Set(["letters", "storage_full", "upload_budget_unavailable"]);
+
+/** Whether a save that ended with this error gives the run its one save back: only when it drew nothing. */
+export function saveGivenBack(error: string): boolean {
+  return UNDRAWN.has(error);
+}
+
 /**
- * The checked file as a tagged PDF, kept as this draft product's file: drawn,
- * measured against MAX_AI_FILE_BYTES, counted as one of the plan's uploads,
- * its room reserved under the store's storage limit, written into the store's
- * own folder for this product, measured again by the store, then attached.
+ * The checked file as a tagged PDF, kept as this draft product's file. Before
+ * anything is drawn, its room is reserved under the store's storage limit and
+ * then one of the plan's uploads is counted, both at MAX_AI_FILE_BYTES, the
+ * most a file may be (its size is not known until it is drawn): a full
+ * storage takes no upload, and a refusal of either draws nothing. Then it is
+ * drawn, measured against MAX_AI_FILE_BYTES, written into the store's own
+ * folder for this product, measured again by the store, then attached.
  * Whatever fails on the way is undone; the product is never published here.
  */
 export async function saveAiFile(store: Store, productId: string, draft: FileDraft, io: FileSaveIo, at = new Date()): Promise<FileSaveResult> {
   if (!(await fileDrawable(draft, store.name))) return { ok: false, error: "letters" };
-  const made = await filePdf({ draft, storeName: store.name, lang: store.language || "en", at });
-  const size = made.bytes.byteLength;
-  if (size > MAX_AI_FILE_BYTES) return { ok: false, error: "too_big" };
   const folder = await io.folder();
-  if (!(await io.reserveUpload(size))) return { ok: false, error: "upload_budget_unavailable" };
-  const room = await io.reserveRoom(folder, size).catch(() => null);
+  const room = await io.reserveRoom(folder, MAX_AI_FILE_BYTES).catch(() => null);
   if (!room) return { ok: false, error: "storage_full" };
-  const name = `${draft.title.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100) || "Guide"}.pdf`;
-  const pathname = vaultPath(folder, productId, randomBytes(8).toString("hex"), name);
+  let pathname: string | null = null;
   try {
+    if (!(await io.reserveUpload(MAX_AI_FILE_BYTES))) return { ok: false, error: "upload_budget_unavailable" };
+    const made = await filePdf({ draft, storeName: store.name, lang: store.language || "en", at });
+    const size = made.bytes.byteLength;
+    if (size > MAX_AI_FILE_BYTES) return { ok: false, error: "too_big" };
+    const name = `${draft.title.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100) || "Guide"}.pdf`;
+    const path = vaultPath(folder, productId, randomBytes(8).toString("hex"), name);
     await io.rememberOwner(folder);
-    if (!(await io.write(pathname, made.bytes))) return { ok: false, error: "failed" };
-    const measured = await io.measure(pathname);
+    pathname = path;
+    if (!(await io.write(path, made.bytes))) return { ok: false, error: "failed" };
+    const measured = await io.measure(path);
     if (measured.size !== size || measured.contentType !== "application/pdf") {
-      await io.remove(pathname).catch(() => {});
+      await io.remove(path).catch(() => {});
       return { ok: false, error: "failed" };
     }
-    const file: ProductFile = { pathname, name, bytes: size, contentType: "application/pdf", addedAt: at.toISOString() };
+    const file: ProductFile = { pathname: path, name, bytes: size, contentType: "application/pdf", addedAt: at.toISOString() };
     const attached = await io.attach(file);
     if (!attached.ok) {
-      await io.remove(pathname).catch(() => {});
+      await io.remove(path).catch(() => {});
       return { ok: false, error: "failed" };
     }
     if (attached.removed) {
       // A file arrived on the product meanwhile: it is put back, and this one goes.
       await io.attach(attached.removed).catch(() => null);
-      await io.remove(pathname).catch(() => {});
+      await io.remove(path).catch(() => {});
       return { ok: false, error: "changed" };
     }
     return { ok: true, file, pages: made.pages };
   } catch (error) {
     console.error("saving a file written with AI failed", error);
-    await io.remove(pathname).catch(() => {});
+    if (pathname) await io.remove(pathname).catch(() => {});
     return { ok: false, error: "failed" };
   } finally {
     await io.releaseRoom(folder, room).catch((error) => console.error("a storage reservation was kept", error));

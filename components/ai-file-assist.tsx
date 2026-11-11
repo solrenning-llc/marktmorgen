@@ -53,13 +53,15 @@ const MESSAGES: Record<string, string> = {
   unchecked: "Check the three boxes under the draft first.",
   expired: "This text can no longer be made into a file. Write the parts again to make one.",
   letters: "Some letters in the text cannot be drawn in the PDF. Change them, then try again.",
-  too_big: "The file came out too big to keep. Make the text shorter, then try again.",
+  too_big: "The file came out too big to keep. Write the parts again with less text to make one.",
   storage_full: "Your storage is full. Delete a file you do not need, then try again.",
   upload_budget_unavailable: "Files cannot be added just now. Try again later.",
   changed: "A file was added to this product meanwhile. That file was kept.",
   unconfirmed: "We could not confirm what happened. Reload the page to check.",
 };
 const said = (error: string) => MESSAGES[error] ?? MESSAGES.unconfirmed;
+/** A save that failed after its PDF was drawn spends the run's one save (lib/ai-file.ts, saveGivenBack): said so, not "try again". */
+const SAVE_FAILED = "The file could not be kept just now. Nothing was added to the product. Write the parts again to make one.";
 
 /** After a run ends: a part that started and did not come back, and a part never started, said apart. */
 export function finalStates(ids: readonly AiStepId[], states: Partial<Record<AiStepId, StepView>>): Partial<Record<AiStepId, StepView>> {
@@ -215,7 +217,9 @@ export function AiFileAssist({ productId, onSaved }: { productId: string; onSave
       setChecks(freshChecks());
       setMissing(plan.sections.map((s) => s.title).filter((title) => !got.sections.some((s) => s.title === title)));
       const back = !line.ok && "returned" in line ? (line.returned === null ? " We could not confirm the writing jobs given back: reload to check." : ` ${line.returned} writing job${line.returned === 1 ? "" : "s"} given back.`) : "";
-      setNote(`${line.ok ? "Written." : line.error === "stopped" ? "Stopped. The parts already written are below." : "Some parts could not be written. The parts that were are below."}${back} Read each part, change what you want, then check the boxes.`);
+      // The run's one save could not be confirmed: said now, before the creator reads and checks the parts.
+      const unsure = "saveable" in line && line.saveable === false ? " We could not confirm that this text can be made into a file. Copy what you want to keep. If saving does not work, write the parts again." : "";
+      setNote(`${line.ok ? "Written." : line.error === "stopped" ? "Stopped. The parts already written are below." : "Some parts could not be written. The parts that were are below."}${back}${unsure} Read each part, change what you want, then check the boxes.`);
       setStage("review");
       return;
     }
@@ -306,7 +310,7 @@ export function AiFileAssist({ productId, onSaved }: { productId: string; onSave
         setNote(`Done. The PDF${typeof data.pages === "number" ? ` (${data.pages} pages)` : ""} is now this product's file. The product is still a draft.`);
         setStage("saved");
         onSaved();
-      } else setError(said(typeof data?.error === "string" ? data.error : "unconfirmed"));
+      } else setError(data?.error === "failed" ? SAVE_FAILED : said(typeof data?.error === "string" ? data.error : "unconfirmed"));
     } catch {
       setError(MESSAGES.unconfirmed);
     }

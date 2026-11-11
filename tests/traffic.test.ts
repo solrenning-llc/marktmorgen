@@ -20,6 +20,8 @@
  *   - a page sends the database no more commands than the cost of a visit
  *     is worked out with (tests/traffic-cost.ts).
  */
+import { holdState } from "@/lib/child-safety";
+import { heldAmongShown } from "@/lib/child-safety-holds";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -325,6 +327,9 @@ async function main(): Promise<void> {
     const store = (await storeForPage("joy"))!;
     await isResting(store);
     await readListings(store, [product.id]);
+    // Its own mark of a child-safety hold, and the marks of the other products the page shows (Revisor 2 on #3588).
+    await holdState(store, product.id);
+    await heldAmongShown(store, store.catalog.head.filter((p) => p.id !== product.id && !p.hidden).map((p) => p.id));
     await Promise.all([
       product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
       stockLeft(store, product).catch(() => null),

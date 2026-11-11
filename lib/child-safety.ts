@@ -38,8 +38,13 @@
  * team is refused) and the AI writing help (refused for everyone, so nothing
  * of it goes to an AI provider: a picture description is refused for its
  * picture and the pictures on its sales page whichever product or page the
- * request names, heldPictureRefusal). A mark that cannot be read refuses the
- * same way (holdState, contentOpenTo).
+ * request names, heldPictureRefusal), nor the MCP server's product tools
+ * (lib/mcp-tools.ts, heldForAgent), for the same reason. The studio's course
+ * and podcast pages are the owner's only. And should taking it off the store
+ * not go through after its mark was written, its public page, the store's
+ * front page and search, and the other products a product page shows leave
+ * it out (lib/child-safety-holds.ts, heldAmongShown). A mark that cannot be
+ * read refuses the same way (holdState, contentOpenTo).
  */
 import { createHash } from "node:crypto";
 import { emailForSession, normaliseEmail } from "@/lib/auth";

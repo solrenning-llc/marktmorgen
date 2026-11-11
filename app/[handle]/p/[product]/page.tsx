@@ -36,7 +36,8 @@ import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
 import { productIdFromAddress, readListing, readListings } from "@/lib/catalog";
-import { offerableTargets } from "@/lib/child-safety-holds";
+import { heldAmongShown, offerableTargets } from "@/lib/child-safety-holds";
+import { holdState } from "@/lib/child-safety";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
@@ -114,8 +115,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   if (!store) return null;
   // The id alone, or the title's words with the id at the end (lib/product-slug.ts).
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
-  // A draft has no page until the creator publishes it.
-  return product && !product.hidden ? { store, product, asked } : null;
+  // A draft has no page until the creator publishes it, nor has a product held for a child-safety report, even when
+  // taking it off the store did not go through after its mark was written; a mark that cannot be read is not a yes
+  // (lib/child-safety.ts; Revisor 2 on #3588). One GET, for the head and the page alike (cache).
+  if (!product || product.hidden) return null;
+  return (await holdState(store, product.id)) === "free" ? { store, product, asked } : null;
 });
 
 async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
@@ -505,25 +509,31 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // What the buyers of this one also bought, counted from the store's own sales (lib/also-bought.ts).
   const pairs = soldCounts?.together[product.id] ?? [];
   const pairedListings = pairs.length ? await readListings(store, pairs.map(([id]) => id)).catch(() => []) : [];
-  const alsoBought = pairs
-    .flatMap(([id, count]) => {
-      const other = pairedListings.find((p) => p.id === id);
-      return other && other.id !== product.id && !other.hidden && canSellProduct(store, other) ? [{ product: other, count }] : [];
-    })
-    .slice(0, ALSO_BOUGHT_COUNT);
   // What the creator picked to go with this one (lib/store-collections.ts): published, in their order.
   const pairIds = (product.pairs ?? []).filter((id) => id !== product.id);
   const pairListings = pairIds.length ? await readListings(store, pairIds).catch(() => []) : [];
+  // None of the other products this page shows (also bought, picked to go with it, more from the store, cards on its
+  // page) is one kept for a child-safety report whose taking off the store did not go through: their marks in one
+  // MGET; a mark that cannot be read leaves that product out (lib/child-safety-holds.ts; Revisor 2 on #3588).
+  const othersHeld = await heldAmongShown(store, [
+    ...new Set([...pairedListings, ...pairListings, ...store.catalog.head].filter((p) => p.id !== product.id && !p.hidden).map((p) => p.id)),
+  ]);
+  const alsoBought = pairs
+    .flatMap(([id, count]) => {
+      const other = pairedListings.find((p) => p.id === id);
+      return other && other.id !== product.id && !other.hidden && !othersHeld.has(other.id) && canSellProduct(store, other) ? [{ product: other, count }] : [];
+    })
+    .slice(0, ALSO_BOUGHT_COUNT);
   const paired = pairIds.flatMap((id) => {
     const other = pairListings.find((p) => p.id === id);
-    return other && !other.hidden ? [other] : [];
+    return other && !other.hidden && !othersHeld.has(other.id) ? [other] : [];
   });
   // Which of them can go in the cart now: one more read, only when there are any (lib/preorders.ts).
   const pairedSoon = cartOn && paired.length ? (await soonState(store).catch(() => ({ soon: new Set<string>() }))).soon : new Set<string>();
   // A limited one with none left is not offered for the cart (lib/stock.ts); only limited ones are counted.
   const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && p.stock !== null).map(async (p) => ((await stockLeft(store, p).catch(() => 0)) === 0 ? p.id : null)))).filter((id) => id !== null));
   const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id) && !pairedOut.has(p.id)).map((p) => p.id));
-  const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id)];
+  const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id), ...othersHeld];
   const more = (
     <>
       <GoesWellWith store={store} title={product.title} items={paired} cartIds={pairedCart} />
@@ -653,7 +663,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     }),
     // Other products the page shows as cards, from what the store record holds (lib/featured-cards.ts).
     featured: page.blocks.some((block) => block.kind === "product")
-      ? featuredCards(store, product.id, page.blocks.flatMap((block) => (block.kind === "product" && block.product ? [block.product] : [])))
+      ? featuredCards(store, product.id, page.blocks.flatMap((block) => (block.kind === "product" && block.product && !othersHeld.has(block.product) ? [block.product] : [])))
       : undefined,
   };
   const [first, ...others] = page.blocks;

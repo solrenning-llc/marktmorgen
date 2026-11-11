@@ -136,6 +136,41 @@ async function main(): Promise<void> {
     const grants = redis.keys().filter((k) => k.startsWith("nl:pod:t:")).map((k) => String(redis.run(["GET", k]) ?? ""));
     is("no grant holding the listener's address is left behind, out of every list", grants.filter((v) => v.includes(LATE)).length, 0);
   }
+  // Claude 4's focal on #3473 (21f76269, MEDIUM): a feed asked for again read its index before the removal and wrote its
+  // missing grant back after the removal had deleted the index, so a grant holding the address was left that no index,
+  // no list and no erasure leads to. A grant is kept only while the index still leads to its token.
+  part("A listener asks for their feed again, and the removal runs between the index read and the grant written back");
+  {
+    const raced = await addProduct(OWNER, "Dawn Radio", "", "19");
+    if (!raced.ok) throw new Error("no third podcast");
+    const rid = raced.product.id;
+    const rpod = newPodcastId();
+    if (!(await setProductPodcast(OWNER, rid, { id: rpod, episodes: 0 })).ok) throw new Error("not a podcast");
+    await savePodcast({ id: rpod, episodes: [] });
+    const EARLY = "early.listener@example.com";
+    const before = (await storeForEmail(OWNER))!;
+    is("the listener's feed is made", typeof (await feedToken(before, rid, EARLY)), "string");
+    const real = redis.pipeline.bind(redis);
+    let removed: { status: number } | null = null;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const reply = await real(commands);
+      if (!removed && commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith(`nl:pod:by:${before.statsId}:${rid}:`)) {
+        redis.pipeline = real;
+        removed = await remove(rid);
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+    let again: string | null = null;
+    try {
+      again = await feedToken(before, rid, EARLY);
+    } finally {
+      redis.pipeline = real;
+    }
+    is("control: the removal ran between the index read and the grant written back", (removed as { status: number } | null)?.status, 200);
+    is("no feed link is handed out for the removed product", again, null);
+    const grants = redis.keys().filter((k) => k.startsWith("nl:pod:t:")).map((k) => String(redis.run(["GET", k]) ?? ""));
+    is("no grant holding the listener's address is left behind with no index", grants.filter((v) => v.includes(EARLY)).length, 0);
+  }
   done();
 }
 

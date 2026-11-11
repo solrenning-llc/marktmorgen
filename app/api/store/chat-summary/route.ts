@@ -24,6 +24,8 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "server_error" }, { status: 500 });
     }
   }
+  // Only explicit text can request a save or removal; malformed input is not a stop.
+  if (typeof body.url !== "string") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   // Each save posts a first message, so saving is kept to a few an hour.
   // Stopping only deletes the address; the studio guard above already admits that work.
   const removing = typeof body.url === "string" && body.url.trim().length === 0;

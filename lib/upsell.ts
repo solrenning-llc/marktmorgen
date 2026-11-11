@@ -48,6 +48,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
+  type Funnel,
   type FunnelStep,
   type StepAnswer,
   activeFunnel,
@@ -267,6 +268,11 @@ export function offerRef(store: Pick<Store, "currency">, step: FunnelStep, targe
 const toAnswers = (records: Map<string, UpsellRecord>) =>
   new Map<string, StepAnswer>([...records].map(([slot, record]) => [slot, record.state]));
 
+/** Whether this offer is the one another offer's "No thanks" leads to, and that offer was turned down in this order. */
+function reachedAfterNo(funnel: Funnel, step: FunnelStep, records: Map<string, UpsellRecord>): boolean {
+  return funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");
+}
+
 /**
  * Answers the offer the buyer is at: "yes" charges it to the card they just
  * paid with, "no" moves on without charging anything.
@@ -415,6 +421,10 @@ export async function takeUpsell(input: {
   // lib/webhooks.ts) can say which step was taken.
   body.set("metadata[step_id]", step.id);
   body.set("metadata[step_number]", String(funnel.steps.findIndex((s) => s.id === step.id) + 1));
+  // Reached by a "No thanks" on another offer of this funnel: a downsell, so the
+  // studio can say what downsells earned (752 [CD3]). The same test the page
+  // drew the offer with; an offer reached any other way carries no mark.
+  if (reachedAfterNo(funnel, step, records)) body.set("metadata[after_no]", "yes");
   // The yes to start access at once, its version and its time, on the offer's own payment.
   if (digital && input.consent) body.set(`metadata[${CONSENT_META}]`, consentMetaValue(input.consent, consentKind(target)));
   if (email) body.set("receipt_email", email);
@@ -787,7 +797,7 @@ export async function funnelView(input: {
   const { step, target } = position;
   // Never a picture moved after a notice to a name no public page gives out (R44); a draft's, as the editor shows it.
   const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom && picturedFrom(p)) ?? null : null;
-  const afterNo = funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");
+  const afterNo = reachedAfterNo(funnel, step, records);
   return {
     offer: {
       step,

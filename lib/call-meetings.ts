@@ -31,6 +31,7 @@
 import { whereOf } from "@/lib/call-place";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
@@ -186,7 +187,13 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
 async function refundsOf(store: Store, callsId: string, deadline: number): Promise<number> {
   const account = store.stripeAccountId as string;
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const [anchorRaw] = await redisPipeline([["GET", anchorKey(callsId)]]);
+  // The walk's place, read exactly (rule 24): only GET's exact null is "no place yet"; another shape stops this store's
+  // walk with the place as it was, never a one-day window written over the real, older place.
+  const anchorRead = repliesFor(await redisPipeline([["GET", anchorKey(callsId)]]), 1);
+  const anchorRaw = anchorRead?.[0];
+  if (!anchorRead || (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw)))) {
+    throw new UnknownReplyError("the call refunds' place");
+  }
   // The first look goes back a day: meetings are only made from now on, and
   // a refund made before one existed has nothing to remove.
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : nowSeconds - 86_400;
@@ -241,7 +248,12 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       if (lookups <= 0) continue;
       lookups -= 1;
       const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
+      // A list in another shape is unknown (rule 24): the refund stays unread and the place held, never "no call".
+      if (!Array.isArray(sessions.data)) {
+        unsure = true;
+        continue;
+      }
+      const session = (sessions.data as Record<string, unknown>[])[0];
       const meta = ((session?.metadata ?? {}) as Record<string, string>) ?? {};
       if (session && typeof session.id === "string" && meta.kind === "call" && handles.has(meta.store ?? "")) {
         const moved = (await readMoves([session.id])).get(session.id);

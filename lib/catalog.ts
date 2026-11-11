@@ -1250,9 +1250,13 @@ export function movedMark(catalog: string, count: number): Command {
 /** How many products the index listed when this catalog was last written, or null when it was never moved. */
 export async function movedCount(catalog: string): Promise<number | null> {
   if (!CATALOG_ID_PATTERN.test(catalog) || !isRedisConfigured()) return null;
-  const [found] = await redisPipeline([["GET", movedKey(catalog)]]);
-  if (typeof found !== "string") return null;
-  return /^\d{1,6}$/.test(found) ? Number(found) : 0;
+  // Read exactly (rule 24): only GET's exact null is "never moved" and only digits are a count. Anything else throws, so
+  // moveToRecords writes nothing, never null or 0 that skipped its guard and wrote a lost index over the products.
+  const read = repliesFor(await redisPipeline([["GET", movedKey(catalog)]]), 1);
+  const found = read?.[0];
+  if (read && found === null) return null;
+  if (!read || typeof found !== "string" || !/^\d{1,6}$/.test(found)) throw new UnknownReplyError("how many products a moved catalog listed");
+  return Number(found);
 }
 
 /** Sends writes in pipelines of a few hundred. */

@@ -14,7 +14,7 @@
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { markRefunded, readReview, reviewId, saveReview } from "@/lib/reviews";
+import { dropReviews, markRefunded, readReview, reviewId, saveReview } from "@/lib/reviews";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 
@@ -36,8 +36,8 @@ async function withPayReply<T>(reply: unknown[], run: () => Promise<T>): Promise
   }
 }
 
-const review = (productId: string, email: string) =>
-  saveReview(statsId, { productId, email, reference: `cs_test_${productId}000001`, pi: PI, rating: 5, text: "Clear lessons.", name: "Ana", paidAt: 1_780_000_000 }, ROOM, 1_780_100_000_000);
+const review = (productId: string, email: string, pi = PI) =>
+  saveReview(statsId, { productId, email, reference: `cs_test_${productId}000001`, pi, rating: 5, text: "Clear lessons.", name: "Ana", paidAt: 1_780_000_000 }, ROOM, 1_780_100_000_000);
 
 redis.clear();
 const fixture = (async () => {
@@ -84,4 +84,51 @@ test("an exact empty read is still no review, and a full refund marks every revi
   for (const product of ["synthbread01", "synthcake001"]) {
     assert.equal((await readReview(statsId, product, reviewId(statsId, product, "ana@example.com")))?.refunded, true);
   }
+});
+
+// dropReviews (a product removed, app/api/store/product): its reviews' ids and photos are read once, exactly. A reply
+// cut short or of another shape throws before anything is deleted, so no review leaves the store's indexes behind
+// and no buyer's photo is left in the picture folder with nothing pointing at it any more.
+const PHOTO_PRODUCT = "synthphoto01";
+const PHOTO_PATH = `images/${"a".repeat(24)}/${"b".repeat(32)}.jpg`;
+const photoFixture = (async () => {
+  await fixture;
+  const saved = await review(PHOTO_PRODUCT, "photo@example.com", "pi_photoreview01");
+  assert.equal(saved.state, "created");
+  const key = `nl:rev:${statsId}:${PHOTO_PRODUCT}`;
+  const [fields] = await pipeline([["HGETALL", key]]);
+  const [id, raw] = fields as string[];
+  await pipeline([["HSET", key, id, JSON.stringify({ ...JSON.parse(raw), photo: { path: `${PHOTO_PATH}`, width: 10, height: 10 } })]]);
+  return key;
+})();
+
+for (const [label, alter] of [
+  ["no replies", () => []],
+  ["one reply short", (r: unknown[]) => r.slice(0, 1)],
+  ["the ids as a number", (r: unknown[]) => [7, r[1]]],
+  ["the reviews as null", (r: unknown[]) => [r[0], null]],
+  ["an id that is not text", (r: unknown[]) => [[1], r[1]]],
+] as [string, (r: unknown[]) => unknown[]][]) {
+  test(`dropReviews: ${label} throws before anything is deleted`, async () => {
+    const key = await photoFixture;
+    redis.pipeline = (async (batch: Batch) => {
+      const real = await pipeline(batch);
+      return batch.length === 2 && batch[0][0] === "HKEYS" && batch[1][0] === "HVALS" ? alter(real) : real;
+    }) as typeof redis.pipeline;
+    let result: { value?: unknown; error?: unknown };
+    try {
+      result = { value: await dropReviews(statsId, PHOTO_PRODUCT) };
+    } catch (error) {
+      result = { error };
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
+    assert.equal((await pipeline([["HLEN", key]]))[0], 1, "the review and its photo are kept for a retry");
+  });
+}
+
+test("dropReviews read exactly hands back the photo to delete", async () => {
+  await photoFixture;
+  assert.deepEqual(await dropReviews(statsId, PHOTO_PRODUCT), [`${PHOTO_PATH}`]);
 });

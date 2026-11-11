@@ -1281,10 +1281,12 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/calendar/[token]/route.ts", names: ["bookedCalendarFeed(owner"] },
       { file: "lib/read-ceilings.ts", names: ["CALENDAR_POLL_SHAPE", "CALENDAR_BUILD_SHAPE", "CALENDAR_FILE_BYTES", "CALENDAR_REFUSED_SHAPE", "CALENDAR_REFUSED_PRICED_PER_HOUR", "moveReads(calls) + roomReads(calls)", "listingReads(listings)"] },
       // Every call listing read LISTINGS_PER_MGET at one MGET (calendar-feed room, option B, 10 November 2026).
-      { file: "lib/catalog-rules.ts", names: ["LISTINGS_PER_MGET", "listingReads"] },
-      { file: "lib/catalog.ts", names: ['["MGET", ...lot]', "UnknownReplyError(\"a store's product records\")"] },
-      // Each booking's room read in shared MGETs, its moves too (calendar-feed room, 10 November 2026).
-      { file: "lib/call-rooms.ts", names: ["ROOM_KEYS_PER_MGET", "ROOM_KEYS_PER_BOOKING", "roomReads", '["MGET", ...lot]', "UnknownReplyError(\"the bookings' rooms\")"] },
+      { file: "lib/catalog.ts", names: ["LISTINGS_PER_MGET", "listingReads"] },
+      // Sized so one reply stays within 1 MiB at the written ceiling, each MGET its own trip (review of #3079, Codex Z M1).
+      { file: "lib/catalog.ts", names: ["mgetLotFor(MAX_PRODUCT_BYTES)", "mgetWhole(keys, LISTINGS_PER_MGET)"] },
+      { file: "lib/redis-mget.ts", names: ["MGET_REPLY_BYTES", "REPLY_ESCAPE_FACTOR", "MGET_CONCURRENCY", '[["MGET", ...lot]]', "mgetCommands", "getsWhole"] },
+      // Each booking's room keys read in shared MGETs, its meeting records a GET each, its moves in MGETs (calendar-feed room, 10 November 2026).
+      { file: "lib/call-rooms.ts", names: ["ROOM_KEYS_PER_MGET", "ROOM_KEYS_PER_BOOKING", "ROOM_RECORDS_PER_BOOKING", "roomReads", "mgetWhole(roomKeys, ROOM_KEYS_PER_MGET)", "getsWhole(recordKeys)"] },
       { file: "lib/call-moves-read.ts", names: ["moveReads", "MOVES_PER_MGET"] },
       { file: "lib/calendar-limits.ts", names: ["CALENDAR_REFUSED_PER_HOUR", "CALENDAR_RETRIES_PER_DAY"] },
       { file: "lib/calendar-sync.ts", names: ["calendarAttemptsKey"] },

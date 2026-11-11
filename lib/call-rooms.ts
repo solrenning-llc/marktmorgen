@@ -40,7 +40,7 @@
  */
 import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
+import { getsWhole, mgetCommands, mgetLotFor, mgetWhole } from "@/lib/redis-mget";
 import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -71,19 +71,32 @@ const bookingKey = (callsId: string, session: string) => `nl:call:room:${callsId
 const timeKey = (callsId: string, product: string, start: number) => `nl:call:room:${callsId}:t:${product}:${start}`;
 
 /**
- * Room keys read at one MGET at the most: a booking's four (its own room, its
- * time's, and its meeting record under both names), so ROOM_KEYS_PER_MGET / 4
- * bookings a command, every MGET of a reading in one trip (calendar-feed room,
- * 10 November 2026). Upstash bills an MGET as one command whatever its keys;
- * the bytes it moves are priced where the reading is (lib/read-ceilings.ts).
+ * The most a room key (a booking's or a time's) holds: its only writer is the
+ * SET NX of roomsFor, of a newVideoRoom() address, 44 bytes of letters,
+ * digits and ":/.", which no JSON answer escapes.
  */
-export const ROOM_KEYS_PER_MGET = 100;
-/** Keys roomsFor reads for each booking asked about. */
-export const ROOM_KEYS_PER_BOOKING = 4;
-/** The MGETs roomsFor's reads take for this many bookings; a count that is not a number is never priced low. */
+export const ROOM_VALUE_BYTES = VIDEO_ROOM_BASE.length + ROOM_NAME_LENGTH;
+/**
+ * Room keys read at one MGET at the most: 400, 200 bookings' two keys (calendar-feed room, 10 November 2026; sized by
+ * bytes on 11 November 2026, review of #3079, Codex Z M1). Sized from the most a room key can be written at
+ * (ROOM_VALUE_BYTES), doubled for the REST answer's escaping (REPLY_ESCAPE_FACTOR): 35,200 bytes a reply at most,
+ * within MGET_REPLY_BYTES (1 MiB), which alone would allow 11,915; 400 keeps the request's keys (a checkout session's
+ * id each, under 255 characters) near 130 KB. Upstash bills an MGET as one command whatever its keys; the bytes it
+ * moves are priced where the reading is (lib/read-ceilings.ts).
+ */
+export const ROOM_KEYS_PER_MGET = Math.min(400, mgetLotFor(ROOM_VALUE_BYTES));
+/** Room keys roomsFor reads in MGETs for each booking asked about: its own and its time's. */
+export const ROOM_KEYS_PER_BOOKING = 2;
+/**
+ * Meeting records roomsFor reads for each booking, a GET each, under both of the booking's possible names. A record
+ * has no byte cap where it is written (lib/meet-records.ts, writeRecord: up to MAX_GUESTS guests' and added
+ * addresses, whose length the code does not bound), so no MGET lot could bound its reply, and none is in an MGET.
+ */
+export const ROOM_RECORDS_PER_BOOKING = 2;
+/** The commands roomsFor's reads take for this many bookings; a count that is not a number is never priced low. */
 export function roomReads(bookings: number): number {
   if (Number.isNaN(bookings) || bookings === Number.POSITIVE_INFINITY) return Number.POSITIVE_INFINITY;
-  return bookings > 0 ? Math.ceil((bookings * ROOM_KEYS_PER_BOOKING) / ROOM_KEYS_PER_MGET) : 0;
+  return bookings > 0 ? mgetCommands(ROOM_KEYS_PER_BOOKING * bookings, ROOM_KEYS_PER_MGET) + ROOM_RECORDS_PER_BOOKING * bookings : 0;
 }
 
 /** One booked seat, as much of it as picks its room. */
@@ -110,7 +123,9 @@ export function fallbackSetup(setup: CallSetup, start: number): CallSetup {
  * The room of each booking asked about, in order: the link a Google Meet or
  * Zoom meeting gave it, else a room already made for it (or for its time, in
  * a group), else a new one when its product makes rooms, else the creator's
- * own link. Two round trips at most, however many.
+ * own link. The room keys' MGETs (MGET_CONCURRENCY trips at a time) and the
+ * meeting records' GETs (one trip) are read side by side, then the rooms to
+ * make in one trip more.
  */
 export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
   // In person (lib/call-place.ts): no room, not even one kept from when it was online; the others are asked as before.
@@ -124,32 +139,22 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
     return out;
   }
   if (!callsId || !isRedisConfigured() || asks.length === 0) return asks.map((a) => roomFor(a.setup, a.start));
-  const keys = asks.flatMap((a) => [
-    bookingKey(callsId, a.session),
-    timeKey(callsId, a.product, a.start),
-    // Asked for every booking, not only those of a product set to make
-    // meetings now, and under both of its possible names, since a call can
-    // go from one seat to several: a booking keeps the link it was given.
+  const roomKeys = asks.flatMap((a) => [bookingKey(callsId, a.session), timeKey(callsId, a.product, a.start)]);
+  // Asked for every booking, not only those of a product set to make
+  // meetings now, and under both of its possible names, since a call can
+  // go from one seat to several: a booking keeps the link it was given.
+  const recordKeys = asks.flatMap((a) => [
     recordKey(callScope(callsId, { group: false, session: a.session, product: a.product, start: a.start })),
     recordKey(callScope(callsId, { group: true, session: a.session, product: a.product, start: a.start })),
   ]);
-  // ROOM_KEYS_PER_MGET keys at one MGET, every MGET in one trip: a command for each twenty-five bookings, not four a
-  // booking. Read only whole (rule 24): one reply per MGET, one value per key, each text or nothing; anything else is
-  // unknown and throws, never a booking taken to have no room (and one made in its place).
-  const lots: string[][] = [];
-  for (let i = 0; i < keys.length; i += ROOM_KEYS_PER_MGET) lots.push(keys.slice(i, i + ROOM_KEYS_PER_MGET));
-  const replies = repliesFor(await redisPipeline(lots.map((lot) => ["MGET", ...lot])), lots.length);
-  if (!replies) throw new UnknownReplyError("the bookings' rooms");
-  const read: (string | null)[] = [];
-  lots.forEach((lot, l) => {
-    const values = listSlots(replies[l]);
-    if (!values || values.length !== lot.length || !values.every((v) => v === null || typeof v === "string")) throw new UnknownReplyError("the bookings' rooms");
-    read.push(...(values as (string | null)[]));
-  });
+  // The room keys ROOM_KEYS_PER_MGET at one MGET, the meeting records a GET each (no lot could bound their reply).
+  // Read only whole (rule 24, lib/redis-mget.ts): one value per key, each text or nothing; anything else is unknown
+  // and throws, never a booking taken to have no room (and one made in its place).
+  const [rooms, records] = await Promise.all([mgetWhole(roomKeys, ROOM_KEYS_PER_MGET), getsWhole(recordKeys)]);
   const found: (string | null)[] = asks.map((_, i) => {
-    const own = read[i * ROOM_KEYS_PER_BOOKING];
-    const shared = read[i * ROOM_KEYS_PER_BOOKING + 1];
-    const meeting = givenLink(parseRecord(read[i * ROOM_KEYS_PER_BOOKING + 2])) ?? givenLink(parseRecord(read[i * ROOM_KEYS_PER_BOOKING + 3]));
+    const own = rooms[i * ROOM_KEYS_PER_BOOKING];
+    const shared = rooms[i * ROOM_KEYS_PER_BOOKING + 1];
+    const meeting = givenLink(parseRecord(records[i * ROOM_RECORDS_PER_BOOKING])) ?? givenLink(parseRecord(records[i * ROOM_RECORDS_PER_BOOKING + 1]));
     if (meeting) return meeting;
     if (isVideoRoom(own)) return own;
     if (isVideoRoom(shared)) return shared;

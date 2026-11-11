@@ -30,6 +30,7 @@ import {
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
 import { ROOM_KEYS_PER_MGET as ROOM_KEYS_READ, isVideoRoom, roomsFor } from "@/lib/call-rooms";
+import { mgetLotFor } from "@/lib/redis-mget";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
@@ -41,7 +42,8 @@ import { COMMENT_ADDRESSES, SHOWN_COMMENTS } from "@/lib/membership-numbers";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { createHash } from "node:crypto";
-import { MAX_PRODUCTS, listingReads } from "@/lib/catalog-rules";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { listingReads } from "@/lib/catalog";
 import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading } from "@/lib/store-readings";
 import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
 import { PRICES_WITHOUT_COMMISSION } from "@/lib/plan";
@@ -299,30 +301,34 @@ async function main(): Promise<void> {
     is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + listingReads(MAX_PRODUCTS) + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
   }
 
-  part("Each booking's room is read in shared MGETs, not four GETs a booking: the feed's making at its worst (calendar-feed room, 10 November 2026)");
+  part("Each booking's room keys are read in shared MGETs, its meeting records a GET each: the feed's making at its worst (calendar-feed room, 10 and 11 November 2026)");
   {
     // A one-to-one call that makes a video room for every booking: the most a booking's room asks of the database.
-    const ROOM_KEYS_PER_MGET = 100;
+    // Room keys hold a 44-byte address at the most (their only writer, newVideoRoom), so a lot is sized from that, up
+    // to 400; the meeting records have no byte cap where they are written, so they are read a GET each.
+    const ROOM_KEYS_PER_MGET = Math.min(400, mgetLotFor(44));
     const setup = { kind: "weekly", minutes: 30, tz: "UTC", weekly: [], noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "", video: true, meet: null, inPerson: false, place: null, seats: 1, sessions: [] } as never;
     const start = Date.UTC(2034, 0, 2, 10);
     const n = 40;
     const asks = Array.from({ length: n }, (_, i) => ({ product: "pv", setup, session: `cs_test_room${String(i).padStart(4, "0")}`, start: start + i * 3_600_000, end: start + i * 3_600_000 + 1_800_000 }));
     const roomsCalls = "r".repeat(32);
-    const reads = Math.ceil((4 * n) / ROOM_KEYS_PER_MGET);
+    const reads = Math.ceil((2 * n) / ROOM_KEYS_PER_MGET) + 2 * n;
     const made = await counted(() => roomsFor(roomsCalls, asks));
-    is(`${n} rooms made: each a room, read in ${reads} MGETs and each made once (SET NX, GET): measured ${made.commands}`, [made.value.every(isVideoRoom), made.commands <= reads + 2 * n], [true, true]);
+    is(`${n} rooms made: each a room, read in ${reads} commands (MGETs of room keys, a GET a meeting record) and each made once (SET NX, GET): measured ${made.commands}`, [made.value.every(isVideoRoom), made.commands <= reads + 2 * n], [true, true]);
     const again = await counted(() => roomsFor(roomsCalls, asks));
-    is(`read again: the same rooms in ${reads} MGETs, nothing made: measured ${again.commands}`, [again.value.join() === made.value.join(), again.commands <= reads], [true, true]);
+    is(`read again: the same rooms in ${reads} commands, nothing made: measured ${again.commands}`, [again.value.join() === made.value.join(), again.commands <= reads], [true, true]);
     const perBooking = (calendarBuildCommands(0, 500) - calendarBuildCommands(0, 0)) / 500;
-    is(`a making prices each booking at its room's making and its share of the moves' and rooms' MGETs (${perBooking.toFixed(2)} <= ${(2 + 0.01 + 0.04).toFixed(2)})`, perBooking <= 2 + 1 / 100 + 4 / ROOM_KEYS_PER_MGET, true);
+    is(`a making prices each booking at its room's making, its two meeting records and its share of the moves' and room keys' MGETs (${perBooking.toFixed(3)} <= ${(2 + 2 + 0.01 + Math.ceil(1_000 / ROOM_KEYS_PER_MGET) / 500).toFixed(3)})`, perBooking <= 2 + 2 + 1 / 100 + Math.ceil((2 * 500) / ROOM_KEYS_PER_MGET) / 500, true);
     // Rule 24: an MGET answered off its shape is unknown, never a booking without a room (nor one made in its place).
     const real = redis.pipeline;
     redis.pipeline = async (batch) => (batch.some((c) => c[0] === "MGET") ? batch.map(() => ["only one"]) : real(batch));
     const off = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
-    redis.pipeline = async (batch) => (batch.some((c) => c[0] === "MGET") ? batch.map(() => Array.from({ length: ROOM_KEYS_PER_MGET }, () => 7)) : real(batch));
+    redis.pipeline = async (batch) => (batch.some((c) => c[0] === "MGET") ? batch.map((c) => Array.from({ length: c.length - 1 }, () => 7)) : real(batch));
     const wrongType = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
+    redis.pipeline = async (batch) => (batch.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:meet:r:")) ? batch.map(() => 7) : real(batch));
+    const recordWrongType = await roomsFor(roomsCalls, asks).then(() => "answered", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error)));
     redis.pipeline = real;
-    is("an MGET answered short, or with a value that is neither text nor nothing, is unknown and throws", [off, wrongType], ["unknown", "unknown"]);
+    is("an MGET answered short, or with a value that is neither text nor nothing, is unknown and throws; so is a meeting record's GET answered so", [off, wrongType, recordWrongType], ["unknown", "unknown", "unknown"]);
     is("the lot measured here is roomsFor's own", ROOM_KEYS_READ, ROOM_KEYS_PER_MGET);
   }
 

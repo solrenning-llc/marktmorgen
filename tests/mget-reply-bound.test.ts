@@ -9,6 +9,7 @@
  */
 import { MAX_PRODUCT_BYTES, readListings, readProducts } from "@/lib/catalog";
 import { roomsFor } from "@/lib/call-rooms";
+import { MGET_CONCURRENCY, MGET_REPLY_BYTES } from "@/lib/redis-mget";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
   const store = storeOf(N);
 
   part("A store's product records, at their written ceiling: each trip's answer within 1 MiB");
+  is("the bound is lib/redis-mget.ts's own, and so is the most trips in flight", [MGET_REPLY_BYTES, MGET_CONCURRENCY], [MIB, 16]);
   is("each planted record is under MAX_PRODUCT_BYTES and over the priced 16,384", [Buffer.byteLength(heavy) <= MAX_PRODUCT_BYTES, Buffer.byteLength(heavy) > 16_384], [true, true]);
   for (const [name, read] of [["readListings", () => readListings(store)], ["readProducts", () => readProducts(store)]] as const) {
     const seen = await watched(read as () => Promise<unknown[]>);

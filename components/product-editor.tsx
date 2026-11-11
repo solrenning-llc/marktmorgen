@@ -3,6 +3,7 @@
 import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
+import { templateLeftMessage } from "@/lib/template-text-rules";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
 import { WaitlistPanel } from "@/components/waitlist-panel";
@@ -290,6 +291,13 @@ async function send(
     if (data.error === "outline_left") {
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
+    }
+    if (data.error === "placeholder") {
+      const left = data as { field?: unknown; kind?: unknown; part?: unknown };
+      const field = left.field === "block" || left.field === "search" || left.field === "test" ? left.field : null;
+      if (field && typeof left.part === "string" && left.part) {
+        return wrong(templateLeftMessage({ field, part: left.part }, typeof left.kind === "string" ? left.kind : null, "product"));
+      }
     }
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);

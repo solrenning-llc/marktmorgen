@@ -45,6 +45,7 @@ import { dropStamped } from "@/lib/pdf-stamp";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
+import { templateLeft } from "@/lib/template-text";
 import { pageWords } from "@/lib/page-translate";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
@@ -414,6 +415,8 @@ export async function POST(request: NextRequest) {
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
           const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          const pageLeft = shownPage ? templateLeft(shownPage) : null;
+          if (pageLeft) return Response.json({ ok: false, error: "placeholder", ...pageLeft, product: draft.title }, { status: 409 });
           const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
           if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
           // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).

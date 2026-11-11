@@ -47,7 +47,8 @@ export function StudioApp() {
       const target = element(event.target);
       if (target) keeper.focusOut(target);
     };
-    const onPointer = (event: PointerEvent) => keeper.pointerDown(element(event.target));
+    // Any element clicked, an icon's <svg> or <path> inside a focused button included (not only HTML elements).
+    const onPointer = (event: PointerEvent) => keeper.pointerDown(event.target instanceof Element ? (event.target as Element & KeptElement) : null);
     const watch = new MutationObserver((records) => {
       let tree = false;
       const added: (HTMLElement & KeptElement)[] = [];

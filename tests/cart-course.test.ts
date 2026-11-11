@@ -118,6 +118,30 @@ async function main(): Promise<void> {
   ].map(([status, where]) => `${status} ${where}`), ["303 /@harbor", "303 /@harbor", "303 /@harbor"]);
   is("nor once the order was refunded", await start({ ...noEmail, payment_intent: { id: "pi_1", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 7700 } } }, course.product.id), [303, "/@harbor"]);
 
+  part("The email counter only when an email goes (Claude 5 LOW 2 on #2608)");
+  {
+    // Redis throws on this order's course-start-order counter only, or it is filled past any limit.
+    const real = redis.pipeline.bind(redis);
+    const on = (mode: "unknown" | "full") => {
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const hit = commands.find((c) => String(c[1] ?? "").startsWith("nl:rl:course-start-order:"));
+        if (hit && mode === "unknown") throw new Error("Redis timed out (synthetic)");
+        if (hit) await real([["SET", String(hit[1]), "1000000000", "EX", 3600]]);
+        return real(commands);
+      }) as typeof redis.pipeline;
+    };
+    try {
+      on("unknown");
+      is("an unreadable count still opens the course page, saying the link could not go", await start(paid, course.product.id), [303, `/@harbor/course/${course.product.id}?link=error`]);
+      on("full");
+      is("past the order's limit it goes back to the store, as before", await start(paid, course.product.id), [303, "/@harbor"]);
+      on("unknown");
+      is("an order with no address to email never reads the counter", await start(noEmail, course.product.id), [303, `/@harbor/course/${course.product.id}?link=ask`]);
+    } finally {
+      redis.pipeline = real;
+    }
+  }
+
   part("Where it is read");
   const route = readFileSync("app/api/store/course/start/route.ts", "utf8");
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");

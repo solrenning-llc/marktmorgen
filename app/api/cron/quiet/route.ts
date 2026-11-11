@@ -10,7 +10,7 @@ import { storeOf } from "@/lib/usage-billing";
 import { checkQuiet } from "@/lib/quiet-sales";
 import { checkAlerts } from "@/lib/store-alerts";
 import { sendDueAlerts } from "@/lib/child-safety-alerts";
-import { hideHeldProducts } from "@/lib/child-safety";
+import { HIDE_BUDGET_MS, hideHeldProducts } from "@/lib/child-safety";
 
 /**
  * Once a day for each store with visits this month or last, whether its
@@ -23,6 +23,10 @@ import { hideHeldProducts } from "@/lib/child-safety";
  */
 export const maxDuration = 60;
 const TIME_BUDGET_MS = 45_000;
+/** How long the child-safety reminders may take, from the run's start. */
+const REMINDERS_BUDGET_MS = 15_000;
+/** The latest, from the run's start, the hide step tries another product: the reminders' time and its own budget. */
+const HIDES_UNTIL_MS = REMINDERS_BUDGET_MS + HIDE_BUDGET_MS;
 
 export async function GET(request: NextRequest) {
   if (!(await cronAllowed(request))) {
@@ -38,13 +42,14 @@ export async function GET(request: NextRequest) {
   const started = Date.now();
   const out = { sent: 0, fine: 0, skipped: 0, seen: 0, failed: 0, alerts: 0, reminders: 0, hidden: 0 };
   try {
-    // Held products whose taking off the store did not go through, taken off first, under this lock: a bounded batch,
-    // within its own HIDE_BUDGET_MS and with a short wait on a busy store, that never throws and leaves what it cannot
-    // confirm or reach for the next hour (lib/child-safety.ts, hideHeldProducts).
-    out.hidden = (await hideHeldProducts(started)).hidden;
-    // The reminders of open child-safety reports next, under this lock: a bounded batch that never throws
-    // and leaves what it cannot read for the next hour (lib/child-safety-alerts.ts).
-    out.reminders = (await sendDueAlerts(started, started + 15_000)).sent;
+    // The reminders of open child-safety reports first, under this lock: a bounded batch that never throws and leaves
+    // what it cannot read for the next hour (lib/child-safety-alerts.ts). First, so nothing before them can spend their
+    // time: the hide step below waits on busy store locks, which is what puts a product in its queue (Claude 4 on #3486).
+    out.reminders = (await sendDueAlerts(started, started + REMINDERS_BUDGET_MS)).sent;
+    // Then held products whose taking off the store did not go through, under this lock, with only the time left: its
+    // own HIDE_BUDGET_MS, never past HIDES_UNTIL_MS from the start, a short wait on a busy store, never throws, and
+    // leaves what it cannot confirm or reach for the next hour (lib/child-safety.ts, hideHeldProducts).
+    out.hidden = (await hideHeldProducts(started, Math.min(Date.now() + HIDE_BUDGET_MS, started + HIDES_UNTIL_MS))).hidden;
     const now = new Date();
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
     const folders = [...new Set([...(await visitedFolders(monthKey(now))), ...(await visitedFolders(monthKey(lastMonth)))])].sort();

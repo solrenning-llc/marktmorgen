@@ -136,20 +136,36 @@ export async function askStockAlert(input: { store: DataStore; productId: string
   return { ok: true, confirm, leave, again: Boolean(before) };
 }
 
+/**
+ * A place confirmed only over exactly the entry the confirmation read, in one step: a leave pressed in between (its
+ * HDEL) is never undone by the confirmation's write (Codex G on #3616). 1 written, 0 changed since it was read.
+ */
+export const CONFIRM_PLACE = `-- marktmorgen:stock-alert-confirm:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+  redis.call('EXPIRE', KEYS[1], ARGV[4])
+  return 1
+end
+return 0`;
+
 /** The confirm link used on the store's own page: the place now counts. */
 export async function confirmStockAlert(token: string, store: DataStore, now = Date.now()): Promise<{ ok: true; productId: string } | { ok: false }> {
   const grant = await readGrant(token);
   if (!grant || grant.k !== "confirm" || !store.statsId || store.statsId !== grant.s) return { ok: false };
   const key = listKey(grant.s, grant.p);
-  const read = repliesFor(await redisPipeline([["HGET", key, grant.e]]), 1);
-  if (!read) throw new UnknownReplyError("a back-in-stock place");
-  const entry = parseEntry(read[0]);
-  if (!entry) return { ok: false };
-  if (!entry.ok) {
-    const wrote = repliesFor(await redisPipeline([["HSET", key, grant.e, JSON.stringify({ ...entry, ok: nowSeconds(now) })], ["EXPIRE", key, WAIT_SECONDS]]), 2);
-    if (!wrote || countOf(wrote[0]) === null || wrote[1] !== 1) throw new UnknownReplyError("a back-in-stock confirmation");
+  // Read again when the place changed under the write (asked again meanwhile, say), a few times at most.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const read = repliesFor(await redisPipeline([["HGET", key, grant.e]]), 1);
+    if (!read) throw new UnknownReplyError("a back-in-stock place");
+    const entry = parseEntry(read[0]);
+    if (!entry) return { ok: false };
+    if (entry.ok) return { ok: true, productId: grant.p };
+    const wrote = repliesFor(await redisPipeline([["EVAL", CONFIRM_PLACE, 1, key, grant.e, String(read[0]), JSON.stringify({ ...entry, ok: nowSeconds(now) }), WAIT_SECONDS]]), 1);
+    const done = wrote ? countOf(wrote[0]) : null;
+    if (done === null || done > 1) throw new UnknownReplyError("a back-in-stock confirmation");
+    if (done === 1) return { ok: true, productId: grant.p };
   }
-  return { ok: true, productId: grant.p };
+  throw new UnknownReplyError("a back-in-stock confirmation");
 }
 
 /** The leave link: the place and the link go, and their room comes back. */

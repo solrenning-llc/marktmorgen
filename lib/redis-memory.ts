@@ -767,6 +767,14 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/stock-alerts.ts CONFIRM_PLACE: a back-in-stock place confirmed only over exactly the entry read.
+        if (key.startsWith("-- marktmorgen:stock-alert-confirm:v1\n") && args[0] === "1" && args.length === 6) {
+          const [, list, field, expected, next, seconds] = args;
+          if (this.run(["HGET", list, field]) !== expected) return 0;
+          this.run(["HSET", list, field, next]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
+        }
         // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
         if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, people, field, expected, next] = args;

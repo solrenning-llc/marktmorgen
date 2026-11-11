@@ -188,7 +188,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
       <button type="submit" className="btn st-btn btn-block">
         {a.emailMeLink}
       </button>
-      <p className="st-muted text-sm">{a.formNote}</p>
+      <p className="st-muted max-w-[46ch] text-sm">{a.formNote}</p>
     </form>
   );
 

@@ -102,3 +102,29 @@ export function whenQuiet(
   else win.addEventListener("load", arm, { once: true });
   return stop;
 }
+
+/**
+ * One count per key, each sent once at the buyer's first pause (`whenQuiet`).
+ *
+ * A count still waiting is never dropped: a tap on a link inside the store
+ * cleans up the page that asked for it while the document stays, so it goes
+ * at the next pause, on the next page, with what it read when its own page
+ * opened (where the visitor came from), or at once when the page is hidden.
+ * Asked again for a key that is waiting or sent (React's double effect, the
+ * same page opened again), it does nothing. Each call keeps its own keys.
+ */
+export function countsAtPause(
+  options?: Parameters<typeof whenQuiet>[1],
+): (key: string, send: () => void) => void {
+  const sent = new Set<string>();
+  const waiting = new Set<string>();
+  return (key, send) => {
+    if (sent.has(key) || waiting.has(key)) return;
+    waiting.add(key);
+    whenQuiet(() => {
+      waiting.delete(key);
+      sent.add(key);
+      send();
+    }, options);
+  };
+}

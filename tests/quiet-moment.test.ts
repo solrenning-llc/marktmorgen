@@ -8,7 +8,7 @@
  * Exercised with a synthetic window and document and a hand-driven clock.
  */
 import { readFileSync } from "node:fs";
-import { QUIET_INPUTS, QUIET_MS, whenQuiet } from "@/lib/quiet-moment";
+import { QUIET_INPUTS, QUIET_MS, countsAtPause, whenQuiet } from "@/lib/quiet-moment";
 import { done, is, part } from "./check";
 
 type Listener = (event?: unknown) => void;
@@ -216,22 +216,63 @@ function main(): void {
     is("nothing left listening", page.listening(), 0);
   }
 
+  part(
+    "A count still waiting when the buyer moves inside the store goes at the next pause, once, as it was read",
+  );
+  {
+    // A tap on a next/link card moves inside the store: the front page's effect is cleaned up, the page is never
+    // hidden. The visit's count must not be dropped there (review of #3642, MEDIUM 1).
+    const page = fakePage();
+    const count = countsAtPause(page.on);
+    const sent: string[] = [];
+    const visit = JSON.stringify({ h: "shop", k: "v", r: "https://news.example/", u: "news", m: "email", g: "launch" });
+    count("shop|/shop", () => sent.push(visit));
+    page.advance(800);
+    page.press();
+    // React's double effect, and the same page mounted again, ask once more: still one count.
+    count("shop|/shop", () => sent.push("a second copy"));
+    page.advance(QUIET_MS - 1);
+    page.idle();
+    is("nothing yet: the buyer is still moving", sent, []);
+    page.advance(1);
+    page.idle();
+    is("at the pause, exactly once, with the source read when the page opened", sent, [visit]);
+    count("shop|/shop", () => sent.push("again"));
+    page.advance(QUIET_MS * 3);
+    page.idle();
+    page.hide();
+    is("never again for the same page", sent, [visit]);
+    is("and nothing left listening", page.listening(), 0);
+  }
+  {
+    // A buyer who never pauses: a tap every 1.5 s for 20 s, then a move to a product, then the page is left.
+    const page = fakePage();
+    const count = countsAtPause(page.on);
+    let sent = 0;
+    count("shop|/shop", () => sent++);
+    for (let elapsed = 0; elapsed < 20_000; elapsed += 1_500) {
+      page.advance(1_500);
+      page.idle();
+      page.press();
+    }
+    count("shop|/shop/p/book", () => sent++);
+    is("no count lands while the buyer keeps tapping", sent, 0);
+    page.hide();
+    is("leaving sends both, the visit and the product's page", sent, 2);
+  }
+
   part("The inputs it waits on and the counts that use it");
   is("a press, a tap or a key", [...QUIET_INPUTS], ["pointerdown", "keydown"]);
   const beacon = readFileSync("components/store-beacon.tsx", "utf8");
   is(
-    "the visit and the page's count wait for it, and the effect cancels it",
-    /const cancel = sent\.has\(key\)\s*\?\s*null\s*:\s*whenQuiet\(/.test(
-      beacon,
-    ) && (beacon.match(/cancel\?\.\(\)/g) ?? []).length === 2,
-    true,
-  );
-  is(
-    "a funnel step waits for it too",
-    /return whenQuiet\(\(\) => \{\s*if \(sent\.has\(key\)\) return;\s*sent\.add\(key\);\s*beacon\(\{ h: handle, k: "f"/.test(
-      beacon,
-    ),
-    true,
+    "the visit, the page's count and a funnel step wait for the pause, and nothing cancels one still waiting",
+    [
+      /const countOnce = countsAtPause\(\);/.test(beacon),
+      /countOnce\(key, \(\) => beacon\(payload\)\);/.test(beacon),
+      /countOnce\(`\$\{handle\}\|\$\{location\.href\}\|funnel`, \(\) =>\s*beacon\(\{ h: handle, k: "f"/.test(beacon),
+      /cancel/.test(beacon.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")),
+    ],
+    [true, true, true, false],
   );
   is(
     "a link's count, which needs no check, still goes at once by sendBeacon",

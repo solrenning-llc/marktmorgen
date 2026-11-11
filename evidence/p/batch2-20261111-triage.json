@@ -1,0 +1,1533 @@
+{
+  "authority": "C1-20261111-1026-codexP-2",
+  "observedAt": "2026-11-11T13:47:02.234Z",
+  "repo": "solrenning-llc/marktmorgen",
+  "scope": {
+    "openRange": [
+      3017,
+      3273
+    ],
+    "count": 53,
+    "inventoryPages": 5,
+    "completePageCounts": [
+      100,
+      100,
+      100,
+      100,
+      71
+    ],
+    "firstBatch": "already diagnosed in comments 6796645685/6796651010/6796657432; not repeated"
+  },
+  "initialRows": [
+    {
+      "n": 3017,
+      "h": "5b7a26d40625d6f2917ac433c0b3d6d9c7b83d5c",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130341107835,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3020,
+      "h": "baaa18ed8e9003eabbc8bd4e7fa76bf1bd9caacd",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3021,
+      "h": "cab993b0274d8ec808cbd4056ebe1c1f0ea72db0",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3022,
+      "h": "0838662d83cca8ccedb2f207035850492a60b218",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128987973342,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3023,
+      "h": "e008c6003b9324d60db70962ac4cf771e6ae2986",
+      "mergeable": true,
+      "state": "unstable",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128999923836,
+          "Real reader entry (macos-latest)",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3024,
+      "h": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3026,
+      "h": "e5d60ff04648ce0c9c6c1e36354223d326c0b7a4",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3027,
+      "h": "5d2e9d9eba6e695615133fc7ed9abb99f7af899c",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 0,
+      "total": 0,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3029,
+      "h": "3c0a62845d3c50c70e097a3d0eb804492528e995",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3033,
+      "h": "b9c0e9c7074b1dbc2805c07f045c0352aa3c2bf3",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 0,
+      "total": 0,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3034,
+      "h": "fd6ea6de1e69f551d930cb9e5d469267c589af60",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3035,
+      "h": "479bd9d69e8e0198d9a6c6ef29d91d06e698c3f3",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130361634717,
+          "Mobile render (candidate)",
+          "failure"
+        ],
+        [
+          130361634697,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3036,
+      "h": "3496dde7a207e157bff578dd8befd32cddbad743",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3037,
+      "h": "585f5d333a8c5f951d1e013c6492cca55844dee0",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3051,
+      "h": "2c45b6b27d1df5cecf1d3ea291e143504d5e926e",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128998941794,
+          "Real reader entry (windows-latest)",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3062,
+      "h": "b2f741a62298c6b24ee31ad18c57297e280ea008",
+      "mergeable": true,
+      "state": "unstable",
+      "g": 1,
+      "total": 1,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3066,
+      "h": "745ce60a03b3819d6dca6f530f48faaf9940ef72",
+      "mergeable": true,
+      "state": "unstable",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128471973757,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3067,
+      "h": "c631abe65f48939136faef03b49fe57139fdf765",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130111616142,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3068,
+      "h": "801e021dd203bbf3006e097bb9528e6699bc9178",
+      "mergeable": true,
+      "state": "unstable",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130146849657,
+          "Mobile render (candidate)",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3069,
+      "h": "7e98f9186bb0734fc0e8d081b011a7e6dac332c4",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3070,
+      "h": "92b02aa03f346da12fe8e08cfde835a8869f2aa2",
+      "mergeable": true,
+      "state": "unstable",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128857919619,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3073,
+      "h": "e988e105b1528780310c1dd6a696500025645727",
+      "mergeable": true,
+      "state": "unstable",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128483210700,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3075,
+      "h": "e532048c4fb76d45d07bff171aeea227c7d8614d",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130310191832,
+          "Mobile render (candidate)",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3079,
+      "h": "fbea9ffa6d3bd661f2d18afc6d3a61d3de5dbb73",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130312745289,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3086,
+      "h": "e0ede3c13d76f5a64c1fee8e5c32a6e59667247b",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3095,
+      "h": "5e748c7b48c35d177bd7c4b660a932bdf0ca697d",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3101,
+      "h": "a3430542c7549c5a79adad3c77399ee669aa76ba",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130113602482,
+          "Mobile render (candidate)",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3107,
+      "h": "a46dd30840a7f44dbddf9d3141fd56211f1bd3c4",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3118,
+      "h": "1a8913d01f4b11d08310e9cf3a466de651c536c7",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          130090095464,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3129,
+      "h": "365d627e6da31aef0ff4688ea90a11142a5abf69",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128534577071,
+          "verify",
+          "failure"
+        ],
+        [
+          128528591476,
+          "Documentation scope (product-checks)",
+          "failure"
+        ]
+      ],
+      "draft": true
+    },
+    {
+      "n": 3156,
+      "h": "9ebc7b7de17b8fc731280cdd9db0ee6834525a6e",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3158,
+      "h": "db19fcb9252ce41e4c9d58f6a9ae660077d1f2e7",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3159,
+      "h": "d824cc0a413b5273d11388382dbc3e51d37ad9de",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3160,
+      "h": "26be932d6e6ffffdbe7afde926ce0ec438cf7868",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3171,
+      "h": "90fb5f74fb4e20dccfeb3f9060673ee8188e8733",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3173,
+      "h": "adf09726af8a925b71f6bd040601b302454ec14f",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          128857425108,
+          "Mobile render (candidate)",
+          "failure"
+        ],
+        [
+          128857425099,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3189,
+      "h": "bd0e13d753de1b79311136394fc2ae02045f6253",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3190,
+      "h": "b7c4f15c2aba07c054a007f876ff680a7a9adc7c",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          129627787442,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3193,
+      "h": "0df0c467c70533ba18e55fb19eb852e001117588",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3194,
+      "h": "bc3ddc1501464830cd93f8d3dde3a3c8738ecb2a",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3203,
+      "h": "881caed76deeac4cd39e6bbbc87bb125d0d4a837",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3206,
+      "h": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "mergeable": false,
+      "state": "dirty",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3213,
+      "h": "208c078026bf16f22781a91be79bf03787b2fec3",
+      "mergeable": true,
+      "state": "blocked",
+      "g": 8,
+      "total": 9,
+      "failed": [
+        [
+          129374809839,
+          "verify",
+          "failure"
+        ]
+      ],
+      "draft": false
+    },
+    {
+      "n": 3215,
+      "h": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3225,
+      "h": "e02db96854a1e15240670506ea66dddb4879058a",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3226,
+      "h": "3c7c19af5b2a2da03a8421d15b10776e6e69cbb0",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3247,
+      "h": "453256f5a529329c7366d79c2bee2f0f51a6e4ed",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3252,
+      "h": "ba0727f2382849244fb0b497d4c11a069f0a91b2",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3261,
+      "h": "ed1ce6d5b55ee607f3613025ba41c97ca46a3ffa",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3267,
+      "h": "91aecfa183d72f9dd9499d4c26f2b6fb448f4e49",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3271,
+      "h": "aaee666db197a2738ed12b00bfedbb4738debf4c",
+      "mergeable": true,
+      "state": "clean",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3272,
+      "h": "ef8922f9e64073a38808620dfff700b850b29de7",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    },
+    {
+      "n": 3273,
+      "h": "f970f05fd9ec09a6cbaf7922c0c19f3710b9e4e5",
+      "mergeable": null,
+      "state": "unknown",
+      "g": 9,
+      "total": 9,
+      "failed": [],
+      "draft": false
+    }
+  ],
+  "comments": [
+    {
+      "n": 3017,
+      "id": 6797416948,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3017#issuecomment-6797416948",
+      "verified": true,
+      "head": "5b7a26d40625d6f2917ac433c0b3d6d9c7b83d5c",
+      "kind": "triage"
+    },
+    {
+      "n": 3020,
+      "id": 6797417554,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3020#issuecomment-6797417554",
+      "verified": true,
+      "head": "baaa18ed8e9003eabbc8bd4e7fa76bf1bd9caacd",
+      "kind": "triage"
+    },
+    {
+      "n": 3021,
+      "id": 6797418295,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3021#issuecomment-6797418295",
+      "verified": true,
+      "head": "cab993b0274d8ec808cbd4056ebe1c1f0ea72db0",
+      "kind": "triage"
+    },
+    {
+      "n": 3022,
+      "id": 6797418989,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3022#issuecomment-6797418989",
+      "verified": true,
+      "head": "0838662d83cca8ccedb2f207035850492a60b218",
+      "kind": "triage"
+    },
+    {
+      "n": 3023,
+      "id": 6797419794,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3023#issuecomment-6797419794",
+      "verified": true,
+      "head": "e008c6003b9324d60db70962ac4cf771e6ae2986",
+      "kind": "triage"
+    },
+    {
+      "n": 3024,
+      "id": 6797420483,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3024#issuecomment-6797420483",
+      "verified": true,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "kind": "triage"
+    },
+    {
+      "n": 3026,
+      "id": 6797421264,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3026#issuecomment-6797421264",
+      "verified": true,
+      "head": "e5d60ff04648ce0c9c6c1e36354223d326c0b7a4",
+      "kind": "triage"
+    },
+    {
+      "n": 3027,
+      "id": 6797422011,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3027#issuecomment-6797422011",
+      "verified": true,
+      "head": "5d2e9d9eba6e695615133fc7ed9abb99f7af899c",
+      "kind": "triage"
+    },
+    {
+      "n": 3029,
+      "id": 6797422765,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3029#issuecomment-6797422765",
+      "verified": true,
+      "head": "3c0a62845d3c50c70e097a3d0eb804492528e995",
+      "kind": "triage"
+    },
+    {
+      "n": 3033,
+      "id": 6797423427,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3033#issuecomment-6797423427",
+      "verified": true,
+      "head": "b9c0e9c7074b1dbc2805c07f045c0352aa3c2bf3",
+      "kind": "triage"
+    },
+    {
+      "n": 3034,
+      "id": 6797424102,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3034#issuecomment-6797424102",
+      "verified": true,
+      "head": "fd6ea6de1e69f551d930cb9e5d469267c589af60",
+      "kind": "triage"
+    },
+    {
+      "n": 3035,
+      "id": 6797424748,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3035#issuecomment-6797424748",
+      "verified": true,
+      "head": "479bd9d69e8e0198d9a6c6ef29d91d06e698c3f3",
+      "kind": "triage"
+    },
+    {
+      "n": 3036,
+      "id": 6797425558,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3036#issuecomment-6797425558",
+      "verified": true,
+      "head": "3496dde7a207e157bff578dd8befd32cddbad743",
+      "kind": "triage"
+    },
+    {
+      "n": 3037,
+      "id": 6797426350,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3037#issuecomment-6797426350",
+      "verified": true,
+      "head": "585f5d333a8c5f951d1e013c6492cca55844dee0",
+      "kind": "triage"
+    },
+    {
+      "n": 3051,
+      "id": 6797432246,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3051#issuecomment-6797432246",
+      "verified": true,
+      "head": "2c45b6b27d1df5cecf1d3ea291e143504d5e926e",
+      "kind": "triage"
+    },
+    {
+      "n": 3062,
+      "id": 6797433141,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3062#issuecomment-6797433141",
+      "verified": true,
+      "head": "b2f741a62298c6b24ee31ad18c57297e280ea008",
+      "kind": "triage"
+    },
+    {
+      "n": 3066,
+      "id": 6797433824,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3066#issuecomment-6797433824",
+      "verified": true,
+      "head": "745ce60a03b3819d6dca6f530f48faaf9940ef72",
+      "kind": "triage"
+    },
+    {
+      "n": 3067,
+      "id": 6797434587,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3067#issuecomment-6797434587",
+      "verified": true,
+      "head": "c631abe65f48939136faef03b49fe57139fdf765",
+      "kind": "triage"
+    },
+    {
+      "n": 3068,
+      "id": 6797435401,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3068#issuecomment-6797435401",
+      "verified": true,
+      "head": "801e021dd203bbf3006e097bb9528e6699bc9178",
+      "kind": "triage"
+    },
+    {
+      "n": 3069,
+      "id": 6797436178,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3069#issuecomment-6797436178",
+      "verified": true,
+      "head": "7e98f9186bb0734fc0e8d081b011a7e6dac332c4",
+      "kind": "triage"
+    },
+    {
+      "n": 3070,
+      "id": 6797437067,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3070#issuecomment-6797437067",
+      "verified": true,
+      "head": "92b02aa03f346da12fe8e08cfde835a8869f2aa2",
+      "kind": "triage"
+    },
+    {
+      "n": 3073,
+      "id": 6797437747,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3073#issuecomment-6797437747",
+      "verified": true,
+      "head": "e988e105b1528780310c1dd6a696500025645727",
+      "kind": "triage"
+    },
+    {
+      "n": 3075,
+      "id": 6797438553,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3075#issuecomment-6797438553",
+      "verified": true,
+      "head": "e532048c4fb76d45d07bff171aeea227c7d8614d",
+      "kind": "triage"
+    },
+    {
+      "n": 3079,
+      "id": 6797439254,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3079#issuecomment-6797439254",
+      "verified": true,
+      "head": "fbea9ffa6d3bd661f2d18afc6d3a61d3de5dbb73",
+      "kind": "triage"
+    },
+    {
+      "n": 3086,
+      "id": 6797439892,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3086#issuecomment-6797439892",
+      "verified": true,
+      "head": "e0ede3c13d76f5a64c1fee8e5c32a6e59667247b",
+      "kind": "triage"
+    },
+    {
+      "n": 3095,
+      "id": 6797440599,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3095#issuecomment-6797440599",
+      "verified": true,
+      "head": "5e748c7b48c35d177bd7c4b660a932bdf0ca697d",
+      "kind": "triage"
+    },
+    {
+      "n": 3101,
+      "id": 6797441597,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3101#issuecomment-6797441597",
+      "verified": true,
+      "head": "a3430542c7549c5a79adad3c77399ee669aa76ba",
+      "kind": "triage"
+    },
+    {
+      "n": 3107,
+      "id": 6797442308,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3107#issuecomment-6797442308",
+      "verified": true,
+      "head": "a46dd30840a7f44dbddf9d3141fd56211f1bd3c4",
+      "kind": "triage"
+    },
+    {
+      "n": 3118,
+      "id": 6797443060,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3118#issuecomment-6797443060",
+      "verified": true,
+      "head": "1a8913d01f4b11d08310e9cf3a466de651c536c7",
+      "kind": "triage"
+    },
+    {
+      "n": 3129,
+      "id": 6797443741,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3129#issuecomment-6797443741",
+      "verified": true,
+      "head": "365d627e6da31aef0ff4688ea90a11142a5abf69",
+      "kind": "triage"
+    },
+    {
+      "n": 3156,
+      "id": 6797444411,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3156#issuecomment-6797444411",
+      "verified": true,
+      "head": "9ebc7b7de17b8fc731280cdd9db0ee6834525a6e",
+      "kind": "triage"
+    },
+    {
+      "n": 3158,
+      "id": 6797445107,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3158#issuecomment-6797445107",
+      "verified": true,
+      "head": "db19fcb9252ce41e4c9d58f6a9ae660077d1f2e7",
+      "kind": "triage"
+    },
+    {
+      "n": 3159,
+      "id": 6797445754,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3159#issuecomment-6797445754",
+      "verified": true,
+      "head": "d824cc0a413b5273d11388382dbc3e51d37ad9de",
+      "kind": "triage"
+    },
+    {
+      "n": 3160,
+      "id": 6797170318,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3160#issuecomment-6797170318",
+      "verified": true,
+      "head": "26be932d6e6ffffdbe7afde926ce0ec438cf7868",
+      "kind": "ready"
+    },
+    {
+      "n": 3171,
+      "id": 6797453823,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3171#issuecomment-6797453823",
+      "verified": true,
+      "head": "90fb5f74fb4e20dccfeb3f9060673ee8188e8733",
+      "kind": "triage"
+    },
+    {
+      "n": 3173,
+      "id": 6797454532,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3173#issuecomment-6797454532",
+      "verified": true,
+      "head": "adf09726af8a925b71f6bd040601b302454ec14f",
+      "kind": "triage"
+    },
+    {
+      "n": 3189,
+      "id": 6797171727,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3189#issuecomment-6797171727",
+      "verified": true,
+      "head": "bd0e13d753de1b79311136394fc2ae02045f6253",
+      "kind": "ready"
+    },
+    {
+      "n": 3190,
+      "id": 6797455282,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3190#issuecomment-6797455282",
+      "verified": true,
+      "head": "b7c4f15c2aba07c054a007f876ff680a7a9adc7c",
+      "kind": "triage"
+    },
+    {
+      "n": 3193,
+      "id": 6797173046,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3193#issuecomment-6797173046",
+      "verified": true,
+      "head": "0df0c467c70533ba18e55fb19eb852e001117588",
+      "kind": "ready"
+    },
+    {
+      "n": 3194,
+      "id": 6797455981,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3194#issuecomment-6797455981",
+      "verified": true,
+      "head": "bc3ddc1501464830cd93f8d3dde3a3c8738ecb2a",
+      "kind": "triage"
+    },
+    {
+      "n": 3203,
+      "id": 6797456791,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3203#issuecomment-6797456791",
+      "verified": true,
+      "head": "881caed76deeac4cd39e6bbbc87bb125d0d4a837",
+      "kind": "triage"
+    },
+    {
+      "n": 3206,
+      "id": 6797457434,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3206#issuecomment-6797457434",
+      "verified": true,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "kind": "triage"
+    },
+    {
+      "n": 3213,
+      "id": 6797458213,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3213#issuecomment-6797458213",
+      "verified": true,
+      "head": "208c078026bf16f22781a91be79bf03787b2fec3",
+      "kind": "triage"
+    },
+    {
+      "n": 3215,
+      "id": 6797458976,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3215#issuecomment-6797458976",
+      "verified": true,
+      "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+      "kind": "triage"
+    },
+    {
+      "n": 3225,
+      "id": 6797459610,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3225#issuecomment-6797459610",
+      "verified": true,
+      "head": "e02db96854a1e15240670506ea66dddb4879058a",
+      "kind": "triage"
+    },
+    {
+      "n": 3226,
+      "id": 6797174270,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3226#issuecomment-6797174270",
+      "verified": true,
+      "head": "3c7c19af5b2a2da03a8421d15b10776e6e69cbb0",
+      "kind": "ready"
+    },
+    {
+      "n": 3247,
+      "id": 6797175777,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3247#issuecomment-6797175777",
+      "verified": true,
+      "head": "453256f5a529329c7366d79c2bee2f0f51a6e4ed",
+      "kind": "ready"
+    },
+    {
+      "n": 3252,
+      "id": 6797177269,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3252#issuecomment-6797177269",
+      "verified": true,
+      "head": "ba0727f2382849244fb0b497d4c11a069f0a91b2",
+      "kind": "ready"
+    },
+    {
+      "n": 3261,
+      "id": 6797178391,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3261#issuecomment-6797178391",
+      "verified": true,
+      "head": "ed1ce6d5b55ee607f3613025ba41c97ca46a3ffa",
+      "kind": "ready"
+    },
+    {
+      "n": 3267,
+      "id": 6797460517,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3267#issuecomment-6797460517",
+      "verified": true,
+      "head": "91aecfa183d72f9dd9499d4c26f2b6fb448f4e49",
+      "kind": "triage"
+    },
+    {
+      "n": 3271,
+      "id": 6797469523,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3271#issuecomment-6797469523",
+      "verified": true,
+      "head": "aaee666db197a2738ed12b00bfedbb4738debf4c",
+      "kind": "ready"
+    },
+    {
+      "n": 3272,
+      "id": 6797461359,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3272#issuecomment-6797461359",
+      "verified": true,
+      "head": "ef8922f9e64073a38808620dfff700b850b29de7",
+      "kind": "triage"
+    },
+    {
+      "n": 3273,
+      "id": 6797462090,
+      "url": "https://github.com/solrenning-llc/marktmorgen/pull/3273#issuecomment-6797462090",
+      "verified": true,
+      "head": "f970f05fd9ec09a6cbaf7922c0c19f3710b9e4e5",
+      "kind": "triage"
+    }
+  ],
+  "diagnosis": {
+    "3017": {
+      "status": "changes requested / CI red",
+      "text": "The exact-head residual MEDIUM in Codex G's comment 6787959688 is still open: a concurrent rewrite of a Discord member can lose discoverability during disconnect. Claude 4's earlier focal does not dispose of that later residual. The verify log (job 130341107835) returned Transport closed twice; I cannot attribute that failure to weekdayAt, proto-keys, or this finding without its real failure section. No repair or fresh test execution is claimed.",
+      "refs": [
+        6787959688
+      ]
+    },
+    "3020": {
+      "status": "changes requested / conflict",
+      "text": "Nine exact-head aggregates succeed, but GitHub reports a conflict and Codex G's MEDIUM 6751455863 remains: pending-picture recovery is discarded before deletion is confirmed (community-approval.ts / community-files.ts). A safe correction must retain the recovery reference on failed/unknown removal and prove retry erasure. Green CI does not close this privacy finding.",
+      "refs": [
+        6751455863
+      ]
+    },
+    "3021": {
+      "status": "stacked dependency held",
+      "text": "Nine exact-head aggregates succeed and the branch is conflict-free against its configured base. Claude 3's exact-head integration focal 6758891477 is credited. This remains stacked on the open #2999 (claude5/sz4-member-prices); it must not be treated as an independent main candidate. Preserve the existing money-review chain and require the applicable financial closure when the parent lands.",
+      "refs": [
+        6758891477
+      ]
+    },
+    "3022": {
+      "status": "CI repair pending / generated artifacts",
+      "text": "I read the full verify log, job 128987973342: pricing-optimization.test.ts fails on input.plans.pro.coefYear.video (553 versus 554) and its rendered document; pricing-usage-proposal.test.ts also reports a stale generated document. These are the two failing files, not the proto-keys TODOs. Codex C2 already owns this diagnosis (6796809738); I will not duplicate a push or type generated monetary figures by hand. The official generators and their checks must run in an authorized cloud executor, preserving all current prices/limits/gates. TODOS-110 has since assigned the official regeneration to the coordinator's Node/SciPy cloud session; that assignment is retained.",
+      "refs": [
+        6796809738
+      ]
+    },
+    "3023": {
+      "status": "CI held / external installation failure",
+      "text": "The full failed macOS log (job 128999923836) shows Guidepup's VoiceOver preferences DMG download returning HTTP 504 before real reader execution. It is not an application assertion or a reason to weaken the reader gate. Eight aggregates succeed; accessibility-real-readers fails. Claude 2's exact-head focal 6736996170 is retained. No rerun or source push was needed for this diagnosis; the missing ninth aggregate still blocks queue readiness.",
+      "refs": [
+        6736996170
+      ]
+    },
+    "3024": {
+      "status": "changes requested / conflict",
+      "text": "Nine aggregates succeed but the stale-snapshot storage accounting MEDIUM is still present, confirmed by Claude 1 in 6787703741 and by Codex Z. Room must be derived from the actual CAS record, reserved before growth, and returned only after confirmed release; unknown writes keep reservations. GitHub also reports a conflict. Codex V's existing candidate is credited, not overwritten or duplicated. No queue readiness is inferred from the old green checks.",
+      "refs": [
+        6787703741
+      ]
+    },
+    "3026": {
+      "status": "conflict held",
+      "text": "Nine exact-head aggregates succeed and Claude 3's current-head focal is favorable, but GitHub now reports a conflict. This PR is stacked on claude5/sz4-member-prices. Preserve the editor's own changes, the parent, and current main when the authorized junction is made; its nine new aggregates and integration focal will be separate requirements. No product price or member-discount setting was changed.",
+      "refs": []
+    },
+    "3027": {
+      "status": "new head / conflict held",
+      "text": "Codex V already published the causal browser-fixture correction at this exact head (6796858920): valid replies carry more:false and explicit missing/invalid-more controls remain. The current head has no All checks aggregates yet and GitHub reports a conflict. Old failures on eb7ca090 are not failures demonstrated on this new head. I did not duplicate V's fix, alter its head during CI, rerun old jobs, or bypass the conflict.",
+      "refs": [
+        6796858920
+      ]
+    },
+    "3029": {
+      "status": "stacked dependency held",
+      "text": "Nine exact-head aggregates succeed; GitHub reports no conflict against the configured stacked base. Claude 1's full exact-head review 6787752460 is favorable and Codex U's textual focal remains credited. The open parent #3004 (claude5/sz2-u2-studio-fields) is still a dependency, so this is not ready as a standalone main candidate. No legal field, shipping gate, price or flag was changed.",
+      "refs": [
+        6787752460
+      ]
+    },
+    "3033": {
+      "status": "new head / conflict held",
+      "text": "Codex V's correction 6796844043 and Claude 4's focal 6796886210 already cover the missing approval coverage row and two company indexes. The new exact head has no All checks aggregates yet and conflicts with its configured stacked base. Do not reapply the old fix or reuse old-head CI as green for this head. The old home-page Mobile render sample has no c.js attribution, so it was not certified as the #3642 cause.",
+      "refs": [
+        6796844043,
+        6796886210
+      ]
+    },
+    "3034": {
+      "status": "conflict held",
+      "text": "Nine aggregates succeed, but GitHub reports a current conflict. The P/J admission-before-measurement focal closures and G's exact-head integration review 6751456860 are retained in their stated scopes; I did not repeat or broaden those financial opinions. A future junction must preserve paid sizing before measurement and CAS history updates. No new main merge, quota release, financial assumption or assertion weakening was made.",
+      "refs": [
+        6751456860
+      ]
+    },
+    "3035": {
+      "status": "CI held / shared Mobile render cause",
+      "text": "The full Mobile render log, job 130361634717, fails only Harbor Kitchen sample 3: interaction 347.2 ms, LCP 632 ms, CLS 0.02872. The overlapping LoAF attributes 289.2 ms to BotID c.js plus 44 ms to its load handler, matching #3642's cause. Do not copy that shared fix into this PR or change lab thresholds. The verify log 130361634697 returned Transport closed twice, so its cause remains unverified; the two proto-keys TODOs are not a substitute for the missing failure section. Earlier corrective review qualifications remain.",
+      "refs": [
+        6788637997
+      ]
+    },
+    "3036": {
+      "status": "conflict held",
+      "text": "Nine exact-head aggregates succeed and the current-head review chain is retained. GitHub now reports a conflict. Codex U already prepared adoption candidate 047c284e11d79465b947c7d95f61cc48431bd5a9 (6751706941); I did not overwrite that work or create a competing adoption branch. A reviewed retain-both junction and fresh exact-head checks are needed after the publication hold.",
+      "refs": [
+        6701960416,
+        6751706941
+      ]
+    },
+    "3037": {
+      "status": "coordinator disposition required",
+      "text": "Nine exact-head aggregates succeed and the branch is conflict-free, but Codex G's final exact-head focal still records an inherited conditional MEDIUM: an escaped literal require can omit a transitive UI dependency. G explicitly asks R2/coordinator disposition rather than another automatic focal, and found no current app/components/lib use in the searched forms. I found no written disposition in the retrieved discussion. This is not ready-for-queue solely because CI is green; no classifier or suite gate was weakened.",
+      "refs": []
+    },
+    "3051": {
+      "status": "CI held / external installation failure",
+      "text": "I read the complete failed Windows log, job 128998941794. Guidepup's NVDA cache ZIP download returns HTTP 504 before the real reader starts. The synthetic preparation tests pass; this log does not establish a product defect. Eight aggregates succeed and accessibility-real-readers fails. Claude 1's exact-head code review 6787685123 and G/M focal qualifications remain; no source correction, blind rerun, or financial approval was added.",
+      "refs": [
+        6787685123
+      ]
+    },
+    "3062": {
+      "status": "new corrective head / CI pending",
+      "text": "Codex V has already published b2f741a62298c6b24ee31ad18c57297e280ea008 for the assigned first batch, with the causal log evidence in 6797080709. The current head has only one successful All checks aggregate in this snapshot; the other eight are not established. Old-head failures cannot be relabeled as failures of this new candidate. I did not duplicate V's correction or move this head during CI. Wait for exact-head validation and the required focal closures.",
+      "refs": [
+        6797080709
+      ]
+    },
+    "3066": {
+      "status": "CI held / reservation",
+      "text": "The full verify log, job 128471973757, has one failing file: reservation-check.test.ts, naming lib/erasure-request.ts under Codex's SG2(17) reservation. The N lease in 6711374391 is credited but the recorded lease and the CI reservation file are different evidence. Only the reservation owner/coordinator may reconcile that row; I will not remove another agent's reservation or weaken the checker. Claude 2's pre-existing MEDIUM/follow-up qualification remains unchanged.",
+      "refs": [
+        6711374391,
+        6710003150
+      ]
+    },
+    "3067": {
+      "status": "CI held / cause unavailable",
+      "text": "Eight of nine aggregates succeed. The failed verify job 130111616142 returned Transport closed on both log reads; I cannot claim its failing file or call it weekdayAt. Claude 3's current-head integration focal 6786787838 is credited, including its explicitly preserved earlier findings. Please supply the actual non-TODO failing section for this job; proto-keys page-depth/partner-share TODOs are not failing files. No head update or rerun was made.",
+      "refs": [
+        6786787838
+      ]
+    },
+    "3068": {
+      "status": "CI held / two distinct mobile failures",
+      "text": "The full Mobile render log, job 130146849657, has two failures: / sample 1 at 224 ms, attributed to an unnamed document.onpointerdown listener (90.9 ms), and /@harborkitchen sample 1 at 359.7 ms, with c.js 119.6 ms plus its onload 227.8 ms. Only the store sample matches #3642. The home-page cause remains separate and unproved; no whole-job clearance or lab threshold change. Claude 3's integration focal 6787032072 is retained; the open #3067 parent also remains a dependency.",
+      "refs": [
+        6787032072
+      ]
+    },
+    "3069": {
+      "status": "stacked dependency held",
+      "text": "Nine exact-head aggregates succeed, and GitHub reports no conflict against the configured base. Claude 3's current-head focal 6787033073 is favorable. The open #2924 base (claude4/meta-lines-exact) is still red and owned by Codex T's assigned batch; this PR is not an independent main candidate. I did not duplicate T's diagnosis, alter Meta prices/settings, or merge main into a conflict-free branch.",
+      "refs": [
+        6787033073
+      ]
+    },
+    "3070": {
+      "status": "CI held / dated fixture",
+      "text": "The full verify log, job 128857919619, has one failing file: affiliate-leads.test.ts, 68 checks/1 failure, 'the monthly budget is the whole program\\'s'. It is not the proto-keys TODOs or weekdayAt. The dated affiliate-leads fixture repair #3142 is already MERGED as ef7037542ec0a9dd72ea75f5c31c609fac72dabd; reuse that proven cause rather than inventing a new budget or changing limits. The exact-head H2 corrective focal remains credited. No broad main merge or source push was made. Source-only one-file candidate `025fd33c8a8bbb34061672c639981979c43687cd` is now prepared, byte-identical to #3142's main fixture and retaining every assertion. Hosted RED evidence was saved before construction in 2cecc2bf00c89fc7369a64ded2221d05cd5309c3/evidence/p/batch2-20261111-red.json. The fresh Actions queue is 187 (>150), so TODOS-108 holds its ref update; no P GREEN execution is claimed.",
+      "refs": [
+        6712140004
+      ]
+    },
+    "3073": {
+      "status": "CI held / test process timeout",
+      "text": "The complete verify log, job 128483210700, identifies backup-run.test.ts: it prints 96 checks all passing, then reaches the 600 s timeout with exit not seen, next compile resolved, and the worker sleeping in futex_do_wait. It is not weekdayAt and does not justify a longer timeout or weaker assertions. Main now has the exitCode-based check helper; Codex V has just ported the shared exit correction in #3062. Preserve both exact-head money reviews; a bounded causal comparison is needed before any targeted port here, not a duplicated product fix. Source-only four-file candidate `1cc894511d0d8b2eac8c0a7ee84c3e1ce5f7fab4` is now prepared from main's exact reviewed blobs, including its static regression and bounded stress proof; the 600 s runner timeout is unchanged. Hosted RED evidence was saved before construction in 2cecc2bf00c89fc7369a64ded2221d05cd5309c3/evidence/p/batch2-20261111-red.json. Queue 187 (>150) holds the ref update under TODOS-108. No P test execution or GREEN claim.",
+      "refs": [
+        6710961782,
+        6711903772
+      ]
+    },
+    "3075": {
+      "status": "CI held / shared Mobile render cause",
+      "text": "The full failed Mobile render log, job 130310191832, fails Harbor Kitchen sample 2 at 216.9 ms. Its overlapping frame contains BotID c.js 153 ms plus onload 46.9 ms; LCP 608 ms and CLS 0.02872 pass. This matches #3642. Existing exact-head merge focals 6786605503/6786617764 remain credited. No copied fix, main merge, changed threshold or rerun; the ninth aggregate is still required.",
+      "refs": [
+        6786605503,
+        6786617764
+      ]
+    },
+    "3079": {
+      "status": "CI and owner decision held",
+      "text": "The existing exact-head diagnosis 6786585140 explicitly leaves the read-ceilings MEDIUM open: batching changed the margin-maximality relation, and the proposed heavy-reading change is a visible-limit decision. This batch prohibits such changes; I did not alter HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, the assertion or the model. The current verify log 130312745289 returned Transport closed twice; its real failing section remains unverified independently. Eight aggregates succeed, so this is not queue-ready.",
+      "refs": [
+        6786585140
+      ]
+    },
+    "3086": {
+      "status": "conflict held",
+      "text": "Nine exact-head aggregates succeed and Claude 4 plus Claude 1 provide favorable exact-head money reviews (6765962777/6787101187). GitHub now reports a current main conflict, so the earlier clean merge observations no longer establish queue readiness. Preserve own-id Stripe reply validation and both parents when resolving; obtain the required integration closure and nine new aggregates afterward. No financial behavior or branch head was changed.",
+      "refs": [
+        6765962777,
+        6787101187
+      ]
+    },
+    "3095": {
+      "status": "changes requested / dependency held",
+      "text": "Nine aggregates succeed and the branch is conflict-free, but Claude 1's two MEDIUMs in 6786390569 remain blocking. The author explicitly keeps this PR out of the queue in 6786402369 pending the #2957 erasure-recovery/handle-race correction. #2957 is still OPEN at f88a31028862cb0af2b0e8ba5dac53c7e1adde13, not merged. I did not duplicate the shared erasure correction or infer privacy clearance from green CI.",
+      "refs": [
+        6786390569,
+        6786402369
+      ]
+    },
+    "3101": {
+      "status": "CI held / shared Mobile render cause",
+      "text": "The complete failed Mobile render log, job 130113602482, fails Harbor Kitchen sample 1 at 344 ms. The overlapping frame attributes 237.7 ms to c.js plus 50.2 ms to its load handler; LCP 648 ms and CLS 0 pass. This matches #3642's first-input challenge cause. Claude 3's integration focal 6787034312 remains credited, as do the earlier financial closures. No duplicate fix, rerun, main merge or threshold change; no ninth-green claim.",
+      "refs": [
+        6787034312
+      ]
+    },
+    "3107": {
+      "status": "conflict held",
+      "text": "Nine exact-head aggregates succeed. Claude 6's first exact-head focal 6786400408 and Claude 1's second money review 6786851490 are favorable. GitHub now reports a conflict with current main. The previously closed interval_count finding stays closed in its reviewed source; a retain-both junction must preserve unknown POST handling and the newer main writes. No live financial path or head was changed.",
+      "refs": [
+        6786400408,
+        6786851490
+      ]
+    },
+    "3118": {
+      "status": "CI held / five real failing files",
+      "text": "The full verify log, job 130090095464, has five failing files: accessibility-inventory, accessibility-statement, checkup-disputes (dated due-day wording), reservation-check (lib/help-content.ts owned by Claude 2/PF1), and stripe-list-lot1 ('refunds read whole and readable: the refund is made once'). This is not weekdayAt or the proto-keys TODOs. The #3062 parent now has V's corrective head b2f741a62298c6b24ee31ad18c57297e280ea008; reconcile that work before a competing repair, and let the reservation owner handle its row. Existing cost review/focal 6787289262 is retained, not expanded.",
+      "refs": [
+        6787289262
+      ]
+    },
+    "3129": {
+      "status": "draft / changes requested / CI and conflict held",
+      "text": "This remains a draft with a current conflict and Claude 5's MEDIUM 6732344981 on the composition with #3101. I read both failed logs: verify 128534577071 has six failing files (cart-link-settle-after-read, limits-proposal, lq17-cost-document, margin-alignment, pricing-optimization, pricing-usage-proposal); Documentation scope job 128528591476 fails the public-data scanner on tests/sales-file-cheaper.test.ts [provider-account]. Generated monetary artifacts must come from the official scripts, never hand-edited numbers. No draft activation, quota/price change, assertion relaxation or branch update.",
+      "refs": [
+        6732344981
+      ]
+    },
+    "3156": {
+      "status": "privacy finding / dependency held",
+      "text": "The nine aggregates succeed, but Claude 6's exact-head MEDIUM in 6786477130 is not disposed merely by green CI. The author places its sibling correction in #3660 (6786726159). #3660 remains OPEN at af59d74bdeefb533fa78b5d8b1b5d6f1f07fa4a0; no merged-fix proof exists yet. Preserve M's earlier causal closures and the author branch. I did not duplicate the erasure fix or certify queue readiness.",
+      "refs": [
+        6786477130,
+        6786726159
+      ]
+    },
+    "3158": {
+      "status": "dependency held",
+      "text": "Nine aggregates succeed and GitHub reports no conflict, but Claude 6's exact-head focal 6748586554 is explicitly conditional on #3173 merging first, not before. #3173 is still OPEN, red and conflicted at adf09726af8a925b71f6bd040601b302454ec14f. The connection-read MEDIUM cannot be closed on main by an unmerged sibling. No duplicate connection-reader fix or rerun.",
+      "refs": [
+        6748586554
+      ]
+    },
+    "3159": {
+      "status": "conflict held / partial overlap, not duplicate",
+      "text": "Nine aggregates succeed, but GitHub reports a main conflict, matching Claude 3's MEDIUM in 6759912223. That review identifies partial overlap with merged #2908 fixes (2334e166c / 267554a9e / d0e25631a); partial coverage is not proof this entire PR is superseded. Retain the main buyer-profile safeguards and this PR's honest partial-state words/tests when resolving. I did not close the PR or erase either side.",
+      "refs": [
+        6759912223
+      ]
+    },
+    "3171": {
+      "status": "conflict held",
+      "text": "Nine exact-head aggregates succeed, but GitHub now reports a conflict. Claude 1's exact-head financial review 6728089498 and Codex Z's focal are credited, including the cookie-pairing LOW and generated-document qualifications. A new junction must preserve both parents and regenerate owned artifacts through their scripts rather than editing figures. No upload gate, price, allowance, session or author head was changed.",
+      "refs": [
+        6728089498
+      ]
+    },
+    "3173": {
+      "status": "CI and conflict held / reservation plus separate mobile issue",
+      "text": "I read both complete failed logs. verify 128857425099 fails only reservation-check.test.ts: three community event paths are owned by Claude 3. The proto-keys warnings are TODOs, not failing files. Mobile render 128857425108 fails / sample 1 at 344 ms; the overlapping frame attributes 258.6 ms to an unnamed document.onpointerdown handler, not c.js. This does not prove the #3642 cause. GitHub also reports a conflict. Preserve Claude 1's focal 6726877965; do not remove the owner's reservations or weaken the lab.",
+      "refs": [
+        6726877965,
+        6728004033
+      ]
+    },
+    "3190": {
+      "status": "changes requested / CI and conflict held",
+      "text": "Claude 1's exact-head MEDIUM 6784937400 remains: the no-refund letter claims the plan renews as usual even when takeBackStop accepted a subscription already ended by our stop. The earlier refund/cursor closures do not close this later wording defect. GitHub now reports a conflict; verify job 129627787442 returned Transport closed twice, so its failing file is not independently verified here. No refund/account behavior, letter, assertion, limit or author ref was changed.",
+      "refs": [
+        6784937400
+      ]
+    },
+    "3194": {
+      "status": "conflict held",
+      "text": "Nine aggregates succeed and Claude 4's exact-head focal 6726774594 closes the earlier QR attribution and date-tag findings. GitHub now reports a current main conflict, so the previous clean composition is stale. A retain-both junction must keep campaignLink's original attribution parameters and this QR correction, followed by exact-head CI and the applicable review chain. No commission or attribution policy was changed.",
+      "refs": [
+        6726774594
+      ]
+    },
+    "3203": {
+      "status": "conflict held",
+      "text": "Nine exact-head aggregates succeed and Codex V's earlier merge-resolution focal 6779490848 is retained. GitHub now reports a new main conflict. Preserve paid buyer access and both parents' OF1/rest-page behavior; the earlier reservation-only focal cannot certify a new unresolved composition. No visitor/buyer gate, receipt, product or author ref was changed.",
+      "refs": [
+        6779490848
+      ]
+    },
+    "3206": {
+      "status": "owner-only reservation conflict held",
+      "text": "Nine aggregates succeed, but this documentary PR conflicts with main's N reservation row. Codex N's exact line confirmation 6718746483 and Codex V's already prepared two-parent candidate d0f43108b9d9df10e34349f15137826c05149b36 (6771004275) are retained. Only the reservation owner/coordinator may reconcile this row. I did not rewrite another agent's reservation or publish a competing candidate.",
+      "refs": [
+        6718746483,
+        6771004275
+      ]
+    },
+    "3213": {
+      "status": "CI held / actual failing reservation file",
+      "text": "The full verify log, job 129374809839, has exactly one failing file: reservation-check.test.ts. It names app/studio/community/page.tsx, lib/community-mail.ts and lib/community.ts under Claude 3's Rule-30 reservations. proto-keys has TODO warnings and fail 0; those are not the failure. My earlier exact-head integration approval 6751419087 remains in its scope, not queue clearance. Only the owner/coordinator can reconcile the reservation evidence; no product, checker or foreign reservation changed.",
+      "refs": [
+        6751419087
+      ]
+    },
+    "3215": {
+      "status": "changes requested despite nine green checks",
+      "text": "Nine aggregates succeed and there is no current conflict, but two exact-head MEDIUM findings remain: Claude 1's 6784932849 (the first unhandled row causes later unhandled rows to be skipped) and Claude 6's 6786534085 (a held store delays earlier healthy stores). Earlier cursor findings and their partial closures are retained, not treated as a blanket approval. A causal correction needs synthetic progress/no-duplicate controls, preserving the bounded walk and unknown state. No paid reminder, visible limit or cursor was changed here.",
+      "refs": [
+        6784932849,
+        6786534085
+      ]
+    },
+    "3225": {
+      "status": "conflict held",
+      "text": "Nine aggregates succeed, and Codex V's previous reservation-resolution focal 6779490424 remains credited. GitHub now reports a current main conflict. Preserve the exact/unknown MCP lesson-parts and page-depth behavior and both parents' test aliases when resolving; no course-import or unrelated product file may be touched. No head update or automatic main merge was attempted.",
+      "refs": [
+        6779490424
+      ]
+    },
+    "3267": {
+      "status": "conflict held",
+      "text": "Nine exact-head aggregates succeed, and Claude 1's exact-head integration review 6784750434 is favorable. GitHub now reports another main conflict. The prior test-config alias merge must not be reused as proof that the new conflict is resolved; preserve both alias lists, the plan-invoices line and studio-calendar-unknown coverage. No calendar feature, source branch or CI assertion was changed.",
+      "refs": [
+        6784750434
+      ]
+    },
+    "3272": {
+      "status": "HIGH finding and conflict held",
+      "text": "Nine aggregates succeed, but the conditional HIGH in Codex CX1's exact-head review remains recorded: HEXISTS=1 / HSETNX=0 is treated as a readable matching payout receipt without validating its contents, allowing the settled item to disappear while readBook still considers commission owed. Claude 1's favorable review 6786935045 does not explicitly dispose of that separate finding. GitHub now reports a conflict too. I did not change payout logic, dismiss the HIGH, enqueue or close the PR; the coordinator must resolve the conflicting findings before admission.",
+      "refs": [
+        6786935045
+      ]
+    },
+    "3273": {
+      "status": "conflict held",
+      "text": "Nine aggregates succeed and Claude 6's exact-head focal 6745918103 closes N1/N3 with LOW notes retained. GitHub now reports a current main conflict. A retain-both junction must preserve the shrink/unknown guard, verified-set logic, and the existing disabled backup route; no cost review or backup gate may be activated. The previous green head is not a tested new composition. No branch or gate changed.",
+      "refs": [
+        6745918103
+      ]
+    }
+  },
+  "candidateRepairs": [
+    {
+      "pr": 3070,
+      "parent": "92b02aa03f346da12fe8e08cfde835a8869f2aa2",
+      "tree": "a6785b3178dfb709b397d3faae19333e18d27a50",
+      "commit": "025fd33c8a8bbb34061672c639981979c43687cd",
+      "message": "test(affiliate-leads): keep monthly-budget fixtures in one month",
+      "files": [
+        {
+          "path": "tests/affiliate-leads.test.ts",
+          "mode": "100644",
+          "type": "blob",
+          "sha": "4f31fe2e4a5d225f1124c09895a3e5e7d435dd49"
+        }
+      ],
+      "refUpdated": false,
+      "compareFiles": [
+        {
+          "path": "tests/affiliate-leads.test.ts",
+          "sha": "4f31fe2e4a5d225f1124c09895a3e5e7d435dd49",
+          "patch": "@@ -112,8 +112,11 @@ async function main(): Promise<void> {\n   is(\"an hour holds a quarter of the day, at least one\", [hourlyLeads(10), hourlyLeads(1), hourlyLeads(500)], [3, 1, 125]);\n \n   part(\"How each lead stands\");\n-  // The start of a UTC day 40 days ago, so the leads below stay inside one day.\n-  const old = Math.floor((NOW - 40 * DAY) / DAY) * DAY;\n+  // The start of the 2nd day of the UTC month two months back: always past every hold below (at least\n+  // 32 days old), and the three days the monthly-budget leads use (2nd to 4th) never cross into another\n+  // month, whatever today's date. \"40 days ago\" crossed a month end on some dates (on 8 November it put\n+  // the third lead on 1 October), so the monthly budget was never reached and the test failed by date.\n+  const old = ((at: Date) => Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - 2, 2) / 1000)(new Date(NOW * 1000));\n   const settled = settleLeads([lead({ at: NOW - DAY })], NOW);\n   is(\"inside its hold it earns and waits\", [settled[0].status, settled[0].commission, settled[0].readyAt], [\"in hold\", 500, NOW - DAY + 30 * DAY]);\n   is(\"after it, it needs the creator's approval\", settleLeads([lead({})], NOW)[0].status, \"needs approval\");"
+        }
+      ]
+    },
+    {
+      "pr": 3073,
+      "parent": "e988e105b1528780310c1dd6a696500025645727",
+      "tree": "525001f30eb78871571023b82da5cd11b5013102",
+      "commit": "1cc894511d0d8b2eac8c0a7ee84c3e1ce5f7fab4",
+      "message": "test: port reviewed exit-code fix for Node 24 test shutdown",
+      "files": [
+        {
+          "path": "tests/check.ts",
+          "mode": "100644",
+          "type": "blob",
+          "sha": "2729607d0019b4fa327033a48153e222588efc07"
+        },
+        {
+          "path": "tests/check-exit.test.ts",
+          "mode": "100644",
+          "type": "blob",
+          "sha": "b6705a63d6f099a76627659bc6336094e50591b3"
+        },
+        {
+          "path": "tests/check-exit.proof.ts",
+          "mode": "100644",
+          "type": "blob",
+          "sha": "29b7a3198c79a51f44b2d2d51edec8f93eef12f0"
+        },
+        {
+          "path": "tests/run.mjs",
+          "mode": "100644",
+          "type": "blob",
+          "sha": "74ad63c22e6480163adf3a2dded382195ad90b46"
+        }
+      ],
+      "refUpdated": false,
+      "compareFiles": [
+        {
+          "path": "tests/check-exit.proof.ts",
+          "sha": "29b7a3198c79a51f44b2d2d51edec8f93eef12f0",
+          "patch": "@@ -0,0 +1,59 @@\n+/**\n+ * Node 24 can deadlock inside process.exit(): the main thread waits for the V8 worker threads to stop while one\n+ * of them waits for a garbage collection only the main thread can run (CI verify hung for 48 min right after\n+ * \"96 checks, all passing.\" in 9 jobs on 6 November; gdb: MainThread in NodePlatform::Shutdown/uv_thread_join,\n+ * V8Worker in CollectionBarrier::AwaitCollectionBackground; nodejs/node#64560). A test file must end by its exit\n+ * code, so the heap is torn down before the platform is.\n+ *\n+ * The proof runs children that allocate hard and then call done(), with V8's --stress-concurrent-allocation,\n+ * which makes that race frequent; with process.exit() about a third of them never end. Each child gets 15 s.\n+ *\n+ * Run it by hand on the CI's Node (24.x): node tests/run-one is not needed — bundle it like any test and run it.\n+ * It is a .proof.ts, not a .test.ts, so the suite does not run 16 stressed children on every verify, and on\n+ * Node 22 the stress flag hangs children even on a normal exit, so the proof is meaningful only on Node 24.\n+ */\n+import { spawn } from \"node:child_process\";\n+import { done, is, part } from \"./check\";\n+\n+const CHILDREN = 16;\n+const AT_ONCE = 8;\n+const LIMIT_MS = 15_000;\n+\n+function allocateThenDone(): void {\n+  const keep: unknown[] = [];\n+  const until = Date.now() + 300;\n+  while (Date.now() < until) {\n+    keep.push(new Array(2_000).fill(Math.random()));\n+    if (keep.length > 400) keep.splice(0, 200);\n+  }\n+  is(\"the child counted its one check\", keep.length > 0, true);\n+  done();\n+}\n+\n+function runChild(): Promise<\"ended\" | \"hung\"> {\n+  return new Promise((resolve) => {\n+    const child = spawn(process.execPath, [\"--stress-concurrent-allocation\", process.argv[1]], { env: { ...process.env, CHECK_EXIT_CHILD: \"1\" }, stdio: \"ignore\" });\n+    const timer = setTimeout(() => {\n+      child.kill(\"SIGKILL\");\n+      resolve(\"hung\");\n+    }, LIMIT_MS);\n+    child.once(\"exit\", () => {\n+      clearTimeout(timer);\n+      resolve(\"ended\");\n+    });\n+  });\n+}\n+\n+async function main(): Promise<void> {\n+  part(\"A test file that has printed its result also ends (no deadlock inside process.exit)\");\n+  const results: (\"ended\" | \"hung\")[] = [];\n+  for (let i = 0; i < CHILDREN; i += AT_ONCE) results.push(...(await Promise.all(Array.from({ length: Math.min(AT_ONCE, CHILDREN - i) }, runChild))));\n+  is(`all ${CHILDREN} children that allocate hard and call done() end within ${LIMIT_MS / 1000} s`, results.filter((r) => r === \"hung\").length, 0);\n+  done();\n+}\n+\n+if (process.env.CHECK_EXIT_CHILD === \"1\") allocateThenDone();\n+else main().catch((error) => {\n+  console.error(error);\n+  process.exitCode = 1;\n+});"
+        },
+        {
+          "path": "tests/check-exit.test.ts",
+          "sha": "b6705a63d6f099a76627659bc6336094e50591b3",
+          "patch": "@@ -0,0 +1,32 @@\n+/**\n+ * Guard for tests/check-exit.proof.ts: done() must end the file by its exit code, never by process.exit() directly,\n+ * because Node 24 can deadlock inside process.exit() (9 CI verify jobs hung 48 min on 6 November). The stress proof\n+ * shows 6 of 16 children hanging with process.exit() and 0 of 48 with the exit code, on Node 24.22.2.\n+ */\n+import { strict as assert } from \"node:assert\";\n+import { readFileSync } from \"node:fs\";\n+import { test } from \"node:test\";\n+\n+const source = readFileSync(\"tests/check.ts\", \"utf8\");\n+const body = source.slice(source.indexOf(\"export function done(\"));\n+const end = body.indexOf(\"\\n}\\n\");\n+const done = body.slice(0, end);\n+\n+test(\"done() sets the exit code and lets the process end by itself\", () => {\n+  assert.match(done, /process\\.exitCode = failures === 0 \\? 0 : 1;/);\n+});\n+\n+test(\"done() never calls process.exit() directly; only a timer that does not hold the process may\", () => {\n+  const code = done.split(\"\\n\").filter((line) => !line.trim().startsWith(\"//\") && !line.trim().startsWith(\"*\"));\n+  const direct = code.filter((line) => line.includes(\"process.exit(\") && !line.includes(\"setTimeout(\"));\n+  assert.deepEqual(direct, []);\n+  assert.match(done, /setTimeout\\(\\(\\) => process\\.exit\\(process\\.exitCode\\), \\d[\\d_]*\\)\\.unref\\(\\);/);\n+});\n+\n+test(\"the runner ends by its exit code too, never process.exit() after a failure\", () => {\n+  const runner = readFileSync(\"tests/run.mjs\", \"utf8\");\n+  const tail = runner.slice(runner.indexOf(\"failed += clientBundles.failed;\"));\n+  assert.match(tail, /process\\.exitCode = 1;/);\n+  const code = tail.split(\"\\n\").filter((line) => !line.trim().startsWith(\"//\"));\n+  assert.deepEqual(code.filter((line) => line.includes(\"process.exit(\") && !line.includes(\"setTimeout(\")), []);\n+});"
+        },
+        {
+          "path": "tests/check.ts",
+          "sha": "2729607d0019b4fa327033a48153e222588efc07",
+          "patch": "@@ -8,6 +8,17 @@\n  */\n let failures = 0;\n let checks = 0;\n+/** Whether the file reached done(): only that ends it with 0. */\n+let reached = false;\n+\n+// A file that stops before done(), on a promise that never settles, ends when the event loop empties, with code 0:\n+// it would pass in CI without a word (Claude 6, 9 November 2026). At its exit it fails instead, with a line that\n+// says so. A file that reached done(), or that already fails (a check, an error thrown), is left as it is.\n+process.once(\"exit\", (code) => {\n+  if (reached || code !== 0) return;\n+  console.log(`\\nThis test file ended without reaching done() (${checks} checks ran): counted as a failure.`);\n+  process.exitCode = 1;\n+});\n \n /** Compares by value, prints the line, and remembers a failure. */\n export function is(what: string, got: unknown, want: unknown): void {\n@@ -30,10 +41,16 @@ export function part(name: string): void {\n \n /** Ends the process with the right code: what makes this usable in CI. */\n export function done(): void {\n+  reached = true;\n   console.log(\n     failures === 0\n       ? `\\n${checks} checks, all passing.`\n       : `\\n${checks} checks, ${failures} failing.`,\n   );\n-  process.exit(failures === 0 ? 0 : 1);\n+  // Ends by its exit code, never process.exit(): Node 24 can deadlock inside process.exit() when a V8 background\n+  // task waits for a garbage collection only the main thread can run (nodejs/node#64560; 9 CI verify jobs hung\n+  // 48 min after \"96 checks, all passing.\" on 6 November). A normal end tears the heap down first. Anything a test\n+  // leaves open still ends the run: the timer below does not hold the process, it only fires if something else does.\n+  process.exitCode = failures === 0 ? 0 : 1;\n+  setTimeout(() => process.exit(process.exitCode), 2_000).unref();\n }"
+        },
+        {
+          "path": "tests/run.mjs",
+          "sha": "74ad63c22e6480163adf3a2dded382195ad90b46",
+          "patch": "@@ -51,8 +51,13 @@ console.log(`\\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${\n for (const failure of clientBundles.failures) console.error(failure);\n failed += clientBundles.failed;\n \n+// Ends by its exit code, like tests/check.ts done(): Node 24 can deadlock inside process.exit() (nodejs/node#64274).\n+// The unref'd timer only fires if something (an esbuild service, a stray handle) still holds the process.\n if (failed) {\n   console.log(`\\n${failed} test file(s) failed.`);\n-  process.exit(1);\n+  process.exitCode = 1;\n+} else {\n+  console.log(\"\\nEverything passing.\");\n+  process.exitCode = 0;\n }\n-console.log(\"\\nEverything passing.\");\n+setTimeout(() => process.exit(process.exitCode), 5_000).unref();"
+        }
+      ]
+    }
+  ],
+  "redEvidence": {
+    "commit": "2cecc2bf00c89fc7369a64ded2221d05cd5309c3",
+    "path": "evidence/p/batch2-20261111-red.json",
+    "blob": "6729d8df9c89ec9d563f2fb6299150787d8b7d7f"
+  },
+  "limits": {
+    "runtimeExecutedByP": false,
+    "testsRunByP": false,
+    "officialTypesLintScannerDiffRunByP": false,
+    "sourceComparison": "Exact GitHub compare patches; one test fixture only for3070; four main-identical test files for3073.",
+    "annotationFetch": "GitHub fetch disallows /check-runs/<id>/annotations; no unsupported annotations claim",
+    "logTransportClosedTwice": [
+      130341107835,
+      130361634697,
+      130111616142,
+      130312745289,
+      129627787442
+    ],
+    "reruns": 0,
+    "merges": 0,
+    "enqueueActions": 0,
+    "productRefUpdates": 0,
+    "subagents": 0
+  },
+  "status": "Triage comments are complete. Repairs, conflicts and finding closures remain pending; do not call this batch fully fixed."
+}

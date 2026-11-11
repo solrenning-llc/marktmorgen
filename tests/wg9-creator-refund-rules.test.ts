@@ -66,13 +66,15 @@ is("the key names the store, the charge and the action, within Stripe's 255 char
 is("no key without a real action token, or with ids we do not make", [refundIdempotencyKey("st1", "ch_1", "short"), refundIdempotencyKey("st1", "ch_1", "z".repeat(32)), refundIdempotencyKey("st 1", "ch_1", A), refundIdempotencyKey("st1", "ch:1", A), refundIdempotencyKey("st1", "", A)], [null, null, null, null, null]);
 
 part("Stripe's answer: done only when it is this refund and it succeeded");
-const asked = { chargeId: "ch_1", cents: 1_250 };
+const asked = { chargeId: "ch_1", cents: 1_250, currency: "usd" };
 const refund = (over: Record<string, unknown> = {}) => ({ id: "re_1", object: "refund", charge: "ch_1", amount: 1_250, currency: "usd", status: "succeeded", ...over });
 is("succeeded, for this charge and this amount: done", refundOutcome(refund(), asked), "done");
 is("the charge expanded as an object reads the same", refundOutcome(refund({ charge: { id: "ch_1", object: "charge" } }), asked), "done");
 is("pending or waiting on an action: pending, not done", [refundOutcome(refund({ status: "pending" }), asked), refundOutcome(refund({ status: "requires_action" }), asked)], ["pending", "pending"]);
 is("failed or canceled: failed", [refundOutcome(refund({ status: "failed" }), asked), refundOutcome(refund({ status: "canceled" }), asked)], ["failed", "failed"]);
 is("another amount, another charge, a status Stripe does not send: unknown, never done", [refundOutcome(refund({ amount: 1_200 }), asked), refundOutcome(refund({ charge: "ch_2" }), asked), refundOutcome(refund({ status: "ok" }), asked)], ["unknown", "unknown", "unknown"]);
+is("a currency missing, null, not text or not the charge's: unknown, never done (Codex Cloud 1 on #3634)", [refundOutcome(refund({ currency: undefined }), asked), refundOutcome(refund({ currency: null }), asked), refundOutcome(refund({ currency: 840 }), asked), refundOutcome(refund({ currency: "eur" }), asked), refundOutcome(refund({ currency: "USD" }), asked)], ["unknown", "unknown", "unknown", "unknown", "unknown"]);
+is("pending or failed in another currency: unknown too", [refundOutcome(refund({ currency: "eur", status: "pending" }), asked), refundOutcome(refund({ currency: "eur", status: "failed" }), asked)], ["unknown", "unknown"]);
 is("no answer, an error body, not a refund: unknown", [refundOutcome(null, asked), refundOutcome({ error: { type: "api_error" } }, asked), refundOutcome({ ...refund(), object: "charge" }, asked), refundOutcome({ ...refund(), id: "" }, asked)], ["unknown", "unknown", "unknown", "unknown"]);
 
 part("Pure: no Stripe call, no Redis, no email");

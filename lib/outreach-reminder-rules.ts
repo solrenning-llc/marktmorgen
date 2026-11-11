@@ -119,7 +119,7 @@ export function reminderDraft(input: { subject: string; sentAt: number; footer: 
     "",
     `I wrote to you on ${dayWords(input.sentAt, input.timeZone)} and wanted to make sure my email reached you. I would still be glad to talk.`,
     "",
-    "If it is not a fit, there is no need to reply, and I will not write again.",
+    "If it is not a fit, there is no need to reply, and I will not follow up on this email again.",
   ].join("\n");
   return { subject: reminderSubject(input.subject), body, text: pitchText(body, input.footer) };
 }

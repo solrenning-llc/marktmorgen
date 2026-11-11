@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/chat-summary/route";
-import { CHAT_URL, reset, state } from "./chat-counter-admission-world";
+import { CHAT_URL, redis, reset, state } from "./chat-counter-admission-world";
 
 let passed = 0, failed = 0;
 async function check(name: string, run: () => Promise<void>) {
@@ -97,6 +97,21 @@ async function main() {
       assert.equal(state.posts, 0); assert.equal(settings().length, 1); assert.equal(settings()[0][0], "DEL");
       assert.equal(counters().length, 0, "removal is admitted by the studio guard, not the provider-test counter");
     });
+    for (const body of [{}, { url: null }, { url: 0 }, { url: false }, { url: [] }, { url: {} }]) {
+      await check("non-text/missing url cannot remove a saved setting: " + JSON.stringify(body), async () => {
+        reset();
+        assert.equal((await ask()).status, 200);
+        const snapshot = () => redis.keys().filter(key => key.startsWith("nl:chatsum:")).sort().map(key => [key, redis.run(["GET", key])]);
+        const before = snapshot();
+        assert.ok(before.length > 0, "a real sealed setting is present");
+        state.commands.length = 0; state.posts = 0;
+        const response = await ask(body);
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), { ok: false, error: "invalid" });
+        assert.deepEqual(snapshot(), before, "invalid input preserves the sealed bytes");
+        assert.deepEqual([counters().length, state.posts, settings().length], [0, 0, 0]);
+      });
+    }
     // Claude 5 LOW1 (6701833468): stopping must remain available after refused saves.
     for (const mode of ["unknown", "exceeded", "whitespace"] as const) await check(`removal bypasses only the provider-test counter: ${mode}`, async () => {
       reset(); state.override = true; state.reply = mode === "unknown" ? ["OK", null] : [null, 11];

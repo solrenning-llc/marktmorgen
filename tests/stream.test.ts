@@ -455,6 +455,23 @@ async function main() {
   const many = (await streamCaptions([door.pathname]))[door.pathname] ?? [];
   is(`a video holds captions in ${MAX_CAPTION_TRACKS} languages and no more`, [many.length, await addCaption(door.pathname, "zh", SRT)], [MAX_CAPTION_TRACKS, { ok: false, reason: "many" }]);
   is("though one of those it has can still be replaced", (await addCaption(door.pathname, "en", SRT)).ok, true);
+  // The cap is read exactly (rule 24): HEXISTS and HLEN answered cut short or in another shape are not "room for one
+  // more", so nothing is sent to the service for a language the video may not take.
+  {
+    const realPipeline = redis.pipeline;
+    for (const [label, reply] of [
+      ["no replies", []],
+      ["one reply short", [0]],
+      ["a count missing", [0, null]],
+      ["a count as text", [0, "3"]],
+      ["objects", [{}, {}]],
+    ] as [string, unknown[]][]) {
+      redis.pipeline = async (commands) => (commands.length === 2 && commands[0][0] === "HEXISTS" && commands[1][0] === "HLEN" ? reply : realPipeline(commands));
+      const answer = await addCaption(door.pathname, "zh", SRT);
+      redis.pipeline = realPipeline;
+      is(`the cap read as ${label}: nothing sent to the service`, [answer, captions.has(`${door.id}/zh`)], [{ ok: false, reason: "unavailable" }, false]);
+    }
+  }
   said = await dropCaption(door.pathname, "pt");
   is("taken away, a language is gone from the service and from the list", [captions.has(`${door.id}/pt`), said.ok && said.captions.some((track) => track.lang === "pt")], [false, false]);
 

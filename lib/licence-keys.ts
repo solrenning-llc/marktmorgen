@@ -55,6 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -701,12 +702,16 @@ export async function checkKey(store: Store, product: Listing, key: string): Pro
 export async function keysOf(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const replies = await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })]));
+  // Read exactly (rule 24): one reply a product, a list of text with an even count; anything else throws, so the
+  // person's data copy fails whole and is tried again, never handed over without their license keys.
+  const replies = repliesFor(await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })])), productIds.length);
+  if (!replies) throw new UnknownReplyError("a person's license keys");
   return productIds.flatMap((product, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a person's license keys");
     const out: (IssuedKey & { product: string })[] = [];
-    for (let k = 0; k + 1 < flat.length; k += 2) {
-      const entry = parseInfo(String(flat[k]), flat[k + 1]);
+    for (let k = 0; k < flat.length; k += 2) {
+      const entry = parseInfo(flat[k], flat[k + 1]);
       if (entry && entry.email.trim().toLowerCase() === address) out.push({ ...entry, product });
     }
     return out;

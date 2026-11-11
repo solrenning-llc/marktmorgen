@@ -16,6 +16,7 @@
  * its room back. The forms themselves are few and bounded (MAX_FORMS).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
@@ -27,8 +28,10 @@ const responsesKey = (statsId: string, formId: string) => `nl:form:r:${statsId}:
 /** Every form of a store, newest change first. */
 export async function readForms(statsId: string | null): Promise<FormDef[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", formsKey(statsId)]]);
-  const list = Array.isArray(raw) ? raw : [];
+  // Read exactly (rule 24): a reply cut short or of another shape throws, never "this store has no forms", which left
+  // a person's answers out of their data copy and wrote no forms into the store's export.
+  const list = stringList(repliesFor(await redisPipeline([["HVALS", formsKey(statsId)]]), 1)?.[0]);
+  if (!list) throw new UnknownReplyError("a store's forms");
   return list
     .map((value) => {
       try {

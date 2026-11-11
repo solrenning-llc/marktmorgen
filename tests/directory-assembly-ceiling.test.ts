@@ -236,6 +236,26 @@ async function main(): Promise<void> {
     const kept = JSON.parse(String(await get(LAST))) as { sids: string[]; rows: Record<string, unknown>[] };
     const first = kept.rows[0];
     const product = (first.products as Record<string, unknown>[])[0];
+
+    // One deduplicated click can lead to more than one checkout. That is a valid rate above 100%, not a bent row.
+    const repeatBuyer = {
+      ...first,
+      numbers: {
+        affiliates: 3,
+        since: 1_700_000_000_000,
+        clicks: 100,
+        clickSales: 120,
+        conversion: 120,
+        per100Cents: 25_000,
+        sales: 120,
+        earnedCents: 30_000,
+        paidCents: 20_000,
+      },
+    };
+    await original([["SET", DIRECTORY_CACHE, JSON.stringify([repeatBuyer, ...kept.rows.slice(1)]), "EX", 300]]);
+    const repeated = await counted(() => attempt());
+    is("a kept page accepts repeat buyers whose sales make conversion exceed 100%", [repeated.result, repeated.words], [["breadhouse", "cakeshop"], { GET: 1 }]);
+
     const bent: [string, unknown][] = [
       ["a row that is null", null],
       ["a row that is a number", 1],

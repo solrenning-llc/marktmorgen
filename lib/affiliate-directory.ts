@@ -288,7 +288,8 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
 
 const isRecord = (raw: unknown): raw is Record<string, unknown> => typeof raw === "object" && raw !== null && !Array.isArray(raw);
 const isWhole = (raw: unknown): raw is number => typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0;
-const isShare = (raw: unknown): raw is number => typeof raw === "number" && Number.isFinite(raw) && raw >= 0 && raw <= 100;
+const isNonNegative = (raw: unknown): raw is number => typeof raw === "number" && Number.isFinite(raw) && raw >= 0;
+const isShare = (raw: unknown): raw is number => isNonNegative(raw) && raw <= 100;
 const isText = (raw: unknown): raw is string => typeof raw === "string";
 const INTERVALS: readonly unknown[] = ["day", "week", "month", "year"];
 
@@ -307,7 +308,8 @@ function isDirectoryNumbers(raw: unknown): raw is DirectoryNumbers {
   if (!isRecord(raw)) return false;
   return (
     isWhole(raw.affiliates) && isWhole(raw.since) && isWhole(raw.clicks) && isWhole(raw.clickSales) &&
-    (raw.conversion === null || isShare(raw.conversion)) && (raw.per100Cents === null || isWhole(raw.per100Cents)) &&
+    // More than one checkout may be credited to one visitor's deduplicated click, so conversion can exceed 100%.
+    (raw.conversion === null || isNonNegative(raw.conversion)) && (raw.per100Cents === null || isWhole(raw.per100Cents)) &&
     isWhole(raw.sales) && isWhole(raw.earnedCents) && isWhole(raw.paidCents)
   );
 }

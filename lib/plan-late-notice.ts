@@ -66,7 +66,11 @@ export async function tellLateRefunds(about: { sid: string; product: string }, e
     out.untold = due.length;
     return out;
   }
-  const open = due.filter((_, i) => countOf(read[i]) === 0);
+  // Exactly 0: not told; exactly 1: told. Any other reply is not known, so that payment is untold and tried again on the
+  // next pass, never taken as told (Claude 1's LOW on #3367; CX-123 rule 24).
+  const claims = read.map((reply) => countOf(reply));
+  out.untold += claims.filter((claim) => claim === null || claim > 1).length;
+  const open = due.filter((_, i) => claims[i] === 0);
   if (!open.length) return out;
   const store = about.sid ? await storeForId(about.sid) : null;
   if (!store) {
@@ -74,7 +78,7 @@ export async function tellLateRefunds(about: { sid: string; product: string }, e
     return out;
   }
   if (!isSenderConfigured()) {
-    out.untold = open.length;
+    out.untold += open.length;
     return out;
   }
   const listing = about.product ? await readListing(store, about.product).catch(() => null) : null;

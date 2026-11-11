@@ -49,7 +49,14 @@ export async function POST(request: NextRequest) {
     if (action === "remove") {
       const id = text(body.id, 20);
       const removed = await removeSalesFilter(statsId, id);
-      return Response.json({ ok: true, removed, filters: await readSavedFilters(statsId) }, { headers });
+      try {
+        return Response.json({ ok: true, removed, filters: await readSavedFilters(statsId) }, { headers });
+      } catch (error) {
+        // The exact deletion already succeeded. Do not turn that truth into a false failure when another kept
+        // entry is unreadable; omit the list so the caller cannot mistake it for a confirmed empty list.
+        console.error("reading the saved sales filters after removal failed", error);
+        return Response.json({ ok: true, removed }, { headers });
+      }
     }
     // Never overwrite an unreadable list when saving or renaming.
     const filters = await readSavedFilters(statsId);

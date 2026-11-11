@@ -6,11 +6,12 @@
  * extrasFor reads what a purchase needs besides itself, each read taken from
  * the opening's meter before it is made: a private podcast's feed, the
  * license key of each product that hands one out (read, or given if the
- * thanks page and the email never got the chance) and which products can be
- * reviewed. cardOf turns a purchase into words and addresses only
+ * thanks page and the email never got the chance), which products can be
+ * reviewed and how far the buyer is in each course (560 [AS1]). cardOf turns a purchase into words and addresses only
  * (components/purchase-card.tsx), so a card drawn in the browser says exactly
  * what the page says.
  */
+import { createHash } from "node:crypto";
 import { domainToUnicode } from "node:url";
 import { feedToken } from "@/lib/podcast-access";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
@@ -35,17 +36,22 @@ import {
   ORDERS_BUNDLE_PER_HOUR,
   ORDERS_OLDER_PER_HOUR,
   OrdersBusy,
+  OrdersLate,
   bundleFor,
   olderFor,
   ORDERS_FEED_COMMANDS,
   ORDERS_KEY_COMMANDS,
   ORDERS_LISTING_COMMANDS,
+  ORDERS_PROGRESS_COMMANDS,
+  ORDERS_PROGRESS_MS,
 } from "@/lib/buyer-orders";
-import type { CardDelivery, CardKey, PurchaseCardModel } from "@/components/purchase-card";
+import type { CardDelivery, CardKey, CardProgress, PurchaseCardModel } from "@/components/purchase-card";
 import type { OrdersShared } from "@/components/orders-shared";
 import type { OrdersBundleLine } from "@/components/orders-bundle";
 import { parseLanguage } from "@/lib/store-language";
 import { unknownLimit } from "@/lib/request-guard";
+import { type Course, readCoursesExact } from "@/lib/course";
+import { lessonsDoneIn } from "@/lib/learn";
 
 /** What a list of purchases needs besides the purchases. */
 export type Extras = {
@@ -55,7 +61,25 @@ export type Extras = {
   keys: Map<string, SaleKey | "error">;
   /** The products that can be reviewed. */
   reviewing: Set<string>;
+  /**
+   * How far the buyer is in each course on the list, by the course's product: lessons done of the lessons it has now, or
+   * "unknown" when that could not be read (said so on the card, never as 0 done). A course with no lessons, or whose
+   * product or outline is gone, is not here, and its card shows no progress.
+   */
+  progress: Map<string, { done: number; total: number } | "unknown">;
 };
+
+/** The products of these purchases that open a course, each once: what was bought and what was ticked with it, while it lasts. */
+export function coursesOf(listed: Purchase[]): string[] {
+  return [
+    ...new Set(
+      listed
+        .filter((purchase) => !purchase.ended)
+        .flatMap((purchase) => [purchase.courseProduct, ...purchase.added.map((added) => added.courseProduct)])
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+}
 
 /**
  * Which products a purchase can be reviewed for: what was bought, what was
@@ -89,9 +113,10 @@ export async function extrasFor(store: Store, email: string, listed: Purchase[],
     // Each product of a bundle has its own key, under the same order, shown with that product when the buyer asks to see
     // the bundle's products (components/orders-bundle.tsx): read then, not here.
   }
-  // Every product these name, read once for the keys and the reviews together (lib/catalog.ts).
+  // Every product these name, read once for the keys, the reviews and the courses together (lib/catalog.ts).
   const reviewed = takesReviews(store) ? listed.filter((p) => p.kind !== "imported").flatMap(inOrder) : [];
-  const ids = [...new Set([...wanted.map((w) => w.productId), ...reviewed])];
+  const courseProducts = coursesOf(listed);
+  const ids = [...new Set([...wanted.map((w) => w.productId), ...reviewed, ...courseProducts])];
   await meter.take(ids.length * ORDERS_LISTING_COMMANDS);
   const products = new Map((ids.length ? await readListings(store, ids) : []).map((product) => [product.id, product]));
   const keyed = wanted.filter((w) => {
@@ -111,7 +136,48 @@ export async function extrasFor(store: Store, email: string, listed: Purchase[],
     }),
   );
   const reviewing = new Set(reviewed.flatMap((id) => (products.has(id) && reviewable(products.get(id)!) ? [id] : [])));
-  return { feeds, keys, reviewing };
+  const progress = await progressOf(courseProducts.flatMap((id) => {
+    const course = products.get(id)?.course;
+    return course ? [{ productId: id, courseId: course.id }] : [];
+  }), email, meter);
+  return { feeds, keys, reviewing, progress };
+}
+
+/**
+ * How far the buyer is in each course (560 [AS1]), read last, ORDERS_PROGRESS_COMMANDS a course taken from the meter
+ * before anything is read: every outline in one MGET read exactly (lib/course.ts, readCoursesExact), then every course's
+ * lessons done in one round trip (lib/learn.ts, lessonsDoneIn). What could not be read, the store's room for it
+ * included, is "unknown" for each course and said so on its card; the purchases themselves are still shown (rule 24).
+ * Waited on ORDERS_PROGRESS_MS at the most: a slow read is "unknown" too, so it never takes the opening past
+ * ORDERS_READ_MS and the whole list with it (review of #3522, MEDIUM). `ms` is for the tests.
+ */
+export async function progressOf(courses: { productId: string; courseId: string }[], email: string, meter: OrdersMeter, ms = ORDERS_PROGRESS_MS): Promise<Extras["progress"]> {
+  if (!courses.length) return new Map();
+  const unknown = (): Extras["progress"] => new Map(courses.map(({ productId }) => [productId, "unknown" as const]));
+  const read = (async (): Promise<Extras["progress"]> => {
+    const progress: Extras["progress"] = new Map();
+    await meter.take(new Set(courses.map(({ courseId }) => courseId)).size * ORDERS_PROGRESS_COMMANDS);
+    const outlines = await readCoursesExact(courses.map(({ courseId }) => courseId));
+    const done = await lessonsDoneIn([...outlines.values()] as Course[], email);
+    for (const { productId, courseId } of courses) {
+      if (!outlines.has(courseId) || !done.has(courseId)) continue;
+      const found = done.get(courseId);
+      progress.set(productId, found ?? "unknown");
+    }
+    return progress;
+  })().catch((error: unknown) => {
+    if (!(error instanceof OrdersBusy || error instanceof OrdersLate)) console.error("reading course progress failed", error);
+    return unknown();
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<Extras["progress"]>((resolve) => {
+    timer = setTimeout(() => resolve(unknown()), ms);
+  });
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Scripts a host may be read in; Han, Hiragana and Katakana count as one (Japanese is written in all three). */
@@ -217,6 +283,16 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
     return [{ slot, title, label: title ? words.yourKeyFor(title) : words.yourKey, value: issued ? issued.key : null, revoked: Boolean(issued?.revoked), waiting: found !== "error" && found.state === "waiting" }];
   };
 
+  // How far the buyer is in a course of this purchase (560 [AS1]), said under its button, which it describes. Its id is
+  // short and the purchase's own, so the card carries no title twice (ORDERS_PAGE_BYTES) and no two cards share one.
+  const progressFor = (productId: string | null, slot: string): CardProgress | null => {
+    const found = productId && !purchase.ended ? extras.progress.get(productId) : undefined;
+    if (!found) return null;
+    const id = `cp${createHash("sha256").update(`${purchase.reference}|${slot}`).digest("hex").slice(0, 10)}`;
+    if (found === "unknown") return { id, text: words.progressUnread, percent: null };
+    return { id, text: words.lessonsDone(found.done, found.total), percent: Math.floor((found.done / found.total) * 100) };
+  };
+
   const reviewableIn = purchase.kind !== "imported" && inOrder(purchase).some((id) => extras.reviewing.has(id));
   const meta = [
     purchase.option,
@@ -259,6 +335,7 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
         : null,
     ended: purchase.ended ? { note: words.endedNote, renew: { href: renewPath(store, { id: purchase.productId }), label: words.renew } } : null,
     course: purchase.courseProduct ? { href: `/@${handle}/course/${purchase.courseProduct}`, label: words.openTitle(purchase.title) } : null,
+    progress: purchase.courseProduct ? progressFor(purchase.courseProduct, "main") : null,
     package:
       typeof purchase.packageLeft === "number"
         ? purchase.packageBook
@@ -272,6 +349,7 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
     added: purchase.added.map((added) => ({
       key: added.key,
       course: added.courseProduct ? { href: `/@${handle}/course/${added.courseProduct}`, label: words.openTitle(added.title) } : null,
+      progress: added.courseProduct ? progressFor(added.courseProduct, added.key) : null,
       delivery: added.delivery ? delivery(added.delivery, added.key) : null,
     })),
     importedNote:

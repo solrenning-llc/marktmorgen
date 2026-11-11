@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Synthetic cancellation-question settings; no member cancellation or provider call. */
 export async function checkLeaveAcknowledgment({browser,LOCAL,fixture,is}){
  const draft="  Les appels   sont trop tard  ",canonical="Les appels sont trop tard";
@@ -28,6 +30,7 @@ export async function checkLeaveAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("[data-leave-editor]");await section.waitFor();
    const onField=section.locator("#leave-on"),own=section.getByRole("textbox",{name:"Reason of your own 1",exact:true});
+   await waitForReactChangeHandler(page,onField);
    await onField.check();await own.fill(draft);
    for(const on of [true,false]){
     await onField.setChecked(on);

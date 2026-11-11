@@ -8,6 +8,37 @@ As [instruções oficiais5472](https://www.irs.gov/instructions/i5472) condicion
 
 A observação histórica deINSS não comprova remuneração atual ou obrigação fixa universal. A remoção/zero depende dos fatos e leitura aplicável;permanece desconhecida neste passo,sem inventar remuneração. TX4global ainda não concluído. Alocação100%Marktmorgen,0%Hazelsong,preços/limites/comissão e demais travas preservados. Nenhum IOprodutivo novo;CI no orçamentoFX275,desconhecido nãozero. O relatório gerado é atualizado junto do catálogo;sem entrega funcional/contador.
 
+## TX4 — official CBE reporting evidence (4 November 2026)
+
+Partial TX4 evidence, read on 4 November 2026. The current manual PDF was read directly; indexed official BCB content supplied the HTML references where a direct fetch returned a JavaScript shell. This record does not establish the owner's residence, aggregate assets or reporting obligation. It does not prepare or submit a declaration. IRPF reporting remains a separate unresolved TX4 component; this CBE record does not replace it.
+
+### Conditional scope and records
+
+[Resolução BCB 279/2022](https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?numero=279&tipo=Resolu%C3%A7%C3%A3o%20BCB), arts. 7–12: the responsible declarant is the resident individual or legal entity holding foreign capital. Test aggregate foreign assets, not the LLC's revenue or the Marktmorgen customer count. The annual threshold is at least USD 1,000,000 on 31 December; quarterly reporting starts at at least USD 100,000,000 on 31 March, 30 June and 30 September, including equivalent foreign currencies. Article 12 excludes Brazilian BDRs and domestic investment-fund units from the ordinary holder's threshold calculation. It requires the full jointly owned asset for threshold testing, while only the declarant's share is reported. Article 15 requires supporting documentation for 10 years from the declaration's reference date.
+
+The [Manual do Declarante 2026](https://www.bcb.gov.br/content/estabilidadefinanceira/cambiocapitais/Manuais_CBE/Manual_CBE_a_partir_de_2017.pdf), sections 1.4–1.7, uses positive assets to determine the obligation; once required, reporting also includes negative-equity companies. There is no separate fourth-quarter return: the annual return uses full-year flows. These rules do not value this owner's holding or resolve the complete inventory of foreign assets.
+
+### Periods and proof of delivery
+
+The [BCB deadline FAQ](https://www.bcb.gov.br/meubc/faqs/p/prazos-para-entrega-da-declaracao), updated 25 March 2026, gives these recurring periods. A closing date on a weekend or holiday moves to the next business day; the FAQ says there is no hour cutoff on that extended day.
+
+| Reference date | Normal delivery period |
+| --- | --- |
+| 31 December | 15 February–5 April of the following year |
+| 31 March | 30 April–5 June |
+| 30 June | 31 July–5 September |
+| 30 September | 31 October–5 December |
+
+The [BCB annual-return page](https://www.bcb.gov.br/estabilidadefinanceira/cbeanual) explicitly states that the 2026 annual declaration concerns 31 December 2025 and its delivery closes on 6 April 2026. That is not a deadline for 31 December 2026. Confirm the applicable calendar and reference date before any real filing; this evidence does not schedule one.
+
+The [official government service description](https://www.gov.br/pt-br/servicos/preencher-declaracao-de-capitais-brasileiros-no-exterior), delivery step, requires finalization and correction of validation errors before submission produces a delivery protocol. A saved draft is not a delivered declaration. Retain the protocol and supporting records; no protocol for this owner has been established here.
+
+### Exposure and complete cost still unresolved
+
+The manual's section 1.7 distinguishes late submission (1%, capped at BRL 25,000), incorrect or incomplete information (2%, capped at BRL 50,000), non-submission or missing supporting documents (5%, capped at BRL 125,000), and false information (10%, capped at BRL 250,000). Late-filing reductions and a 50% increase for certain uncorrected breaches depend on the stated conditions. These are penalty rules, not a penalty reserve or a determination that a breach occurred.
+
+The government service page says the public submission service is free. That does not make preparation, review, valuation, translation, recordkeeping or corrections free. Applicable work, tools, currency conversion, taxes, delivery evidence and reserve timing still need a complete cost record. The existing `br-cbe` category is not removed or reduced: its complete monetary ceiling remains unknown and unreserved; unknown is rejection, never zero. No account, contact, paid service, filing, price, commercial limit, commission, flag or gate was changed. The complete TX4 item remains in progress.
+
 ## TX4 — official U.S. federal filing evidence (4 November 2026)
 
 This is a dated evidence record, not a filed return, legal or tax advice, an applicability conclusion, or a complete cost ceiling. The official sources below were read on 4 November 2026. No form, extension, account, payment, engagement or external contact was made.

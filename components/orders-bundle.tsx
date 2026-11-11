@@ -82,9 +82,10 @@ export function OrdersBundle({ reference, item, label, heading }: { reference: s
 
   return (
     <section className="mt-6" aria-labelledby={head}>
-      <p id={head} className="st-label">
+      {/* A heading under its purchase's h2, its products h4 under it (WCAG 2.4.10). */}
+      <h3 id={head} className="st-label">
         {heading}
-      </p>
+      </h3>
       <form method="get" action={`/@${shared.handle}/orders`} onSubmit={toggle}>
         <input type="hidden" name="token" value={shared.token} />
         <input type="hidden" name="bundle" value={`${reference}:${item}`} />
@@ -112,6 +113,7 @@ export function OrdersBundle({ reference, item, label, heading }: { reference: s
             storeName={shared.storeName}
             heading={heading}
             showHeading={false}
+            titleAs="h4"
             missing={shown.missing ? 1 : 0}
             words={{ ...words.bundle, missing: shown.missing }}
             lines={shown.lines.map((line) => ({

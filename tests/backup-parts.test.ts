@@ -17,7 +17,7 @@
  *     failed write said as anything but "verify", or an earlier part deleted;
  *   - anything thrown instead of a result.
  */
-import { copyInParts, manifestBound, openManifest, readBackupSet, runStoredBound, sealManifest, MAX_PARTS, PART_MAX_BYTES, PART_SEAL_ROOM } from "@/lib/backup-parts";
+import { BACKUP_SCAN_PAGES, copyInParts, manifestBound, openManifest, readBackupSet, runStoredBound, sealManifest, MAX_PARTS, PART_MAX_BYTES, PART_SEAL_ROOM } from "@/lib/backup-parts";
 import type { BackupObjectStore } from "@/lib/backup-roundtrip";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -138,6 +138,29 @@ async function main(): Promise<void> {
   const writeDown = await copyInParts(limits, key, store);
   failPut = -1;
   is("a write refused after one part: verify, the part before it kept", [writeDown.ok === false && writeDown.reason, writeDown.ok === false && writeDown.parts, objects.size], ["verify", 1, at + 1]);
+
+  part("The walk reads at most BACKUP_SCAN_PAGES pages; past them the copy is refused, never partial (inbox C4-46)");
+  {
+    is("200 pages, enough for the design's 10,000 keys at 500 a page with room", BACKUP_SCAN_PAGES, 200);
+    const pages = (fake: number) => {
+      let page = 0;
+      (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
+        if (list[0]?.[0] !== "SCAN") return real(list);
+        page += 1;
+        // `fake` pages that each move the cursor and hold none of ours, then the real walk from its start.
+        return page <= fake ? [[String(page), []]] : real([["SCAN", "0", ...list[0].slice(2)]]);
+      }) as typeof redis.pipeline;
+      return () => page;
+    };
+    const kept = objects.size;
+    let read = pages(BACKUP_SCAN_PAGES);
+    const over = await copyInParts({ ...limits, maxCommands: 10_000 }, key, store);
+    is("201 pages: refused as scan_pages after 200 SCANs, nothing written", [over, read(), objects.size - kept], [{ ok: false, reason: "scan_pages", commands: BACKUP_SCAN_PAGES, parts: 0 }, BACKUP_SCAN_PAGES, 0]);
+    read = pages(BACKUP_SCAN_PAGES - 1);
+    const fits = await copyInParts({ ...limits, maxCommands: 10_000 }, key, store);
+    is("exactly 200 pages: the whole set", [fits.ok, fits.ok && fits.keys, read()], [true, 21, BACKUP_SCAN_PAGES]);
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = real;
+  }
 
   part("Bounds");
   is("a manifest of the most parts stays a small object", manifestBound(MAX_PARTS) < 2_000_000, true);

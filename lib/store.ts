@@ -3800,19 +3800,22 @@ export async function setProductImage(
 export async function moveProductImage(
   email: string,
   id: string,
-  from: { path: string; small: string | null },
-  to: { path: string; small: string | null },
+  from: { path: string; small: string | null; thumb?: string | null },
+  to: { path: string; small: string | null; thumb?: string | null },
 ): Promise<{ ok: true } | { ok: false; reason: "none" | "unknown" } | { ok: false; reason: "changed"; shown: string[] }> {
   let shown: string[] = [];
   const done = await onProduct<"changed">(email, id, (product) => {
     const image = product.image;
-    shown = image ? [image.path, ...(image.small ? [image.small.path] : [])] : [];
-    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small) {
+    shown = image ? [image.path, ...(image.small ? [image.small.path] : []), ...(image.thumb ? [image.thumb.path] : [])] : [];
+    if (!image || image.path !== from.path || (image.small?.path ?? null) !== from.small || (image.thumb?.path ?? null) !== (from.thumb ?? null)) {
       return { ok: false, reason: "changed" } as const;
     }
-    const { r2: _r2, ...rest } = image;
+    const { r2: _r2, thumb: _thumb, ...rest } = image;
     void _r2;
-    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, withdrawn: true as const } };
+    void _thumb;
+    // The thumbnail copy moves with the picture (#2801); one with no new name is dropped, never left at its old name.
+    const thumb = image.thumb && to.thumb ? { thumb: { ...image.thumb, path: to.thumb } } : {};
+    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, ...thumb, withdrawn: true as const } };
   });
   if (done.ok) return { ok: true };
   return done.reason === "changed" ? { ok: false, reason: "changed", shown } : { ok: false, reason: done.reason };

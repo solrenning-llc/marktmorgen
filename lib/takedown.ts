@@ -204,10 +204,11 @@ const MAX_OWED = 50;
  */
 type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean; picture?: PictureNames };
 
-/** Kept picture names, exactly: a path, and a smaller copy's path or null. */
+/** Kept picture names, exactly: a path, a smaller copy's path or null, and a thumbnail's path, null or none (#2801). */
 const pictureNames = (value: unknown): value is PictureNames => {
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  return Boolean(v && typeof v.path === "string" && v.path && (v.small === null || (typeof v.small === "string" && v.small)));
+  const thumbOk = !v || v.thumb === undefined || v.thumb === null || (typeof v.thumb === "string" && Boolean(v.thumb));
+  return Boolean(v && typeof v.path === "string" && v.path && (v.small === null || (typeof v.small === "string" && v.small)) && thumbOk);
 };
 
 /**
@@ -227,7 +228,7 @@ async function readSteps(key: string): Promise<Steps | null> {
       (v.picture !== undefined && !pictureNames(v.picture))) {
     throw new Error("a takedown's steps could not be read");
   }
-  const picture = pictureNames(v.picture) ? { path: v.picture.path, small: v.picture.small } : null;
+  const picture = pictureNames(v.picture) ? { path: v.picture.path, small: v.picture.small, ...(v.picture.thumb ? { thumb: v.picture.thumb } : {}) } : null;
   return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent, ...(picture ? { picture } : {}) };
 }
 

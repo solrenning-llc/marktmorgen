@@ -408,17 +408,18 @@ export async function takeReview(sid: string, token: string): Promise<number | n
 }
 
 /** One email to the store's own address, from the company's sending, under an idempotency key. Not sent only logs. */
-async function mail(store: Store, letter: { subject: string; text: string }, key: string): Promise<void> {
+async function mail(store: Store, letter: { subject: string; text: string }, key: string): Promise<boolean> {
   const to = normaliseEmail(store.email);
   if (!EMAIL_PATTERN.test(to) || !isSenderConfigured()) {
     console.error(`plan-refund: store ${store.sid}'s email was not sent (no address or no sender)`);
-    return;
+    return false;
   }
   const sent = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to, replyTo: SUPPORT_EMAIL, subject: letter.subject, text: letter.text, idempotencyKey: key }).catch((error) => {
     console.error("sending a plan refund email failed", error);
     return false;
   });
   if (!sent) console.error(`plan-refund: store ${store.sid}'s email was not sent`);
+  return sent;
 }
 
 /** The confirmation, once the plan has ended; keyed by the refund, so a retry never sends it twice. */
@@ -555,15 +556,25 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
           counts.left += 1;
           continue;
         }
+        // Unknown stays unknown: a store reply that is not an exact answer keeps the note, and so does a letter that was
+        // not sent. The note is dropped only after the send, so nothing is let go without the creator being told
+        // (Revisor 2's LOW on #3585). The letter's key makes a retry never send it twice.
         const damagedStore = await storeForId(sid);
-        console.error(`plan-refund: store ${sid}'s recovery note had unknown debt evidence for ${GIVE_UP_DAYS} days; it is dropped and the creator told`);
-        await dropNote(sid);
-        if (damagedStore) {
-          // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
-          // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
-          const sub = await subscriptionOf(note.s);
-          await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan: planState(sub) }), `plan-refund-unknown:${sid}:${note.at}`);
+        if (!damagedStore) {
+          console.error(`plan-refund: store ${sid}'s damaged recovery note is retained: its store could not be read exactly`);
+          counts.left += 1;
+          continue;
         }
+        // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
+        // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
+        const sub = await subscriptionOf(note.s);
+        if (!(await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan: planState(sub) }), `plan-refund-unknown:${sid}:${note.at}`))) {
+          console.error(`plan-refund: store ${sid}'s damaged recovery note is retained: the letter was not sent`);
+          counts.left += 1;
+          continue;
+        }
+        await dropNote(sid);
+        console.error(`plan-refund: store ${sid}'s recovery note had unknown debt evidence for ${GIVE_UP_DAYS} days; the creator was told and it is dropped`);
         counts.dropped += 1;
         continue;
       }

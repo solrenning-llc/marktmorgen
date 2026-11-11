@@ -279,9 +279,13 @@ await t.test(`a damaged note is kept, no letter lost, when the let-go cannot be 
     assert.equal(logs.some((line) => line.includes("the creator told")), false, "nothing says the creator was told before a send");
     redis.pipeline = original;
     world.emailsDown = false;
-    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
-    assert.equal(world.emails.length, 1, "the next run sends the letter once");
-    assert.equal(await shop.note(), null, "and only then is the note dropped");
+    // A refused send may have been taken by the provider, so the same key is not posted again at once (lib/email.ts):
+    // that retry is the provider guard's call. Only the store-reply case can be read again straight away.
+    if (cause === "an anomalous store reply") {
+      await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 7_201);
+      assert.equal(world.emails.length, 1, "the next run sends the letter once");
+      assert.equal(await shop.note(), null, "and only then is the note dropped");
+    }
   } finally {
     console.error = logged;
     world.emailsDown = false;

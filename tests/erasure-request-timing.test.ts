@@ -20,6 +20,10 @@ import { done, is, part } from "./check";
 // from the order of events, never from a clock, so a slow or busy machine
 // gives the same result (tests/aliases/erasure-request-timing.test.ts.json
 // keeps the tasks after() is handed, so the test can wait for them to end).
+// That stand-in never throws, so lib/erasure-request.ts's `catch { void run() }`
+// (the real after() throws outside a request scope) is not exercised here:
+// tests/buyer-library-known-exact.test.ts runs it with the real next/server and
+// fails if that try/catch goes. Keep that test on the real next/server.
 let sends = 0;
 let fails = false;
 let gate: Promise<void> = Promise.resolve();
@@ -57,6 +61,20 @@ async function paidStore(handle: string): Promise<Store> {
 const drained = () => new Promise<void>((resolve) => setImmediate(resolve));
 /** Only a request that never answers and never reaches the email gets here; it is not a speed limit. */
 const BLOCKED_MS = 30_000;
+/**
+ * Waits for `promise`, or gives "stuck" after BLOCKED_MS: only a task that never ends gets there (a regression
+ * that leaves it waiting without sending), which then fails by name instead of hanging until the runner's limit.
+ * It is not a speed limit.
+ */
+async function unlessStuck<T>(promise: Promise<T>): Promise<T | "stuck"> {
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  const stuck = new Promise<"stuck">((resolve) => (guard = setTimeout(() => resolve("stuck"), BLOCKED_MS)));
+  try {
+    return await Promise.race([promise, stuck]);
+  } finally {
+    clearTimeout(guard);
+  }
+}
 
 type Asked = {
   answer: unknown;
@@ -68,6 +86,10 @@ type Asked = {
   emailHeld: boolean;
   /** Sends once every task the answer left behind has ended. */
   emailed: number;
+  /** Tasks handed to after() by the time of the answer. */
+  handedToAfter: number;
+  /** Where a task the answer left behind never ended, or "" when none did. */
+  stuck: string;
 };
 
 let ip = 0;
@@ -89,14 +111,21 @@ async function ask(email: string, handle?: string): Promise<Asked> {
   const held = arrival.then(drained).then((): "answered" | "held" => (answered ? "answered" : "held"));
   const first = await Promise.race([answer.then(() => "answered" as const), held, blocked]);
   clearTimeout(guard);
+  const handedToAfter = afterRuns.length - runsBefore;
   const runs = Promise.all(afterRuns.slice(runsBefore));
-  const emailHeld = first === "answered" && (await Promise.race([arrival.then(() => true), runs.then(() => false)])) && answered;
+  let stuck = "";
+  let emailHeld = false;
+  if (first === "answered") {
+    const reached = await unlessStuck(Promise.race([arrival.then(() => true), runs.then(() => false)]));
+    if (reached === "stuck") stuck = "before reaching the email provider";
+    emailHeld = reached === true && answered;
+  }
   openGate();
   gate = Promise.resolve();
-  if (first === "blocked") return { answer: "blocked", sendsAtAnswer, first, emailHeld, emailed: sends - before };
+  if (first === "blocked") return { answer: "blocked", sendsAtAnswer, first, emailHeld, emailed: sends - before, handedToAfter, stuck };
   const value = await answer;
-  await runs;
-  return { answer: value, sendsAtAnswer, first, emailHeld, emailed: sends - before };
+  if (!stuck && (await unlessStuck(runs)) === "stuck") stuck = "after the email provider let it through";
+  return { answer: value, sendsAtAnswer, first, emailHeld, emailed: sends - before, handedToAfter, stuck };
 }
 
 async function main(): Promise<void> {
@@ -114,6 +143,8 @@ async function main(): Promise<void> {
     n += 1;
     const a = await ask(known(n), handle);
     const b = await ask(stranger(n), handle);
+    is("the email is handed to after(), not run by the answer itself (and the stranger's lookup too)", [a.handedToAfter, b.handedToAfter], [1, 1]);
+    is("no task the answer left behind is stuck", [a.stuck, b.stuck], ["", ""]);
     is("the same answer for a known address and a stranger's", a.answer, b.answer);
     is("and that answer is 'sent'", a.answer, { status: "sent" });
     is("nothing is emailed before the answer, for either", [a.sendsAtAnswer, b.sendsAtAnswer], [0, 0]);
@@ -126,6 +157,7 @@ async function main(): Promise<void> {
     const aDown = await ask(known(n), handle);
     const bDown = await ask(stranger(n), handle);
     fails = false;
+    is("with the email provider down, no task the answer left behind is stuck", [aDown.stuck, bDown.stuck], ["", ""]);
     is("with the email provider down, still the same answer for both", [aDown.answer, bDown.answer], [{ status: "sent" }, { status: "sent" }]);
     is("and neither waits for the failing email", [aDown.first, bDown.first], ["answered", "answered"]);
   }

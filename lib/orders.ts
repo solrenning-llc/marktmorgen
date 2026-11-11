@@ -335,7 +335,7 @@ export function coveredByShare(store: Parameters<typeof shareBps>[0], paidCents:
 export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now(), admission?: { hour: unknown; items: number; createdAtMs: number }): Promise<boolean> {
   if (!isRedisConfigured() || !reference) return false;
   try {
-    if (admission) return await countLegacyCheckout(store, reference, paidCents, now, admission);
+    if (admission) return (await countLegacyCheckout(store, reference, paidCents, now, admission)) === "committed";
     const reply: unknown = await redisPipeline([["SET", seenKey(reference), "1", "NX", "EX", SEEN_SECONDS]]);
     if (!Array.isArray(reply)) return false;
     const length = Object.getOwnPropertyDescriptor(reply, "length"), fresh = Object.getOwnPropertyDescriptor(reply, "0");
@@ -380,26 +380,39 @@ export async function countOrder(store: Store, reference: string, paidCents: num
  * Reuse the existing atomic counter/hold Lua and its intent protocol. The
  * legacy 45-day horizon is fixed to checkout creation and is never renewed
  * by a retry; after it, refuse instead of counting again after expiry. */
-async function countLegacyCheckout(store: Store, reference: string, paidCents: number, now: number,
-  admission: { hour: unknown; items: number; createdAtMs: number }): Promise<boolean> {
-  if (!CHECKOUT_REFERENCE.test(reference) || !Number.isSafeInteger(paidCents) || paidCents < 0 ||
-      !Number.isSafeInteger(now) || !Number.isSafeInteger(admission.createdAtMs) || admission.createdAtMs <= 0 ||
-      now < admission.createdAtMs || now >= admission.createdAtMs + SEEN_SECONDS * 1000 ||
-      !Number.isSafeInteger(admission.items) || admission.items < 1 || admission.items > MAX_ORDER_ITEMS) return false;
-  const hour = typeof admission.hour === "number" && Number.isSafeInteger(admission.hour) && admission.hour >= 0 ? String(admission.hour)
-    : typeof admission.hour === "string" && /^(0|[1-9][0-9]{0,8})$/.test(admission.hour) ? admission.hour : "";
-  const owner = storeRef(store), folder = await storeFolder(owner);
-  if (!FOLDER_PATTERN.test(folder)) return false;
-  const window = (allowanceWindow(store, now) ?? calendarWindow(now)).id, month = calendarWindow(now).id;
-  const bytes = orderDataBytes(admission.items), count = coveredByShare(store, paidCents, now / 1000) ? 0 : 1;
-  const receipt = `oc1:${fingerprint(JSON.stringify(["legacy-checkout-v1", reference, folder, paidCents, hour, bytes, count, admission.createdAtMs]))}`;
-  const [open, held] = orderConfirmationHoldKeys(folder);
-  const reply: unknown = await redisPipeline([["EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference), countKey(folder, window), open, held,
-    foldersKey(month), `nl:store:folder-owner:${folder}`, receipt, hour, bytes, count, folder, owner,
-    admission.createdAtMs + SEEN_SECONDS * 1000, now, KEEP_SECONDS]]);
-  if (!Array.isArray(reply)) return false;
-  const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
-  return Boolean(length && "value" in length && length.value === 1 && value && "value" in value && value.value === 1 && count === 1);
+/** Durable count result for a paid legacy checkout; unknown blocks email. */
+export type LegacyCheckoutCountOutcome = "committed" | "already" | "unknown";
+
+/** Record a settled legacy checkout before any confirmation is sent.
+ * Missing amounts are counted as one order because share coverage cannot
+ * safely be established from an unknown value.
+ */
+export async function countLegacyCheckoutForConfirmation(store: Store, reference: string, paidCents: number | null, now: number,
+  admission: { hour: unknown; items: number; createdAtMs: number }): Promise<LegacyCheckoutCountOutcome> {
+  try {
+    if (!CHECKOUT_REFERENCE.test(reference) || (paidCents !== null && (!Number.isSafeInteger(paidCents) || paidCents < 0)) ||
+        !Number.isSafeInteger(now) || !Number.isSafeInteger(admission.createdAtMs) || admission.createdAtMs <= 0 ||
+        now < admission.createdAtMs || now >= admission.createdAtMs + SEEN_SECONDS * 1000 ||
+        !Number.isSafeInteger(admission.items) || admission.items < 1 || admission.items > MAX_ORDER_ITEMS) return "unknown";
+    const hour = typeof admission.hour === "number" && Number.isSafeInteger(admission.hour) && admission.hour >= 0 ? String(admission.hour)
+      : typeof admission.hour === "string" && /^(0|[1-9][0-9]{0,8})$/.test(admission.hour) ? admission.hour : "";
+    const owner = storeRef(store), folder = await storeFolder(owner);
+    if (!FOLDER_PATTERN.test(folder)) return "unknown";
+    const window = (allowanceWindow(store, now) ?? calendarWindow(now)).id, month = calendarWindow(now).id;
+    const bytes = orderDataBytes(admission.items), count = paidCents === null ? 1 : coveredByShare(store, paidCents, now / 1000) ? 0 : 1;
+    const receipt = `oc1:${fingerprint(JSON.stringify(["legacy-checkout-v1", reference, folder, paidCents, hour, bytes, count, admission.createdAtMs]))}`;
+    const [open, held] = orderConfirmationHoldKeys(folder);
+    const reply: unknown = await redisPipeline([["EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference), countKey(folder, window), open, held,
+      foldersKey(month), `nl:store:folder-owner:${folder}`, receipt, hour, bytes, count, folder, owner,
+      admission.createdAtMs + SEEN_SECONDS * 1000, now, KEEP_SECONDS]]);
+    if (!Array.isArray(reply)) return "unknown";
+    const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!length || !("value" in length) || length.value !== 1 || !value || !("value" in value)) return "unknown";
+    return value.value === 1 ? "committed" : value.value === 2 ? "already" : "unknown";
+  } catch (error) {
+    console.error("could not count a legacy checkout", error);
+    return "unknown";
+  }
 }
 
 /** The orders a store had in a window: a calendar month ("2026-10"), this one by default, or a billing month ("2026-10-19"). Zero when it cannot be read. */

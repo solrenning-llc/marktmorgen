@@ -38,7 +38,7 @@ import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { ADMITTED_FIELD } from "@/lib/order-admission";
-import { countOrder } from "@/lib/orders";
+import { countLegacyCheckoutForConfirmation } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { recordPackage } from "@/lib/call-packages";
@@ -469,7 +469,8 @@ async function confirmOnce(
   // A payment request (lib/payment-requests.ts): written down as paid, and its receipt emailed.
   if (session.metadata?.kind === "request") {
     if (isSettled(session) && saleHandles(store).has(session.metadata.store ?? "") && typeof session.metadata.request === "string") {
-      await accountPaidCheckout(store, session, 1);
+      const accounting = await accountPaidCheckout(store, session, 1);
+      if (accounting === "unknown") return "failed";
     }
     return confirmRequest(store, session, key);
   }
@@ -482,7 +483,8 @@ async function confirmOnce(
   bundleFromMeta(session.metadata, "bundle").length || 1);
   if (isSettled(session) && saleHandles(store).has(session.metadata?.store ?? "") && session.metadata?.kind !== "call" &&
       (listings.length || session.metadata?.gift || session.metadata?.group || session.metadata?.preorder)) {
-    await accountPaidCheckout(store, session, items);
+    const accounting = await accountPaidCheckout(store, session, items);
+    if (accounting === "unknown") return "failed";
   }
   // Bought for somebody else: handed to them, and the buyer gets a receipt
   // that says so (lib/gifts.ts), instead of the usual confirmation.
@@ -535,13 +537,14 @@ async function confirmOnce(
   return sent ? "sent" : "failed";
 }
 
-async function accountPaidCheckout(store: Store, session: SessionRecord, items: number): Promise<void> {
-  // Missing payment amounts cannot become a free order. This accepts the
-  // same explicit zero as isSettled for a fully discounted checkout.
-  const paid = session.amount_total;
-  if (!Number.isSafeInteger(paid) || Number(paid) < 0) return;
+async function accountPaidCheckout(store: Store, session: SessionRecord, items: number): Promise<"committed" | "already" | "unknown"> {
+  // Missing payment amounts cannot prove a share-covered order, so count one
+  // conservatively. This accepts the same explicit zero as isSettled for a
+  // fully discounted checkout.
+  const paid = Number.isSafeInteger(session.amount_total) && Number(session.amount_total) >= 0
+    ? Number(session.amount_total) : null;
   const createdAtMs = typeof session.created === "number" && Number.isSafeInteger(session.created) ? session.created * 1000 : NaN;
-  await countOrder(store, `checkout:${session.id}`, Number(paid), Date.now(), {
+  return countLegacyCheckoutForConfirmation(store, `checkout:${session.id}`, paid, Date.now(), {
     hour: session.metadata?.[ADMITTED_FIELD], items, createdAtMs,
   });
 }

@@ -1064,3 +1064,112 @@ check("3479 control: known store reaches checkout observation",providerReads,1);
 console.log(JSON.stringify({scope:"extracted exact source function bodies, synthetic boundary mocks; not full module/integration/native Redis/provider proof",results,commands:reads,http:0},null,2));
 
 ```
+
+
+## 11/11/2026 — consolidação dos lotes nominais C1-1008/C1-1026 (Codex L)
+
+### Autoridade e limites
+- C1-20261111-1008-codexL-1: #2517, #2514, #3667, #3626, depois próximo item livre somente ao concluir o lote.
+- C1-20261111-1026-codexL-2: depois do primeiro lote, PRs OPEN #3579..#3632. Esses grants nominais de 11/11 autorizam os respectivos ramos; não são grant para o #2794.
+- Repetições do ESTADO08Nov10h07 preservadas no contexto do #2794: MV3217 já CLOSED, sem grant para seus arquivos compartilhados, sem nova consulta de head/CI, sem teste/replay, sem fechar achado nem inferir ownership.
+- GitHub integration ONLY; nenhum terminal, node_repl, PC do dono, navegador, arquivo local ou subagente nesta execução. Nenhum teste/compilador/native Redis/provedor executado por L. Objetos de teste anteriores às correções NÃO significam RED executado.
+- Nenhuma alteração de preço, limite visível, comissão configurada, flags/gates comerciais, contas, termos, pagamentos reais, dados pessoais reais ou reservas de outro dono. Nenhum merge, enqueue, fechamento de PR/issue ou rerun/cancelamento de CI por L.
+- #3680 entrou no main; #3677 CLOSED confirmado em 2026-11-11T13:31:47Z (10h31min47 Fortaleza). TODOS-109/110/111 lidas. Liberado o HOLD de main, mas TODOS-108 permanece: queued>150 segura ref/push.
+- Último main integrado nos candidatos quando necessário: c6f9a7b90600c31bad5a8430fcd24234fd3cdbc3, tree07f28295e6f55ce08e68a8f5caedac467cfb9896.
+- ROOT mais recente recuperado FULL: messages.md @blob f4a14fb4acd7ff6ae8c903908f579a3d8f14bb83, 373737 codeunits lidos pelo conector, prefixo365954 EXATO + delta7783 lido. Não houve cálculo independente de hash/roundtripBase64 desse ROOT nem append até este preparo.
+
+### Três pushes efetivamente publicados, um por PR, sem force
+1. #2517, codex/x-membership-status-evidence: 69d41c18f35b9ddad84ea0a14cece629f1747cd6 → c5ed79d3878fd6bacc43c082fd6ab7014df1cfa9, tree d251360b449c340731dd63d6cb638aa5ed5ff648. Gate sequencial: issuesmain-vermelho=[], queued138, expectedhead exato. Readback direto confirmou o head. Comentário6797952495 relido EXATO.
+   - Expandidos exigem ID próprio/data property válido; desconhecido não concede nem faz novo I/O. Mantidos testes G/evidence e retryScheduled de past_due do main. Alias Redis por teste, central test-config do main preservado. Seis arquivos relidos EXATOS.
+   - Teste primeiro982debfc04cb5d489c2184065896fe066d4e3467; correçãoe9d72ff576b65b09a92efa7e345e89027530dfb9; junção final c5ed com mainc6. G5793906330 precisa focal dirigido. Nenhum GREEN próprio nem fechamento do achado.
+   - Logs originais reais lidos: Mobile127144168278 mede bc788e38 (homepage interação280ms, NÃO demonstrada mesma causa3642); reader127143905480 Guidepup downloadHTTP504 antes do fluxo; verify127144168247 cancelado. Não foi demonstrado weekdayAt nesse head.
+2. #3626, claude4/wp10-move-letters: 23878d6e13e0756af58236cd29f394ee87505bbb → a503c789eac6981530ad6e2123e144006801e674, tree c2c7f71c530408ef7b482d1553b444f246a11721. Gate: issues=[], queued141, expectedhead exato. PR readback confirmou head; comentário6797977262 relido EXATO.
+   - Base EMPILHADA preservada: claude4/wp10-move-index (#3625). PR.base.sha ainda mostrava snapshot7b2a; a primeira guarda interna abortou ANTES de chamar update_ref. GET direto da ref da base +#3625 confirmou26ae0dc946bca3a8feb2539e6118482d38c91176, incluído como parent. Não houve falha de push/retry/force nem retarget.
+   - M1 propaga desconhecido; M2 guardas de destino já movido/source holdings/cap existente e ambas escritas no mesmo MOVE_APPLY v2. Retry verifica backlink. Reader recusa overflow antes das leituras dos antigos; nunca slice silencioso.
+   - Mantém movedRoomSlot por source/worst-length da base. Cinco guardas antes da reserva e oito comandos no pior EVAL; MOVE_APPLY_COMMANDS=32. MAX_MOVED_INTO=5 e delivery gate preservados. MemoryRedis acompanha script; oito arquivos relidos EXATOS.
+   - Testesprimeiro d2c6168636895ef13301174784a5a48e76dda9b0 / M1ace77732cebbb71c4dbbfbf0977fdfaad4625645 / M2teste d4c16c54cc6d9bc6865ff92567e094336909be46. C1/C3 achados6786776466/6796104539 precisam focais; não alegar Lua/nativo/CI executado.
+3. #3600, codex/cx2-2741-chat-counter: 9cb50bbbecbce57d3fd90e890614103af6a6e0bb → 47579e52bc497760a30b2bba2b210071a05afe95, tree df8b257746f59a4224cd520c4a377d49533f3b5e. Gate issues=[], queued149, expectedhead exato. Head relido; comentário6798120533 EXATO.
+   - LEVE CX4 #6779545986: url ausente/não textual agora400 antes de contador/helper; não apaga configuração. Auth e sales-only vêm antes; remoção por texto vazio/espaços e guardas de salvar preservadas; helper reservado intocado.
+   - Teste antes4c489c74bb078e6c2e030eb8a09e9d323f01ef3e cobre seis formas inválidas com configuração selada real do ambiente sintético, retenção BYTE e zero comandos/provedor adicionais. Dois paths relidos EXATOS. Focal nominal CX4 pendente; CX1 retirou seu próprio parecer anterior, não revalidar como aprovação.
+
+### Candidatos preparados SEM ref update — não confundir com publicados
+- #2514 candidate622733a9f987bcb5c966b5f15ebbe2d7a2561485/tree26e538b9dee77432a4925ef2db78c39d33e51b67; testeprimeirob3c5adeed7c2b69e5867fe08f2e518fbae528d09; preserva T8a0701f04afe42e5282ec69f0c2e7557c7955a1d e junção mainc6. Cinco arquivos EXATOS. Resolve callMeeting/roomOf ANTES da marca confirmada (com funding/idempotência próprios mantidos) e usa uma resolução de sala antes das duas marcas dos lembretes. Regressão callers reais/sintéticos de erro→retry→não duplicar. Focal precisa revisar posição do provider antes da marca, custos em retries, novos testes. Comentário6797645458.
+  - OFICIAL ainda e74d6cce39b3226090e1b206df505ebacb3080bc. MEDIUM6750502912 não autoencerrado. CodeQL162/163 e >600chars ainda ABERTOS. Log real CodeQL128523471226/run42411080266 conclui upload, não solução dos alerts. Annotations e URLs exatas de detalhes rejeitadas400 pelo conector; sem path até regex. Não escapar fixtures/suprimir/dizerfalsepositive. C1 precisa fornecer nexo/SARIF por sessão permitida. Novo recibo6798013377 relidoEXATO.
+- #3667 SOMENTE reparo de testes candidate850b432e30a99cfa3b5833c7d352bb0df8781118/treefb430f8cffb2d4238789cbc3ed0216dfb344f965, parentoficial4babe2ad1f18891cc95f26d69161b7610868e7c2. Dois paths EXATOS. bought-for-others captura created passado UMA vez para fingerprint estável, mais caso futuro→retry saudável. plan-margin continua exigindo chamada checkout, agora countLegacyCheckoutForConfirmation. Comentário6797884154 EXATO.
+  - M2 recuperação financiada de unknown permanente continua OPEN, além da junção +8 docs gerados (não editar valores à mão). Main countOrder/markAndCount/COUNT_ORDER +billingwindowunknown devem ser preservados; jamais restaurar SET NX separado da contagem. Não implementar email sem custeio sugerido em review. C1 precisa executor cloud dos geradores Node/SciPy e desenho financiado. #2338 duplicado não fechado/retargetado; decisão C1/autor.
+- #3624 parcialcandidatebb81f4a1947dff6ddebc3d183906518f5bd7d44e/tree7a08f39704b5dbb6204c8b0e4fbbba0c9f27be59; testeprimeiro028e92078c2b738b441bacdfcf66060c37043742. Dois pathsEXATOS. TypeError antes do mapa para clockNaN/infinito/negativo, entradasnãoarray e liçõesduplicadas/vazias/malformadas; controles válidos preservados. M privacy smallcohort de C3 #6795042817 continua OPEN; nenhum limiar visível inventado. Comentário6797830434 EXATO. Sem push, sem ready.
+- #3632 candidate b0ebf1d029b5e1eac5d7c881c3ea7cd651bfd06c/tree613aed2a75a1edd246a7e055dc2b3cd2f3fea446, testeprimeiroc50b1696aa2a187572a3caf661aca77991eef44c, foi preparado e ambos paths relidos EXATOS, mas NUNCA publicado. Autor agora enviou 698b778c9cb334ebdaea52436a76e258a3118b34: GET direto confirma OPEN/base main/mergeabletrue. Comentário do autor6798192403 relata fix58285bb3/RED905131f1 +junçãomainc6 e testes dele, não execução L. Meu candidato saiu da sequência de envio, sem duplicar nem sobrescrever. Comentário6798324125 publicado e relido EXATO.
+  - C1focal6798262215 é a PRIMEIRA revisão money limpa do novo head, semALTO/MÉDIO e comLEVE divisão taxFees/stripeFees aindaaberto; C6focal pedido continua pendente. Não ready/merge/CIverde novo. ReservaHG1/escopo permanece responsabilidade do autor, nenhuma linha editada por L.
+
+### Lote2 — triagem53 OPEN, não 53 consertos concluídos
+- #3581 não constavaOPEN no intervalo. Ainda há trabalho: esta rodada NÃO termina os lotes e não autoriza pegar unidade nova da fila.
+- Corrigida uma contagem inicial ERRADA em commentary: get_pr_info false foi tratado como conflito; GETdireto mostrou muitos null/unknown. Snapshot direto posterior:20clean/9unstable/15unknown/8blocked/1dirty, com3626dirtyANTESdo nosso push. NUNCA usar null/unknown como conflito confirmado/zero. #2517 e #3626 tinham dirty confirmado.
+- Dez reports ready for merge queue publicados e relidosEXATOS no head antigo INALTERADO, cada um com9AllchecksSUCCESS frescos+API mergeabletrue/clean+parecer existente, não nova revisão L: #3606 comentário6797687899; #3622 comentário6797688355; #3627 comentário6797719259; #3617 comentário6797719630; #3613 comentário6797720086; #3610 comentário6797720524; #3609 comentário6797720898; #3605 comentário6797721274; #3601 comentário6797721753; #3586 comentário6797722255. Preservadas qualificações documentais; nada enfileirado/incorporado.
+- Dez Mobile jobs FULL lidos,15medidas cada: 3630, 3628, 3625, 3620, 3618, 3616, 3614, 3607, 3596, 3594. Todas as versões medidas tinham StoreBeacon blobb124b6ff58ff009d2fa2c9ffe1bc61207369e659, startBrowserCheck na montagem/semcountsAtPause. Falhasinteraction>200 comLoAFc.js, mesma classe concreta do#3642; patch4paths e focal6797308020 lidos. #3642OPEN em9f79827eb961fdef83cf8ad0dcaa9a67d0f364bc, NÃOmerged; não duplicarfixnemmudaralvo. NotasporPR publicadas e TODAS10 relidasEXATAS; outroschecks/achados continuam independentes.
+- Verifyde3623, 3618, 3615, 3612, 3611: UMA tentativa cada do FULLlog deuTransportclosed; discussãofresh semexcerptreal. Comentários6797814692,6797815306,6797815851,6797816358,6797816869; procurararquivoERROreal, NÃOos2TODOproto-keys. Todos5 comentários relidosEXATOS. Sem inventarweekdayAt/falha.
+- #3604 fullverify130143469091 lido4.198.346chars: checkup-disputes.test.ts49 datafixa8Nov, já corrigido no main ed7420d53e2ae2cea671be63235186cff1c2eeed (diff+ambasfonteslidos). NÃOrefazercorreção. Firefox130143469125/WebKit130143469157: timeoutlocator('#sales').getByRole('status').getByRole('link') em shipment-acknowledgment.mjs96, confirmado sememail/390; causa deDOMainda precisa fonte; main ePR têmmesmotesTBLOBbde1025b88b7518a22ebd20c3aaca3e04738e2d1. Comentário6797499789EXATO. M1capacidade/linhagemcontinuaaberto, base2020 preservada.
+- #3589 autor já mudou51f99→ee5933e19dfd47a09e74a07c0a032b6f3d9b0282 (CodeQL2101linha), C1focal6797306073; 1ªmoneylimpaapenas, semCodesuccessnovoL. #3598 autorjuntoumain295b0615f74463e0a1763e13707a01e743af9897, focais6797413001/6797461347; CI nova pendente. #3588 novo9f62167940e3bb05105ea9da85deedbc7105922a, focal6797699478; base#3471própriospareceres. Não trabalhar sobreheadsantigosnememprestarchecks.
+- #3621 dizsubstituído#3659, masGET#3659OPEN/unmergedd12ef6f0d7486966b740d25c2e82414c2fa5e3ac; NÃOháprovaMERGEDparafechar/rotularsupersededconcluído. #3599 HOLDfinanceiro2048/TODOS99 preservado, semready. #3595 faltasegundamoney. #3631rowdeautorpendente.
+
+| PR | Head observado (ou publicado L) | Base | API/state no snapshot | Trabalho/pendência |
+| --- | --- | --- | --- | --- |
+| #3632 | 698b778c9cb334ebdaea52436a76e258a3118b34 | main | clean | author published fix; L candidate NOT published; first clean money focal6798262215, LOW tax split and C6/CI pending |
+| #3631 | e0a915e268ff3930eae633967ac5788e9a350a4e | main | clean | author reservation-row LOW remains |
+| #3630 | 3ac3b790930b88702972ecb59db1b0864a783988 | claude4/stn8-order-queue-rules | unstable | Mobile c.js / #3642: 6797758616 |
+| #3629 | 72da1c8d95e5e198f80a2749aa86e8fd6573eeac | main | unknown | triage inventory only; not completed/cleared |
+| #3628 | 1f951b8ba7a41bf0dda76db46b92d14629b51186 | main | blocked | Mobile c.js / #3642: 6797759154 |
+| #3627 | 35cdb00b15014cc552f75d8a69715ac279e2f1f0 | main | clean | ready report 6797719259 |
+| #3626 | a503c789eac6981530ad6e2123e144006801e674 | claude4/wp10-move-index | new head: CI/focal pending | L pushed once a503c789eac6981530ad6e2123e144006801e674 |
+| #3625 | 26ae0dc946bca3a8feb2539e6118482d38c91176 | claude4/wp10-move-purchases-request | unstable | Mobile c.js / #3642: 6797759604 |
+| #3624 | c5985d77317a7ad5c11b12dabc1a95f12d7f9a9c | main | clean | partial candidate bb81f4a1947dff6ddebc3d183906518f5bd7d44e; privacy MEDIUM OPEN |
+| #3623 | 6d5938effb8c25a9ba42805a48a1b1835840abec | main | blocked | verify Transport closed: 6797814692 |
+| #3622 | a77489d51291ddc2ebd2510faf64cd275dc5c3ed | main | clean | ready report 6797688355 |
+| #3621 | 78b875b8c97c8eb309ded025828beb6a304d7cb0 | claude4/wp10-move-purchases-store | clean | #3659 OPEN, not proof of MERGED supersession |
+| #3620 | 2f6ce6dd0e63551da91a64a7a78e8901b648e40a | claude4/sz7-stock-alert-store | unstable | Mobile c.js / #3642: 6797760128 |
+| #3619 | 42c8c7f25afee2a0115cf499105c7ea81bbbce1b | main | clean | triage inventory only; not completed/cleared |
+| #3618 | 2907ef1b5aa4c04419f03b6b98afb81861826c62 | claude1/pp2-support-handoff | unstable | Mobile c.js / #3642: 6797760577; verify Transport closed: 6797815306 |
+| #3617 | 58a6b031d61aaaac8c0ee3b3f0e285cbb5520995 | main | clean | ready report 6797719630 |
+| #3616 | f58f547d2eca0464b76b4606241880f3ca5fe352 | claude4/sz7-stock-alert-rules | unstable | Mobile c.js / #3642: 6797761129 |
+| #3615 | db65f259e854e0c9ea971ee22e17bca81717e611 | claude4/cd3-lever-switch-cards | unstable | verify Transport closed: 6797815851 |
+| #3614 | 40c8264b2519e98f75aec32d2239b6e9e1c5cbd9 | main | blocked | Mobile c.js / #3642: 6797761614 |
+| #3613 | ee7c8d19a0dc7acde081a1d1f5374e601e7ab5ca | main | clean | ready report 6797720086 |
+| #3612 | fa17d62919f0308d6b9400f3183afa6a2877dabf | claude1/wg6-appeal-route | unstable | verify Transport closed: 6797816358 |
+| #3611 | 83baf0081c054b0db90b7faef6d437c2e852f5b6 | main | blocked | verify Transport closed: 6797816869 |
+| #3610 | 0511e719efb29b31d429bbd0f63031369722435f | main | clean | ready report 6797720524 |
+| #3609 | a08a7d0054c42cfdecb10fc683474bfd85964353 | main | clean | ready report 6797720898 |
+| #3608 | bc6bcadb63bf8d66ab9d8a0c7d91cbbcd0ba0bad | claude4/wp10-move-purchases-rules | clean | triage inventory only; not completed/cleared |
+| #3607 | 503fbcb060183b2fbddf3bc28e8d524f39489a15 | main | blocked | Mobile c.js / #3642: 6797762109 |
+| #3606 | 819c154433eff9c25a36b78cd154dd517faba719 | main | clean | ready report 6797687899 |
+| #3605 | c9bb7c40527b7e9e1601415a52ff1be352840ece | main | clean | ready report 6797721274 |
+| #3604 | 47adf74c2fab3ed0bc196b82b6f7efc3bd5089ba | codex/a3-2020-current-main | unstable | full verify/crossbrowser logs; inherited date fixed ed7420d5; tracking selector pending; 6797499789 |
+| #3603 | eea23dc30b0625ce396f17de81912dbfd878a2b9 | main | unknown | triage inventory only; not completed/cleared |
+| #3602 | 3cff7f1816ea4b65177394d7483b638d96990479 | main | unknown | triage inventory only; not completed/cleared |
+| #3601 | fca6e02b12b0ec56eacda0a4b888b8361c62ed24 | main | clean | ready report 6797721753 |
+| #3600 | 47579e52bc497760a30b2bba2b210071a05afe95 | main | new head: CI/focal pending | L pushed once 47579e52bc497760a30b2bba2b210071a05afe95 |
+| #3599 | bc599016f831590ed3e762e2209fcf562c0c919f | main | clean | financial HOLD2048/TODOS99 remains; no ready |
+| #3598 | 295b0615f74463e0a1763e13707a01e743af9897 | main | blocked | author head changed; prior checks cannot certify new head |
+| #3597 | b67f46397564d7d03249142ebf2ce4a2e30b18bf | main | unknown | triage inventory only; not completed/cleared |
+| #3596 | a5b085fccbcf25ca1d814394c6823d73ce4184fa | main | blocked | Mobile c.js / #3642: 6797762547 |
+| #3595 | 59c2597d5c25b2c6c2e450b24f94395541a0e9c0 | main | clean | second independent money review still needed |
+| #3594 | 5614ec1c2e5556b8c81cd0efbc5017f451f2ee0a | main | blocked | Mobile c.js / #3642: 6797762978 |
+| #3593 | 34d7b1238d088d85cd4321cb4ac993200d5c587c | main | unknown | triage inventory only; not completed/cleared |
+| #3592 | fa87f05db3c504117cffc3af7bf7a1b0ed80f59e | main | unknown | triage inventory only; not completed/cleared |
+| #3591 | 223f2b0e4616e04a3fc4a4b941f2256c757c7f66 | main | unknown | triage inventory only; not completed/cleared |
+| #3590 | 65fc2ec76538e69de1452026d6c7d04e1c8951c7 | main | unknown | triage inventory only; not completed/cleared |
+| #3589 | ee5933e19dfd47a09e74a07c0a032b6f3d9b0282 | claude3/fix-2685-option-off-sale | unstable | author head changed; prior checks cannot certify new head |
+| #3588 | 9f62167940e3bb05105ea9da85deedbc7105922a | claude2/child-safety-keep | unstable | author head changed; prior checks cannot certify new head |
+| #3587 | 50316b14ef83faf5515f64fa8ff7fcc2ff6026bb | main | unknown | triage inventory only; not completed/cleared |
+| #3586 | e736ca84e0a103c120a0d69c8fcffeed62dd31e7 | main | clean | ready report 6797722255 |
+| #3585 | fcbbbc22ceab865e8adc184232875baa2005d3c8 | main | unknown | triage inventory only; not completed/cleared |
+| #3584 | 1e25d697a27292fc6c566de9fc75590fbbc6b9d3 | main | unknown | triage inventory only; not completed/cleared |
+| #3583 | e006f15bf7ef395dcb5693a53d198859e7d5395a | claude4/cd1-submission-buyer | clean | triage inventory only; not completed/cleared |
+| #3582 | e03e50374b8c4d658938b11e412c3f9ac68b413f | main | unknown | triage inventory only; not completed/cleared |
+| #3580 | 901d481c4b3f538902521f567154a661a45f97d2 | main | unknown | triage inventory only; not completed/cleared |
+| #3579 | 8cfb65bd2086d73fa523612b7eb5080d5f083cd5 | main | unknown | triage inventory only; not completed/cleared |
+
+### Próxima retomada útil
+1. PRIMEIRO este checkpoint FULL no MESMO caminho/ramo, validar prefixo e último receipt; depois ROOTatual/normas/reservas/caixa. Não reler arquivosarquivados dispensadosporTODOS80. Não voltar ao cursor08Novcomoestadooperacionaldoslotes11Nov.
+2. Não repetir push nos três PRs publicados nesta rodada. Só novos retornos dirigidos deles/CI por causa concreta. SemselfGREEN/fecharfindings; guardar expectedheadsempre.
+3. Concluir2514/3667 (C1 evidência/execução necessária), privacidade3624; #3632 já corrigido pelo autor, só retorno focal/CI novo sem duplicar; continuar tarefaspendentes3579..3632 quandoevidênciapermitir; nenhumitemnovoantesdelotesconcluídos.
+4. Push de PR só comfreshMVvazia eTODOS108<=150, máximo3PRs/h poragente. Último gate antes deste preparo:issues=[],queued163 (TRANSITÓRIO; não confundircomMVOPEN). Checkpoint documental separado: confirmado pela busca que seu ramo não tem PR OPEN e lidos TODOS9 workflows nesse ramo, push somente branches:[main], nenhum gatilho push para este ramo. Portanto salvar só o checkpoint não dispara os workflows de PR/main e não é novo envio de PR/unidade/junção; essa distinção corrige a retenção excessiva do preparo anterior. Canal também não é envio de PR. Não encerrar nem duplicar a única continuidade por esse limite; semvigiaemfundo. Automatização/período não alterados.
+5. A publicação deste texto só é confirmada pelo recibo de escrita+readback externo; nenhum resultado de execução é criado por salvar este registro. Prefixo anterior161970 preservado INTEIRO. Nenhum409novodesta rodada; históricos1712/1811e05h11continuamNÃOPUBLICADOS.

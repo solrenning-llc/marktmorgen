@@ -473,8 +473,13 @@ type ChargeOutcome = { settled: boolean; returned: number; disputed: number; cur
 async function giveBack(id: string, key: string, intent: string, least = 1): Promise<ChargeOutcome | null> {
   if (!OBJECT_ID.test(intent)) return { settled: false, returned: 0, disputed: 0, currency: "" };
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
-  const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
-  if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
+  // The reply is this payment's own (rule 30, Claude 6 on #3628): an intent or a charge of another payment, already
+  // refunded in full, would settle this one with nothing given back and a letter saying it was.
+  if (!plainObject(pi) || ownField(pi, "id") !== intent) throw new Error(`Stripe answered the payment of ${key} for another payment`);
+  const charge = ownField(pi, "latest_charge") as Record<string, unknown> | null | undefined;
+  if (!charge || !plainObject(charge) || typeof ownField(charge, "id") !== "string" || !OBJECT_ID.test(String(ownField(charge, "id")))) return { settled: false, returned: 0, disputed: 0, currency: "" };
+  if (ownField(charge, "payment_intent") !== intent) throw new Error(`Stripe answered the charge of ${key} for another payment`);
+  const chargeId = String(ownField(charge, "id"));
   // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
   // settleOne keeps the plan in line, never settled as refunded with nothing given back.
   const amount = ownField(charge, "amount");
@@ -490,7 +495,8 @@ async function giveBack(id: string, key: string, intent: string, least = 1): Pro
   // Read in full or not at all: a refund missed on an unknown list would be asked for twice (settleOne keeps it on the throw).
   // Each row in Stripe's own domain: a refund's amount is above zero and its status one of Stripe's. A negative one
   // would ask for more than was paid, an unknown one for a second refund: either throws before anything is asked for.
-  const refunds = await allRows("/refunds", new URLSearchParams({ charge: charge.id, limit: "100" }), (row) => REFUND_STATUSES.has(ownField(row, "status")) && wholeAtLeast(ownField(row, "amount"), 1), 5);
+  // And each row is this charge's own: a refund of another charge counted here would settle it with nothing given back.
+  const refunds = await allRows("/refunds", new URLSearchParams({ charge: chargeId, limit: "100" }), (row) => ownField(row, "charge") === chargeId && REFUND_STATUSES.has(ownField(row, "status")) && wholeAtLeast(ownField(row, "amount"), 1), 5);
   const sum = (status: string) => refunds.filter((row) => row.status === status).reduce((total, row) => total + (Number(row.amount) || 0), 0);
   const succeeded = sum("succeeded");
   const pending = sum("pending") + sum("requires_action");
@@ -507,8 +513,15 @@ async function giveBack(id: string, key: string, intent: string, least = 1): Pro
     new URLSearchParams({ payment_intent: intent, amount: String(amount - succeeded), reason: "requested_by_customer", "metadata[closing_plan]": id }),
     { version: AT, idempotencyKey: `closing-plan-refund:${key}:${failed}` },
   );
-  const now = made.status === "succeeded" ? succeeded + (Number(made.amount) || 0) : succeeded;
-  return { settled: made.status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
+  // The reply is the refund asked for (Claude 6's LOW on #3628): for this payment, its amount the whole number asked
+  // for, its status one of Stripe's. Any other reply throws and the plan stays in line; the next run reads the list,
+  // and the idempotency key never makes the refund twice.
+  const asked = amount - succeeded;
+  if (!plainObject(made) || ownField(made, "payment_intent") !== intent || ownField(made, "amount") !== asked || !REFUND_STATUSES.has(ownField(made, "status"))) {
+    throw new Error(`Stripe answered the refund of ${key} in another shape`);
+  }
+  const now = ownField(made, "status") === "succeeded" ? succeeded + asked : succeeded;
+  return { settled: ownField(made, "status") === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
 }
 
 /**

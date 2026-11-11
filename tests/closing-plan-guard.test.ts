@@ -107,7 +107,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (!charge) return json({ error: { message: "No such payment_intent" } }, 404);
     // As Stripe keeps it: what refunds that have not failed took back.
     const refunded = world.refunds.filter((row) => row.payment_intent === intent[1] && (row.status === "succeeded" || row.status === "pending")).reduce((sum, row) => sum + row.amount, 0);
-    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount: charge.amount, amount_refunded: refunded, disputed: charge.disputed } });
+    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, payment_intent: intent[1], currency: "usd", amount: charge.amount, amount_refunded: refunded, disputed: charge.disputed } });
   }
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.listLags ? [] : world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
   if (path === "/refunds" && method === "POST") {
@@ -582,7 +582,7 @@ async function main() {
         const one = await closingStore(`refr${"abcd"[index]}`, day);
         refundStores.push(one);
         const before = refundPosts;
-        garble = (path, url) => (path === "/refunds" && url.searchParams.get("charge") === `ch_${one.pi.slice(3)}` ? { object: "list", data: [{ id: `re_refr${"abcd"[index]}row001`, object: "refund", status, amount, currency: "usd" }], has_more: false } : undefined);
+        garble = (path, url) => (path === "/refunds" && url.searchParams.get("charge") === `ch_${one.pi.slice(3)}` ? { object: "list", data: [{ id: `re_refr${"abcd"[index]}row001`, object: "refund", charge: `ch_${one.pi.slice(3)}`, status, amount, currency: "usd" }], has_more: false } : undefined);
         const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
         garble = null;
         is(`a refund row ${what}: no refund is asked for, kept in line, nobody told`, [outcome, refundPosts - before, refundsOf(one.pi).length, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", 0, 0, false, 0]);
@@ -595,7 +595,7 @@ async function main() {
       garble = (path, url, page) => {
         if (path !== "/refunds" || url.searchParams.get("charge") !== `ch_${twice.pi.slice(3)}`) return undefined;
         if (url.searchParams.get("starting_after") === "re_refpagedno01") return page;
-        return { object: "list", data: [{ id: "re_refpagedno01", object: "refund", amount: 6_900, status: "failed", currency: "usd" }], has_more: true };
+        return { object: "list", data: [{ id: "re_refpagedno01", object: "refund", charge: `ch_${twice.pi.slice(3)}`, amount: 6_900, status: "failed", currency: "usd" }], has_more: true };
       };
       const beforeTwice = refundPosts;
       const twiceOutcome = await refusePlanIfClosing({ store: (await storeForEmail(twice.email))!, handle: "refpaged", subscriptionId: twice.id, customerId: twice.customer });

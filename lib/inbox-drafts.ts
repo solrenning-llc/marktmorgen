@@ -51,6 +51,16 @@ type Kept = Record<string, { text: string; at: number }>;
  * not ours to read reads as no drafts and is removed, as an old draft is.
  */
 function readAll(storage: DraftStorage | null, now: number): Kept | null {
+  return readState(storage, now)?.kept ?? null;
+}
+
+/**
+ * readAll, and whether words that are no longer shown are still in storage
+ * because the device refused to remove them (stuck): then the 7-day promise
+ * is not kept, and the inbox says so (Codex U on #3521). Every read tries the
+ * removal again, so it goes as soon as the device accepts.
+ */
+function readState(storage: DraftStorage | null, now: number): { kept: Kept; stuck: boolean } | null {
   if (!storage) return null;
   let raw: string | null;
   try {
@@ -58,17 +68,15 @@ function readAll(storage: DraftStorage | null, now: number): Kept | null {
   } catch {
     return null;
   }
-  if (!raw) return {};
+  if (!raw) return { kept: {}, stuck: false };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    purge(storage, {});
-    return {};
+    return { kept: {}, stuck: !purge(storage, {}) };
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    purge(storage, {});
-    return {};
+    return { kept: {}, stuck: !purge(storage, {}) };
   }
   const kept: Kept = {};
   let dropped = false;
@@ -81,14 +89,13 @@ function readAll(storage: DraftStorage | null, now: number): Kept | null {
     kept[id] = { text: text.slice(0, MAX_MESSAGE), at };
   }
   // A draft past DRAFT_DAYS, or an entry that is not one, leaves storage as soon as it is read, so its words are
-  // not kept on the device after they stop being shown (Codex U on #3521). Best effort: a refused write changes nothing.
-  if (dropped) purge(storage, kept);
-  return kept;
+  // not kept on the device after they stop being shown (Codex U on #3521). A refused write is reported as stuck, never as gone.
+  return { kept, stuck: dropped && !purge(storage, kept) };
 }
 
-/** Writes back only what is still kept; nothing left removes the entry. Never throws. */
-function purge(storage: DraftStorage, kept: Kept): void {
-  writeAll(storage, kept);
+/** Writes back only what is still kept; nothing left removes the entry. Never throws; false when storage refused. */
+function purge(storage: DraftStorage, kept: Kept): boolean {
+  return writeAll(storage, kept);
 }
 
 /** Writes them back, the newest MAX_DRAFTS only; false when storage refused. Nothing left removes the entry. */
@@ -112,6 +119,16 @@ export function readDraft(storage: DraftStorage | null, id: string, now = Date.n
 /** The conversations that have a draft on this device. */
 export function draftIds(storage: DraftStorage | null, now = Date.now()): Set<string> {
   return new Set(Object.keys(readAll(storage, now) ?? {}));
+}
+
+/**
+ * True when a draft past DRAFT_DAYS (or an entry that is not one) is still on
+ * this device because it refused to remove it: hidden, but not gone. Looking
+ * tries the removal again. False when nothing old is left, and when there is
+ * no storage at all (then nothing was ever kept).
+ */
+export function oldDraftsStuck(storage: DraftStorage | null, now = Date.now()): boolean {
+  return readState(storage, now)?.stuck ?? false;
 }
 
 /**

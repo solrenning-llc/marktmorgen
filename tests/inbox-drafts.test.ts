@@ -154,7 +154,7 @@ part("A draft that could not be kept is said, never claimed kept (Codex U, MEDIU
   is("a full storage refuses the draft", saveDraft(full, a, "Words", t0), false);
   is("the inbox acts on the refusal", studio.includes("const kept = saveDraft(browserDrafts(me), thread.conversation.id, next); setDraftFailed(!kept && next.trim() !== \"\"); if (kept) setDrafted(draftIds(browserDrafts(me)));"), true);
   is("and says so, politely, once", studio.includes("if (!kept && next.trim() && !draftFailed) setDraftSaid(NOT_KEPT);"), true);
-  is("the help under the box no longer says the words are kept", studio.includes("{draftFailed ? NOT_KEPT : \"What you type is kept on this device only"), true);
+  is("the help under the box no longer says the words are kept", studio.includes("{draftFailed ? NOT_KEPT : cleanFailed ? STUCK : \"What you type is kept on this device only"), true);
   is("the words said", studio.includes('const NOT_KEPT = "This device could not keep your answer as a draft, so it is only in this box until you send it.";'), true);
 }
 

@@ -32,7 +32,7 @@ const T1 = "1".repeat(32);
 const T2 = "2".repeat(32);
 const T3 = "3".repeat(32);
 
-type Made = { id: string; amount: number; status: string };
+type Made = { id: string; amount: number; status: string; action: string | null };
 const stripe = {
   charge: { amount: 5_000, refunded: 0, disputed: false, store: HANDLE, status: "succeeded" },
   keys: new Map<string, { busy: boolean; reply: Record<string, unknown> | null; params: string }>(),
@@ -54,6 +54,8 @@ const chargeBody = () => ({
   status: stripe.charge.status,
   paid: stripe.charge.status === "succeeded",
   amount: stripe.charge.amount,
+  captured: true,
+  amount_captured: stripe.charge.amount,
   amount_refunded: stripe.charge.refunded,
   currency: "usd",
   disputed: stripe.charge.disputed,
@@ -75,6 +77,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (headers.get("Stripe-Account") !== ACCOUNT) return Response.json({ error: { type: "invalid_request_error", message: "no such account" } }, { status: 400 });
   if (path === `/charges/${CHARGE}` && (init?.method ?? "GET") === "GET") return Response.json(chargeBody());
   if (path.startsWith("/charges/")) return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such charge" } }, { status: 404 });
+  // The charge's refunds, newest first, each with the metadata it was made with (Stripe keeps them for good).
+  if (path === "/refunds" && (init?.method ?? "GET") === "GET" && url.searchParams.get("charge") === CHARGE) {
+    const data = [...stripe.made].reverse().map((m) => ({ id: m.id, object: "refund", amount: m.amount, charge: CHARGE, currency: "usd", status: m.status, metadata: m.action ? { mm_action: m.action } : {} }));
+    return Response.json({ object: "list", data, has_more: false });
+  }
   if (path === "/refunds" && init?.method === "POST") {
     const params = new URLSearchParams(body);
     if (key) {
@@ -92,7 +99,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = Number(params.get("amount"));
     const status = stripe.next?.status ?? "succeeded";
     refundIds += 1;
-    const made = { id: `re_wg9_${refundIds}`, amount, status };
+    const made = { id: `re_wg9_${refundIds}`, amount, status, action: params.get("metadata[mm_action]") };
     stripe.made.push(made);
     if (status === "succeeded" || status === "pending") stripe.charge.refunded += amount;
     const reply = stripe.next?.body ?? { id: made.id, object: "refund", amount, charge: params.get("charge"), currency: "usd", status, reason: params.get("reason") };
@@ -143,6 +150,14 @@ async function main(): Promise<void> {
   is("said done again", [again.status, again.body.state], [200, "done"]);
   is("still one refund made at Stripe, and 12.50 given back", [stripe.made.length, stripe.charge.refunded], [1, 1_250]);
   is("and still one line in the log", (await logLines(store)).length, 1);
+
+  part("The same form sent again a day later, once Stripe has forgotten its key: still one refund (Claude 3 and Codex G on #3678)");
+  stripe.keys.clear();
+  const nextDay = await post({ charge: CHARGE, token: T1, amount: "12.50", reason: "requested_by_customer" });
+  is("said done, as the first refund", [nextDay.status, nextDay.body.state], [200, "done"]);
+  is("no second refund made at Stripe, still 12.50 given back", [stripe.made.length, stripe.charge.refunded], [1, 1_250]);
+  is("each refund carries this action's mark, never the key or the token itself", [stripe.made[0]?.action?.length, (stripe.made[0]?.action ?? "").includes(T1)], [40, false]);
+  is("still one line in the log", (await logLines(store)).length, 1);
 
   part("Two clicks at the same moment on a new form: one refund");
   const [a, b] = await Promise.all([post({ charge: CHARGE, token: T2, amount: "10" }), post({ charge: CHARGE, token: T2, amount: "10" })]);

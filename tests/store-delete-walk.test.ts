@@ -31,9 +31,17 @@ const stateKey = (key: string) => `nl:plan:closing:${createHash("sha256").update
 
 // Replies replaced for one kind of command, to stand for a reply that was lost or garbled (undefined: Redis's own).
 let garble: ((command: (string | number)[]) => unknown[] | undefined) | undefined;
+// Run once right after one command's reply is read, before the caller sees it: another request landing in between.
+let after: { when: (command: (string | number)[]) => boolean; run: () => Promise<void> } | undefined;
 redis.pipeline = async (commands: (string | number)[][]) => {
   const swapped = commands.length === 1 && garble ? garble(commands[0]) : undefined;
-  return swapped ?? pipe(commands);
+  const reply = swapped ?? (await pipe(commands));
+  const hook = after;
+  if (hook && commands.length === 1 && hook.when(commands[0])) {
+    after = undefined;
+    await hook.run();
+  }
+  return reply;
 };
 
 async function allKeys(): Promise<string[]> {
@@ -155,6 +163,30 @@ async function main(): Promise<void> {
   is("a walk while a delete may still be under way keeps its keys and leaves its entry waiting", [await erasableBy(idsOf(staysStore)), typeof (await inBatch(staysRef))], [staysKeys, "string"]);
   await eraseClosed(deadline(), finishClosed, t1 + 21 * HOUR);
   is("once no delete can be under way, its entry is dropped and its keys are kept", [await erasableBy(idsOf(staysStore)), await inBatch(staysRef), (await storeForId(staysStore.sid))?.handle], [staysKeys, null, "keepsstays"]);
+
+  part("a retry inside a stale admission: its fresh entry is never dropped for the old one (Codex T and reviewer 2 on #3670)");
+  redis.clear();
+  await claimHandle(OWNER, "keepshome", "Keeps Home", "");
+  const again = await createStore(OWNER, "keepsagain", "Keeps Again", "");
+  if (!again.ok) throw new Error("no retried store");
+  const againStore = await furnished(storeRef(again.store));
+  const againRef = storeRef(againStore);
+  garble = (command) => (command[0] === "EVAL" && /DEL/.test(String(command[1])) && String(command[3] ?? "").startsWith("nl:store:lock:") && String(command[4] ?? "").startsWith("nl:store:owner:") ? ["garbled"] : undefined);
+  is("first delete fails, its entry E0 left waiting", [await deleteFromStudio(OWNER, againStore), typeof (await inBatch(againRef))], ["error", "string"]);
+  garble = undefined;
+  const e0 = await inBatch(againRef);
+  let retried = "";
+  // The walk's admission reads the record standing; the owner's retry runs to its end before the admission goes on.
+  after = { when: (command) => command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:"), run: async () => { retried = await deleteFromStudio(OWNER, againStore); } };
+  const t2 = Date.now();
+  await eraseClosed(deadline(), finishClosed, t2 + 2 * HOUR);
+  after = undefined;
+  is("the interleaving happened and the retry says deleted", retried, "deleted");
+  is("the record is gone", await storeForEmail(againRef), null);
+  const e1 = await inBatch(againRef);
+  is("the retry's fresh entry survives the stale admission", [typeof e1, e1 !== e0], ["string", true]);
+  await eraseClosed(deadline(), finishClosed, t2 + 30 * HOUR);
+  is("a later walk erases every key named by its ids", [await erasableBy(idsOf(againStore)), await readPhoto(againStore.photoId!), await inBatch(againRef)], [[], null, null]);
 
   part("rule 24: a record not read at the walk leaves the entry waiting, never walked nor dropped");
   redis.clear();

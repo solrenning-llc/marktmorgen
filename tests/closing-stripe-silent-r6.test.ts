@@ -233,6 +233,20 @@ async function main(): Promise<void> {
   is("not closed on the old count: no sooner than STRIPE_SILENT_DAYS after the answer", removedAt === -1 || removedAt >= 5 + SILENT, true);
   is("but closed on the new one", removedAt > 0, true);
 
+  // Claude 1's review 6799408486 of #3463 (MEDIUM): only the creator account's subscription search gave no answer; its
+  // balance and the rest of the account answered on every run. The renewals step lapsed on that silence and the
+  // refund step's answer did not undo it, so on C+8 the store was removed as lapsed, its renewals never stopped.
+  part("The renewals search silent while the account answers its balance: never closed as lapsed");
+  fresh();
+  const c = await withMember("searchquiet", "acct_1SearchQuiet01");
+  await redis.pipeline([["SET", creditKey(c.folder), 5]]);
+  broken.set("/v1/subscriptions/search", "down");
+  let closedAt = -1;
+  for (let d = C + 1; d <= C + SILENT + 3 && closedAt < 0; d += 1) if ((await quietly(() => closeOne(c.email, c.ended + d * DAY, hands))).state === "removed") closedAt = d - C;
+  is("never removed while the account answers on the same run", closedAt, -1);
+  is("nothing written down as lapsed", (await record(c))?.lapsed, undefined);
+  is("its member is not told renewals may continue, nor that the refund may not have been made", [renewalNotices(c).length, refundLetters(c).length], [0, 0]);
+
   done();
 }
 

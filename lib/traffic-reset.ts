@@ -33,6 +33,9 @@ import { PARTS_PER_VISIT } from "@/lib/traffic-rules";
 /** How many resets are kept in the record, the newest first. */
 export const TRAFFIC_LOG_KEEP = 1_000;
 
+/** How long the record lasts after its last reset: it names stores, and a handle is often a person's name. */
+export const TRAFFIC_LOG_DAYS = 400;
+
 const LOG_KEY = "nl:operator:traffic-log";
 const LOCK_KEY = "nl:operator:traffic-reset:lock";
 const LOCK_SECONDS = 30;
@@ -54,6 +57,7 @@ if not string.match(room, '^%d+$') then return {-3} end
 if tonumber(current) < tonumber(ARGV[1]) then return {-1, tonumber(current)} end
 redis.call('LPUSH', KEYS[3], ARGV[3])
 redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[5]) - 1)
+redis.call('EXPIRE', KEYS[3], ARGV[6])
 return {1, redis.call('DECRBY', KEYS[1], ARGV[2]), tonumber(room)}`;
 
 /** The lock let go only by the token that took it. */
@@ -113,7 +117,7 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
     const entry: TrafficReset = { at: now, sid: store.sid, handle: store.handle, window: window.id, before, after: to };
     const replies = repliesFor(
       await redisPipeline([
-        ["EVAL", RESET_SCRIPT, 4, key, roomKey, LOG_KEY, LOCK_KEY, String(people), String(before - to), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP],
+        ["EVAL", RESET_SCRIPT, 4, key, roomKey, LOG_KEY, LOCK_KEY, String(people), String(before - to), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP, TRAFFIC_LOG_DAYS * 86_400],
       ]),
       1,
     );

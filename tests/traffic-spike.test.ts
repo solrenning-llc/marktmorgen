@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   // the claim, the day's count or the email.
   const givenBack = traffic.indexOf('if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]])');
   is("the alarm looks only after a refused hold was given back", givenBack > counted && alarm > givenBack, true);
-  is("a count given back rings nothing", /if \(n > limit && giveBack\)[^\n]*\n[\s\S]*?if \(!\(n > limit && giveBack\)\) afterAnswer\(\(\) => alertSpike\(/.test(traffic), true);
+  is("a count given back rings nothing", /if \(n > limit && giveBack\)[^\n]*\n[\s\S]*?if \(!\(n > limit && giveBack\) && spikeMark\(n, units, limit, window, now\) !== null\) afterAnswer\(\(\) => alertSpike\(/.test(traffic), true);
   is("the request never waits on the alarm", traffic.includes("await alertSpike("), false);
 
   done();

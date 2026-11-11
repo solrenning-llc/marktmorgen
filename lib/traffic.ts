@@ -35,11 +35,12 @@
  */
 import { createHash, createHmac } from "node:crypto";
 import { headers } from "next/headers";
+import { after } from "next/server";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { admitNonPaying } from "@/lib/free-pool";
-import { alertSpike } from "@/lib/traffic-spike";
+import { alertSpike, spikeMark } from "@/lib/traffic-spike";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
@@ -251,6 +252,16 @@ export async function isResting(store: Store, now = Date.now(), who: "public" | 
   } catch { return true; }
 }
 
+/** Runs after the answer is sent when there is a request to wait for; otherwise now, unwaited. Never throws. */
+function afterAnswer(task: () => Promise<unknown>): void {
+  const run = () => task().catch((error) => console.error("a traffic alarm failed", error));
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
+}
+
 /**
  * One more request answered for this store's public side, counted in its
  * window: true when it fits, where public pages rest at 95% of the window's
@@ -275,11 +286,14 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
   if (!Number.isSafeInteger(n) || n < units) return false;
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
-  // A window used up much faster than it passes tells the operator, once a mark; it changes nothing (lib/traffic-spike.ts).
-  await alertSpike(store, folder, window, n, units, limit, now);
   // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
   // read for it. A request refused as a page resting stays counted, as it always has.
   if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});
+  // A window used up much faster than it passes tells the operator, once a mark; it changes nothing (lib/traffic-spike.ts).
+  // Only on a count that stays, and after the answer is sent: the page never waits on the claim or the email (Claude 1's
+  // LOW on #3380).
+  // spikeMark is pure, so an ordinary request schedules nothing.
+  if (!(n > limit && giveBack) && spikeMark(n, units, limit, window, now) !== null) afterAnswer(() => alertSpike(store, folder, window, n, units, limit, now));
   return n <= limit;
 }
 

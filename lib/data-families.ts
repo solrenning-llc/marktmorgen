@@ -418,7 +418,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // the window ends, and the day's count of all of them, kept two days: the company's own, like the sweep's cursor.
   "nl:traffic:spike:": C, "nl:traffic:spike-day:": C,
   // The operator's lowering of a store's visits (lib/traffic-reset.ts): one record list, at most TRAFFIC_LOG_KEEP
-  // entries, and its short lock: the company's own.
+  // entries expiring TRAFFIC_LOG_DAYS after the last reset, and its short lock: the company's own.
   "nl:operator:traffic-log": C, "nl:operator:traffic-reset:lock": C,
   "nl:upd:job:": X(120), "nl:upd:last:": E, "nl:upd:latest:": E, "nl:upd:off:": E, "nl:upd:stop:": T("nl:erase:ix:", 400), "nl:updq": I,
   // The creator's business card (lib/creator-card.ts): goes with the store.

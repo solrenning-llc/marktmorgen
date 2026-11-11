@@ -118,7 +118,7 @@ async function planRefunds(): Promise<void> {
       if (path === "/invoices") return list(q.get("subscription") === sub ? [invoice] : []);
       if (path === "/charges") return list(q.get("customer") === customer ? [chargeRow] : []);
       if (path === `/charges/${charge}`) return Response.json(chargeRow);
-      if (path === "/charges/search" || path === "/customers/search") return list([]);
+      if (path === "/charges/search" || path === "/customers/search") return Response.json({ object: "search_result", data: [], has_more: false });
       if (path === "/disputes") return list([]);
       if (path === "/refunds") return Response.json(refundsPage);
       return null;

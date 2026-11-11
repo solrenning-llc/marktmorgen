@@ -22,6 +22,8 @@
  * Pure, so the store record and the page can import it.
  */
 import { LINK_CODE_PATTERN } from "@/lib/code-link";
+import { type IntroCandidate, activeIntro } from "@/lib/intro-price";
+import { type SaleCandidate, type StoreSale, saleOff } from "@/lib/store-sale";
 
 /** What a code takes off, Stripe's coupon as it was made: a percentage, or an amount in one currency. */
 export type ReturningOff =
@@ -138,15 +140,36 @@ export function readLinkToken(raw: string | null | undefined): string {
 }
 
 /**
- * Whether a product's buy box offers the field: only where the store has a
- * code that has not ended, can sell, and the price is the creator's own (a
- * buyer who names the amount already chooses what they pay).
+ * Whether another discount wins this product's checkout for everyone, as
+ * lib/store-checkout.ts decides it: a buyer who names the amount, a
+ * membership's introductory price, or a sale across the store that covers it.
+ * The checkout then refuses a returning-buyer code ("other"), so it is never
+ * offered, asked for or sent while one runs. A fair price depends on the
+ * buyer's country and is checked where the country is known (lib/returning-code.ts).
  */
-export function returningCodeOffered(
-  store: { returningCodes: readonly ReturningCode[]; stripeAccountId: string | null },
-  product: { pwyw?: unknown },
+export function otherDiscountForAll(
+  store: { sale?: StoreSale; tiers?: readonly string[] },
+  product: { pwyw?: unknown } & Partial<Omit<SaleCandidate, "pwyw">> & Partial<Pick<IntroCandidate, "recurring">>,
   nowSeconds: number,
 ): boolean {
-  if (!store.stripeAccountId || product.pwyw) return false;
+  if (product.pwyw) return true;
+  if (typeof product.id !== "string" || typeof product.priceCents !== "number") return false;
+  const candidate = product as SaleCandidate & IntroCandidate;
+  if (candidate.recurring && activeIntro(candidate, store.tiers ?? [])) return true;
+  return Boolean(store.sale) && saleOff(store.sale as StoreSale, candidate, nowSeconds) > 0;
+}
+
+/**
+ * Whether a product's buy box offers the field: only where the store has a
+ * code that has not ended, can sell, and the price is the creator's own (a
+ * buyer who names the amount already chooses what they pay), with no other
+ * discount winning its checkout (otherDiscountForAll).
+ */
+export function returningCodeOffered(
+  store: { returningCodes: readonly ReturningCode[]; stripeAccountId: string | null; sale?: StoreSale; tiers?: readonly string[] },
+  product: { pwyw?: unknown } & Partial<Omit<SaleCandidate, "pwyw">> & Partial<Pick<IntroCandidate, "recurring">>,
+  nowSeconds: number,
+): boolean {
+  if (!store.stripeAccountId || otherDiscountForAll(store, product, nowSeconds)) return false;
   return store.returningCodes.some((entry) => entry.endsAt === null || entry.endsAt > nowSeconds);
 }

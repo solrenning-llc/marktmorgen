@@ -37,11 +37,14 @@ import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
-import { type ReturningCode, readLinkToken, returningCodeFor } from "@/lib/returning-code-rules";
+import { type ReturningCode, otherDiscountForAll, readLinkToken, returningCodeFor } from "@/lib/returning-code-rules";
+import { activePwyw } from "@/lib/pay-what-you-want";
+import { fairOff } from "@/lib/fair-price";
+import { saleOff } from "@/lib/store-sale";
 import { returningLinkWords } from "@/lib/buyer-words/returning-link";
 import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
-import { type Store, saleHandles } from "@/lib/store";
+import { type Listing, type Store, saleHandles } from "@/lib/store";
 
 /** Public requests one check counts as: the same reads and Stripe calls as ownedHere for the next product after a purchase. */
 export const RETURNING_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
@@ -83,6 +86,19 @@ export async function requestReturningLink(input: { store: Store; productId: str
   const typed = input.email.trim().slice(0, MAX_EMAIL_LENGTH);
   later(() => sendReturningLink(store, input.productId, input.productTitle, code, email, input.origin, sendEmail, typed));
   return "sent";
+}
+
+/**
+ * Whether another discount wins this product's checkout for this buyer, so the
+ * checkout would refuse the code ("other", lib/store-checkout.ts): the same
+ * branches, in the same order. Answered before anything is read, held or sent.
+ * A come-back offer (a winback coupon) is only known at the checkout, which
+ * still refuses it there.
+ */
+export function otherDiscountWins(store: Store, product: Listing, country: string, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  if (activePwyw(product) || otherDiscountForAll(store, product, nowSeconds)) return true;
+  const saleNow = saleOff(store.sale, product, nowSeconds);
+  return !product.recurring && fairOff(store.fair, product, country) > saleNow;
 }
 
 /** Runs after the answer, so how long the answer takes tells nothing either; at once when there is no request. */

@@ -6,7 +6,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, redeemReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
+import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
@@ -214,6 +214,9 @@ export async function POST(request: NextRequest) {
   let returning: { code: ReturningCode; email: string } | null = null;
   const backToField = (status: string) => away(`/@${store.handle}/p/${product.id}?returning=${status}#returning`);
   if (linkToken || typedCode) {
+    // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
+    // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.
+    if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")))) return backToField("other");
     // Each try may read the creator's Stripe account or use a link: a few per connection.
     if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
     // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.

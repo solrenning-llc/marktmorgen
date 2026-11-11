@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, moveProduct, setSubscription, storeForEmail } from "@/lib/store";
 import { visibleIds } from "@/lib/catalog";
+import * as policyInputs from "@/lib/store-policy-input";
 import { policyInput, policyInputFrom } from "@/lib/store-policy-input";
 import { policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { RESERVED_SLUGS } from "@/lib/site-page-rules";
@@ -96,7 +97,47 @@ async function storedSchedule() {
   is("the readable schedule back: memberships again", await stored(JSON.parse(original).recurring), { memberships: true });
 }
 
-storedSchedule().then(done, (e) => {
+/**
+ * The page is public and dynamic, and it reads every visible product's listing (Claude 1's review of #1824): those
+ * reads are paid for as the store's own public requests before any is made (lib/public-read-rules.ts, listingUnits),
+ * and a store whose window refuses them reads none of them and rests, as the collection page and the map do.
+ */
+async function paidReads() {
+  part("Its listings are paid for before they are read");
+  const paidPolicyInput = (policyInputs as Record<string, unknown>).paidPolicyInput as ((s: unknown) => Promise<unknown>) | undefined;
+  is("a paid reader of the page's input exists", typeof paidPolicyInput, "function");
+  redis.clear();
+  const owner = "policy-paid@example.test";
+  await claimHandle(owner, "policypaid", "Policy Paid", "");
+  await ensureStatsId(owner);
+  for (let i = 0; i < 60; i++) if (!(await addProduct(owner, `Guide ${i}`, "", "5", null)).ok) throw Error("fixture product failed");
+  const seen: string[] = [];
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    for (const c of commands) seen.push(`${c[0]} ${c[1]}`);
+    return real(commands);
+  };
+  const listingReads = () => seen.filter((c) => /^(GET|MGET) nl:catalog:[^:]+:l:/.test(c)).length;
+  try {
+    const unpaid = (await storeForEmail(owner))!;
+    seen.length = 0;
+    const refused = paidPolicyInput ? await paidPolicyInput(unpaid).catch(() => "threw") : "missing";
+    is("a store whose window cannot be charged: refused, and no listing read", [refused, listingReads()], [null, 0]);
+    await setSubscription(owner, { customerId: "cus_PolicyPaid01", subscriptionId: "sub_PolicyPaid01", active: true, period: paidPeriod() });
+    const shop = (await storeForEmail(owner))!;
+    seen.length = 0;
+    const input = paidPolicyInput ? ((await paidPolicyInput(shop)) as { sellsDigital?: boolean } | null) : null;
+    const firstRead = seen.findIndex((c) => /^(GET|MGET) nl:catalog:[^:]+:l:/.test(c));
+    const firstCount = seen.findIndex((c) => /^INCRBY /.test(c));
+    is("a paid store: built, its requests counted before the first listing is read", [input?.sellsDigital, listingReads() > 0, firstCount >= 0 && firstCount < firstRead], [true, true, true]);
+  } finally {
+    redis.pipeline = real;
+  }
+  const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
+  is("the page rests as the store's other pages do, then pays before it reads", [page.includes("if (await isResting(store)) return <StoreResting store={store} />;"), page.includes("const input = await paidPolicyInput(store);"), page.includes("if (!input) return <StoreResting store={store} />;")], [true, true, true]);
+}
+
+storedSchedule().then(paidReads).then(done, (e) => {
   console.error(e);
   process.exitCode = 1;
 });

@@ -80,7 +80,8 @@ export function renderMarktmorgenAffiliates(): string {
   const table = rows.map((row) => {
     const max = row.maxCommissionBps;
     const share = max === null ? "none" : pct(max);
-    const amount = max === null ? "—" : usd(Math.floor((row.priceCents * max) / 10_000));
+    // The commission the net pays: the share of the price rounded up, as ceilBps takes it (review of #3756).
+    const amount = max === null ? "—" : usd(ceilBps(row.priceCents, max));
     return `| ${row.name} | ${usd(row.priceCents)} | ${usd(row.usageCents)} | ${usd(row.receivingCents)} | ${usd(row.roomCents)} | ${usd(row.netWithoutCommissionCents)} | ${share} | ${amount} |`;
   });
   const lowest = rows.reduce((min, row) => (row.maxCommissionBps === null ? min : Math.min(min, row.maxCommissionBps)), 10_000);
@@ -123,6 +124,8 @@ Their fees per payment and per country, their minimums, and the tax forms each n
 - whether a 1099 is due.
 
 That is the next unit. Until it is done, the largest commission that keeps MR is lower than the table by that unknown cost, and none can be proposed as final.
+
+**A dispute after the commission was paid** is a cost not yet covered, and so unknown, never zero (review of #3756). The commission is owed after the 30 days of the refund, but a card dispute can come up to about 120 days after the charge, when the affiliate has already been paid. Taking it back then depends on the affiliate earning more commissions. The dispute reserve of \`lib/receiving-costs.ts\` covers the price disputed, not a commission already paid. The unit that builds the programme either holds the commission until the dispute window has passed or prices this risk.
 
 **The company's fixed costs and funded exposures** stay outside the unit, as MR says: they are covered from the minimum base of paying customers, not by any one customer.
 

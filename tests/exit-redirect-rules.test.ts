@@ -8,7 +8,8 @@
  *     this site or one of its stores) taken as the store's new home;
  *   - a notice shown before the closing day, after the 90 days, or under an
  *     address that now belongs to another store or whose owner is unknown;
- *   - an unreadable record, date or address read as a notice;
+ *   - an unreadable record, date or address read as a notice, or a record
+ *     that keeps anything more (a store's ref may be its owner's email);
  *   - the old address handed to somebody else while its notice still runs;
  *   - a visitor's path or query carried to the new address.
  */
@@ -86,7 +87,7 @@ is("not a store whose closing day comes before its plan ended", mayChooseExit({ 
 is("not with an unknown clock", mayChooseExit({ endedAt: ended, closingDay: CLOSED, now: Number.NaN }), false);
 
 part("The record");
-const record = { to: "https://example.com/", host: "example.com", ref: "store-a", closedAt: CLOSED, setAt: CLOSED - DAY };
+const record = { to: "https://example.com/", host: "example.com", closedAt: CLOSED, setAt: CLOSED - DAY };
 is("a whole record is read", readExitNotice(JSON.stringify(record)), record);
 is("as an object too", readExitNotice(record), record);
 for (const [what, value] of [
@@ -96,8 +97,8 @@ for (const [what, value] of [
   ["no address", { ...record, to: undefined }],
   ["an address this site refuses", { ...record, to: "http://example.com/" }],
   ["a host that does not match the address", { ...record, host: "evil.com" }],
-  ["no store", { ...record, ref: "" }],
-  ["a store that is not text", { ...record, ref: 7 }],
+  ["a store's ref (it may be its owner's email)", { ...record, ref: "owner@example.com" }],
+  ["any other field", { ...record, extra: 1 }],
   ["no closing day", { ...record, closedAt: undefined }],
   ["a closing day that is not a number", { ...record, closedAt: "2026-12-01" }],
   ["a closing day that is not whole", { ...record, closedAt: CLOSED + 0.5 }],
@@ -123,8 +124,7 @@ is("the last moment of the 90 days: the notice", exitAnswer({ ...held, now: CLOS
 is("after the 90 days: gone", exitAnswer({ ...held, now: CLOSED + 90 * DAY }), { kind: "gone" });
 is("before the closing day: the store itself answers", exitAnswer({ ...held, now: CLOSED - 1 }), { kind: "none" });
 is("no record: nothing", exitAnswer({ record: null, holder: "released", now: CLOSED }), { kind: "none" });
-is("an address taken by another store: never sent away", exitAnswer({ record, holder: "store-b", now: CLOSED }), { kind: "none" });
-is("an address still the same store's: the store answers", exitAnswer({ record, holder: "store-a", now: CLOSED }), { kind: "none" });
+is("an address a store has (another, or still the same): never sent away", exitAnswer({ record, holder: "taken", now: CLOSED }), { kind: "none" });
 is("an owner that could not be read: nothing", exitAnswer({ record, holder: "unknown", now: CLOSED }), { kind: "none" });
 is("an unknown clock: nothing", exitAnswer({ ...held, now: Number.NaN }), { kind: "none" });
 is("a record that does not read: nothing", exitAnswer({ record: readExitNotice({ ...record, to: "javascript:x" }), holder: "released", now: CLOSED }), { kind: "none" });

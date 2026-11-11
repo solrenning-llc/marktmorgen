@@ -96,8 +96,12 @@ export function mayChooseExit(input: { endedAt: number | undefined; closingDay: 
   return Number.isFinite(now) && now < closingDay;
 }
 
-/** What is kept for the notice: the address, the store it was chosen by, its closing day and when it was chosen. */
-export type ExitNotice = { to: string; host: string; ref: string; closedAt: number; setAt: number };
+/**
+ * What is kept for the notice: the address, its host, the closing day and
+ * when it was chosen. Never the store's ref, which may be its owner's email:
+ * nothing that names a person outlives the store's erasure for this.
+ */
+export type ExitNotice = { to: string; host: string; closedAt: number; setAt: number };
 
 /** A kept notice, read whole or not at all. */
 export function readExitNotice(value: unknown): ExitNotice | null {
@@ -110,13 +114,13 @@ export function readExitNotice(value: unknown): ExitNotice | null {
     }
   }
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-  const { to, host, ref, closedAt, setAt } = data as Record<string, unknown>;
+  const { to, host, closedAt, setAt } = data as Record<string, unknown>;
   const checked = exitDestination(to);
   if (!checked.ok || checked.url !== to || checked.host !== host) return null;
-  if (typeof ref !== "string" || !ref) return null;
   if (typeof closedAt !== "number" || !Number.isSafeInteger(closedAt) || closedAt <= 0) return null;
   if (typeof setAt !== "number" || !Number.isSafeInteger(setAt) || setAt <= 0 || setAt >= closedAt) return null;
-  return { to: checked.url, host: checked.host, ref, closedAt, setAt };
+  if (Object.keys(data).length !== 4) return null;
+  return { to: checked.url, host: checked.host, closedAt, setAt };
 }
 
 /** When the notice of a store closed at `closedAt` ends; unknown is no end, and so no notice. */
@@ -143,10 +147,10 @@ export function exitHoldSeconds(closedAt: number, now: number, quarantineDays: n
 
 /**
  * Who holds the old address now: "released" when it is held for the closed
- * store and belongs to nobody, a store's ref when a store has it, "unknown"
- * when it could not be read.
+ * store and belongs to nobody, "taken" when a store has it (another, or
+ * still the same one), "unknown" when it could not be read.
  */
-export type ExitHolder = "released" | "unknown" | string;
+export type ExitHolder = "released" | "taken" | "unknown";
 
 export type ExitAnswer = { kind: "moved"; to: string; host: string; until: number } | { kind: "gone" } | { kind: "none" };
 

@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1214,6 +1214,29 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
   if (email.startsWith(RELEASED_PREFIX)) return null;
   const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
   return parseStore(raw);
+}
+
+/**
+ * storeForHandle for a worker that lets work go on "no store" (lib/call-reminders.ts): null only when the handle or
+ * the owner's record is confirmed absent (GET answered nil) or the handle was let go. An incomplete or extra reply,
+ * a value of another type or a record that does not parse is unknown and throws UnknownReplyError, never "no store".
+ */
+export async function storeForHandleExactly(handle: string): Promise<Store | null> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("no store read (Redis not configured)");
+  if (handleProblem(handle)) return null;
+  const first = repliesFor(await redisPipeline([["GET", handleKey(handle)]]), 1);
+  if (!first) throw new UnknownReplyError("the store's handle");
+  const [email] = first;
+  if (email === null) return null;
+  if (typeof email !== "string" || !email) throw new UnknownReplyError("the store's handle");
+  if (email.startsWith(RELEASED_PREFIX)) return null;
+  const second = repliesFor(await redisPipeline([["GET", await ownerKey(email)]]), 1);
+  if (!second) throw new UnknownReplyError("the store's record");
+  const [raw] = second;
+  if (raw === null) return null;
+  const store = parseStore(raw);
+  if (!store) throw new UnknownReplyError("the store's record");
+  return store;
 }
 
 /**

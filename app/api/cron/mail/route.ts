@@ -9,7 +9,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured, sendQueuedShipmentMail } from "@/lib/email";
 import { runShipmentMail } from "@/lib/shipment-mail-outbox";
 import { runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
-import { storeForHandle } from "@/lib/store";
+import { storeForHandle, storeForHandleExactly } from "@/lib/store";
 import { advanceAll } from "@/lib/broadcasts";
 import { advanceAnnouncements } from "@/lib/community-mail";
 import { advanceUpdates } from "@/lib/product-updates";
@@ -212,7 +212,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     // events and the webhooks always have their turn.
     let calls = null;
     try {
-      calls = await sendCallReminders(storeForHandle, Math.min(started + 40_000, Math.max(deadline, Date.now() + 10_000)), SITE_URL);
+      calls = await sendCallReminders(storeForHandleExactly, Math.min(started + 40_000, Math.max(deadline, Date.now() + 10_000)), SITE_URL);
     } catch (error) {
       console.error("sending call reminders failed", error);
     }

@@ -196,7 +196,13 @@ export async function sendCallReminders(
     try {
       store = await findStore(handle);
     } catch (error) {
+      // Unknown, not gone: tried again next run, and given up on only once it
+      // is hours late, as when Stripe does not answer below, so one unreadable
+      // store never holds the batch for good.
       console.error("reading the store for call reminders failed", error);
+      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
+      if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
+      counts.dropped += stale.length;
       continue;
     }
     const done: string[] = [];

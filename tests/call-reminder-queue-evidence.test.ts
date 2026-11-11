@@ -93,7 +93,7 @@ test("an unknown single-session payment read preserves due reminders", async () 
     }
     throw new Error("unexpected synthetic Stripe route");
   }) as typeof fetch;
-  const store = { callsId: "calls-evidence", handle: "harbor", email: "owner@example.invalid", stripeAccountId: "acct_test_reminders" } as import("@/lib/store").Store;
+  const store = { callsId: "calls-evidence", handle: "harbor", email: "owner@example.invalid", stripeAccountId: "acct_test_reminders", previousHandles: [] } as unknown as import("@/lib/store").Store;
   const counts = await run(async () => store);
   assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 0 });
   assert.equal(stripeReads, 2, "the list is confirmed empty before the individual read fails");

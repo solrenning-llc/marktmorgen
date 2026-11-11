@@ -118,12 +118,15 @@ async function main(): Promise<void> {
   const reminders = readFileSync("lib/call-reminders.ts", "utf8");
   is("the buyer's says where, the creator's that it is in person", [reminders.includes("setup.place ? b.whereAt(placeLine(setup.place))"), reminders.includes("? `In person, at: ${placeLine(setup.place)}`")], [true, true]);
   is("the calendar file a reminder links to names the address too", readFileSync("app/api/store/ics/route.ts", "utf8").includes("note: buyerNote(words, store, room, place)"), true);
+  const callsSource = readFileSync("lib/calls.ts", "utf8");
+  const remindersSource = readFileSync("lib/call-reminders.ts", "utf8");
   is("no room kept from when it was online is used, in the emails, the reminders, the calendar file or the creator's calendar feed", [
-    (readFileSync("lib/calls.ts", "utf8").match(/const room = place \? null : await roomOf/g) ?? []).length,
-    (readFileSync("lib/call-reminders.ts", "utf8").match(/const room = setup\.place \? null : await roomOf/g) ?? []).length,
+    callsSource.includes("const room = !writesAboutBookings(store) || place ? null : await roomOf"),
+    (callsSource.match(/const room = place \? null : await roomOf/g) ?? []).length,
+    remindersSource.includes("const room = product.call.place ? null : await roomOf"),
     readFileSync("app/api/store/ics/route.ts", "utf8").includes("const room = order.product.call.place ? null : await roomOf"),
     readFileSync("lib/calendar-sync.ts", "utf8").includes("const room = place ? null :"),
-  ], [2, 2, true, true]);
+  ], [true, 1, true, true, true]);
   is("a meeting retried for it later sends no new link", readFileSync("lib/call-meetings.ts", "utf8").includes('whereOf(product.call).kind !== "place"'), true);
   is("the studio's save takes it, now that the booking pages and the editor say where (unit 3)", readFileSync("app/api/store/call/route.ts", "utf8").includes('if (setup.place) return Response.json({ ok: false, error: "place" }'), false);
 

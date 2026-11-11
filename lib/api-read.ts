@@ -116,7 +116,7 @@ export async function products(store: Store, cursor: string | null, charge: Char
  * the same order Redis keeps them. `agreed=true` narrows it to those who
  * agreed to hear from the creator and have not left.
  */
-export async function leads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<Page<Record<string, unknown>>> {
+export async function leads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<LeadsPage> {
   return (await scanLeads(store, cursor, onlyAgreed)).page;
 }
 
@@ -127,7 +127,7 @@ export async function leads(store: Store, cursor: string | null, onlyAgreed: boo
  * (scannedPageWork), before it is sent. The refusal, as it is, when it is
  * not left. What /api/v1/leads answers.
  */
-export async function chargedLeads(store: Store, cursor: string | null, onlyAgreed: boolean, hold: Hold): Promise<Page<Record<string, unknown>> | Response> {
+export async function chargedLeads(store: Store, cursor: string | null, onlyAgreed: boolean, hold: Hold): Promise<LeadsPage | Response> {
   if (!store.listId || !isRedisConfigured()) return { data: [], next: null };
   return scannedPage(hold, listPageMost("leads", API_PAGE), async () => {
     const { page, readBytes } = await scanLeads(store, cursor, onlyAgreed);
@@ -189,7 +189,10 @@ async function scannedPage<T>(hold: Hold, most: ReadWork, read: () => Promise<{ 
   return refused ?? out;
 }
 
-async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<{ page: Page<Record<string, unknown>>; readBytes: number }> {
+/** A page of the list, with how many contacts it holds that could not be read (only when there are any): never left out without a word (rule 24). */
+type LeadsPage = Page<Record<string, unknown>> & { unreadable?: number };
+
+async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<{ page: LeadsPage; readBytes: number }> {
   if (!store.listId || !isRedisConfigured()) return { page: { data: [], next: null }, readBytes: 0 };
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
   // HSCAN answers [cursor, [field, value, ...]] (CX-123 rule 24): a page in any other shape is unknown, never a
@@ -200,9 +203,13 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
   const flat = stringList(reply?.[1]);
   if (next === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
   const data: Record<string, unknown>[] = [];
+  let unreadable = 0;
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const c = parseContact(flat[i + 1]);
-    if (!c) continue;
+    if (!c) {
+      unreadable += 1;
+      continue;
+    }
     const mailable = c.agreed && !c.unsub;
     if (onlyAgreed && !mailable) continue;
     data.push({
@@ -222,7 +229,7 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
   }
   // The bytes the scan answered with, for the reading that pays for them (chargedLeads).
   const readBytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
-  return { page: { data, next: next === "0" ? null : next }, readBytes };
+  return { page: { data, next: next === "0" ? null : next, ...(unreadable ? { unreadable } : {}) }, readBytes };
 }
 
 /**

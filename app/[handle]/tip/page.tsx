@@ -8,6 +8,8 @@ import { speech } from "@/lib/buyer-words";
 import { tipsWords } from "@/lib/buyer-words/tips";
 import { formatMoney } from "@/lib/money";
 import { readTip } from "@/lib/store-tip-checkout";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -31,6 +33,9 @@ export default async function TipPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // One of the store's public requests, as its other pages take (lib/traffic.ts):
+  // past them the page rests with the store, before Stripe is asked (R20 finding 3).
+  if (await isResting(store)) return <StoreResting store={store} />;
   const query = await searchParams;
   const session = typeof query.session_id === "string" ? query.session_id : "";
   const said = speech(store);

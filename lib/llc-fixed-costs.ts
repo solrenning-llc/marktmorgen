@@ -31,10 +31,15 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
  backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", approvedCeiling: false },
  /** #2271 (Codex G's MEDIUM): moves of the sign-in address, a company cost admitted at most MOVES_PER_MONTH times a
   * calendar month before any of their work (lib/auth.ts takeMoveRoom), their worst month priced from the registry's
-  * rates and measured on the real route (tests/move-cost.test.ts). Not a reviewed ceiling: MOVE_COST_UNKNOWNS are open
-  * (sessions, memberships, phone device lists, broken moves kept from earlier months, undo, repairs and asks before the
-  * room), and the owner has not approved a monthly cost. */
- accountMoves: { currency: "USD", model: "tests/plan-cost-registry.ts MOVES_MONTH_COST", unknowns: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", checked: "2026-11-11", source: "tests/move-cost.test.ts", approvedCeiling: false },
+  * rates and measured on the real route (tests/move-cost.test.ts).
+  * boundedPartApproval: the owner approved US$17 a month (11 November 2026, 11:32 Fortaleza, his choice "Aprovar
+  * US$ 17/mês") for the bounded part only, MOVES_MONTH_COST; tests/move-cost.test.ts fails when that priced month,
+  * rounded up to the cent, passes it. approvedCeiling stays false: it is the whole line's, and MOVE_COST_UNKNOWNS
+  * are open (sessions, memberships, phone device lists, broken moves kept from earlier months, undo, repairs and asks
+  * before the room). The approval prices none of them, neither at zero nor inside what is left under US$17, so the
+  * line's reviewed ceiling in CURRENT_LLC_FIXED_COST_CEILINGS stays unknown, and with it the company total. */
+ accountMoves: { currency: "USD", model: "tests/plan-cost-registry.ts MOVES_MONTH_COST", unknowns: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", checked: "2026-11-11", source: "tests/move-cost.test.ts", approvedCeiling: false,
+  boundedPartApproval: { monthlyUsdCents: 1700, covers: "tests/plan-cost-registry.ts MOVES_MONTH_COST", excludes: "tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS", approvedBy: "owner", decided: "2026-11-11T11:32:00-03:00", decision: "Aprovar US$ 17/mês" } },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

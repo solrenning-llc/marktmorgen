@@ -17,6 +17,8 @@
  * 4. What the code does not bound is named (MOVE_COST_UNKNOWNS), never priced at zero, and the move is a line of the
  *    LLC fixed costs ("account-moves", lib/llc-fixed-costs.ts; FX275: 100% Marktmorgen) whose reviewed ceiling stays
  *    unknown while any of it is open: the company total, and with it the minimum base, stays unknown, never zero.
+ *    The owner approved US$17 a month for the bounded part (11/11/2026 11:32 Fortaleza, accountMoves.boundedPartApproval):
+ *    the priced month, rounded up to the cent, must stay within it, so a dearer month fails here.
  *
  * Synthetic only: a stand-in Redis and a stand-in clock; the move link is written as sendMoveLink writes it, and no
  * email is sent.
@@ -274,8 +276,17 @@ async function main(): Promise<void> {
   }
   const ids = fixed.LLC_FIXED_COST_IDS as readonly string[];
   is("the move is one of the LLC's fixed costs (FX275: 100% Marktmorgen)", ids.includes("account-moves"), true);
-  const observation = (fixed.FIXED_COST_SOURCE_OBSERVATIONS as Record<string, { model?: string; approvedCeiling?: boolean }>).accountMoves;
-  is("its observation names the priced month and is not an approved ceiling", [observation?.model?.includes("MOVES_MONTH_COST"), observation?.approvedCeiling], [true, false]);
+  type Approval = { monthlyUsdCents?: unknown; covers?: string; excludes?: string; approvedBy?: string; decided?: string; decision?: string };
+  const observation = (fixed.FIXED_COST_SOURCE_OBSERVATIONS as Record<string, { model?: string; approvedCeiling?: boolean; boundedPartApproval?: Approval }>).accountMoves;
+  is("its observation names the priced month and the whole line is not an approved ceiling", [observation?.model?.includes("MOVES_MONTH_COST"), observation?.approvedCeiling], [true, false]);
+  // The owner's decision (11/11/2026 11:32 Fortaleza, "Aprovar US$ 17/mês"): US$17 a month for the bounded part only.
+  const approval = observation?.boundedPartApproval;
+  is("the owner's approval is US$17 a month, dated, for MOVES_MONTH_COST only and not MOVE_COST_UNKNOWNS",
+    [approval?.monthlyUsdCents, approval?.approvedBy, approval?.decided, approval?.decision, approval?.covers?.endsWith(" MOVES_MONTH_COST"), approval?.excludes?.endsWith(" MOVE_COST_UNKNOWNS")],
+    [1700, "owner", "2026-11-11T11:32:00-03:00", "Aprovar US$ 17/mês", true, true]);
+  const approvedCents = typeof approval?.monthlyUsdCents === "number" && Number.isSafeInteger(approval.monthlyUsdCents) ? approval.monthlyUsdCents : -1;
+  is("the priced worst month, rounded up to the cent, stays within the owner's approved ceiling", Math.ceil(num("MOVES_MONTH_COST") * 100) <= approvedCents, true);
+  is("unknowns are still open, so the approval does not complete the line", unknowns.length > 0, true);
   const line = fixed.CURRENT_LLC_FIXED_COST_CEILINGS.find((one) => one.id === ("account-moves" as never));
   is("its reviewed ceiling stays unknown while anything is open", [Boolean(line), line?.fullMonthlyUsdCents, line?.fullAnnualUsdCents], [true, null, null]);
   is("so the company's fixed total stays unknown, never zero", fixed.allocateEntireLlcFixedCosts(fixed.CURRENT_LLC_FIXED_COST_CEILINGS), null);

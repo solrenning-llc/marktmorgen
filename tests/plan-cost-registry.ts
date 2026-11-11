@@ -1688,7 +1688,12 @@ export const MOVE_ROOM_KEY_BYTES = 128;
  * a store that moved and the company's two, each kept 32 days, so into the next month too.
  */
 export const MOVES_MONTH_KEPT = 2 * MOVES_PER_MONTH * MOVE_BROKEN_RECORD_BYTES * DB_BYTE_MONTH + 2 * (MOVES_PER_MONTH + 2) * MOVE_ROOM_KEY_BYTES * DB_BYTE_MONTH;
-/** The month's moves in dollars: MOVES_PER_MONTH taps at their worst and what they keep. The "account-moves" line of the LLC fixed costs. */
+/**
+ * The month's moves in dollars: MOVES_PER_MONTH taps at their worst and what they keep. The "account-moves" line of the
+ * LLC fixed costs, whose bounded part the owner approved at US$17 a month (11/11/2026 11:32 Fortaleza,
+ * lib/llc-fixed-costs.ts accountMoves.boundedPartApproval): tests/move-cost.test.ts fails when this, rounded up to the
+ * cent, passes it. MOVE_COST_UNKNOWNS are outside that approval.
+ */
 export const MOVES_MONTH_COST = MOVES_PER_MONTH * MOVE_TAP_COST + MOVES_MONTH_KEPT;
 /** What MOVES_MONTH_COST does not bound, each open, never zero: while any is, the fixed-cost line's reviewed ceiling stays unknown. */
 export const MOVE_COST_UNKNOWNS: readonly string[] = [

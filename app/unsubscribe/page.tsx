@@ -44,7 +44,8 @@ async function storeOf(query: Query): Promise<Store | null> {
   }
   const update = param(query, "u");
   if (update) {
-    const found = UPDATE_STOP.test(update) ? await readUpdateStop(update) : null;
+    // A link that could not be read just now is spoken of in English, as one we do not know the store of.
+    const found = UPDATE_STOP.test(update) ? await readUpdateStop(update).catch(() => null) : null;
     return found?.handle ? storeForPage(found.handle) : null;
   }
   const token = param(query, "t") || param(query, "l");
@@ -293,7 +294,15 @@ async function StopReviewRequests({ token, notSaved }: { token: string; notSaved
 
 /** The same one button, for a store's emails telling its buyers of an update. */
 async function StopUpdates({ token }: { token: string }) {
-  const found = UPDATE_STOP.test(token) ? await readUpdateStop(token) : null;
+  // A link whose read was unknown (CX-123 rule 24) is never called unknown nor stopped: the page says it could not
+  // open it just now, in English, as the store is not known, and offers no button.
+  let unread = false;
+  const found = UPDATE_STOP.test(token)
+    ? await readUpdateStop(token).catch(() => {
+        unread = true;
+        return null;
+      })
+    : null;
   const store = found?.handle ? await storeForPage(found.handle) : null;
   const who = found?.storeName || "";
   const a = wordsFor(store);
@@ -301,7 +310,12 @@ async function StopUpdates({ token }: { token: string }) {
   return (
     <main id="content" lang={localeOf(store)} className="min-h-screen bg-paper px-4 py-20 text-ink">
       <div className="card mx-auto max-w-md p-7 sm:p-9">
-        {!found ? (
+        {unread ? (
+          <>
+            <h1 className="t-h3">{a.linkNotReadTitle}</h1>
+            <p className="mt-3 text-ink-soft">{a.linkNotReadBody}</p>
+          </>
+        ) : !found ? (
           <>
             <h1 className="t-h3">{a.unknownLink}</h1>
             <p className="mt-3 text-ink-soft">{a.unknownOtherBody}</p>

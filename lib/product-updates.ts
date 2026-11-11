@@ -533,19 +533,27 @@ export async function advanceUpdates(load: (handle: string) => Promise<Store | n
   return touched;
 }
 
-/** Who a stop link belongs to, without acting on it. */
+/**
+ * Who a stop link belongs to, without acting on it. Null only when the link is confirmed not there (an exact nil) or
+ * its record is not a stop link's; a reply cut short or of another shape throws (CX-123 rule 24), and the unsubscribe
+ * page says it could not open the link just now, never that the link is unknown.
+ */
 export async function readUpdateStop(token: string): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
   if (!UPDATE_STOP.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const read = repliesFor(await redisPipeline([["GET", stopKey(token)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("an update stop link");
+  const raw = read[0];
+  if (raw === null || !raw) return null;
+  let grant: { s?: unknown; e?: unknown; h?: unknown; n?: unknown };
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown; n?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string") return null;
-    const [off] = await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]);
-    return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: Number(off) === 1, handle: typeof grant.h === "string" ? grant.h : "" };
+    grant = JSON.parse(raw) as typeof grant;
   } catch {
     return null;
   }
+  if (!grant || typeof grant.s !== "string" || typeof grant.e !== "string") return null;
+  const off = repliesFor(await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]), 1)?.[0];
+  if (off !== 0 && off !== 1) throw new UnknownReplyError("whether an address stopped a store's update emails");
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: off === 1, handle: typeof grant.h === "string" ? grant.h : "" };
 }
 
 /**

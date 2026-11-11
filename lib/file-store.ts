@@ -103,9 +103,15 @@ export async function writeFileWhole(pathname: string, bytes: Uint8Array, conten
   await blob.put(pathname, Buffer.from(bytes), { access: "private", contentType, addRandomSuffix: false, allowOverwrite: true });
 }
 
-/** Every path kept under a prefix, in the store the prefix belongs to. Throws when it cannot be read. */
+/**
+ * Every path kept under a prefix, in the store the prefix belongs to. Throws when it cannot be read, or when a
+ * page is not in its exact shape (CX-123 rule 24): "has more" without a new cursor, a cursor handed out twice, a
+ * page that does not say whether more follows, or a path outside the prefix is unknown, never the end of the
+ * folder, so a caller deleting what is listed never takes a partial folder for the whole one.
+ */
 export async function listFiles(prefix: string): Promise<string[]> {
   const out: string[] = [];
+  const seen = new Set<string>();
   if (prefix.startsWith(`${VAULT_PREFIX}/`)) {
     let cursor: string | undefined;
     do {
@@ -113,16 +119,24 @@ export async function listFiles(prefix: string): Promise<string[]> {
       if (!page) throw new Error("the file store could not be listed");
       out.push(...page.files.map((file) => file.pathname));
       cursor = page.cursor ?? undefined;
+      if (cursor !== undefined && seen.has(cursor)) throw new Error("incomplete file store listing");
+      if (cursor !== undefined) seen.add(cursor);
     } while (cursor);
     return out;
   }
   let cursor: string | undefined;
-  do {
+  for (;;) {
     const page = await blob.list({ prefix, cursor, limit: 1000 });
-    out.push(...page.blobs.map((entry) => entry.pathname));
-    cursor = page.hasMore ? page.cursor : undefined;
-  } while (cursor);
-  return out;
+    if (!page || !Array.isArray(page.blobs) || typeof page.hasMore !== "boolean") throw new Error("invalid storage listing");
+    for (const entry of page.blobs) {
+      if (!entry || typeof entry.pathname !== "string" || !entry.pathname.startsWith(prefix)) throw new Error("invalid storage entry");
+      out.push(entry.pathname);
+    }
+    if (!page.hasMore) return out;
+    if (typeof page.cursor !== "string" || !page.cursor || seen.has(page.cursor)) throw new Error("incomplete storage listing");
+    seen.add(page.cursor);
+    cursor = page.cursor;
+  }
 }
 
 /**

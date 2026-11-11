@@ -448,7 +448,11 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
   if (!list.length) return [];
   const raws = repliesFor(await redisPipeline(list.map((id) => ["GET", jobKey(id)])), list.length);
   if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("one of the store's imports");
-  return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
+  const jobs = raws.map(parseJob);
+  // The record GET nl:import:A answers is import A's only when it says so: one naming another import is unknown, never
+  // listed as A's nor left out (Codex V on #3661, rule 30).
+  if (jobs.some((job, i) => job !== null && job.id !== list[i])) throw new UnknownReplyError("one of the store's imports");
+  return jobs.filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 
 export type StartProblem = "busy" | "too_many" | "consent" | "email" | "list" | "store" | "unavailable" | "stripe" | "stopped";

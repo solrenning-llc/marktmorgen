@@ -159,3 +159,31 @@ for (const [label, alter] of [
     assert.equal(after, before, "the stars and the count are kept");
   });
 }
+
+// creatorChange (hide, answer, photo, refund): the review itself read in another shape is unknown, never "missing", so
+// a refund sweep whose payment index reads well does not take the refund as seen with the review left unmarked.
+for (const [label, reply] of [
+  ["no reply", []],
+  ["a number", [7]],
+  ["an object", [{}]],
+] as [string, unknown[]][]) {
+  test(`markRefunded: the review itself read as ${label} throws, never "missing"`, async () => {
+    await fixture;
+    const PI2 = "pi_refundindex02";
+    const saved = await review("synthpie0001", "pie@example.com", PI2);
+    assert.ok(saved.state === "created" || saved.state === "updated");
+    redis.pipeline = (async (batch: Batch) => {
+      const real = await pipeline(batch);
+      return batch.length === 1 && batch[0][0] === "HGET" && batch[0][1] === `nl:rev:${statsId}:synthpie0001` ? reply : real;
+    }) as typeof redis.pipeline;
+    let result: { value?: unknown; error?: unknown };
+    try {
+      result = { value: await markRefunded(statsId, PI2) };
+    } catch (error) {
+      result = { error };
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
+  });
+}

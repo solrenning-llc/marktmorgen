@@ -30,6 +30,8 @@ const DAY = 86_400;
 const emails: string[] = [];
 /** Addresses the sender refuses (422), every time. */
 const refused = new Set<string>();
+/** The sender down for everyone (503) while true. */
+let senderDown = false;
 /** The platform's subscriptions by status (billing reminders), and each connected account's running memberships. */
 const lists: Record<string, Record<string, unknown>[]> = { trialing: [], active: [], past_due: [] };
 const running = new Map<string, Record<string, unknown>[]>();
@@ -47,6 +49,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body ?? "{}"));
     const to = Array.isArray(body.to) ? body.to[0] : body.to;
+    if (senderDown) return answer({ message: "unavailable", name: "internal_server_error" }, 503);
     if (refused.has(to)) return answer({ message: "refused", name: "validation_error" }, 422);
     emails.push(to);
     return answer({ id: `email_${emails.length}` });
@@ -162,6 +165,32 @@ async function main(): Promise<void> {
     for (let i = 0; i < 4; i += 1) await recover();
     is("the walk moves on and reaches the member past the first five pages", sentTo("nopinmany-0550@example.com"), 1);
     is("the refused one is never counted as told", sentTo("nopinmany-0010@example.com"), 0);
+  }
+
+  part("Card notices: a sender outage on a run that starts at the first member due never skips the others (Claude 1 on #3215)");
+  redis.clear();
+  {
+    const product = await makeStore("nopin-down@example.com", "nopindown", "acct_1TestNoPinDown1");
+    running.set("acct_1TestNoPinDown1", Array.from({ length: 600 }, (_, i) => member("nopindown", product, String(i).padStart(4, "0"), i % 10 === 0)));
+    senderDown = true;
+    await recover();
+    senderDown = false;
+    await recover();
+    const early = Array.from({ length: 49 }, (_, i) => `nopindown-${String((i + 1) * 10).padStart(4, "0")}@example.com`);
+    is("the next run tells every member due in the pages the outage read, past the first one", early.filter((to) => sentTo(to) === 1).length, 49);
+  }
+
+  part("Trial reminders: a sender outage on a run that starts at the first trial due never skips the others (Claude 1 on #3215)");
+  redis.clear();
+  {
+    lists.trialing = Array.from({ length: 5_050 }, (_, i) => trial(`sub_NoPinDown${String(i).padStart(4, "0")}`, i % 100 === 0 ? 7 : 20));
+    senderDown = true;
+    await sendReminders(NOW);
+    senderDown = false;
+    await sendReminders(NOW);
+    const early = Array.from({ length: 49 }, (_, i) => `sub_NoPinDown${String((i + 1) * 100).padStart(4, "0")}@example.com`);
+    is("the next run tells every trial due in the pages the outage read, past the first one", early.filter((to) => sentTo(to) === 1).length, 49);
+    lists.trialing = [];
   }
 
   done();

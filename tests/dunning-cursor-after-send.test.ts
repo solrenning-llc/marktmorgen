@@ -257,6 +257,21 @@ async function main(): Promise<void> {
     is("the failing store still sends nothing", told(`${first.handle}-due-0000@example.com`), 0);
   }
 
+  part("The store walk: a store held at the end of the walk never keeps the stores before it waiting (Claude 6 on #3215)");
+  reset();
+  {
+    const [first, second, third] = await threeStores();
+    for (const s of [first, second]) pastDue.set(s.account, behind(s.handle, s.product, 1));
+    pastDue.set(third.account, behind(third.handle, third.product, 1));
+    broken.add(third.account);
+    await run();
+    is("this run: the first two written to, the last one held", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`)], [1, 1]);
+    pastDue.set(first.account, behind(first.handle, first.product, 2));
+    await run();
+    is("the next run starts at the held store and comes round: the first store's new member behind is written to", told(`${first.handle}-due-0001@example.com`), 1);
+    is("and nobody twice", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`)], [1, 1]);
+  }
+
   done();
 }
 

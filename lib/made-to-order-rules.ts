@@ -42,7 +42,13 @@ export type OrderStep = { stage: OrderStage; at: number };
 /** One order made to order: when it was paid, the days promised, and each stage it reached, in order. */
 export type MadeOrder = { paidAt: number; days: number; steps: OrderStep[] };
 
-const isTime = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
+/**
+ * A time in seconds since 1970, below 10^11 (the year 5138): a time in
+ * milliseconds (about 1.8 * 10^12 today) is not one, so a seconds and
+ * milliseconds slip never reads as an order that is never late (Claude 3 on #3627).
+ */
+const MAX_SECONDS = 100_000_000_000;
+const isTime = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0 && value < MAX_SECONDS;
 const isStage = (value: unknown): value is OrderStage => typeof value === "string" && (STAGES as readonly string[]).includes(value);
 
 /**
@@ -86,7 +92,8 @@ function deliveredAt(order: MadeOrder): number | null {
 export function parseMadeOrder(raw: unknown): MadeOrder | null {
   if (!raw || typeof raw !== "object") return null;
   const { paidAt, days, steps } = raw as Record<string, unknown>;
-  if (!isTime(paidAt) || parseProductionDays(days) === null || !Array.isArray(steps) || !steps.length) return null;
+  // Kept as startOrder writes it: the days as a number, never the creator's typed text.
+  if (!isTime(paidAt) || typeof days !== "number" || parseProductionDays(days) === null || !Array.isArray(steps) || !steps.length) return null;
   const kept: OrderStep[] = [];
   for (const entry of steps) {
     if (!entry || typeof entry !== "object") return null;
@@ -96,7 +103,7 @@ export function parseMadeOrder(raw: unknown): MadeOrder | null {
     if (!last ? stage !== "received" || at < paidAt : STAGES.indexOf(stage) <= STAGES.indexOf(last.stage) || at < last.at) return null;
     kept.push({ stage, at });
   }
-  return { paidAt, days: days as number, steps: kept };
+  return { paidAt, days, steps: kept };
 }
 
 export type StageMove = { ok: true; order: MadeOrder } | { ok: false; reason: "same" | "backward" | "time" | "stage" };

@@ -8,7 +8,7 @@
  * personal data; the same receipt never counts twice. Off: nothing here
  * reads a bank, opens an account or charges anybody.
  */
-import { isTransferReference, matchReceipt, reviewLine, type OpenInvoice } from "@/lib/bank-transfer-match-rules";
+import { isTransferReference, matchReceipt, newTransferReference, reviewLine, type OpenInvoice } from "@/lib/bank-transfer-match-rules";
 import { done, is, part } from "./check";
 
 const invoice = (reference: string, amountCents: number, creditCents = 0): OpenInvoice => ({ reference, currency: "usd", amountCents, creditCents });
@@ -18,6 +18,11 @@ const receipt = (id: string, reference: unknown, amountCents: unknown, currency:
 part("A reference is one of ours, exactly");
 is("ours", isTransferReference("MM-7K4QX9TP2W"), true);
 for (const bad of ["mm-7k4qx9tp2w", "MM-7K4QX9TP2", "MM-7K4QX9TP2WX", "MM-7K4QX9TP2O", "INV 7K4QX9TP2W", "", null, 7]) is(`not: ${JSON.stringify(bad)}`, isTransferReference(bad), false);
+
+part("A new reference is one of ours, and different each time");
+const made = Array.from({ length: 200 }, () => newTransferReference());
+is("every one reads as ours", made.every(isTransferReference), true);
+is("no two the same in 200", new Set(made).size, 200);
 
 part("The whole amount in the right currency starts the period");
 is("exact", matchReceipt(receipt("r1", "MM-7K4QX9TP2W", 6900), open, new Set()), { kind: "paid", reference: "MM-7K4QX9TP2W", creditCents: 6900, overCents: 0 });

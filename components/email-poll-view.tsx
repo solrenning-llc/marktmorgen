@@ -14,6 +14,19 @@ export function PollView({ page, broadcastId, link, asked, done }: { page: PollP
   const w = pollWords(language);
   const locale = LANGUAGES[parseLanguage(language)].locale;
 
+  // A vote just kept or taken back, then a page that could not be read again (the store's month used up by
+  // that very vote, or a read that failed): what happened is still said, never "Nothing was counted".
+  if ((page.state === "unknown" || page.state === "resting") && (done === "recorded" || done === "withdrawn")) {
+    return (
+      <main id="content" lang={locale} className="min-h-screen bg-paper px-4 py-20 text-ink">
+        <div className="card mx-auto max-w-md p-7 sm:p-9">
+          <h1 className="t-h3">{w.title}</h1>
+          <p role="status" className="mt-3 font-semibold">{done === "recorded" ? w.recorded : w.withdrawn}</p>
+        </div>
+      </main>
+    );
+  }
+
   if (page.state === "invalid" || page.state === "unknown" || page.state === "resting") {
     const [title, body] =
       page.state === "invalid" ? [w.unknownLinkTitle, w.unknownLink] : page.state === "resting" ? [w.title, w.resting] : [w.unreadTitle, w.unread];

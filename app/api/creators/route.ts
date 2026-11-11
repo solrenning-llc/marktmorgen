@@ -10,7 +10,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
-import { RESPONSES_KEY } from "@/lib/creator-research-store";
+import { MAX_RESEARCH_ANSWERS, RESPONSES_KEY } from "@/lib/creator-research-store";
 const RATE_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const MAX_BODY_BYTES = 20_000;
@@ -148,9 +148,17 @@ export async function POST(request: NextRequest) {
     if (count === null || count < 1) throw new UnknownReplyError("the creator research count");
     if (count > RATE_LIMIT) return fail(429, "rate_limited");
 
-    const [saved] = await redisPipeline([["LPUSH", RESPONSES_KEY, JSON.stringify(answer)]]);
+    const kept = JSON.stringify(answer);
+    const [saved] = await redisPipeline([["LPUSH", RESPONSES_KEY, kept]]);
     if (typeof saved !== "number" || !Number.isSafeInteger(saved) || saved < 1) {
       throw new Error("Research storage did not confirm the saved answer");
+    }
+    // Over the list's own ceiling (MR): this answer, unique by its id, is taken back out and not kept, so the
+    // public list never stays above MAX_RESEARCH_ANSWERS however many addresses send at once.
+    if (saved > MAX_RESEARCH_ANSWERS) {
+      const removed = repliesFor(await redisPipeline([["LREM", RESPONSES_KEY, 1, kept]]), 1);
+      if (!removed || removed[0] !== 1) console.error("an answer over the research ceiling could not be confirmed removed");
+      return fail(503, "unavailable");
     }
   } catch (error) {
     console.error("creator research submission failed", error);

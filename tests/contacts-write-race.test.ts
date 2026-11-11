@@ -63,6 +63,9 @@ const erase = async (list: string, email: string) => {
 };
 const row = (list: string, email: string) => redis.run(["HGET", leadsKey(list), email]);
 
+/** A caller that pays each round past the first of a sign-up from the store's room (lib/store-join.ts, lib/waitlist.ts). */
+const paid = async () => true;
+
 async function main() {
   redis.clear();
 
@@ -105,7 +108,7 @@ async function main() {
     const list = `race_upsert_unsub_${what.length}`, email = "reader@example.com";
     const token = await setup(list, email);
     const race = raceAt(rowRead(list, 3), () => unsubscribe(token));
-    const result = await upsertContact(list, email, { agreed: false, explicit: false, source: "free", productId: "prod_2", title: "Free" }, room);
+    const result = await upsertContact(list, email, { agreed: false, explicit: false, source: "free", productId: "prod_2", title: "Free" }, room, paid);
     redis.pipeline = real;
     is(`${what}: control: the race ran`, race.ran(), true);
     const after = (await readUnsubToken(token))?.contact;
@@ -115,7 +118,7 @@ async function main() {
     const list = `race_upsert_complaint_${what.length}`, email = "spam@example.com";
     const token = await setup(list, email);
     const race = raceAt(rowRead(list, 3), () => stopWriting(list, email, "complained"));
-    await upsertContact(list, email, { agreed: false, explicit: false, source: "buyer", productId: "prod_6", title: "Pack" }, room);
+    await upsertContact(list, email, { agreed: false, explicit: false, source: "buyer", productId: "prod_6", title: "Pack" }, room, paid);
     redis.pipeline = real;
     is(`${what}: control: the race ran`, race.ran(), true);
     const after = (await readUnsubToken(token))?.contact;
@@ -128,7 +131,7 @@ async function main() {
     const token = await setup(list, email);
     const at = new Date(Date.now() - 60_000).toISOString();
     const race = raceAt(rowRead(list, 3), () => unsubscribe(token));
-    await upsertContact(list, email, { agreed: true, explicit: true, source: "buyer", at, productId: "prod_7", title: "Book" }, room);
+    await upsertContact(list, email, { agreed: true, explicit: true, source: "buyer", at, productId: "prod_7", title: "Book" }, room, paid);
     redis.pipeline = real;
     is(`${what}: control: the race ran`, race.ran(), true);
     is(`${what}: a yes given before the unsubscribe does not undo it`, (await readUnsubToken(token))?.contact.unsub, true);
@@ -139,7 +142,7 @@ async function main() {
     const list = `race_upsert_erase_${what.length}`, email = "gone@example.com";
     await setup(list, email);
     const race = raceAt(rowRead(list, 3), () => erase(list, email));
-    const result = await upsertContact(list, email, { agreed: false, explicit: false, source: "free", productId: "prod_8", title: "Free" }, room);
+    const result = await upsertContact(list, email, { agreed: false, explicit: false, source: "free", productId: "prod_8", title: "Free" }, room, paid);
     redis.pipeline = real;
     is(`${what}: control: the race ran`, race.ran(), true);
     is(`${what}: the deleted person is not written back, and nothing says they joined`, [row(list, email), result.joined], [null, false]);
@@ -148,7 +151,7 @@ async function main() {
     const list = `race_upsert_erase_new_${what.length}`, email = "new.gone@example.com";
     // Not on the list yet: a deletion that lands between the read and the write leaves its mark, and the row is not made.
     const race = raceAt(rowRead(list, 3), () => real([suppressCommand(list, email)]));
-    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", at: new Date(Date.now() - 60_000).toISOString() }, room);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", at: new Date(Date.now() - 60_000).toISOString() }, room, paid);
     redis.pipeline = real;
     is(`${what}: control: the race ran`, race.ran(), true);
     is(`${what}: a sign-up read before a deletion is not written after it, nor the deletion lifted`, [row(list, email), result.joined, redis.run(["HLEN", suppressedKey(list)])], [null, false, 1]);
@@ -224,9 +227,9 @@ async function main() {
     await setup(list, email);
     const ordered = new Date(Date.now() - 60_000).toISOString();
     await erase(list, email);
-    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "buyer", at: ordered, productId: "prod_12", title: "Book" }, room);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "buyer", at: ordered, productId: "prod_12", title: "Book" }, room, paid);
     is(`${what}: an older order's yes writes nothing back and lifts nothing`, [row(list, email), result.joined, redis.run(["HLEN", suppressedKey(list)])], [null, false, 1]);
-    const bought = await upsertContact(list, email, { agreed: false, explicit: false, source: "buyer", at: ordered, productId: "prod_12", title: "Book" }, room);
+    const bought = await upsertContact(list, email, { agreed: false, explicit: false, source: "buyer", at: ordered, productId: "prod_12", title: "Book" }, room, paid);
     is(`${what}: nor does an older purchase without the box`, [row(list, email), bought.gotProduct], [null, false]);
   }
   for (const [what, room] of [["the store's room", ROOM], ["an order's room", orderRoom(OWNER)]] as const) {
@@ -235,7 +238,7 @@ async function main() {
     await forgetContactPerson(list, email);
     // Deleted ten seconds ago; their own yes, given now.
     await real([suppressCommand(list, email, Math.floor(Date.now() / 1000) - 10)]);
-    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, room);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, room, paid);
     is(`${what}: their own yes given after the deletion puts them back and lifts it`, [result.joined, JSON.parse(String(row(list, email))).agreed, redis.run(["HLEN", suppressedKey(list)])], [true, true, 0]);
   }
   {
@@ -339,7 +342,7 @@ async function main() {
         await erase(list, email);
         await forgetLibraryPerson(sid, email);
       });
-      const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid }, room);
+      const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid }, room, paid);
       redis.pipeline = real;
       const listed = joinedKeys(email).some((k) => redis.run(["SISMEMBER", k, sid]) === 1);
       is(`${what}: control: the race ran`, race.ran(), true);

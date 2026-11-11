@@ -103,33 +103,42 @@ async function main() {
   // Codex Z on #3448 (6751568157, MEDIUM): only a healthy round was held against the public request that pays for a
   // sign-up; a sign-up whose row another writer changed between the read and the write went round again, up to
   // CONTACT_WRITE_TRIES times, past what that request pays for (19 commands measured against 18).
-  part("a contested sign-up from a public request stays inside what the request pays for");
+  part("a contested sign-up from a public request stays inside what the requests it takes pay for");
   {
-    const list = "contested_list", email = "contested@example.com";
-    await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, ROOM);
-    let losses = 2;
-    let sum = 0;
-    redis.pipeline = async (commands: Commands) => {
-      // Another writer changes the row just before each of the first two checked writes: theirs is not counted here.
-      if (losses > 0 && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v1"))) {
-        losses -= 1;
-        const [row] = await real([["HGET", leadsKey(list), email]]);
-        await real([["HSET", leadsKey(list), email, String(row).replace(/"lastAt":"[^"]*"/, `"lastAt":"2026-01-0${losses + 1}T00:00:00.000Z"`)]]);
+    const contested = async (list: string, pay?: () => Promise<boolean>) => {
+      const email = "contested@example.com";
+      await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, ROOM);
+      let losses = 2;
+      let sum = 0;
+      redis.pipeline = async (commands: Commands) => {
+        // Another writer changes the row just before each of the first two checked writes: theirs is not counted here.
+        if (losses > 0 && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v1"))) {
+          losses -= 1;
+          const [row] = await real([["HGET", leadsKey(list), email]]);
+          await real([["HSET", leadsKey(list), email, String(row).replace(/"lastAt":"[^"]*"/, `"lastAt":"2026-01-0${losses + 1}T00:00:00.000Z"`)]]);
+        }
+        sum += billed(commands, CONTACT_WRITE_CALLS);
+        return real(commands);
+      };
+      let outcome = "written";
+      try {
+        await upsertContact(list, email, { agreed: true, explicit: true, source: "free", productId: "p9", title: "Nine" }, ROOM, pay);
+      } catch {
+        outcome = "refused";
+      } finally {
+        redis.pipeline = real;
       }
-      sum += billed(commands, CONTACT_WRITE_CALLS);
-      return real(commands);
+      return { sum, outcome };
     };
-    let outcome = "written";
-    try {
-      await upsertContact(list, email, { agreed: true, explicit: true, source: "free", productId: "p9", title: "Nine" }, ROOM);
-    } catch {
-      outcome = "refused";
-    } finally {
-      redis.pipeline = real;
-    }
-    is(`a contested sign-up's commands stay inside a later page's (${sum} against ${COMMANDS.laterPage + COMMANDS.laterCount})`, sum <= COMMANDS.laterPage + COMMANDS.laterCount, true);
-    is("and the figure for it says so", CONTACT_COMMANDS_MOST.upsertPublic <= COMMANDS.laterPage + COMMANDS.laterCount, true);
-    is("it is refused, for the visitor to try again, never written over what changed", outcome, "refused");
+    const page = COMMANDS.laterPage + COMMANDS.laterCount;
+    const unpaid = await contested("contested_unpaid");
+    is(`with no request to pay a round more: refused, for the visitor to try again, inside the one request (${unpaid.sum} against ${page})`, [unpaid.outcome, unpaid.sum <= page], ["refused", true]);
+    let taken = 0;
+    const funded = await contested("contested_paid", async () => ((taken += 1), true));
+    is(`each round more takes a public request first, and each stays inside one (${funded.sum} against ${1 + taken} × ${page})`, [funded.outcome, taken, funded.sum <= (1 + taken) * page], ["written", 2, true]);
+    is("the figures say so: the first round with its read back, and each round more", [CONTACT_COMMANDS_MOST.upsertPublic <= page, CONTACT_COMMANDS_MOST.upsertRound <= page], [true, true]);
+    const refused = await contested("contested_refused", async () => false);
+    is("a request that cannot be taken: refused, never a round unpaid", refused.outcome, "refused");
   }
 
   part("named where the paths are paid for");

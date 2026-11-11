@@ -218,6 +218,7 @@ export async function upsertContact(
   },
   /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
+  payRound?: () => Promise<boolean>,
 ): Promise<AddResult> {
   const none = { joined: false, gotProduct: false, full: false };
   if (!isRedisConfigured() || !listId) return none;
@@ -228,7 +229,13 @@ export async function upsertContact(
   // a complaint or a deletion that lands in between is never written over (consent audit of 9 November 2026).
   // What changed meanwhile is read again and decided again; a deletion that landed since the first read wins.
   let deletedAtFirst: boolean | null = null;
+  // A sign-up a public request pays for (a store's own room, not an order's): its first round, and the read back of an
+  // answer in another shape, fit what that request pays for; each round more, after a row changed meanwhile, is paid
+  // first, one public request of the store's (`payRound`), or not made: refused, for the visitor to try again (Codex Z
+  // on #3448, 6751568157). An order's goes round CONTACT_WRITE_TRIES times, inside the order's own compute.
+  const publicRoom = room !== null && !isOrderRoom(room);
   for (let round = 0; round < CONTACT_WRITE_TRIES; round += 1) {
+    if (round > 0 && publicRoom && !(payRound && (await payRound().catch(() => false)))) break;
     const replies = repliesFor(await redisPipeline([
       ["HGET", key, email],
       ["HLEN", key],
@@ -335,7 +342,8 @@ export const CONTACT_WRITE_CALLS = 8;
  * The most database commands each path of this file's checked writes makes, a script counted as 1 plus its calls
  * (review of #3448, 9 November 2026; held in tests/contacts-write-cost.test.ts and named in
  * tests/plan-cost-registry.ts). Each is CONTACT_WRITE_TRIES rounds lost to a change made in between, and, once, the
- * read back of an answer in another shape. The room's own charge scripts (lib/store-data.ts) are left out: the data
+ * read back of an answer in another shape; a sign-up a public request pays for pays each round past its first
+ * (upsertPublic). The room's own charge scripts (lib/store-data.ts) are left out: the data
  * room's line prices them. A sign-up (upsertContact) is a public request's work, not an order's, unless its room is
  * an order's (orderRoom): there the checks add two reads inside ORDER_WRITE_IF_SAME, inside the order's own compute.
  */
@@ -344,6 +352,11 @@ export const CONTACT_COMMANDS_MOST = {
   /** upsertContact: the row, the list's size and the deleted mark; the mark's time; the script and its calls. */
   upsertRound: 3 + 1 + 1 + CONTACT_WRITE_CALLS,
   upsert: CONTACT_WRITE_TRIES * (3 + 1 + 1 + CONTACT_WRITE_CALLS) + 2,
+  /**
+   * upsertContact from a public request (a store's own room), what that request pays for: one round, and once the read
+   * back; each round more is paid first by a public request of its own (payRound), at most upsertRound commands each.
+   */
+  upsertPublic: (3 + 1 + 1 + CONTACT_WRITE_CALLS) + 2,
   /** unsubscribe: the link, the row, the script and the 3 calls it makes there (the row, the row written, the left count). */
   unsubscribeRound: 1 + 1 + 1 + 3,
   unsubscribe: CONTACT_WRITE_TRIES * (1 + 1 + 1 + 3),

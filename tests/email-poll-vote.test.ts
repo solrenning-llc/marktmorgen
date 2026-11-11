@@ -17,7 +17,7 @@
 import type { NextRequest } from "next/server";
 import { BroadcastsUnreadable, readBroadcast } from "@/lib/broadcasts";
 import { pollLinkPart } from "@/lib/email-poll-links";
-import { votePoll } from "@/lib/email-poll-vote";
+import { POLL_ROUTE_WORDS, votePoll } from "@/lib/email-poll-vote";
 import * as route from "@/app/api/mail/poll/route";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -96,8 +96,14 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   put({ poll: undefined });
   is("a broadcast with no poll", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "invalid");
   for (const status of ["scheduled", "waiting", "cancelled", "failed"]) {
-    put({ status });
-    is(`a broadcast ${status}: its poll was never sent`, await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "invalid");
+    put({ status, sent: 0 });
+    is(`a broadcast ${status} with nothing sent: its poll reached nobody`, await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "invalid");
+  }
+  // Daily portions, a month's emails spent, a subject test's wait: it waits with part of the list sent (review, ALTO).
+  for (const status of ["waiting", "cancelled", "failed"]) {
+    put({ status, sent: 4 });
+    is(`a broadcast ${status} after 4 went out: a reader among them is kept`, await votePoll({ broadcastId: ID, link: link(3), option: 0, now }, deps()), "recorded");
+    is(`…one it has not reached yet is not`, await votePoll({ broadcastId: ID, link: link(4), option: 0, now }, deps()), "invalid");
   }
   put({ status: "sending" });
   is("while it is going out: kept", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "recorded");
@@ -125,8 +131,8 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("a record that does not read: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
   put({ sendAt: "soon" });
   is("a send time that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
-  put({ total: -1 });
-  is("a list size that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
+  put({ sent: -1 });
+  is("a count of those reached that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
 
   part("The route: only a POST with an answer, plain words, never a vote from a bad link");
   is("no GET: opening a link never votes", Object.keys(route).sort(), ["POST"]);
@@ -144,6 +150,8 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   const bad = await post(`b=${ID}&k=${link(2).replace(/^2\./, "3.")}`, { a: "0" });
   is("a link that is not that recipient's: refused", bad.status, 404);
   is("not cached", bad.headers.get("Cache-Control"), "no-store");
+  // takePublicRequest answers false both past the month's figure and when the count could not be read (review, LOW 7).
+  is("resting never claims the month is spent", /this month/.test(POLL_ROUTE_WORDS.resting.text), false);
   is("nothing kept by the route", votes(), []);
 
   done();

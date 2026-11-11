@@ -85,7 +85,7 @@ export function PollComposer({ on, value, onToggle, onChange, touched: shown = f
                   </label>
                   <button
                     type="button"
-                    className="btn btn-secondary min-h-11"
+                    className="btn btn-secondary"
                     disabled={value.options.length <= MIN_POLL_OPTIONS}
                     onClick={() => change({ ...value, options: value.options.filter((_, j) => j !== i) })}
                   >{`Remove answer ${i + 1}`}</button>
@@ -93,7 +93,7 @@ export function PollComposer({ on, value, onToggle, onChange, touched: shown = f
               ))}
             </div>
             {value.options.length < MAX_POLL_OPTIONS ? (
-              <button type="button" className="btn btn-secondary mt-2 min-h-11" onClick={() => change({ ...value, options: [...value.options, ""] })}>Add an answer</button>
+              <button type="button" className="btn btn-secondary mt-2" onClick={() => change({ ...value, options: [...value.options, ""] })}>Add an answer</button>
             ) : null}
             <span id="poll-options-hint" aria-live="polite" className="field-hint mt-1 block">{problem.options ? PROBLEM.options : `${MIN_POLL_OPTIONS} to ${MAX_POLL_OPTIONS} answers, each its own link in the email.`}</span>
           </fieldset>

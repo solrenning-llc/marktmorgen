@@ -20,7 +20,7 @@ import { onAccount, StripeError } from "@/lib/stripe-account";
 import { CODES_API_VERSION } from "@/lib/discount";
 import type { CodeAsked } from "@/lib/discount-input";
 import { MAX_RETURNING_CODES, type ReturningCode } from "@/lib/returning-code-rules";
-import { type Store, addReturningCode, removeReturningCode } from "@/lib/store";
+import { type Store, addReturningCode, removeReturningCode, storeForEmail } from "@/lib/store";
 
 export type MadeReturning = { ok: true; code: ReturningCode } | { ok: false; reason: "taken" | "full" | "minimum" | "stripe" };
 
@@ -77,12 +77,25 @@ export async function makeReturningCode(email: string, store: Store, asked: Code
   if (!id) return { ok: false, reason: "stripe" };
   const entry: ReturningCode = { code: asked.code, coupon: id, off: asked.off, endsAt: null, createdAt: Math.floor(now / 1000) };
   const kept = await addReturningCode(email, entry);
-  if (kept !== "ok") {
-    // Not kept: the coupon takes nothing off anybody, nothing points at it. Deleted so it does not linger.
-    await onAccount("DELETE", account, `/coupons/${encodeURIComponent(id)}`, undefined, CODES_API_VERSION).catch(() => null);
-    return { ok: false, reason: kept === "taken" ? "taken" : kept === "full" ? "full" : "stripe" };
+  if (kept === "ok") return { ok: true, code: entry };
+  // The answer is not "kept", but a write whose answer was lost may have landed (rule 24): the store is read again,
+  // and the coupon is deleted only when the store surely does not point at it.
+  let again: Store | null = null;
+  try {
+    again = await storeForEmail(email);
+  } catch {
+    again = null;
   }
-  return { ok: true, code: entry };
+  const saved = again?.returningCodes.find((c) => c.code === entry.code && c.coupon === id);
+  if (saved) return { ok: true, code: saved };
+  if (!again) {
+    // Unknown either way: the coupon stays. It takes nothing off anybody unless the store points at it.
+    console.error("a returning-buyer code's store write is unknown; its coupon is kept", id);
+    return { ok: false, reason: "stripe" };
+  }
+  // Not kept: the coupon takes nothing off anybody, nothing points at it. Deleted so it does not linger.
+  await onAccount("DELETE", account, `/coupons/${encodeURIComponent(id)}`, undefined, CODES_API_VERSION).catch(() => null);
+  return { ok: false, reason: kept === "taken" ? "taken" : kept === "full" ? "full" : "stripe" };
 }
 
 /** Takes the code off the store (which stops it), then deletes its coupon. True once the store no longer has it. */

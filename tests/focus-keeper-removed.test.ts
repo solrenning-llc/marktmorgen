@@ -107,6 +107,25 @@ part("A control taken away under the focus");
   is("nor when only the main region itself is left, which is the page changing", (main.first as El).focused, 0);
 }
 
+{
+  // Seen in Chromium: blur and focusout reach the button while it is still on the page, a moment before React takes
+  // it away. That is not a person leaving it.
+  const k = fresh();
+  const main = el("main", null, { main: true });
+  const card = el("card", main);
+  const opener = el("Change my address", card);
+  const field = el("the address field", card);
+  active = opener;
+  k.focusIn(opener);
+  k.focusOut(opener); // still connected here
+  opener.isConnected = false;
+  opener.parentElement = null;
+  card.first = field;
+  active = body;
+  k.treeChanged();
+  is("a blur just before it is taken away does not stop the focus going on", field.focused, 1);
+}
+
 part("A control moved under the focus");
 {
   const k = fresh();

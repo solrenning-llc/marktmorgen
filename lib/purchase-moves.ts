@@ -21,7 +21,7 @@
  * two links for the caller to email, after taking each email from a store's
  * allowance, and a claim says only that the move may now be made.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { claimMark, claimValue } from "@/lib/claim-mark";
 import {
   type MoveRequest,
@@ -57,6 +57,14 @@ const confirmKey = (id: string, side: MoveSide) => `nl:pm:c:${id}:${side}`;
 const doneKey = (id: string) => `nl:pm:done:${id}`;
 /** One address's count of the day (UTC), under a fingerprint that cannot be turned back into the address. */
 const dayKey = (address: string, nowMs: number) => `nl:pm:day:${sha(`nimbus-pm-day:${Math.floor(nowMs / 86_400_000)}:${address}`).slice(0, 32)}`;
+/** A same-address, same-destination retry finds the existing request without storing either address in a key. */
+const retryKey = (from: string, to: string, scope: MoveRequest["scope"], nowMs: number) =>
+  `nl:pm:retry:${sha(`nimbus-pm-retry:v1:${Math.floor(nowMs / 86_400_000)}:${JSON.stringify([scope, from, to])}`).slice(0, 32)}`;
+const retryToken = (id: string, side: MoveSide): string | null => {
+  const key = process.env.NIMBUS_DATA_KEY;
+  if (!key) return null;
+  return createHmac("sha256", key).update(`nimbus-pm-link:v1:${id}:${side}`).digest("hex").slice(0, 48);
+};
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
 type Kept = Pick<MoveRequest, "from" | "to" | "scope" | "createdAt">;
@@ -120,19 +128,54 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
   if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
 
-  const id = randomBytes(16).toString("hex");
-  const fromToken = randomBytes(24).toString("hex");
-  const toToken = randomBytes(24).toString("hex");
-  const wrote = repliesFor(
-    await redisPipeline([
-      ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
-      ["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-      ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
-    ]),
-    3,
-  );
-  // Not exactly written: no link goes out.
-  if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
+  const retry = retryKey(made.from, made.to, made.scope, now);
+  const indexed = repliesFor(await redisPipeline([["GET", retry]]), 1);
+  if (!indexed) return { ok: false, reason: "unknown" };
+
+  let id: string;
+  let fromToken: string;
+  let toToken: string;
+  if (indexed[0] === null) {
+    id = randomBytes(16).toString("hex");
+    fromToken = retryToken(id, "from") ?? "";
+    toToken = retryToken(id, "to") ?? "";
+    if (!fromToken || !toToken) return { ok: false, reason: "unknown" };
+    const wrote = repliesFor(
+      await redisPipeline([
+        ["SET", requestKey(id), json, "EX", MOVE_CONFIRM_SECONDS],
+        ["SET", tokenKey(fromToken), JSON.stringify({ id, side: "from" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
+        ["SET", tokenKey(toToken), JSON.stringify({ id, side: "to" } satisfies Grant), "EX", MOVE_CONFIRM_SECONDS],
+        ["SET", retry, id, "EX", MOVE_CONFIRM_SECONDS],
+      ]),
+      4,
+    );
+    // The retry index is last: its presence means all link records were written first.
+    if (!wrote || wrote.some((reply) => reply !== "OK")) return { ok: false, reason: "unknown" };
+  } else {
+    if (typeof indexed[0] !== "string" || !ID.test(indexed[0])) return { ok: false, reason: "unknown" };
+    id = indexed[0];
+    fromToken = retryToken(id, "from") ?? "";
+    toToken = retryToken(id, "to") ?? "";
+    if (!fromToken || !toToken) return { ok: false, reason: "unknown" };
+    const existing = repliesFor(
+      await redisPipeline([["GET", requestKey(id)], ["GET", tokenKey(fromToken)], ["GET", tokenKey(toToken)]]),
+      3,
+    );
+    if (!existing || typeof existing[0] !== "string" || existing[1] === null || existing[2] === null) return { ok: false, reason: "unknown" };
+    const prior = parseJson(existing[0]) as Partial<Kept> | undefined;
+    const parsed = prior && parseMoveRequest({ ...prior, fromConfirmedAt: null, toConfirmedAt: null, appliedAt: null });
+    const fromGrant = parseGrant(existing[1]);
+    const toGrant = parseGrant(existing[2]);
+    if (
+      !parsed ||
+      parsed.from !== made.from ||
+      parsed.to !== made.to ||
+      JSON.stringify(parsed.scope) !== JSON.stringify(made.scope) ||
+      seconds(now) >= parsed.createdAt + MOVE_CONFIRM_SECONDS ||
+      !fromGrant || fromGrant.id !== id || fromGrant.side !== "from" ||
+      !toGrant || toGrant.id !== id || toGrant.side !== "to"
+    ) return { ok: false, reason: "unknown" };
+  }
   return { ok: true, id, fromToken, toToken };
 }
 

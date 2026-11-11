@@ -8,7 +8,9 @@ import { lessonHtmlDocument } from "@/lib/lesson-html";
  * blank line, lines starting with "- " as a list, blocks of code between
  * lines of three backticks (lib/lesson-blocks.ts), and web addresses that can
  * be clicked outside code. Nothing else is interpreted, so nothing a creator
- * types can turn into markup on a student's screen.
+ * types can turn into markup on a student's screen. Paragraphs and lists are
+ * drawn at most 46ch wide, under 80 characters a line (WCAG 1.4.8 AAA,
+ * tests/lesson-text-line-length.test.ts); code keeps the column.
  */
 const URL_PATTERN = /(https:\/\/[^\s<>"')\]]+)/g;
 
@@ -35,7 +37,7 @@ export function LessonText({ text, codeLabel = "Code", htmlPreviewLabel }: { tex
     <div className="space-y-4 leading-relaxed">
       {lessonBlocks(text).map((block, i) =>
         block.kind === "list" ? (
-          <ul key={i} className="list-disc space-y-1 pl-6">
+          <ul key={i} className="list-disc max-w-[46ch] space-y-1 pl-6">
             {block.items.map((item, k) => (
               <li key={k}>
                 <Linked text={item} />
@@ -66,7 +68,7 @@ export function LessonText({ text, codeLabel = "Code", htmlPreviewLabel }: { tex
             <code>{block.code}</code>
           </pre>
         ) : (
-          <p key={i} className="whitespace-pre-line break-words">
+          <p key={i} className="max-w-[46ch] whitespace-pre-line break-words">
             <Linked text={block.lines.join("\n")} />
           </p>
         ),

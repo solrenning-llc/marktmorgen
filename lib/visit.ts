@@ -111,8 +111,9 @@ export async function countHit(
     if (today) await maybeBusyAlert(store, today);
   } catch (error) {
     console.error("counting a visit failed", error);
-    // A count not made is written down, so no rate is shown from it (lib/traffic.ts, markCountGap).
-    await markCountGap(store.handle);
+    // A count not made is written down under its kind, so no rate is shown from it (lib/traffic.ts, markCountGap):
+    // a link's click under the clicks, any other count (a view, a product's visitor, a checkout) under the visits.
+    await markCountGap(store.handle, hit.kind === "link" ? "clicks" : "visits");
   }
 }
 
@@ -158,6 +159,6 @@ export async function countAffiliateClick(
     else await write();
   } catch (error) {
     console.error("counting an affiliate click failed", error);
-    await markCountGap(store.handle);
+    await markCountGap(store.handle, "clicks");
   }
 }

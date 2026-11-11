@@ -135,8 +135,8 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
   };
   const inventory = await readPageFunnelsStrict(store.statsId).catch(() => null);
   const formReviews = readFunnelFormReviews(store, inventory ?? [], { reviewOffers: true });
-  // When the store's counts were not made (lib/traffic.ts, countGap): a funnel whose steps were counted since then says so.
-  const gap = await countGap(store).catch(() => "unknown" as const);
+  // When the store's funnel steps were not all counted (lib/traffic.ts, countGap): a funnel whose steps were counted since then says so.
+  const gap = await countGap(store, "steps").catch(() => "unknown" as const);
   const savedFunnels: SavedFunnel[] = await Promise.all(
     (inventory ?? []).map(async (funnel) => {
       const [states, counts, pageReviews] = await Promise.all([stepStates(store, funnel, { strictProducts: true, includeReviewProduct: true }).catch(() => null), readFunnelCountsStrict(store.statsId, funnel).catch(() => null), formReviews]);

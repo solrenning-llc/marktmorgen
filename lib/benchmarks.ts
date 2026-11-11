@@ -34,7 +34,7 @@ export function mondayOf(now: number): string {
 }
 
 /** Keeps a store's rates for this week, or marks it out when it no longer qualifies. Never throws. */
-export async function recordSample(store: Pick<Store, "statsId" | "email" | "suspended" | "handle" | "previousHandles" | "releasedHandles">, data: StatsData | null, now = Date.now()): Promise<void> {
+export async function recordSample(store: Pick<Store, "statsId" | "email" | "suspended" | "handle" | "previousHandles" | "releasedHandles" | "createdAt">, data: StatsData | null, now = Date.now()): Promise<void> {
   if (!store.statsId || !data || !isRedisConfigured()) return;
   const key = weekKey(mondayOf(now));
   const sample = store.suspended || isHouseStore(store) ? null : sampleFrom(data, await visitsWhole(store, now));
@@ -78,8 +78,15 @@ export async function readRanges(): Promise<KeptRanges | null> {
   }
 }
 
-/** Whether every visit of the last 90 days was counted (lib/traffic.ts, countGap): an unreadable record is not. */
-export async function visitsWhole(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles">, now = Date.now()): Promise<boolean> {
-  const gap = await countGap(store).catch(() => "unknown" as const);
-  return gap === null || (gap !== "unknown" && gap.last < now - 90 * 86_400_000);
+/**
+ * Whether every visit of the last 90 days was counted (lib/traffic.ts, countGap): an unreadable record is not. Only
+ * since the store itself was made: a mark left under an address it took after another store let it go
+ * (RELEASE_QUARANTINE_DAYS is shorter than these 90 days) is not one of its counts (Claude 5 on b2acc71c18, M1). A
+ * creation time that cannot be read counts the whole 90 days.
+ */
+export async function visitsWhole(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles" | "createdAt">, now = Date.now()): Promise<boolean> {
+  const gap = await countGap(store, "visits").catch(() => "unknown" as const);
+  const made = Date.parse(store.createdAt);
+  const since = Math.max(now - 90 * 86_400_000, Number.isFinite(made) ? made : 0);
+  return gap === null || (gap !== "unknown" && gap.last < since);
 }

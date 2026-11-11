@@ -268,14 +268,23 @@ export function funnelVisitor(statsId: string, funnelId: string, ip: string, use
 
 /**
  * Counts a person opening step `index`. Never throws: a count must not stop a
- * page. Answers whether the count changed, false for somebody it already
- * had (app/api/store/hit keeps the store's signal only then).
+ * page. Answers whether the count changed: true when PFADD added the person,
+ * false for somebody it already had (app/api/store/hit gives the store's
+ * signal back only then), and null when that is not known, a write that
+ * failed or answered in another shape (CX-123 rule 24; Claude 5 on
+ * b2acc71c18, M2): never read as somebody already counted, so the signal is
+ * kept and the step is written down as not made (lib/traffic.ts, takeSignal).
  */
-export async function countFunnelStep(statsId: string, funnel: PageFunnel, index: number, visitor: string): Promise<boolean> {
+export async function countFunnelStep(statsId: string, funnel: PageFunnel, index: number, visitor: string): Promise<boolean | null> {
   if (!isRedisConfigured() || index < 0 || index >= funnel.steps.length) return false;
   const key = seenKey(statsId, funnel, index);
-  const [added] = await redisPipeline([["PFADD", key, visitor], ["EXPIRE", key, KEEP_SECONDS]]).catch(() => [0]);
-  return Number(added) === 1;
+  try {
+    const replies = repliesFor(await redisPipeline([["PFADD", key, visitor], ["EXPIRE", key, KEEP_SECONDS]]), 2);
+    if (!replies) return null;
+    return replies[0] === 1 ? true : replies[0] === 0 ? false : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Counts a person signing up or paying at step `index`. Never throws. */

@@ -42,11 +42,12 @@ import { headers } from "next/headers";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { admitNonPaying } from "@/lib/free-pool";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
-import { PAID_ARRIVALS_PER_VISIT, PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, countGapWords, publicVisitLimit, requestLimitFor, shareAddress, signalLimitFor, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
+import { type CountKind, PAID_ARRIVALS_PER_VISIT, PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, countGapWords, publicVisitLimit, requestLimitFor, shareAddress, signalLimitFor, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
 
 const dayKey = (folder: string, day: string) => `nl:traffic:day:${folder}:${day}`;
 const countKey = (folder: string, month: string) => `nl:traffic:n:${folder}:${month}`;
@@ -369,17 +370,23 @@ async function takePublic(store: Store, who: "public" | "buyer", now: number, un
  *
  * Each connection may take its share of a day of them (clientDayShare of the
  * pool); the share counts what a connection asks for, written or not, so one
- * machine sending made-up codes spends its own share and nobody else's.
+ * machine sending made-up codes spends its own share and nobody else's. What
+ * a connection sends past its share is left out as a repeat and not written
+ * down: one connection alone could otherwise hide any store's rates (Claude 5
+ * on b2acc71c18, M1; lib/traffic-rules.ts, signalsWords says so).
  *
- * Every count not made, for whatever reason (its pool spent, the connection's
- * share, a store that pays nothing without a place, a funded window not
- * reserved, a count that could not be made), is written down (markCountGap),
- * and a rate made from these counts is then said to be incomplete, never
- * shown. Answers whether `write` ran and recorded.
+ * Every other count not made (its pool spent, a store that pays nothing
+ * without a place, a funded window not reserved, a count that could not be
+ * made, a write that threw or answered in another shape) is written down
+ * under its kind (`what`, markCountGap), and a rate made from those counts is
+ * then said to be incomplete, never shown. `write` answers true when it
+ * recorded, false when it recorded nothing (its place is given back), and
+ * null when that is not known (its place is kept, since it may have written,
+ * and the count is written down: M2). Answers whether `write` ran and recorded.
  */
-export async function takeSignal(store: Store, write: () => Promise<boolean> = async () => true, now = Date.now(), pool: "signals" | "paid" = "signals"): Promise<boolean> {
+export async function takeSignal(store: Store, write: () => Promise<boolean | null> = async () => true, now = Date.now(), pool: "signals" | "paid" = "signals", what: CountKind = "clicks"): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const gap = () => markCountGap(store.handle, now);
+  const gap = () => markCountGap(store.handle, what, now);
   const refuse = async () => {
     await gap();
     return false;
@@ -396,7 +403,8 @@ export async function takeSignal(store: Store, write: () => Promise<boolean> = a
     if (!FOLDER_PATTERN.test(folder)) return refuse();
     if (!(await admitNonPaying(store, now))) return refuse();
     const client = await askingConnection();
-    if (client && (await overShare(signalShareKey, pool === "paid" ? "paid" : "signal", folder, window, clientDayShare(limit), client, 1, now))) return refuse();
+    // Past its share, one connection's own repeats: left out, never written down (M1).
+    if (client && (await overShare(signalShareKey, pool === "paid" ? "paid" : "signal", folder, window, clientDayShare(limit), client, 1, now))) return false;
     key = (pool === "paid" ? paidArrivalsKey : signalsKey)(folder, window.id);
     keep = keepSecondsFor(window, now);
     // With its expiry in the same write, as a window's requests are (countRequest).
@@ -414,39 +422,53 @@ export async function takeSignal(store: Store, write: () => Promise<boolean> = a
   }
   let wrote: boolean | null;
   try {
-    wrote = await write();
+    const answer: unknown = await write();
+    wrote = answer === true || answer === false ? answer : null;
   } catch {
     wrote = null;
   }
   if (wrote === false) await redisPipeline([["DECR", key], ["EXPIRE", key, keep]]).catch(() => undefined);
+  // Not known whether it wrote: its place is kept, and the count is written down, so no rate is shown from it.
+  if (wrote === null) await gap();
   return wrote === true;
 }
 
 /**
- * Writes down that a count of this store was not made now: the first time
- * ever, and the last (lib/traffic-rules.ts, countGapWords). Kept with the
- * store, as the counts it qualifies are; never throws.
+ * Writes down that a count of this store of one kind (clicks, a funnel's
+ * steps, visits) was not made now: the first time ever, and the last, in the
+ * fields of that kind (lib/traffic-rules.ts, countGapWords), so a count not
+ * made hides only the rates made from its own kind (Claude 5 on b2acc71c18,
+ * M1). Kept with the store, as the counts it qualifies are; never throws.
  */
-export async function markCountGap(handle: string, now = Date.now()): Promise<void> {
+export async function markCountGap(handle: string, what: CountKind, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !handle) return;
-  await redisPipeline([["HSETNX", gapKey(handle), "first", now], ["HSET", gapKey(handle), "last", now]]).catch(() => undefined);
+  await redisPipeline([["HSETNX", gapKey(handle), `${what}:first`, now], ["HSET", gapKey(handle), `${what}:last`, now]]).catch(() => undefined);
+}
+
+/** A mark's time as written (markCountGap): a string of digits; null when absent; NaN for anything else. */
+function markTime(value: unknown): number | null {
+  if (value === null) return null;
+  return typeof value === "string" && /^\d{1,16}$/.test(value) ? Number(value) : NaN;
 }
 
 /**
- * When counts of the store were first and last not made, null when never, and
- * "unknown" when it cannot be read: a rate is shown only from counts known to
+ * When counts of the store of one kind were first and last not made, null
+ * when never, and "unknown" when it cannot be read (an answer in another
+ * shape included, CX-123 rule 24): a rate is shown only from counts known to
  * be whole.
  */
-export async function countGap(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles">): Promise<{ first: number; last: number } | null | "unknown"> {
+export async function countGap(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles">, what: CountKind): Promise<{ first: number; last: number } | null | "unknown"> {
   if (!isRedisConfigured()) return null;
   try {
     // Under every address the store has answered to: a count refused before its record is read is written down under the address it came to.
     const handles = [...saleHandles(store)];
-    const replies = await redisPipeline(handles.map((h) => ["HMGET", gapKey(h), "first", "last"]));
+    const replies = repliesFor(await redisPipeline(handles.map((h) => ["HMGET", gapKey(h), `${what}:first`, `${what}:last`])), handles.length);
+    if (!replies) return "unknown";
     let out: { first: number; last: number } | null = null;
     for (const raw of replies) {
-      if (!Array.isArray(raw)) return "unknown";
-      const [first, last] = raw.map((v) => (v === null || v === undefined ? null : Number(v)));
+      const pair = repliesFor(raw, 2);
+      if (!pair) return "unknown";
+      const [first, last] = pair.map(markTime);
       if (first === null && last === null) continue;
       if (first === null || last === null || !Number.isFinite(first) || !Number.isFinite(last)) return "unknown";
       out = out ? { first: Math.min(out.first, first), last: Math.max(out.last, last) } : { first, last };
@@ -457,9 +479,9 @@ export async function countGap(store: Pick<Store, "handle" | "previousHandles" |
   }
 }
 
-/** What a page says instead of a rate made from this store's counts since `since` (ms), or "" when they are whole. */
-export async function countGapNote(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles">, what: "clicks" | "steps" | "visits", since: number): Promise<string> {
-  return countGapWords(await countGap(store), what, since);
+/** What a page says instead of a rate made from this store's counts of one kind since `since` (ms), or "" when they are whole. */
+export async function countGapNote(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles">, what: CountKind, since: number): Promise<string> {
+  return countGapWords(await countGap(store, what), what, since);
 }
 
 /**

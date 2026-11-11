@@ -705,13 +705,13 @@ async function main(): Promise<void> {
   // for it, and its rates are said to be incomplete rather than shown too high.
   const spentAt = redis.run(["GET", joySignals]);
   redis.run(["SET", joySignals, String(signalLimitFor(joyNow))]);
-  is("before any count is refused, no rate is said to be incomplete", [await countGap(joyNow), await countGapNote(joyNow, "clicks", 0)], [null, ""]);
+  is("before any count is refused, no rate is said to be incomplete", [await countGap(joyNow, "clicks"), await countGapNote(joyNow, "clicks", 0)], [null, ""]);
   const pastBefore = counts();
   const spentMoment = Date.now();
   for (const body of Object.values(clicks)) await signal(body, `192.0.2.${clickIp++}`);
   is("once the store's signals are spent, a click, an affiliate's visit and a funnel's step are not counted", [counts(), Number(redis.run(["GET", joySignals]))], [pastBefore, signalLimitFor(joyNow)]);
   is("and its pages do not rest for it", await isResting((await storeForHandle("joy"))!), false);
-  const gapNow = await countGap(joyNow);
+  const gapNow = await countGap(joyNow, "clicks");
   const dayNow = new Date(spentMoment).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   is("and its rates since before then say they are not complete, with the day; a rate counted only since after it does not", [
     gapNow !== null && gapNow !== "unknown" && gapNow.first >= spentMoment - 60_000,
@@ -734,6 +734,11 @@ async function main(): Promise<void> {
   ], [true, true, true, true, true]);
   // The benchmark's visits that became a sale: neither shown nor set beside others from visits not all counted in its 90 days.
   const benchData = { sales: "ok", partial: false, totals: { d90: { visitors: 5_000, sales: 100, checkouts: 200 } }, refunds: null, buyers: null };
+  // Clicks and steps not counted say nothing of the visits (M1); a view whose count failed does.
+  is("clicks and steps not counted leave the visits whole", await visitsWhole(joyNow), true);
+  failWhen = (c) => c[0] === "EVAL";
+  await signal({ h: "joy", k: "v", r: "", u: "" }, `192.0.2.${clickIp++}`);
+  failWhen = null;
   is("the benchmark leaves out visits that became a sale when its visits were not all counted", [sampleFrom(benchData as never)?.converted, sampleFrom(benchData as never, false)?.converted, sampleFrom(benchData as never, false)?.paid, await visitsWhole(joyNow), await visitsWhole(joyNow, Date.now() + 100 * DAY)], [0.02, undefined, 0.5, false, true]);
   redis.run(["SET", joySignals, String(spentAt)]);
   redis.run(["DEL", gapKeyOf("joy")]);
@@ -742,7 +747,7 @@ async function main(): Promise<void> {
   decrHook = (key) => { if (key === joySignals) redis.run(["DECRBY", joySignals, "2"]); };
   await signal(clicks.l, `192.0.2.${clickIp++}`);
   decrHook = null;
-  is("a signal past the figure while another was given back meanwhile is not written down as a count not made", await countGap(joyNow), null);
+  is("a signal past the figure while another was given back meanwhile is not written down as a count not made", await countGap(joyNow, "clicks"), null);
   redis.run(["SET", joySignals, String(spentAt)]);
   redis.run(["DEL", gapKeyOf("joy")]);
   // L1: a write that throws keeps its place, since it may have written.
@@ -750,7 +755,7 @@ async function main(): Promise<void> {
   is("a write whose outcome is not known keeps its place, and one that wrote nothing gives it back", [await takeSignal(joyNow, async () => { throw new Error("unknown"); }), Number(redis.run(["GET", joySignals]) ?? 0) - keptBefore, await takeSignal(joyNow, async () => false), Number(redis.run(["GET", joySignals]) ?? 0) - keptBefore], [false, 1, false, 1]);
   // A store whose window is not known counts nothing, and writes that down.
   await takeSignal({ ...joyNow, period: undefined } as never);
-  is("a signal refused because the store's window is not known is written down", (await countGap(joyNow)) !== null, true);
+  is("a signal refused because the store's window is not known is written down", (await countGap(joyNow, "clicks")) !== null, true);
   redis.run(["DEL", gapKeyOf("joy")]);
   // H2: an affiliate's visit from a paid ad is counted on its own pool, even once the store's signals are spent.
   const joyPaid = `nl:traffic:sp:${joy.folder}:${windowOf(joyNow)}`;
@@ -815,10 +820,10 @@ async function main(): Promise<void> {
     is("M2: a funnel step whose count failed keeps its place and is written down, never taken for a visitor already seen", [Number(redis.run(["GET", joySignals]) ?? 0) - keptF, counts().f - stepsBefore, (await countGap(joyNow, "steps")) !== null], [1, 0, true]);
     redis.run(["DEL", gapKeyOf("joy")]);
     failWhen = (c) => c[0] === "PFADD";
-    const failed = await countFunnelStep(joyStats, (await readPageFunnel(joyStats, funnelId))!, 0, "v".repeat(24));
+    const failed = await countFunnelStep(joyStats!, (await readPageFunnel(joyStats!, funnelId))!, 0, "v".repeat(24));
     failWhen = null;
     replyHook = (list) => (list[0]?.[0] === "PFADD" ? ["1", 1] : null);
-    const odd = await countFunnelStep(joyStats, (await readPageFunnel(joyStats, funnelId))!, 0, "w".repeat(24));
+    const odd = await countFunnelStep(joyStats!, (await readPageFunnel(joyStats!, funnelId))!, 0, "w".repeat(24));
     replyHook = null;
     is("M2: a funnel step's count that failed or answered in another shape is unknown, never false", [failed, odd], [null, null]);
     const keptA = Number(redis.run(["GET", joySignals]) ?? 0);

@@ -8,13 +8,36 @@ import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funne
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { productIdFor } from "@/lib/catalog";
 import { markCountGap, takeSignal } from "@/lib/traffic";
-import { HIT_STORE_LIMIT, shareAddress } from "@/lib/traffic-rules";
+import { type CountKind, HIT_STORE_LIMIT, shareAddress } from "@/lib/traffic-rules";
 import { affiliatesOn } from "@/lib/affiliates";
 import { browserProof } from "@/lib/bot-check";
 
 const MAX_BODY_BYTES = 1_500;
 
 const done = () => new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+
+/** How often one server writes down, for one store and one kind, the counts a flood past HIT_STORE_LIMIT refused. */
+const FLOOD_MARK_MS = 60_000;
+/** The last time this server wrote it, by store and kind: at most FLOOD_MARKS_KEPT of them, the oldest let go first. */
+const floodMarked = new Map<string, number>();
+const FLOOD_MARKS_KEPT = 1_000;
+
+/**
+ * Writes down that a flood past the store's ten minutes refused some of its counts (lib/traffic.ts, markCountGap),
+ * at most once a minute for a store and a kind on this server (Claude 5 on b2acc71c18, L1): every request of a flood
+ * used to read the address's index and write the mark, three commands each. The mark keeps its first time and its
+ * last to within a minute, and the pages say the day.
+ */
+async function floodMark(handle: string, what: CountKind): Promise<void> {
+  const at = Date.now();
+  const id = `${what}|${handle}`;
+  const last = floodMarked.get(id);
+  if (last !== undefined && at - last < FLOOD_MARK_MS) return;
+  floodMarked.delete(id);
+  if (floodMarked.size >= FLOOD_MARKS_KEPT) floodMarked.delete(floodMarked.keys().next().value as string);
+  floodMarked.set(id, at);
+  if (await handleTaken(handle).catch(() => false)) await markCountGap(handle, what, at);
+}
 
 /**
  * A store page saying it was opened, or that one of its links was.
@@ -63,15 +86,17 @@ export async function POST(request: NextRequest) {
   // a /48 for the new kind), so a machine with a block of its own is one.
   const address = clientAddress(request);
   const from = shareAddress(address) || address;
-  // Every count refused is written down for a store that exists, so no rate
-  // is shown from counts that were not whole (lib/traffic.ts, markCountGap).
-  const refused = async () => {
-    if (await handleTaken(handle).catch(() => false)) await markCountGap(handle);
+  // One address's allowance is one address's alone: what it sends past it is
+  // left out as a repeat and never written down, or one machine could hide any
+  // store's rates (Claude 5 on b2acc71c18, 7 November 2026, M1).
+  if (!(await withinLimit(allowance[0], `${from}|${handle}`, allowance[1], 600))) return done();
+  // The store's own ten minutes for what is not a page (lib/traffic-rules.ts, HIT_STORE_LIMIT): views and pages are
+  // never under it. Past it many machines at once were sending, and counts may have been lost: written down, under the
+  // kind of count refused, for a store that exists, so no rate is shown from counts that were not whole.
+  if (kind !== "v" && kind !== "p" && !(await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600))) {
+    await floodMark(handle, kind === "f" ? "steps" : "clicks");
     return done();
-  };
-  if (!(await withinLimit(allowance[0], `${from}|${handle}`, allowance[1], 600))) return refused();
-  // The store's own ten minutes for what is not a page (lib/traffic-rules.ts, HIT_STORE_LIMIT): views and pages are never under it.
-  if (kind !== "v" && kind !== "p" && !(await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600))) return refused();
+  }
   // A page opened (a visit, another page, a funnel's step) is counted only when the host's check says a person's
   // browser sent this (lib/bot-check.ts, browserProof). A program, a check that failed or did not answer, is counted
   // nowhere: not toward the visits the store's plan covers, never in its numbers as a visit. What pages cost is still
@@ -124,7 +149,7 @@ export async function POST(request: NextRequest) {
     const step = read("t", 1) === "g" ? "page" : "product";
     const index = funnel?.on ? stepIndex(funnel, step, read("id", 40)) : -1;
     if (funnel && index >= 0 && !(await isStorePeople(request, store))) {
-      await takeSignal(store, () => countFunnelStep(statsId, funnel, index, funnelVisitor(statsId, funnel.id, clientAddress(request), userAgent)));
+      await takeSignal(store, () => countFunnelStep(statsId, funnel, index, funnelVisitor(statsId, funnel.id, clientAddress(request), userAgent)), Date.now(), "signals", "steps");
     }
   } else if (kind === "a") {
     // A visit through an affiliate's link: counted for them, once a day.

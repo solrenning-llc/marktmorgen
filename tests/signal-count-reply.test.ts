@@ -29,7 +29,7 @@ test("a signal's count from Redis's exact answer is taken, and the write runs", 
   let wrote = 0;
   assert.equal(await takeSignal(store, async () => { wrote += 1; return true; }), true);
   assert.equal(wrote, 1);
-  assert.equal(await countGap(store), null);
+  assert.equal(await countGap(store, "clicks"), null);
 });
 
 for (const receipt of [[true, 1], ["1", 1], [1], [1, 1, 1], [1, "1"], [1, true], [null, 1], [1.5, 1], [1, 0], ["OK", 1], [0, 1]]) {
@@ -46,7 +46,7 @@ for (const receipt of [[true, 1], ["1", 1], [1], [1, 1, 1], [1, "1"], [1, true],
     }
     assert.equal(taken, false);
     assert.equal(wrote, 0);
-    assert.notEqual(await countGap(store), null, "a count not made is written down");
+    assert.notEqual(await countGap(store, "clicks"), null, "a count not made is written down");
   });
 }
 

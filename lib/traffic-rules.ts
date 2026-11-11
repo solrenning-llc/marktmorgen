@@ -189,6 +189,9 @@ export const HIT_STORE_LIMIT = Math.ceil((SIGNALS_PER_VISIT * Math.max(...Object
 /** A day as the pages print it: "November 4, 2026". */
 const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
+/** The kinds of count a rate is made from, each written down apart when one is not made (lib/traffic.ts, markCountGap). */
+export type CountKind = "clicks" | "steps" | "visits";
+
 /**
  * Said instead of a rate made from counts that stopped (lib/traffic.ts,
  * countGap): the affiliate directory's rates, a funnel's steps, the
@@ -196,7 +199,7 @@ const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { mont
  * rate covers (from `since`) went uncounted; a count that cannot be read is
  * said to be incomplete too, never taken as whole.
  */
-export function countGapWords(gap: { first: number; last: number } | null | "unknown", what: "clicks" | "steps" | "visits", since: number): string {
+export function countGapWords(gap: { first: number; last: number } | null | "unknown", what: CountKind, since: number): string {
   if (gap === null) return "";
   if (gap === "unknown") return `Not complete: we could not check that every one of these ${what} was counted, so no rate is shown.`;
   if (gap.last < since) return "";
@@ -215,7 +218,7 @@ export function countGapWords(gap: { first: number; last: number } | null | "unk
  */
 export function signalsWords(): string {
   const month = (tier: Tier) => countWords(SIGNALS_PER_VISIT * VISITS_INCLUDED[tier]);
-  return `Clicks on your store's links, visits through an affiliate's link and steps of your page funnels are counted up to ${countWords(SIGNALS_PER_VISIT)} for each visit your plan covers: ${month("creator")} a billing month on Store, ${month("pro")} on Studio and ${month("scale")} on Scale. Visits through an affiliate's link from a paid search ad are counted apart, up to one for each visit your plan covers. One connection is counted for only part of them in a day, and at the busiest moments some of them may not be counted. Whenever any of them were not counted, the rates made from them (the share of clicks that became a sale, a funnel's steps, visits that became a sale) say they are not complete instead of showing a number. Nothing else stops.`;
+  return `Clicks on your store's links, visits through an affiliate's link and steps of your page funnels are counted up to ${countWords(SIGNALS_PER_VISIT)} for each visit your plan covers: ${month("creator")} a billing month on Store, ${month("pro")} on Studio and ${month("scale")} on Scale. Visits through an affiliate's link from a paid search ad are counted apart, up to one for each visit your plan covers. One connection is counted for only part of them in a day, and what one connection sends many times in a few minutes is left out as a repeat, without a note. Apart from those, at the busiest moments some of them may not be counted, and whenever any of them were not counted, the rates made from them (the share of clicks that became a sale, a funnel's steps, visits that became a sale) say they are not complete instead of showing a number. Nothing else stops.`;
 }
 
 /** The signals a store's window holds: SIGNALS_PER_VISIT for each visit of its figure. */

@@ -6,8 +6,11 @@
  *     an object) is not "fresh": the mark is read back, and a payout already
  *     written for the item is never written a second time;
  *   - the payout's own write failing after the mark was taken does not drop
- *     the line: on the next run the line is still on its way, so the affiliate
- *     is never paid again by PayPal while the book still says "owed";
+ *     the line: it stays on its way, so the affiliate is never paid again by
+ *     PayPal while the book still says "owed", and the store's other lines are
+ *     settled all the same;
+ *   - two runs at once write one payout; a mark left by a run that stopped
+ *     between its mark and its write is taken over after an hour;
  *   - a payout that did land although its write answered badly is found in the
  *     book by its reference ("PayPal <item>") and is not written twice.
  *
@@ -146,7 +149,7 @@ async function main(): Promise<void> {
   itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
   // Nothing written: the HSET never reaches Redis and the answer is cut short.
   answering(payoutWrite, async () => []);
-  is("the run stops on the unknown write", await settled(store), "threw");
+  is("Sara stays on her way, Tom too: the run goes on", await settled(store), { paid: 0, released: 0, waiting: 2 });
   redis.pipeline = pipeline;
   is("(nothing was written)", await payoutCount(), 0);
   const next = await settled(store);
@@ -163,7 +166,7 @@ async function main(): Promise<void> {
     await run();
     return [];
   });
-  is("the run stops on the unknown write", await settled(store), "threw");
+  is("Sara stays on her way: the write was not known", await settled(store), { paid: 0, released: 0, waiting: 2 });
   redis.pipeline = pipeline;
   is("(it was written once)", await payoutCount(), 1);
   const later = await settled(store);
@@ -173,6 +176,73 @@ async function main(): Promise<void> {
   const sentAfter = created.length;
   const none = await payWithPayPal(store);
   is("PayPal is never asked to pay Sara again", [none.ok ? "sent" : none.reason, created.length - sentAfter], ["nothing", 0]);
+
+  // The mark answered in another shape while nothing is written yet: read back, it is this run's own, and the payout
+  // is written once (Revisor on the first version: the cases above never reached the mark).
+  for (const [label, reply] of [
+    ["cut short", [] as unknown[]],
+    ["a number", [7]],
+    ["wrapped in an object", [{ result: "OK" }]],
+  ] as [string, unknown[]][]) {
+    part(`The item's mark answered ${label}, nothing written yet`);
+    await sent(store);
+    itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
+    answering(itemMark, async (_batch, run) => {
+      await run();
+      return reply;
+    });
+    const result = await settled(store);
+    redis.pipeline = pipeline;
+    is("written once, read back as this run's own mark", [typeof result === "string" ? result : result.paid, await payoutCount()], [1, 1]);
+    is("(the book says paid once)", (await book(store))["sara@example.com"], [3000, 0]);
+  }
+
+  part("Two settling runs at the same moment, the first write answering badly");
+  await sent(store);
+  itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
+  let first = true;
+  answering(payoutWrite, async (_batch, run) => {
+    const real = await run();
+    if (!first) return real;
+    first = false;
+    return [];
+  });
+  await Promise.all([settled(store), settled(store)]);
+  redis.pipeline = pipeline;
+  await settled(store);
+  is("one payout in the book for the item", [await payoutCount(), (await book(store))["sara@example.com"]], [1, [3000, 0]]);
+  is("Sara is no longer on her way", [...(await onTheirWay(store))], ["bbbbbbbbbbbb"]);
+
+  part("A run that stopped between its mark and its write");
+  await sent(store);
+  itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
+  const item = "ITEMBATCH1ABC0";
+  await pipeline([["SET", `${ITEM_PREFIX}${item}`, `${Date.now() - 10 * 60_000}.000000001`, "EX", 400 * 86_400]]);
+  is("a mark ten minutes old is another run's: the line waits", (await settlePayPal(store)).paid, 0);
+  is("(nothing written)", await payoutCount(), 0);
+  await pipeline([["SET", `${ITEM_PREFIX}${item}`, `${Date.now() - 2 * 3_600_000}.000000001`, "EX", 400 * 86_400]]);
+  is("a mark two hours old with nothing in the book is taken over: written once", [(await settlePayPal(store)).paid, await payoutCount()], [1, 1]);
+  await sent(store);
+  itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
+  await pipeline([["SET", `${ITEM_PREFIX}${item}`, "BATCH1ABC", "EX", 400 * 86_400]]);
+  is("a mark from before marks carried their time is taken over too", [(await settlePayPal(store)).paid, await payoutCount()], [1, 1]);
+
+  part("One item that cannot be written never holds up the others");
+  await sent(store);
+  itemStatus = { aaaaaaaaaaaa: "SUCCESS", bbbbbbbbbbbb: "SUCCESS" };
+  let failOnce = true;
+  answering(payoutWrite, async (batch, run) => {
+    if (failOnce && String(batch.find((c) => c[0] === "HSET")?.[3] ?? "").includes("aaaaaaaaaaaa")) {
+      failOnce = false;
+      return [];
+    }
+    return run();
+  });
+  const mixed = await settled(store);
+  redis.pipeline = pipeline;
+  is("Tom is written, Sara stays on her way", mixed, { paid: 1, released: 0, waiting: 1 });
+  is("(the book)", await book(store), { "sara@example.com": [0, 3000], "tom@example.com": [1500, 0] });
+  is("Sara is written on the next run", [(await settlePayPal(store)).paid, await payoutCount()], [1, 2]);
 }
 
 main().then(done, (error) => {

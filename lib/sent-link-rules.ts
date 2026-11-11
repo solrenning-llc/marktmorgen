@@ -29,6 +29,14 @@ export const MAX_SENT_LINKS = 20;
 export const MAX_SENT_LINK_URL = 2048;
 /** Changes kept for one link, newest first. */
 export const MAX_LINK_CHANGES = 10;
+/** Database commands one click makes at the most (lib/sent-links.ts): the store's id and record, and the link's changes. A review ceiling. */
+export const SENT_LINK_COMMANDS = 3;
+/**
+ * Public requests of the store's month one click takes before its changes
+ * are read: more than its reads cost (SENT_LINK_READ in
+ * tests/plan-cost-registry.test.ts).
+ */
+export const SENT_LINK_REQUEST_UNITS = 2;
 
 const EMAIL_ID = /^[0-9a-f]{24}$/;
 /** A store's fixed id, as lib/store.ts STORE_ID_PATTERN (not imported, so these rules stay pure). */

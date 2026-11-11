@@ -131,7 +131,7 @@ export class BroadcastCancellationUnconfirmed extends Error {
 
 export const MAX_SCHEDULE_DAYS = 365;
 /** How long a broadcast's record is kept after its last change, and who it went to after it was made. */
-const RECORD_DAYS = 400;
+export const RECORD_DAYS = 400;
 const RECIPIENT_DAYS = 60;
 /**
  * Readings of the buyers the scheduled job may make for one email beyond its
@@ -191,7 +191,7 @@ const QUEUE = "nl:mail:queue";
 const bcKey = (id: string) => `nl:mail:bc:${id}`;
 const toKey = (id: string) => `nl:mail:bc:${id}:to`;
 /** Every key a broadcast keeps, by its id: for a closed store (lib/closed-store-data.ts). */
-export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`];
+export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`, `${bcKey(id)}:links`];
 const listKey = (listId: string) => `nl:mail:bcs:${listId}`;
 const lockKey = (id: string) => `nl:mail:bc:${id}:lock`;
 export const BROADCAST_ID = /^[0-9a-f]{24}$/;

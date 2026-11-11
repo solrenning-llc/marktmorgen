@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
+import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
@@ -15,7 +17,8 @@ import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-conse
  * say yes. Everywhere else the pixels run unless the browser sends Global
  * Privacy Control, which is a no given in advance. Either way the choice can
  * be changed from the link at the bottom of the page, and it is kept for this
- * store only, on this device.
+ * store only, on this device. Every word is in the store's language
+ * (lib/buyer-words/tracking-consent.ts), marked as such (`lang`).
  *
  * The scripts are each platform's own standard snippet, loaded from the
  * platform, with the creator's id — which was checked against the platform's
@@ -37,8 +40,17 @@ type PixelWindow = Window & {
 };
 
 export type PixelEvent =
-  /** `value` is in the currency's own units (27.5 dollars, 2700 yen); `currency` is its ISO code. */
-  | { type: "purchase"; id: string; value: number; currency?: string; productId: string; title: string }
+  /**
+   * `value` is in the currency's own units (27.5 dollars, 2700 yen); `currency` is its ISO code.
+   * `id` is the id the platforms are given, made from the order's on the server
+   * (lib/ad-events.ts adEventId), never the order's own; "" sends nothing.
+   * `relay` is an opaque handle sealed on the server for this store and this
+   * hour (lib/ad-events.ts adEventRelay), sent only to this site's own server,
+   * which opens it and sends the same purchase from there; never to a pixel.
+   * Never the checkout's own id: that is a key to the order, and every prop
+   * here is written into the page, where the platforms' scripts run.
+   */
+  | { type: "purchase"; id: string; relay?: string; value: number; currency?: string; productId: string; title: string }
   /** `id`, when the route that took the sign-up sent the same lead from the server (lib/ad-events.ts), so it is counted once. */
   | { type: "lead"; productId: string; id?: string }
   | null;
@@ -96,6 +108,133 @@ function once(key: string): boolean {
   return true;
 }
 
+/** Whether this browser already marked one of these as sent. */
+function sentBefore(keys: string[]): boolean {
+  try {
+    return keys.some((key) => localStorage.getItem(key) !== null);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The query parameters on a store's pages that are keys to an order here
+ * (506 [SG1], finding E-2): whoever has one opens what it names. The thanks
+ * page's checkout (session_id) and PayPal order (paypal), the free page's
+ * download token (token), a call package's booking link (pkg), a call's
+ * new-time link (move), the gift of support's checkout (session_id on /tip)
+ * and an order handed to the affiliate page (order). Every ad script reads
+ * the page's own address with each event it sends (Meta's `dl`, Google's
+ * page_location, TikTok's, Pinterest's, X's and Reddit's page URL) and the
+ * page it came from (Meta's `rl`, Google's `dr`), so none of them may be on
+ * either when one starts.
+ */
+export const KEY_PARAMS = ["session_id", "paypal", "token", "pkg", "move", "order"] as const;
+
+/** The address without its keys, and the keys taken out, in order. */
+export function withoutKeys(href: string): { href: string; keys: [string, string][] } {
+  const url = new URL(href);
+  const keys: [string, string][] = [];
+  for (const name of KEY_PARAMS) {
+    for (const value of url.searchParams.getAll(name)) keys.push([name, value]);
+    url.searchParams.delete(name);
+  }
+  return { href: keys.length ? url.href : href, keys };
+}
+
+const keptKeysKey = (path: string) => `nl_px_keys:${path}`;
+
+/** Set once the page is on its way back to its address with a key: nothing starts on the way. */
+let leaving = false;
+/** The keys' values taken out of this page's address, for the marks of purchases sent before ids were derived. */
+let taken: string[] = [];
+
+/**
+ * Whether Next's router has wrapped history.replaceState (an own property of
+ * history, set by the app router's effect: node_modules/next/dist/client/
+ * components/app-router.js). Only then does a write without Next's own state
+ * move the router's address along with the bar's; before it, a write keeps
+ * Next's state, so the router's history entry stays whole.
+ */
+function routerListens(): boolean {
+  return Object.prototype.hasOwnProperty.call(history, "replaceState");
+}
+
+/**
+ * Takes the keys out of the address, with history.replaceState, and keeps
+ * the address as it was, with the address it became, in this tab's storage
+ * under this page, so a reload or a step back to exactly that address can go
+ * back (restoreKeys). Answers the values taken out, or null when the address
+ * still names a key: then no pixel starts.
+ */
+function hideKeys(): string[] | null {
+  try {
+    const was = location.href;
+    const { href, keys } = withoutKeys(was);
+    if (!keys.length) return [];
+    try {
+      sessionStorage.setItem(keptKeysKey(location.pathname), JSON.stringify({ clean: href, was }));
+    } catch {
+      // Without this tab's storage a reload shows the page as a link without its key does.
+    }
+    // A state of null, so Next's router takes the new address as its own and
+    // its next write (a refresh, a server action) does not put the key back.
+    // Before the router listens (its effect runs after this component's on
+    // the first round), the bar is cleared now, keeping Next's state, and the
+    // router is told the same address right after that round.
+    if (routerListens()) history.replaceState(null, "", href);
+    else {
+      history.replaceState(history.state, "", href);
+      setTimeout(() => {
+        if (routerListens() && location.href === href) history.replaceState(null, "", href);
+      }, 0);
+    }
+    if (withoutKeys(location.href).keys.length) return null;
+    const values = keys.map(([, value]) => value);
+    taken = [...taken, ...values];
+    return values;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the page this one was opened from, on this site, named a key (document.referrer). */
+function cameWithKey(): boolean {
+  try {
+    if (!document.referrer) return false;
+    const from = new URL(document.referrer);
+    return from.origin === new URL(location.href).origin && withoutKeys(from.href).keys.length > 0;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * A reload or a step back to a page whose keys were taken out of the address
+ * opens it without them, and the server can only draw the order from its
+ * address. So when the address is exactly the one the keys were taken out
+ * of, as kept in this tab's storage for this page, the address as it was is
+ * opened instead; that page takes them out again before its pixels start.
+ * Only on a reload or a step back: a page opened afresh stays as it is.
+ * Answers whether the page is going.
+ */
+function restoreKeys(): boolean {
+  try {
+    if (withoutKeys(location.href).keys.length) return false;
+    const how = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
+    if (how !== "reload" && how !== "back_forward") return false;
+    const raw = sessionStorage.getItem(keptKeysKey(location.pathname));
+    const kept = raw ? (JSON.parse(raw) as { clean?: unknown; was?: unknown } | null) : null;
+    if (!kept || typeof kept.clean !== "string" || typeof kept.was !== "string" || kept.clean !== location.href) return false;
+    const was = new URL(kept.was);
+    if (was.origin !== new URL(location.href).origin || was.pathname !== location.pathname || withoutKeys(was.href).href !== kept.clean) return false;
+    location.replace(was.href);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function script(src: string) {
   const tag = document.createElement("script");
   tag.async = true;
@@ -117,6 +256,10 @@ function startMeta(w: PixelWindow, id: string) {
     if (!w._fbq) w._fbq = n;
     script("https://connect.facebook.net/en_US/fbevents.js");
   }
+  // Meta's automatic configuration reports the buttons clicked with where
+  // they lead, and a store's links can name an order (a download's
+  // session_id): off for this pixel, set before its init.
+  w.fbq("set", "autoConfig", false, id);
   w.fbq("init", id);
   w.fbq("track", "PageView");
 }
@@ -260,6 +403,7 @@ export function StorePixels({
   askFirst,
   place = { country: null, region: null },
   event = null,
+  language,
 }: {
   handle: string;
   storeName: string;
@@ -271,10 +415,22 @@ export function StorePixels({
   /** Where the visitor is, for Reddit's Limited Data Use (lib/reddit-pixel.ts placeOf). */
   place?: Place;
   event?: PixelEvent;
+  /** The store's language (lib/store-language.ts); English when missing or unknown. */
+  language?: LanguageCode;
 }) {
   // "unknown" until the browser has been asked, so the server's page and the
   // browser's first paint agree.
   const [state, setState] = useState<"unknown" | "ask" | "on" | "off">("unknown");
+
+  // Back to the address with its keys after a reload, whatever the choice:
+  // turning the pixels off reloads the page, which must still show the order.
+  // And out of the address at once, whatever the choice, so a page opened
+  // from this one is not told the key as where it came from.
+  useEffect(() => {
+    taken = [];
+    leaving = restoreKeys();
+    if (!leaving) hideKeys();
+  }, []);
 
   useEffect(() => {
     const choice = readChoice(handle);
@@ -290,9 +446,13 @@ export function StorePixels({
   }, [state, handle]);
 
   useEffect(() => {
-    if (state !== "on") return;
+    if (state !== "on" || leaving) return;
+    // Never a pixel while the address names an order: its keys go first. Nor
+    // on a page opened from an address on this site that named one, which
+    // every script would send as where the visitor came from.
+    if (hideKeys() === null || cameWithKey()) return;
     const w = window as PixelWindow;
-    const start = (kind: string, id: string | null, run: (w: PixelWindow, id: string) => void) => {
+    const start =(kind: string, id: string | null, run: (w: PixelWindow, id: string) => void) => {
       if (!id || started.has(`${kind}:${id}`)) return;
       started.add(`${kind}:${id}`);
       run(w, id);
@@ -306,17 +466,23 @@ export function StorePixels({
     start("x", pixels.x, (win, id) => startX(win, id, restricted));
     start("reddit", pixels.reddit, (win, id) => startReddit(win, id, restricted, place));
 
-    if (event?.type === "purchase" && once(`nl_px_sent:${event.id}`)) {
+    // Before ids were derived, a purchase was marked sent under the order's own
+    // id (the checkout's or PayPal's, both from the address, taken out of it
+    // above): sent then, not again.
+    const marked = event?.type === "purchase" ? taken.filter(Boolean).map((v) => `nl_px_sent:${v}`) : [];
+    if (event?.type === "purchase" && event.id && !sentBefore(marked) && once(`nl_px_sent:${event.id}`)) {
       track(w, pixels, event, restricted);
       // The same purchase from our server now, where the creator set it up
       // (lib/ad-events.ts), rather than at the server's next pass over the
       // store's checkouts: asked only here, where the pixels were allowed to run.
-      fetch("/api/store/ads-event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ h: handle, s: event.id }),
-        keepalive: true,
-      }).catch(() => {});
+      if (event.relay) {
+        fetch("/api/store/ads-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ h: handle, t: event.relay }),
+          keepalive: true,
+        }).catch(() => {});
+      }
     }
     if (event?.type === "lead" && !started.has(`lead:${event.productId}`)) {
       started.add(`lead:${event.productId}`);
@@ -348,21 +514,25 @@ export function StorePixels({
 
   if (state === "unknown") return null;
 
+  const spoken = parseLanguage(language);
+  const words = trackingConsentWords(spoken);
+  const locale = LANGUAGES[spoken].locale;
   if ((navigator as Navigator & {globalPrivacyControl?:boolean}).globalPrivacyControl === true) {
-    return <p className="mt-3 text-center text-xs st-footer-link">Your browser’s Global Privacy Control keeps ad measurement off. Manage this signal in your browser settings.</p>;
+    return <p lang={locale} className="mt-3 text-center text-xs st-footer-link">{words.gpc}</p>;
   }
   if (state === "ask") {
     return (
       <section
-        aria-label="Ad measurement"
+        lang={locale}
+        aria-label={words.adsLabel}
         className="st-card fixed inset-x-3 bottom-3 z-50 mx-auto max-w-xl p-5 text-left sm:inset-x-6 sm:bottom-6"
         style={{ boxShadow: "0 18px 50px -18px rgba(0,0,0,.45)" }}
       >
-        <p className="font-bold">{`${storeName} measures its ads`}</p>
+        <p className="font-bold">{words.adsTitle(storeName)}</p>
         <p className="st-muted mt-1 text-sm leading-relaxed">
-          {`With your permission, this page loads ad measurement from ${names}, which sets cookies, and ${storeName} tells them about your sign-ups and purchases, so it can tell which of its ads bring people here. If you say no, nothing loads, nothing is sent, and the page works just the same.`}{" "}
+          {words.adsBody(names, storeName)}{" "}
           <Link href="/privacy#ads" className="st-footer-link font-semibold">
-            More about this
+            {words.more}
           </Link>
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -375,7 +545,7 @@ export function StorePixels({
               setState(pixelChoiceState("yes",askFirst,gpc));
             }}
           >
-            Allow
+            {words.allow}
           </button>
           <button
             type="button"
@@ -385,7 +555,7 @@ export function StorePixels({
               setState("off");
             }}
           >
-            No thanks
+            {words.noThanks}
           </button>
         </div>
       </section>
@@ -393,7 +563,7 @@ export function StorePixels({
   }
 
   return (
-    <p className="mt-3 text-center">
+    <p lang={locale} className="mt-3 text-center">
       <button
         type="button"
         className="st-footer-link text-xs font-semibold"
@@ -409,7 +579,7 @@ export function StorePixels({
           }
         }}
       >
-        {state === "on" ? "Turn off ad measurement" : "Ad measurement settings"}
+        {state === "on" ? words.turnOff : words.settings}
       </button>
     </p>
   );

@@ -2,7 +2,7 @@
 import { importContactRows, importContacts, leadsKey, previewContactRows, agreedKey, MAX_LEADS, type ImportedContact } from "@/lib/contacts";
 import { addRows, finishUpload, runImport, startImport } from "@/lib/imports";
 import { claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
-import { suppressCommand } from "@/lib/suppression";
+import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     else if (mode === "paste") is("valid paste adds only the new address", result, { added: 1, already: 1, full: false });
     else is("valid preview distinguishes the new person from the erased person", result, { outcomes: [{ outcome: "added", fresh: true }, { outcome: "left", fresh: false }], room: MAX_LEADS });
     is("erased contact remains absent", redis.run(["HGET", leadsKey(list), emails[1]]), null);
-    is("erasure marker is kept", typeof redis.run(["HGET", `nl:erased:${list}`, String(suppressCommand(list, emails[1])[2])]), "string");
+    is("erasure marker is kept", typeof redis.run(["HGET", suppressedKey(list), suppressionPrint(list, emails[1])]), "string");
   }
   part("The real import job keeps its place and retries the same rows");
   redis.clear();

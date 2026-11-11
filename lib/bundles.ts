@@ -30,6 +30,16 @@ export async function contentsOf(store: Store, ids: string[]): Promise<BundleCon
 }
 
 /**
+ * The items the bundles among `listings` hold that offeredItems reads, those
+ * not already in `listings`: what a page counts and pays for before calling
+ * it (lib/page-read-rules.ts, bundleItemUnits).
+ */
+export function bundleItemsToRead(listings: Listing[]): string[] {
+  const known = new Set(listings.map((p) => p.id));
+  return [...new Set(listings.flatMap((p) => (p.bundle && p.bundle.length > 0 ? p.bundle : [])))].filter((id) => !known.has(id));
+}
+
+/**
  * The products each bundle among `listings` offers right now, read at once:
  * one read for a whole page of cards however many bundles it has, and none
  * at all for a page without any, so a store without bundles keeps its round
@@ -39,9 +49,7 @@ export async function offeredItems(store: Store, listings: Listing[]): Promise<M
   const bundles = listings.filter((p) => p.bundle && p.bundle.length > 0);
   const out = new Map<string, Listing[]>();
   if (bundles.length === 0) return out;
-  const ids = [...new Set(bundles.flatMap((p) => p.bundle ?? []))];
-  const known = new Map(listings.map((p) => [p.id, p]));
-  const missing = ids.filter((id) => !known.has(id));
+  const missing = bundleItemsToRead(listings);
   const read = missing.length ? await readListings(store, missing) : [];
   const all = [...listings, ...read];
   for (const bundle of bundles) out.set(bundle.id, deliverableItems(bundle, all));

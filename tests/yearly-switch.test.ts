@@ -1,3 +1,9 @@
+import {renderToReadableStream} from "react-dom/server";
+import SwitchPage from "@/app/[handle]/manage/switch/page";
+import {membershipWords} from "@/lib/buyer-words/membership";
+let jPreviewUnknown=false;
+/** Codex J, return on 669e541d: a preview whose lines say more follow (has_more), read as unknown. */
+let jPreviewPartial = false;
 /**
  * A monthly member moving to the same membership's yearly price, and the one
  * email that offers it (lib/yearly-switch-rules.ts, lib/yearly-switch.ts,
@@ -27,6 +33,10 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
+import { consentMetaValue } from "@/lib/digital-consent";
+import { NextRequest } from "next/server";
+import { POST as switchRoute } from "@/app/api/store/manage/switch/route";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_yearly_switch_only";
 process.env.RESEND_API_KEY = "re_test_yearly_switch_only";
@@ -76,12 +86,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Yearly000001" });
   if (method === "POST" && path === "/invoices/create_preview") {
+    if(jPreviewUnknown)return json({});
+    if (jPreviewPartial) return json({currency:"usd",starting_balance:0,lines:{object:"list",has_more:true,data:[{amount:0,proration:true,period:{start:Number(body.get("subscription_details[proration_date]"))}}]}});
     const at = Number(body.get("subscription_details[proration_date]"));
     // The month's unused part back, and the year from now.
     return json({
       currency: "usd",
       starting_balance: 0,
       lines: {
+        object: "list",
+        has_more: false,
         data: [
           { amount: -667, parent: { subscription_item_details: { proration: true } }, period: { start: at } },
           { amount: 20000, parent: { subscription_item_details: { proration: false } }, period: { start: at } },
@@ -94,7 +108,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return json(
         declined
           ? { id: "sub_Dana00000001", pending_update: { expires_at: 1 }, latest_invoice: { id: "in_Declined0001", status: "open", total: 19333 } }
-          : { id: "sub_Dana00000001", pending_update: null, latest_invoice: { id: "in_Paid0001", status: "paid", total: 19333, amount_paid: 19333, currency: "usd" } },
+          : // Applied: Stripe answers the subscription as it now is, on the new price and with the yes sent (lib/tier-switch.ts, switchReply).
+            { id: "sub_Dana00000001", pending_update: null, items: { data: [{ id: "si_Dana00000001", price: { id: body.get("items[0][price]") } }] }, metadata: body.get("metadata[dc]") ? { dc: body.get("metadata[dc]") } : {}, latest_invoice: { id: "in_Paid0001", status: "paid", total: 19333, amount_paid: 19333, currency: "usd" } },
       );
     }
     return json({ id: "sub_Dana00000001" });
@@ -172,20 +187,41 @@ async function main(): Promise<void> {
   is("previewed as the move itself will be made", [asked.get("subscription_details[items][0][price]"), asked.get("subscription_details[proration_behavior]")], ["price_Yearly000001", "always_invoice"]);
   is("somebody else's membership is not on this link", (await previewYearly(store, token, "sub_Somebody0001")).ok, false);
 
+  part("The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)");
+  is("the preview says the membership is delivered at once, so the page shows the box", preview.preview.digital, true);
+  const unasked = calls.length;
+  const noYes = await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, null);
+  is("without the box checked: refused, and nothing sent to Stripe", [noYes, calls.slice(unasked).filter((c) => c.method === "POST").length], [{ ok: false, reason: "consent" }, 0]);
+  const post = (fields: Record<string, string>, consent: boolean) => {
+    const form = new URLSearchParams(fields);
+    if (consent) withConsent(form);
+    return switchRoute(new NextRequest("https://marktmorgen.com/api/store/manage/switch", {
+      method: "POST",
+      headers: { Host: "marktmorgen.com", Origin: "https://marktmorgen.com", "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": "203.0.113.9" },
+      body: form.toString(),
+    }));
+  };
+  const fields = { handle: "harbor", token, sub: "sub_Dana00000001", to: YEARLY_TARGET, at: String(preview.preview.at) };
+  const sentBack = await post(fields, false);
+  const where = new URL(sentBack.headers.get("location") ?? "https://x.invalid/");
+  is("the button without the box: back to the same move, the box saying what is missing", [sentBack.status, where.pathname, where.searchParams.get("to"), where.searchParams.get("sub"), where.searchParams.get("consent")], [303, "/@harbor/manage/switch", YEARLY_TARGET, "sub_Dana00000001", "needed"]);
+  is("and nothing sent to Stripe", calls.slice(unasked).filter((c) => c.method === "POST").length, 0);
+
   part("The move");
-  is("a figure more than 15 minutes old is not used", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at - 16 * 60), { ok: false, reason: "stale" });
+  is("a figure more than 15 minutes old is not used", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at - 16 * 60, TEST_CONSENT), { ok: false, reason: "stale" });
   await redisPipeline([["SET", "nl:tier:sub_Dana00000001:lock", "another-change", "EX", 60]]);
   const sentBefore = calls.length;
-  const held = await switchYearly(store, token, "sub_Dana00000001", preview.preview.at);
+  const held = await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, TEST_CONSENT);
   await redisPipeline([["DEL", "nl:tier:sub_Dana00000001:lock"]]);
   is("another change to the membership holding the lock: busy, never an error, and nothing sent", [held, calls.length - sentBefore], [{ ok: false, reason: "busy" }, 0]);
   declined = true;
-  is("a declined card changes nothing", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at), { ok: false, reason: "declined" });
+  is("a declined card changes nothing", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, TEST_CONSENT), { ok: false, reason: "declined" });
   is("and leaves nothing owed", calls.some((c) => c.path === "/invoices/in_Declined0001/void"), true);
   declined = false;
   mails.length = 0;
-  is("made", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at), { ok: true, title: "Supper Club" });
+  is("made", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, TEST_CONSENT), { ok: true, title: "Supper Club" });
   const update = calls.filter((c) => c.path === "/subscriptions/sub_Dana00000001" && c.body.get("items[0][price]")).at(-1)!.body;
+  is("the yes is kept on the subscription with the charge itself", update.get("metadata[dc]"), consentMetaValue(TEST_CONSENT, "membership"));
   is("at the preview's second, charged at once", [update.get("items[0][price]"), update.get("proration_date"), update.get("payment_behavior")], ["price_Yearly000001", String(preview.preview.at), "pending_if_incomplete"]);
   const record = calls.filter((c) => c.path === "/subscriptions/sub_Dana00000001" && c.body.get("metadata[every]")).at(-1)!.body;
   is("recorded as a membership bought yearly says it", record.get("metadata[every]"), "year");
@@ -200,6 +236,21 @@ async function main(): Promise<void> {
   is("not another", await grantFor(store, offer, "sub_Other0000001"), null);
   is("and not the member's page", await membershipsFor(store, offer), null);
 
+  part("J: unreadable yearly preview is not zero");
+  jPreviewUnknown=true;
+  const unknownPreview=await previewYearly(store,offer,"sub_Dana00000001");
+  const unknownHtml=await new Response(await renderToReadableStream(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token:offer,sub:"sub_Dana00000001",to:YEARLY_TARGET,from:"offer"})}))).text();
+  is("unknown yearly preview refuses to certify a zero amount",unknownPreview.ok,false);
+  is("unknown yearly preview never says nothing is charged today",unknownHtml.includes(membershipWords("en").nothingToday),false);
+  const priorCharges=calls.filter(c=>c.method==="POST"&&c.body.has("items[0][price]")).length;
+  const chargedAfterUnknown=await switchYearly(store,offer,"sub_Dana00000001",unknownPreview.ok?unknownPreview.preview.at:Math.floor(Date.now()/1000),TEST_CONSENT);
+  is("yearly valid-consent control reaches one charging update",[chargedAfterUnknown.ok,calls.filter(c=>c.method==="POST"&&c.body.has("items[0][price]")).length-priorCharges],[true,1]);
+  jPreviewUnknown=false;
+  jPreviewPartial = true;
+  const partialPreview = await previewYearly(store, offer, "sub_Dana00000001");
+  const partialHtml = await new Response(await renderToReadableStream(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token:offer,sub:"sub_Dana00000001",to:YEARLY_TARGET,from:"offer"})}))).text();
+  jPreviewPartial = false;
+  is("yearly lines said to go on (has_more) never say nothing is charged today", [partialPreview.ok, partialHtml.includes(membershipWords("en").nothingToday)], [false, false]);
   part("The email");
   is("refused without an address", (await setYearlyAsk(OWNER, { on: true, address: "" })).ok, false);
   is("saved with one", (await setYearlyAsk(OWNER, { on: true, address: "1 Main St, Portland, OR 97201" })).ok, true);

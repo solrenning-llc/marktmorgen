@@ -31,4 +31,6 @@ export const KIND_ICONS: Record<BlockKind, IconName> = {
   form: "list",
   row: "layout",
   booking: "calendar",
+  divider: "minus",
+  space: "chevron-down",
 };

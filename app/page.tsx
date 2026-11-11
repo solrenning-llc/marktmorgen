@@ -206,7 +206,7 @@ export default function Home() {
                 <li>{CHECK}Courses, downloads, memberships and calls</li>
                 <li>{CHECK}Money goes to your own Stripe account</li>
               </ul>
-              <a href="/signin" className="hm-plan-button">Start free</a>
+              <a href="/signin" className="hm-plan-button">Start your store</a>
             </div>
           </div>
         </section>

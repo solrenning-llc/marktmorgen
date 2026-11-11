@@ -5,6 +5,7 @@ import { Icon, iconFor } from "@/components/icons";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 import { FeatureVisual } from "@/components/feature-visuals";
+import { FeatureCapture, hasFeatureCapture } from "@/components/feature-captures";
 import { JsonLd } from "@/components/structured-data";
 import { PAGES, type Block, type TopicPage } from "@/lib/site-pages";
 import { PUBLISHED_PLAN_PRICES as PLAN_PRICES, PLAN_TITLES, TRIAL_DAYS } from "@/lib/plan";
@@ -144,7 +145,7 @@ function BlockView({ block }: { block: Block }) {
               return (
                 <li key={item.title}>
                   {item.href ? (
-                    <Link href={item.href} className="card flex h-full gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
+                    <Link href={item.href} className="card flex gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
                       {inner}
                     </Link>
                   ) : (
@@ -339,8 +340,8 @@ function BlockView({ block }: { block: Block }) {
 
     case "note":
       return (
-        <section className="rounded-[var(--r-lg)] border border-line bg-sand p-6">
-          <h2 className="flex items-center gap-2 font-semibold text-ink">
+        <section className="rounded-[var(--r-lg)] border border-line bg-sand p-6" aria-labelledby={sectionId(block.title)}>
+          <h2 id={sectionId(block.title)} className="flex items-center gap-2 font-semibold text-ink">
             <Icon name="info" size={18} className="text-violet-deep" />
             {block.title}
           </h2>
@@ -573,7 +574,11 @@ export function TopicPageView({ page }: { page: TopicPage }) {
             </div>
             {page.visual ? (
               <div className="flex min-w-0 justify-center lg:justify-end">
-                <FeatureVisual visual={page.visual} tone={light ? "light" : "dark"} />
+                {page.section === "platform" && hasFeatureCapture(page.slug) ? (
+                  <FeatureCapture slug={page.slug} />
+                ) : (
+                  <FeatureVisual visual={page.visual} tone={light ? "light" : "dark"} />
+                )}
               </div>
             ) : heroStore ? (
               /*

@@ -853,7 +853,13 @@ export async function watchPayPal(
     // never settles cannot keep a newer, paid one out of the batch until their records end (Claude 2's first and
     // Claude 6's second money reviews of #3392, LEVE 1). XX: never put back an order a capture or another sweep has
     // just taken off.
-    const later = () => redisPipeline([["ZADD", pendingKey(statsId), "XX", String(now), order]]);
+    // A list write that fails only keeps the order where it was: logged, never thrown out of the sweep, so the store's
+    // refund watch still runs this time (Claude 1's LOW on #3392, from Claude 2 and Claude 6).
+    const later = () =>
+      redisPipeline([["ZADD", pendingKey(statsId), "XX", String(now), order]]).then(
+        () => undefined,
+        (error: unknown) => console.error("putting a pending PayPal order back in line failed; it stays where it was", error),
+      );
     const opened = await readOpened(order);
     // Thirty days without PayPal settling it: no longer asked about.
     if (!opened || (await readPaid(order))) {

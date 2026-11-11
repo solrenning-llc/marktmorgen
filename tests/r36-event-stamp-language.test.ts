@@ -42,6 +42,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   if (url.origin !== ORIGIN || !url.pathname.startsWith(`/${BUCKET}`)) return new Response(null, { status: 404 });
   const key = url.pathname.slice(BUCKET.length + 2);
+  // The bucket listed, as R2 answers ListObjectsV2: what a new copy is measured against (lib/pdf-stamp.ts writeWithinStorage).
+  if (!key) {
+    const prefix = url.searchParams.get("prefix") ?? "";
+    const all = [...objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+    const listed = all.map((k) => `<Contents><Key>${k}</Key><Size>${objects.get(k)!.bytes.byteLength}</Size></Contents>`).join("");
+    return new Response(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated>${listed}</ListBucketResult>`, { status: 200, headers: { "content-type": "application/xml" } });
+  }
   if (method === "PUT") {
     const body = init?.body instanceof Uint8Array ? init.body : new Uint8Array(init?.body as ArrayBuffer);
     objects.set(key, { bytes: new Uint8Array(body), type: "" });

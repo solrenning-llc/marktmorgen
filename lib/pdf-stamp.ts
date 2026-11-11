@@ -42,6 +42,9 @@ import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/pr
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
+import { standingOf } from "@/lib/plan-standing";
+import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
+import { releaseStorage, reserveStorage } from "@/lib/storage-reservations";
 import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -52,6 +55,11 @@ const COPY_RECORD_SECONDS = 400 * 24 * 60 * 60;
 export const COPY_RECORD_BYTES = 768;
 /** How long a note about a PDF that could not be stamped stays in the studio. */
 const PROBLEM_SECONDS = 60 * 24 * 60 * 60;
+/**
+ * How long a store found without room for a new copy is taken to be still without it: its later downloads hand
+ * the file over as uploaded without measuring the store again, and the hour after, it is measured once more.
+ */
+const STORAGE_PROBLEM_SECONDS = 60 * 60;
 
 export const copyKey = (reference: string, file: Pick<ProductFile, "pathname" | "addedAt">) => `nl:stamp:copy:${sha(`${reference}|${file.pathname}|${file.addedAt}`).slice(0, 40)}`;
 export const problemKey = (pathname: string) => `nl:stamp:problem:${sha(pathname).slice(0, 40)}`;
@@ -60,10 +68,11 @@ export const problemKey = (pathname: string) => `nl:stamp:problem:${sha(pathname
  * Why a file is handed over unstamped: too big; one the stamp cannot write
  * into (a PDF locked with a password or damaged, an EPUB damaged or built in a
  * way the mark does not read); or, for an EPUB only, one carrying a digital
- * signature a mark would break, or one under encryption (DRM).
+ * signature a mark would break, or one under encryption (DRM); or a store
+ * whose storage has no room for one more copy ("storage", writeWithinStorage).
  */
-export type StampProblem = "too_big" | "unreadable" | "signed" | "encrypted";
-const PROBLEMS: readonly StampProblem[] = ["too_big", "unreadable", "signed", "encrypted"];
+export type StampProblem = "too_big" | "unreadable" | "signed" | "encrypted" | "storage";
+const PROBLEMS: readonly StampProblem[] = ["too_big", "unreadable", "signed", "encrypted", "storage"];
 
 /** An EPUB's reason, in the creator's terms: only the four the studio explains. */
 export function epubProblem(why: EpubProblem): StampProblem {
@@ -125,9 +134,49 @@ export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
   return stamp && isStampable(file);
 }
 
-async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
+async function noteProblem(pathname: string, problem: StampProblem, seconds = PROBLEM_SECONDS): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["SET", problemKey(pathname), problem, "EX", PROBLEM_SECONDS]]).catch(() => {});
+  await redisPipeline([["SET", problemKey(pathname), problem, "EX", seconds]]).catch(() => {});
+}
+
+/**
+ * Writes a copy made from `original` (a buyer's stamped copy, or a PDF's preview, lib/pdf-preview.ts) into the
+ * store's own folder only within the storage its plan stands at (lib/storage-quota.ts storageBrakeFor): its bytes
+ * are reserved first against what the store holds, measured from the file stores themselves, plus what other
+ * uploads have reserved (lib/storage-reservations.ts), so a copy is a cost inside the plan's storage line, never
+ * past it (owner rule MR: a ceiling before every spend). A store without room, a measurement that cannot be read
+ * or a reservation that cannot be confirmed writes nothing: false, and the caller hands over the original.
+ *
+ * The reservation goes once the write has answered, whether it wrote or threw: a copy that did land is then held
+ * by the store's own listing, which is what every later reservation measures, so nothing is counted as room.
+ */
+export async function writeWithinStorage(
+  original: Pick<ProductFile, "pathname">,
+  pathname: string,
+  bytes: Uint8Array,
+  contentType: string,
+  store: DataStore,
+): Promise<boolean> {
+  const folder = folderFromPathname(original.pathname);
+  if (!folder || folderFromPathname(pathname) !== folder || bytes.byteLength <= 0) return false;
+  const brake = storageBrakeFor(standingOf(store), store.tier);
+  let reservation: Awaited<ReturnType<typeof reserveStorage>>;
+  try {
+    reservation = await reserveStorage(folder, bytes.byteLength, brake, async () => {
+      const held = await storageUsed(folder, brake);
+      if (held.available !== true) throw new Error("storage_unknown");
+      return held.bytes;
+    });
+  } catch (error) {
+    console.error("no room confirmed in the store's storage for a new copy; the original is handed over", error);
+    return false;
+  }
+  try {
+    await writeFileWhole(pathname, bytes, contentType);
+  } finally {
+    await releaseStorage(folder, reservation.id).catch((error: unknown) => console.error("a copy's storage reservation was kept", error));
+  }
+  return true;
 }
 
 /** What went wrong stamping each of these files lately, for the studio. */
@@ -196,6 +245,8 @@ export async function stampedCopy(
       // new file is a new path. A size note is not trusted this way, since a
       // failed read is noted as one too.
       if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return null;
+      // A store found full a moment ago is not listed again on every download (writeWithinStorage).
+      if (noted === "storage") return null;
     }
     const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
     if (!original) {
@@ -227,7 +278,10 @@ export async function stampedCopy(
     // beside the path, as it is for the original.
     const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
     const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
-    await writeFileWhole(pathname, stamped, contentType);
+    if (!(await writeWithinStorage(file, pathname, stamped, contentType, store))) {
+      await noteProblem(file.pathname, "storage", STORAGE_PROBLEM_SECONDS);
+      return null;
+    }
     const copy: ProductFile = {
       pathname,
       name: file.name,

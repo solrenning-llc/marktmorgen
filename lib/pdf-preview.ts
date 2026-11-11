@@ -26,10 +26,10 @@
  */
 import { createHash } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
-import { readFileWhole, writeFileWhole } from "@/lib/file-store";
+import { readFileWhole } from "@/lib/file-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
-import { copyFolder } from "@/lib/pdf-stamp";
+import { copyFolder, writeWithinStorage } from "@/lib/pdf-stamp";
 import { type DataStore, keepFor } from "@/lib/store-data";
 
 /** The most pages a preview may hold. */
@@ -87,7 +87,8 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
     const base = file.name.replace(/\.pdf$/i, "") || "preview";
     const name = `${base} (preview).pdf`;
     const pathname = `${copyFolder(file)}preview-${pages}-${sha(file.addedAt).slice(0, 12)}.pdf`;
-    await writeFileWhole(pathname, bytes, "application/pdf");
+    // A new file in the store's folder: made only within its plan's storage (lib/pdf-stamp.ts writeWithinStorage).
+    if (!(await writeWithinStorage(file, pathname, bytes, "application/pdf", store))) return null;
     const copy: ProductFile = { pathname, name, bytes: bytes.byteLength, contentType: "application/pdf", addedAt: new Date().toISOString() };
     if (isRedisConfigured()) await redisPipeline([["SET", key, JSON.stringify(copy), "EX", PREVIEW_SECONDS]]);
     return copy;

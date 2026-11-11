@@ -16,7 +16,7 @@ const MESSAGES: Record<string, string> = {
   server_error: "We could not confirm whether your marking setting was saved. Reload this page to check before trying again.",
 };
 
-type Problem = { name: string; bytes: number; kind?: "pdf" | "epub"; reason: "too_big" | "unreadable" | "signed" | "encrypted" };
+type Problem = { name: string; bytes: number; kind?: "pdf" | "epub"; reason: "too_big" | "unreadable" | "signed" | "encrypted" | "storage" };
 
 /**
  * Stamping the buyer's email on every page of a product's PDFs, and as an
@@ -127,13 +127,15 @@ export function PdfStampToggle({ product }: { product: Product }) {
               <strong>{problem.name}</strong>
               {problem.reason === "too_big"
                 ? ` is ${readableSize(problem.bytes)}, over the ${readableSize(MAX_STAMP_BYTES)} that can be stamped, so buyers get it unstamped.`
-                : problem.reason === "signed"
-                  ? " carries a digital signature that a mark would break, so buyers get it unstamped."
-                  : problem.reason === "encrypted"
-                    ? " is encrypted (DRM), so buyers get it unstamped."
-                    : problem.kind === "epub"
-                      ? " could not be stamped — it is damaged, holds more inside than can be marked, or is built in a way the mark does not read — so buyers get it unstamped."
-                      : " could not be stamped — it is locked with a password or damaged — so buyers get it unstamped. Save it again without a password to stamp it."}
+                : problem.reason === "storage"
+                  ? " was not stamped for a recent buyer: each buyer's stamped copy is kept in your store's storage, and there was no room for one more (or the storage could not be checked). That buyer got it unstamped. Free up storage to stamp it again."
+                  : problem.reason === "signed"
+                    ? " carries a digital signature that a mark would break, so buyers get it unstamped."
+                    : problem.reason === "encrypted"
+                      ? " is encrypted (DRM), so buyers get it unstamped."
+                      : problem.kind === "epub"
+                        ? " could not be stamped — it is damaged, holds more inside than can be marked, or is built in a way the mark does not read — so buyers get it unstamped."
+                        : " could not be stamped — it is locked with a password or damaged — so buyers get it unstamped. Save it again without a password to stamp it."}
             </li>
           ))}
         </ul>

@@ -49,7 +49,11 @@ test("only an upload is ever refused by it, never a download", () => {
     // the room of a store with no plan: the daily job that gives what it
     // keeps a date (lib/plan-closing.ts), and the studio, which shows its
     // owner that date. Neither is a door a buyer comes through.
-    ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/plan-closing.ts", "lib/vault-storage.ts"],
+    // And the one place a copy is made for a buyer (a stamped copy, a PDF's
+    // preview, lib/pdf-stamp.ts writeWithinStorage): a store without room gets
+    // no new copy, and its buyer is handed the file as uploaded, never refused
+    // (tests/stamped-copy-storage.test.ts).
+    ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/pdf-stamp.ts", "lib/plan-closing.ts", "lib/vault-storage.ts"],
     "what a store keeps is measured where an upload is let in, and for a store whose plan has ended. No download is ever refused by it.",
   );
 });

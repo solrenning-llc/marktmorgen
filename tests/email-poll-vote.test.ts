@@ -17,6 +17,7 @@
 import { BroadcastsUnreadable, readBroadcast } from "@/lib/broadcasts";
 import { pollLinkPart } from "@/lib/email-poll-links";
 import { votePoll } from "@/lib/email-poll-vote";
+import * as route from "@/app/api/mail/poll/route";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -120,6 +121,24 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   is("a send time that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
   put({ total: -1 });
   is("a list size that is not one: unknown", await votePoll({ broadcastId: ID, link: link(2), option: 0, now }, deps()), "unknown");
+
+  part("The route: only a POST with an answer, plain words, never a vote from a bad link");
+  is("no GET: opening a link never votes", Object.keys(route).sort(), ["POST"]);
+  const post = (query: string, form: Record<string, string>) => {
+    const body = new FormData();
+    for (const [k, v] of Object.entries(form)) body.set(k, v);
+    return route.POST(new Request(`https://marktmorgen.com/api/mail/poll?${query}`, { method: "POST", body }));
+  };
+  redis.clear();
+  put();
+  const noAnswer = await post(`b=${ID}&k=${link(2)}`, {});
+  is("no answer: refused", [noAnswer.status, await noAnswer.text()], [404, "This poll link is not one we know. Nothing was counted."]);
+  const twoDigits = await post(`b=${ID}&k=${link(2)}`, { a: "12" });
+  is("an answer that is not one digit: refused", twoDigits.status, 404);
+  const bad = await post(`b=${ID}&k=${link(2).replace(/^2\./, "3.")}`, { a: "0" });
+  is("a link that is not that recipient's: refused", bad.status, 404);
+  is("not cached", bad.headers.get("Cache-Control"), "no-store");
+  is("nothing kept by the route", votes(), []);
 
   done();
 })();

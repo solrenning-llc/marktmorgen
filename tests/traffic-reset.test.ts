@@ -29,20 +29,23 @@ async function main(): Promise<void> {
   redis.run(["SET", requests, "90000", "EX", 1000]);
   redis.run(["SET", parts, "500", "EX", 1000]);
   const lowered = await resetVisits({ store: shop, to: 1200, now: NOW });
-  is("a lower figure is taken", lowered, { ok: true, window: window?.id, before: 3400, after: 1200 });
-  is("the visits are the figure asked for", redis.run(["GET", visits]), "1200");
+  // Admission reads the people plus the live room's 500 parts (5 visits): 3,405, lowered to 1,200 (Claude 1 on #3380).
+  is("a lower figure is taken", lowered, { ok: true, window: window?.id, before: 3405, after: 1200 });
+  is("the people are lowered so the visits are the figure asked for", redis.run(["GET", visits]), "1195");
   is("the visits keep their time to live", Number(redis.run(["TTL", visits])) > 0, true);
   is("the requests are not touched", redis.run(["GET", requests]), "90000");
   is("the live room is not touched", redis.run(["GET", parts]), "500");
-  is("a higher figure is refused, and nothing changes", [await resetVisits({ store: shop, to: 1201, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "above", before: 1200 }, "1200"]);
-  is("the same figure changes nothing", [await resetVisits({ store: shop, to: 1200, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "same", before: 1200 }, "1200"]);
+  is("a higher figure is refused, and nothing changes", [await resetVisits({ store: shop, to: 1201, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "above", before: 1200 }, "1195"]);
+  is("the same figure changes nothing", [await resetVisits({ store: shop, to: 1200, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "same", before: 1200 }, "1195"]);
   is("a figure that is not a whole number from zero up is refused", await Promise.all([-1, 1.5, Number.NaN, 2 ** 60].map((to) => resetVisits({ store: shop, to, now: NOW }))), Array(4).fill({ ok: false, reason: "invalid" }));
   is("a store with no visits yet has nothing to lower", [await resetVisits({ store: { ...shop, sid: "s1empty001", handle: "empty", email: "empty@example.com" } as Store, to: 0, now: NOW })], [{ ok: false, reason: "same", before: 0 }]);
 
   part("Every reset is written down first, the newest first, at most TRAFFIC_LOG_KEEP");
   const log = await readTrafficLog();
   is("one record, for the one change made", log?.length, 1);
-  is("when, which store, which window, before and after; no address", log?.[0], { at: NOW, sid: "s1shop0001", handle: "shop", window: window?.id, before: 3400, after: 1200 });
+  is("when, which store, which window, before and after; no address", log?.[0], { at: NOW, sid: "s1shop0001", handle: "shop", window: window?.id, before: 3405, after: 1200 });
+  // With no live room every figure down to zero is reachable; the room's own case is tests/traffic-reset-room.test.ts.
+  redis.run(["DEL", parts]);
   redis.run(["SET", visits, String(TRAFFIC_LOG_KEEP + 10), "EX", 1000]);
   for (let i = TRAFFIC_LOG_KEEP + 9; i >= 0; i -= 1) await resetVisits({ store: shop, to: i, now: NOW + i });
   const kept = await readTrafficLog();
@@ -56,7 +59,7 @@ async function main(): Promise<void> {
   const base = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const answer = await base(commands);
-    return commands.some((command) => command[0] === "DECRBY" || (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:traffic-reset:v1"))) ? answer.map(() => "garbled") : answer;
+    return commands.some((command) => command[0] === "DECRBY" || (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:traffic-reset:v2"))) ? answer.map(() => "garbled") : answer;
   }) as typeof redis.pipeline;
   is("a change whose answer is lost: unknown, never said done", await resetVisits({ store: shop, to: 10, now: NOW }), { ok: false, reason: "unknown" });
   redis.pipeline = base;

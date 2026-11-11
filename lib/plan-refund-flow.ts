@@ -55,7 +55,7 @@ import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
+import { planRefundLetter, planRefundNotMadeEndedLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
 import { ownField, plainObject, readStripePage, StripeListUnreadable, type StripePage } from "@/lib/stripe-list";
 import { randomBytes } from "node:crypto";
 
@@ -184,17 +184,21 @@ async function subscriptionOf(id: string): Promise<Row | null> {
 }
 const stopSet = (sub: Row) => sub.cancel_at_period_end === true || (typeof sub.cancel_at === "number" && sub.cancel_at > 0);
 
-/** Takes back the stop we set, when it is still there. True when nothing of ours is left. */
-async function takeBackStop(id: string): Promise<boolean> {
+/**
+ * Takes back the stop we set, when it is still there. "live" when nothing of ours is left and the plan goes on,
+ * "ended" when the subscription is no longer live (our stop may have ended it), null when it could not be done.
+ */
+async function takeBackStop(id: string): Promise<"live" | "ended" | null> {
   try {
     const sub = await subscriptionOf(id);
-    if (!sub) return false;
-    if (!LIVE.includes(String(sub.status)) || sub.cancel_at_period_end !== true) return true;
+    if (!sub) return null;
+    if (!LIVE.includes(String(sub.status))) return "ended";
+    if (sub.cancel_at_period_end !== true) return "live";
     await setCancelAtPeriodEnd(id, false);
-    return true;
+    return "live";
   } catch (error) {
     console.error("taking back a plan's stop after a refund that was not made failed", error);
-    return false;
+    return null;
   }
 }
 
@@ -415,7 +419,7 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // our stop is taken back at once and the note goes.
     const notMade = async (reason: Exclude<PlanRefundFlow, { ok: true }>["reason"], maybe: boolean): Promise<PlanRefundFlow> => {
       if (!maybe) {
-        if (note.m === 1 && (await takeBackStop(id))) note = { ...note, m: 0 };
+        if (note.m === 1 && (await takeBackStop(id)) !== null) note = { ...note, m: 0 };
         if (note.m === 0) {
           await dropNote(store.sid);
           return { ok: false, reason, stopLeft: false };
@@ -550,8 +554,9 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         counts.left += 1;
         continue;
       }
-      // None was made: our stop goes, the plan goes on as it was.
-      if (note.m === 1 && !(await takeBackStop(note.s))) {
+      // None was made: our stop goes, the plan goes on as it was; or our stop already ended it, and the letter says so.
+      const back = note.m === 1 ? await takeBackStop(note.s) : "live";
+      if (back === null) {
         if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
           counts.left += 1;
           continue;
@@ -560,7 +565,8 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
       }
       await dropNote(sid);
       // Read and none was made: the creator saw "nothing was refunded" or "we check every day", so it reaches them by email.
-      await mail(store, planRefundNotMadeLetter({ store: store.name || store.handle }), `plan-refund-none:${sid}:${note.at}`);
+      const letter = back === "ended" ? planRefundNotMadeEndedLetter : planRefundNotMadeLetter;
+      await mail(store, letter({ store: store.name || store.handle }), `plan-refund-none:${sid}:${note.at}`);
       counts.dropped += 1;
     } catch (error) {
       console.error(`plan-refund: the note for store ${sid} is not decided yet; tried again tomorrow`, error);

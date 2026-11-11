@@ -104,6 +104,24 @@ export function planRefundNotMadeLetter(o: { store: string }): { subject: string
   return { subject: `${store}: your refund was not made`, text: lines.join("\n") };
 }
 
+/**
+ * When a refund the creator asked for was not made, and the stop set for it already ended the plan at its period's
+ * end (the outcome stayed unread past it, rule 24): nothing was refunded and the plan has ended; never "it goes on"
+ * (Claude 1 on #3190).
+ */
+export function planRefundNotMadeEndedLetter(o: { store: string }): { subject: string; text: string } {
+  const store = o.store || "your store";
+  const lines = [
+    `The refund you asked for on your Marktmorgen plan for ${store} was not made: our payment provider did not take it.`,
+    "",
+    "Nothing was refunded. Your plan ended at the end of the period you paid for, because it was set to stop while we waited to see the refund. Nothing more will be charged for it.",
+    `To use your plan again, start a plan again from your studio. If you have a question, email ${SUPPORT_ADDRESS}.`,
+    "",
+    "Marktmorgen",
+  ];
+  return { subject: `${store}: your refund was not made and your plan has ended`, text: lines.join("\n") };
+}
+
 /** When only part of a refund went through and the rest could not be made in GIVE_UP_DAYS: the plan stops at its period's end, support settles the rest. */
 export function planRefundPartLetter(o: { store: string }): { subject: string; text: string } {
   const store = o.store || "your store";

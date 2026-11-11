@@ -109,6 +109,17 @@ async function main(): Promise<void> {
   const teamBusy = await post(owner, { email: "sam@example.com", pipeline: "wkshp1", access: "view" });
   await redis.pipeline([["DEL", teamLock]]);
   is("while the team is being changed, a save waits, then says so and writes nothing", [teamBusy.status, teamBusy.body.error, teamBusy.body.message, (await readPipelineAccess(store.statsId, "sam@example.com"))?.wkshp1 ?? "edit"], [409, "busy", "Someone else is changing your team right now. Try again in a moment.", "edit"]);
+  part("A stored empty record, carried when the teammate changes their sign-in");
+  const accessKey = `nl:crm:pacc:${store.statsId}`;
+  const [kept0] = await redis.pipeline([["HGET", accessKey, "sam@example.com"]]);
+  await redis.pipeline([["HSET", accessKey, "sam@example.com", ""]]);
+  is("(an empty record opens nothing, as every reader says)", await readPipelineAccess(store.statsId, "sam@example.com"), null);
+  await moveMemberships("sam@example.com", "sam9@example.com");
+  is("it moves as it is: the new address still opens nothing, never no restriction", await readPipelineAccess(store.statsId, "sam9@example.com"), null);
+  const movedDeal = await CRM(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", cookie: await cookie("sam9@example.com") }, body: JSON.stringify({ action: "deal", deal: { title: "Moved", email: "", cents: 100, stage: "lead00", note: "" } }) }));
+  is("and the deal routes still refuse the moved teammate", movedDeal.status, 403);
+  await moveMemberships("sam9@example.com", "sam@example.com");
+  await redis.pipeline([typeof kept0 === "string" ? ["HSET", accessKey, "sam@example.com", kept0] : ["HDEL", accessKey, "sam@example.com"]]);
   is("the route reads the teammate and writes with the team's lock held", readFileSync("app/api/store/pipeline-access/route.ts", "utf8").includes("await withTeamLocked(store.sid, async () => {"), true);
 
   part("Every pipeline at once, from the Save button");

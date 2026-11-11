@@ -1229,7 +1229,7 @@ export default async function StudioPage({
             ...(may("settings") && sellsMemberships(current) ? { winback: "#winback-title" } : {}),
           },
           currency: current.currency,
-          now: Date.now(),
+          now: todayNow(),
         })
       : null;
   // The list of products: all of a short one, a page of a long one, found by

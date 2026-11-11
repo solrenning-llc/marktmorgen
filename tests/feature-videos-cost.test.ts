@@ -52,6 +52,9 @@ part("The record");
 const doc = renderFeatureVideosCost();
 is("a PROPOSAL, said first", doc.split("\n").slice(0, 4).join("\n").includes("PROPOSAL"), true);
 is("unknowns are named, never zero", [/never zero/i.test(doc), /unknown/i.test(doc)], [true, true]);
+// Each unknown by name, so deleting one fails here (review of #3769).
+is("each unknown is named: storage per region, replays, which features, the counter's own cost", ["storage price per region", "Replays inside one player", "Which features can be filmed", "The play counter's own cost"].map((name) => doc.includes(name)), [true, true, true, true]);
+is("the ceiling is not said to hold before replays are measured (review of #3769)", [doc.includes("The cost can then never pass"), doc.includes("once replays are measured")], [false, true]);
 is("it has an Acessibilidade section", doc.includes("## Acessibilidade"), true);
 is("docs/feature-videos-cost.md is current (node scripts/feature-videos-cost.mjs)", existsSync("docs/feature-videos-cost.md") ? readFileSync("docs/feature-videos-cost.md", "utf8") : "", doc);
 

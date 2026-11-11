@@ -255,7 +255,22 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 
       const token = randomBytes(20).toString("hex");
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
-      await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))]);
+      // Read in their exact shape (CX-123 rule 24, as lib/checkout-recovery.ts writes its stop link): the link written
+      // ("OK") and each erasure note a count. Anything else is unknown: the email does not go with a link that may lead
+      // to "this offer has ended" or that an erasure could not find; the link that may have landed is taken back (its
+      // reply read as nothing) and this run's marks are let go, so the next run sends the offer once.
+      const notes = noteForErasure(statsId, email, linkKey(token));
+      const written = repliesFor(
+        await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...notes]).catch(() => null),
+        1 + notes.length,
+      );
+      if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) {
+        await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
+        await releaseMark(onceKey(statsId, email, product.id), onceValue);
+        await releaseMark(sentKey(account, subId), claim);
+        console.error("a come-back link was not written as asked; nothing sent", store.handle);
+        continue;
+      }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,

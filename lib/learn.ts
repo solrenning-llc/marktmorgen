@@ -40,6 +40,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
 import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
@@ -206,7 +207,12 @@ export async function dropEnrollment(store: Store, email: string, productId: str
   if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
-type Listed = { data?: unknown };
+/**
+ * Pages of a hundred checkouts read for one spelling of an address before its list is unknown: far past any buyer of
+ * one store, and bounded (each one request to the creator's Stripe account, only for an address with more than a
+ * hundred checkouts there, and the answer kept PAID_SECONDS).
+ */
+const PAID_PAGES = 3;
 
 /** What Stripe says about one address's courses here. */
 type Ledger = {
@@ -239,8 +245,21 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
     query.append("expand[]", "data.subscription");
     query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // In Stripe's exact list shape and to its end (CX-123 rules 24 and 30, lib/stripe-list.ts): a list in another
+    // shape, a row not readable or more pages than PAID_PAGES is unknown and throws, never "no checkouts" (so never
+    // "not refunded": a course written down on the thanks page and refunded since would open again on it).
+    const rows: Record<string, unknown>[] = [];
+    let after = "";
+    for (let page = 0; ; page += 1) {
+      if (page === PAID_PAGES) throw new StripeListUnreadable(`more than ${PAID_PAGES} pages of checkouts for one address`);
+      if (after) query.set("starting_after", after);
+      const listed = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`));
+      if (listed.unreadable) throw new StripeListUnreadable("a checkout not readable");
+      rows.push(...listed.rows);
+      if (!listed.hasMore) break;
+      if (!listed.lastId) throw new StripeListUnreadable("more checkouts and no readable last one");
+      after = listed.lastId;
+    }
     for (const session of rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
       const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
@@ -327,6 +346,11 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     ...(imported ? [imported] : []),
   ]);
   let asked: Ledger | null = typeof cached === "string" ? parseLedger(cached) : null;
+  // Stripe's answer could not be had whole: which purchases were refunded is unknown, never "none" (CX-123 rule 24).
+  // A course whose opening depends on that answer (a membership, or a one-off written down on the thanks page and
+  // perhaps refunded since) is not opened on it, as the community and the downloads do; nothing is kept, so the next
+  // page asks again. What does not depend on it (brought over from another platform, earned in the community) opens.
+  let unknown = false;
   if (!asked) {
     try {
       asked = await paidAtStripe(store, email);
@@ -335,6 +359,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     } catch (error) {
       console.error("reading course purchases failed", error);
       asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
+      unknown = true;
     }
   }
   const fromStripe = asked.paid;
@@ -369,9 +394,11 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
     // unless Stripe now says it was refunded in full.
-    const start = product.recurring || asked.refunded.has(product.id)
-      ? fromStripe.get(product.id)
-      : recorded.get(product.id) ?? fromStripe.get(product.id);
+    const start = unknown
+      ? undefined
+      : product.recurring || asked.refunded.has(product.id)
+        ? fromStripe.get(product.id)
+        : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
     if (opens !== undefined && Number.isFinite(opens)) result.set(product.id, opens);
   }

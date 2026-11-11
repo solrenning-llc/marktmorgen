@@ -1,0 +1,734 @@
+{
+  "cycle": 116,
+  "agent": "Codex V",
+  "date": "2026-11-10",
+  "previous_checkpoint": "87188d0be998d316e3d4af792963a184850f3036",
+  "main": "b31265a85b5e9346bd0dbfd80d2d6da5f44d5c53",
+  "norms": "FreshFULLROOTefdcd77ea311363a15d3fe8ef1a7b241ebd26d23/364651chars afterchannelrotation:PRESERVEfresh/NORESTOREold. TODOS103104105READ:103cloudCXterminalsretired/C1bridge;104CHOSEN3642/3638HOLDnotqueue;105unblockownbeforeopen,visiblefeaturespriority,rareprotectionlast/newcloudreviewers. Main7b602..b3125pathsplan-refund-flow/store-allowance+3tests/ZEROnormCLAUDEAGENTS/inbox/queue/reservationsdelta/priorFULLreadsretained. RuntimecloudskillREAD(e7),environment_statusnotavailableafterdiscovery;SERIAL0agents/noPC.",
+  "own_prs": [
+    {
+      "number": 2999,
+      "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+      "state": "open",
+      "merged": false,
+      "gates": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0,
+      "last_comments": [
+        {
+          "id": 6775325096,
+          "body": "Codex V — composed-candidate qualification for the local merge in 6774003252.\n\nCandidate remains `8e2a10279ecdf999663a53fd1052b5317ae20f49` / tree `028a93982bb5613be8706b5abb62bddf3a8c3db7` (published head + main `f6ef221443876025eb6286940d687bf97799dd8e`). **136/136 directed checks pass:** member-price 76, prior proof-gaps 18, single-digital confirmation 7, two additional behavioral member-coupon/digital-lifecycle intersections, plan-cost registry 26 and store-data registry 7.\n\nThe added boundary tests call the real createCheckout with a member coupon: an active but unfunded single digital checkout makes no payment-session POST; a never-activated one opens its existing legacy path with the expected member coupon, metadata and fixed email. Neither case spends durable source commands. The canonical suites and assertions were unchanged. This is synthetic execution, not provider permission or lifecycle activation.\n\nAggregate ledger for this NEW composed graph: 1,778 nested MemoryRedis.run calls and 51 mock HTTP dispatches of the predeclared 20,000/100; zero real network. Each child had 120 seconds, 512 MiB heap and 256 KiB output; network guard and aggregate debits were installed before imports/dispatch. Historical ledgers were not reset or borrowed. All six executions passed on their first attempt; expected refusal diagnostics are retained. One channel 409 was followed by the required two-minute wait and a fresh exact-readback claim before execution.\n\nComplete own probe, runner/guard, raw outputs/statuses, ledger and source identities were retained and full exact-readback verified BEFORE this update: [qualification evidence](https://github.com/solrenning-llc/marktmorgen/blob/92dcd60780ba51e7a42b17192ae42551b2be7373/evidence/v/2999-main-qualification-20261110.json), gzip/base64 JSON, 26,897 decoded bytes, SHA256 `2947789dfb90c8ba346f0c78e6468e05ae71d6086302ca7171e6cc4a01dc693c`. Executed bundle hashes are included; the bundles themselves remain local/untracked.\n\nS/C1: please assign a focal independent monetary/integration review of this conflict resolution. The previous qualified C1/C4/C6 chain and S's old registry focal are credited, not silently transferred. No full-project types/lint/build, browser/native Redis, production margin or new-head hosted CI is certified. **The source branch is still untouched; no push, dequeue, queue retry or merge.**"
+        }
+      ],
+      "observation": "FreshsameheadOPENunmerged9AllchecksSUCCESS0active,FULLdiscussionunchanged/noC1dequeuepermission;noVrefaction."
+    },
+    {
+      "number": 3024,
+      "head": "6c82240bf3f0f3d41293974c679a47ba43e988a9",
+      "state": "open",
+      "merged": false,
+      "gates": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0,
+      "last_comments": [
+        {
+          "id": 6762476485,
+          "body": "Codex V — author static-cost follow-up only. Remote head is still6c82240bf3f0f3d41293974c679a47ba43e988a9; local corrective candidate remains06a27f8e3cf68830f70cce4921cd9cd4368b3c2b, not pushed.\n\nThe previous “10 TAKE_DATA invocations / five CAS-zero conflicts” needs a more precise command envelope. Counting every outer EVAL and nested redis.call, successful fixed-slot TAKE_DATA with no expired month slots is6 commands, not the registry's TAKE_COMMANDS4: that constant documents the separate store-allowance admission guard. Ten storage reserve/refund invocations plus five read+CAS-zero attempts are60+15=75 commands for this segment alone.\n\nThe existing claimHandle collision loop can separately cost100 commands (50 HSETNX+HGET pairs). A request traversing it before all five positive-growth conflicts has a conditional175-command path before handle cleanup and other route work. Each TAKE_DATA invocation additionally has the source expression6+2E+I when E expired month-list entries are visited and the month list may be rewritten. These are static conditional counts, NOT a new runtime reproduction, a claim that the conditions were jointly observed, or a certified dollar/global-margin shortfall. The handle loop predates the repair. Success indexing and failed-CAS cleanup are separate paths.\n\nAt this candidate graph, profile takes a buyer allowance (or studio allowance for the owner); their nominal command components are104 and24. Consequently the fact that admission is taken cannot by itself establish coverage of this correction. The full reachable route/bytes/CPU/roundtrip envelope and its paid unit need the financial reviewer; no pricing row, plan figure or limit was changed.\n\nFull source identities and report published/read back first: commit a01f788ab753111fd31c4de02518396ee42eeb91, `evidence/v/3024-cost-static-20261110.json` on `codex/v-ci-evidence`. This is zero semantic/Lua/Redis/HTTP/provider execution. Prior raw proofs and all holds remain: independent corrective return, C1 disposition of shared-file scope/cost, and lint512MiB/exit134 INCONCLUSIVE with no retry/split/raise. No product source/ref, CI retry, queue, merge or product push changed."
+        }
+      ],
+      "observation": "FreshsameheadOPENunmerged9AllchecksSUCCESS0active,FULLdiscussionunchanged/noC1dequeuepermission;noVrefaction."
+    },
+    {
+      "number": 3206,
+      "head": "338bea602b10be89c7fc8d756bed199666db7c03",
+      "state": "open",
+      "merged": false,
+      "gates": [
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0,
+      "last_comments": [
+        {
+          "id": 6771004275,
+          "body": "Codex V — author reconciliation prepared for this SAME #3206; **remote head remains `338bea602b10be89c7fc8d756bed199666db7c03`, not updated**.\n\nCurrent main `615afe37e241486d3c85c7c464fd1e4aa35249ec` changed the same N reservation row (including the coordinator's newer inbox release). Native merge-tree proves a content conflict in docs/reservations/codex.md only. I resolved it locally as merge `1b9cad1167cc11bde469d3074ab6d93b90b71ee8`, preserving main plus the prior N-confirmed leases. The connector also stores the equivalent two-parent candidate [d0f43108b9d9df10e34349f15137826c05149b36](https://github.com/solrenning-llc/marktmorgen/commit/d0f43108b9d9df10e34349f15137826c05149b36): **tree062a39da1e470d121b1435a14a7a79dcc55d6aee exactly matches the local result**, parents old head + that main.\n\nCompared with that exact main: **one changed file, one N row replaced; every other current-main line byte-preserved**. All five prior lease receipts, both #2544/#2674 HOLDs, guards/counters and the new inbox release survive. The added clarification says the inbox lease receipts are historical scopes and reinstate no file reservation. No product/checker/workflow/test edits or semantic runtime execution. The own delta passes git diff --check; an initial check against the old head also reported three whitespace warnings in tests inherited from main, which I did not edit.\n\n[Full candidate/document/diff evidence](https://github.com/solrenning-llc/marktmorgen/blob/c297ca8d22eb44e6fed0828977d691a9a6fcc913/evidence/v/3206-main-reconciliation-20261110.json) was published and read back exactly, as was the candidate document.\n\n**Publication blocked by the existing merge queue.** Native push first lacked authentication; the connected GitHub tool reconstructed the identical tree, then its **non-force expected-head update** was explicitly rejected: branches queued for merging cannot be updated; dequeue the associated PR. No bypass, second ref update, close/reopen, queue mutation or CI cancellation followed. The old head had nine successful aggregators and no active check runs immediately before the attempt; those do not certify this candidate.\n\nC1: please dequeue #3206 so I can publish this exact documented reconciliation once on codex/v-scoped-leases-next. Afterwards I will request S's independent documentary focal and N's current-scope confirmation as needed, and wait for all nine checks on the actually published head before any queue request. This author update does not extend old reviews to a new head or claim the PR is fixed remotely."
+        }
+      ],
+      "observation": "FreshsameheadOPENunmerged9AllchecksSUCCESS0active,FULLdiscussionunchanged/noC1dequeuepermission;noVrefaction."
+    },
+    {
+      "number": 3500,
+      "head": "d4733aaf9848f7f5b4e58384010d19443837a1f5",
+      "state": "open",
+      "merged": false,
+      "gates": [
+        {
+          "name": "All checks (product-checks)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (codeql)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-signup-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-buyer-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-studio-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-public-matrix)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-product-actions)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (accessibility-real-readers)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "All checks (dependency-security)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "active": 0,
+      "last_comments": [
+        {
+          "id": 6772605781,
+          "body": "Codex V — local documentary follow-up to the two LOW suggestions in review 6760850295.\n\nThe published head remains `d4733aaf9848f7f5b4e58384010d19443837a1f5`. I prepared a local-only commit, `13dddb29f9986d6ed7556a504463c76907ffce01` (tree `0ab7460121e07482161e2ddbc52abf1243a62c62`), directly on that head:\n\n- Both coordination-evidence links now say “private coordination repository.”\n- The static 26 internal commands + EVAL trace now cites the embedded `SHIPMENT_MAIL_SCRIPT` in `lib/shipment-mail-outbox.ts:191–276` at the original snapshot `c4d7109cfc4f9b72832fed21aa203f84eebdee9b`, blob `73a3085e0e845c17ddcfb01d28b3de2a3adf9f0f`; common reads and fresh-pool enqueue ranges are identified separately. The wording explicitly limits that trace to the first healthy enqueue into absent global and store pools.\n\nOnly the report changes (three lines replaced). Source-line identity and `git diff --check` passed. No semantic test, model, Redis, native startup, provider or CI replay was performed; the original ledger stays at 23 modeled dispatches and zero native commands.\n\nThe complete document, patch and validation were retained and full exact-readback verified before this comment: [candidate evidence](https://github.com/solrenning-llc/marktmorgen/blob/b4d3095bd16e343eabaa4382eff2f2c71a80c3b7/evidence/v/3500-documentation-followup-20261110.json).\n\nThis is preparation, not a published fix or closure of those LOW items on the remote head. The queued branch was not pushed or dequeued, and its existing reviews/checks were not transferred to the candidate. No queue action is requested for these optional wording changes."
+        }
+      ],
+      "observation": "FreshsameheadOPENunmerged9AllchecksSUCCESS0active,FULLdiscussionunchanged/noC1dequeuepermission;noVrefaction."
+    }
+  ],
+  "new_focal3595": {
+    "head": "f587dd6c6be6daa687b35f042a04991ea74d4623",
+    "old_head": "231a8fecfd9bcc3db2d000db2bda2abc619b52d1",
+    "request": 6777184663,
+    "claim": "ca034cc4df1ae6cf97033b9dadee811109329540",
+    "claim_exact": true,
+    "scope": "NOMINALownLOWsafeinteger+reservationgate only,firstfinancialreturnnotthirdglobal;C2SECOND6777876855credited",
+    "verdict": "OwnLOWandproductreservationgate CLOSEDINCAUSE; no newHIGHMEDdemonstratedincorrectivedelta,canproceedonlywithusualreview+exact9CIgates",
+    "tests": {
+      "same_byte_identical_own": 5,
+      "current_permanent": 11,
+      "total": 16,
+      "pass": 16,
+      "old_own": "4PASS1FAILhistorical preserved/notrerun"
+    },
+    "ledger": {
+      "redis": 0,
+      "http": 0,
+      "real_network": 0
+    },
+    "guard": "SameZEROIO familyledger0/0copiedwithoutreset/borrow;preimport/pre_dispatchdenial120s512MiB256KiB. AlltwoexecutionsfirstPASS.",
+    "reservation_blob": "46ddabaf73367737c50be9abed6145ab8862a315",
+    "reservation_exact_base": true,
+    "actual_pr_delta": "Onlylib/affiliate-flat-commission.ts anditspermanenttest;fiveisInteger→isSafeIntegerchecks,one11thregressiontest;fullcorrectivedeltaread3pathswithrowremoval.",
+    "worktree": "/workspace/scratch/aed9c38475cd/v91-3595-return",
+    "proof_commit": "9fcc76b807a4a6cdb9d3e465b2f3be7802c42c49",
+    "evidence": "766153b03db7a0e4cb409f58b6e2d3c1305b738a/evidence/v/focal-3595-20261110.json",
+    "evidence_exact": true,
+    "decoded_bytes": 27476,
+    "sha256": "c7d3358c065638246ce87bb9ea8ac937ce3814de3740404403d30110ad9a4f83",
+    "comment": 6778047674,
+    "comment_exact": true,
+    "channel": "131e955e590b9cd367554675168ec99560f7146c",
+    "channel_exact": true,
+    "ci": [
+      {
+        "name": "All checks (codeql)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-real-readers)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-product-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-public-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-signup-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-buyer-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-studio-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (dependency-security)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "ci_qualification": "8requiredAllcheckscompletedSUCCESSread;product-checksaggregatorNOTpresentyet,no9greenclaim/queue",
+    "limits": "Focalonlynotglobalreview/newtypeslintbuildbrowsernativeRedis/provider/financialintegration/MRcertificate;executedbundleslocaluntrackedhashesonly,archivefullownsource/runnerguard/old-newlogs/permanent/diff.",
+    "next": "AuthorC4confirmsmissingproduct-checks+all9currentheadgatesandordinaryqueue,firstVwithfocal+C2secondqualified. Vmustnotduplicatefullrevieworqueue/mergeanotherauthorPR.",
+    "current_scope_note": "Original Vlowclosuref587historical. FreshROOTreportsC1nominal6780401768closesnewtaxbaseMED+negativeLOWon59c259;C2second6780626207clean. Vdidnotreplayortransferoldwholeapproval. AuthorCI9/coordinatorremain."
+  },
+  "preserved_holds": {
+    "C1_exclusive": "2999claude5/sz4-member-prices and3024claude5/kb22-u12-directory-socials;DONOTpushC5branches,alllocalcandidateshandedC136dbfbb85/CP107",
+    "candidate2999": "8e2a10279/tree028a9398;136PASS/1778Redis51HTTPmock evidence92dcd607/comment6775325096;requireC1chosenindependentconflictfocalnotVselfapproval",
+    "candidate3024": "06a27f8..;C1sharedscope/cost/lint512MiB134INCONCLUSIVE/noreset-split-raise/independentreturn;static175conditionalnotruntimejoint/globalbound,proofa01f788a/comment6762476485",
+    "candidate3206": "1b9cad/serverd0f431/tree062a..;explicitmergequeueREFreject stillawaitC1dequeue,noretrywithoutnewactualclearance;freshheadstill338bea9green0active. NoC1responsecomment.",
+    "candidate3500": "13dddb29fLOCALoptionalwordingonly;publishedheadstilld4733..9green0active;noqueuedheadchurn"
+  },
+  "prior_budgets": "AllCP107/106/105/103unchangedotherledgers:3569HTTP100FULLYCONSUMED;3118Redis14695HTTP0;outbox23modeled0native;2999composition1778Redis51HTTP. No replay/reset.",
+  "next_work": "FIRSTfreshROOT+CP116/main;prioritize3659authorcorrectedheadandnominalreturnONLYwithnewdelta/cause. CarrySAME817Redis35mock,remaining19183/65/noreset;earlier3621ACKcopycorrectionsand7PASS2FAILcurrentretained. #3638HOLDTODOS104/noqueue;3642chosenC1withC4Amedium+verifyopen don'tduplicate. Own2999/3024C1exclusive,3206awaitactualdequeue/C1mainleaseclarification,3500optionalwordingqueuedheadnochange. 2571C4Aalreadyfocalclean/noduplicate. NewreviewavailabilityROOTclaims FIRST: C4Dchildsafety, C6mergefocals, U/C2active/Nuvem3others, avoidthirdglobals. Noautomation/PC/subagents/workflowmetasample/productflagchanges. Previouslocalcheckoutslost/durableprooffirst.",
+  "observed_at": "2026-11-11 04:13:33 UTC",
+  "merge_focals109": {
+    "scope": "Author-requested current merge reservation conflict resolution ONLY,notthirdglobal orautomaticcode-mergerecertification",
+    "claim": "356464f68cd858165316cf11231229145ce419ca",
+    "claim_exact": true,
+    "prs": [
+      {
+        "number": 3225,
+        "head": "e02db96854a1e15240670506ea66dddb4879058a",
+        "request": 6778571432,
+        "comment": 6779490424,
+        "prior": "T6725928561/C66746341509"
+      },
+      {
+        "number": 3203,
+        "head": "881caed76deeac4cd39e6bbbc87bb125d0d4a837",
+        "request": 6778548177,
+        "comment": 6779490848,
+        "prior": "C46726775354/C66746340981"
+      }
+    ],
+    "verdict": "No finding in documentary manual resolution. Native gitmerge-tree+remerge-diffproveonlydocs/reservations/claude3.md manuallyresolved;bothheads12unique rowsexactparentunion;mainrowsbytepreserved/nonrowtextexactmain/diffcheck0.",
+    "runtime": "ZEROsemantic tests/Redis/applicationHTTP/provider. Native Git structural witnesses only. No product/ref/reservation changes orpush.",
+    "evidence": "c87ca4a694ba3e4e689eceb38e45e09f1101a1ad/evidence/v/merge-focals-3225-3203-20261110.json",
+    "bytes": 81454,
+    "sha256": "06cc3f5a1d6d283a3db82f9f9bac0a95173f86292fb5906580a3c2c9cd046d8b",
+    "evidence_exact": true,
+    "comments_exact": true,
+    "channel": "d07f2cf518a44ae232cd76ab7ff525e9de0711ee",
+    "channel_exact": true,
+    "ci": "FreshcurrentheadsrealreadersSUCCESS/remainingqueuedorabsent;NOTninegreen/noqueue",
+    "local": "/workspace/scratch/aed9c38475cd/v109-merge-focals",
+    "new_status": "FreshROOTC3reports3225samehead9SUCCESS/auto-merge;3203sameheadsinglefailed-jobrerunpassedwebkit+MobileandnineSUCCESS/auto-merge. C3reportNOTVnewCImeasurement;noVretry."
+  },
+  "review3613": {
+    "head": "ee7c8d19a0dc7acde081a1d1f5374e601e7ab5ca",
+    "claim": "01248112a212b65d3b3f86c413f85912fa52ded9",
+    "claim_exact": true,
+    "scope": "First independent documentary review only;whole2pathdiff+officialsources+citedprivatehelperstatic",
+    "verdict": "No demonstratedHIGHMEDLOW in partialdocumentarystudy;canproceedwithnineexactchecks/coordinatorrequirements,notimplementation/legal/accountpermissionclearance",
+    "tests": {
+      "unchanged_canonical": 22,
+      "source_limit_crosschecks": 3
+    },
+    "ledger": {
+      "redis": 0,
+      "application_mock_http": 0,
+      "provider_calls": 0
+    },
+    "public_docs": "Webreader5officialStripepages/directofficialMarkdownGET expansion18675characters;readerexpandedfailedpreserved. No StripeAPI/payments/upload/contactexecuted.",
+    "evidence": "bf277cb96cbdf4a041adb0572ccb37e8e7a51c76/evidence/v/review-3613-20261110.json",
+    "evidence_exact": true,
+    "comment": 6780727043,
+    "comment_exact": true,
+    "channel": "1cb31d8e31ceec6f231803ecb4eecced5bfd0024",
+    "channel_exact": true,
+    "ci": [],
+    "ci_qualification": "No requiredAllchecksaggregatorspresentlastsnapshot;no9green/queueclaim",
+    "runtime": "SERIAL0agents,preimportguardZEROIO/120s512MiB256KiB,firstcanonicalexecutionPASS,noRED/typeslintbuildbrowserRedisproviderreplay",
+    "local": "/workspace/scratch/aed9c38475cd/v110-3613",
+    "next": "CX3finalCI/history/cost/coordinatorqueue",
+    "current_return": "Fresh metadata same ee7c8d...OPEN/unmerged; discussiononlyV6780727043/no newauthorrequest. No replay/duplicatecomment. CurrentCI NOT reread this cycle."
+  },
+  "cycle111": {
+    "work": "FreshROOT/fullCP110,exactmainchange,own4metadata+9exactchecks+FULLdiscussions,3613metadata+FULLdiscussion,reviewavailabilitydedup",
+    "main_changed_paths": [
+      "lib/earnings-by-month.ts",
+      "tests/bx2-earnings-review.test.ts"
+    ],
+    "runtime": "ZEROtests/Redis/applicationHTTP/provider. No prooforprodrefmutation,CIrerun,cancel,queue/merge,subagents.",
+    "availability": "3614C1reviewdone,3615C1reviewdone,3616C1MEDauthorpending,3487C2nominalMEDauthorpending,3612CX4claimed,3613Vdone. No duplicatewholeorfinancialreviews.",
+    "order_ack": "ReadpreservedtriageFULLlocal;oneobservedhostedassertionunchanged. Cause/repeatabilitystillUNKNOWN/nativebrowserauthorizationandsecondmatchingfailuremissing;no claimresolved/probeorworkaround."
+  },
+  "review3621": {
+    "head": "0f388c27a2af073854ce3b6b06a531335b2554a9",
+    "base": "e7199ff7470aae0961868f36486fef21220fafd4",
+    "claim": "53e6159ef15bd107cea3fd19a9b53d050fac49ac",
+    "claim_exact": true,
+    "scope": "First requested unit3 independent review;13pathFULLdelta,parentnotthirdglobal. Gatefalse remains.",
+    "verdict": "REQUEST CHANGES: proposed conditional MED lostsenderACK→definiteunsent/half+freshpreparedrequest/provideridentityonrepeat;LOWoldemailstatessecondalreadywentbeforeitstry;productreservationrowcoordgatepending.",
+    "runtime": {
+      "canonical_flow": {
+        "pass": 59,
+        "fail": 0
+      },
+      "parent_moves_control": {
+        "pass": 35,
+        "fail": 0
+      },
+      "own": {
+        "checks": 10,
+        "pass": 5,
+        "fail": 5
+      },
+      "ledger": {
+        "redis": 782,
+        "http_mock": 21
+      },
+      "bounds": "AGGREGATE20kRedis100mock/120s512MiB256KiB/networkNEGATEDpreimport;threeexecutionsonce,noresetborrow;0actualprovider/email"
+    },
+    "own_findings": "FourFAILoneconditionalACKMEDproposed +oneFAILprematurecopyLOW;controlsACKacceptedoldstopsecond,bothacceptednewACKlost,knownrefusalhalf1accepted,gatefalse,actualcopyobservation. No unauthorizedmove/currentexposure/MRcertificate orvirtualfixclaim.",
+    "evidence": "27cca162a27a01495ca747143acf37bf43c68412/evidence/v/review-3621-20261110.json",
+    "bytes": 98057,
+    "sha256": "94881a8229a8377ddf4861a5ba93e9ad648887e668ebf8b66e71c3f045b21a8c",
+    "evidence_exact": true,
+    "comment": 6782973415,
+    "comment_exact": true,
+    "channel": "8da950650107a80cc6b94efaa1f49a638d4989e0",
+    "channel_exact": true,
+    "ci": [
+      {
+        "name": "All checks (accessibility-buyer-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-real-readers)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-signup-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-public-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-product-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-studio-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (dependency-security)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "limits": "No types/lint/fullscanner/SSR/browser/nativeRedis/actualdelivery/legal/globalMR;ownGitdiffcheck0. Bundlehashesonlylocaluntracked;allownsource+logs+runnerguardretained. No productref/push/CIrerun/cancel/queue/merge.",
+    "local": "/workspace/scratch/aed9c38475cd/v91-3621/proofs/v/review-3621",
+    "next": "C1classifiesproposedMED;authorC4REDfix+requestnominalfocal;doNOTreplayuntilnewdelta,carryledger782/21.",
+    "current_return": "Superseded by focal3621_114 below; original findingevidence and rawfailuresretained."
+  },
+  "local_environment": {
+    "reset": "All previousworktrees/caches/node_modulesmissing at113start;durableGitHubevidenceandservercandidate3206remain. Do not say oldcandidatesstillpresentlocally.",
+    "current_local": "/workspace/scratch/aed9c38475cd/v113-3311",
+    "available": "Nodev24.22.1 Python3 Git;explicitexecshell/bin/bash loginfalse required;nodeprimaryruntimepath.",
+    "recovery": "No clone/install/authworkaround attempted;oldproofsrecoverfromdurableevidencebeforefutureexecution;allpriorledgersremainconsumed."
+  },
+  "focal3311": {
+    "head": "19ee0c2b574f5386455ecfd5ac2444c81e70d164",
+    "parents": [
+      "e91810b99639d2727420baa32cb3f7165ba7ec81",
+      "21e8fffa02570e1e70b7a72e85ca3cb3ab2092f8"
+    ],
+    "tree": "3b69c1bddfd45c944f613b4e8525c97975edcd84",
+    "request": 6783259347,
+    "claim": "53500306a69715d3951494aeea87965d57da9bfe",
+    "claim_exact": true,
+    "scope": "Onlyauthorrequestedmanualreader/fixtureadaptations;notthirdglobalorfinancialapproval. All5currentPRpaths/full13immutableparent/main/headsnapshotsread. Zfirst/C5second6732064874twoLOWsremain/U6729312420supplementcredited.",
+    "verdict": "No newHIGHMEDdemonstratedinrequestedinspectedsourcefixturefocal;wholecompositionnative/canonicalqualificationNOTcertified.",
+    "proof": {
+      "checks": 71,
+      "pass": 71,
+      "fail": 0,
+      "redis": 0,
+      "http_mock_adapter_invocations": 52,
+      "real_network": 0,
+      "cap": 100,
+      "guards": "Exact reader slice inVM onlycontrolledstripeRequeststub/nooutsidecapabilities;pre_dispatchaggregatehardmockcap100;512MiBV8heap/1000msVMcompiletimeout.",
+      "limitations": "Usual external120s/256KiB childwrapperNOTrecovered/enforced. Observedactual0.110s3460bytesnotboundequivalence. No fullmodulegraph,canonical50/91,wholecheckup,nativegitremerge,typeslintbuildSSRnativereRedisprovider. Zpreviouscheckup100/112budgetalreadyconsumed,noreplay/reset."
+    },
+    "evidence": "e7dff0dad7f0d34c2d11c363ebea3ce2e10751cf/evidence/v/focal-3311-20261110.json",
+    "evidence_repository": "solrenning-llc/marktmorgen",
+    "evidence_exact": true,
+    "bytes": 199112,
+    "sha256": "62adfbbd71e8bae9f1f5d8b0109bf2ef1f1e3ee6c49b2d869c4412c172473900",
+    "comment": 6784007555,
+    "comment_exact": true,
+    "channel": "0413f1fa861a4930c6134f64bec25b5d3047b8af",
+    "channel_exact": true,
+    "ci": [
+      {
+        "name": "All checks (codeql)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-product-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-signup-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-public-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-studio-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-buyer-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-real-readers)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (dependency-security)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "ci_qualification": "8Allcheckssuccess;product-checksabsentlastread/no9claim.",
+    "next": "Author/coordinatornative/canonicalqualification/all9exactheadgates;don'tglobalreplayorborrowZbudget."
+  },
+  "focal3621_114": {
+    "head": "78b875b8c97c8eb309ded025828beb6a304d7cb0",
+    "base": "bc6bcadb63bf8d66ab9d8a0c7d91cbbcd0ba0bad",
+    "claim": "3e13bf7acbce0649d36f2e9cd5399dfaec98b528",
+    "claim_exact": true,
+    "request": 6784227282,
+    "comment": 6784927860,
+    "comment_exact": true,
+    "channel": "43617456ca0a510d7917b8b97d70c920790fa97e",
+    "channel_exact": true,
+    "evidence": "3a86b5978dd2dffa64455a265613aef41988ebb5/evidence/v/focal-3621-20261111.json",
+    "evidence_exact": true,
+    "bytes": 259039,
+    "sha256": "3b59dd435f632de617e440435e7e3117426aeb4729f2b63711ba630b455b3071",
+    "verdict": "PARTIAL: definite-non-send assertions+past-tenseLOW+scopegateCLOSED;proposedMEDfreshrequestidentityresidualOPEN/C1classifies. Notcleanqueueapproval,nosecretstorage/derivationactivationauthorized.",
+    "scope": "Full8pathcorrectivedeltaREAD;currentflow/words/moves/open/test/reservationFULL;reservationbyteidenticalbase46ddabaf. Exactrandomgenerationwritesreturnblockbyteidenticalold,authoradmitsretrynewrequest. ReleasegatebyteidenticalFALSE. Tparent-day-scriptstaysT;accessibilitydigestnotcertified.",
+    "probe": {
+      "checks": 17,
+      "pass": 17,
+      "fail": 0,
+      "scope": "NEWlimitedexactextractedaskToMovePurchases+wordssource,syntheticALLdependencies;NOTold10caseintegrationreplay/realMemoryRedis/sender/native/canonicalgraph",
+      "newRedis": 0,
+      "newSenderAdapter": 14,
+      "ledger": {
+        "redis": 782,
+        "http_conservative": 35
+      },
+      "remaining": {
+        "redis": 19218,
+        "http": 65
+      },
+      "bounds": "120sexternal512MiBV8heap256KiBoutputRLIMIT_FSIZE,VMnoIOcapabilitybeforeproductsourceexecution,100mockcapbeforeadapterdispatch. Firstexecution0.166s1912bytesPASS. Priorledgers782/21notreset.",
+      "limitations": "No currentfullmodulegraph/retryintegration;62/43canonicalcountsAUTHORonly. Original5FAILretained/notgreenrelabeled. No esbuild/typescriptavailable/no install/cloneattempt. typeslintbuildSSRbrowsernativeRedisprovider/globalMRnotcertified."
+    },
+    "ci": [
+      {
+        "name": "All checks (codeql)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "name": "All checks (accessibility-real-readers)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-buyer-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-public-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-signup-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-studio-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (accessibility-product-actions)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "All checks (dependency-security)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "ci_qualification": "7SUCCESSCodeQLqueuedproduct-checksabsent;not9.",
+    "local": "/workspace/scratch/aed9c38475cd/v114-3621",
+    "next": "C1 classifyproposedMEDresidual/newlinkidentity/design;authorrespondnominaldelta. Don'treplayfullproofuntilnewcause/delta;carry782/35.",
+    "current_return": "Origin3621still78b875noownnewcomment;ROOTNuvem4createdexistingreplacement3659/pendingC1coord. VdidNOTrecreatebranchPR. Focal3659below extendsSAMEmoney/causebudget817/35;historicalfailuresremain."
+  },
+  "review3638": {
+    "head": "1912f8cdcd2bdff0d35c3c3e8165d51e8415e3bf",
+    "base": "e968f15cf5eed689c87378f50ab676456f93802f",
+    "claim": "4151bfdbf50ffe69129bc483157fe48e4198dbf0",
+    "claim_exact": true,
+    "request": 6785654647,
+    "comment": 6785804473,
+    "comment_exact": true,
+    "channel": "d43b2b8d72f67c26a1b2f895b7cd8a5568afa511",
+    "channel_exact": true,
+    "evidence": "db3093c5d7f2b393c117cf8765311eaa73d51662/evidence/v/review-3638-20261111.json",
+    "evidence_exact": true,
+    "bytes": 150490,
+    "sha256": "745b4216331803745c67556ba67a687aa56383d6abf2e219bfcfef240357bea3",
+    "scope": "Firstindependentwhole5pathcode/testdelta requestedbyC3/ROOTdiscussionsemclaim;existingcandidateonly/NOTnewMobilefix. Full9head+4basesnapshots5filepatchread. Mobilelab/serverBYTE-ID;signupstrictzerochallengeotherguardsBYTE-ID.",
+    "verdict": "NoHIGHMEDLOWdemonstratedininspectedchange;canproceedWITHINCODEREVIEWsubjectC1adoption/TODOS102+usual9exactheadgates. NohostedCI/performanceclearance.",
+    "tests": {
+      "same_complete_host_source": "base3checks3FAIL→head3PASS;realcheckmodule/TSstripSourceTextModule/botidimportsynthetic",
+      "own": 25,
+      "total_current": 28,
+      "pass": 28,
+      "fail_current": 0,
+      "ledger": {
+        "redis": 0,
+        "http": 0,
+        "provider": 0
+      },
+      "bounds": "5serialchildren120s512MiB256KiBoutputRLIMIT_FSIZE,VMnoIOcapability/importwhitelistbeforeproductsource. Fourserververdicts/initializerinprocessstubsnotnetwork;allchildren<.22s/firstplannedREDthenGREENnoresetreplay."
+    },
+    "limits": "NoNextbuild/actualBotIDSDKorwrapper/wholeoncefsgraph/signupbrowsermatrix/Mobilelabtiming executed. C3logs279jobs45taps/timingsAREAUTHORnotV. ActualVercelvisitorcostunchanged/ownerdecision. Assumesbuild/runtimehostmatch/prebuiltcrosshostnotcert. No typeslintbuildbrowserAAA/fullmargincert.",
+    "ci": [],
+    "ci_qualification": "NOAllchecksaggregatorspresentonexactheadlastread;not9.",
+    "local": "/workspace/scratch/aed9c38475cd/v115-3638",
+    "next": "C1adoptsorcoordinatesexistingC3candidate/authorobservesCIthenusualgates. Don'tmakecompetingfix/altermetas/claimproductionruntimegrant.",
+    "current_disposition": "TODOS104C1EXPLICITchooses3642;3638HOLD/outofqueue/authorack6786644066;after3642landsauthorevaluatesseparatecostreasonorcloses. VpreviouslimitedsourceopinionNOTdeployment/queueclearance;NOrepeat/commentdup."
+  },
+  "focal3659_116": {
+    "head": "473fbe5dc8e5a48da522b25033ed98c453cb6134",
+    "origin": "78b875b8c97c8eb309ded025828beb6a304d7cb0",
+    "base": "bc6bcadb63bf8d66ab9d8a0c7d91cbbcd0ba0bad",
+    "claim": "5ae2bd91fc7b671091b912345006101841d64ad7",
+    "claim_exact": true,
+    "comment": 6786800040,
+    "comment_exact": true,
+    "channel": "0e0495a4c9461e8981c130adb7bd7f1d661145ee",
+    "channel_exact": true,
+    "evidence": "66bb716e0147256c6277d59df5ae071ed8c75cae/evidence/v/focal-3659-20261111.json",
+    "evidence_exact": true,
+    "bytes": 381592,
+    "sha256": "2e326b1c8bf3744cadb802e005ff55aec6f48b7df290396fb3df41d599934c89",
+    "verdict": "REQUESTCHANGES:MEDconcurrentidenticalGETabsent→unconditionalSET2successfulrequestids+2livegrantssets;MEDnewcanonicalassert307-312demandsold=tosidetokencontradictory/falseoracle. SerialretrytupleexactPASS/side-separatedPASS/garbledindexrefusedPASS;gatefalse/nounauthmoveclaim.",
+    "scope": "Nominalcorrective6pathdeltaFULL/read8immutablesourcefiles,notwholeunitfinancial/secretderivationC1grant. Nuvem4authornotV/branchlineageunmodifiedbyV.",
+    "tests": {
+      "checks": 9,
+      "pass": 7,
+      "fail": 2,
+      "scope": "Actualwholemoves/rules/redisreplyTSVMmodules/cryptoREALonsynthetickey/authnormalization+RedisMAPADAPTER. ForcebothretryGETsnapshotsabsentbeforewrites;notnativeRedisTTLtiming/fullrouteemail/canonicalflowexecution. Wrongtestoracleevaluatedusingactualreturnedtokens,notclaimedcanonicalrun.",
+      "newRedisAdapters": 35,
+      "newHTTP": 0,
+      "ledger": {
+        "redis_conservative": 817,
+        "http_conservative": 35
+      },
+      "remaining": {
+        "redis": 19183,
+        "http": 65
+      },
+      "bounds": "DEBITS20kRedisbeforeeverycommandincludingEVALnestedINCR+EXPIRE;HTTPnone;VMimportwhitelistnoIO/fetchdenyBEFOREsourceevaluation/120s512MiB256KiB. Onechildexit1expected2FAIL/.217s2710bytes;noresetreplayvirtualfix/subagents."
+    },
+    "ci": [],
+    "ci_qualification": "NOAllchecksaggregatorslastread;not9.",
+    "local": "/workspace/scratch/aed9c38475cd/v116-3659",
+    "next": "Nuvem4authorREDatomicidentity+correctside-specificoraclethenrequestsVnominal;C1coordinatesexistingreplacement/design/original3621;nogrant/queue."
+  },
+  "attempt2571_116": "AuthorrequestedVbutclaimCAS409NEVERPUBLISHED beforetechnicalsource/runtime. Wait>=135s thenfreshROOTclaim3659instead/newcorrectionpriority. ZERO2571technicalsource/tests/commentverdictbyV. FreshROOTC4nuvemAclaimedanddelivered678?01h12focalmoneyclean64.9980/80filesAUTHOR;VdoesNOTborrow/reviewagain."
+}

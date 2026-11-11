@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_ALLOCATION } from "../lib/llc-fixed-costs";
+import { allocateEntireLlcFixedCosts, CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_ALLOCATION } from "../lib/llc-fixed-costs";
 
 const read = () => readFileSync("docs/tx4-south-africa-vat-evidence.md", "utf8");
 
@@ -24,6 +24,17 @@ test("TX4 South Africa evidence keeps location, B2B and intermediary treatment c
   for (const fact of ["resident of South Africa", "registered bank", "business, residential or postal address", "1 April 2025", "VAT-registered vendors", "imported services", "intermediary", "written agreement", "jointly and severally liable", "direct"]) assert.ok(text.includes(fact), fact);
   assert.match(text, /does not classify Marktmorgen's supplies, recipients or intermediary role/);
   assert.match(text, /does not register, charge, collect, file or pay VAT/);
+  // No uncited conclusion may narrow the platform's possible intermediary or deemed-supplier role (AGENTS.md art. 9a).
+  assert.doesNotMatch(text, /not inferred merely/i);
+  assert.doesNotMatch(text, /(?:LLC|Marktmorgen)\s+(?:must|will|is not|need not|does not need to)\s+(?:file|register|appoint|an intermediary|be an intermediary)/i);
+});
+
+test("TX4 South Africa evidence says which statute was not read", () => {
+  const text = read();
+  // TX asks for the provision with article and date; without it the note must say it rests on SARS pages only.
+  assert.match(text, /Value-Added Tax Act 89 of 1991[^.]*not read/);
+  assert.match(text, /secondary SARS (?:pages|publications) only/);
+  assert.doesNotMatch(text, /professional confirmation/i);
 });
 
 test("TX4 South Africa evidence records recurring return, record and currency work without inventing a schedule", () => {
@@ -40,5 +51,7 @@ test("TX4 South Africa work never funds an unknown compliance ceiling or realloc
   assert.deepEqual([line.fullMonthlyUsdCents, line.fullAnnualUsdCents, line.reserveReviewed], [null, null, false]);
   assert.deepEqual([LLC_FIXED_COST_ALLOCATION.marktmorgenBps, LLC_FIXED_COST_ALLOCATION.hazelsongBps], [10000, 0]);
   for (const fact of ["vat-oss-and-local-compliance", "unknown", "not zero", "100% Marktmorgen", "currency", "reserve", "professional review", "Owner-dependent", "No registration, submission, payment, account or external contact"]) assert.ok(text.includes(fact), fact);
-  assert.doesNotMatch(text, /(?:USD|ZAR|US\$|R)\s*0(?:[.,]0+)?\b/i);
+  assert.equal(allocateEntireLlcFixedCosts(CURRENT_LLC_FIXED_COST_CEILINGS), null);
+  // A zero amount, not any word that ends in "r" before a 0 (Claude 1 LOW).
+  assert.doesNotMatch(text, /(?:\bUSD|\bZAR|\bUS\$|\bR)\s*0(?:[.,]0+)?\b/);
 });

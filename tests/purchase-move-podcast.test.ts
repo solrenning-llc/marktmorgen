@@ -118,13 +118,15 @@ async function main(): Promise<void> {
   is("no room to read the old address: unknown, never \"holds none\"", await listens("ana.new@example.com"), "unknown");
   odd = null;
 
-  part("An index that cannot be read changes nothing, and is never read as nothing");
+  part("An index that cannot be read is unknown: never access given back, never a definite no (Claude 1 on #3717)");
   odd = { command: "GET", prefix: "nl:pm:moved:", reply: 7, times: 1 };
-  is("the old address keeps what it bought", await listens("ana.old@example.com"), true);
+  is("the old address's mark unreadable: unknown, never its listening back", await listens("ana.old@example.com"), "unknown");
   odd = { command: "HGETALL", prefix: "nl:pm:into:", reply: ["odd"], times: 1 };
-  is("the new address gains nothing from it", await listens("ana.new@example.com"), false);
+  is("the new address's index unreadable: unknown, never \"holds none\"", await listens("ana.new@example.com"), "unknown");
   odd = { command: "HGETALL", prefix: "nl:pm:into:", reply: ["odd"], times: 1 };
-  is("and keeps what it bought itself", await listens("ana.new@example.com", other.product.id), true);
+  is("what it bought itself needs no index read", await listens("ana.new@example.com", other.product.id), true);
+  odd = { command: "HGET", prefix: "nl:pm:into:", reply: "not-a-move-id", times: 1 };
+  is("a back line that is not a move id: unknown, never \"not moved\"", await listens("ana.old@example.com"), "unknown");
   odd = null;
 
   part("The store deleting the new address gives the old one its listening back");

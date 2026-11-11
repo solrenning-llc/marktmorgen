@@ -11,14 +11,13 @@
  * can be used and its end date are Stripe's, checked by Stripe), with the
  * word a buyer types kept here, on the store. The buyer types the code and
  * their email on the store's page, before the checkout; the server reads
- * what that email bought in this store (lib/next-offer.ts, ownedHere) and
- * opens the checkout with the coupon, for that email only, or refuses the
- * code with a plain sentence. Anything that cannot be read is a refusal:
- * an unknown purchase history is never a discount.
- *
- * The typed email is not kept by Marktmorgen: it is read once, in the
- * request, and is the address the checkout opens with on Stripe's page,
- * where the buyer would have typed it anyway.
+ * whether that email paid for an order in this store before and, if it did,
+ * emails that address a link that works once (lib/returning-code.ts); the
+ * page answers the same whether or not it bought here, so it never tells
+ * who is a customer. Only that link opens the checkout with the coupon, for
+ * that email. Anything that cannot be read is a refusal: an unknown purchase
+ * history is never a discount. (Independent review of #3666: a typed email
+ * alone proves nothing, so it never applies the coupon by itself.)
  *
  * Pure, so the store record and the page can import it.
  */
@@ -106,33 +105,36 @@ export function returningCodeFor(codes: readonly ReturningCode[], typed: string,
 }
 
 /**
- * Why a code typed with an email is not taken:
- *   - "code": no such code in this store, or it has ended;
+ * What the buy form is told after a code was typed or a link was used:
+ *   - "sent": the answer to every code and email that could be checked,
+ *     whether or not the email bought here before, so it never says who is
+ *     a customer: a link was emailed if it did;
+ *   - "code": no such code in this store, or it has ended or is used up;
  *   - "email": the email is not one;
- *   - "bought": the email has no earlier purchase in this store;
- *   - "unknown": what the email bought could not be read in full, or the
- *     store's month of requests is used: never taken on a guess;
- *   - "busy": too many tries from this connection in a short time.
+ *   - "link": the confirmation link was used already, ran out, or is not for
+ *     this product;
+ *   - "other": the code cannot go on this purchase: another discount already
+ *     applies, the buyer names the price, or it is a gift, for several
+ *     people or a pre-order;
+ *   - "unknown": something could not be read, or the store's month of
+ *     requests is used: never a discount on a guess;
+ *   - "busy": too many tries in a short time.
  */
-export type ReturningRefusal = "code" | "email" | "bought" | "unknown" | "busy";
+export type ReturningStatus = "sent" | "code" | "email" | "link" | "other" | "unknown" | "busy";
+export type ReturningRefusal = Exclude<ReturningStatus, "sent">;
 
-export const RETURNING_REFUSALS: readonly ReturningRefusal[] = ["code", "email", "bought", "unknown", "busy"];
+export const RETURNING_STATUSES: readonly ReturningStatus[] = ["sent", "code", "email", "link", "other", "unknown", "busy"];
+export const RETURNING_REFUSALS: readonly ReturningRefusal[] = ["code", "email", "link", "other", "unknown", "busy"];
 
-/** A refusal carried back to the page in its address, or null for anything else. */
-export function readRefusal(raw: string | null | undefined): ReturningRefusal | null {
-  return RETURNING_REFUSALS.find((reason) => reason === raw) ?? null;
+/** A status carried back to the page in its address, or null for anything else. */
+export function readRefusal(raw: string | null | undefined): ReturningStatus | null {
+  return RETURNING_STATUSES.find((status) => status === raw) ?? null;
 }
 
-/**
- * The decision, once the code and what the email owns are known. `owned` is
- * every product the email has from this store, or null when that could not
- * be read in full: null is "unknown", never "bought nothing".
- */
-export function returningDecision(code: ReturningCode | null, owned: ReadonlySet<string> | null): { ok: true; code: ReturningCode } | { ok: false; reason: ReturningRefusal } {
-  if (!code) return { ok: false, reason: "code" };
-  if (owned === null) return { ok: false, reason: "unknown" };
-  if (owned.size === 0) return { ok: false, reason: "bought" };
-  return { ok: true, code };
+/** A confirmation link's token as it arrives in an address: 64 hex characters, or "". */
+export function readLinkToken(raw: string | null | undefined): string {
+  const token = (raw ?? "").trim();
+  return /^[a-f0-9]{64}$/.test(token) ? token : "";
 }
 
 /**

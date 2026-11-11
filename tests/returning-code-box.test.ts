@@ -70,7 +70,9 @@ async function main(): Promise<void> {
   is("the code box has a visible label tied to it", box.includes(`<label for="${codeId}" class="st-label">Your code</label>`), true);
   is("and its note, which says how the code is checked", new RegExp(`<input id="${codeId}"[^>]*aria-describedby="${codeId.replace("-code", "-note")}"`).test(box), true);
   is("the email box has a visible label tied to it", box.includes(`<label for="${codeId.replace("-code", "-email")}" class="st-label">The email of your earlier order</label>`), true);
-  is("the email box says it is not kept", box.includes("It is not kept."), true);
+  is("the email box says what is done with it, and for how long it is kept", box.includes("it gets a link that works once, for 30 minutes. We keep it only for those 30 minutes."), true);
+  is("asking for the link is its own button, which the buying boxes do not hold back", /<button type="submit" formNoValidate=""[^>]*>Email me the link<\/button>/.test(box), true);
+  is("no link in the address: no hidden link field", box.includes('name="rtoken"'), false);
   is("no reason is said before anything was tried", box.includes('role="alert"'), false);
 
   part("Not where the buyer names the price");
@@ -83,11 +85,11 @@ async function main(): Promise<void> {
   is("all seven languages", Object.keys(RETURNING_CODE_WORDS).sort(), [...LANGUAGE_CODES].sort());
   for (const lang of LANGUAGE_CODES) {
     const w = RETURNING_CODE_WORDS[lang];
-    const all = [w.open, w.note, w.codeLabel, w.emailLabel, w.emailNote, ...RETURNING_REFUSALS.map((r) => w.refused[r])];
+    const all = [w.open, w.note, w.codeLabel, w.emailLabel, w.emailNote, w.send, w.sent, w.confirmed, ...RETURNING_REFUSALS.map((r) => w.refused[r])];
     is(`${lang}: nothing empty, a sentence for each reason`, all.every((line) => typeof line === "string" && line.trim().length > 0), true);
     if (lang !== "en") {
       const en = RETURNING_CODE_WORDS.en;
-      is(`${lang}: not left in English`, all.some((line, i) => line === [en.open, en.note, en.codeLabel, en.emailLabel, en.emailNote, ...RETURNING_REFUSALS.map((r) => en.refused[r])][i]), false);
+      is(`${lang}: not left in English`, all.some((line, i) => line === [en.open, en.note, en.codeLabel, en.emailLabel, en.emailNote, en.send, en.sent, en.confirmed, ...RETURNING_REFUSALS.map((r) => en.refused[r])][i]), false);
     }
   }
 

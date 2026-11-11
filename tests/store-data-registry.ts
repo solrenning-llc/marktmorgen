@@ -340,6 +340,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:listed:@lib/buyer-list.ts": short("An order put on the list", "order", 8, MARK),
   "nl:lostdispute:cursor:@lib/refunds.ts": short("Where a job that takes things back left off in a store's lost disputes, when there were more than one run reads", "run", 30),
   "nl:orders:link:@lib/buyer-orders.ts": short("A buyer's purchases link, a day", "access", 1, LINK_BYTES, MAIL("orders")),
+  "nl:rcode:link:@lib/returning-code.ts": short("A returning-buyer code's confirmation link, half an hour", "access", 1, LINK_BYTES, MAIL("returning code")),
   "nl:rl:orders:addr:@lib/buyer-orders.ts": short("Purchase links per address, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:rl:orders:ip:@lib/buyer-orders.ts": short("Purchase links per connection, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:person:@lib/buyer-profile.ts": { what: "Notes about people", room: ["lib/buyer-profile.ts"] },

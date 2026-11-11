@@ -45,6 +45,7 @@ function main(): void {
   is("a note longer than the most is refused, never cut", readOrderProblem({ reason: "not_received", note: "a".repeat(1_001), order: SESSION }), { ok: false, field: "note" });
   is("a note of exactly the most is read", (readOrderProblem({ reason: "not_received", note: "a".repeat(1_000), order: SESSION }) as { ok?: boolean } | null)?.ok, true);
   is("a note that is not text is refused", readOrderProblem({ reason: "not_received", note: 42, order: SESSION }), { ok: false, field: "note" });
+  is("a line break sent as CRLF counts as one character, as the browser's own check counts it", (readOrderProblem({ reason: "not_received", note: `${"a".repeat(994)}\r\n${"b".repeat(5)}`, order: SESSION }) as { ok?: boolean } | null)?.ok, true);
   is("control characters become spaces and line breaks stay", readOrderProblem({ reason: "not_received", note: "Line one\r\nLine\u0007two", order: SESSION }), { ok: true, problem: { reason: "not_received", note: "Line one\nLine two", reference: SESSION } });
   is("nothing at all is refused", readOrderProblem(null), { ok: false, field: "reason" });
   is("a list is refused", readOrderProblem([]), { ok: false, field: "reason" });
@@ -65,26 +66,26 @@ function main(): void {
     text,
     [
       "Problem with an order: It is not what was described.",
+      "Please answer by November 18, 2026 (UTC).",
       "Product: Bread at Home",
       "Paid on: November 2, 2026",
       "Order: cs_test_a1B2c3D4e5F6g7H8",
       "",
       "Chapter 3 is missing.",
-      "",
-      "Please answer by November 18, 2026 (UTC). If you do not, the buyer is shown your contact details and your refund policy.",
     ].join("\n"));
   const bare = caseText({ reason: "not_received", note: "", reference: INTENT }, { title: "", paidAt: 0 }, at);
   is("an unknown title and paid date are said as unknown, never invented",
     bare,
     [
       "Problem with an order: I did not get it.",
+      "Please answer by November 18, 2026 (UTC).",
       "Product: unknown",
       "Paid on: unknown",
       `Order: ${INTENT}`,
-      "",
-      "Please answer by November 18, 2026 (UTC). If you do not, the buyer is shown your contact details and your refund policy.",
     ].join("\n"));
-  is("a title is one line", caseText({ reason: "cannot_access", note: "", reference: SESSION }, { title: "Two\nlines", paidAt: 0 }, at).split("\n")[1], "Product: Two lines");
+  is("a title is one line", caseText({ reason: "cannot_access", note: "", reference: SESSION }, { title: "Two\nlines", paidAt: 0 }, at).split("\n")[2], "Product: Two lines");
+  is("the due date is in the first lines, so a notice cut at 1,000 characters still carries it", caseText({ reason: "other", note: "x ".repeat(500).trim(), reference: SESSION }, { title: "A", paidAt: 0 }, at).slice(0, 1_000).includes("Please answer by"), true);
+  is("nothing is promised that does not happen yet", /shown your contact|refund policy/.test(text), false);
   is("an unknown report time gives no case", caseText({ reason: "cannot_access", note: "", reference: SESSION }, { title: "A", paidAt: 0 }, Number.NaN), "");
 
   part("The buyer's words, in every store language");

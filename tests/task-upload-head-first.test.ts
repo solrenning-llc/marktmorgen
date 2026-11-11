@@ -28,7 +28,7 @@ import { POST as handInRoute } from "@/app/api/store/course/task/route";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { emailKey, mintPass, passCookieName, recordEnrollment, storeKey } from "@/lib/learn";
-import { DOOR_SECONDS, noteTaskUpload, saveTask, staleTaskUploads, submissionOf } from "@/lib/assignment";
+import { DOOR_SECONDS, noteTaskUpload, saveTask, submissionOf, sweepTaskUploads } from "@/lib/assignment";
 import { taskFolder } from "@/lib/assignment-rules";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -185,7 +185,8 @@ async function main(): Promise<void> {
     const orphan = await work("headfirstsweep", "c");
     blobs.set(orphan.path, "drop");
     await handIn(orphan);
-    const swept = await staleTaskUploads(Date.now() + (DOOR_SECONDS + 60) * 1000);
+    // main replaced staleTaskUploads with sweepTaskUploads (b2d12e3a2): it answers the paths it won and deleted.
+    const swept = await sweepTaskUploads(async () => {}, Date.now() + (DOOR_SECONDS + 60) * 1000);
     is("the sweep still finds the unused upload", swept.includes(orphan.path), true);
 
     part("The store answered that the file is not there: still missing");
@@ -202,8 +203,10 @@ async function main(): Promise<void> {
     blobs.set(raced.path, "answer");
     const both = await Promise.all([handIn(raced), handIn(raced)]);
     const statuses = both.map((one) => one.status).sort();
-    is("exactly one of two racing hand-ins goes through the door", statuses, [200, 400]);
-    is("the other is refused as a door already used", both.find((one) => one.status === 400)?.error, "invalid");
+    // Since main's oneHandInAtATime (lib/assignment.ts), two hand-ins of the same work run one after the other: the
+    // second finds the file the first kept (before.file) and reuses it, never passing the door or counting it again.
+    is("two racing hand-ins of the same work run one after the other", statuses, [200, 200]);
+    is("the upload's door was spent once", await door(raced.path), false);
     is("the file's bytes are counted once", await roomUsed(raced), 1000);
     is("the submission keeps the file once", await handedFile(raced), raced.path);
   } finally {

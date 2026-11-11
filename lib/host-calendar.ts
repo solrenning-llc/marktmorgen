@@ -36,12 +36,14 @@
 import { CALENDAR_LIST_PAUSED, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
 import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/lib/safe-fetch";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { NotConnected, accessFor, disconnect, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
+import { NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
 import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars, googleFreeBusy, grantedParts, hostSyncOn } from "@/lib/meet-providers";
+import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
 import type { Store } from "@/lib/store";
 
@@ -52,9 +54,9 @@ import type { Store } from "@/lib/store";
  * host's calendar filled in the meantime is still never booked twice through
  * us, because every hold is claimed on each host's own list (lib/host-claims.ts).
  */
-export const SYNC_SECONDS = 900;
+export const SYNC_SECONDS = HOST_SYNC_MINUTES * 60;
 /** How old the last good reading may be before the host is blocked: three readings missed. */
-export const STALE_SECONDS = 45 * 60;
+export const STALE_SECONDS = HOST_STALE_MINUTES * 60;
 /** How far ahead busy times are read: past the longest booking horizon. */
 export const HOST_LOOKAHEAD_DAYS = 92;
 /** How long the last reading and the last failure are kept, for the studio. */
@@ -143,8 +145,19 @@ async function readConfig(host: string): Promise<Config | null> {
   return parseConfig(raw);
 }
 
+/**
+ * Writes a host's settings, only when Redis answers "OK" (CX-123 rule 24): any other reply leaves the write
+ * unknown, so it throws, and the route says it failed rather than that an address was forgotten.
+ */
 async function writeConfig(host: string, config: Config): Promise<void> {
-  await redisPipeline([["SET", cfgKey(host), JSON.stringify(config)]]);
+  const [saved] = repliesFor(await redisPipeline([["SET", cfgKey(host), JSON.stringify(config)]]), 1) ?? [];
+  if (saved !== "OK") throw new UnknownReplyError("a host's calendar settings write");
+}
+
+/** Forgets a host's last reading and last failure, only on a count Redis answered for it. */
+async function forgetReadings(host: string): Promise<void> {
+  const [gone] = repliesFor(await redisPipeline([["DEL", goodKey(host), errKey(host)]]), 1) ?? [];
+  if (countOf(gone) === null) throw new UnknownReplyError("forgetting a host's calendar readings");
 }
 
 function emptyConfig(email: string): Config {
@@ -472,17 +485,25 @@ export async function removeHostIcs(store: Pick<Store, "statsId">, email: string
   const config = await readConfig(host);
   if (!config) return;
   await writeConfig(host, { ...config, ics: "", icsAddedAt: "", source: config.source === "ics" ? "none" : config.source });
-  await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  await forgetReadings(host);
 }
 
-/** Disconnects a host's own Google Calendar: access given back to Google, everything kept here forgotten. */
-export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email: string): Promise<void> {
-  if (!store.statsId) return;
+/**
+ * Disconnects a host's own Google Calendar: access given back to Google, everything kept here forgotten.
+ * True only when Google confirmed the give-back in this request. False when it did not, and when the
+ * connection was already gone: a try that stopped below after forgetting it (its error answered as
+ * "try again") leaves the retry nothing to ask Google, so the page says how to remove the access there
+ * rather than that it was given back (G review 5815599962). The cleanup below still throws, so that
+ * retry also finishes it.
+ */
+export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email: string): Promise<boolean> {
+  if (!store.statsId) return true;
   const host = hostId(email);
-  await disconnect(store.statsId, "google", host);
+  const { providerAccessRemoved } = await disconnectFor(store.statsId, "google", host);
   const config = await readConfig(host);
   if (config) await writeConfig(host, { ...config, read: [], write: "", source: config.source === "google" ? "none" : config.source });
-  await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  await forgetReadings(host);
+  return providerAccessRemoved;
 }
 
 /** Where a host's team bookings are written, when they connected Google Calendar for it: the calendar id ("" is primary). */

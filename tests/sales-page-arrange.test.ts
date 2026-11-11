@@ -39,6 +39,7 @@ import { coachChecks, coachScore } from "@/lib/page-coach";
 import { pageWords, mapPageWords } from "@/lib/page-translate";
 import { copiedBlocks, emptyBlocksLeft } from "@/lib/store-copy-rules";
 import { BLOCK_KINDS, MAX_BLOCKS, type BlockKind, type PageBlock, emptyBlock, pageProblem, parsePage } from "@/lib/sales-page";
+import { SITE_KINDS } from "@/lib/site-page-rules";
 import { done, is, part } from "./check";
 
 const divider = { id: "div00001", kind: "divider" };
@@ -185,6 +186,10 @@ async function main(): Promise<void> {
   const editor = readFileSync("components/page-editor.tsx", "utf8");
   is("the space's form offers its sizes", /case "space":[\s\S]{0,1500}SPACE_SIZES\.map/.test(editor), true);
   is("a divider has nothing to fill in", /case "divider":[\s\S]{0,400}Nothing to fill in/.test(editor), true);
+  part("On a store's own pages too");
+  is("a store's own page offers the divider and the space", [SITE_KINDS.includes("divider"), SITE_KINDS.includes("space")], [true, true]);
+  is("so its menu shows the arrange group with both", blockGroupsFor(SITE_KINDS, "").find((g) => g.kinds.includes("divider"))?.kinds, ["divider", "space"]);
+  is("and the side menu offers them there", [offeredKinds([], SITE_KINDS).includes("divider"), offeredKinds([], SITE_KINDS).includes("space")], [true, true]);
   done();
 }
 

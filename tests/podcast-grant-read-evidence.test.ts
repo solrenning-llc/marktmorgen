@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFeedToken } from "@/lib/podcast-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { reset, calls } from "./podcast-grant-read-world";
 
 const token = "a".repeat(48);
@@ -16,8 +17,13 @@ async function refuses(reply: unknown[]) {
   assert.equal(calls.length, 1);
 }
 
-test("extra pipeline result is unknown, not a confirmed feed grant", () =>
-  refuses([JSON.stringify(grant), null]));
+// Since main's rule 24 (lib/podcast-access.ts readFeedToken), a reply in an unknown shape throws UnknownReplyError,
+// so the feed answers a server error its app asks again after: still never a confirmed grant.
+test("extra pipeline result is unknown, not a confirmed feed grant", async () => {
+  reset([JSON.stringify(grant), null]);
+  await assert.rejects(readFeedToken(token), UnknownReplyError);
+  assert.equal(calls.length, 1);
+});
 
 for (const [name, row] of [
   ["missing handle", { s: grant.s, p: grant.p, e: grant.e }],

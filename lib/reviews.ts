@@ -44,6 +44,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
@@ -245,10 +246,15 @@ export async function visibleReviews(
   return [...shownFirst, ...rest].slice(0, Math.max(limit, shownFirst.length));
 }
 
-/** One review, when it exists. */
+/** One review, when it exists; null when it does not. Throws when the answer is not in its exact shape. */
 export async function readReview(statsId: string, productId: string, id: string): Promise<Review | null> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
+  // Only in its exact shape (CX-123 rule 24, inventory R24 item 13): one reply, the review as text or nil when there is
+  // none. Anything else is unknown and throws, never "no review yet", so a buyer is never shown a blank form over the
+  // review they already wrote.
+  const one = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+  const raw = one?.[0];
+  if (!one || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a buyer's review");
   return parseReview(raw);
 }
 
@@ -337,12 +343,19 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
   if (!STATS_ID_PATTERN.test(statsId) || !PRODUCT_ID_PATTERN.test(input.productId) || rating === null) return { state: "invalid" };
   const id = reviewId(statsId, input.productId, input.email);
   const result = await locked(statsId, input.productId, async (): Promise<SaveResult> => {
-    const [raw, size] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["HGET", productKey(statsId, input.productId), id],
       ["HLEN", productKey(statsId, input.productId)],
-    ]);
+    ]), 2);
+    // Only in their exact shape (audit SG2, CX-123 rule 24): the buyer's
+    // review as text, or null when they have none yet, and the count of the
+    // product's reviews as a whole number. Anything else lets no review past
+    // the ceiling: thrown, and the review page says nothing was changed.
+    const raw = replies?.[0];
+    const size = countOf(replies?.[1]);
+    if (!replies || (raw !== null && typeof raw !== "string") || size === null) throw new UnknownReplyError("a product's reviews or their count");
     const before = parseReview(raw);
-    if (!before && Number(size) >= MAX_REVIEWS_PER_PRODUCT) return { state: "full" };
+    if (!before && size >= MAX_REVIEWS_PER_PRODUCT) return { state: "full" };
     const review: Review = {
       id,
       productId: input.productId,
@@ -389,14 +402,53 @@ async function payEntry(statsId: string, pi: string, member: string): Promise<st
   return list.slice(-20).join(";");
 }
 
+/**
+ * A review's field as read for a deletion (CX-123 rule 24): null only when it is confirmed absent; the review when it
+ * reads. A reply in another shape, or a stored review that does not read, throws UnknownReplyError, never "no review",
+ * so the deletion keeps it for the retry.
+ */
+function storedReview(raw: unknown, what: string): Review | null {
+  if (raw === null) return null;
+  const review = typeof raw === "string" ? parseReview(raw) : null;
+  if (!review) throw new UnknownReplyError(what);
+  return review;
+}
+
+/**
+ * A write's replies, each in its exact shape (CX-123 rule 24): one per command; for HDEL, ZREM, DEL and HSET a whole
+ * number no larger than the fields, members or keys it names; for ZREMRANGEBYSCORE any whole number; "OK" for a SET.
+ * Null for anything else, and the caller says the write as unknown.
+ */
+function exactWriteReplies(replies: unknown, commands: (string | number)[][]): unknown[] | null {
+  const list = repliesFor(replies, commands.length);
+  if (!list) return null;
+  for (let i = 0; i < commands.length; i += 1) {
+    const [name, , ...rest] = commands[i];
+    const reply = list[i];
+    if (name === "SET") {
+      if (reply !== "OK") return null;
+      continue;
+    }
+    const count = countOf(reply);
+    const most =
+      name === "HDEL" || name === "ZREM" ? rest.length : name === "DEL" ? rest.length + 1 : name === "HSET" ? rest.length / 2 : name === "ZREMRANGEBYSCORE" ? Number.MAX_SAFE_INTEGER : -1;
+    if (count === null || count > most) return null;
+  }
+  return list;
+}
+
 /** Deletes a buyer's own review. Its stars leave the average with it. */
 export async function deleteReview(statsId: string, productId: string, id: string, room: DataStore): Promise<"deleted" | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
+  const what = "a buyer's review (its deletion)";
   const result = await locked(statsId, productId, async () => {
-    const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
-    const gone = parseReview(raw);
+    // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape, or a stored
+    // review that does not read, throws, so the review is kept and its deletion is never said as done.
+    const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+    if (!read) throw new UnknownReplyError(what);
+    const gone = storedReview(read[0], what);
     if (!gone) return "missing" as const;
-    const [removed] = await redisPipeline([
+    const deletion: (string | number)[][] = [
       ["HDEL", productKey(statsId, productId), id],
       ["ZREM", visibleKey(statsId, productId), id],
       ["ZREM", allKey(statsId), `${productId}|${id}`],
@@ -404,12 +456,24 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it. One hidden or
       // refunded was never counted, and takes none away.
       ...(counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
-    ]);
+    ];
+    // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
+    // (below) before it is said as deleted or thrown.
+    const replies = exactWriteReplies(await redisPipeline(deletion), deletion);
     // Its room given back only once its own HDEL answered that it removed the review: never twice for two
     // deletions racing. A request that failed may still have run the HDEL (an error on another command); the room
     // then stays counted, more than is used, never less.
-    if (Number(removed) === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
+    if (replies?.[0] === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
+    // Replies in an unknown shape: the field is read again, exactly. Confirmed absent means its HDEL ran, so the review
+    // is deleted (the caller drops or hands over its photo; its room stays counted, as above). Still there, or read
+    // again in another shape, throws.
+    let removed = replies !== null;
+    if (!removed) {
+      const again = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+      removed = again !== null && again[0] === null;
+    }
     await recount(statsId, productId);
+    if (!removed) throw new UnknownReplyError(what);
     return "deleted" as const;
   });
   return result;
@@ -684,27 +748,59 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
 /**
  * Deletes every review one buyer wrote in this store (lib/person-erasure.ts),
  * as their own delete does: its stars leave the average with it. Returns the
- * photos to delete from the picture folder.
+ * photos to delete from the picture folder; each also goes into `files`, when
+ * given, before its review's delete is tried. `leaving`, when given, is handed
+ * every review found before the first is deleted (the store page's quotes,
+ * lib/store-quotes.ts); when it throws, this throws. The caller keeps the
+ * quotes again once this returns, from the reviews as they then stand.
  */
-export async function forgetReviewsPerson(statsId: string | null, productIds: string[], email: string, room: DataStore): Promise<{ records: number; photos: string[] }> {
+export async function forgetReviewsPerson(
+  statsId: string | null,
+  productIds: string[],
+  email: string,
+  room: DataStore,
+  files?: string[],
+  leaving?: (reviews: Review[]) => Promise<void>,
+): Promise<{ records: number; photos: string[] }> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return { records: 0, photos: [] };
   const wanted = productIds.filter((p) => PRODUCT_ID_PATTERN.test(p));
   const ids = wanted.map((p) => reviewId(statsId, p, email));
-  const raws = wanted.length ? await redisPipeline(wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]])) : [];
+  const what = "a person's reviews (their erasure)";
+  // Read exactly (CX-123 rule 24), every one before anything is deleted: only a confirmed absent field is "no review".
+  // A reply in another shape, or a stored review that does not read, throws, so the erasure is never said as done
+  // while the review (name, words, photo) is still there.
+  const raws = wanted.length ? repliesFor(await redisPipeline(wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]])), wanted.length) : [];
+  if (!raws) throw new UnknownReplyError(what);
+  const reviews = raws.map((raw) => storedReview(raw, what));
+  const found = reviews.filter((review): review is Review => review !== null);
+  // Their words leave the store page's quotes before any review goes: when that fails, every review is still here
+  // for the retry to find them by.
+  if (leaving && found.length) await leaving(found);
   let records = 0;
   const photos: string[] = [];
   for (let i = 0; i < wanted.length; i += 1) {
-    const review = parseReview(raws[i]);
+    const review = reviews[i];
     if (!review) continue;
-    if ((await deleteReview(statsId, wanted[i], ids[i], room)) !== "deleted") throw new Error("a review could not be deleted just now");
-    records += 1;
-    if (review.photo?.path) photos.push(review.photo.path);
+    // Its payment's list first and the review itself last: whatever fails on the way, a retry finds the review again
+    // and does every step once more (each is the same the second time).
     if (review.pi) {
       const member = `${wanted[i]}|${ids[i]}`;
-      const [raw] = await redisPipeline([["HGET", payKey(statsId), review.pi]]);
-      const rest = (typeof raw === "string" ? raw.split(";") : []).filter((m) => m && m !== member);
-      await redisPipeline([rest.length ? ["HSET", payKey(statsId), review.pi, rest.join(";")] : ["HDEL", payKey(statsId), review.pi]]);
+      const read = repliesFor(await redisPipeline([["HGET", payKey(statsId), review.pi]]), 1);
+      const raw = read?.[0];
+      // An unknown read is never an empty list: that would delete the other reviews this payment paid for.
+      if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError(`${what} (its payment's list)`);
+      const rest = (raw === null ? [] : raw.split(";")).filter((m) => m && m !== member);
+      const change: (string | number)[][] = [rest.length ? ["HSET", payKey(statsId), review.pi, rest.join(";")] : ["HDEL", payKey(statsId), review.pi]];
+      if (!exactWriteReplies(await redisPipeline(change), change)) throw new UnknownReplyError(`${what} (its payment's list)`);
     }
+    // Its photo is handed to the eraser's files before the delete is tried: the review is being erased anyway, and a
+    // delete that ran but answered in an unknown shape leaves nothing for the retry to find the photo by.
+    if (review.photo?.path) {
+      photos.push(review.photo.path);
+      files?.push(review.photo.path);
+    }
+    if ((await deleteReview(statsId, wanted[i], ids[i], room)) !== "deleted") throw new Error("a review could not be deleted just now");
+    records += 1;
   }
   return { records, photos };
 }

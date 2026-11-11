@@ -6,9 +6,13 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { CREATOR, readMembers, within } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
 import { MAX_CHAT_TEXT, clearRoom, lastSaid, room, say, unsay } from "@/lib/community-chat";
+import { wholeUnits } from "@/lib/community-chat-rules";
 import { grantRoom } from "@/lib/chat-grant";
 import { isTalking } from "@/lib/chat-pace";
 import { takeBuyerAction } from "@/lib/buyer-actions";
+
+/** What the page shows for a reason it does not know, or "unknown": the room's honest "could not confirm" sentence. */
+const unconfirmed = () => Response.json({ ok: false, error: "unknown" }, { status: 503, headers: { "Cache-Control": "no-store" } });
 
 /**
  * The room: reading what is new, and saying something.
@@ -63,11 +67,28 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  try {
+    return await act(request);
+  } catch (error) {
+    // Redis did not answer, or answered a count in a shape nobody knows
+    // (CX-123 rule 24): whether the message went in is not known, so the
+    // page says it could not be confirmed, in the store's language, and asks
+    // to check the room before sending again (refusals.unknown).
+    console.error("a community room action failed", error);
+    return unconfirmed();
+  }
+}
+
+async function act(request: NextRequest): Promise<Response> {
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
   // Read only as far as 8_000 bytes, whether or not a length was declared (docs/security-audit-2026-10-18.md, MM-SA-10).
   const body = (await limited(request, 8_000).then((r) => r.json()).catch(() => null)) as Record<string, unknown> | null;
   if (!body) return Response.json({ ok: false, error: "bad" }, { status: 400 });
-  const text = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+  // A lone half of a surrogate pair is made U+FFFD (wholeUnits): JSON sends
+  // it escaped in 6 bytes, and a look at the room is priced at 3 a unit
+  // (lib/chat-pace.ts, LOOK_MOST_BYTES). Done after the cut, which can
+  // split a pair.
+  const text = (value: unknown, max: number) => (typeof value === "string" ? wholeUnits(value.trim().slice(0, max)) : "");
 
   const handle = normaliseHandle(text(body.handle, 60));
   const store = handle ? await storeForHandle(handle) : null;
@@ -97,7 +118,7 @@ export async function POST(request: NextRequest) {
       // room used to tell.
       return Response.json({ ok: false, error: "hourly" }, { status: 429 });
     }
-    const name = owner ? store.name : viewer.member?.n || "A member";
+    const name = wholeUnits(owner ? store.name : viewer.member?.n || "A member");
     const said = await say(id, config.chat, key, owner, text(body.text, MAX_CHAT_TEXT), name);
     if (!said.ok) {
       return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : said.reason === "unknown" ? 503 : 400 });

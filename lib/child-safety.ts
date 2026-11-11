@@ -273,6 +273,12 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 export const HIDE_DUE = "nl:csa:hide";
 /** How long a held product whose taking off did not go through waits before the next try: the job's own hour. */
 export const HIDE_RETRY_MS = 3_600_000;
+/**
+ * How much earlier than HIDE_RETRY_MS a product tried and not confirmed off is due again: the next hourly run may
+ * start a little before a full hour after this one's `now` (cron jitter, a faster claim), and it must find it due,
+ * never leave it visible a second hour.
+ */
+export const HIDE_RETRY_SLACK_MS = 300_000;
 /** The most held products one run tries to take off; the rest wait for the next run, by when each is due. */
 export const HIDES_PER_RUN = 25;
 /**
@@ -322,7 +328,7 @@ async function hideOne(member: string, lockWaitMs: number): Promise<"hidden" | "
 /**
  * The hourly job's step (app/api/cron/quiet): tries to take off the store each held product whose taking off did not
  * go through (holdReported), up to HIDES_PER_RUN of those due, and lets each go only once it is confirmed off or has
- * nothing left to take off; anything else is tried again an hour later. It tries no product once `until` (by the clock,
+ * nothing left to take off; anything else is tried again by the next hourly run. It tries no product once `until` (by the clock,
  * HIDE_BUDGET_MS from the call unless the caller gives less) is past, and waits at most HIDE_LOCK_WAIT_MS, and never
  * past `until`, for a busy store: what it did not reach stays due as it was, for the next run. Never throws: a queue
  * that cannot be read is left for the next run.
@@ -348,8 +354,8 @@ export async function hideHeldProducts(now = Date.now(), until = Date.now() + HI
       return "waiting" as const;
     });
     out[done] += 1;
-    // Tried again in an hour (only while it is still there: XX); if this write is lost it is simply due again sooner.
-    const next: (string | number)[] = done === "waiting" ? ["ZADD", HIDE_DUE, "XX", now + HIDE_RETRY_MS, member] : ["ZREM", HIDE_DUE, member];
+    // Tried again by the next hourly run (only while it is still there: XX); if this write is lost it is simply due again sooner.
+    const next: (string | number)[] = done === "waiting" ? ["ZADD", HIDE_DUE, "XX", now + HIDE_RETRY_MS - HIDE_RETRY_SLACK_MS, member] : ["ZREM", HIDE_DUE, member];
     await redisPipeline([next]).catch(() => console.error("a waiting child-safety hide could not be moved on"));
   }
   if (out.waiting) console.error(`child safety: ${out.waiting} held product(s) still waiting to be taken off the store`);

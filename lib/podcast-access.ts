@@ -88,7 +88,22 @@ export async function feedToken(store: Store, productId: string, email: string):
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
   // Listed with its product in the same write (audit A1), so removing the product finds this feed and deletes it.
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)], ["SADD", listenersKey(sid, productId), addressKey(email)]]);
-  return made === "OK" ? token : null;
+  return made === "OK" && (await stillIndexed(grant, token)) ? token : null;
+}
+
+/**
+ * After a grant is written, whether the index still leads to its token (Claude 4's focal on #3473, MEDIUM): a removal
+ * or an erasure that deleted the index (and the grant) between the index read and this write would otherwise leave a
+ * grant holding the address that no index, no list and no erasure reaches. When the index no longer leads to it, or its
+ * read is unknown, the grant just written is deleted and no link is given; a deletion not confirmed throws
+ * UnknownReplyError. While the index leads to it, any later removal or erasure deletes both in one DEL.
+ */
+async function stillIndexed(grant: FeedGrant, token: string): Promise<boolean> {
+  if ((await indexedToken(grant.s, grant.p, grant.e)) === token) return true;
+  const reply = repliesFor(await redisPipeline([["DEL", tokenKey(token)]]), 1);
+  const gone = reply ? countOf(reply[0]) : null;
+  if (gone === null || gone > 1) throw new UnknownReplyError("a podcast feed's grant written after its index was deleted");
+  return false;
 }
 
 /**
@@ -102,7 +117,7 @@ async function withGrant(store: Store, token: string, grant: FeedGrant): Promise
   if (held === undefined) return null;
   if (held !== null) return sameGrant(held, grant) ? token : null;
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"], ["SADD", listenersKey(grant.s, grant.p), addressKey(grant.e)]]);
-  if (made === "OK") return token;
+  if (made === "OK") return (await stillIndexed(grant, token)) ? token : null;
   if (made !== null) return null;
   // null: another call wrote it first; hand it out only if it is this address's grant.
   const again = await grantOf(token);

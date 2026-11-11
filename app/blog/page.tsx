@@ -43,7 +43,7 @@ export default function BlogIndexPage() {
               No hacks, no invented case studies. What to charge, what the page has to say, where the money lands, and
               what each platform really costs you on a sale.
             </p>
-            <p className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-ink-mute">
+            <p className="mt-6 flex max-w-[46ch] flex-wrap items-center gap-x-5 gap-y-2 text-sm text-ink-mute">
               <span>{`${posts.length} articles`}</span>
               <span aria-hidden="true">·</span>
               <span>{latest ? `Written by us, latest ${formatPostDate(latest.date)}` : "Written by us"}</span>
@@ -55,7 +55,7 @@ export default function BlogIndexPage() {
 
         <section className="container-page py-10" aria-labelledby="creator-guides-title" data-creator-guides>
           <h2 id="creator-guides-title" className="t-h2">Start with the offer you want to build</h2>
-          <p className="mt-4 max-w-3xl text-ink-soft">Five practical guides: prepare the deliverable, explain its terms, test the access and review real records. Read the one that fits your work; none promises demand or earnings.</p>
+          <p className="mt-4 max-w-[46ch] text-ink-soft">Five practical guides: prepare the deliverable, explain its terms, test the access and review real records. Read the one that fits your work; none promises demand or earnings.</p>
           <ul className="mt-6 grid gap-3 sm:grid-cols-2">{CREATOR_GUIDE_SLUGS.map(slug=>{const guide=postBySlug(slug)!;return <li key={slug}><Link href={"/blog/"+slug} prefetch={false} className="block rounded-2xl border border-line bg-white p-5 font-semibold text-violet-deep underline underline-offset-4">{guide.title}</Link></li>;})}</ul>
         </section>
 
@@ -104,7 +104,7 @@ export default function BlogIndexPage() {
 
         <section className="container-page py-14 sm:py-20">
           <h2 className="t-h2">More to explore</h2>
-          <p className="mt-3 max-w-2xl text-ink-soft">
+          <p className="mt-3 max-w-[46ch] text-ink-soft">
             Pick a subject or search for a word. Every article is written by us and says where its facts about other companies come from.
           </p>
           <div className="mt-8">

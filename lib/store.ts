@@ -922,6 +922,20 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/**
+ * What a store record says of its takedown (lib/takedown.ts), read exactly (rule 24): absent or "" is a store that is
+ * on, a date is the day it was switched off, and anything else (a later version's shape after a rollback, true, a
+ * number, null) is unknown, which is never "on": it reads as switched off, so nothing sells or mails, and the next
+ * save keeps it so until a takedown is lifted on purpose (noteTakedown).
+ */
+const SUSPENDED_UNREADABLE = "unreadable";
+function parseSuspended(value: object): string {
+  if (!Object.hasOwn(value, "suspended")) return "";
+  const raw = (value as { suspended?: unknown }).suspended;
+  if (raw === "" || raw === undefined) return "";
+  return typeof raw === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw : SUSPENDED_UNREADABLE;
+}
+
 function parseStore(raw: unknown): Store | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -1045,7 +1059,7 @@ function parseStore(raw: unknown): Store | null {
       tips: parseTips(value.tips),
       kit: parseKit(value.kit),
       numbersLinks: parseLinks(value.numbersLinks),
-      suspended: typeof value.suspended === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.suspended) ? value.suspended : "",
+      suspended: parseSuspended(value),
       strikes: parseStrikes(value.strikes),
       faq: parseFaq(value.faq),
       intro: parseVideo(value.intro),

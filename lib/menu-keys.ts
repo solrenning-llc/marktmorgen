@@ -26,3 +26,9 @@ export function moveFocus(key: string, index: number, count: number, axis: "row"
   if (key === "End") return count - 1;
   return null;
 }
+
+
+/** Whether Tab should enter an already-expanded disclosure menu. */
+export function shouldEnterMenuOnTab(key: string, expanded: boolean): boolean {
+  return key === "Tab" && expanded;
+}

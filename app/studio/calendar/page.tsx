@@ -70,17 +70,20 @@ export default async function StudioCalendarPage({ searchParams }: Params) {
   const email = access.email.toLowerCase();
 
   // The team calls this person hosts here, and the time zone their week is written in.
-  const calls = await readKind(store, "call").catch(() => []);
-  const teams = await readTeams(store).catch(() => new Map<string, unknown>());
-  const hosting: string[] = [];
+  // Not read is not "none" (VR 2, rule 24): the section then says it could not be read, never "None yet".
+  const calls = await readKind(store, "call").catch(() => null);
+  const teams = await readTeams(store).catch(() => null);
+  const hosting: string[] | null = calls && teams ? [] : null;
   let tz = "UTC";
-  for (const product of calls) {
-    if (!product.call) continue;
-    const team = parseTeamSetup(teams.get(product.id), product.call);
-    const me = team?.hosts.find((h) => h.email === email);
-    if (!me) continue;
-    hosting.push(product.title);
-    if (tz === "UTC") tz = me.tz;
+  if (calls && teams && hosting) {
+    for (const product of calls) {
+      if (!product.call) continue;
+      const team = parseTeamSetup(teams.get(product.id), product.call);
+      const me = team?.hosts.find((h) => h.email === email);
+      if (!me) continue;
+      hosting.push(product.title);
+      if (tz === "UTC") tz = me.tz;
+    }
   }
   const view = await hostCalendarView(store, email, tz).catch((error) => {
     console.error("reading a host's calendar failed", error);

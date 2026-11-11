@@ -42,7 +42,7 @@ function when(ms: number): string {
  * busy times are read from, which Google calendars count and which one
  * bookings are written to, and how the last reading went (lib/host-calendar.ts).
  */
-export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCalendarView; pin: string; tz: string; hosting: string[] }) {
+export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCalendarView; pin: string; tz: string; hosting: string[] | null }) {
   const [view, setView] = useState(first);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -287,7 +287,11 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
           <h2 id="host-hosting-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
             Team calls you host here
           </h2>
-          {hosting.length ? (
+          {hosting === null ? (
+            <p className="mt-2 text-sm text-ink-soft" role="status">
+              We could not read which team calls you host just now. Reload the page in a minute to see them.
+            </p>
+          ) : hosting.length ? (
             <ul className="mt-3 space-y-1.5 text-sm text-ink-soft">
               {hosting.map((title) => (
                 <li key={title} className="break-words">

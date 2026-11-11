@@ -280,6 +280,23 @@ async function main(): Promise<void> {
   is("a possibly accepted message remains an explicit failure without another POST", [unknown.status, unknownAgain.status, outboundPosts - postsBefore, sent.length - sentBefore], [500, 500, 1, 0]);
   is("the original provider source remains available for reconciliation", (MAILS[uncertainId] as Record<string, unknown>).text, (MAILS[A] as Record<string, unknown>).text);
 
+  part("A creator's hourly count that cannot be read: a failure, and the retry is heard (Claude 2's and Claude 1's LOW on #3067)");
+  // withinLimit throws for a count it cannot read; the route used to answer 500 with the message still marked seen,
+  // so Resend's retry was dropped as a repeat.
+  const realPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const first = commands[0] ?? [];
+    if (first[0] === "SET" && String(first[1]).startsWith("nl:rl:creator-inbound:")) return [];
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  const countUnread = newMailLike(E);
+  const sentBeforeCount = sent.length;
+  const unreadCount = await POST(announce(countUnread, { id: "msg_count_unread" }));
+  redis.pipeline = realPipe;
+  is("answered with a failure, nothing sent", [unreadCount.status, sent.length - sentBeforeCount], [500, 0]);
+  const countRetry = await POST(announce(countUnread, { id: "msg_count_unread" }));
+  is("and the retry is heard and sent", [countRetry.status, ((await countRetry.json()) as { result?: string }).result, sent.length - sentBeforeCount], [200, "sent", 1]);
+
   part("Names and addresses");
   is("a name and an address", parseSender('"Doe, Jane" <jane@example.com>'), { name: "Doe, Jane", address: "jane@example.com" });
   is("a bare address", parseSender("jane@example.com"), { name: "", address: "jane@example.com" });

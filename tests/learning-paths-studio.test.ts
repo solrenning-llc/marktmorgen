@@ -114,6 +114,7 @@ async function main(): Promise<void> {
   is("its name field has a label", /<label[^>]*for="path-0-name"/.test(html) && html.includes('id="path-0-name"'), true);
   is("the name field keeps to the rules' limit", html.includes(`maxLength="${MAX_PATH_NAME}"`), true);
   is("the order is a choice of two, said in words", [html.includes('type="radio"'), html.includes("One after another"), html.includes("In any order")], [true, true, true]);
+  is("the order is said as a suggestion that never locks a course the student has (review of #3674)", [html.includes("opens when"), html.includes("can still open any course they have")], [false, true]);
   is("the courses are listed in the path's order, by title", html.indexOf("Bread School") < html.indexOf("Pastry School"), true);
   is("a course moves with buttons, never only by dragging (2.5.7)", html.includes("Move up") && html.includes("Move down"), true);
   is("one save for the whole list", (html.match(/type="submit"/g) ?? []).length, 1);
@@ -129,6 +130,7 @@ async function main(): Promise<void> {
   part("The page");
   const page = readFileSync("app/studio/learning-paths/page.tsx", "utf8");
   is("only for whoever may change products", page.includes('studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "products")'), true);
+  is("its words never say a course opens only after another", page.includes("opens when"), false);
   is("it draws the studio's trail", page.includes("<StudioTrail"), true);
   is("the courses are read exactly, never dropped when unread", page.includes('readKindExact(store, "course")'), true);
 

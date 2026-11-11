@@ -141,7 +141,10 @@ async function dailyRoom(): Promise<number> {
     if (typeof field.value !== "string") return 0;
     const used = confirmedCount(field.value, 0);
     return used === null ? 0 : Math.max(0, cap - used);
-  } catch { return 0; }
+  } catch (error) {
+    console.error("reading the daily email usage failed", error);
+    return 0;
+  }
 }
 
 /**

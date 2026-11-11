@@ -97,6 +97,29 @@ export async function markTakenDown(store: Owner, productId: string): Promise<vo
   await revokeDraftPreview(store, productId);
 }
 
+/**
+ * Whether this draft has a live preview now. Missing records and expired or malformed records are not live;
+ * Redis replies outside their exact shape throw, so a failed read never authorizes a takedown.
+ */
+export async function hasDraftPreview(store: Owner, productId: string, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
+  const statsId = statsOf(store);
+  const pointer = stringOrNull((await exactly([["GET", pointerKey(statsId, productId)]]))[0], "pointer");
+  if (pointer === null) return false;
+  if (!HASH.test(pointer)) throw new Error("A preview link pointer could not be read");
+  const [rawValue, downValue] = await exactly([["GET", lookupKey(pointer)], ["GET", downKey(statsId, productId)]]);
+  const raw = stringOrNull(rawValue, "record");
+  if (raw === null || stringOrNull(downValue, "taken-down mark") !== null) return false;
+  let record: unknown;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  const { s, p, e } = record as Record<string, unknown>;
+  return s === statsId && p === productId && typeof e === "number" && Number.isInteger(e) && e > now;
+}
+
 /** Whether the product was taken down and not published since; a reply that cannot be read throws. */
 export async function isTakenDown(store: Owner, productId: string): Promise<boolean> {
   const mark = stringOrNull((await exactly([["GET", downKey(statsOf(store), productId)]]))[0], "taken-down mark");

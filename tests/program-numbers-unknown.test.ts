@@ -240,20 +240,23 @@ async function main(): Promise<void> {
     ["HDEL", `nl:aff:${sid}:payouts`, "p_one"],
   ]);
 
-  await redisPipeline([["DEL", "nl:dir:page"], ["HSET", `nl:aff:${sid}:sales`, "cs_bad", sale({ base: 1e307, rate: 100 })]]);
+  // Rule 23 (merge of main into #2921): a build whose numbers read failed sets the build mark to "failed" for ten
+  // minutes (lib/affiliate-directory.ts, FAILED_SECONDS), so each read below drops the mark with the kept page, as
+  // those ten minutes passing would.
+  await redisPipeline([["DEL", "nl:dir:page", "nl:dir:build"], ["HSET", `nl:aff:${sid}:sales`, "cs_bad", sale({ base: 1e307, rate: 100 })]]);
   const overflowRow = (await readDirectory()).find((r) => r.handle === "breadhouse");
   is("the directory shows the row with an overflowing sale without numbers, never $∞", overflowRow?.numbers, null);
   const [keptOverflow] = await redisPipeline([["GET", "nl:dir:page"]]);
   const keptOverflowRow = typeof keptOverflow === "string" ? (JSON.parse(keptOverflow) as { handle: string; numbers: unknown }[]).find((r) => r.handle === "breadhouse") : undefined;
   is("and the page kept for the next visitors holds no $0 for it", keptOverflowRow === undefined || keptOverflowRow.numbers === null, true);
-  await redisPipeline([["DEL", "nl:dir:page"], ["HDEL", `nl:aff:${sid}:sales`, "cs_bad"]]);
+  await redisPipeline([["DEL", "nl:dir:page", "nl:dir:build"], ["HDEL", `nl:aff:${sid}:sales`, "cs_bad"]]);
 
-  await redisPipeline([["DEL", "nl:dir:page"], ["HSET", `nl:aff:${sid}:payouts`, "p_bad", "{not json"]]);
+  await redisPipeline([["DEL", "nl:dir:page", "nl:dir:build"], ["HSET", `nl:aff:${sid}:payouts`, "p_bad", "{not json"]]);
   is("the directory shows the row with a bad record without numbers", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers, null);
-  await redisPipeline([["DEL", "nl:dir:page"], ["HDEL", `nl:aff:${sid}:payouts`, "p_bad"]]);
+  await redisPipeline([["DEL", "nl:dir:page", "nl:dir:build"], ["HDEL", `nl:aff:${sid}:payouts`, "p_bad"]]);
 
   part("The public directory: the row without numbers, never zeros");
-  await redisPipeline([["DEL", "nl:dir:page"]]);
+  await redisPipeline([["DEL", "nl:dir:page", "nl:dir:build"]]);
   malform((c) => c[0] === "HGETALL" && c[1] === `nl:aff:${sid}:payouts`, null);
   const rows = await readDirectory();
   restore();
@@ -263,7 +266,7 @@ async function main(): Promise<void> {
   const [kept] = await redisPipeline([["GET", "nl:dir:page"]]);
   const keptRow = typeof kept === "string" ? (JSON.parse(kept) as { handle: string; numbers: unknown }[]).find((r) => r.handle === "breadhouse") : undefined;
   is("and any page kept for the next visitors holds no zeros for it", keptRow === undefined || keptRow.numbers === null, true);
-  await redisPipeline([["DEL", "nl:dir:page"]]);
+  await redisPipeline([["DEL", "nl:dir:page", "nl:dir:build"]]);
   is("read exactly again, the directory shows the real numbers", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers?.paidCents, 300);
 
   done();

@@ -50,6 +50,8 @@ import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
 import { POLL_VOTE_REQUEST_UNITS } from "@/lib/email-poll-rules";
+import { POLL_VALUE_BYTES, pollResultsUnits } from "@/lib/email-polls";
+import { MAX_LEADS } from "@/lib/contact-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
@@ -333,6 +335,13 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   const billingRequest = request("heavy", 40, 200_000) + PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD;
   assert.ok(billingRequest >= 1.05 * PLAN_INVOICES_READ, `${billingRequest} < 1.05 x ${PLAN_INVOICES_READ}`);
   console.log(`a store's plan invoices: $${PLAN_INVOICES_READ.toFixed(6)} at most, inside one billing request priced at $${billingRequest.toFixed(6)}`);
+  // A poll's totals read every kept vote, one HVALS, after pollResultsUnits(total) studio requests are taken: more than
+  // what that many votes cost at a whole studio request's shape, at every size up to the largest list (lib/email-polls.ts).
+  for (const total of [0, 1, 4_999, 5_000, 5_001, 10_000, 50_000, MAX_LEADS]) {
+    const read = request("studio", 1, total * POLL_VALUE_BYTES);
+    assert.ok(pollResultsUnits(total) * UNIT_COST.studio >= read, `${total} people: ${pollResultsUnits(total)} x ${UNIT_COST.studio} < ${read}`);
+  }
+  console.log(`a poll's totals: ${pollResultsUnits(10_000)} studio requests for an email to 10,000 people, ${pollResultsUnits(MAX_LEADS)} at the largest list`);
   // Making a store's count of its tasks again reads every task once, after tasksRecountUnits(people) studio requests are taken:
   // more than four commands and what that many people can keep cost, at a whole studio request's shape (lib/crm.ts).
   for (const people of [1, 3, 49, 50, 51, MAX_STORE_TASKS]) {

@@ -26,6 +26,19 @@ export const POLL_RESULTS_DAYS = 30;
 /** One vote as kept: a place of up to six digits, its answer's digit and what Redis keeps beside a field. */
 export const POLL_VOTE_BYTES = 6 + 1 + 64;
 
+/**
+ * What one kept vote adds to the answer of HVALS at the most, its digit with
+ * the reply's quotes, comma and framing: the votes' read is sized by it.
+ */
+export const POLL_VALUE_BYTES = 8;
+/** Bytes of votes a studio request pays for (UNIT_COST.studio is priced at 50 KB; held in tests/plan-cost-registry.test.ts). */
+const RESULTS_BYTES_PER_UNIT = 40_000;
+/** Studio requests taken before a poll's votes are read, for an email that went to `total` people: never fewer than one. */
+export function pollResultsUnits(total: number): number {
+  const people = Number.isSafeInteger(total) && total > 0 ? Math.min(total, MAX_LEADS) : 0;
+  return Math.max(1, Math.ceil((people * POLL_VALUE_BYTES) / RESULTS_BYTES_PER_UNIT));
+}
+
 const BROADCAST_ID = /^[A-Za-z0-9_-]{6,64}$/;
 export const pollKey = (broadcastId: string) => `nl:mail:bc:${broadcastId}:poll`;
 

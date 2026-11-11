@@ -291,6 +291,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               money: broadcastMoney(revenue, b.id),
               visits: visits?.[b.id] ?? null,
               test: b.test,
+              poll: b.poll ?? null,
               published: letterPath(b.id),
               publishedMembers: letterMembers(b.id),
               publishedUnknown: published === null,

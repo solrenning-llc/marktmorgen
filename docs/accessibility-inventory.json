@@ -1380,6 +1380,7 @@
     "components/email-field.tsx",
     "components/email-input.tsx",
     "components/email-poll-composer.tsx",
+    "components/email-poll-results.tsx",
     "components/email-poll-view.tsx",
     "components/email-studio.tsx",
     "components/email-suggestion.tsx",

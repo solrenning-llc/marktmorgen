@@ -11,6 +11,8 @@ import {
   storeForHandle,
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { studioPollResults } from "@/lib/email-poll-results";
+import { countStudio } from "@/lib/studio-route";
 import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
@@ -75,6 +77,8 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
   // The two sequences written for the creator. Made switched off, but a
   // sequence all the same, so it is for whoever may reach the list.
   starters: "send",
+  // A poll's totals (125 [F2-EMAIL-POLLS]): how many chose each answer, never who.
+  "poll_results": "draft",
 };
 
 /**
@@ -126,6 +130,14 @@ export async function POST(request: NextRequest) {
   try {
     let store = await storeForEmail(ref);
     if (!store) return fail("none");
+
+    if (action === "poll_results") {
+      // The record is read inside this request's own unit; the votes only after the units their size needs are taken.
+      const read = await studioPollResults(store, text(body.id, 40), async (units) => (await countStudio(store!, null, units)).ok, Date.now());
+      if (read.state === "ok") return Response.json({ ok: true, ...read });
+      if (read.state === "used") return fail("studio_used", 429);
+      return fail(read.state === "none" ? "poll_none" : "poll_unknown", read.state === "none" ? 404 : 503);
+    }
 
     if (action === "settings") {
       const fromName = text(body.fromName, 200).replace(/\s+/g, " ").trim().slice(0, MAX_MAIL_NAME);

@@ -1233,6 +1233,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
+      // A poll's totals take pollResultsUnits(total) more before its votes are read (125 [F2-EMAIL-POLLS], 11 November 2026).
+      { file: "app/api/store/mail/route.ts", names: ["countStudio(store!, null, units)"] },
+      { file: "lib/email-poll-results.ts", names: ["take(pollResultsUnits(broadcast.total))"] },
       // The invoices of a store's own plan take one billing request of the day (the essential counter) before Stripe is asked, none without a plan subscription (601 [KB22] U5).
       { file: "lib/plan-invoices.ts", names: ["PLAN_INVOICES_PER_DAY", "PLAN_INVOICES_SHOWN", "takeEssentialBelow(store, PLAN_INVOICES_PER_DAY)", "await take()"] },
       { file: "lib/studio-route.ts", names: ["takeEssential", "takeEssentialBelow", 'essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400)'] },

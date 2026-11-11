@@ -39,6 +39,8 @@ import { subjectTestPreview, type SubjectTestPreview } from "@/lib/mail-test-pre
 import { readMailSchedule } from "@/lib/mail-schedule";
 import { PublishControl } from "@/components/letter-publish-control";
 import { PollComposer, emptyPoll, pollAsked } from "@/components/email-poll-composer";
+import { PollResults } from "@/components/email-poll-results";
+import type { EmailPoll } from "@/lib/email-poll-rules";
 import { channelName } from "@/lib/channel-names";
 import { type Narrow, ACTIVE_DAYS, MAX_SPENT, readSegmentSpend, QUIET_DAYS, type Segment } from "@/lib/segments-rules";
 
@@ -174,6 +176,8 @@ type BroadcastRow = {
   visits: number | null;
   /** The second subject line it tried, and how that went (lib/mail-test.ts). */
   test: SubjectTest | null;
+  /** The poll it carries (125 [F2-EMAIL-POLLS]); null or absent for none. */
+  poll?: EmailPoll | null;
   /** Where it is published on the store, or null when it is not (lib/letters.ts). */
   published?: string | null;
   /** Whether it is published could not be read: then nothing is offered that would publish it on a guess. */
@@ -1711,6 +1715,7 @@ function History({
             <AudienceSummary audience={b} products={products} currency={currency} />
             {b.note ? <p className="mt-1 text-sm text-ink-soft">{b.note}</p> : null}
             {b.test ? <TestLine test={b.test} status={b.status} /> : null}
+            {b.poll && (b.status === "sent" || b.status === "sending") ? <PollResults id={b.id} poll={b.poll} /> : null}
             {/* Said only for an email whose links were tagged: for an older
                 one nothing could be counted, and "no sales" would be a guess. */}
             {b.status === "sent" && b.tagged ? (

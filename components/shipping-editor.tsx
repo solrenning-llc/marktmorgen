@@ -55,7 +55,7 @@ export function ShippingEditor({ product }: { product: Product }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!current && shipProblem(product) !== null) return null;
-  const link = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
   const id = `ship-${product.id}`;
 
   async function send(shipping: Record<string, unknown> | null, said: string) {
@@ -124,7 +124,7 @@ export function ShippingEditor({ product }: { product: Product }) {
         ) : (
           <button
             type="button"
-            className={`block ${link}`}
+            className={`flex ${link}`}
             aria-disabled={ready ? undefined : true}
             disabled={!ready}
             onClick={() => {

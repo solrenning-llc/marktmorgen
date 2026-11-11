@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   // (Claude 5's LEVE, Claude 1's LOW on #2850): every language says who cannot be paid.
   for (const language of LANGUAGES) is(`${language}: it says Marktmorgen sells no placement`, orderLine(language)?.includes("Marktmorgen"), true);
   // Portuguese says "a Marktmorgen" (feminine) everywhere else in lib/buyer-words (Claude 4's LOW on #2850).
-  is("pt: Marktmorgen is feminine, as everywhere else", /\bà Marktmorgen\b/.test(orderLine("pt") ?? ""), true);
+  is("pt: Marktmorgen is feminine, as everywhere else", (orderLine("pt") ?? "").includes(" à Marktmorgen "), true);
 
   part("The store page shows it beside the results");
   for (const language of LANGUAGES) {

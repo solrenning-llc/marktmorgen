@@ -212,10 +212,12 @@ async function main(): Promise<void> {
       bunny.length = 0;
       paidReceipt = receipt;
       const answer = await requestAutoCaptions(store, PATH, "en", ["es"]);
+      // The one call to the service is the free read of the video's caption list before the charge (askedFree,
+      // Claude 2's MEDIUM on #3427): no work is asked of it.
       is("unknown payment " + JSON.stringify(receipt) + " closes supplier admission",
-        [answer.ok, bunny.length, stripePaths().filter((p) => p.endsWith("/pay")).length,
+        [answer.ok, bunny.map((b) => `${b.method} ${b.path}`), stripePaths().filter((p) => p.endsWith("/pay")).length,
           stripePaths().filter((p) => p.endsWith("/void")).length, redis.run(["GET", pending])],
-        [false, 0, 1, 1, null]);
+        [false, [`GET /videos/${VIDEO}`], 1, 1, null]);
     }
   } finally {
     paidReceipt = undefined;

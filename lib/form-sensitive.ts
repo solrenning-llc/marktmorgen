@@ -38,6 +38,8 @@ const TOPIC_QUESTION = /^(?:how|what|why|which|when|where|who|do|did|does|would|
 const ABOUT_QUESTION = /^(?!(?:how|what)\s+about\b)(?:how|what|why|which|when|where|who|do|did|does|have|has|should)\b/i;
 // A sentence that asks the visitor to type or hand over something ("Type it here").
 const REQUEST_VERB = /^(?:(?:please|kindly|now|then|and|also)\s+)*(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:enter|provide|type|input|write|share|send|tell|give|confirm|re[-\s]?enter|put|paste|fill)\b/i;
+// The same verbs handing over "it" anywhere in a clause ("If yes type it in the box").
+const REQUEST_IT = /\b(?:enter|provide|type|input|write|share|send|tell|give|confirm|re[-\s]?enter|put|paste|fill)\s+(?:(?:in|out|down|us|me)\s+)?(?:it|them|that|this)\b/i;
 
 function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.
@@ -52,8 +54,11 @@ function asksForPassword(label: string): boolean {
     // ("How do you remember your passwords?", "Which of your apps needs a new password most often?").
     if (!ABOUT_QUESTION.test(sentence) && OWN_SECRET.test(sentence)) return true;
   }
-  // A question about the secret followed by a request for "it" ("Do you have your password handy? Type it here").
-  if (OWN_SECRET.test(request) && sentences.some((sentence) => REQUEST_VERB.test(sentence))) return true;
+  // A question about the secret followed by a request for "it" ("Do you have your password handy? Type it here"),
+  // also after a comma or a short opener ("If yes, type it in the box", "Great, enter it here"). Clauses that are
+  // themselves questions ("Do you write them down?") ask about the secret, not for it.
+  const clauses = request.split(/[?!.:;,\n]+/).map((part) => part.trim()).filter(Boolean);
+  if (OWN_SECRET.test(request) && clauses.some((clause) => !ABOUT_QUESTION.test(clause) && (REQUEST_VERB.test(clause) || REQUEST_IT.test(clause)))) return true;
 
   // Punctuation is a separator in ordinary credential labels ("Email, password"
   // and "Gmail — password"), not a reason to let the secret through.

@@ -204,6 +204,35 @@ async function main(): Promise<void> {
     is("and the session stays used after its mark expires", await left(PAID), 2);
   }
 
+  // Codex C2 (6781681699) and Claude 4 (6785022039) on #3487: writeUsed took any number in SADD's place, and any array,
+  // as "written down", so the mark went on with no paid session in the package's record.
+  for (const [label, answer] of [["SADD answers -1", [-1, 1]], ["one reply only", [1]]] as [string, unknown[]][]) {
+    part(`The package's write answered in another shape (${label}): no mark, tried again`);
+    const { store, product } = await setUp();
+    const PAID = checkoutId(label.startsWith("SADD") ? "s" : "o");
+    await buy(store, product, PAID);
+    const session = sessionId(label.startsWith("SADD") ? "s" : "o", 0);
+    await holdSession(store, PAID, session, nowSeconds() - 3_600);
+    const pipeline = redis.pipeline.bind(redis);
+    let bent = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!bent && commands[0]?.[0] === "SADD" && String(commands[0][1]).endsWith(":used")) {
+        bent = true;
+        return answer as never;
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    try {
+      is(`${label}: the confirmation throws, to be tried again`, await confirmFromPackage(store, product, PAID, session), "threw");
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    is(`${label}: and wrote no mark`, redis.run(["EXISTS", markOf(session)]), 0);
+    is(`${label}: tried again, it confirms`, await confirmFromPackage(store, product, PAID, session), "confirmed");
+    moveBothClocks(434 * DAY);
+    is(`${label}: and the session stays used after its mark expires`, await left(PAID), 2);
+  }
+
   part("A move made before the confirmation writes the session's mark: it writes the session down with its package first");
   {
     const { store, product } = await setUp();

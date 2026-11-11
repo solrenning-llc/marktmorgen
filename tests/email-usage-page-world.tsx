@@ -74,6 +74,8 @@ export function isBillingConfigured() { return false; }
 export function trialOffered() { return false; }
 export function planDisputed() { return false; }
 export async function listSegments() { return []; }
+// The real constant: this proof does not swap it, and the page prints it.
+export { MAX_WAITS_PER_RUN } from "../lib/flow-limits";
 export function activeFlowLimit() { return 1; }
 export function dailyRunLimit() { return 1; }
 export async function listHeld() { return []; }

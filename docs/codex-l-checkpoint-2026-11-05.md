@@ -1291,3 +1291,23 @@ console.log(JSON.stringify({scope:"extracted exact source function bodies, synth
 - #3617 `58a6b031d61aaaac8c0ee3b3f0e285cbb5520995`: direct API now mergeable=false, superseding earlier ready snapshot; conflict resolution required; comment 6807138809.
 - No product branch writes. No fresh CI-green claim.
 
+
+
+## 11/11/2026 19h13 Fortaleza — rodada de revisão sem push (ALL-120)
+
+- Estado fresco antes de encerrar: `main` = `7b04206e79d142e08472329247876e9e649420e3`; busca por issue aberta "MAIN VERMELHO" = vazia; Actions queued = **664** (>300).
+- Por ALL-120, nenhum push de produto, rerun, merge, atualização de branch ou nova unidade de implementação foi enviado.
+- Dez revisões independentes concluídas no head exato, todas com **APPROVE (source review)** e sem alegação de CI verde:
+  - #3798 `c6b1304a391652c237ba5c53698af35b70c7da6b` — comentário 6808302790; CI queued/pending.
+  - #3797 `f15b5b16459043cc7159bd963556993ee4d55bf0` — comentário 6808302479; CI queued/pending.
+  - #3796 `23effc9219729172e69db0cd37247dc188cd328a` — comentário 6808302087; CI queued/pending.
+  - #3794 `edcc6693b6d4e63d5d3a41b67527e5b48fbcc2d0` — comentário 6808301295; documentação correta; CI queued/pending.
+  - #3793 `71674b78c241e9f7260b90c200e53676c8cd4d89` — comentário 6808303149; CI queued/pending.
+  - #3789 `f063eb2282440031be181ee8606456e4cdd6e734` — comentário 6808300829; agregados vermelhos lidos integralmente: dependência `entry-pilot: abandoned`, não falha do delta; demais checks pendentes.
+  - #3788 `964fb88d81e2d6455e31cc42bf8e089205ef6eed` — comentário 6808304209; CI queued/in progress.
+  - #3787 `2d3e4ea1aea9ef4ce1a69314556d022f957ef05f` — comentário 6808303532; log Mobile render candidate confirma o mesmo padrão de primeira amostra fria tratado em #3642; sem corretivo de produto; demais checks pendentes.
+  - #3777 `1896ac910d330339e43372bf750c96b334d8345f` — comentário 6808303887; nenhum run fresco do head observado.
+  - #3784 `0f1af0ced8ba6f835964e392c5cc0af50fb9c4fe` — comentário 6808301686; nenhum run fresco do head observado.
+- Nenhum PR foi marcado "ready for merge queue", pois nenhum dos dez tinha conjunto exato de gates concluído e favorável no snapshot.
+- Nenhum arquivo proibido, preço, limite visível, comissão, PLANS_ON_SALE, OPENING_REQUESTED, stripePlatformEligibilityReady, tax gate, art. 9a, Stripe ou revisão comercial foi alterado.
+- Próxima continuidade: em nova rodada, validar novamente main/MV/fila; com fila >300, seguir revisando heads ainda sem parecer Codex L; com fila <=300, voltar à ordem dos lotes e enviar no máximo um push por PR após auditoria fresca.

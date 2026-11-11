@@ -134,3 +134,16 @@ test("an entry taken out, with another store at the key, costs no more than the 
   const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
   assert.ok(tries * 3 <= replaced, `${tries} tries (${tries * 3} commands) priced inside the ${replaced} they replace`);
 });
+
+test("a pending entry is taken out by the idle pass at one script a run, inside the record's going it replaces (Codex on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const tries = Number(source.match(/const WITHDRAW_TRIES = (\d+);/)?.[1]);
+  const pending = source.slice(source.indexOf("async function withdrawPending"), source.indexOf("export async function eraseClosed"));
+  // One WITHDRAW_ENTRY script (EVAL, HGET, HDEL) per pending entry, never retried within the run.
+  assert.match(pending, /\["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw\]/);
+  assert.doesNotMatch(pending, /for \(let tries/);
+  // With another store at the key, the preparation's tries and the idle pass's one script of that same run stay inside
+  // the commands of the record's going that do not run (as in the test above).
+  const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
+  assert.ok((tries + 1) * 3 <= replaced, `${tries} tries and one idle script (${(tries + 1) * 3} commands) priced inside the ${replaced} they replace`);
+});

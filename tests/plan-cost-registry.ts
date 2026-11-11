@@ -1499,7 +1499,7 @@ export const KEY_NAME_BYTES = 128;
  * webhooks, email platform, phones, address, record and line in the walk.
  * Then the record's going (lib/store.ts, closeStoreRecord): the store's lock
  * (SET NX, tried again for LOCK_WAIT_MS: at most STORE_LOCK_TRIES), the record
- * read again (GET), the walk's entry written again when it names more (HSET),
+ * read again (GET), the walk's entry written again, no longer pending (HSET),
  * its id taken out of its account's list at the address the record read again
  * names too (one more SREM: an account moved since), the record deleted only
  * while the lock is still held (EVAL, GET, DEL) and the lock let go (EVAL,

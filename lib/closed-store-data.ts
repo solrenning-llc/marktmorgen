@@ -124,6 +124,13 @@ export type Batched = {
    * is never walked by its ids again, since by then another store may hold its address or key.
    */
   unfinished?: number;
+  /**
+   * Written before the store's record goes and not yet confirmed as this store's (prepareStore): rewritten without it
+   * under the store's lock right before the record is deleted. One still pending names a store whose record has not
+   * gone by this closing, or a key another store holds now (Codex on #3643): it is never walked, never finished and
+   * never starts a walk, and the idle pass takes it out (withdrawPending).
+   */
+  pending?: true;
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -199,7 +206,7 @@ return redis.call("HDEL", KEYS[1], ARGV[1])`;
 export class EntryNotWithdrawnError extends UnknownReplyError {}
 
 /** How many times prepareStore tries to take such an entry out before it throws EntryNotWithdrawnError. */
-const WITHDRAW_TRIES = 3;
+const WITHDRAW_TRIES = 2;
 
 /** Takes a store out of line: its plan was started again before its walk began. */
 export async function unmarkDue(ref: string): Promise<void> {
@@ -299,7 +306,8 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
     wrote = bytes;
   };
-  await write(entry);
+  // Pending until the record's going confirms it this store's (below): a pending entry is never walked (Codex on #3643).
+  await write({ ...entry, pending: true });
   // The record is read again under its lock right before it goes (closeStoreRecord), since all of the above worked
   // from the walk's first read: an id it names now and the entry does not (a photo put on meanwhile, through the photo
   // route's setPhotoId; an id made since) becomes a mark, and an address it moved to since one of the entry's, before
@@ -307,14 +315,16 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // Only ids never to be marks stay out: our own Stripe customer and subscription, its Stripe account (a mark already,
   // unless another store shares it) and its owner's address. The entry rewritten is confirmed or this throws, with the
   // record still there, and the store waits a walk.
+  // The entry is always written again here, without `pending`, under the lock and before the record goes: only an entry
+  // so confirmed is walked (Codex on #3643).
   const closed = await closeStoreRecord(store, [], async (fresh) => {
-    if (!fresh) return;
-    const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
-    const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
-    const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
-    if (!added.length && !moved.length) return;
-    entry.marks = [...new Set([...marks, ...added])].sort();
-    entry.handles = [...entry.handles, ...moved];
+    if (fresh) {
+      const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
+      const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
+      const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
+      entry.marks = [...new Set([...marks, ...added])].sort();
+      entry.handles = [...entry.handles, ...moved];
+    }
     await write(entry);
   });
   if (closed) return entry;
@@ -340,7 +350,7 @@ type Owners = { byMark: Map<string, string>; byHandle: Map<string, string>; byRe
 function ownersOf(batch: Batched[]): Owners {
   const owners: Owners = { byMark: new Map(), byHandle: new Map(), byRef: new Map() };
   for (const entry of batch) {
-    if (entry.unfinished) continue;
+    if (entry.unfinished || entry.pending) continue;
     for (const mark of entry.marks) owners.byMark.set(mark, entry.ref);
     for (const handle of entry.handles) owners.byHandle.set(handle, entry.ref);
     owners.byRef.set(entry.ref, entry.ref);
@@ -684,17 +694,46 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
  * stores left as 0 from it too (Claude 5's second money review of #3279). An entry that does not read is kept and
  * counted in `unreadable`, so the count of stores left is never lowered past it.
  */
-async function readBatch(): Promise<{ entries: Map<string, Batched>; unreadable: number }> {
+async function readBatch(): Promise<{ entries: Map<string, Batched>; raws: Map<string, string>; unreadable: number }> {
   const list = stringList(repliesFor(await redisPipeline([["HGETALL", BATCH_KEY]]), 1)?.[0]);
   if (!list || list.length % 2 !== 0) throw new UnknownReplyError("the closing walk's batch (HGETALL)");
   const entries = new Map<string, Batched>();
+  const raws = new Map<string, string>();
   let unreadable = 0;
   for (let i = 0; i + 1 < list.length; i += 2) {
     const value = json(list[i + 1]) as Batched | null;
-    if (value && Array.isArray(value.marks)) entries.set(list[i], value);
-    else unreadable += 1;
+    if (value && Array.isArray(value.marks)) {
+      entries.set(list[i], value);
+      raws.set(list[i], list[i + 1]);
+    } else unreadable += 1;
   }
-  return { entries, unreadable };
+  return { entries, raws, unreadable };
+}
+
+/** The entries a walk may walk and finish: never one still pending (Codex on #3643), whose store's record never went by its closing. */
+function walkable(entries: Map<string, Batched>): Map<string, Batched> {
+  return new Map([...entries].filter(([, entry]) => !entry.pending));
+}
+
+/**
+ * Takes every pending entry out of the batch (Codex on #3643): one a preparation left when another store was at its
+ * key and its own taking-out was never confirmed, or one whose preparation stopped before the record went (that store
+ * waits a walk and writes it again). Only while the field still holds the exact text read (WITHDRAW_ENTRY), so an entry
+ * written again since is never taken. One script each; true only when every one answered 0 or 1 (rule 24). One not
+ * taken out is still never walked, and is tried again on the next run.
+ */
+async function withdrawPending(batch: { entries: Map<string, Batched>; raws: Map<string, string> }): Promise<boolean> {
+  let confirmed = true;
+  for (const [field, entry] of batch.entries) {
+    if (!entry.pending) continue;
+    const raw = batch.raws.get(field);
+    const taken = raw === undefined ? null : repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw]]).catch(() => null), 1)?.[0];
+    if (taken !== 0 && taken !== 1) {
+      console.error("a pending closing entry was not confirmed taken out of the batch; it is never walked and is tried again on the next run", taken);
+      confirmed = false;
+    }
+  }
+  return confirmed;
 }
 
 /**
@@ -815,15 +854,21 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
     if (entryLeft) return { ...report, done: false };
+    // A pending entry never starts a walk (Codex on #3643): it is taken out here, on this run and the next ones until
+    // Redis confirms it, and one not confirmed out leaves the run unsure.
+    const waiting = await readBatch();
+    if (!(await withdrawPending(waiting))) unsure = true;
     // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again.
-    if (![...(await readBatch()).entries.values()].some((entry) => !entry.unfinished)) return { ...report, done: !unsure };
+    if (![...waiting.entries.values()].some((entry) => !entry.unfinished && !entry.pending)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";
     report.started = true;
   }
 
-  const { entries: batch, unreadable } = await readBatch();
+  const read = await readBatch();
+  const batch = walkable(read.entries);
+  const { unreadable } = read;
   const owners = ownersOf([...batch.values()]);
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
     // A page that does not read is unknown, not a page with no keys nor the end of the database (rule 30): the run

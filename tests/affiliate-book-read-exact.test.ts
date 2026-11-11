@@ -80,6 +80,22 @@ async function main(): Promise<void> {
   garble = undefined;
   is("(answered again: nothing owed)", await owedTo(store), 0);
 
+  part("A payment row this code did not write (Revisor 1 on #3719): never dropped, so never owed again");
+  const [paidRow] = await real([["HGETALL", `nl:aff:${statsId}:payouts`]]);
+  const payoutId = String((paidRow as string[])[0]);
+  const payoutJson = String((paidRow as string[])[1]);
+  for (const [label, row] of [
+    ["not JSON", "{"],
+    ["cents as text", JSON.stringify({ ...JSON.parse(payoutJson), cents: "3000" })],
+    ["no affiliate", JSON.stringify({ ...JSON.parse(payoutJson), aff: undefined })],
+    ["a currency of another shape", JSON.stringify({ ...JSON.parse(payoutJson), currency: "US dollars" })],
+  ] as const) {
+    await real([["HSET", `nl:aff:${statsId}:payouts`, payoutId, row]]);
+    is(`a payment row ${label}: the book is not known, never owed again`, await owedTo(store), "unknown");
+  }
+  await real([["HSET", `nl:aff:${statsId}:payouts`, payoutId, payoutJson]]);
+  is("(the row restored: nothing owed)", await owedTo(store), 0);
+
   part("Removing idle affiliates: a sales hash that does not read never makes anyone look idle");
   await setAffiliateSetting(OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30, idle: 90 });
   const idleStore = { ...(await storeForEmail(OWNER))!, affiliates: { ...(await storeForEmail(OWNER))!.affiliates, idle: 90, idleOn: NOW - 400 * 86_400 } };

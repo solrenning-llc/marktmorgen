@@ -13,7 +13,7 @@ export const PROVIDER_FEES = {
   stripe: { cardBps: 290, internationalBps: 150, conversionBps: 100, billingBps: 70, taxBps: 50, fixedCents: 30 },
   paddle: { bps: 500, fixedCents: 50 },
 } as const;
-/** Stripe's fees summed: 6.6%. */
+/**\n * Stripe's US ACH Direct Debit fees, checked against the official pricing page\n * on 2026-11-11. These are inputs for later cost modeling only; this registry\n * does not activate ACH or change any customer price or payment setting.\n * A null two-day cap means the published page gives no cap, not a zero cap.\n *\n * Source: https://stripe.com/pricing/local-payment-methods\n */\nexport const ACH_DIRECT_DEBIT_FEES = Object.freeze({\n  sourceUrl: "https://stripe.com/pricing/local-payment-methods",\n  verifiedOn: "2026-11-11",\n  standardRateBps: 80,\n  standardCapCents: 500,\n  twoDayRateBps: 120,\n  twoDayCapCents: null,\n  instantVerificationCents: 150,\n  microdepositVerificationCents: 0,\n  disputedPaymentCents: 1_500,\n  failedPaymentCents: 400,\n} as const);\n\n/** Stripe's fees summed: 6.6%. */
 export const STRIPE_TOTAL_BPS =
   PROVIDER_FEES.stripe.cardBps + PROVIDER_FEES.stripe.internationalBps + PROVIDER_FEES.stripe.conversionBps + PROVIDER_FEES.stripe.billingBps + PROVIDER_FEES.stripe.taxBps;
 /** Stripe's fee for a dispute received, and again for one countered (stripe.com/pricing, 17 October 2026). */

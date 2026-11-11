@@ -35,7 +35,9 @@ export const DARK_QUERY = "(prefers-color-scheme: dark)";
 /**
  * The script, as written into <head> by app/layout.tsx. With no choice, or "light", or anything it does not know, it
  * does nothing at all: no attribute is set or removed. "dark" sets the attribute; "system" sets it when the device
- * asks for dark, and follows the device if that changes while the page is open. Any error leaves the page light.
+ * asks for dark, and follows the device if that changes while the page is open, but only while the kept choice is
+ * still "system": once the reader picks Light or Dark in the switch, a later change of the device changes nothing
+ * (the listener reads the key again each time). Any error leaves the page light.
  */
 export const COLOR_SCHEME_SCRIPT =
   '(function(){try{var c=localStorage.getItem("mm-color-scheme");' +
@@ -43,12 +45,13 @@ export const COLOR_SCHEME_SCRIPT =
   'var r=document.documentElement;' +
   'if(c==="dark"){r.setAttribute("data-color-scheme","dark");return}' +
   'var m=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)");if(!m)return;' +
-  'var a=function(){if(m.matches){r.setAttribute("data-color-scheme","dark")}else if(r.hasAttribute("data-color-scheme")){r.removeAttribute("data-color-scheme")}};' +
+  'var a=function(){try{if(localStorage.getItem("mm-color-scheme")!=="system")return}catch(e){return}' +
+  'if(m.matches){r.setAttribute("data-color-scheme","dark")}else if(r.hasAttribute("data-color-scheme")){r.removeAttribute("data-color-scheme")}};' +
   'a();if(m.addEventListener){m.addEventListener("change",a)}' +
   '}catch(e){}})()';
 
 /** Its hash, as a Content-Security-Policy source list writes it. */
-export const COLOR_SCHEME_HASH = "'sha256-O8nl/w+7l5EseGiqoUo7qRx/Fx4YGt7Enk2gJ50igp8='";
+export const COLOR_SCHEME_HASH = "'sha256-CqaBtkbkpsTsUXYy7eBfjoNHPIjf3OFT+1gh3Gi8Qi8='";
 
 /** Read a stored value as a choice. Anything unknown is light, the default; it is never guessed to be dark. */
 export function toChoice(value: string | null | undefined): ColorSchemeChoice {

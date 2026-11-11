@@ -1,43 +1,29 @@
 "use client";
 
 import { useEffect } from "react";
-import { initBotId } from "botid/client/core";
+import { startBrowserCheck } from "@/lib/browser-check-client";
 import { sourceTag } from "@/lib/source-rules";
 
 // One count per page load, however many times React runs the effect.
 const sent = new Set<string>();
 
-// The host's browser check answers for every count this page sends (lib/bot-check.ts, browserProof), set up once.
-// It signs fetch only, never sendBeacon, so the count goes by fetch. Each initBotId keeps the routes it was given
-// and passes the others on, so the sign-in form's own protection (components/signin-form.tsx) stays as it is.
-let checked = false;
-// The fetch from before the check wrapped it: a count whose check could not be loaded still goes, unsigned, and the
-// server then counts it as no visit (app/api/store/hit), as it would a program's.
-let unsigned: typeof fetch | null = null;
-// Set as the page is left: a count sent again from a page going away starts a request that is never finished.
-let leaving = false;
-function withBrowserCheck() {
-  if (checked) return;
-  checked = true;
-  unsigned = window.fetch.bind(window);
-  window.addEventListener("pagehide", () => {
-    leaving = true;
-  });
-  try {
-    initBotId({ protect: [{ path: "/api/store/hit", method: "POST" }] });
-  } catch {
-    // Without the check the count still goes; the server then counts it as no visit (app/api/store/hit).
-  }
-}
-
+// The host's browser check answers for every count this page sends but a link's (lib/bot-check.ts, browserProof). It
+// is set up once for the whole window, with the sign-in form's route too (lib/browser-check-client.ts): a second
+// initBotId in one window never gets the host's challenge, and its requests never settle.
 function beacon(payload: Record<string, string>) {
-  withBrowserCheck();
   const body = JSON.stringify(payload);
+  if (payload.k === "l") {
+    // A link's count needs no check (app/api/store/hit), so it goes by sendBeacon, which outlives the page being
+    // left, and never waits on the challenge; with no sendBeacon, by the fetch from before the check wrapped it.
+    const queued = typeof navigator.sendBeacon === "function" && navigator.sendBeacon("/api/store/hit", new Blob([body], { type: "text/plain" }));
+    if (!queued) (startBrowserCheck() ?? fetch)("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
+    return;
+  }
+  startBrowserCheck();
   const send = (via: typeof fetch) => via("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } });
-  // Only a link's count is sent again without the check, and never from a page being left: a visit, a page or a
-  // funnel step without the check counts as nothing (app/api/store/hit), so sending it again would only cost a request.
-  const retryUnsigned = payload.k === "l";
-  send(fetch).catch(() => (retryUnsigned && unsigned && !leaving ? send(unsigned) : undefined)?.catch(() => {}));
+  // A visit, a page or a funnel step goes by fetch, which the check signs. Without the check it counts as nothing
+  // (app/api/store/hit), so it is never sent again unsigned: that would only cost a request.
+  send(fetch).catch(() => {});
 }
 
 /**

@@ -102,9 +102,7 @@ export async function usedThisMonthExact(listId: string | null, window: string |
 }
 
 export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
-  if (!listId || !window || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", usedKey(listId, window)]]);
-  return Number(raw) || 0;
+  return usedThisMonthExact(listId, window);
 }
 
 /**

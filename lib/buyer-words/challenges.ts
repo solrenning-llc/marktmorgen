@@ -66,7 +66,7 @@ const en: ChallengeWords = {
   counts: (joined, checkIns) => `${joined} joined, ${checkIns} ${checkIns === 1 ? "check-in" : "check-ins"} in all.`,
   today: (n) => `${n} checked in today.`,
   notices: {
-    joined: { text: "You joined. Come back each day to check in.", tone: "ok" },
+    joined: { text: "You joined. Check in once a day while the challenge runs.", tone: "ok" },
     already: { text: "You had already joined.", tone: "ok" },
     checked: { text: "Checked in.", tone: "ok" },
     checkedalready: { text: "You had already checked in today.", tone: "ok" },
@@ -108,7 +108,7 @@ const es: ChallengeWords = {
   counts: (joined, checkIns) => `${joined} unidos, ${checkIns} ${checkIns === 1 ? "registro" : "registros"} en total.`,
   today: (n) => `${n} registraron hoy.`,
   notices: {
-    joined: { text: "Te uniste. Vuelve cada día para registrarlo.", tone: "ok" },
+    joined: { text: "Te uniste. Registra tu día una vez al día mientras dure el reto.", tone: "ok" },
     already: { text: "Ya te habías unido.", tone: "ok" },
     checked: { text: "Día registrado.", tone: "ok" },
     checkedalready: { text: "Ya habías registrado el día de hoy.", tone: "ok" },
@@ -150,7 +150,7 @@ const fr: ChallengeWords = {
   counts: (joined, checkIns) => `${joined} inscrits, ${checkIns} ${checkIns === 1 ? "pointage" : "pointages"} au total.`,
   today: (n) => `${n} ont pointé aujourd’hui.`,
   notices: {
-    joined: { text: "Vous avez rejoint le défi. Revenez chaque jour pour pointer.", tone: "ok" },
+    joined: { text: "Vous avez rejoint le défi. Pointez une fois par jour tant qu’il dure.", tone: "ok" },
     already: { text: "Vous aviez déjà rejoint ce défi.", tone: "ok" },
     checked: { text: "C’est pointé.", tone: "ok" },
     checkedalready: { text: "Vous aviez déjà pointé aujourd’hui.", tone: "ok" },
@@ -192,7 +192,7 @@ const de: ChallengeWords = {
   counts: (joined, checkIns) => `${joined} dabei, insgesamt ${checkIns} ${checkIns === 1 ? "Check-in" : "Check-ins"}.`,
   today: (n) => `${n} heute eingecheckt.`,
   notices: {
-    joined: { text: "Sie sind dabei. Kommen Sie jeden Tag zum Einchecken wieder.", tone: "ok" },
+    joined: { text: "Sie sind dabei. Checken Sie einmal am Tag ein, solange die Challenge läuft.", tone: "ok" },
     already: { text: "Sie waren schon dabei.", tone: "ok" },
     checked: { text: "Eingecheckt.", tone: "ok" },
     checkedalready: { text: "Sie hatten heute schon eingecheckt.", tone: "ok" },
@@ -234,7 +234,7 @@ const it: ChallengeWords = {
   counts: (joined, checkIns) => `${joined} partecipanti, ${checkIns} check-in in tutto.`,
   today: (n) => `${n} hanno fatto il check-in oggi.`,
   notices: {
-    joined: { text: "Partecipi. Torna ogni giorno per il check-in.", tone: "ok" },
+    joined: { text: "Partecipi. Fai il check-in una volta al giorno finché la sfida è in corso.", tone: "ok" },
     already: { text: "Partecipavi già.", tone: "ok" },
     checked: { text: "Check-in fatto.", tone: "ok" },
     checkedalready: { text: "Avevi già fatto il check-in oggi.", tone: "ok" },
@@ -276,7 +276,7 @@ const nl: ChallengeWords = {
   counts: (joined, checkIns) => `${joined} doen mee, ${checkIns} keer ingecheckt in totaal.`,
   today: (n) => `${n} vandaag ingecheckt.`,
   notices: {
-    joined: { text: "Je doet mee. Kom elke dag terug om in te checken.", tone: "ok" },
+    joined: { text: "Je doet mee. Check één keer per dag in zolang de uitdaging loopt.", tone: "ok" },
     already: { text: "Je deed al mee.", tone: "ok" },
     checked: { text: "Ingecheckt.", tone: "ok" },
     checkedalready: { text: "Je had vandaag al ingecheckt.", tone: "ok" },
@@ -318,7 +318,7 @@ const pt: ChallengeWords = {
   counts: (joined, checkIns) => `${joined} participantes, ${checkIns} check-ins no total.`,
   today: (n) => `${n} fizeram o check-in hoje.`,
   notices: {
-    joined: { text: "Está a participar. Volte todos os dias para fazer o check-in.", tone: "ok" },
+    joined: { text: "Está a participar. Faça o check-in uma vez por dia enquanto o desafio durar.", tone: "ok" },
     already: { text: "Já estava a participar.", tone: "ok" },
     checked: { text: "Check-in feito.", tone: "ok" },
     checkedalready: { text: "Já tinha feito o check-in hoje.", tone: "ok" },

@@ -63,6 +63,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
 import { preorderProblem } from "@/lib/preorder-rules";
 import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
+import type { ReturningCode } from "@/lib/returning-code-rules";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
 
 /**
@@ -135,6 +136,14 @@ export function canSellProduct(store: Store, product: Listing): boolean {
 /** The figure a product card leads with: the cheapest way in. */
 export function fromPriceCents(product: Listing): number {
   return lowestPriceCents(sellableOptions(product), product.priceCents);
+}
+
+/** A code only for people who bought here before that Stripe would not take on this checkout (lib/returning-code.ts). */
+export class ReturningCodeRefused extends Error {
+  constructor() {
+    super("Stripe would not take this code's coupon");
+    this.name = "ReturningCodeRefused";
+  }
 }
 
 /**
@@ -264,6 +273,15 @@ export async function createCheckout(
      * type one is shown as it always is.
      */
     code?: string;
+    /**
+     * A code only for people who already bought here (554 [DS1], unit 2;
+     * lib/returning-code.ts), already checked by the route against what
+     * `email` bought: its coupon comes off, for that email only, with no box
+     * beside it. Like a code from a link, it never stacks: a come-back or
+     * welcome offer, a membership's introductory price, a fair price or a
+     * sale across the store already applied wins.
+     */
+    returning?: ReturningCode;
     /**
      * The buyer's yes, checked on the form before paying, to start access at
      * once and lose the right to cancel once it starts (lib/digital-consent.ts).
@@ -514,6 +532,15 @@ export async function createCheckout(
     // How a membership began, for who stays (lib/discount-impact.ts, entryOf).
     if (recurring) body.set("subscription_data[metadata][discount]", "sale");
     mayComeOff.push({ kind: "percent", percent: saleOffNow });
+  } else if (extras.returning && extras.email && !pwyw) {
+    // A code only for people who bought here before, checked by the route:
+    // the creator's coupon, with no box beside it (Stripe takes one or the
+    // other), and the checkout opens for the email that was checked.
+    body.set("discounts[0][coupon]", extras.returning.coupon);
+    body.set("metadata[returning]", extras.returning.code);
+    if (recurring) body.set("subscription_data[metadata][discount]", "code");
+    const off = extras.returning.off;
+    mayComeOff.push(off.kind === "percent" ? { kind: "percent", percent: off.percent } : off.currency === store.currency.toLowerCase() ? { kind: "cents", cents: off.cents } : { kind: "unknown" });
   } else if (store.hasDiscounts && !pwyw) {
     // A code from a link, or one typed in Stripe's box: either may be the
     // largest the store has.
@@ -796,6 +823,12 @@ export async function createCheckout(
         body.delete(DISPLAY_NAME);
         named = false;
         continue;
+      }
+      if (extras.returning && body.get("discounts[0][coupon]") === extras.returning.coupon && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
+        // The code's coupon is used up, ended or gone on the creator's
+        // account: the buyer typed it for a discount, so no checkout opens at
+        // a price they did not ask for. They are told on the form.
+        throw new ReturningCodeRefused();
       }
       if (body.has("discounts[0][promotion_code]") && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
         // The code from the link is real but not for this sale — a minimum,

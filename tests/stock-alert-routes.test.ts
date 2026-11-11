@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   const leave = tokenIn(mail.text, "leave");
   is("a confirm link and a stop link, to the list's page", [confirm.length, leave.length, mail.text.includes("https://marktmorgen.com/@harbor/back-in-stock?token=")], [48, 48, true]);
   is("HTML and text, each with the creator's postal address", [Boolean(mail.html), mail.text.includes(POSTAL), mail.html.includes(POSTAL)], [true, true, true]);
-  is("one-click unsubscribe for mail apps", [mail.headers?.["List-Unsubscribe"], mail.headers?.["List-Unsubscribe-Post"]], [`<https://marktmorgen.com/api/store/stock-alert/leave?h=harbor&t=${leave}>`, "List-Unsubscribe=One-Click"]);
+  is("one-click unsubscribe for mail apps", [mail.headers?.["List-Unsubscribe"], mail.headers?.["List-Unsubscribe-Post"]], [`<https://marktmorgen.com/api/store/stock-alert/leave?i=${store.sid}&t=${leave}>`, "List-Unsubscribe=One-Click"]);
   is("no picture, so nothing to track an opening", /<img\b/i.test(mail.html), false);
   is("the place is kept, not confirmed yet, and nothing is due", [typeof redis.run(["HGET", listKey, "reader@example.com"]), redis.run(["ZCARD", STOCK_ALERT_DUE])], ["string", 0]);
 
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   part("The stop link, honored at once");
   const crossLeave = await leaveRoute(request("/api/store/stock-alert/leave", { handle: "harbor", token: leave }, "7.7.7.7", "cross-site"));
   is("the page's button is refused from another site", crossLeave.status, 403);
-  const oneClick = await leaveRoute(request(`/api/store/stock-alert/leave?h=harbor&t=${leave}`, null, "9.9.9.9", "cross-site"));
+  const oneClick = await leaveRoute(request(`/api/store/stock-alert/leave?i=${store.sid}&t=${leave}`, null, "9.9.9.9", "cross-site"));
   is("one click from a mail app: done", oneClick.status, 200);
   is("the place is gone", redis.run(["HEXISTS", listKey, "reader@example.com"]), 0);
   is("pressed again from the page: not on the list", statusOf(await leaveRoute(request("/api/store/stock-alert/leave", { handle: "harbor", token: leave }))), "gone");

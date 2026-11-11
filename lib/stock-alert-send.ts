@@ -26,7 +26,12 @@
  * sent, under a key made of when it was written (lib/email.ts, sendBatch). A
  * batch tried again, because the send or the clean-up after it did not come
  * back as asked, is the same batch under the same key, which the email
- * service sends to nobody twice. Never dropped: an address leaves the list
+ * service sends to nobody twice. The service keeps a key a day, and so does
+ * the batch: a send whose outcome stayed unknown (the service may have taken
+ * it and the answer was lost) is written down with when it was first tried,
+ * and UNKNOWN_SETTLED_MS after that, still within the day, the batch is taken
+ * as sent and its addresses leave the list, never tried again under a new
+ * key: an unknown never counts as "not sent". Never dropped: an address leaves the list
  * only after its batch was sent; a refusal, an answer out of shape or a
  * spent figure keeps everything where it is and the product is looked at
  * again RESTOCK_WAIT_MS later. Somebody who left meanwhile (an exact nil) is
@@ -65,6 +70,12 @@ export const RESTOCK_BATCH = 100;
 export const RESTOCK_WAIT_MS = 15 * 60_000;
 /** How long a batch written down before its send is kept: within the day the email service keeps a batch's key. */
 const BATCH_SECONDS = 86_400;
+/**
+ * How long after its first unknown outcome a batch is taken as sent: well
+ * inside BATCH_SECONDS (written again at that first unknown), so the runs
+ * every RESTOCK_WAIT_MS settle it before it could end and a new batch start.
+ */
+export const UNKNOWN_SETTLED_MS = 20 * 3_600_000;
 
 const jobKey = (sid: string, pid: string) => `nl:sa:${sid}:${pid}:job`;
 
@@ -75,12 +86,17 @@ export function stockAlertsOpen(store: Store): boolean {
 
 const pagePath = (store: Store) => `/@${store.handle}/back-in-stock`;
 
-/** The way out at the foot of both emails: the page with its button, and the one-click address a mail app uses (always this site's own). */
+/**
+ * The way out at the foot of both emails: the page with its button, and the
+ * one-click address a mail app uses (always this site's own). The one-click
+ * address names the store by its own id, which a change of handle or a
+ * handle let go never changes, so it works for as long as the link does.
+ */
 function door(store: Store, w: StockAlertWords, origin: string, leave: string, why: string): Door {
   const page = `${origin}${pagePath(store)}?leave=${leave}`;
   return {
     page,
-    oneClick: `${SITE_URL}/api/store/stock-alert/leave?h=${encodeURIComponent(store.handle)}&t=${leave}`,
+    oneClick: `${SITE_URL}/api/store/stock-alert/leave?i=${encodeURIComponent(store.sid)}&t=${leave}`,
     why,
     label: w.doorLabel,
     after: w.doorAfter,
@@ -140,17 +156,19 @@ export async function askBackInStock(input: { store: Store; product: Listing; em
 
 // ------------------------------------------------------------------ the restock job
 
-type Job = { at: number; emails: string[] };
+/** A batch: when it was written, its addresses and, once a send's outcome was unknown, when that was first. */
+type Job = { at: number; emails: string[]; unknownSince?: number };
 
 function parseJob(raw: unknown): Job | null {
   if (typeof raw !== "string" || raw.length > 64_000) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const { at, emails } = value;
+    const { at, emails, unknownSince } = value;
     if (typeof at !== "number" || !Number.isSafeInteger(at) || at <= 0) return null;
+    if (unknownSince !== undefined && (typeof unknownSince !== "number" || !Number.isSafeInteger(unknownSince) || unknownSince < at)) return null;
     if (!Array.isArray(emails) || !emails.length || emails.length > RESTOCK_BATCH || emails.some((e) => typeof e !== "string" || !e)) return null;
-    return { at, emails: emails as string[] };
+    return unknownSince === undefined ? { at, emails: emails as string[] } : { at, emails: emails as string[], unknownSince };
   } catch {
     return null;
   }
@@ -193,7 +211,9 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
     const leave = leaves[i];
     return leave ? [{ email, leave }] : [];
   });
-  if (going.length) {
+  // An outcome unknown long enough is taken as sent: the service may have written to them, so nobody is written to again.
+  const settled = job.unknownSince !== undefined && Date.now() - job.unknownSince >= UNKNOWN_SETTLED_MS;
+  if (going.length && !settled) {
     if (!(await reserveDay(going.length))) return { sent: 0, next: "later" };
     const messages: BatchMessage[] = going.map(({ email, leave }) => {
       const mail = backEmail(store, product, leave);
@@ -202,6 +222,8 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
     const outcome = await deps.send(messages, `stock-alert:${sid}:${product.id}:${job.at}`, { by: "store", store, kind: "email" });
     if (outcome !== "sent") {
       await releaseDay(going.length);
+      // A refusal sent nothing. "retry" may mean taken with the answer lost: written down once, with when.
+      if (outcome === "retry" && job.unknownSince === undefined) await writeJob(sid, product.id, { ...job, unknownSince: Date.now() });
       return { sent: 0, next: "later" };
     }
   }
@@ -209,7 +231,7 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
   await clearStockAlerts(store, product.id, job.emails);
   const gone = repliesFor(await redisPipeline([["DEL", jobKey(sid, product.id)]]), 1);
   if (!gone || countOf(gone[0]) === null) throw new UnknownReplyError("a back-in-stock batch sent");
-  return { sent: going.length, next: "again" };
+  return { sent: settled ? 0 : going.length, next: "again" };
 }
 
 async function restockOne(member: string, budget: number, deps: RestockDeps): Promise<Turn> {

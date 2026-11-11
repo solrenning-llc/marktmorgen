@@ -115,7 +115,7 @@ async function main(): Promise<void> {
   is("the product's link, in the text", mail.text.includes(`/@harbor/p/`), true);
   is("the creator's postal address, in the text and the HTML", [mail.text.includes(POSTAL), mail.html.includes(POSTAL)], [true, true]);
   is("a stop link, in the text", mail.text.includes("/@harbor/back-in-stock?leave="), true);
-  is("one-click unsubscribe for mail apps", [mail.headers?.["List-Unsubscribe"]?.includes("/api/store/stock-alert/leave?h=harbor&t=") ?? false, mail.headers?.["List-Unsubscribe-Post"]], [true, "List-Unsubscribe=One-Click"]);
+  is("one-click unsubscribe for mail apps", [mail.headers?.["List-Unsubscribe"]?.includes(`/api/store/stock-alert/leave?i=${store.sid}&t=`) ?? false, mail.headers?.["List-Unsubscribe-Post"]], [true, "List-Unsubscribe=One-Click"]);
   is("no picture, so nothing to track an opening", /<img\b/i.test(mail.html), false);
   is("in the store's language", mail.html.includes('lang="en-US"'), true);
   is("sent under a key made of the batch", sent.key.startsWith(`stock-alert:${sid}:${pid}:`), true);

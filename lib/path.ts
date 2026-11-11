@@ -225,7 +225,9 @@ export async function visitPath(store: Store, record: PathRecord, now = Date.now
   if (!moneyFresh(money, store, now) || !countsFresh(counts, now)) {
     if (await charge(PATH_READ_UNITS)) {
       const [readMoney, readCounts] = await Promise.all([readPathMoney(store, now).catch(() => null), readPathCounts(store, now)]);
-      if (readMoney) money = readMoney;
+      // A reading whose refunds are unknown (money null, no sale counted as kept) never replaces a kept one, as a reading
+      // that could not be made at all does not: it would show a store with kept sales as having none (Claude 4's LOW on #3443).
+      if (readMoney && (readMoney.cents !== null || !money)) money = readMoney;
       if (readCounts) counts = readCounts;
       changed = Boolean(readMoney || readCounts);
     }

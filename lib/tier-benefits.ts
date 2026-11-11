@@ -265,7 +265,12 @@ export async function benefitsDue(store: Store, now = Date.now()): Promise<DueVi
   // A person deleted from the store keeps their membership on the creator's Stripe: never listed here by address
   // again (Claude 1 on #3014), as lib/membership-numbers.ts leaves them out. A list of the deleted that cannot be read
   // is unknown, never "nobody deleted".
-  const gone = await suppressedAmong(store.listId, [...new Set(read.members.map((m) => m.email))]).catch(() => null);
+  // The list is read again when the store was read without one (Codex G on #3014): an erasure gives the store its list
+  // before it writes the print, so a stale store with none would skip a person deleted during the Stripe read. Not
+  // known: unknown, never listed.
+  const listId = store.listId ?? (await ensureListId(store.email).catch(() => null))?.listId ?? null;
+  if (!listId) return { state: "unknown", why: "erased" };
+  const gone = await suppressedAmong(listId, [...new Set(read.members.map((m) => m.email))]).catch(() => null);
   if (gone === null) return { state: "unknown", why: "erased" };
   const members = read.members.filter((m) => !gone.has(m.email));
   const waiting: Record<string, Waiting> = {};

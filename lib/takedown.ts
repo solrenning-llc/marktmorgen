@@ -30,6 +30,8 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { TAKEN_DOWN_SECONDS, isTakenDown, markTakenDown, readDraftPreview } from "@/lib/draft-preview";
+import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
 const TOKEN_SECONDS = 60 * 86_400;
@@ -89,10 +91,19 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
   return sent ? "sent" : "error";
 }
 
-/** The product a notice's address points at (/@handle/p/<product>), when it points at one of this store's. */
+/**
+ * The product a notice's address points at (/@handle/p/<product>, or a draft's preview link /@handle/preview/<code>,
+ * lib/draft-preview.ts), when it points at one of this store's. A preview link that no longer opens points at nothing.
+ */
 export async function reportedProduct(report: Report, store: Store): Promise<Listing | null> {
   try {
     const parts = new URL(report.url).pathname.split("/").filter(Boolean);
+    const preview = parts.indexOf("preview");
+    if (preview >= 0) {
+      // Claude 6 on #3439, MEDIUM 1: a notice about a preview address maps to the draft it opens, in this store only.
+      const opened = await readDraftPreview(decodeURIComponent(parts[preview + 1] ?? ""));
+      return opened && store.statsId && opened.statsId === store.statsId ? await readListing(store, opened.productId) : null;
+    }
     const at = parts.indexOf("p");
     const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
     const id = segment ? productIdFromAddress(store, segment) : null;
@@ -197,9 +208,17 @@ const owedKey = (report: string) => reportKey(`${report}:n`);
 const MAX_OWED = 50;
 /**
  * `applied`: the content was confirmed taken down (apply returned true and this mark was confirmed). Steps written
- * before this field existed have none, and are read as not confirmed.
+ * before this field existed have none, and are read as not confirmed. `picture`: a product's old picture names, kept
+ * before its record is pointed at the copies (lib/picture-withdraw.ts), so a later press deletes those files and
+ * never moves the picture twice; absent until then.
  */
-type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean };
+type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean; picture?: PictureNames };
+
+/** Kept picture names, exactly: a path, and a smaller copy's path or null. */
+const pictureNames = (value: unknown): value is PictureNames => {
+  const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return Boolean(v && typeof v.path === "string" && v.path && (v.small === null || (typeof v.small === "string" && v.small)));
+};
 
 /**
  * A takedown's steps, or null only when Redis itself answers null (no steps). A pipeline that answers nothing, or a
@@ -214,10 +233,12 @@ async function readSteps(key: string): Promise<Steps | null> {
   const value: unknown = JSON.parse(raw);
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" || typeof v.at !== "string" || !/^\d+$/.test(v.at) ||
-      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean") {
+      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean" ||
+      (v.picture !== undefined && !pictureNames(v.picture))) {
     throw new Error("a takedown's steps could not be read");
   }
-  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent };
+  const picture = pictureNames(v.picture) ? { path: v.picture.path, small: v.picture.small } : null;
+  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent, ...(picture ? { picture } : {}) };
 }
 
 /**
@@ -253,7 +274,17 @@ async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "st
     // Read by id, however far down the store's list it is (lib/catalog.ts). A failed read throws to the caller.
     const product = await readListing(store, action.id);
     if (!product) throw new Error("the store lists this product, but its record could not be read");
-    if (product.hidden) return null;
+    if (product.hidden) {
+      // A draft is not public, but its preview link is (lib/draft-preview.ts): a notice about that address takes the
+      // link down, and none opens or is made for the draft until it is published (Claude 6's focal on #3597). Once
+      // marked, there is nothing more to take down. A store without a stats id never had a preview link. A mark that
+      // cannot be read throws to the caller, never "nothing to do".
+      if (!store.statsId || (await isTakenDown(store, action.id))) return null;
+      return {
+        what: `The preview link of the draft product "${product.title}", now closed`,
+        howLong: `How long: until you publish the product, and at most ${Math.round(TAKEN_DOWN_SECONDS / 86_400)} days while it stays a draft. No preview link opens or can be made for it meanwhile. Publishing it while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,
+      };
+    }
     return {
       what: `The product "${product.title}", now unpublished`,
       howLong: `How long: until you publish it again. Publishing it again while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,
@@ -268,6 +299,16 @@ async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "st
   }
   if (store.suspended) return null;
   return { what: "Your store's pages and sales, now switched off", howLong: "How long: until we switch your store back on, for example after your answer below." };
+}
+
+/**
+ * A product taken down after a notice also has its draft preview closed (Claude 6 on #3439, MEDIUM 1): its link ends at
+ * once and none opens or is made for it until it is published again (lib/draft-preview.ts). Run before a takedown's
+ * steps say it landed, on every path that says so, so a press after this failed marks it then; a write that is not
+ * confirmed throws. A store without a stats id never had a preview link to close.
+ */
+async function closePreview(store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>): Promise<void> {
+  if (action.type === "product" && store.statsId) await markTakenDown(store, action.id);
 }
 
 /** Takes it down. False when it went in the meantime (nothing was done); throws when the write's outcome is unknown. */
@@ -351,9 +392,12 @@ export async function sendOwedNotice(report: Report, store: Store, action: Exclu
         if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a notice's owed takedowns write");
         return "unconfirmed" as const;
       }
+      await closePreview(now, action);
       kept = { ...kept, applied: true };
       await writeSteps(key, kept);
     }
+    // The picture too, while the product is still off the store (R44); one the creator published again keeps it.
+    if (action.type === "product") kept = await withdrawPicture(storeRef(now), action.id, key, kept);
     return { done: await complete(report, now, action, origin, part, key, kept) };
   });
 }
@@ -392,7 +436,8 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
       await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
     }
-    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905).
+    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905), its preview closed first.
+    await closePreview(store, action);
     steps = { ...steps, applied: true };
     await writeSteps(key, steps);
   } else {
@@ -402,11 +447,24 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
     if (!kept || kept.sent) return null;
     steps = kept;
     if (!steps.applied) {
+      await closePreview(store, action);
       steps = { ...steps, applied: true };
       await writeSteps(key, steps);
     }
   }
+  // A product's picture leaves the address its pages gave out before the creator is told it is down (R44).
+  if (action.type === "product") steps = await withdrawPicture(ref, action.id, key, steps);
   return complete(report, store, action, origin, part, key, steps);
+}
+
+/** Moves a product's picture (lib/picture-withdraw.ts), its old names kept with the steps first; the steps as they are now. */
+async function withdrawPicture(ref: string, id: string, key: string, steps: Steps): Promise<Steps> {
+  let kept = steps;
+  await withdrawProductPicture(ref, id, kept.picture ?? null, async (picture) => {
+    kept = { ...kept, picture };
+    await writeSteps(key, kept);
+  });
+  return kept;
 }
 
 /** Whether the store already keeps this strike (as lib/store.ts parseStrikes keeps it: report, time and words). */

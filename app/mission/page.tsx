@@ -281,7 +281,7 @@ export default function MissionPage() {
                 Nobody should need a platform&apos;s permission{" "}
                 <span className="serif font-normal text-[#cfc4ff]">to be paid for their work</span>
               </h1>
-              <p className="t-lead mt-6 max-w-2xl text-white/80">
+              <p className="t-lead mt-6 max-w-[46ch] text-white/80">
                 What you pay us, and what we take from a sale, should both be clear before you choose. That is the whole idea, and
                 everything we build is judged against it.
               </p>
@@ -391,7 +391,7 @@ export default function MissionPage() {
                 <span className="tag tag-live">{`Built and working · ${built.length}`}</span>
                 <ul className="mt-6 space-y-3">
                   {built.slice(0, 10).map((item) => (
-                    <li key={item} className="flex gap-3 text-[0.9375rem] text-ink-soft">
+                    <li key={item} className="flex max-w-[46ch] gap-3 text-[0.9375rem] text-ink-soft">
                       <Icon name="check" size={18} strokeWidth={2.2} className="mt-0.5 shrink-0 text-mint-brand" />
                       <span>{item}</span>
                     </li>
@@ -410,7 +410,7 @@ export default function MissionPage() {
                     </summary>
                     <ul className="mt-4 space-y-3">
                       {built.slice(10).map((item) => (
-                        <li key={item} className="flex gap-3 text-[0.9375rem] text-ink-soft">
+                        <li key={item} className="flex max-w-[46ch] gap-3 text-[0.9375rem] text-ink-soft">
                           <Icon name="check" size={18} strokeWidth={2.2} className="mt-0.5 shrink-0 text-mint-brand" />
                           <span>{item}</span>
                         </li>
@@ -427,13 +427,13 @@ export default function MissionPage() {
                 <span className="tag tag-next">{`Not built yet · ${notBuilt.length}`}</span>
                 <ul className="mt-6 space-y-3">
                   {notBuilt.map((item) => (
-                    <li key={item} className="flex gap-3 text-[0.9375rem] text-ink-soft">
+                    <li key={item} className="flex max-w-[46ch] gap-3 text-[0.9375rem] text-ink-soft">
                       <Icon name="minus" size={18} className="mt-0.5 shrink-0 text-ink-mute" />
                       <span>{item}</span>
                     </li>
                   ))}
                 </ul>
-                <p className="mt-7 border-t border-line pt-5 text-sm text-ink-soft">
+                <p className="mt-7 max-w-[46ch] border-t border-line pt-5 text-sm text-ink-soft">
                   Other platforms have many of these today. If you need them now, they are the better choice now, and{" "}
                   <Link href="/proof/compare" className="link">
                     our comparison page
@@ -487,7 +487,7 @@ export default function MissionPage() {
                 <li key={r.date} className="reveal relative">
                   <span className="absolute -left-[2.3rem] top-1.5 h-3 w-3 rounded-full border-2 border-paper bg-violet-brand" aria-hidden="true" />
                   <p className="text-sm font-semibold text-violet-deep">{r.date}</p>
-                  <p className="mt-1.5 leading-relaxed text-ink-soft">{r.items}</p>
+                  <p className="mt-1.5 max-w-[46ch] leading-relaxed text-ink-soft">{r.items}</p>
                 </li>
               ))}
             </ol>

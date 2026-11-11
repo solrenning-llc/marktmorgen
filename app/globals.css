@@ -1731,6 +1731,11 @@ a.chip {
   font-size: 1.25rem;
   letter-spacing: -0.02em;
 }
+/* No block of an article's or the mission's prose is wider than 80 characters, at any width or with text spacing
+   (1.4.8 AAA, tests/mission-article-line-length.test.ts). */
+.prose-nb :where(p, li, blockquote) {
+  max-width: 46ch;
+}
 .prose-nb a {
   color: var(--violet-deep);
   font-weight: 600;

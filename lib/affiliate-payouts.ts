@@ -35,6 +35,7 @@
  * changed away from is left out of the totals there, and so is left out here.
  */
 import { MAX_REFERENCE_LENGTH, type Affiliate, type Book, type Row, addPayout, payAddress } from "@/lib/affiliates";
+import { csvCell } from "@/lib/csv";
 import { plainAmount } from "@/lib/money";
 import type { Store } from "@/lib/store";
 
@@ -85,10 +86,13 @@ function paypalAmount(cents: number, currency: string): string {
   return `"${plain.replace(".", ",")}"`;
 }
 
-/** A cell a spreadsheet reads back as text, never as a formula. */
+/**
+ * A cell a spreadsheet reads back as text, never as a formula: the platform's
+ * one cell rule (lib/csv.ts csvCell), always quoted. The PayPal amount is built
+ * apart (paypalAmount), and the currency and wallet columns are fixed words.
+ */
 function cell(value: string): string {
-  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  return csvCell(value);
 }
 
 /**

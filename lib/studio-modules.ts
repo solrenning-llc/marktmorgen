@@ -110,6 +110,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   labels: "A tool for labels on many contacts at once, opened from Moving from another platform.",
   agent: "The changes an AI assistant prepared through the store's API, waiting for the owner to confirm; not a part of the store.",
   card: "The business card, one address with a Save contact button, opened from Your pages.",
+  invoices: "The invoices of the store's own Marktmorgen plan, opened from the plan card on the studio home.",
   tax: "The tax registrations active on the store's Stripe account, read from Stripe: a report for the owner, not a part of the store.",
   notifications: "Which optional alert emails the owner gets, the owner's own setting, opened from the studio home.",
 };

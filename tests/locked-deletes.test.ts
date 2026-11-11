@@ -554,7 +554,7 @@ async function main(): Promise<void> {
       "cm-hide": "open:reversible", "cm-on": "open:reversible", "cm-reply": "open:adds", disable: "open:only a course with nothing in it turns back into a product",
       edit: "open:edits", enable: "open:adds", "lesson-add": "open:adds", "lesson-edit": "open:edits", "lesson-move": "open:edits",
       "lesson-remove": "act:products", media: "lockedFor", "media-remove": "act:products", "module-add": "open:adds", "module-edit": "open:edits",
-      "module-move": "open:edits", "module-remove": "act:products", outline: "open:adds", quiz: "act:products:quiz-remove",
+      "module-move": "open:edits", "module-remove": "act:products", "next-step": "open:edits", outline: "open:adds", quiz: "act:products:quiz-remove",
       retries: "open:gives a student their quiz tries back", review: "open:edits", start: "open:edits", task: "act:products:task-remove",
       template: "open:adds", withdraw: "act:products",
     },

@@ -61,10 +61,24 @@ async function main() {
   await visitorSend(first.thread.token, "One more detail.", async () => (await storeForEmail(owner))!);
   is("and no third before it is read again", pushes.length, 2);
 
+  part("Two messages at once, after it was read, are still one buzz (Codex C2 on #3619)");
+  await openConversation(store.statsId!, conversation.id, (await storeForEmail(owner))!);
+  const before = pushes.length;
+  const now = Date.now();
+  const both = await Promise.all([
+    visitorSend(first.thread.token, "First of two at once.", async () => (await storeForEmail(owner))!, now),
+    visitorSend(first.thread.token, "Second of two at once.", async () => (await storeForEmail(owner))!, now + 1),
+  ]);
+  is("both messages are kept", both.map((r) => r.ok), [true, true]);
+  is("one push for the two, not one each", pushes.length - before, 1);
+  await openConversation(store.statsId!, conversation.id, (await storeForEmail(owner))!);
+  await visitorSend(first.thread.token, "After reading them both.", async () => (await storeForEmail(owner))!, now + 2);
+  is("and read again, the next message tells again", pushes.length - before, 2);
+
   part("A message from the contact form is told the same way");
   const contact = await fileContact({ store: (await storeForEmail(owner))!, email: "another.buyer@example.test", name: "Another", text: "A question about sizes." });
-  is("filed and told", [contact, pushes.length], [true, 3]);
-  is("with nothing of that buyer", pushes[2].payload.includes("another.buyer") || pushes[2].payload.includes("sizes"), false);
+  is("filed and told", [contact, pushes.length], [true, 5]);
+  is("with nothing of that buyer", pushes[4].payload.includes("another.buyer") || pushes[2].payload.includes("sizes"), false);
 
   part(`At most QUIET_PER_HOUR (${QUIET_PER_HOUR}) an hour, however many buyers write`);
   for (let i = 0; i < QUIET_PER_HOUR + 5; i++) {

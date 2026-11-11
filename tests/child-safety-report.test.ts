@@ -19,6 +19,9 @@ import { REPORT_KINDS, readReport } from "@/lib/takedown-rules";
 import { CHILD_SAFETY_HOLDS_PER_DAY, TAKE_IT_DOWN_HOURS, alertOwner, holdReported } from "@/lib/child-safety";
 import { POST as reportRoute } from "@/app/api/report/route";
 import { readListing } from "@/lib/catalog";
+import { fileReport, openReport, takeDown } from "@/lib/takedown";
+import TakedownPage from "@/app/takedown/[token]/page";
+import { type ReactNode, isValidElement } from "react";
 import { transparencyCounts } from "@/lib/transparency";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -39,6 +42,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const DESCRIPTION = "This product page sells material that exploits a child. Please act now.";
 const CHILD = { kind: "child_safety", url: "", work: DESCRIPTION, name: "", email: "worried@example.com", signature: "", goodFaith: true, accurate: false };
 const INTIMATE = { kind: "intimate_image", url: "", work: "This is an intimate photo of me, shared here without my consent.", name: "Dana Doe", email: "dana@example.com", signature: "Dana Doe", goodFaith: true, accurate: true };
+
+/** The words a server page puts on screen: text children and title, label and eyebrow props, without running any component. */
+function wordsOf(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(wordsOf).join("");
+  if (isValidElement(node)) {
+    const props = node.props as Record<string, unknown>;
+    const named = ["title", "label", "eyebrow"].map((key) => (typeof props[key] === "string" ? ` ${props[key]} ` : "")).join("");
+    return named + wordsOf(props.children as ReactNode);
+  }
+  return "";
+}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -173,6 +189,55 @@ async function main(): Promise<void> {
   is("the Terms forbid it and say it is reported", [terms.includes('id="child-safety"'), terms.includes("Exploited Children (NCMEC)")], [true, true]);
   const procedure = readFileSync("docs/incident-response.md", "utf8");
   is("the procedure is written down, with the law", [procedure.includes("18 U.S.C. § 2258A"), procedure.includes("TAKE IT DOWN"), procedure.includes("Nenhum agente abre")], [true, true, true]);
+
+  part("Each kind's notice email, notice page and email to the creator say only what that kind's sender stated (Revisor 2 on #3587)");
+  // A child-safety report asks for no name, signature or sworn statement, and an intimate-image request's statements are
+  // its own: nobody stated "under penalty of perjury" for either. The reporter's words never reach the creator.
+  const kinds = [
+    { report: CHILD, ip: "10.35.87.1" },
+    { report: INTIMATE, ip: "10.35.87.2" },
+    { report: { ...INTIMATE, kind: "other", work: "This page sells a counterfeit of a registered trademark, shown in its first picture.", contact: "" }, ip: "10.35.87.3" },
+  ] as const;
+  for (const { report, ip } of kinds) {
+    const made = await addProduct(owner, `Reported For ${report.kind}`, "On sale", "9", null);
+    if (!made.ok) throw new Error("no product");
+    const read = readReport({ ...report, url: `https://marktmorgen.com/@safetyshop/p/${made.product.id}` });
+    if (!read.ok) throw new Error(`notice ${report.kind}`);
+    sent.length = 0;
+    is(`${report.kind}: filed`, await fileReport(read.report, ip, "https://marktmorgen.com"), "sent");
+    const notice = sent[0];
+    is(`${report.kind}: the notice email states no oath under penalty of perjury`, /perjury/i.test(notice?.text ?? ""), false);
+    is(`${report.kind}: no empty sender name`, /From:\s*</.test(notice?.text ?? ""), false);
+    if (report.kind === "child_safety") {
+      is("child_safety: the notice email names the kind, not illegal content in general", [/^Child safety report/.test(notice?.subject ?? ""), (notice?.text ?? "").includes("Notice of illegal content")], [true, false]);
+      is("child_safety: no signature line, since none was asked for", /Signed:/.test(notice?.text ?? ""), false);
+    } else if (report.kind === "intimate_image") {
+      is("intimate_image: the notice email names the kind", /^Request to remove an intimate image/.test(notice?.subject ?? ""), true);
+      is("intimate_image: it states what the person confirmed on the form", [(notice?.text ?? "").includes("Signed: Dana Doe"), (notice?.text ?? "").includes("this intimate image of them was published without their consent")], [true, true]);
+    } else {
+      is("other: it states what the person confirmed on the form", (notice?.text ?? "").includes("accurate and complete to the best of their knowledge"), true);
+    }
+    const token = notice?.text.match(/\/takedown\/([0-9a-f]{48})/)?.[1] ?? "";
+    const page = wordsOf(await TakedownPage({ params: Promise.resolve({ token }) }));
+    is(`${report.kind}: the notice page states no oath under penalty of perjury, nor both statements for a report that has none`, [/perjury/i.test(page), report.kind === "child_safety" && /Signed:|both statements/.test(page)], [false, false]);
+    is(`${report.kind}: the notice page shows no empty sender name`, /From:\s*</.test(page), false);
+    if (report.kind === "child_safety") is("child_safety: the notice page names the kind", [page.includes("Child safety report"), page.includes("Notice of illegal content")], [true, false]);
+    if (report.kind === "intimate_image") is("intimate_image: the notice page says what the person confirmed", page.includes("this intimate image of them was published without their consent"), true);
+    const opened = await openReport(token);
+    if (!opened?.store) throw new Error("opened");
+    sent.length = 0;
+    await takeDown(opened.report, opened.store, { type: "product", id: made.product.id }, "https://marktmorgen.com");
+    const creator = sent.find((mail) => [mail.to].flat().includes(owner));
+    is(`${report.kind}: the creator is told what was taken down`, (creator?.text ?? "").includes(`Reported For ${report.kind}`), true);
+    const private_ = report.kind === "child_safety" || report.kind === "intimate_image";
+    is(`${report.kind}: the reporter's words reach the creator only for a notice that is not about a child or an intimate image`, (creator?.text ?? "").includes(report.work), !private_);
+    if (private_) is(`${report.kind}: and no "The notice says" line, nor a ground that points at those words`, [(creator?.text ?? "").includes("The notice says"), (creator?.text ?? "").includes("for the reason it gives above")], [false, false]);
+  }
+
+  part("The urgent email shows only the reported page's path, never what the reporter added to the address (Revisor 2 on #3587, LEVE)");
+  sent.length = 0;
+  await alertOwner({ kind: "child_safety", url: `${url}?ref=a-tracking-code#a-fragment` }, "no_product", Date.UTC(2026, 10, 9, 18));
+  is("the canonical address, without the query or the fragment", [(sent.at(-1)?.text ?? "").includes(`Where: ${url}\n`), (sent.at(-1)?.text ?? "").includes("a-tracking-code"), (sent.at(-1)?.text ?? "").includes("a-fragment")], [true, false, false]);
 
   done();
 }

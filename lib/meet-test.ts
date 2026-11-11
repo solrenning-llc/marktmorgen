@@ -22,7 +22,7 @@ import type { MeetProvider } from "@/lib/call-setup";
 import { accessFor, testKey, NotConnected } from "@/lib/meet-connect";
 import { eventId, googleCreate, googleDelete, googleMove, zoomCreate, zoomDelete, zoomMove } from "@/lib/meet-providers";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 
 export class TestMeetingUnavailable extends Error {
   constructor() { super("The test meeting could not be changed just now. Try again in a moment."); }
@@ -144,6 +144,8 @@ export async function removeTest(statsId: string, provider: MeetProvider): Promi
   const access = await accessFor(statsId, provider);
   if (provider === "zoom") await zoomDelete(access.token, had.id);
   else await googleDelete(access.token, had.id);
-  await redisPipeline([["DEL", testKey(statsId, provider)]]);
+  // Read as written (CX-123 rule 24): a DEL whose reply is not a count is not known to be done, and is said so;
+  // asking again deletes the same meeting (a 404 there is done) and forgets it.
+  if (countOf(repliesFor(await redisPipeline([["DEL", testKey(statsId, provider)]]), 1)?.[0]) === null) throw unread("forgetting the test meeting with a reply that is not a count");
   return true;
 }

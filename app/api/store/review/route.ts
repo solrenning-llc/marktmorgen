@@ -1,7 +1,7 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import { refreshStoreQuotes } from "@/lib/store-quotes";
+import { dropReviewQuote, refreshStoreQuotes } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
@@ -90,6 +90,8 @@ export async function POST(request: NextRequest) {
   try {
     if (action === "delete") {
       const before = await readReview(statsId, productId, id);
+      // Its words leave the store page's quotes first (lib/store-quotes.ts), so "deleted" never leaves them there.
+      if (before) await dropReviewQuote(store, before);
       const done = await deleteReview(statsId, productId, id, store);
       if (done === "deleted") {
         after(() => refreshStoreQuotes(store));
@@ -101,6 +103,7 @@ export async function POST(request: NextRequest) {
       // Whatever this buyer wrote from this order no longer counts.
       const before = await readReview(statsId, productId, id);
       if (before && before.reference === proof.reference && !before.refunded) {
+        await dropReviewQuote(store, before);
         await markOneRefunded(statsId, productId, id);
         after(() => refreshStoreQuotes(store));
       }

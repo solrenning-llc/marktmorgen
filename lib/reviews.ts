@@ -803,7 +803,10 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
  * was granted (photoCountKey) goes too, for every product asked about, even
  * one whose review the buyer had already deleted: its id is computed from
  * their address. One erased person who writes again may get at most
- * MAX_REVIEW_PHOTOS more, bounded by the erasures themselves.
+ * MAX_REVIEW_PHOTOS more, bounded by the erasures themselves. `leaving`, when
+ * given, is handed every review found before the first is deleted (the store
+ * page's quotes, lib/store-quotes.ts); when it throws, this throws. The caller
+ * keeps the quotes again once this returns, from the reviews as they then stand.
  */
 export async function forgetReviewsPerson(
   statsId: string | null,
@@ -811,6 +814,7 @@ export async function forgetReviewsPerson(
   email: string,
   room: DataStore,
   files?: string[],
+  leaving?: (reviews: Review[]) => Promise<void>,
 ): Promise<{ records: number; photos: string[] }> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return { records: 0, photos: [] };
   const wanted = productIds.filter((p) => PRODUCT_ID_PATTERN.test(p));
@@ -832,6 +836,10 @@ export async function forgetReviewsPerson(
     const back = wanted.flatMap((p, i) => (removed[i] === 1 ? [{ slot: REVIEWS_SLOT(p), bytes: dataBytes([ids[i], String(MAX_REVIEW_PHOTOS)]) }] : []));
     if (back.length) await giveData(room, back);
   }
+  const found = reviews.filter((review): review is Review => review !== null);
+  // Their words leave the store page's quotes before any review goes: when that fails, every review is still here
+  // for the retry to find them by.
+  if (leaving && found.length) await leaving(found);
   let records = 0;
   const photos: string[] = [];
   for (let i = 0; i < wanted.length; i += 1) {

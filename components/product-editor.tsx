@@ -522,7 +522,7 @@ function ProductForm({
         {offerOutline && !loadingAbout ? (
           <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-product-outline="">
             <p id={`product-outline-help-${id}`} className="text-sm text-ink-soft">
-              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace with your own words, including the brackets. This product can&apos;t go on your store until you replace every one.
+              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace, brackets and all, with your own words. This product can&apos;t go on your store until you replace every one.
             </p>
             {draft.about.trim() ? (
               <p className="mt-2 text-sm text-ink-soft">The outline goes only into an empty description. Clear the description to use it.</p>

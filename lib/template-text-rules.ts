@@ -112,7 +112,7 @@ export function templateTextIn(page: Pick<SalesPage, "blocks"> & Partial<Pick<Sa
 export function templateLeftMessage(where: { field: TemplateLeft["field"]; part: string }, label: string | null, on: "site" | "product"): string {
   const place = where.field === "search" ? "In the search title or line" : where.field === "test" ? "In the headline you are testing" : `In the ${label ?? "page"} block`;
   const way = on === "site" ? "or keep the page hidden" : "or take the product off your store first";
-  return `${place}, “${where.part}” is a part for you to write. Replace it with your own words, including the brackets, ${way}. Nothing was saved.`;
+  return `${place}, “${where.part}” is a part for you to write. Replace the whole part, brackets and all, with your own words, ${way}. Nothing was saved.`;
 }
 
 /** A block's name as the page editor shows it (components/page-editor.tsx, kindLabel). */
@@ -125,5 +125,5 @@ const blockName = (kind: BlockKind | null): string => (kind === "booking" ? "Boo
  */
 export function templatePublishMessage(left: { field: TemplateLeft["field"]; kind: BlockKind | null; part: string }, product: string | null): string {
   const place = left.field === "search" ? "the search title or line" : left.field === "test" ? "the headline you are testing" : `the ${blockName(left.kind)} block`;
-  return `${product ? `“${product}”` : "This product"} has a part for you to write on its sales page, in ${place}: “${left.part}”. Open it under Sales pages, replace it with your own words, including the brackets, then publish it. Nothing was published.`;
+  return `${product ? `“${product}”` : "This product"} has a part for you to write on its sales page, in ${place}: “${left.part}”. Open it under Sales pages, replace the whole part, brackets and all, with your own words, then publish it. Nothing was published.`;
 }

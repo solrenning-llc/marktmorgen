@@ -215,6 +215,12 @@ function watching(written: { maybe: boolean }): typeof fetch {
   }) as typeof fetch;
 }
 
+/**
+ * The slowest stock count of one product: lib/stock.ts asks Stripe about at most five holds that ran out, two seconds
+ * each (MAX_CHECKS × CHECK_MS there). A run starts a product only with this much of it left.
+ */
+export const RESTOCK_COUNT_MS = 10_000;
+
 /** What became of one product this run: "done" leaves the job, "later" waits RESTOCK_WAIT_MS, "again" is due again at once. */
 type Turn = { sent: number; next: "done" | "later" | "again" };
 
@@ -266,7 +272,7 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
   return { sent: settled ? 0 : going.length, next: "again" };
 }
 
-async function restockOne(member: string, budget: number, deps: RestockDeps): Promise<Turn> {
+async function restockOne(member: string, budget: number, deadline: number, deps: RestockDeps): Promise<Turn> {
   const cut = member.indexOf("|");
   const storeId = cut > 0 ? member.slice(0, cut) : "";
   const productId = cut > 0 ? member.slice(cut + 1) : "";
@@ -302,6 +308,8 @@ async function restockOne(member: string, budget: number, deps: RestockDeps): Pr
   if (count === 0) return { sent: 0, next: "done" };
 
   if (restocked(0, await deps.left(store, product)) !== "yes") return { sent: 0, next: "later" };
+  // The count ran past the run's deadline: nothing is written down or sent this run; it goes on the next.
+  if (Date.now() > deadline) return { sent: 0, next: "later" };
   const everyone = await stockAlertAddresses(store, productId);
   const confirmed = everyone.filter((a) => a.confirmed).map((a) => a.email).sort();
   if (!confirmed.length) {
@@ -330,10 +338,11 @@ export async function runRestocks(deadline: number, deps: RestockDeps = DEFAULTS
   }
   let sent = 0;
   for (const member of members) {
-    if (Date.now() > deadline || sent >= RESTOCK_RUN_EMAILS) break;
+    // A product is started only when the run still holds its slowest stock count (Claude 3 on #3620).
+    if (Date.now() + RESTOCK_COUNT_MS > deadline || sent >= RESTOCK_RUN_EMAILS) break;
     let turn: Turn;
     try {
-      turn = await restockOne(member, RESTOCK_RUN_EMAILS - sent, deps);
+      turn = await restockOne(member, RESTOCK_RUN_EMAILS - sent, deadline, deps);
     } catch (error) {
       console.error("sending back-in-stock emails: a product could not be read as asked, so it waits", error);
       turn = { sent: 0, next: "later" };

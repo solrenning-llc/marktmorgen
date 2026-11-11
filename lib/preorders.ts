@@ -36,6 +36,8 @@ import { preorderWords } from "@/lib/buyer-words/preorder";
 import { isSettled } from "@/lib/instant-pay";
 import { formatMoney } from "@/lib/money";
 import { type Preorder, keptDay, parsePreorder, preorderCounts, preorderJob, preorderOpen, preorderProblem, readPreorderJob } from "@/lib/preorder-rules";
+// On its own line, so open pull requests that change the imports above still merge cleanly.
+import { type StripePage, StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const dayKey = (sid: string) => `nl:wl:${sid}:pre`;
@@ -43,7 +45,78 @@ const entriesKey = (sid: string, product: string) => `nl:pre:${sid}:${product}`;
 export const piKey = (pi: string) => `nl:pre:pi:${pi}`;
 const anyKey = (sid: string) => `nl:pre:${sid}:any`;
 const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;
+
+/**
+ * Pages of the creator's refunds (GET /refunds, up to 100 each) the checkout sweep reads for pre-orders per store per run,
+ * only for a store that ever sold one (CX-123 rule 24; r24 money inventory, item 1). Stripe lists the newest first: a
+ * run that stops here with pages left keeps the anchor, so no refund behind them is passed over, and the next
+ * run goes on from where it stopped (passKey). With the gifts (lib/gifts.ts, GIFT_REFUND_PAGES_PER_STORE),
+ * at most twice this many calls a store every five minutes; priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ */
+export const PREORDER_REFUND_PAGES_PER_STORE = 3;
 const seenKey = (sid: string) => `nl:pre:${sid}:seen`;
+/** Where a pass over the refunds stands between runs (revokeRefundedPreorders), in the store's nl:pre: keys (erased with it). */
+const passKey = (sid: string) => `nl:pre:${sid}:refunds:pass`;
+/** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
+const REFUND_PASS_SECONDS = 7 * 86_400;
+/**
+ * A pass: the window it reads (created since), the last refund it read, the newest refund it read, the connected
+ * account it reads (a pass kept from the store's earlier account is started over: its cursor names a refund the
+ * account it has now does not have; review of #3301, Claude 2 M2), the time the anchor waits at when the pass ends
+ * (absent: nothing to wait for), that of the oldest refund it read that Stripe had not finished (heldAt) or that could
+ * not be handled, and whether it read a row that is not readable (then the anchor stays where it was when the pass
+ * ends), so the next pass reads each of those rows again.
+ */
+type RefundPass = { since: number; after: string; newest: number; account: string; waiting?: number; unread?: true };
+/** A kept pass in its exact shape; null when there is none or it is in any other shape (then the pass starts over). */
+function readRefundPass(raw: unknown): RefundPass | null {
+  if (typeof raw !== "string") return null;
+  let pass: unknown;
+  try {
+    pass = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!pass || typeof pass !== "object" || Array.isArray(pass)) return null;
+  const { since, after, newest, account, waiting, unread } = pass as Record<string, unknown>;
+  if (!Number.isSafeInteger(since) || (since as number) < 0 || !Number.isSafeInteger(newest) || (newest as number) < 0) return null;
+  if (typeof after !== "string" || !/^[A-Za-z0-9_]{3,255}$/.test(after)) return null;
+  if (typeof account !== "string" || !/^acct_[A-Za-z0-9]{1,255}$/.test(account)) return null;
+  if (waiting !== undefined && (!Number.isSafeInteger(waiting) || (waiting as number) < 0)) return null;
+  if (unread !== undefined && unread !== true) return null;
+  // Figures a pass never keeps, each of which would move the anchor wrongly (review of #3301, Claude 2 L1): its newest
+  // refund and the time it waits at lie within its window, from its start to now (with the anchor's 300 s margin).
+  const latest = now() + 300;
+  if ((newest as number) < (since as number) || (newest as number) > latest) return null;
+  if (waiting !== undefined && ((waiting as number) < (since as number) || (waiting as number) > latest)) return null;
+  return {
+    since: since as number,
+    after,
+    newest: newest as number,
+    account,
+    ...(waiting === undefined ? {} : { waiting: waiting as number }),
+    ...(unread === true ? { unread } : {}),
+  };
+}
+/**
+ * Whether a row gives back what it paid for, by the one shared rule (lib/refunds.ts rowGivesBack), as the other jobs
+ * that take things back read it: a full refund going through (succeeded or pending), or a dispute lost; and, as
+ * before, a refund that succeeded on a charge marked refunded, whatever else that charge says.
+ */
+function givesBack(refund: Record<string, unknown>): boolean {
+  const charge = refund.charge as { refunded?: unknown } | null;
+  return rowGivesBack(refund) || (refund.object !== "dispute" && refund.status === "succeeded" && charge?.refunded === true);
+}
+/**
+ * The time of a refund Stripe has not finished (pending, or waiting on an action) whose charge is not refunded in full
+ * yet; null for any other row. It holds the anchor at its time (review of #3188, Claude 3): a later refund never moves
+ * the read past it, so it is listed again and taken back once it goes through. One that already gives everything back
+ * is taken back now and holds nothing.
+ */
+function heldAt(refund: Record<string, unknown>): number | null {
+  if (refund.object === "dispute" || (refund.status !== "pending" && refund.status !== "requires_action") || givesBack(refund)) return null;
+  return typeof refund.created === "number" ? refund.created : 0;
+}
 /** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
 /** Marks a row of the refunds job read; true only when Redis answered the SADD of one member with 0 or 1. */
@@ -585,65 +658,60 @@ export async function revokeRefundedPreorders(
 ): Promise<number> {
   if (!store.statsId || !store.stripeAccountId || !isRedisConfigured()) return 0;
   const sid = store.statsId;
-  const [any, anchorRaw] = await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)]]);
+  const account = store.stripeAccountId;
+  // The first reads in their exact shape (CX-123 rule 24): a reply cut short or in another shape does nothing this
+  // run, and asks nothing of Stripe; the next run reads them again.
+  const begun = repliesFor(await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)], ["GET", passKey(sid)]]), 3);
+  if (!begun) return 0;
+  const [any, anchorRaw, passRaw] = begun;
   if (!any) return 0;
-  const since = Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
-  let newest = Number(anchorRaw) || since;
+  const fresh = Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
+  // A pass over the refunds longer than one run goes on where the last run stopped (r24 money inventory, item 1, the
+  // gap left by #3188), as lib/group-buy.ts does: without it a store with more refunds since the anchor than one run
+  // reads read the same newest pages every run and never reached the older ones. A pass kept in an unknown shape (not
+  // text, not the pass's JSON, a cursor that is not an id), or of another anchor's window, is started over from the
+  // anchor, which never moved past it: read again, never skipped.
+  const keptPass = readRefundPass(passRaw);
+  const pass = keptPass && keptPass.account === account && (anchorRaw === null || keptPass.since === fresh) ? keptPass : null;
+  const since = pass ? pass.since : fresh;
+  let newest = pass ? pass.newest : Number(anchorRaw) || since;
+  let after = pass ? pass.after : "";
+  // The oldest refund the pass read that Stripe had not finished (heldAt; Infinity: none), kept with the pass.
+  let waiting = pass?.waiting ?? Infinity;
+  /** The pass as it is kept between runs. */
+  // Whether the pass read a row that is not readable: the anchor then stays where it was when the pass ends.
+  let unread = pass?.unread === true;
+  const passNow = (): RefundPass => ({ since, after, newest, account, ...(Number.isFinite(waiting) ? { waiting } : {}), ...(unread ? { unread } : {}) });
   let revoked = 0;
-  const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
-  query.append("expand[]", "data.charge");
-  const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-  // The refunds in their exact shape (Codex Q on #2724; CX-123 rule 24): a list of rows each as refundRowKnown()
-  // reads it, with every field that decides whether money went back. Anything else leaves the read unsure, so the
-  // anchor does not move past refunds that could not be read.
-  const refundsKnown = Array.isArray(listed.data) && (listed.data as unknown[]).every(refundRowKnown);
-  const refunds = refundsKnown ? (listed.data as Record<string, unknown>[]) : [];
-  // A dispute closed as lost takes a pre-order back as a full refund does, whatever its amount (lib/refunds.ts, the
-  // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
-  // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
-  const lost = await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("pre", sid));
-  let unsure = !lost.complete || !refundsKnown;
-  for (const refund of [...lost.rows, ...refunds]) {
-    if (Date.now() >= deadline) return revoked;
+
+  /** One row read whole and handled: false when something it needed was left unknown, and then it is not marked read. */
+  const handle = async (refund: Record<string, unknown>): Promise<boolean> => {
     const id = typeof refund.id === "string" ? refund.id : "";
-    const created = typeof refund.created === "number" ? refund.created : 0;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    const charge = refund.charge as { refunded?: unknown } | null;
     const dispute = refund.object === "dispute";
-    newest = Math.max(newest, created);
     if (dispute && id && !pi) {
       // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
-      if (!(await markRead(sid, id))) unsure = true;
-      continue;
+      return markRead(sid, id);
     }
-    if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
+    if (!id || !pi || !givesBack(refund)) return true;
     // Read before anything is marked (Codex Z on #2724; CX-123 rule 24): whether this row was handled, the payment's
     // pre-order and the pre-order itself, each in its exact shape. Unknown leaves the row unread and the read unsure,
     // and the next run asks again; nothing is marked read until it was handled.
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const found = looked?.[1];
-    if (!looked || handled === null || handled > 1 || (found !== null && typeof found !== "string")) {
-      unsure = true;
-      continue;
-    }
-    if (handled === 1) continue;
+    if (!looked || handled === null || handled > 1 || (found !== null && typeof found !== "string")) return false;
+    if (handled === 1) return true;
     const [foundSid, productId, session] = typeof found === "string" ? found.split("|") : [];
     if (foundSid === sid && productId && session) {
       const raw = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), session]]), 1)?.[0];
-      if (raw !== null && typeof raw !== "string") {
-        unsure = true;
-        continue;
-      }
+      if (raw !== null && typeof raw !== "string") return false;
       const entry = parsePreorder(raw);
       if (entry && !entry.revoked) {
         if (entry.given) {
           // Only what this pre-order gave: a purchase of the same product given another way stays.
           const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, entry.to), productId]]), 1)?.[0];
-          if (given !== null && typeof given !== "string") {
-            unsure = true;
-            continue;
-          }
+          if (given !== null && typeof given !== "string") return false;
           // No record: nothing of this pre-order is held as a purchase any more (null). A record that does not read,
           // or whose job is not text, is unknown, never "given another way" (rule 30, Claude 4 on #2781).
           let job = "";
@@ -655,10 +723,7 @@ export async function revokeRefundedPreorders(
               v = undefined;
             }
             const named = v && typeof v === "object" && !Array.isArray(v) ? (v as { job?: unknown }).job : undefined;
-            if (typeof named !== "string") {
-              unsure = true;
-              continue;
-            }
+            if (typeof named !== "string") return false;
             job = named;
           }
           if (readPreorderJob(job)?.checkout === session) {
@@ -668,33 +733,117 @@ export async function revokeRefundedPreorders(
               await dropStart(entry.to, productId);
             } catch (error) {
               console.error("taking a refunded pre-order's course away failed; tried again next run", error);
-              unsure = true;
-              continue;
+              return false;
             }
             // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
             // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
             const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
-            if (!oneWrite(removed?.[0])) {
-              unsure = true;
-              continue;
-            }
+            if (!oneWrite(removed?.[0])) return false;
           }
         }
         const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);
-        if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) {
-          unsure = true;
-          continue;
-        }
+        if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) return false;
         revoked += 1;
       }
     }
     // Marked read once handled: a run that stops halfway leaves it to the next, which does the same again.
-    if (!(await markRead(sid, id))) unsure = true;
+    return markRead(sid, id);
+  };
+
+  /** One page of refunds in its exact shape (lib/stripe-list.ts), each row as refundRowKnown() reads it; null when the page itself could not be read. */
+  const readPage = async (from: string): Promise<StripePage | null> => {
+    const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
+    query.append("expand[]", "data.charge");
+    if (from) query.set("starting_after", from);
+    try {
+      return readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading refunds for pre-orders: a page in another shape", error);
+      return null;
+    }
+  };
+
+  // A dispute closed as lost takes a pre-order back as a full refund does, whatever its amount (lib/refunds.ts, the
+  // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
+  // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
+  const lost = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("pre", sid));
+  let unsure = !lost.complete;
+  let lostNewest = 0;
+  for (const row of lost.rows) {
+    if (Date.now() >= deadline) return revoked;
+    lostNewest = Math.max(lostNewest, typeof row.created === "number" ? row.created : 0);
+    if (!(await handle(row))) unsure = true;
+  }
+
+  // Every page of the refunds since the anchor (CX-123 rule 24; r24 money inventory, item 1), newest first, read in
+  // its exact shape. The pass moves past a page once every row on it was read and handled as far as it can be (kept in
+  // passKey, a week); a row not readable or not handled holds the anchor, never the pass, and a page in another shape
+  // or a run out of time leaves the pass on that page, read again next run. A run that resumes a pass
+  // first reads the newest page, so a refund made meanwhile does not wait for the pass: what it reads there never
+  // moves the pass or the anchor, and the next pass reads it again (each handled one stays handled).
+  let pages = PREORDER_REFUND_PAGES_PER_STORE;
+  if (after) {
+    pages -= 1;
+    const top = await readPage("");
+    for (const refund of top?.rows ?? []) {
+      if (Date.now() >= deadline) return revoked;
+      await handle(refund);
+    }
+  }
+  let ended = false;
+  for (let page = 0; page < pages; page += 1) {
+    if (Date.now() >= deadline) return revoked;
+    const read = await readPage(after);
+    if (!read) break;
+    // One row that cannot be handled, or that is not readable at all, never holds the pages behind it (reviews of
+    // #3301, Claude 2 M1 and Claude 5): the pass goes on, the row is never marked read, and the anchor waits for it.
+    // A row not handled holds the anchor at its time, as a refund Stripe had not finished does; a row not readable,
+    // whose time is not known, keeps the anchor where it was. The next pass reads it again either way:
+    // never taken as refunded, never as not refunded, never passed over.
+    let unhandled = Infinity;
+    for (const refund of read.rows) {
+      if (Date.now() >= deadline) return revoked;
+      if (!(await handle(refund))) unhandled = Math.min(unhandled, typeof refund.created === "number" ? refund.created : since);
+    }
+    // The page read and handled as far as it can be moves the pass, and what it read moves with it: its newest refund,
+    // and the time the anchor waits at, however far the pass goes on (the pass skips no page; the anchor waits on it).
+    waiting = Math.min(waiting, unhandled);
+    if (read.unreadable > 0) unread = true;
+    for (const refund of read.rows) {
+      newest = Math.max(newest, typeof refund.created === "number" ? refund.created : 0);
+      const held = heldAt(refund);
+      if (held !== null) waiting = Math.min(waiting, held);
+    }
+    if (!read.hasMore) {
+      ended = true;
+      break;
+    }
+    // The next page is read from the last row, or, when that row is not readable, from the last readable one, which
+    // reads the rows after it again (never skipped). A page with no readable row at all has nothing to go on from:
+    // the pass stays on it and the anchor where it was, so nothing behind it is passed over.
+    const from = read.lastId ?? read.rows.at(-1)?.id ?? null;
+    if (!from) {
+      console.error("reading refunds for pre-orders: a page with no readable row; the pass stays on it");
+      break;
+    }
+    after = from;
+    // Either reply leaves a place that skips nothing: this page's last row, or the one kept before it (read again).
+    await redisPipeline([["SET", passKey(sid), JSON.stringify(passNow()), "EX", REFUND_PASS_SECONDS]]);
   }
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), and the
   // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.
   if (!(await confirmLostRead(lost, seenKey(sid)))) unsure = true;
   else if (lost.complete && lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
-  if (!unsure) await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
+  // The anchor moves, and the pass is let go, only once the list was read to its end and every lost dispute handled.
+  // A closing read in this run counts toward it only when this run began the pass: one that resumed it may have
+  // passed refunds made since the pass began, which the next pass reads from the anchor.
+  if (ended && !unsure) {
+    // Never past a refund the pass read that Stripe had not finished, or that could not be handled: the next pass reads
+    // it again from there. A pass that read a row not readable lets the pass go and keeps the anchor where it was.
+    const anchor = Math.min(pass || (lost.complete && lost.resumed) ? newest : Math.max(newest, lostNewest), Math.max(waiting, since));
+    const closed = repliesFor(await redisPipeline([...(unread ? [] : [["SET", anchorKey(sid), String(anchor)]]), ["DEL", passKey(sid)]]), unread ? 1 : 2);
+    if (!closed) console.error("ending a pass over refunds for pre-orders was left unknown");
+  }
   return revoked;
 }

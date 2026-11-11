@@ -14,6 +14,7 @@ const ERRORS: Record<string, string> = {
   server: "Discord could not be reached just now. Nothing was changed; try again in a moment.",
   not_connected: "No server is connected any more. Reload the page.",
   unavailable: "We could not read your Discord connection just now. Nothing was changed; try again in a few minutes.",
+  not_finished: "The bot left your server, but we could not finish disconnecting just now. Try again in a few minutes.",
   name: "Type a name for the role.",
   signed_out: "Your session ended. Log in again.",
 };

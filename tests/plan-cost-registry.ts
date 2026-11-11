@@ -1141,6 +1141,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
+      // A license key's device activation or release (610 [WP9] unit 2): at most ACTIVATION_COMMANDS commands and the record's
+      // bytes, counted as ACTIVATION_REQUEST_UNITS requests before anything is read (the price is held in tests/licence-activations.test.ts);
+      // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).
+      { file: "lib/licence-activations.ts", names: ["ACTIVATION_COMMANDS", "ACTIVATION_REQUEST_UNITS", "MAX_ACTIVATION_RECORD_BYTES", "needData(store"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },

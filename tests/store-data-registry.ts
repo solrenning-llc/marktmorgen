@@ -652,6 +652,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lc:@lib/lesson-comments.ts": { what: "Lesson comments", room: ["lib/lesson-comments.ts"] },
   "nl:lnote:@lib/lesson-notes.ts": { what: "A student's private notes on lessons (290 [SQ1]): at most MAX_NOTES_PER_STUDENT of MAX_NOTE_CHARS each, MAX_NOTES_BYTES_PER_STUDENT a student, all students' notes in one slot (NOTES_TOTAL_FIELD) of at most studentNotesRoomFor, a tenth of the data room", room: ["lib/lesson-notes.ts"] },
   "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
+  // 610 [WP9] unit 2: a key's devices, each a digest, taken in the room until the month the record expires in; its lock lives ten seconds.
+  "nl:keys:@lib/licence-activations.ts": { what: "The devices a license key runs on (one-way digests) and when the buyer freed one, and the lock of a change", room: ["lib/licence-activations.ts"] },
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },

@@ -268,6 +268,7 @@ async function main(): Promise<void> {
     is("an activation sends no more commands than it is priced at", sent.length <= ACTIVATION_COMMANDS, true);
     const cost = request("wait", ACTIVATION_COMMANDS, 3 * MAX_ACTIVATION_RECORD_BYTES);
     is("and its requests cost more than its commands and bytes", ACTIVATION_REQUEST_UNITS * laterPageCost() >= cost, true);
+    console.log(`  an activation: ${sent.length} commands here, at most ${ACTIVATION_COMMANDS}, ${cost.toFixed(6)} USD at most, counted as ${ACTIVATION_REQUEST_UNITS} requests at ${laterPageCost().toFixed(6)} USD; fullest record ${Buffer.byteLength(raw)} bytes`);
   }
 
   part("The person's copy of their data");

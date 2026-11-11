@@ -66,6 +66,7 @@ import { chatMessagesOf } from "@/lib/community-chat";
 import { rsvpsOf } from "@/lib/community-events";
 import { votesOf } from "@/lib/community-polls";
 import { keysOf } from "@/lib/licence-keys";
+import { activationsOf } from "@/lib/licence-activations";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
@@ -130,6 +131,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },
   "lib/paypal-sales.ts": { how: "copied", what: "Your PayPal orders: the product, the amount, the date and the box you checked before paying" },
   "lib/licence-keys.ts": { how: "copied", what: "License keys you bought, and the sale each came from" },
+  "lib/licence-activations.ts": { how: "copied", what: "The devices your license keys run on, as the codes kept for them, and when you freed one" },
   "lib/gifts.ts": { how: "copied", what: "Gifts you bought or were given" },
   "lib/group-buy.ts": { how: "copied", what: "Places bought for a group that you bought or were given" },
   "lib/preorders.ts": { how: "copied", what: "Your pre-orders and what became of them" },
@@ -415,6 +417,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/licence-activations.ts": async (s) => activationsOf(s.store, (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key }))),
   "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
   "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
   "lib/closing-buyers.ts": async (s) => {

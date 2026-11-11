@@ -58,6 +58,8 @@ async function main(): Promise<void> {
       checkout("cs_test_nointent", null, {}, now - 7),
       checkout("cs_test_lowword", { id: "pi_l", object: "payment_intent", latest_charge: charge("ch_l", { risk_level: "low" }) }, {}, now - 8),
       checkout("cs_test_trial", null, { trial_days: "7" }, now - 9),
+      checkout("cs_test_customerobj", { id: "cus_x", object: "customer", latest_charge: charge("ch_c", { risk_level: "highest" }) }, {}, now - 12),
+      checkout("cs_test_noobject", { id: "pi_y", latest_charge: charge("ch_y", { risk_level: "normal" }) }, {}, now - 13),
     ] };
     intents = { data: [
       { id: "pi_upsell_risky", object: "payment_intent", status: "succeeded", created: now - 10, amount: 900, currency: "usd",
@@ -88,6 +90,8 @@ async function main(): Promise<void> {
     is("charge not expanded", risk.get("cs_test_chargeid"), "not_available");
     is("no payment on the checkout", risk.get("cs_test_nointent"), "not_available");
     is("a word Stripe does not send", risk.get("cs_test_lowword"), "not_available");
+    is("another kind of object in the payment's place (Codex C2 on #3647)", risk.get("cs_test_customerobj"), "not_available");
+    is("a payment that does not say what it is", risk.get("cs_test_noobject"), "not_available");
     is("an extra whose charge was not expanded", risk.get("pi_upsell_plain"), "not_available");
 
     part("A free trial charged nothing, so it shows no risk");

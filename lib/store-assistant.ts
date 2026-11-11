@@ -31,6 +31,7 @@ import { forAi } from "@/lib/inbox-rules";
 import { handOver } from "@/lib/inbox";
 import { isHouseStore } from "@/lib/house-store";
 import { assistantWords } from "@/lib/buyer-words/assistant";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Listing, Store } from "@/lib/store";
 import {
   ASSISTANT_FACTS_BYTES,
@@ -458,6 +459,27 @@ export async function assistantMissed(store: Store, limit = 20): Promise<{ quest
     } catch {}
   }
   return out;
+}
+
+/**
+ * The same list read exactly, for a report that stands for the whole of it
+ * (lib/customer-voice.ts): a reply that is not a list, or a row this code
+ * never wrote (not JSON, no question, no time), throws UnknownReplyError
+ * instead of being read as fewer questions or none (rule 24). Never who asked.
+ */
+export async function assistantMissedExact(store: Store, limit = ASSISTANT_MISSED_KEPT): Promise<{ question: string; at: number }[]> {
+  if (!store.statsId || !isRedisConfigured()) return [];
+  const replies = await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]);
+  if (!Array.isArray(replies) || replies.length !== 1 || !Array.isArray(replies[0])) throw new UnknownReplyError("the assistant's unanswered questions");
+  return (replies[0] as unknown[]).map((row) => {
+    let value: { q?: unknown; at?: unknown } | null = null;
+    try {
+      value = typeof row === "string" ? (JSON.parse(row) as { q?: unknown; at?: unknown }) : null;
+    } catch {}
+    const question = value ? readAssistantText(value.q) : "";
+    if (!question || typeof value?.at !== "number" || !Number.isSafeInteger(value.at) || value.at <= 0) throw new UnknownReplyError("an unanswered question of the assistant");
+    return { question, at: value.at };
+  });
 }
 
 /** Forgets the list: the creator has read it. */

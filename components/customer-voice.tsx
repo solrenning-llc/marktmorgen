@@ -23,8 +23,9 @@ const SOURCE_WORDS: Record<VoiceSource, [string, string]> = {
   question: ["unanswered question", "unanswered questions"],
   review: ["review", "reviews"],
   search: ["search with no result", "searches with no result"],
+  assistant: ["question the assistant could not answer", "questions the assistant could not answer"],
 };
-const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search"];
+const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant"];
 
 const said = (counts: Partial<Record<VoiceSource, number>>) =>
   SOURCES.filter((s) => counts[s])
@@ -45,7 +46,8 @@ function monthName(month: string): string {
 
 /**
  * What customers are saying (lib/customer-voice.ts): the last 90 days of
- * cancellation words, unanswered questions, reviews and searches that found
+ * cancellation words, unanswered questions (the pages' and the Store
+ * assistant's), reviews and searches that found
  * nothing, sorted into themes once a month, each with its count and the
  * customers' own words.
  */
@@ -82,7 +84,7 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
         What customers are saying
       </p>
       <p className="mt-1 text-xs text-ink-soft">
-        The last 90 days of what members wrote when leaving, questions your pages could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
+        The last 90 days of what members wrote when leaving, questions your pages or your Store assistant could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
       </p>
       {summary ? (
         <div className="mt-3">

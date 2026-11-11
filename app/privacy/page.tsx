@@ -1869,9 +1869,9 @@ export default function PrivacyPage() {
             the student wrote for it, never the student&apos;s name, address
             or file. When a creator asks for the month&apos;s summary of what
             their customers say, it receives the words members wrote when
-            canceling, questions a page could not answer, the words of
-            reviews and the words searched for on the store that found
-            nothing, from the last 90 days, never with a name, and with any
+            canceling, questions a page or the store&apos;s assistant could
+            not answer, the words of reviews and the words searched for on
+            the store that found nothing, from the last 90 days, never with a name, and with any
             email address, phone number or web address in them taken out
             first. When a creator asks for the summary of one product&apos;s
             reviews, it receives the words of up to 60 of that product&apos;s

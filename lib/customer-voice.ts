@@ -54,6 +54,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
+import { assistantMissedExact } from "@/lib/store-assistant";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
@@ -61,8 +62,8 @@ import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
 import type { Store } from "@/lib/store";
 
-export type VoiceSource = "cancel" | "question" | "review" | "search";
-export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search"];
+export type VoiceSource = "cancel" | "question" | "review" | "search" | "assistant";
+export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant"];
 
 /** One text from a customer, as the model is handed it, by its number. */
 export type VoiceItem = {
@@ -206,6 +207,10 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   for (const q of (await missedQuestions(store, 50).catch(failed("question"))) ?? []) {
     if (q.at >= since) items.push({ source: "question", text: q.question, n: 1, product: titleOf(q.productId) });
   }
+  // The Store assistant's own unanswered questions (95 [D2-DEMAND-RADAR]), read exactly: never who asked.
+  for (const q of (await assistantMissedExact(store).catch(failed("assistant"))) ?? []) {
+    if (q.at >= since) items.push({ source: "assistant", text: q.question, n: 1 });
+  }
   const reviews = await studioReviews(store.statsId, { queue: false, offset: 0, limit: 100 }).catch(failed("review"));
   for (const r of reviews?.rows ?? []) {
     if (r.createdAt / 1000 >= since && r.text.trim()) items.push({ source: "review", text: r.text, n: 1, product: titleOf(r.productId), stars: r.rating });
@@ -234,6 +239,7 @@ export function voicePrompt(items: VoiceItem[]): string {
     question: "a visitor's question the page could not answer",
     review: "a buyer's review",
     search: "words searched for on the store that found nothing",
+    assistant: "a buyer's question the Store assistant could not answer",
   };
   return items
     .map((i) => `[${i.id}] (${where[i.source]}${i.product ? `, about ${cleanVoice(i.product, 80)}` : ""}${i.stars ? `, ${i.stars} of 5 stars` : ""}${i.n > 1 ? `, searched ${i.n} times` : ""}) ${i.text}`)

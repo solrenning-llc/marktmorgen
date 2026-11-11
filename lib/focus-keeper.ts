@@ -47,8 +47,8 @@ export type FocusKeeper = {
   focusIn: (element: KeptElement) => void;
   /** The focus left an element (a focusout event). Not a person leaving it on its own: see pointerDown. */
   focusOut: (element: KeptElement) => void;
-  /** A click or a touch somewhere (a pointerdown event): a person leaving the control on purpose. */
-  pointerDown: () => void;
+  /** A click or a touch on `target` (a pointerdown event): a person leaving the control on purpose, unless it is on it. */
+  pointerDown: (target?: KeptElement | null) => void;
   /** An element's disabled attribute changed (a MutationObserver attributes record). */
   disabledChanged: (element: KeptElement) => void;
   /** Elements were added or taken away somewhere (MutationObserver childList records), with the elements added. */
@@ -83,7 +83,9 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       // Nothing to do: a Tab brings a focusin elsewhere, and a click a pointerdown first. A blur alone also comes to
       // a control being turned off, moved or taken away, which is when the focus must go on.
     },
-    pointerDown() {
+    pointerDown(target) {
+      // On the control that has the focus, or inside it (its icon): no focusin follows, and the person is still on it.
+      if (last !== null && target && (target === last || place?.contains(last, target))) return;
       last = null;
       waiting = null;
       around = [];

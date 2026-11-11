@@ -47,7 +47,7 @@ export function StudioApp() {
       const target = element(event.target);
       if (target) keeper.focusOut(target);
     };
-    const onPointer = () => keeper.pointerDown();
+    const onPointer = (event: PointerEvent) => keeper.pointerDown(element(event.target));
     const watch = new MutationObserver((records) => {
       let tree = false;
       const added: (HTMLElement & KeptElement)[] = [];

@@ -103,7 +103,76 @@ async function main(): Promise<void> {
   plain.setLanguage("fr-FR");
   const plainPreview = await PDFDocument.load(await firstPages(await plain.save(), 1));
   is("an untagged source gives an untagged preview, with its language", [plainPreview.catalog.has(PDFName.of("StructTreeRoot")), (plainPreview.catalog.lookup(PDFName.of("Lang")) as PDFString | undefined)?.decodeText() ?? null], [false, "fr-FR"]);
+
+  part("A marked-content number out of range: the preview is untagged, at once (Claude 3, cloud D, and Claude 1, cloud reviewer C4, on #3785)");
+  // The number comes from the creator's file and was used as an array index with no bound: 500 million of them ran
+  // the server out of memory, which no try/catch holds. Above a small cap, negative or not whole, the tree is unread.
+  for (const mcid of [20_000_000, -1, 1.5]) {
+    const odd = await withFirstMcid(source, mcid);
+    const started = Date.now();
+    const oddPreview = await PDFDocument.load(await firstPages(odd, 1));
+    const took = Date.now() - started;
+    is(`MCID ${mcid}: no structure tree, made in well under a second (${took} ms)`, [oddPreview.catalog.has(PDFName.of("StructTreeRoot")), took < 1000], [false, true]);
+  }
+
+  part("An element partly on a page left out keeps no text of its attributes (Claude 3, cloud D, and Claude 1 on #3785)");
+  const SUMMARY = "Totals that only page three holds";
+  const spanning = await withSpanningTable(source, SUMMARY);
+  const spanningPreview = await firstPages(spanning, 2);
+  const spanAll = everything(spanningPreview);
+  is("the table's summary, which may describe the page left out, is not in the preview", [spanAll.includes(SUMMARY), spanAll.includes(hexOf(SUMMARY))], [false, false]);
+  const spanDoc = await PDFDocument.load(spanningPreview);
+  is("the part on the kept pages is still tagged", spanDoc.catalog.has(PDFName.of("StructTreeRoot")), true);
   done();
+}
+
+/** The source with its first element's first marked-content number replaced. */
+async function withFirstMcid(bytes: Uint8Array, mcid: number): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes);
+  const root = doc.catalog.lookup(PDFName.of("StructTreeRoot")) as PDFDict;
+  const stack: PDFDict[] = [];
+  const top = root.lookup(PDFName.of("K"));
+  for (const kid of top instanceof PDFArray ? top.asArray() : [top]) {
+    const value = doc.context.lookup(kid as PDFRef);
+    if (value instanceof PDFDict) stack.push(value);
+  }
+  while (stack.length) {
+    const element = stack.shift()!;
+    const k = element.lookup(PDFName.of("K"));
+    const kids = k instanceof PDFArray ? k.asArray() : k === undefined ? [] : [k];
+    const at = kids.findIndex((kid) => kid instanceof PDFNumber);
+    if (at >= 0) {
+      if (k instanceof PDFArray) k.set(at, PDFNumber.of(mcid));
+      else element.set(PDFName.of("K"), PDFNumber.of(mcid));
+      return doc.save();
+    }
+    for (const kid of kids) {
+      const value = doc.context.lookup(kid as PDFRef);
+      if (value instanceof PDFDict) stack.push(value);
+    }
+  }
+  throw new Error("no marked-content number in the source");
+}
+
+/** The source with one more element: a table over the first and third pages, its summary in its attributes. */
+async function withSpanningTable(bytes: Uint8Array, summary: string): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes);
+  const root = doc.catalog.lookup(PDFName.of("StructTreeRoot")) as PDFDict;
+  const pages = doc.getPages();
+  const top = root.lookup(PDFName.of("K"));
+  const holder = (top instanceof PDFArray ? doc.context.lookup(top.get(0) as PDFRef) : doc.context.lookup(top as PDFRef)) as PDFDict;
+  const table = doc.context.obj({
+    Type: "StructElem",
+    S: "Table",
+    P: root.get(PDFName.of("K")) instanceof PDFArray ? (top as PDFArray).get(0) : root.get(PDFName.of("K")),
+    A: { O: "Table", Summary: PDFString.of(summary) },
+    K: [doc.context.obj({ Type: "MCR", Pg: pages[0].ref, MCID: 0 }), doc.context.obj({ Type: "MCR", Pg: pages[2].ref, MCID: 0 })],
+  });
+  const kids = holder.lookup(PDFName.of("K"));
+  const ref = doc.context.register(table);
+  if (kids instanceof PDFArray) kids.push(ref);
+  else holder.set(PDFName.of("K"), doc.context.obj(kids === undefined ? [ref] : [kids, ref]));
+  return doc.save();
 }
 
 void main();

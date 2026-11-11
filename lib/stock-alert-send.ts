@@ -256,7 +256,13 @@ async function restockOne(member: string, budget: number, deps: RestockDeps): Pr
   if (product.hidden) return { sent: 0, next: "later" };
 
   const pending = await readJob(store.statsId, productId);
-  if (pending) return sendJob(store, product, pending, deps);
+  // A batch left waiting goes only when what is left of this run holds it whole (its key is its batch, so it is never
+  // cut): otherwise it waits for the next run, and the run's ceiling holds (Claude 3 on #3620).
+  // One taken as sent (UNKNOWN_SETTLED_MS) sends nothing, so it is settled whatever is left.
+  if (pending) {
+    const settling = pending.unknownSince !== undefined && Date.now() - pending.unknownSince >= UNKNOWN_SETTLED_MS;
+    return pending.emails.length > budget && !settling ? { sent: 0, next: "later" } : sendJob(store, product, pending, deps);
+  }
   // The list ended by itself (a year after its latest write) or was erased: nothing left to send for.
   const size = repliesFor(await redisPipeline([["HLEN", `nl:sa:${store.statsId}:${productId}`]]), 1);
   const count = size ? countOf(size[0]) : null;

@@ -1871,9 +1871,9 @@ export default function PrivacyPage() {
             their customers say, it receives the words members wrote when
             canceling, questions a page or the store&apos;s assistant could
             not answer, the words of reviews, the words searched for on the
-            store that found nothing and the names of products coming soon
-            with how many joined their waitlists (never who), from the last
-            90 days, never with a name, and with any
+            store that found nothing, from the last 90 days, and the names of
+            products coming soon with how many are on their waitlists so far,
+            confirmed or not (never who), never with a name, and with any
             email address, phone number or web address in them taken out
             first. When a creator asks for the summary of one product&apos;s
             reviews, it receives the words of up to 60 of that product&apos;s

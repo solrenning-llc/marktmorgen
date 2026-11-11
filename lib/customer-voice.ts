@@ -8,14 +8,20 @@
  * an AI summary of open answers with their sentiment; Baremetrics'
  * Cancellation Insights groups the reasons members give; Amplitude's
  * feedback agent groups feedback into themes and sends them on a schedule.
- * Here four lists the studio already keeps, each shown on its own, are read
+ * Here six lists the studio already keeps, each shown on its own, are read
  * together:
  *
  *   - what members wrote when canceling (lib/membership-numbers.ts);
  *   - questions a product page or the store's guide could not answer
  *     (lib/answers.ts);
  *   - the words of reviews (lib/reviews.ts);
- *   - what was searched for on the store and found nothing (lib/stats.ts).
+ *   - what was searched for on the store and found nothing (lib/stats.ts);
+ *   - questions the Store assistant could not answer (lib/store-assistant.ts);
+ *   - how many are on the waitlist of each product coming soon so far,
+ *     confirmed or not, never who (lib/waitlist.ts).
+ *
+ * What the last two read is paid for first, in VOICE_EXTRA_STUDIO_UNITS more
+ * of the store's studio requests (app/api/store/voice; review of #3731).
  *
  * A list whose read failed is never taken for an empty one (rule 24): the
  * summary stands for the whole month, so it is made only from every list
@@ -55,7 +61,7 @@ import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
 import { assistantMissedExact } from "@/lib/store-assistant";
-import { waitlistSizes } from "@/lib/waitlist";
+import { waitlistSizes, WAITLIST_VOICE_PRODUCTS } from "@/lib/waitlist";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
@@ -107,6 +113,12 @@ export type VoiceSummary = {
 };
 
 export const DAYS = 90;
+/**
+ * The studio requests one summary click takes beyond its own, before it reads: one SMEMBERS of the products coming
+ * soon, a HLEN for each of up to WAITLIST_VOICE_PRODUCTS of them and one LRANGE of the assistant's unanswered
+ * questions, against a studio request's twenty commands (UNIT_COST.studio, tests/plan-cost-registry.ts).
+ */
+export const VOICE_EXTRA_STUDIO_UNITS = Math.ceil((1 + WAITLIST_VOICE_PRODUCTS + 1) / 20);
 /** Fewer texts than this, and there is nothing worth sorting. */
 export const MIN_TEXTS = 8;
 /**
@@ -385,7 +397,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     const done = await counted(store, now, async () => {
       const system = [
         "You sort what an online store's customers wrote into the few themes they repeat.",
-        "You are given numbered texts: words members wrote when canceling, questions a product page could not answer, reviews, and words searched for on the store that found nothing.",
+        "You are given numbered texts: words members wrote when canceling, questions a product page or the store's assistant could not answer, reviews, words searched for on the store that found nothing, and products coming soon with how many are on their waitlists.",
         `Group texts that say the same thing into at most ${MAX_THEMES} themes. A theme needs at least two texts. Leave out texts that fit no theme. Each text goes in one theme at most.`,
         "Name each theme in plain American English, at most 8 words, saying what customers said or wanted (for example: \"Wants a printable version\", \"Price feels high for what is inside\"). No numbers in a name, no judgment of the customers, nothing that is not in the texts.",
         "Return only a JSON object: {\"themes\": [{\"title\": string, \"ids\": [numbers of its texts]}]}, the most repeated theme first.",

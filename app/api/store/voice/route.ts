@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
-import { makeVoice } from "@/lib/customer-voice";
+import { VOICE_EXTRA_STUDIO_UNITS, makeVoice } from "@/lib/customer-voice";
+import { countStudio } from "@/lib/studio-route";
 import { withCutoff } from "@/lib/fetch-timeout";
 
 /**
@@ -29,6 +30,9 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { store } = guarded;
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  // What the waitlists and the assistant's questions read is paid for before it is read (MR; review of #3731).
+  const extra = await countStudio(store, "stats", VOICE_EXTRA_STUDIO_UNITS);
+  if (!extra.ok) return Response.json({ ok: false, error: extra.reason === "unknown" ? "unread" : "used", message: extra.message }, { status: extra.reason === "unknown" ? 503 : 429 });
   try {
     const done = await withCutoff(cutoff, () => makeVoice(store));
     // "unread": a list could not be read just now, so too few texts is not known to be few (rule 24); nothing was counted.

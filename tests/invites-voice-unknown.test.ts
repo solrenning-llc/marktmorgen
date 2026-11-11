@@ -197,7 +197,7 @@ test("a whole read with enough texts is sorted as before", async () => {
   const made = await makeVoice(store, now);
   if (!made.ok) throw new Error(`no summary: ${made.reason}`);
   assert.deepEqual(made.summary.read, { question: 4, review: 2, search: 2 });
-  assert.match(systems.at(-1)!, /You are given numbered texts: words members wrote when canceling, questions a product page could not answer, reviews, and words searched for on the store that found nothing\./, "the model is told what it was given, all of it");
+  assert.match(systems.at(-1)!, /You are given numbered texts: words members wrote when canceling, questions a product page or the store's assistant could not answer, reviews, words searched for on the store that found nothing, and products coming soon with how many are on their waitlists\./, "the model is told what it was given, all of it");
 });
 
 test("the studio names the lists that could not be read when it refuses", () => {

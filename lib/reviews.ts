@@ -228,15 +228,18 @@ export async function visibleReviews(
   first: string[] = [],
 ): Promise<Review[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([
+  // Read exactly (rule 24): a reply of another shape is unknown, never "no reviews to show".
+  const ids = repliesFor(await redisPipeline([
     ["ZREVRANGEBYSCORE", visibleKey(statsId, productId), "+inf", "-inf", "LIMIT", offset, limit],
-  ]);
-  const list = Array.isArray(ids) ? (ids as string[]).filter((id) => REVIEW_ID_PATTERN.test(id)) : [];
+  ]), 1)?.[0];
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) throw new UnknownReplyError("a product's reviews to show");
+  const list = (ids as string[]).filter((id) => REVIEW_ID_PATTERN.test(id));
   const picked = offset === 0 ? first.filter((id) => REVIEW_ID_PATTERN.test(id)).slice(0, 3) : [];
   const wanted = [...new Set([...picked, ...list])];
   if (wanted.length === 0) return [];
-  const [rows] = await redisPipeline([["HMGET", productKey(statsId, productId), ...wanted]]);
-  const read = (Array.isArray(rows) ? rows : []).map(parseReview);
+  const rows = repliesFor(await redisPipeline([["HMGET", productKey(statsId, productId), ...wanted]]), 1)?.[0];
+  if (!Array.isArray(rows) || rows.length !== wanted.length || !rows.every((r) => r === null || typeof r === "string")) throw new UnknownReplyError("a product's reviews to show");
+  const read = rows.map(parseReview);
   const byId = new Map<string, Review>();
   wanted.forEach((id, i) => {
     const review = read[i];

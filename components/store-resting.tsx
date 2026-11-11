@@ -54,20 +54,20 @@ export function StoreResting({ store, suspended = false, buyer = false }: { stor
           <div className="mt-10">
             {canRecover(store) ? (
               <p className="mb-4">
-                <Link href={`/@${store.handle}/orders`} className="st-footer-link text-sm font-semibold">
+                <Link href={`/@${store.handle}/orders`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                   {w.getAgain}
                 </Link>
               </p>
             ) : null}
             {store.community?.on ? (
               <p className="mb-4">
-                <Link href={`/@${store.handle}/community`} className="st-footer-link text-sm font-semibold">
+                <Link href={`/@${store.handle}/community`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                   {w.communityTitle}
                 </Link>
               </p>
             ) : null}
             <p className="mb-4">
-              <Link href="/studio" className="st-footer-link text-sm font-semibold">
+              <Link href="/studio" className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {w.restingOwner}
               </Link>
             </p>

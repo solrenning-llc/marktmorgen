@@ -21,9 +21,9 @@ const NOW = Math.floor(Date.now() / 1000);
 
 const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};
 let refunds: Record<string, unknown>[] = [];
-let sessionsAnswer: "list" | "broken" = "list";
+const sessionsAnswer = "list" as "list" | "broken";
 /** How the charge's own refunds (GET /refunds?charge=) are answered, and the charges asked about. */
-let chargeRefundsAnswer: "list" | "broken" | "more" = "list";
+const chargeRefundsAnswer = "list" as "list" | "broken" | "more";
 const chargeReads: string[] = [];
 /** The charge a refund row names, as an id or its expanded object. */
 const chargeIdOf = (row: Record<string, unknown>) => (typeof row.charge === "string" ? row.charge : ((row.charge as { id?: string } | null)?.id ?? ""));

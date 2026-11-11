@@ -64,7 +64,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { hasProduct, readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -839,7 +839,15 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      const givesBack = rowGivesBack(refund);
+      // A full refund that needs an action (requires_action) is on its way, as a pending one (Claude 1 and Claude 6 on
+      // #2868): skipped, a newer refund moved the anchor past it and, once it succeeded, its key stayed valid for good.
+      // One whose charge does not read as refunded in full yet proves nothing, and keeps the place from moving past it.
+      const actionNeeded = refund.object !== "dispute" && refund.status === "requires_action";
+      if (actionNeeded && !refundedInFull(refund.charge)) {
+        unsure = true;
+        continue;
+      }
+      const givesBack = rowGivesBack(refund) || actionNeeded;
       // A refund Stripe answers exactly failed or canceled takes nothing back, but may undo the mark a pending one left
       // (PENDING_REFUND_SALE): its sale is looked up like any refund's, and only that mark is cleared. Any other row
       // that gives nothing back is skipped as before (Claude 2's focal money review of #2868, LOW).
@@ -847,7 +855,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       if (!givesBack && !undone) continue;
       // A full refund not yet through: the keyless sale is marked pending, and the refund stays unread until it settles.
       // A succeeded part of a full refund whose rest is still pending counts as pending too (below).
-      let pending = givesBack && refund.object !== "dispute" && refund.status === "pending";
+      let pending = givesBack && refund.object !== "dispute" && REFUND_ON_ITS_WAY.has(refund.status as string);
       const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);

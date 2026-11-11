@@ -129,7 +129,9 @@ async function main(): Promise<void> {
     const pressed = await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: link }, "7.7.5.1"));
     is("the link in the email that went still confirms", statusOf(pressed), "confirmed");
     const again = await ask("lost@example.com", "7.7.5.2");
-    is("asking again the same day: answered as sent", statusOf(again), "sent");
+    // The service's answer for that key is still unknown, so the sender keeps it and never writes it again; the email
+    // that went already carries a link that works.
+    is("asking again the same day: never \"sent\" twice, the unknown kept", statusOf(again), "unsent");
     is("and no second email is written to them", mails.length - before, 1);
   }
 

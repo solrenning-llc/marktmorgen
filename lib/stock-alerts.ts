@@ -47,6 +47,8 @@ export const dueMember = (storeId: string, productId: string) => `${storeId}|${p
 const tokenKey = (token: string) => `nl:sa:t:${createHash("sha256").update(token).digest("hex")}`;
 const slotOf = (pid: string) => `sa:${pid}`;
 const newToken = () => randomBytes(24).toString("hex");
+/** A place's confirm link for one day (UTC): derived from its secret leave link, 48 hex characters as every link. */
+const confirmFor = (leave: string, now: number) => createHash("sha256").update(`confirm|${leave}|${new Date(now).toISOString().slice(0, 10)}`).digest("hex").slice(0, 48);
 const nowSeconds = (ms: number) => Math.floor(ms / 1000);
 
 function parseEntry(raw: unknown): AlertEntry | null {
@@ -131,7 +133,9 @@ export async function askStockAlert(input: { store: DataStore; productId: string
   if (!before && stockAlertSignup(input.left, size) === "full") return { ok: false, reason: "full" };
 
   const leave = before?.t ?? newToken();
-  const confirm = newToken();
+  // The confirm link is the leave link's, for the day (never guessable: the leave link is secret): asking again the
+  // same day makes the same email under the same key, which the service answers once (Codex G on #3620).
+  const confirm = confirmFor(leave, now);
   const entry: AlertEntry = { at: before?.at ?? nowSeconds(now), ok: before?.ok ?? 0, t: leave };
   const grant = (k: Grant["k"]): Grant => ({ s: sid, p: productId, e: email, k });
   const changes: DataChange[] = [{ until: now + CONFIRM_SECONDS * 1000, bytes: dataBytes([tokenKey(confirm), JSON.stringify(grant("confirm"))], 1) }];

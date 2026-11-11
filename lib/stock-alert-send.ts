@@ -44,7 +44,7 @@ import { type BatchMessage, sendBatch, sendEmail } from "@/lib/email";
 import { type Door, fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { productSegment } from "@/lib/product-slug";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { notYetTaken } from "@/lib/ses";
+import { isSesConfigured, notYetTaken } from "@/lib/ses";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { SITE_URL } from "@/lib/site-url";
 import { stockLeft } from "@/lib/stock";
@@ -141,21 +141,32 @@ export async function askBackInStock(input: { store: Store; product: Listing; em
   });
   if (!asked.ok) return asked.reason === "unknown" ? "error" : asked.reason;
   const mail = confirmEmail(store, product, asked, input.origin);
-  const sent = await sendEmail({
-    meter: { by: "store", store, kind: "transactional", asked: true },
-    from: fromLine(store),
-    to: input.email.trim(),
-    subject: mail.subject,
-    text: mail.text,
-    html: mail.html,
-    headers: mail.headers,
-  }).catch((error) => {
+  const written = { maybe: false };
+  const sent = await sendEmail(
+    {
+      meter: { by: "store", store, kind: "transactional", asked: true },
+      from: fromLine(store),
+      to: input.email.trim(),
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+      headers: mail.headers,
+      // The same confirmation asked again the same day is the same email under the same key: the service answers it
+      // once, so a retry after a lost answer never writes to them twice (Codex G on #3620).
+      idempotencyKey: `stock-alert-confirm:${store.statsId}:${product.id}:${asked.confirm}`,
+    },
+    { fetch: watching(written) },
+  ).catch((error) => {
     console.error("sending a back-in-stock confirmation failed", error);
     return false;
   });
   if (sent) return "sent";
-  // Its email did not go: a new place is taken back at once (one asked before keeps its own).
-  if (!asked.again) await leaveStockAlert(asked.leave, store).catch((error) => console.error("taking back an unconfirmed back-in-stock place failed", error));
+  // Known not sent (nothing was written to a service: no sender, the store's figure spent, a refusal before it): a new
+  // place is taken back at once (one asked before keeps its own). One the service may have taken (its answer lost, or
+  // Amazon, which sends with its own fetch) keeps its place: the email that went must still confirm (Codex G on #3620).
+  if (!asked.again && !written.maybe && !isSesConfigured()) {
+    await leaveStockAlert(asked.leave, store).catch((error) => console.error("taking back an unconfirmed back-in-stock place failed", error));
+  }
   return "unsent";
 }
 
@@ -204,7 +215,7 @@ function watching(written: { maybe: boolean }): typeof fetch {
     try {
       const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
       const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
-      write = method !== "GET" && method !== "HEAD" && path.endsWith("/emails/batch");
+      write = method !== "GET" && method !== "HEAD" && (path.endsWith("/emails/batch") || path.endsWith("/emails"));
     } catch {
       // Not read exactly: counted as a write.
     }

@@ -149,6 +149,8 @@ const link = (place: number) => pollLinkPart(ID, place) as string;
   const bad = await post(`b=${ID}&k=${link(2).replace(/^2\./, "3.")}`, { a: "0" });
   is("a link that is not that recipient's: refused", bad.status, 404);
   is("not cached", bad.headers.get("Cache-Control"), "no-store");
+  // takePublicRequest answers false both past the month's figure and when the count could not be read (review, LOW 7).
+  is("resting never claims the month is spent", /this month/.test(String(route.WORDS?.resting?.text ?? "this month")), false);
   is("nothing kept by the route", votes(), []);
 
   done();

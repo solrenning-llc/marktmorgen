@@ -10,7 +10,14 @@
  * shown as recorded), other fees of a kind not known here, refunds,
  * disputes (with money given back) and the net Stripe itself recorded.
  * Stripe Tax fees and other Stripe fees charged to the account (Billing,
- * Radar) belong to no sale and stay apart, by currency.
+ * Radar, currency conversion) belong to no sale and stay apart, by currency.
+ * A bank payment that bounced (payment_reversal) takes the sale back, as a
+ * refund does.
+ *
+ * Only the types named here are read. Payouts, transfers and top-ups are
+ * named as money that is no sale and no fee; every other type, and every
+ * adjustment that is not a dispute, cannot be read, so the report is
+ * unavailable rather than missing money (rule 24).
  *
  * Amounts are in the currency the account recorded, in its smallest unit;
  * currencies are never added together and nothing is converted here.
@@ -58,7 +65,19 @@ const record = (v: unknown): v is Record<string, unknown> => typeof v === "objec
 
 const SALE_TYPES = new Set(["charge", "payment"]);
 const REFUND_TYPES = new Set(["refund", "payment_refund", "refund_failure", "payment_failure_refund"]);
+const REVERSAL_TYPES = new Set(["payment_reversal"]);
 const DISPUTE_CATEGORIES = new Set(["dispute", "dispute_reversal"]);
+const ACCOUNT_FEE_TYPES = new Map<string, "tax_fee" | "stripe_fee">([
+  ["tax_fee", "tax_fee"],
+  ["stripe_fee", "stripe_fee"],
+  ["stripe_fx_fee", "stripe_fee"],
+]);
+/** Types known to carry no sale money and no fee: read and left out. */
+const NO_SALE_TYPES = new Set([
+  "payout", "payout_cancel", "payout_failure",
+  "transfer", "transfer_cancel", "transfer_failure",
+  "topup", "topup_reversal",
+]);
 const STRIPE_FEE_DETAILS = new Set(["stripe_fee", "payment_method_passthrough_fee"]);
 
 /** The sale a sale line is for: its source, as an id or expanded. */
@@ -74,10 +93,15 @@ function chargeOf(source: unknown): string | null {
   return typeof charge === "string" && SALE_ID.test(charge) ? charge : null;
 }
 
+/** The sale a payment reversal is for: the payment itself, or the charge on its expanded source. */
+function reversedSale(source: unknown): string | null {
+  return saleSource(source) ?? chargeOf(source);
+}
+
 /**
- * One balance transaction: a FeeLine, "other" (a payout, a transfer, an
- * adjustment that is not a dispute: money that is no sale and no fee), or
- * null when it cannot be read.
+ * One balance transaction: a FeeLine, "other" (a payout, a transfer or a
+ * top-up: money that is no sale and no fee), or null when it cannot be read,
+ * which includes every type not named here.
  */
 export function readFeeLine(raw: unknown): FeeLine | "other" | null {
   if (!record(raw) || raw.object !== "balance_transaction") return null;
@@ -110,13 +134,18 @@ export function readFeeLine(raw: unknown): FeeLine | "other" | null {
   } else if (REFUND_TYPES.has(type)) {
     kind = "refund";
     sale = chargeOf(raw.source);
+  } else if (REVERSAL_TYPES.has(type)) {
+    kind = "refund";
+    sale = reversedSale(raw.source);
   } else if (type === "adjustment" && DISPUTE_CATEGORIES.has(category)) {
     kind = "dispute";
     sale = chargeOf(raw.source);
-  } else if (type === "tax_fee" || type === "stripe_fee") {
-    return { id, kind: type, sale: null, at: created, currency, amount, stripeFee, feeTax, applicationFee, otherFee, net };
-  } else {
+  } else if (ACCOUNT_FEE_TYPES.has(type)) {
+    return { id, kind: ACCOUNT_FEE_TYPES.get(type)!, sale: null, at: created, currency, amount, stripeFee, feeTax, applicationFee, otherFee, net };
+  } else if (NO_SALE_TYPES.has(type)) {
     return "other";
+  } else {
+    return null;
   }
   if (sale === null) return null;
   return { id, kind, sale, at: created, currency, amount, stripeFee, feeTax, applicationFee, otherFee, net };
@@ -134,7 +163,7 @@ export type SaleRow = {
   feeTax: number;
   applicationFee: number;
   otherFee: number;
-  /** Refunds (negative) and failed refunds given back (positive). */
+  /** Refunds and bank payments reversed (negative), failed refunds given back (positive). */
   refunds: number;
   /** Disputed money taken (negative) and given back (positive). */
   disputes: number;

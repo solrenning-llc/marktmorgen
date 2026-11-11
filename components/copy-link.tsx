@@ -13,6 +13,7 @@ export function CopyLink({ id }: { id: string }) {
     <a
       href={`#${id}`}
       onClick={async (event) => {
+        if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         if (!navigator.clipboard) return;
         event.preventDefault();
         const url = `${window.location.origin}${window.location.pathname}#${id}`;

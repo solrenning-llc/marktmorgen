@@ -37,6 +37,7 @@ import { WRITE_PATH, FORGET_PATH } from "@/lib/path-atomic";
  * (lib/person-data.ts, "account"). Answers and money remain private; only explicit\n * board consent shares a pseudonym, verified mission count and reading time.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { dataBytes, contentRoomFor } from "@/lib/store-data-rules";
 import { dataKey, monthOf } from "@/lib/store-data";
@@ -152,11 +153,20 @@ export function pathJson(record: PathRecord): string {
   return JSON.stringify({ v: 1, r: record.revision ?? "", a: record.answers, at: record.startedAt, c: record.checkins, b: record.best, bAt: record.bestAt, m: record.money, n: record.counts, g: record.board ?? null,...(record.returnStep?{w:record.returnStep}:{}) });
 }
 
-/** The store's path, or null when it has not begun one (or nothing can be read). */
+/**
+ * The store's path, or null when it has not begun one. The GET answer is read exactly (rule 24): no reply, extra
+ * replies or a value that is neither text nor null throws, never "not started". A record kept as text is read by
+ * parsePath as before; kept text that parsePath does not take for a record throws too, because only this file
+ * writes the key, always as pathJson. Only a GET of null (no key) is "not started".
+ */
 export async function readPath(store: Pick<Store, "sid">): Promise<PathRecord | null> {
   if (!SID.test(store.sid) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", key(store.sid)]]);
-  return parsePath(raw);
+  const reply = repliesFor(await redisPipeline([["GET", key(store.sid)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("a store's Path");
+  if (reply[0] === null) return null;
+  const record = parsePath(reply[0]);
+  if (!record) throw new UnknownReplyError("a store's Path");
+  return record;
 }
 
 /**

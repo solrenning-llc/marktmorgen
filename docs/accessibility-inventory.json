@@ -1712,6 +1712,7 @@
     "app/api/library/route.ts",
     "app/api/mail/clicked/route.ts",
     "app/api/mail/inbound/route.ts",
+    "app/api/mail/poll/route.ts",
     "app/api/mail/ses/route.ts",
     "app/api/mail/unsubscribe/route.ts",
     "app/api/mcp/route.ts",

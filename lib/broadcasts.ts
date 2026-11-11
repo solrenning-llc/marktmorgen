@@ -36,6 +36,7 @@ import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
 import { BUYER_LEDGER_UNITS, LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadBytes, ledgerReadingUnits, ledgerUnits, readNarrow, readsBuyers } from "@/lib/segments";
 import { sameNarrow } from "@/lib/segments-rules";
+import { type EmailPoll, readPollInput } from "@/lib/email-poll-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
 
@@ -118,6 +119,14 @@ export type Broadcast = {
   misses?: number;
   /** A waiting email is not tried before this moment (seconds): the month whose studio requests it waits for, or a failed reading's wait. */
   retryAt?: number;
+  /**
+   * A poll answered by a click and a press of Confirm (125 [F2-EMAIL-POLLS],
+   * lib/email-poll-rules.ts), open from sendAt for its days. Absent on an
+   * email with none, which is every email made before it existed; one that
+   * does not read makes the whole record unreadable, never an email without
+   * its poll.
+   */
+  poll?: EmailPoll;
 };
 
 /** Creation may have been partially written even when its acknowledgement is lost. */
@@ -201,6 +210,8 @@ function parse(raw: unknown): Broadcast | null {
   try {
     const value = JSON.parse(raw) as Broadcast;
     if (!BROADCAST_ID.test(value.id)) return null;
+    const poll = value.poll === undefined ? null : readPollInput(value.poll);
+    if (poll && !poll.ok) return null;
     // Written before the exclusion existed: it goes to everyone it was
     // addressed to, exactly as it was when it was scheduled.
     return {
@@ -211,6 +222,7 @@ function parse(raw: unknown): Broadcast | null {
       narrow: isNarrowed(value.narrow) ? readNarrow(value.narrow) : null,
       ...(typeof value.label === "string" && value.label ? { label: value.label } : {}),
       test: parseTest(value.test),
+      ...(poll ? { poll: poll.poll } : {}),
     };
   } catch {
     return null;

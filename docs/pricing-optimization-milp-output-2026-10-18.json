@@ -5,7 +5,7 @@
    "scenario": "-0.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 975.728,
+   "objective": 975.7174,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -52,7 +52,7 @@
    "scenario": "-0.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 987.9081,
+   "objective": 987.8796,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -99,7 +99,7 @@
    "scenario": "-1",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 343.6766,
+   "objective": 343.6728,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -146,7 +146,7 @@
    "scenario": "-1",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 347.9539,
+   "objective": 347.943,
    "plans": {
     "creator": {
      "monthCents": 19900,
@@ -193,7 +193,7 @@
    "scenario": "-1.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 190.5747,
+   "objective": 190.5707,
    "plans": {
     "creator": {
      "monthCents": 16900,
@@ -240,7 +240,7 @@
    "scenario": "-1.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 315.7559,
+   "objective": 315.7169,
    "plans": {
     "creator": {
      "monthCents": 12900,
@@ -287,7 +287,7 @@
    "scenario": "-2",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 111.2292,
+   "objective": 111.2271,
    "plans": {
     "creator": {
      "monthCents": 16900,
@@ -334,7 +334,7 @@
    "scenario": "-2",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 310.9935,
+   "objective": 310.955,
    "plans": {
     "creator": {
      "monthCents": 12900,

@@ -123,6 +123,7 @@ import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { serverNote } from "@/lib/server-note";
 import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
 import { SidePanelSwitch, useSidePanel } from "@/components/side-panel-switch";
 import { COMPUTER_BODY_MAX, type PreviewScreen, screenFor } from "@/lib/preview-screen";
@@ -938,22 +939,30 @@ export function PageEditor({
   const [versionNote, setVersionNote] = useState<string | null>(null);
   async function loadVersions() {
     setVersionNote(null);
+    let refused: unknown = null;
     try {
       const response = await fetch(`/api/store/page-versions?id=${encodeURIComponent(pageKey)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; versions?: { index: number; at: number; blocks: number; headline: string }[] };
-      if (!data.ok || !data.versions) throw new Error("unread");
+      if (!data.ok || !data.versions) {
+        refused = data;
+        throw new Error("unread");
+      }
       setVersions(data.versions);
     } catch {
       setVersions(null);
-      setVersionNote("The earlier versions could not be read just now. Try again in a moment.");
+      setVersionNote(serverNote(refused, "The earlier versions could not be read just now. Try again in a moment."));
     }
   }
   async function bringBack(index: number) {
     setVersionNote(null);
+    let refused: unknown = null;
     try {
       const response = await fetch(`/api/store/page-versions?id=${encodeURIComponent(pageKey)}&n=${index}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; at?: number; page?: SalesPage; dropped?: number };
-      if (!data.ok || !data.page) throw new Error("unread");
+      if (!data.ok || !data.page) {
+        refused = data;
+        throw new Error("unread");
+      }
       const page = data.page;
       putVersions(page, false);
       setSeoTitle(page.seoTitle);
@@ -971,7 +980,7 @@ export function PageEditor({
         `Loaded the version from ${whenSaved(data.at ?? 0)}. Press Save to put it back live${dropped ? `; ${dropped === 1 ? "one picture was" : `${dropped} pictures were`} deleted since, so add ${dropped === 1 ? "it" : "them"} again if you want ${dropped === 1 ? "it" : "them"}` : ""}.`,
       );
     } catch {
-      setVersionNote("That version could not be read just now. Try again in a moment.");
+      setVersionNote(serverNote(refused, "That version could not be read just now. Try again in a moment."));
     }
   }
 
@@ -998,7 +1007,7 @@ export function PageEditor({
       const response = await fetch(`/api/store/page?id=${encodeURIComponent(copyFrom)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; blocks?: PageBlock[]; picturesLeft?: number; style?: PageStyle };
       if (!data.ok || !data.blocks?.length) {
-        setCopyNote("That page could not be read just now. Try again in a moment.");
+        setCopyNote(serverNote(data, "That page could not be read just now. Try again in a moment."));
         return;
       }
       const blocks = data.blocks;

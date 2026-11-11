@@ -59,12 +59,16 @@ let calls = 0;
 let onCall: (n: number) => void = () => {};
 /** What the reading answers: its facts, unless a check gives it another valid answer. */
 let readingSays = JSON.stringify(FACTS);
+/** The reading's HTTP status: 200, unless a check has the provider refuse it. */
+let readingStatus = 200;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (new URL(String(input)).hostname !== "api.anthropic.com") return new Response("{}", { status: 404 });
   calls += 1;
   onCall(calls);
   // The reading is the call that carries the PDF; any other is the writing.
-  const text = String(init?.body ?? "").includes('"type":"document"') ? readingSays : JSON.stringify(DRAFT);
+  const reading = String(init?.body ?? "").includes('"type":"document"');
+  if (reading && readingStatus !== 200) return new Response("overloaded", { status: readingStatus });
+  const text = reading ? readingSays : JSON.stringify(DRAFT);
   return new Response(JSON.stringify({ content: [{ type: "text", text }] }));
 }) as typeof fetch;
 
@@ -100,6 +104,7 @@ async function main(): Promise<void> {
     calls = 0;
     onCall = () => {};
     readingSays = JSON.stringify(FACTS);
+    readingStatus = 200;
     refuse.at = 0;
     // Each check starts from a month with nothing used, so a plan's allowance never runs out midway.
     redis.run(["DEL", monthKey]);
@@ -212,6 +217,20 @@ async function main(): Promise<void> {
   const emptyUnsure = await writePage(store, input, Date.now(), stepsOf("runemptyunsure01", []));
   is("said as not confirmed, never as a number", emptyUnsure, { ok: false, reason: "empty", returned: null, left: null });
   is("one give-back sent, no retry", giveBacks(monthKey).length, 1);
+
+  // A reading that failed is not a reading that found nothing (Claude 2's LOW and Codex M's LOW on #3435): the creator
+  // is never told their PDF held nothing to write from when it was not read, only that the help could not finish.
+  part("A reading the provider refused, or answered in no readable shape: said as failed, never as an empty PDF");
+  fresh();
+  before = await ai.aiLeft(store);
+  readingStatus = 529;
+  const refusedReading = await writePage(store, input, Date.now(), stepsOf("runreadfailed001", []));
+  is("the provider refused the reading: failed, the page's job given back", [calls, refusedReading], [1, { ok: false, reason: "failed", returned: 1, left: before - READ_PDF_JOBS }]);
+  fresh();
+  before = await ai.aiLeft(store);
+  readingSays = "Sorry, I cannot read that.";
+  const unreadReading = await writePage(store, input, Date.now(), stepsOf("runreadnojson001", []));
+  is("a reading with no JSON in it: failed too", [calls, unreadReading], [1, { ok: false, reason: "failed", returned: 1, left: before - READ_PDF_JOBS }]);
 
   part("The writing step's money refused: it never reaches the model");
   fresh();

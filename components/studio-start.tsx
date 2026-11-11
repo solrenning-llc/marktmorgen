@@ -107,7 +107,7 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
  */
 export function StudioNav({ items }: { items: { href: string; label: string }[] }) {
   return (
-    <nav aria-label="Studio sections" className="sticky top-16 z-30 -mx-4 mt-6 border-b border-line bg-paper/95 px-4 backdrop-blur sm:mx-0 sm:rounded-full sm:border sm:px-2">
+    <nav aria-label="Studio sections" data-studio-nav="" className="sticky top-16 z-30 -mx-4 mt-6 border-b border-line bg-paper/95 px-4 backdrop-blur sm:mx-0 sm:rounded-full sm:border sm:px-2">
       <ul className="flex gap-1 overflow-x-auto py-2 pr-10 [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%-3rem),transparent)] [mask-image:linear-gradient(to_right,#000_calc(100%-3rem),transparent)] [scrollbar-width:none] sm:pr-0 sm:[mask-image:none]">
         {items.map((item) => (
           <li key={item.href} className="shrink-0">

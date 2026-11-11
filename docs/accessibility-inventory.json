@@ -1055,6 +1055,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/fees/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/fees",
+      "parameters": []
+    },
+    {
       "source": "app/studio/forms/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/forms",
@@ -1816,6 +1822,7 @@
     "app/api/store/extras/route.ts",
     "app/api/store/fair/route.ts",
     "app/api/store/faq/route.ts",
+    "app/api/store/fees/export/route.ts",
     "app/api/store/fields/route.ts",
     "app/api/store/file/attach/route.ts",
     "app/api/store/file/download/route.ts",
@@ -2073,6 +2080,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

@@ -151,6 +151,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/exit-offer": row("offers", draft),
   "GET store/export": row("buyers", never(PEOPLE_FILE)),
   "POST store/extras": row("products", draft),
+  "GET store/fees/export": row("numbers", read, "Fees and what the creator kept on each sale (282 [HG1]), read from their own Stripe account; it names no buyer."),
   "POST store/fair": row("products", draft),
   "POST store/faq": row("pages", draft),
   "POST store/fields": row("products", draft),

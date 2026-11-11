@@ -51,9 +51,9 @@ function main(): void {
   }
 
   part("The page and the download");
-  is("the page is for whoever may see the store's numbers", /studioView\([^)]*"stats"\)/.test(page), true);
+  is("the page is for whoever may see the store's numbers", /studioView\(await cookies\(\), [^\n]*: undefined, "stats"\)/.test(page), true);
   is("the download too", /creatorFrom\(request, "stats"\)/.test(route), true);
-  is("both read the same reading", [page.includes("keptSaleFees(store, now)"), route.includes("keptSaleFees(store)")], [true, true]);
+  is("both read the same reading", [page.includes("keptSaleFees(store)"), route.includes("keptSaleFees(store)")], [true, true]);
   is("the download link says what it gives", page.includes(">Download every sale as a spreadsheet (CSV)</a>"), true);
   is("the page lists at most FEES_PAGE_SALES and says the download has every one", [FEES_PAGE_SALES, page.includes("sales.rows.slice(0, FEES_PAGE_SALES)"), page.includes("The download has every one.")], [50, true, true]);
   is("a download that is not whole gives no file", route.includes("if (csv === null) return plain(503"), true);
@@ -64,7 +64,7 @@ function main(): void {
   is("column headers scoped", (page.match(/scope="col"/g) ?? []).length, 15);
   is("each row has its own header", (page.match(/scope="row"/g) ?? []).length, 4);
   is("each table scrolls on its own and is reachable by keyboard", (page.match(/overflow-x-auto" tabIndex=\{0\} role="region" aria-label=/g) ?? []).length, 2);
-  is("a breadcrumb says where the page is", page.includes('aria-label="Breadcrumb"') && page.includes('aria-current="page"'), true);
+  is("the studio's trail says where the page is (components/breadcrumb.tsx)", page.includes('<StudioTrail store={store} here="Fees and what you keep" />'), true);
   is("what changes after loading is announced", (page.match(/role="status"/g) ?? []).length >= 3, true);
   is("one h1, sections under h2", [(page.match(/<h1/g) ?? []).length, (page.match(/<h2/g) ?? []).length], [1, 2]);
 

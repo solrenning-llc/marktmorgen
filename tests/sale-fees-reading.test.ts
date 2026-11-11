@@ -112,12 +112,12 @@ async function main(): Promise<void> {
   for (let i = 0; i < SALE_FEES_READINGS_PER_DAY; i += 1) pages.push(page([sale], false));
   for (let i = 0; i < SALE_FEES_READINGS_PER_DAY; i += 1) await keptSaleFees(STORE, NOW + i * 2 * HOUR);
   is(`${SALE_FEES_READINGS_PER_DAY} readings a day`, asked.length, SALE_FEES_READINGS_PER_DAY);
-  const past = await keptSaleFees(STORE, NOW + 10 * HOUR);
+  const past = await keptSaleFees(STORE, NOW + 6 * HOUR);
   is("past it, Stripe is not called", asked.length, SALE_FEES_READINGS_PER_DAY);
   is("and the last copy is shown as stale", past.kind === "read" ? [past.kept.stale, past.kept.at] : past.kind, [true, NOW + (SALE_FEES_READINGS_PER_DAY - 1) * 2 * HOUR]);
   is("the count is given back past the figure", (await redis.pipeline([["GET", "nl:salefees:day:stats1:2026-11-11"]]))[0], String(SALE_FEES_READINGS_PER_DAY));
   await redis.pipeline([["DEL", "nl:salefees:copy:stats1"]]);
-  is("with no copy: used, with when they come back", await keptSaleFees(STORE, NOW + 11 * HOUR), { kind: "used", backAt: Date.UTC(2026, 10, 12) });
+  is("with no copy: used, with when they come back", await keptSaleFees(STORE, NOW + 7 * HOUR), { kind: "used", backAt: Date.UTC(2026, 10, 12) });
   reset();
   const realPipeline = redis.pipeline.bind(redis);
   (redis as unknown as { pipeline: typeof realPipeline }).pipeline = async (commands) => (commands.some((c) => c[0] === "INCRBY") ? commands.map(() => "?") : realPipeline(commands));

@@ -82,8 +82,14 @@ async function main(): Promise<void> {
   part("Wired where the window is counted, after its own INCRBY");
   const traffic = readFileSync("lib/traffic.ts", "utf8");
   const counted = traffic.indexOf('redisPipeline([["INCRBY", key, units]])');
-  const alarm = traffic.indexOf("await alertSpike(store, folder, window, n, units, limit, now);");
+  const alarm = traffic.indexOf("alertSpike(store, folder, window, n, units, limit, now)");
   is("countRequest asks after the count, with the count, the units and the limit", counted > 0 && alarm > counted, true);
+  // Claude 1's LOW on #3380: a hold refused and given back is not counted, so it rings nothing; the page never waits on
+  // the claim, the day's count or the email.
+  const givenBack = traffic.indexOf('if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]])');
+  is("the alarm looks only after a refused hold was given back", givenBack > counted && alarm > givenBack, true);
+  is("a count given back rings nothing", /if \(n > limit && giveBack\)[^\n]*\n[\s\S]*?if \(!\(n > limit && giveBack\)\) afterAnswer\(\(\) => alertSpike\(/.test(traffic), true);
+  is("the request never waits on the alarm", traffic.includes("await alertSpike("), false);
 
   done();
 }

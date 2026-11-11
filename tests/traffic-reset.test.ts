@@ -6,7 +6,7 @@
  * stores and the in-memory Redis.
  */
 import { readFileSync } from "node:fs";
-import { TRAFFIC_LOG_KEEP, readTrafficLog, resetVisits } from "@/lib/traffic-reset";
+import { TRAFFIC_LOG_DAYS, TRAFFIC_LOG_KEEP, readTrafficLog, resetVisits } from "@/lib/traffic-reset";
 import { trafficForAdmission } from "@/lib/traffic";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { storeFolder, storeRef, type Store } from "@/lib/store";
@@ -45,6 +45,10 @@ async function main(): Promise<void> {
   part("Every reset is written down first, the newest first, at most TRAFFIC_LOG_KEEP");
   const log = await readTrafficLog();
   is("one record, for the one change made", log?.length, 1);
+  // Claude 1's LOW on #3380: the record names stores (a handle is often a person's name), so it does not outlive
+  // TRAFFIC_LOG_DAYS from its last reset.
+  const ttl = Number(redis.run(["TTL", "nl:operator:traffic-log"]));
+  is("the record expires TRAFFIC_LOG_DAYS after its last reset", ttl > 0 && ttl <= TRAFFIC_LOG_DAYS * 86_400, true);
   is("when, which store, which window, before and after; no address", log?.[0], { at: NOW, sid: "s1shop0001", handle: "shop", window: window?.id, before: 3405, after: 1200 });
   redis.run(["DEL", parts]); // people only here, so every figure down to 0 can be reached
   redis.run(["SET", visits, String(TRAFFIC_LOG_KEEP + 10), "EX", 1000]);

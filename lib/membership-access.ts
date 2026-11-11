@@ -34,6 +34,7 @@
  * choice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { type PauseSub, pausedNow } from "@/lib/membership-pause-rules";
@@ -81,7 +82,11 @@ function retryScheduled(sub: object): boolean {
 export function memberState(sub: unknown): string | null {
   if (!sub || typeof sub !== "object") return null;
   const status = (sub as { status?: unknown }).status;
-  if (typeof status !== "string") return null;
+  // A subscription Stripe sent always says what state it is in. One with no
+  // readable state is an answer not understood (CX-123 rule 24), never an
+  // ended membership: the door says to try again, it does not tell somebody
+  // who pays that their membership is over.
+  if (typeof status !== "string" || !status) throw new UnknownReplyError("a membership's status");
   if (pausedNow(sub as PauseSub)) return "paused";
   return status === "past_due" && !retryScheduled(sub) ? PAST_DUE_NO_RETRY : status;
 }
@@ -89,6 +94,19 @@ export function memberState(sub: unknown): string | null {
 /** Whether a membership, as Stripe sent it, opens its doors now. */
 export function isLiveSub(sub: unknown): boolean {
   return isLive(memberState(sub));
+}
+
+/**
+ * Whether the membership on a paid subscription checkout, read with its
+ * subscription expanded, opens its doors now (rule 30: every door that reads
+ * one). A checkout in subscription mode always has its subscription, so one
+ * that is still its id (not expanded), null, a list or anything but a
+ * subscription is an answer not understood: it throws UnknownReplyError,
+ * never "ended" (lib/learn.ts, lib/community-access.ts, lib/buyer-orders.ts).
+ */
+export function liveExpanded(sub: unknown): boolean {
+  if (!sub || typeof sub !== "object" || Array.isArray(sub)) throw new UnknownReplyError("a checkout's membership");
+  return isLiveSub(sub);
 }
 
 /**

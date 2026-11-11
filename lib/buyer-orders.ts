@@ -38,7 +38,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
-import { isLiveSub, soldAMembership } from "@/lib/membership-access";
+import { liveExpanded, soldAMembership } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
@@ -704,8 +704,8 @@ async function purchaseFromSession(
   // A membership hands its thing over while it is being paid for.
   const member = soldAMembership(product, { mode: session.mode, metadata: meta });
   if (member) {
-    const sub = session.subscription as { status?: unknown } | null;
-    if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+    // One that cannot be read throws (rule 24): never shown as ended, with the way to renew, to somebody who pays.
+    if (!liveExpanded(session.subscription)) {
       return { customer: null, purchase: {
         reference: id,
         kind: "sale",

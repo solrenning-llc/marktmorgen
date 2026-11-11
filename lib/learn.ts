@@ -41,7 +41,7 @@ import { orderWrite } from "@/lib/order-data";
 import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { isLiveSub } from "@/lib/membership-access";
+import { liveExpanded } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
@@ -260,9 +260,9 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
       for (const product of bought) {
         // A course sold as a membership is open while the membership runs.
         if (product.id === meta.product && product.recurring && session.mode === "subscription" && meta.kind !== "plan") {
-          const sub = session.subscription as { status?: unknown } | null;
-          // The same rule as every other door a membership opens (lib/membership-access.ts).
-          if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+          // The same rule as every other door a membership opens (lib/membership-access.ts). One that cannot be read
+          // throws (rule 24), so nothing is kept as "ended" and the next good read opens the course.
+          if (!liveExpanded(session.subscription)) {
             ended.add(product.id);
             continue;
           }

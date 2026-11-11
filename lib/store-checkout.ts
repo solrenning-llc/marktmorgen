@@ -56,6 +56,7 @@ import { imageUrl } from "@/lib/product-image";
 import { readMoves } from "@/lib/call-records";
 import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, withoutRecovery } from "@/lib/recovery-setting";
 import { isLive, membershipStatus, soldAMembership } from "@/lib/membership-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { purchaseRefunded } from "@/lib/refunds";
 import { BUMP_KEYS, type BumpKey, MIN_BUNDLE_ITEMS, bumpsFromMeta, bundleFromMeta, bundleMeta, chosenItems, deliverableItems, picks } from "@/lib/bundle-rules";
 import { type BundleContents, contentsOf } from "@/lib/bundles";
@@ -1068,6 +1069,8 @@ export async function readOrder(
   let membership: "live" | "ended" | null = null;
   if (soldAMembership(product, { mode: session.mode, metadata })) {
     try {
+      // A paid subscription checkout always has its subscription: none at all is an answer not understood (rule 24).
+      if (session.subscription === null || session.subscription === undefined) throw new UnknownReplyError("a checkout's membership");
       membership = isLive(await membershipStatus(store, session.subscription)) ? "live" : "ended";
     } catch (error) {
       console.error("reading a membership failed", error);

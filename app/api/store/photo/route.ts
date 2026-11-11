@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { dropPhotoUpload, notePhotoUpload, setPhotoId, settlePhotos, storeForEmail } from "@/lib/store";
+import { dropPhotoUpload, notePhotoUpload, setPhotoId, settlePhotos, storeForEmail, storeForEmailSeen } from "@/lib/store";
 import { MAX_PHOTO_BYTES, decodePhoto, deletePhoto, newPhotoId, writePhoto } from "@/lib/store-photo";
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
@@ -26,6 +26,23 @@ import { lockedFor } from "@/lib/two-step";
  * replace is not confirmed deleted, the new one is on the page but the answer
  * is an error too; the old one stays named until a later try deletes it.
  */
+/**
+ * Whether the owner's store record is gone, exactly: its one GET answered an
+ * exact nil. A record read back, a record of another owner or shape, a reply
+ * of another shape or a read that throws is not known to be gone (rule 24).
+ */
+async function recordGoneExactly(ref: string): Promise<boolean> {
+  let raw: unknown;
+  try {
+    if (await storeForEmailSeen(ref, (_commands, reply) => { raw = reply; })) return false;
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(raw) || raw.length !== 1) return false;
+  const entry = Object.getOwnPropertyDescriptor(raw, "0");
+  return Boolean(entry && "value" in entry && entry.value === null);
+}
+
 export async function POST(request: NextRequest) {
   // Base64 is a third bigger than the bytes it carries, plus the JSON around it.
   // Taking the photo off deletes it: named apart, for a session let in without its second step (lib/two-step.ts).
@@ -81,15 +98,15 @@ export async function POST(request: NextRequest) {
     // When this throws the photo stays named as waiting, whether or not the store was pointed at it: never deleted
     // here while the store may show it; the next upload deletes it past the wait if the store does not. But the
     // record that names it may be gone: a closing walk prepared from a record read before this upload named the
-    // photo, then removed the record (Codex G on #3614). The record is read again, exactly: only when it is gone for
-    // sure (no record) is nothing left that could show or find this photo, so it goes now. A record that is there,
-    // or one that cannot be read, keeps the photo as before (rule 24: unknown is never "gone").
+    // photo, then removed the record (Codex G on #3614). The record is read again, exactly: only when the read
+    // answers an exact nil (no record) is nothing left that could show or find this photo, so it goes now. A record
+    // that is there, a record of another shape, a reply of another shape or a read that throws keeps the photo as
+    // before (rule 24: unknown is never "gone"; Claude 3 on #3614).
     let result: Awaited<ReturnType<typeof setPhotoId>>;
     try {
       result = await setPhotoId(guarded.ref, id);
     } catch (error) {
-      const still = await storeForEmail(guarded.ref).catch(() => "unknown" as const);
-      if (still === null) await deletePhoto(id).catch((drop) => console.error("deleting a store photo whose store closed failed", drop));
+      if (await recordGoneExactly(guarded.ref)) await deletePhoto(id).catch((drop) => console.error("deleting a store photo whose store closed failed", drop));
       throw error;
     }
     if (!result.ok) {

@@ -33,7 +33,7 @@
  */
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, StandardFonts, degrees, rgb } from "pdf-lib";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -86,6 +86,12 @@ function writable(text: string): string {
  * Puts the line along the bottom of every page, however the page is turned: a
  * page stored sideways and shown upright gets the line along what the reader
  * sees as its foot, reading left to right. Pure: bytes in, bytes out.
+ *
+ * The line is drawn as an artifact (`/Artifact BMC … EMC`), like a running
+ * footer or a watermark: a creator's tagged PDF keeps every piece of its
+ * content in its structure tree or marked as decoration (PDF/UA, ISO 14289-1
+ * 7.1), so a screen reader goes on reading the book and not the mark. In an
+ * untagged file the marker changes nothing a reader sees.
  */
 export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
@@ -107,6 +113,7 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
           : angle === 270
             ? { x: box.x + lift, y: box.y + box.height - inset, rotate: 270 }
             : { x: box.x + inset, y: box.y + lift, rotate: 0 };
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.BeginMarkedContent, [PDFName.of("Artifact")]));
     page.drawText(text, {
       x: at.x,
       y: at.y,
@@ -116,6 +123,7 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
       color: rgb(0.38, 0.38, 0.42),
       opacity: 0.85,
     });
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
   }
   return doc.save();
 }

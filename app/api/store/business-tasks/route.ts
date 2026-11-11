@@ -72,7 +72,9 @@ export async function POST(request: NextRequest) {
       if (action === "add" && input?.ok) return addBusinessTask(tasks, input.value, newId(), now);
       if (action === "edit" && input?.ok) return editBusinessTask(tasks, id, input.value);
       if (action === "done") return markBusinessTask(tasks, id, body.done === true, now);
-      return removeBusinessTask(tasks, id);
+      // Named, not left as the last case, so tests/locked-deletes.test.ts sees how this removal is held.
+      if (action === "remove") return removeBusinessTask(tasks, id);
+      return { ok: false, error: "unknown" };
     });
     if (!done.ok) {
       if (done.error === "store_full") return Response.json({ ok: false, error: "store_full", message: done.message }, { status: 409, headers: NO_STORE });

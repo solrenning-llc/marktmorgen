@@ -159,7 +159,7 @@ async function main(): Promise<void> {
   is("each refund carries this action's mark, never the key or the token itself", [stripe.made[0]?.action?.length, (stripe.made[0]?.action ?? "").includes(T1)], [40, false]);
   is("still one line in the log", (await logLines(store)).length, 1);
   const otherFigures = await post({ charge: CHARGE, token: T1, amount: "5", reason: "requested_by_customer" });
-  is("the same form with other figures a day later: refused, nothing sent", [otherFigures.status, otherFigures.body.error, stripe.made.length], [400, "invalid", 1]);
+  is("the same form with other figures a day later: refused, nothing sent", [otherFigures.status, otherFigures.body.error, stripe.made.length], [409, "form_used", 1]);
   const stripeFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
   const badToken = await post({ charge: CHARGE, token: "abc", amount: "5" });
   is("no form token: refused before any read", [badToken.status, badToken.body.error], [400, "invalid"]);
   const badReason = await post({ charge: CHARGE, token: T3, amount: "5", reason: "because" });
-  is("a reason Stripe does not take: refused", [badReason.status, badReason.body.error], [400, "invalid"]);
+  is("a reason Stripe does not take: refused, said as the reason (Claude 3 on #3678, LEVE)", [badReason.status, badReason.body.error], [400, "reason"]);
   stripe.charge.store = "someoneelse";
   const other = await post({ charge: CHARGE, token: T3, amount: "5" });
   is("a payment of another store on the same account: not found, nothing sent", [other.status, other.body.error, refundPosts().length], [404, "not_found", asked]);
@@ -204,7 +204,7 @@ async function main(): Promise<void> {
   part("Refused by Stripe before anything was made: said so, and no line in the log");
   const linesBefore = (await logLines(store)).length;
   const changed = await post({ charge: CHARGE, token: T1, amount: "5" });
-  is("the first form's key with another amount: refused, the first refund stands", [changed.status, changed.body.error, stripe.made.length], [400, "invalid", 2]);
+  is("the first form's key with another amount: said as a form already used, the first refund stands (Claude 3 on #3678, LEVE)", [changed.status, changed.body.error, stripe.made.length], [409, "form_used", 2]);
   stripe.next = { body: undefined };
   const refusedBody = { error: { type: "invalid_request_error", code: "parameter_invalid_integer", message: "Invalid integer" } };
   const realFetch = globalThis.fetch;
@@ -224,7 +224,7 @@ async function main(): Promise<void> {
   reset();
   stripe.next = { status: "failed" };
   const failed = await post({ charge: CHARGE, token: T2, full: true });
-  is("refused by Stripe: said failed", [failed.status, failed.body.state], [200, "failed"]);
+  is("refused by Stripe: never ok, its own error (Claude 3 on #3678, LEVE)", [failed.status, failed.body.ok, failed.body.error], [409, false, "refund_failed"]);
   reset();
   stripe.next = { body: { id: "re_odd", object: "refund", amount: 5_000, charge: CHARGE, currency: "usd", status: "ok" } };
   const odd = await post({ charge: CHARGE, token: T3, full: true });

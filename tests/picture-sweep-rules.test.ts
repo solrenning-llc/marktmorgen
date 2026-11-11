@@ -65,4 +65,10 @@ is("at most MAX_SWEEP_PER_RUN noticed in one run", bigNotice !== "unknown" && bi
 const twice = sweepPlan([pic("t"), pic("t")], new Set(), new Map([[pic("t").path, now - 30 * DAY]]), now);
 is("a picture listed twice is swept once", twice !== "unknown" && twice.sweep, [pic("t").path]);
 
+part("Readings that disagree keep the picture (independent review)");
+const dup = sweepPlan([pic("u"), pic("u", now - DAY)], new Set(), new Map([[pic("u").path, now - 30 * DAY]]), now);
+is("a picture listed twice with different added times is kept, never swept by the older one", dup !== "unknown" && [dup.notice, dup.sweep], [[], []]);
+const zero = sweepPlan([pic("z")], new Set(), new Map([[pic("z").path, 0]]), now);
+is("a notice at time 0 (a missing notice read as 0) is not a notice: never swept", zero !== "unknown" && zero.sweep, []);
+
 done();

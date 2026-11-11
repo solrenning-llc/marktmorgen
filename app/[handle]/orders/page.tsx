@@ -1,4 +1,5 @@
 import { EmailField } from "@/components/email-field";
+import { EmptyState } from "@/components/empty-state";
 import { placeLine } from "@/lib/call-place";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { isDiscordConfigured } from "@/lib/discord";
@@ -268,7 +269,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                 </section>
               ) : null}
               {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 && !older.cursor ? (
-                <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
+                <EmptyState title={words.nothingToOpenTitle} body={words.nothingToOpen(store.name)} className="mt-6" />
               ) : (
                 <>
                   <p className="st-muted mt-4 leading-relaxed">{words.everythingSold(store.name)}</p>

@@ -1338,7 +1338,12 @@ export const REFUND_WORDS = /refund|money.?back|guarantee|reembols|devoluci|devo
  * (lib/ai-rules.ts).
  */
 
-async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | null> {
+/**
+ * What the product's first pages show, or null. `seen.answered` is set only when the model answered with a reading in
+ * its JSON shape, so a caller tells "read, and nothing in it" apart from "could not be read" (a refused or failed call,
+ * or an answer with no JSON): only the first is ever said to the creator as an empty PDF (Claude 2 and Codex M on #3435).
+ */
+async function readPdfFacts(store: Store, pdf: Uint8Array, seen?: { answered: boolean }): Promise<string | null> {
   const system = [
     "You read the first pages of a product a creator sells, given as a PDF.",
     "List only what these pages actually show. Never add a chapter, a number, a result or a claim that is not on them, and never guess at the pages you were not given.",
@@ -1351,6 +1356,7 @@ async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | nul
   const answer = await askModel(store, system, content, 1_500, answerModel());
   const json = answer ? jsonIn(answer) : null;
   if (!json) return null;
+  if (seen) seen.answered = true;
   const parts = (Array.isArray(json.parts) ? json.parts : [])
     .map((p: unknown) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
     .map((p: Record<string, unknown>) => ({ title: line(p.title, 80), detail: line(p.detail, 160) }))
@@ -1404,20 +1410,22 @@ export async function writePage(
     // What the product's own first pages hold, when the creator asked for them to be read.
     let fileFacts: string | null = null;
     let read = false;
+    const reading = { answered: false };
     if (pdf) {
       say("read", "started");
       const before = sent();
-      fileFacts = await readPdfFacts(store, pdf);
+      fileFacts = await readPdfFacts(store, pdf, reading);
       read = reached(before);
       if (read) say("read", "done");
       else unrun.jobs += READ_PDF_JOBS;
     }
     // Nothing to write from: the writing step never starts, and its job is
     // given back. A run told in steps says the PDF, read, gave nothing, so
-    // the page can ask for a few words instead of a retry of the same.
+    // the page can ask for a few words instead of a retry of the same; a
+    // reading that failed (no readable answer) is said as failed instead.
     if (pdf && !fileFacts && !notes && !about && !summary) {
       unrun.jobs += 1;
-      unrun.empty = read && steps !== undefined;
+      unrun.empty = read && reading.answered && steps !== undefined;
       return null;
     }
     // Between the two steps, a stop asked for is honored: the page is not

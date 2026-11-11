@@ -87,7 +87,8 @@ test('a failed daily usage read is logged and still blocks list email',async()=>
   assert.equal(seen.length,1);
   assert.equal(seen[0][0],'reading the daily email usage failed');
   assert.equal(JSON.stringify(seen[0].map(String)).includes('reader@example.com'),false,'no address in the log');
-  assert.equal(JSON.stringify(seen[0].map(String)).includes(made.listId),false,'no list id in the log');
+  const listId=made.listId;assert.ok(listId);
+  assert.equal(JSON.stringify(seen[0].map(String)).includes(listId),false,'no list id in the log');
  } finally { console.error=previous; }
 });
 test('an unknown daily usage reply that does not throw is logged too (Claude 4 B LOW)',async()=>{

@@ -76,6 +76,7 @@
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPaidExact, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, type SendOutcome, isSenderConfigured, sendEmail, sendEmailOutcome } from "@/lib/email";
@@ -2588,11 +2589,11 @@ export function pendingNotice(
   const studio = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
   const first = {
     unread: `An order on ${store.name} came through an affiliate's link that could not be read when the buyer paid, and it still could not be read when it was checked again later. The code on the link was ${code}.`,
-    share: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read afterwards, but the share it was sold at is not known now: the program's share for it was not kept, or the affiliate has a share of their own that is not known to date from before the sale (it may have been set or moved after it, or its date was not kept). So it was not credited automatically.`,
+    share: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read later, but the share it was sold at is not known now: the program's share for it was not kept, or the affiliate has a share of their own that is not known to date from before the sale (it may have been set or moved after it, or its date was not kept). So it was not credited automatically.`,
     first: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The affiliate is on its subscription, so its renewals are credited to them, but the payment its first invoice was paid by could not be read, so that first payment is not counted.`,
-    own: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read afterwards, but we could not tell whether the buyer was the affiliate themselves, whose own purchases never earn, so it was not credited automatically.`,
+    own: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read later, but we could not tell whether the buyer was the affiliate themselves, whose own purchases never earn, so it was not credited automatically.`,
     offers: `An order on ${store.name} came through the link of the affiliate with the code ${code} and was credited to them, but the offers the buyer took after paying could not all be read, so those offers are not counted.`,
-    membership: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The link could not be read when the buyer paid, or could not be put on the subscription afterwards, so its payments are not credited to them.`,
+    membership: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The link could not be read when the buyer paid, or could not be put on the subscription later, so its payments are not credited to them.`,
     unsure: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. We could not confirm whether the affiliate was put on its subscription: Stripe did not answer.`,
     lead: `A call booked on ${store.name} came through the link of the affiliate with the code ${code}. The sale was credited to them, but its lead could not be written down, so the lead is not counted.`,
   }[why];
@@ -3149,7 +3150,11 @@ export async function notePendingDue(now = Math.floor(Date.now() / 1000), deadli
   for (const member of members) {
     const [sid, session] = member.split("|");
     try {
-      const store = sid ? await storeForId(sid) : null;
+      // Read exactly (rule 24; Claude 4 on #3479): only a store answered for sure as absent takes its order off the
+      // list; one that does not read is kept for the next run, never dropped as gone.
+      const found = sid ? await storeForIdExactly(sid) : "none";
+      if (found === "unknown") throw new UnknownReplyError("the store of a pending affiliate link");
+      const store = found === "none" ? null : found;
       const valid = Boolean(store?.statsId && store.stripeAccountId && /^cs_[A-Za-z0-9_]{3,250}$/.test(session ?? ""));
       const mark = valid ? await readPendingMark(store!.statsId as string, session) : null;
       // Its store gone, or decided already: off the list.
@@ -4399,8 +4404,12 @@ const wholeCents = (value: unknown, least: number): value is number => typeof va
 /** A share as its writers store it: 0 (`Number(meta.via_rate) || 0`) to MAX_COMMISSION, two decimals when blended. */
 const exactShare = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_COMMISSION;
 
-/** How a sale found its affiliate, as writeReferral writes it; absent on older records (then `byCode`, or a click). */
-const STORED_HOW = new Set<unknown>(["click", "code", "buyer", "partner", "contact"]);
+/**
+ * How a sale found its affiliate, as writeReferral writes it; absent on older records (then `byCode`, or a click).
+ * "recurring" is a membership's first payment credited when its pending link was decided (creditFirstPayment;
+ * Claude 4 on #3479): refused here, it made the program's numbers unreadable for good.
+ */
+const STORED_HOW = new Set<unknown>(["click", "code", "buyer", "partner", "contact", "recurring"]);
 
 /** A total of the public numbers, or UnknownReplyError when it is not a whole number held exactly (never "$∞" or "$0"). */
 function exactTotal(total: number, what: string): number {

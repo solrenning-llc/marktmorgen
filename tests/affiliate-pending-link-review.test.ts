@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "oven", "Oven Notes", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPrerevPend01", true);
+  await setStripeAccount(OWNER, "acct_1TestPrerevPend", true);
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, percent: 30, days: 30 }));
   let store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;

@@ -168,7 +168,9 @@ async function main(): Promise<void> {
   mode = "odd";
   is("Stripe answering without the date asked for: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
   const realPipeline = redis.pipeline.bind(redis);
-  redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "SET" ? [{ odd: true }] : realPipeline(commands))) as typeof redis.pipeline;
+  // Regra 23: this bent every SET; since Codex V's review of #2912 the press first takes the membership's lock (a SET NX
+  // of nl:tier:...:lock), so only the claim's own SET (nl:free-days:) is bent, as the check means.
+  redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "SET" && String(commands[0]?.[1]).startsWith("nl:free-days:") ? [{ odd: true }] : realPipeline(commands))) as typeof redis.pipeline;
   mode = "ok";
   const before = posted.length;
   is("Redis answering the claim in an unknown shape: unknown", await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by), { ok: false, reason: "unknown" });
@@ -209,7 +211,9 @@ async function main(): Promise<void> {
     giveFreeDays(store, "member@example.com", "sub_trial00001", 10, TRIAL_END, by),
   ]);
   slow = 0;
-  is("one gives the days, the other is told it is under way", both.map((r) => (r.ok ? "ok" : r.reason)).sort(), ["busy", "ok"]);
+  // Regra 23: this said ["busy", "ok"]. Since Codex V's review of #2912 both presses take the membership's lock: the
+  // second waits for the first, reads the membership again and finds the date already moved, so it is "changed".
+  is("one gives the days, the other finds them given and adds nothing", both.map((r) => (r.ok ? "ok" : r.reason)).sort(), ["changed", "ok"]);
   is("Stripe asked once, the member emailed once", [posted.length - postedBefore, emails.length - emailsBefore], [1, 1]);
   is("a trial's end moved exactly the days given", byId("sub_trial00001").trial_end, TRIAL_END + 10 * DAY);
 

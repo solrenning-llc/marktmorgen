@@ -32,6 +32,7 @@ import { onAccount, StripeError } from "@/lib/stripe-account";
 import { memberSubRows } from "@/lib/member-discount";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
+import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
 import { sendEmail } from "@/lib/email";
@@ -66,9 +67,19 @@ export type GiveResult =
   | { ok: false; reason: "days" | "not_member" | "changed" | "busy" | "refused" | "unknown" | "stripe" }
   | { ok: false; reason: "blocked"; blocked: FreeDaysBlock };
 
+/** The lock every change to a membership takes: a switch between plans or to yearly, a pause (lib/membership-pause.ts). */
+const membershipLockKey = (subscription: string) => `nl:tier:${subscription}:lock`;
+/** As lib/membership-pause.ts: longer than the reads and the change at their ceiling, with room; a press waits at most 5 s. */
+const MEMBERSHIP_LOCK_SECONDS = 120;
+const MEMBERSHIP_LOCK_WAIT_MS = 5_000;
+
 /**
  * Gives `days` free days on one of the member's running memberships: its next
  * charge, `expected` as the creator was shown it, moves to `expected + days`.
+ *
+ * Under the membership's own lock, across the fresh read and the write (Codex V on #2912): a switch between plans that
+ * read the membership as having no free days can never go on to charge after free days were given in between. A lock
+ * held by another change answers "busy", and one that cannot be asked "unknown"; nothing is given either way.
  */
 export async function giveFreeDays(
   store: Store,
@@ -78,6 +89,25 @@ export async function giveFreeDays(
   expected: unknown,
   by: { who: string; role: Role },
   nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<GiveResult> {
+  if (!SUB_PATTERN.test(subscription) || !isRedisConfigured()) return giveUnlocked(store, email, subscription, rawDays, expected, by, nowSeconds);
+  try {
+    return await withLock(membershipLockKey(subscription), MEMBERSHIP_LOCK_SECONDS, MEMBERSHIP_LOCK_WAIT_MS, () => giveUnlocked(store, email, subscription, rawDays, expected, by, nowSeconds));
+  } catch (error) {
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    console.error("giving a member free days could not take the membership's lock", error);
+    return { ok: false, reason: "unknown" };
+  }
+}
+
+async function giveUnlocked(
+  store: Store,
+  email: string,
+  subscription: string,
+  rawDays: unknown,
+  expected: unknown,
+  by: { who: string; role: Role },
+  nowSeconds: number,
 ): Promise<GiveResult> {
   const account = store.stripeAccountId;
   const days = parseFreeDays(rawDays);

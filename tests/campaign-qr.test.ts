@@ -140,6 +140,12 @@ const refused = renderToStaticMarkup(createElement(CampaignQr, { url: page, titl
 is("a refused name says why in words, as a status", /role="status"[^>]*>[^<]*email address or phone number/.test(refused), true);
 is("a refused name draws no code and offers no download", !refused.includes("<img") && !refused.includes("download="), true);
 is("no meaning by color alone: no color-only danger text", !/text-danger/.test(html + refused), true);
+// Only the optional variant looks personal: the sentence names the variant, so the creator knows which field to change.
+const variantOnly = renderToStaticMarkup(createElement(CampaignQr, { url: page, title: "Knife skills", campaign: "spring-fair", content: "call 85 99999-1234" }));
+is("a refused variant draws no code", !variantOnly.includes("<img") && !variantOnly.includes("download="), true);
+is("a refused variant names the variant, not the campaign name", [/role="status"[^>]*>[^<]*this variant/.test(variantOnly), variantOnly.includes("this name")], [true, false]);
+const nameAndVariant = renderToStaticMarkup(createElement(CampaignQr, { url: page, title: "Knife skills", campaign: "ana.silva@example.com", content: "call 85 99999-1234" }));
+is("both refused: the sentence names both fields", /role="status"[^>]*>[^<]*this name and this variant/.test(nameAndVariant), true);
 
 part("Where it is shown");
 const panel = readFileSync("components/share-panel.tsx", "utf8");

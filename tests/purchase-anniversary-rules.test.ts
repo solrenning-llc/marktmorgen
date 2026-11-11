@@ -68,6 +68,6 @@ const a = onceKey("st_1", "contact-hash-a", "anniversary:prod_1:1", "2026-11-11"
 is("the same contact, date and reason: the same key", a, onceKey("st_1", "contact-hash-a", "anniversary:prod_1:1", "2026-11-11"));
 is("another contact: another key", a === onceKey("st_1", "contact-hash-b", "anniversary:prod_1:1", "2026-11-11"), false);
 is("another date: another key", a === onceKey("st_1", "contact-hash-a", "anniversary:prod_1:1", "2027-11-11"), false);
-is("never the address itself", /@/.test(a), false);
+is("never the address itself", /@/.test(a ?? ""), false);
 is("an unreadable part gives no key", onceKey("st_1", "", "anniversary:prod_1:1", "2026-11-11"), null);
 done();

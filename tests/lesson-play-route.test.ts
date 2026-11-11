@@ -133,9 +133,21 @@ async function main(): Promise<void> {
     return { status: reply.status, location, play };
   };
   const PLAYER = "https://player.mediadelivery.net/embed/12345/";
-  // Read with a pattern, not includes/indexOf, so CodeQL does not take a test's frame check for URL sanitizing.
-  const PLAYER_AT = /https:\/\/player\.mediadelivery\.net\/embed\/12345\//;
-  const framesPlayer = (html: string) => PLAYER_AT.test(html);
+  // Each src the page draws, read as a URL and compared by origin and path, never as a substring or an unanchored
+  // pattern, so CodeQL does not take a test's frame check for URL sanitizing (its alerts on #3402).
+  const playerAt = (html: string): number => {
+    const want = new URL(PLAYER);
+    for (const m of html.matchAll(/src="([^"]+)"/g)) {
+      try {
+        const url = new URL(m[1].replace(/&amp;/g, "&"));
+        if (url.origin === want.origin && url.pathname.startsWith(want.pathname)) return m.index;
+      } catch {
+        // not a URL: not the player
+      }
+    }
+    return -1;
+  };
+  const framesPlayer = (html: string) => playerAt(html) >= 0;
 
   part("The page draws a Play lesson button and holds nothing");
   {
@@ -152,7 +164,7 @@ async function main(): Promise<void> {
     is("the press answers with the lesson and a ticket, at the video", [first.status, first.location.startsWith(`${BASE}/@kilnworks/course/${id}/lesson000001?play=`), first.location.endsWith("#video"), /^[0-9a-f]{24}$/.test(first.play)], [303, true, true, true]);
     is("its playback is held", (await held()) > 0, true);
     const framed = await page("stranger", "lesson000001", { play: first.play });
-    is("the page framed with the ticket shows the player", framesPlayer(framed) && framed.search(PLAYER_AT) < framed.indexOf(`>${w.playLesson}</button>`), true);
+    is("the page framed with the ticket shows the player", framesPlayer(framed) && playerAt(framed) < framed.indexOf(`>${w.playLesson}</button>`), true);
     // Owner's decision 16: a press plays a block of half an hour at most; the page says so, with Play lesson under it.
     const said = (w as unknown as { playBlockRest?: (minutes: number) => string }).playBlockRest;
     is("under the player, the block's words and a Play lesson button to go on", typeof said === "function" && framed.includes(inHtml(said(30))) && framed.includes(`>${w.playLesson}</button>`), true);

@@ -120,6 +120,16 @@ function main(): void {
   is("unreadable: a payment_reversal that names no sale", readFeeLine(reversal(null)), null);
   is("unreadable: a payment_reversal whose source is a refund id only", readFeeLine(reversal("pyr_1")), null);
 
+  part("A fee on a payout, a transfer or a top-up is never dropped (Claude 6 on #3632)");
+  const instant = txn({ type: "payout", reporting_category: "payout", amount: -4800, details: [{ amount: 72, type: "stripe_fee" }] });
+  is("the payout's fee is a Stripe fee on the account", saleFees([sale("ch_p", 10000, 320), instant], { complete: true }).available ? (saleFees([sale("ch_p", 10000, 320), instant], { complete: true }) as { accountFees: unknown }).accountFees : null, [{ currency: "usd", taxFees: 0, stripeFees: -72 }]);
+  is("a payout with no fee is still left out", saleFees([txn({ type: "payout", reporting_category: "payout", amount: -4800 })], { complete: true }), { available: true, rows: [], accountFees: [] });
+
+  part("Sums past what a number holds exactly are unavailable, never rounded (Codex Cloud 1 on #3637)");
+  const big = (charge: string, amount: number) => txn({ type: "charge", reporting_category: "charge", amount, source: charge });
+  is("one sale's lines summing past MAX_SAFE_INTEGER", rowsOf(saleFees([big("ch_big", Number.MAX_SAFE_INTEGER), txn({ type: "refund", reporting_category: "refund", amount: 2, source: { id: "re_x", object: "refund", charge: "ch_big" } })], { complete: true })), "unreadable");
+  is("account fees summing past MAX_SAFE_INTEGER", rowsOf(saleFees([txn({ type: "stripe_fee", reporting_category: "fee", amount: -Number.MAX_SAFE_INTEGER }), txn({ type: "stripe_fee", reporting_category: "fee", amount: -2 })], { complete: true })), "unreadable");
+
   part("Stripe's currency conversion fee is an account fee");
   const fx = readFeeLine(txn({ type: "stripe_fx_fee", reporting_category: "fee", amount: -250 })) as FeeLine;
   is("stripe_fx_fee is a Stripe fee on the account, with no sale", [fx.kind, fx.sale, fx.net], ["stripe_fee", null, -250]);

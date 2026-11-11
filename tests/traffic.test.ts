@@ -636,6 +636,14 @@ async function main(): Promise<void> {
   const kaiPaidKeys = { requests: kaiKeys.requests, signals: `nl:traffic:sp:${kai.folder}:${windowOf(kaiNow)}` };
   const kaiPaid = await measureSignal("a, from a paid ad, signed in as another affiliate", { h: "kai", k: "a", c: "partner", p: "1" }, `192.0.2.${clickIp++}`, kaiPaidKeys, kaiClicks, { cookie: `${affiliateCookieName("kai")}=${otherToken}` });
   is("a link's first click of the day, and an affiliate's visit from a paid ad by another affiliate's browser, are inside what a signal is priced at", [kaiFirst.counted, within(kaiFirst), kaiPaid.counted, kaiPaid.signals, within(kaiPaid)], [true, true, true, 1, true]);
+  // The owner's decision of 11 November 2026 (#1496, A1): the click's reads batched, so the browser's own affiliate is
+  // known from its session without reading that affiliate's record a second time. The affiliate's own browser is still
+  // never counted, and its signal is given back.
+  const ownToken = "d".repeat(64);
+  await real([["SET", `nl:aff:session:${createHash("sha256").update(`nimbus-aff-session:${ownToken}`).digest("hex").slice(0, 40)}`, JSON.stringify({ s: kaiStats, a: AFF })]]);
+  const kaiOwn = await measureSignal("a, by the affiliate's own browser", { h: "kai", k: "a", c: "partner" }, `192.0.2.${clickIp++}`, kaiKeys, kaiClicks, { cookie: `${affiliateCookieName("kai")}=${ownToken}` });
+  is("the affiliate's own browser is not counted, and its signal is given back", [kaiOwn.counted, kaiOwn.signals], [false, 0]);
+  is("an affiliate's visit by another affiliate's browser tells that browser's affiliate from its session, without reading its record: 18 commands at the most", kaiPaid.sentCommands, 18);
   const tia = await storeWith("tia", "trial");
   const tiaLinked = await addStoreLink(tia.email, "My site", "https://example.com/site");
   const tiaLink = tiaLinked.ok ? tiaLinked.store.links[tiaLinked.store.links.length - 1].id : "";

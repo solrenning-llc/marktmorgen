@@ -204,8 +204,13 @@ export const COMMANDS = {
    * its own pool and every count not made written down: still 15 to 19, the
    * paid-ad visit the heaviest. Kept signals only: one given back or refused
    * costs returnedSignalCost (two commands more), priced on its own line.
+   * The owner's decision of 11 November 2026 (#1496, A1: the cost brought
+   * under the exposure ceilings without raising them, writes and reads batched
+   * first): an affiliate's visit reads the code and the browser's session in
+   * one round trip, and the browser's own affiliate is told by the session's
+   * id, not by reading that affiliate's record again: 18 at the most.
    */
-  signal: 19,
+  signal: 18,
 };
 
 /**

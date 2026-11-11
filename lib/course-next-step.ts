@@ -23,6 +23,9 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { offerable } from "@/lib/next-offer-rules";
 import { ownedBeforeCart } from "@/lib/cart-offers";
 import { nextStepShown } from "@/lib/course-next-step-rules";
+import { ownKey } from "@/lib/paypal-sales";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 
 /** How long a "No thanks" is kept in the browser: a year. */
 export const NEXT_STEP_NO_SECONDS = 365 * 86_400;
@@ -49,7 +52,32 @@ export async function nextStepFor(input: {
   if (!nextStepShown({ step, courseProductId, product, owned: false, dismissed: false }).shown || listing === "unknown" || !listing) return null;
   const owned = await ownedBeforeCart(store, input.email).catch(() => null);
   if (owned === null) return null;
+  // What was bought through PayPal is kept apart (lib/paypal-sales.ts, ownKey), never in the Stripe lists above: the
+  // product and each product of its bundle, read exactly; unknown shows no card (focal on #3530, MEDIUM).
+  const paypal = await paypalOwned(store, input.email, [step.productId, ...(listing.bundle ?? [])]).catch(() => null);
+  if (paypal === null) return null;
+  for (const id of paypal) owned.add(id);
   // Owned, or a bundle holding something owned (lib/next-offer-rules.ts offerable).
   const has = owned.has(step.productId) || !offerable(listing, owned, sellable);
   return nextStepShown({ step, courseProductId, product, owned: has, dismissed: false }).shown ? listing : null;
+}
+
+/**
+ * Which of these products this address bought through PayPal from this store: one SCARD each on the set PayPal's
+ * hand-over keeps (lib/paypal-sales.ts, ownKey). Null when any answer is not a whole count (rule 24), or there is no
+ * store id to read under while products are asked about.
+ */
+async function paypalOwned(store: Store, email: string, productIds: string[]): Promise<Set<string> | null> {
+  const ids = [...new Set(productIds.filter((id) => typeof id === "string" && id))];
+  if (!ids.length) return new Set();
+  if (!store.statsId || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline(ids.map((id) => ["SCARD", ownKey(store.statsId!, email, id)])), ids.length);
+  if (!replies) return null;
+  const owned = new Set<string>();
+  for (let i = 0; i < ids.length; i++) {
+    const count = countOf(replies[i]);
+    if (count === null) return null;
+    if (count > 0) owned.add(ids[i]);
+  }
+  return owned;
 }

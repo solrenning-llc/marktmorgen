@@ -275,3 +275,15 @@ test("No thanks is kept by the server for a year, on both addresses of the cours
   const elsewhere = await post(good, { origin: "https://evil.example", accept: "application/json" });
   assert.deepEqual([elsewhere.status, elsewhere.headers.get("set-cookie")], [403, null], "not from another site");
 });
+
+test("the PayPal reads are paid inside the reading's own public requests (rule MR: the ceiling before the spend)", async () => {
+  const { NEXT_OFFER_REQUEST_UNITS } = await import("@/lib/next-offer-rules");
+  const { MAX_BUNDLE_ITEMS } = await import("@/lib/bundle-rules");
+  const { COMMAND, NEXT_OFFER_READ } = await import("./plan-cost-registry");
+  const { laterPageCost } = await import("./traffic-cost");
+  // ownedBeforeCart's reading (NEXT_OFFER_READ) and one SCARD for the product and each product of a bundle at most.
+  const most = NEXT_OFFER_READ + (1 + MAX_BUNDLE_ITEMS) * COMMAND;
+  assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= most, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${most}`);
+  const source = readFileSync("lib/course-next-step.ts", "utf8");
+  assert.ok(source.indexOf("ownedBeforeCart(store, input.email)") < source.indexOf("paypalOwned(store, input.email"), "read only after the requests are taken");
+});

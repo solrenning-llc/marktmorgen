@@ -117,6 +117,13 @@ async function shownOf(store: Store, kept: Kept): Promise<NextOffer | null> {
  * in one click after paying, and what the creator brought over or gave it.
  * Null when that cannot be read in full: nothing is offered on a guess.
  */
+/** A Stripe list answer in its whole shape: object "list", data an array of objects, has_more a boolean (review of #3530). */
+function wholeList(listed: unknown): listed is { object: "list"; data: Record<string, unknown>[]; has_more: boolean } {
+  if (!listed || typeof listed !== "object") return false;
+  const { object, data, has_more } = listed as { object?: unknown; data?: unknown; has_more?: unknown };
+  return object === "list" && typeof has_more === "boolean" && Array.isArray(data) && data.every((row) => !!row && typeof row === "object");
+}
+
 export async function ownedHere(store: Store, email: string): Promise<Set<string> | null> {
   const account = store.stripeAccountId;
   if (!account || !email) return null;
@@ -129,9 +136,10 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
   try {
     for (const variant of [...new Set([email.trim(), normaliseEmail(email)])]) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-      const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
-      if (listed.has_more === true) return null;
-      for (const session of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
+      const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as { object?: unknown; data?: unknown; has_more?: unknown };
+      // Only a whole list says what was bought: any other answer (a 200 {}, no data, no has_more) is unknown (rule 24).
+      if (!wholeList(listed) || listed.has_more === true) return null;
+      for (const session of listed.data as Record<string, unknown>[]) {
         const meta = (session.metadata ?? {}) as Record<string, string>;
         if (!handles.has(meta.store ?? "") || !isSettled(session)) continue;
         add(meta.product);
@@ -142,9 +150,9 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
     }
     if (customers.size > 3) return null;
     for (const customer of customers) {
-      const listed = (await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`)) as { data?: unknown; has_more?: unknown };
-      if (listed.has_more === true) return null;
-      for (const intent of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
+      const listed = (await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`)) as { object?: unknown; data?: unknown; has_more?: unknown };
+      if (!wholeList(listed) || listed.has_more === true) return null;
+      for (const intent of listed.data as Record<string, unknown>[]) {
         const meta = (intent.metadata ?? {}) as Record<string, string>;
         if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || intent.status !== "succeeded") continue;
         add(meta.product);

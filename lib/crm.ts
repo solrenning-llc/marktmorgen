@@ -408,8 +408,11 @@ export async function writeStages(statsId: string, stages: Stage[], room: DataSt
 /** Every deal, newest change first. `stages` reads a deal in a stage the store still has. */
 export async function readDeals(statsId: string | null, stages: readonly Stage[]): Promise<Deal[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", dealsKey(statsId)]]);
-  return (Array.isArray(raw) ? raw : [])
+  // Rule 24: "no deals" only for an empty list; any other reply is unknown,
+  // never a board with no deals (a workflow would make a second one).
+  const raw = repliesFor(await redisPipeline([["HVALS", dealsKey(statsId)]]), 1)?.[0];
+  if (!Array.isArray(raw) || !raw.every((value) => typeof value === "string")) throw new CrmDealReadUnavailable();
+  return raw
     .map((value) => parseDeal(json(value), stages))
     .filter((d): d is Deal => d !== null)
     .sort((a, b) => b.updatedAt - a.updatedAt);

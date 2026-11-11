@@ -23,10 +23,17 @@ import { done, is, part } from "./check";
 
 type Sent = { to: string[]; subject: string; text: string; html: string; headers?: Record<string, string> };
 const batches: { batch: Sent[]; key: string }[] = [];
+/** How the stand-in email service answers a batch: 200, a status, or "lost" (taken, then the answer is lost). */
+let batchAnswer: number | "lost" = 200;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
+    if (batchAnswer !== 200 && batchAnswer !== "lost") return new Response("{}", { status: batchAnswer });
     const batch = JSON.parse(String(init?.body)) as Sent[];
+    if (batchAnswer === "lost") {
+      batches.push({ batch, key: new Headers(init?.headers).get("Idempotency-Key") ?? "" });
+      throw new TypeError("fetch failed");
+    }
     batches.push({ batch, key: new Headers(init?.headers).get("Idempotency-Key") ?? "" });
     return Response.json({ data: batch.map((_, i) => ({ id: `synthetic_${i}` })) });
   }
@@ -43,6 +50,28 @@ function sender(outcome: "sent" | "retry" | "refused") {
   const send = (async (messages: BatchMessage[], key: string, meter: EmailMeter) => {
     calls.push({ messages, key, meter });
     return outcome;
+  }) as typeof sendBatch;
+  return { calls, send };
+}
+
+/**
+ * A send that writes the batch to the email service through the runtime it was handed, as sendBatch does
+ * (lib/resend-fallback-transport.ts), the service answering `answer`; then, as sendBatch does then, "retry".
+ */
+function posting(answer: number | "lost") {
+  const calls: { messages: BatchMessage[]; key: string }[] = [];
+  const send = (async (messages: BatchMessage[], key: string, _meter: EmailMeter, _only?: "resend" | "amazon", runtime?: { fetch?: typeof fetch }) => {
+    calls.push({ messages, key });
+    batchAnswer = answer;
+    try {
+      const body = JSON.stringify(messages.map((m) => ({ to: [m.to], subject: m.subject, text: m.text, html: m.html })));
+      await (runtime?.fetch ?? fetch)("https://api.resend.com/emails/batch", { method: "POST", headers: { "Idempotency-Key": key }, body });
+    } catch {
+      // The answer was lost on the way.
+    } finally {
+      batchAnswer = 200;
+    }
+    return "retry" as const;
   }) as typeof sendBatch;
   return { calls, send };
 }
@@ -228,7 +257,7 @@ async function main(): Promise<void> {
   await place("fay@example.com");
   await place("gus@example.com");
   makeDue();
-  const lost = sender("retry");
+  const lost = posting("lost");
   await runRestocks(Date.now() + 30_000, { ...real, send: lost.send });
   is("tried once: the email service may have taken it, the answer was lost", lost.calls.length, 1);
   const realNow = Date.now;
@@ -244,6 +273,35 @@ async function main(): Promise<void> {
     const later = sender("sent");
     await runRestocks(Date.now() + 30_000, { ...real, send: later.send });
     is("a day later: nobody written to a second time", later.calls.flatMap((c) => c.messages.map((m) => m.to)), []);
+  } finally {
+    Date.now = realNow;
+  }
+
+  part("A batch known not to have gone is never dropped, however long the email service stays down (Claude 1 on #3620)");
+  redis.run(["DEL", listKey, `nl:sa:${sid}:${pid}:job`]);
+  await place("hal@example.com");
+  await place("ivy@example.com");
+  makeDue();
+  const busy = posting(429);
+  await runRestocks(Date.now() + 30_000, { ...real, send: busy.send });
+  is("tried once, and the email service said no (429)", busy.calls.length, 1);
+  try {
+    Date.now = () => realNow() + 21 * 3_600_000;
+    makeDue();
+    const unset = sender("retry");
+    await runRestocks(Date.now() + 30_000, { ...real, send: unset.send });
+    is("21 hours on, still not sent (no sender ready, nothing written): tried again", unset.calls.length, 1);
+    is("a known non-send is never taken as sent: the addresses stay", [redis.run(["HEXISTS", listKey, "hal@example.com"]), redis.run(["HEXISTS", listKey, "ivy@example.com"])], [1, 1]);
+    makeDue();
+    const refusedAgain = posting(429);
+    await runRestocks(Date.now() + 30_000, { ...real, send: refusedAgain.send });
+    is("still refused at 21 hours: the addresses stay", [redis.run(["HEXISTS", listKey, "hal@example.com"]), redis.run(["HEXISTS", listKey, "ivy@example.com"])], [1, 1]);
+    Date.now = () => realNow() + 22 * 3_600_000;
+    makeDue();
+    const back = sender("sent");
+    await runRestocks(Date.now() + 30_000, { ...real, send: back.send });
+    is("the service is back: both get their one email", back.calls.flatMap((c) => c.messages.map((m) => m.to)).sort(), ["hal@example.com", "ivy@example.com"]);
+    is("and then leave the list", [redis.run(["HEXISTS", listKey, "hal@example.com"]), redis.run(["HEXISTS", listKey, "ivy@example.com"])], [0, 0]);
   } finally {
     Date.now = realNow;
   }

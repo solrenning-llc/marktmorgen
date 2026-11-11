@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   garble = null;
   is("their lessons done do not read: finished is unknown, has still known", [lessonsDone.has === null, lessonsDone.finished], [false, null]);
 
-  garble = { command: "GET", key: /^nl:course:[0-9a-f]+$/, reply: "{not a course" };
+  garble = { command: "MGET", key: /^nl:course:[0-9a-f]+$/, reply: ["{not a course", "{not a course"] };
   const outline = await pathStudent(store, path, learner);
   garble = null;
   is("a course's outline does not read: finished is unknown", outline.finished, null);

@@ -711,7 +711,12 @@ const CURRENCY_WORDS: [string, RegExp][] = [
   ["euro", /^(?:euros?|eur)(?![\p{L}\p{N}])/u],
   ["pound", /^(?:pounds?|quids?|gbp|pfund|sterlin[ae]|sterling|libras?)(?![\p{L}\p{N}])/u],
   ["real", /^(?:reais|real|brl)(?![\p{L}\p{N}])/u],
-  ["franc", /^(?:francs?|franken|franchi|franco|chf)(?![\p{L}\p{N}])/u],
+  ["franc", /^(?:francs?|franken|franchi|franco|chf)(?![\p{L}\p{N}])/u],  // Every other currency, by its ordinary name in the store languages or its ISO 4217 code, and money-like units
+  // (credits, coins, tokens): a figure in any of them is money no published price holds (cloud J's review of #3484 at
+  // ea30e19c, MEDIUM: "It costs 12 yen.", "12 JPY", "12 pesos" or "12 credits" were read as a count of that word, held
+  // by the facts' 12 lessons). A code that is also a word ("top", "try", "all") makes a figure money too: a reply
+  // held by it is never shown, the safe side.
+  ["other", /^(?:yen|yuan|renminbi|rmb|won|rupees?|rupias?|roupies?|rupien|pesos?|kronor|krona|kronur|kroner|krone|kronen|korun[ay]?|zlot(?:y|e|ych)|z\u0142ot(?:y|e|ych)|rand|lira|lire|liras|lei|leu|forints?|fiorini|rubles?|roubles?|rubel|rubli|hryvnias?|baht|ringgits?|dirhams?|dinars?|riyals?|rials?|shekels?|dong|naira|shillings?|kwacha|cedis?|birr|taka|lari|manat|tenge|soles|quetzal(?:es)?|lempiras?|colones|bolivar(?:es)?|guarani(?:es)?|florins?|gulden|marks?|escudos?|pesetas?|drachmas?|credits?|creditos?|crediti|coins?|monedas?|munten|munzen|gettoni|tokens?|fichas?|jetons?|aed|afn|all|amd|ang|aoa|ars|awg|azn|bam|bbd|bdt|bgn|bhd|bif|bmd|bnd|bob|bov|bsd|btn|bwp|byn|bzd|cdf|che|chw|clf|clp|cny|cop|cou|crc|cuc|cup|cve|czk|djf|dkk|dop|dzd|egp|ern|etb|fjd|fkp|gel|ghs|gip|gmd|gnf|gtq|gyd|hkd|hnl|hrk|htg|huf|idr|ils|inr|iqd|irr|isk|jmd|jod|jpy|kes|kgs|khr|kmf|kpw|krw|kwd|kyd|kzt|lak|lbp|lkr|lrd|lsl|lyd|mad|mdl|mga|mkd|mmk|mnt|mop|mru|mur|mvr|mwk|mxn|mxv|myr|mzn|nad|ngn|nio|nok|npr|nzd|omr|pab|pen|pgk|php|pkr|pln|pyg|qar|ron|rsd|rub|rwf|sar|sbd|scr|sdg|sek|sgd|shp|sle|sll|sos|srd|ssp|stn|svc|syp|szl|thb|tjs|tmt|tnd|top|try|ttd|twd|tzs|uah|ugx|uyu|uzs|ves|vnd|vuv|wst|xaf|xcd|xof|xpf|yer|zar|zmw|zwl)(?![\p{L}\p{N}])/u],
 ];
 const SIGNS: Record<string, string> = { $: "dollar", "\u00a2": "cent", "\u20ac": "euro", "\u00a3": "pound" };
 /** The currency a sign or a word names, or null. */

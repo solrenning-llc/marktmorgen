@@ -141,6 +141,28 @@ async function main() {
   await finishPlanRefunds(Date.now() + 10_000, NOW + SETTLE_SECONDS + 60);
   is("no letter says the refund was not made", world.emails.filter((e) => /was not made|Nothing was refunded/.test(e.text)).length, 0);
   is("the stop not taken back, the note kept", [job.sub().cancel_at_period_end, (await job.note()) !== null], [true, true]);
+
+  part("None was made, and our stop already ended the plan: never told it goes on (Claude 1 on #3190)");
+  const gone = await shop();
+  await redisPipeline([["HSET", ENDING_KEY, gone.sid, JSON.stringify({ s: gone.subId, at: NOW, t: NOW, m: 1, p: one(gone.charge) })]]);
+  world.subs.get(gone.subId)!.cancel_at_period_end = true;
+  world.subs.get(gone.subId)!.status = "canceled";
+  world.emails = [];
+  await finishPlanRefunds(Date.now() + 10_000, NOW + SETTLE_SECONDS + 60);
+  const goneLetters = world.emails.filter((e) => /was not made/.test(e.text));
+  is("one letter that the refund was not made", goneLetters.length, 1);
+  is("it never says the plan goes on or renews", goneLetters.some((e) => /goes on as before|renews as usual/.test(e.text)), false);
+  is("it says the plan ended and how to start it again", goneLetters.every((e) => /ended at the end of the period you paid for/.test(e.text) && /start a plan again/i.test(e.text)), true);
+  is("the note goes", (await gone.note()) === null, true);
+
+  part("Control: none was made and the plan is live: the stop is taken back and the plan goes on");
+  const live = await shop();
+  await redisPipeline([["HSET", ENDING_KEY, live.sid, JSON.stringify({ s: live.subId, at: NOW, t: NOW, m: 1, p: one(live.charge) })]]);
+  world.subs.get(live.subId)!.cancel_at_period_end = true;
+  world.emails = [];
+  await finishPlanRefunds(Date.now() + 10_000, NOW + SETTLE_SECONDS + 60);
+  is("the stop taken back", live.sub().cancel_at_period_end, false);
+  is("the letter says the plan goes on", world.emails.filter((e) => /goes on as before/.test(e.text)).length, 1);
   delete process.env.RESEND_API_KEY;
   done();
 }

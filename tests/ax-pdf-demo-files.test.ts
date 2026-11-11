@@ -8,7 +8,10 @@
  * catalog, the structure tree and each page's drawing.
  */
 import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFRawStream, type PDFRef, PDFString, decodePDFRawStream } from "pdf-lib";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { getDemoFile, type DemoFileName } from "@/lib/demo-file";
+import { demoFileModule } from "@/lib/demo-file-build";
 import { done, is, part } from "./check";
 
 const NAMES: DemoFileName[] = ["weekly-meal-planner.pdf", "meal-planner-5-weeks.pdf", "weekend-batch-cooking.pdf", "grocery-list-pack.pdf"];
@@ -36,6 +39,10 @@ function walk(stream: string): { loose: number; texts: { fill: RGB; ground: RGB 
   let fill: RGB = [0, 0, 0];
   let x = 0;
   let y = 0;
+  // Only translations are used here: the origin, saved and restored with q/Q.
+  let origin: [number, number] = [0, 0];
+  const saved: { origin: [number, number]; fill: RGB }[] = [];
+  let path: [number, number][] = [];
   const args: string[] = [];
   const out = { loose: 0, texts: [] as { fill: RGB; ground: RGB }[], strokes: [] as RGB[] };
   let depth = 0;
@@ -63,9 +70,40 @@ function walk(stream: string): { loose: number; texts: { fill: RGB; ground: RGB 
       case "RG":
         out.strokes.push([n[0], n[1], n[2]]);
         break;
-      case "re":
-        bands.push({ x: n[0], y: n[1], w: n[2], h: n[3], fill });
+      case "q":
+        saved.push({ origin: [...origin] as [number, number], fill });
         break;
+      case "Q": {
+        const back = saved.pop();
+        if (back) ({ origin, fill } = back);
+        break;
+      }
+      case "cm":
+        origin = [origin[0] + n[4], origin[1] + n[5]];
+        break;
+      case "re":
+        path.push([origin[0] + n[0], origin[1] + n[1]], [origin[0] + n[0] + n[2], origin[1] + n[1] + n[3]]);
+        break;
+      case "m":
+      case "l":
+        path.push([origin[0] + n[0], origin[1] + n[1]]);
+        break;
+      case "f":
+      case "f*":
+      case "F":
+      case "B":
+      case "B*":
+      case "S":
+      case "s":
+      case "n": {
+        if (token !== "S" && token !== "s" && token !== "n" && path.length) {
+          const xs = path.map((p) => p[0]);
+          const ys = path.map((p) => p[1]);
+          bands.push({ x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys), fill });
+        }
+        path = [];
+        break;
+      }
       case "Td":
       case "TD":
         x = n[0];
@@ -135,6 +173,12 @@ async function main(): Promise<void> {
       is(`${name}: its checklist is a list`, [all.includes("L"), all.includes("LI"), all.includes("LBody")], [true, true, true]);
     }
   }
+  part("The files are what the build makes of the sources");
+  is(
+    "lib/demo-file.ts is exactly `node scripts/demo-files.mjs` output (rerun it after changing the source or the build)",
+    readFileSync(join(process.cwd(), "lib/demo-file.ts"), "utf8") === (await demoFileModule()),
+    true,
+  );
   done();
 }
 

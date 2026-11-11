@@ -424,6 +424,74 @@ async function stale(job: Job, base: number): Promise<void> {
   }
 }
 
+/**
+ * The place the list is read again from moves with this store's own visits, never with the clock (focal review of
+ * #3302, comment 6786660350, MEDIUM): with the start taken from the time, a store the sweep reaches every ten minutes
+ * read the same ten rows of a list of twenty on every visit, so when those ten could never be handled (a refund from an
+ * earlier account Stripe no longer finds, a course removal that always fails), the refunds put on the list after them
+ * stayed with the buyer forever. Twenty rows: the ten that are always kept first (in the order they were put on the
+ * list and by id), then ten full refunds Stripe finished of real gifts or pre-orders; six visits.
+ */
+async function rotation(job: Job, base: number): Promise<void> {
+  const realNow = Date.now;
+  // Visits on whole ten-minute marks, so a start taken from the clock is the same on every one of them.
+  const first = Math.floor(realNow() / 600_000) * 600_000 + 600_000 + 1_000;
+  const cases = [
+    { label: "visited every five minutes (control), ten rows from an earlier account first", every: 300_000, tag: "q", good: 40, failing: 0 },
+    { label: "visited every ten minutes, ten rows from an earlier account first", every: 600_000, tag: "r", good: 50, failing: 0 },
+    { label: "visited every ten minutes, ten rows whose course removal always fails first", every: 600_000, tag: "t", good: 60, failing: 70 },
+  ];
+  for (const c of cases) {
+    part(`${job.name}: ${c.label}: every refund on the list is read again, whatever the time of the visits`);
+    await original.call(redis, [["DEL", job.anchor], ["DEL", job.pass], ["DEL", job.retry]]);
+    refunds = [];
+    const stuckIds = Array.from({ length: 10 }, (_, i) => `re_${job.name}${c.tag}A${String(i).padStart(6, "0")}`);
+    const goodIds = Array.from({ length: 10 }, (_, i) => `re_${job.name}${c.tag}B${String(i).padStart(6, "0")}`);
+    const good: Made[] = [];
+    for (let i = 0; i < 10; i += 1) good.push(await job.make(c.good + i));
+    const never = new Set<string>();
+    const stuckPis: string[] = [];
+    for (let i = 0; i < 10; i += 1) {
+      if (c.failing) {
+        const made = await job.make(c.failing + i);
+        never.add(made.email);
+        stuckPis.push(made.pi);
+        ledger.set(stuckIds[i], { id: stuckIds[i], object: "refund", created: base, status: "succeeded", payment_intent: made.pi, charge: { object: "charge", refunded: true } });
+      } else {
+        // A refund from an earlier account: the store's account has no such refund (404), so it is kept on every read.
+        stuckPis.push(`pi_${job.name}${c.tag}gone${String(i).padStart(6, "0")}`);
+        ledger.delete(stuckIds[i]);
+      }
+    }
+    for (let i = 0; i < 10; i += 1) {
+      ledger.set(goodIds[i], { id: goodIds[i], object: "refund", created: base, status: "succeeded", payment_intent: good[i].pi, charge: { object: "charge", refunded: true } });
+    }
+    await original.call(redis, [["HSET", job.retry, ...stuckIds.flatMap((id, i) => [id, stuckPis[i]]), ...goodIds.flatMap((id, i) => [id, good[i].pi])]]);
+    const refusing = async (email: string) => {
+      if (never.has(email)) throw new Error("the ledger never answers for this one");
+    };
+    const readAgain = new Set<string>();
+    try {
+      for (let visit = 0; visit < 6; visit += 1) {
+        const at = first + visit * c.every;
+        Date.now = () => at;
+        rereads.length = 0;
+        await job.run(refusing);
+        for (const r of rereads) readAgain.add(r.id);
+        is(`${job.name} ${c.tag}, visit ${visit + 1}: at most ten read again`, rereads.length <= 10, true);
+      }
+    } finally {
+      Date.now = realNow;
+    }
+    const held: boolean[] = [];
+    for (const g of good) held.push(await g.holds());
+    is(`${job.name} ${c.tag}: no refund behind the rows always kept is left with the buyer`, held.filter(Boolean).length, 0);
+    is(`${job.name} ${c.tag}: every refund on the list was read again`, goodIds.filter((id) => !readAgain.has(id)).length + stuckIds.filter((id) => !readAgain.has(id)).length, 0);
+    is(`${job.name} ${c.tag}: the rows always kept stay on the list, nothing taken back for them`, Object.keys(await waiting(job.retry)).sort(), [...stuckIds].sort());
+    await original.call(redis, [["DEL", job.retry]]);
+  }
+}
+
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_refund_retry_only_a_stand_in";
@@ -500,9 +568,11 @@ async function main(): Promise<void> {
   await anchors(gift, NOW - 10_000);
   await stuck(gift, NOW - 9_000);
   await stale(gift, NOW - 20_000);
+  await rotation(gift, NOW - 30_000);
   await anchors(pre, NOW - 5_000);
   await stuck(pre, NOW - 4_000);
   await stale(pre, NOW - 20_000);
+  await rotation(pre, NOW - 30_000);
 
   done();
 }

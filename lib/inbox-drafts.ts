@@ -22,7 +22,8 @@
  *     where every log-out and every ended session lands (an expired or
  *     refused session, "log in again", a log-out everywhere seen here;
  *     components/forget-inbox-drafts.tsx); and DRAFT_DAYS after it was last
- *     typed, whichever comes first. No more than MAX_DRAFTS are kept for a
+ *     typed, whichever comes first: an old one leaves storage the first time
+ *     it is read after that. No more than MAX_DRAFTS are kept for a
  *     person, the oldest going first.
  *   - Break the inbox when storage is blocked or full (a private window, a
  *     setting): every read and write is tried and, when it fails, the inbox
@@ -47,7 +48,7 @@ type Kept = Record<string, { text: string; at: number }>;
 /**
  * The drafts as kept, made safe and without the ones past DRAFT_DAYS; null
  * when the storage itself cannot be read (none, or blocked). An entry that is
- * not ours to read reads as no drafts, and the next one kept replaces it.
+ * not ours to read reads as no drafts and is removed, as an old draft is.
  */
 function readAll(storage: DraftStorage | null, now: number): Kept | null {
   if (!storage) return null;
@@ -62,18 +63,32 @@ function readAll(storage: DraftStorage | null, now: number): Kept | null {
   try {
     parsed = JSON.parse(raw);
   } catch {
+    purge(storage, {});
     return {};
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    purge(storage, {});
+    return {};
+  }
   const kept: Kept = {};
+  let dropped = false;
   for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!CONVERSATION_ID.test(id) || !value || typeof value !== "object") continue;
-    const { text, at } = value as { text?: unknown; at?: unknown };
-    if (typeof text !== "string" || !text.trim() || typeof at !== "number" || !Number.isFinite(at)) continue;
-    if (at > now + DAY_MS || now - at > DRAFT_DAYS * DAY_MS) continue;
+    const { text, at } = value && typeof value === "object" ? (value as { text?: unknown; at?: unknown }) : {};
+    if (!CONVERSATION_ID.test(id) || typeof text !== "string" || !text.trim() || typeof at !== "number" || !Number.isFinite(at) || at > now + DAY_MS || now - at > DRAFT_DAYS * DAY_MS) {
+      dropped = true;
+      continue;
+    }
     kept[id] = { text: text.slice(0, MAX_MESSAGE), at };
   }
+  // A draft past DRAFT_DAYS, or an entry that is not one, leaves storage as soon as it is read, so its words are
+  // not kept on the device after they stop being shown (Codex U on #3521). Best effort: a refused write changes nothing.
+  if (dropped) purge(storage, kept);
   return kept;
+}
+
+/** Writes back only what is still kept; nothing left removes the entry. Never throws. */
+function purge(storage: DraftStorage, kept: Kept): void {
+  writeAll(storage, kept);
 }
 
 /** Writes them back, the newest MAX_DRAFTS only; false when storage refused. Nothing left removes the entry. */

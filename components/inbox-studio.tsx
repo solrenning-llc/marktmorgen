@@ -31,6 +31,8 @@ const REASONS: Record<string, string> = {
   notes: "That conversation is no longer kept.",
 };
 
+/** Said when this device cannot keep the answer as a draft: the words are only in the box (lib/inbox-drafts.ts). */
+const NOT_KEPT = "This device could not keep your answer as a draft, so it is only in this box until you send it.";
 const LETTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
 const savedId = () => randomLetters(LETTERS, 6);
 const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -111,11 +113,17 @@ export function InboxStudio({
   const [drafted, setDrafted] = useState<Set<string>>(() => new Set());
   // Read out politely when a draft is kept or comes back, never on each key (3.2.5).
   const [draftSaid, setDraftSaid] = useState("");
+  // The last answer typed could not be kept on this device (storage full or blocked): said, never claimed kept (Codex U on #3521).
+  const [draftFailed, setDraftFailed] = useState(false);
   /** The answer box changed by typing, a saved reply or a suggestion: kept as this conversation's draft. */
   const typed = (next: string) => {
     setText(next);
     if (!thread) return;
-    if (saveDraft(browserDrafts(me), thread.conversation.id, next)) setDrafted(draftIds(browserDrafts(me)));
+    const kept = saveDraft(browserDrafts(me), thread.conversation.id, next);
+    setDraftFailed(!kept && next.trim() !== "");
+    if (kept) setDrafted(draftIds(browserDrafts(me)));
+    // Read out once when keeping first fails, never on each key (3.2.5).
+    if (!kept && next.trim() && !draftFailed) setDraftSaid(NOT_KEPT);
   };
   // Once the page is drawn: the drafts on this device, and the open conversation's own back in its box.
   const firstId = first?.conversation.id ?? null;
@@ -192,6 +200,7 @@ export function InboxStudio({
     const kept = readDraft(browserDrafts(me), id);
     const now = draftIds(browserDrafts(me));
     setText(kept);
+    setDraftFailed(false);
     setDrafted(now);
     setDraftSaid(
       kept
@@ -218,6 +227,7 @@ export function InboxStudio({
     put(next.conversation);
     setText("");
     clearDraft(browserDrafts(me), next.conversation.id);
+    setDraftFailed(false);
     setDrafted(draftIds(browserDrafts(me)));
     setDraftSaid("");
     toast(answer.emailed ? `Sent: in their chat, and emailed to ${next.conversation.email}.` : "Kept in the conversation. The email could not go just now; they see it in their chat.");
@@ -374,7 +384,7 @@ export function InboxStudio({
                   <textarea className="field mt-1 w-full" rows={5} maxLength={MAX_MESSAGE} required value={text} onChange={(e) => typed(e.target.value)} aria-describedby="inbox-draft-help" />
                 </label>
                 <p id="inbox-draft-help" className="text-xs text-ink-soft">
-                  What you type is kept on this device only, for you, as a draft for this conversation, until you send it, you log out or your session ends, or for 7 days. It is never sent to us.
+                  {draftFailed ? NOT_KEPT : "What you type is kept on this device only, for you, as a draft for this conversation, until you send it, you log out or your session ends, or for 7 days. It is never sent to us."}
                 </p>
                 <p className="sr-only" role="status" aria-live="polite" data-inbox-draft-said="">{draftSaid}</p>
                 <div className="flex flex-wrap items-center gap-2">

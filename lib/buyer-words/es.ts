@@ -43,7 +43,7 @@ export const es: BuyerWords = {
 
   fairHead: (country, percent) => `Precio justo para tu país (${country}): ${percent}\u00a0% de descuento`,
   fairNote: (store, plan) =>
-    `${store} baja sus precios donde el dinero rinde menos. Se descuenta en la página de pago, sin necesidad de código${plan ? "; el precio rebajado es para el pago completo" : ""}.`,
+    `${store} baja sus precios donde el dinero rinde menos. Este precio se calculó automáticamente para ti a partir del país de tu conexión a internet. Se descuenta en la página de pago, sin necesidad de código${plan ? "; el precio rebajado es para el pago completo" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}\u00a0% de descuento · ${ends}`,
   saleNote: (until, plan) =>
     `Hasta el ${until}. Se descuenta en la página de pago, sin necesidad de código${plan ? "; el precio de oferta es para el pago completo" : ""}.`,
@@ -190,6 +190,8 @@ export const es: BuyerWords = {
     `Cuando esté activo, el pago lo cobra Stripe en la propia cuenta de ${store}: Marktmorgen nunca retiene el dinero ni se queda con nada.`,
   paidBy: (takers, store) =>
     `El pago lo cobra ${takers} en la propia cuenta de ${store}. Marktmorgen nunca retiene el dinero ni se queda con nada.`,
+  whoAnswers: (store) =>
+    `${store} es quien vende y responde de lo que compras, de los reembolsos y de cualquier derecho de desistimiento que tengas. Marktmorgen aloja las páginas de la tienda y no es parte en la venta.`,
   noPaymentsTitle: "Esta tienda todavía no puede aceptar pagos.",
   noPaymentsBody: (store) => `Los precios de arriba son reales, pero aquí nada puede cobrar una tarjeta. Para comprar, escribe directamente a ${store}.`,
   noPaymentsBodyOne: (store) => `El precio de arriba es real, pero aquí nada puede cobrar una tarjeta. Para comprar, escribe directamente a ${store}.`,
@@ -199,6 +201,7 @@ export const es: BuyerWords = {
     busy: { title: "Alguien lo está comprando ahora mismo", body: "No se ha cobrado nada. Vuelve a pulsar comprar en un momento." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a pulsar comprar." },
     error: { title: "No se pudo abrir la página de pago", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
+    nocharges: { title: "Esta tienda no puede aceptar pagos con tarjeta ahora mismo", body: "No se ha cobrado nada. Volver a intentarlo no funcionará hasta que la tienda lo solucione." },
     paused: { title: "Esta tienda no acepta pedidos nuevos ahora mismo", body: "No se ha cobrado nada. Los pedidos nuevos vuelven a abrirse a principios del mes que viene, o antes." },
     "paypal-declined": {
       title: "PayPal no aceptó el pago",
@@ -308,9 +311,12 @@ export const es: BuyerWords = {
   askTermsCut: () => "No tengo aquí las condiciones completas. Pregunta al creador antes de comprar.",
 
   noLongerOnSale: "Este producto ya no está a la venta.",
+  cardUnread: "No se ha podido cargar este producto ahora mismo. Vuelve a intentarlo en un momento.",
+  cardBuyUnread: "Ahora mismo no se puede comprar. Vuelve a intentarlo en un momento.",
   seeStore: (store) => `Ver ${store}`,
   cardTestMode: "Modo de prueba: no se cobra ninguna tarjeta real.",
   cardCheckout: "Pago seguro con Stripe, en una pestaña nueva.",
+  cardSoldBy: (store) => `Lo vende ${store}, que responde de lo que compras.`,
   cardOpens: (store) => `Se abre en la tienda de ${store}, en una pestaña nueva.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

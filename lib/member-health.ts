@@ -11,6 +11,7 @@
  *   nl:health:<statsId>   JSON Health, ten minutes
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -24,6 +25,7 @@ import { type Band, type HealthFactor, bandOf, scoreOf } from "@/lib/member-heal
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
 const LIVE = new Set(["active", "trialing", "past_due"]);
+const SUBSCRIPTION_STATES = new Set(["active", "trialing", "past_due", "canceled", "unpaid", "incomplete", "incomplete_expired", "paused"]);
 const cacheKey = (store: Store) => `nl:health:${store.statsId}`;
 
 export type MemberRow = {
@@ -55,6 +57,8 @@ export type Health = {
   atRisk: number;
   /** Members at risk paying in another currency than the store's: counted, never added to atRisk (22 [E5], unit 2e). */
   atRiskElsewhere?: number;
+  /** Running memberships omitted because their own reporting evidence was incomplete. */
+  unscored: number;
   complete: boolean;
 };
 
@@ -72,6 +76,31 @@ type Raw = PauseSub & {
 };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const natural = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+const positive = (v: unknown): v is number => natural(v) && v > 0;
+const INTERVALS = new Set(["day", "week", "month", "year"]);
+
+/** Facts needed to count and price one known running member. */
+function memberEvidence(raw: Raw) {
+  const email = raw.customer && typeof raw.customer === "object" && !Array.isArray(raw.customer) && typeof raw.customer.email === "string"
+    ? normaliseEmail(raw.customer.email)
+    : "";
+  const product = productOfSub(raw);
+  const item = Array.isArray(raw.items?.data) ? raw.items.data[0] : undefined;
+  const unitAmount = item?.price?.unit_amount;
+  const quantity = item?.quantity;
+  const interval = item?.price?.recurring?.interval;
+  const intervalCount = item?.price?.recurring?.interval_count;
+  const periodEnd = positive(item?.current_period_end) ? item.current_period_end : positive(raw.current_period_end) ? raw.current_period_end : 0;
+  const currency = raw.currency;
+  const startDate = raw.start_date;
+  const amount = natural(unitAmount) && positive(quantity) ? unitAmount * quantity : NaN;
+  if (!email || !product || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
+      !natural(amount) || typeof interval !== "string" || !INTERVALS.has(interval) || !positive(intervalCount) ||
+      !positive(startDate) || !periodEnd || (raw.cancel_at_period_end !== undefined && typeof raw.cancel_at_period_end !== "boolean") ||
+      (raw.cancel_at != null && !natural(raw.cancel_at))) throw new Error("Membership reporting evidence could not be confirmed");
+  return { raw, email, product, amount, interval, intervalCount, periodEnd, currency };
+}
 
 /** A payment turned into a month: a year counts a twelfth, a week 52 twelfths. */
 export function monthlyOf(amount: number, interval: string, count: number): number {
@@ -85,42 +114,57 @@ export async function runningMembers(store: Store): Promise<{ rows: Raw[]; compl
   if (!account) return { rows: [], complete: true };
   const handles = saleHandles(store);
   const rows: Raw[] = [];
+  const seen = new Set<string>();
   let after = "";
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const query = new URLSearchParams({ status: "all", limit: "100" });
     query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
-    const listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
-    const data = (Array.isArray(listed.data) ? listed.data : []) as Raw[];
+    const listed = await onAccount("GET", account, `/subscriptions?${query}`);
+    if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length > 100 ||
+        typeof listed.has_more !== "boolean" || (listed.has_more && listed.data.length === 0)) throw new Error("Membership list could not be confirmed");
+    const data = listed.data as Raw[];
+    // Validate the entire page, including records filtered out below, before counting.
+    for (const raw of data) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof raw.id !== "string" || !/^sub_[A-Za-z0-9]+$/.test(raw.id) ||
+          seen.has(raw.id) || typeof raw.status !== "string" || !SUBSCRIPTION_STATES.has(raw.status) ||
+          !raw.metadata || typeof raw.metadata !== "object" || Array.isArray(raw.metadata) || Object.values(raw.metadata).some(value => typeof value !== "string")) throw new Error("Membership record could not be confirmed");
+      seen.add(raw.id);
+    }
     for (const raw of data) {
       const meta = raw.metadata ?? {};
       if (handles.has(meta.store ?? "") && meta.kind !== "plan" && LIVE.has(String(raw.status))) rows.push(raw);
     }
     const last = data[data.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { rows, complete: true };
-    after = last.id;
+    if (!listed.has_more) return { rows, complete: true };
+    after = last.id as string;
   }
   return { rows, complete: false };
 }
 
-/** Every running member with a score, the lowest first. */
-export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()): Promise<MemberRow[]> {
+/** Every evidenced running member with a score, plus the number omitted. */
+async function scoredMembers(store: Store, rows: Raw[], now = Date.now()): Promise<{ members: MemberRow[]; unscored: number }> {
   const nowSeconds = Math.floor(now / 1000);
-  const members = rows
-    .map((raw) => {
-      const email = raw.customer && typeof raw.customer === "object" && typeof raw.customer.email === "string" ? normaliseEmail(raw.customer.email) : "";
-      return { raw, email, product: productOfSub(raw) };
-    })
-    .filter((m) => m.email && m.product);
+  const members: ReturnType<typeof memberEvidence>[] = [];
+  let unscored = 0;
+  for (const row of rows) {
+    try {
+      members.push(memberEvidence(row));
+    } catch {
+      unscored += 1;
+    }
+  }
   const ids = [...new Set(members.map((m) => m.product))];
-  const listings = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p]));
+  const listings = new Map((ids.length ? await readListings(store, ids) : []).map((p) => [p.id, p]));
 
   // The community, and which memberships open it.
   const community = store.community?.on ? store.community.id : "";
-  const config = community ? await readConfig(community).catch(() => null) : null;
+  const config = community ? await readConfig(community) : null;
   const opens = new Set(config?.access ?? []);
   const inCommunity = members.filter((m) => opens.has(m.product)).map((m) => m.email);
-  const communitySeen = community && inCommunity.length ? await lastSeenIn(community, inCommunity).catch(() => new Map<string, number>()) : new Map<string, number>();
+  // An unavailable activity reading is not evidence that every member never visited.
+  // Refuse the report before it can be cached or used by the return-email job.
+  const communitySeen = community && inCommunity.length ? await lastSeenIn(community, inCommunity) : new Map<string, number>();
 
   // Each course, and the members whose membership is it.
   const courseSeen = new Map<string, number>();
@@ -130,19 +174,15 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
     if (course) byCourse.set(course, [...(byCourse.get(course) ?? []), m.email]);
   }
   for (const [course, emails] of byCourse) {
-    const seen = await lastSeenMany(course, [...new Set(emails)]).catch(() => new Map<string, number>());
+    const seen = await lastSeenMany(course, [...new Set(emails)]);
     for (const [email, at] of seen) courseSeen.set(`${course}|${email}`, at);
   }
 
-  return members
-    .map(({ raw, email, product }) => {
+  const scored = members
+    .map(({ raw, email, product, amount, interval, intervalCount, periodEnd, currency }) => {
       const listing = listings.get(product);
       const course = listing?.course?.id ?? "";
       const meta = raw.metadata ?? {};
-      const item = raw.items?.data?.[0];
-      const amount = num(item?.price?.unit_amount) * (num(item?.quantity) || 1);
-      const interval = typeof item?.price?.recurring?.interval === "string" ? item.price.recurring.interval : "month";
-      const count = num(item?.price?.recurring?.interval_count) || 1;
       // A membership sold to end after a set number of payments has its end from the start: that is not a choice to leave.
       const ending = !meta.ends_after && (raw.cancel_at_period_end === true || num(raw.cancel_at) > 0);
       const { score, factors } = scoreOf(
@@ -152,13 +192,12 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
           paused: pausedNow(raw, nowSeconds),
           courseSeen: course ? (courseSeen.get(`${course}|${email}`) ?? 0) : null,
           communitySeen: opens.has(product) ? (communitySeen.get(email) ?? 0) : null,
-          since: num(raw.start_date),
+          since: raw.start_date as number,
         },
         nowSeconds,
       );
-      // The currency it pays in, lowercased; the store's when Stripe says none, so a missing one is never counted apart.
-      const currency = typeof raw.currency === "string" && raw.currency ? raw.currency.toLowerCase() : store.currency;
-      const cents = monthlyOf(amount, interval, count);
+      const cents = monthlyOf(amount, interval, intervalCount);
+      if (!natural(cents)) throw new Error("Membership reporting amount could not be confirmed");
       return {
         sub: String(raw.id),
         email,
@@ -169,12 +208,18 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
         score,
         band: bandOf(score),
         factors,
-        periodEnd: num(item?.current_period_end) || num(raw.current_period_end),
+        periodEnd,
         ending,
         status: String(raw.status),
       };
     })
     .sort((a, b) => a.score - b.score || b.monthly - a.monthly);
+  return { members: scored, unscored };
+}
+
+/** Every evidenced running member with a score, the lowest first. */
+export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()): Promise<MemberRow[]> {
+  return (await scoredMembers(store, rows, now)).members;
 }
 
 export async function memberHealth(store: Store, fresh = false, now = Date.now()): Promise<Health | null> {
@@ -183,14 +228,17 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     const [cached] = await redisPipeline([["GET", cacheKey(store)]]);
     if (typeof cached === "string") {
       try {
-        return JSON.parse(cached) as Health;
+        const health = JSON.parse(cached) as Health;
+        // Copies written before omitted rows were counted cannot certify that
+        // their zeroes are complete. Read the source again instead.
+        if (natural(health.unscored)) return health;
       } catch {
         // Read again below.
       }
     }
   }
   const { rows, complete } = await runningMembers(store);
-  const members = await scoreMembers(store, rows, now);
+  const { members, unscored } = await scoredMembers(store, rows, now);
   const counts: Record<Band, number> = { well: 0, slipping: 0, risk: 0 };
   let atRisk = 0;
   let atRiskElsewhere = 0;
@@ -200,7 +248,7 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     if (m.own && m.own.currency !== store.currency) atRiskElsewhere += 1;
     else atRisk += m.monthly;
   }
-  const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, complete };
+  const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, unscored, complete };
   if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
   return health;
 }
@@ -208,6 +256,10 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */
 export async function forgetHealthCopy(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", cacheKey(store)]]);
-  return Number(gone) || 0;
+  const replies = repliesFor(await redisPipeline([["DEL", cacheKey(store)]]), 1);
+  const gone = countOf(replies?.[0]);
+  // One key: 0 (it was not there) or 1 (deleted). Any other reply is unknown, so the step is not done and the
+  // erasure says so, never a copy with the person in it counted as gone (CX-123 rule 24).
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of the members' scores copy");
+  return gone;
 }

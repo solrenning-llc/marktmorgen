@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { MAX_HELP_QUESTION } from "@/lib/ai-rules";
@@ -12,13 +13,16 @@ type Answer = { answer: string; sources: { id: string; q: string }[] };
  * "How do I…?" in the studio (lib/help-ask.ts): a question in plain words,
  * answered from the help center's own answers, with links to read them in
  * full. A question the help center does not cover is said to be so.
+ * `left` is null when the month's AI allowance could not be read: said in
+ * words, never "0 left"; the server still checks before an answer.
  */
-export function StudioHelp({ left: startLeft }: { left: number }) {
+export function StudioHelp({ left: startLeft }: { left: number | null }) {
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [note, setNote] = useState("");
   const [left, setLeft] = useState(startLeft);
+  const allowanceId = useId();
 
   async function ask(event: React.FormEvent) {
     event.preventDefault();
@@ -55,7 +59,8 @@ export function StudioHelp({ left: startLeft }: { left: number }) {
         How do I…?
       </h2>
       <p className="mt-1 text-sm text-ink-soft">
-        {`Ask anything about your store in your own words, in English or the language you write in. Answered from our help center only, with the answers it came from. Each question counts as one of your ${left} AI jobs left this month.`}
+        {"Ask anything about your store in your own words, in English or the language you write in. Answered from our help center only, with the answers it came from. "}
+        <span id={allowanceId}>{left === null ? `${AI_ALLOWANCE_UNKNOWN} Each question counts as one AI job.` : `Each question counts as one of your ${left} AI jobs left this month.`}</span>
       </p>
       <form onSubmit={ask} className="mt-4 flex flex-col gap-2 sm:flex-row">
         <label htmlFor="studio-help-question" className="sr-only">Your question</label>
@@ -67,7 +72,7 @@ export function StudioHelp({ left: startLeft }: { left: number }) {
           placeholder="How do I sell a course in payments?"
           className="field min-w-0 flex-1"
         />
-        <button type="submit" disabled={busy || question.trim().length < 3} aria-busy={busy} className="btn btn-primary shrink-0">
+        <button type="submit" disabled={busy || question.trim().length < 3} aria-busy={busy} aria-describedby={allowanceId} className="btn btn-primary shrink-0">
           {busy ? "Looking…" : "Ask"}
         </button>
       </form>

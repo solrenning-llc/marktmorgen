@@ -71,7 +71,9 @@ function mangleOnce(matches: (commands: Command[]) => boolean, mangle: (replies:
 const readsReviews = (commands: Command[]) => commands.length > 0 && commands.every((c) => c[0] === "HGET" && String(c[1]).startsWith(`nl:rev:${STATS}:`));
 const readsPay = (commands: Command[]) => commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === payKey;
 const writesPay = (commands: Command[]) => commands.length === 1 && (commands[0][0] === "HSET" || commands[0][0] === "HDEL") && commands[0][1] === payKey;
-const deletesReview = (commands: Command[]) => commands.some((c) => c[0] === "HDEL" && String(c[1]).startsWith(`nl:rev:${STATS}:`));
+// The photo counts' deletion (lib/reviews.ts, photoCountKey, #2863) is its own request, not the review's delete.
+const deletesCount = (c: Command) => c[0] === "HDEL" && String(c[1]).startsWith(`nl:rev:${STATS}:`) && String(c[1]).endsWith(":photos");
+const deletesReview = (commands: Command[]) => commands.some((c) => c[0] === "HDEL" && String(c[1]).startsWith(`nl:rev:${STATS}:`) && !deletesCount(c));
 // What the erasure writes to the reviews' records (the product's lock, taken and let go of around it, is not one).
 const wrote = (seen: Command[][]) =>
   seen.flat().some((c) => ["HDEL", "ZREM", "DEL", "HSET", "SET", "ZREMRANGEBYSCORE"].includes(String(c[0])) && String(c[1]).startsWith("nl:r") && !String(c[1]).startsWith("nl:rev:lock:"));
@@ -90,11 +92,13 @@ test("healthy control: the person's review, its index entries and its payment me
   assert.equal(payEntry(), null, "the payment's last member goes with its entry");
 });
 
-test("confirmed empty control: nobody's review is 0 records and no write", async () => {
+test("confirmed empty control: nobody's review is 0 records and no write but the photo counts' deletion", async () => {
   await setup();
   const seen = answerOnce(() => false, null);
   assert.deepEqual(await forgetReviewsPerson(STATS, [P1, P2], "nobody@example.test", ROOM), { records: 0, photos: [] });
-  assert.equal(wrote(seen), false);
+  // A count is erased even where the review is already gone (#2863): asked for every product, it removes nothing here.
+  assert.equal(seen.flat().filter(deletesCount).length, 2);
+  assert.equal(wrote(seen.map((commands) => commands.filter((c) => !deletesCount(c)))), false);
   assert.equal(await deleteReview(STATS, P1, reviewId(STATS, P1, "nobody@example.test"), ROOM), "missing");
 });
 

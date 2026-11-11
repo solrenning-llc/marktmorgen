@@ -842,18 +842,19 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
-          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
-          // from Redis only on keys of the wrong type: a lock key that is not a string reads here as not ours (0), where
-          // Redis's GET would fail the script; a hash key that is not a hash fails in both.
-          const [lock, target, token] = [args[1], args[2], args[3]];
+        if (key.startsWith("-- marktmorgen:crm-companies-write:v2\n") && args[0] === "3" && args.length >= 7 && (args.length - 7) % 2 === 0) {
+          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token, with the
+          // company kept for an undo set, deleted or left. It differs from Redis only on keys of the wrong type: a lock
+          // key that is not a string reads here as not ours (0), where Redis's GET would fail the script; a hash key
+          // that is not a hash fails in both.
+          const [lock, target, undo, token, kept, seconds] = [args[1], args[2], args[3], args[4], args[5], args[6]];
           this.live(lock);
           this.live(target);
           if (this.data.get(lock) !== token) return 0;
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
           const hash = this.hash(target);
-          for (let i = 4; i < args.length; i += 2) {
+          for (let i = 7; i < args.length; i += 2) {
             if (args[i + 1] === "") hash.delete(args[i]);
             else hash.set(args[i], args[i + 1]);
           }
@@ -861,6 +862,12 @@ export class MemoryRedis {
             this.data.delete(target);
             this.until.delete(target);
           }
+          this.live(undo);
+          if (kept === "-") this.run(["DEL", undo]);
+          else if (kept !== "" && seconds === "") {
+            // SET XX KEEPTTL: written over only while it is there, for the time it has left.
+            if (typeof this.data.get(undo) === "string") this.data.set(undo, kept);
+          } else if (kept !== "") this.run(["SET", undo, kept, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {

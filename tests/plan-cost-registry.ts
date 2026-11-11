@@ -679,10 +679,11 @@ export const PATH_BOARD_JOIN = request("heavy",70,30_000);
  * 639 [GL7](4)): every company read (MAX_COMPANIES_BYTES, about a megabyte), the
  * two records a link moves written back, the lock taken and let go, the room
  * taken and given back, its studio requests counted, and every company sent on
- * to the browser. Counted as COMPANIES_REQUEST_UNITS studio requests, taken
- * before it reads (tests/plan-cost-registry.test.ts).
+ * to the browser; the company deleted kept for its undo read and written
+ * (one GET, one SET or DEL in the write). Counted as COMPANIES_REQUEST_UNITS
+ * studio requests, taken before it reads (tests/plan-cost-registry.test.ts).
  */
-export const COMPANIES_REQUEST = request("heavy", 12 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES + 2 * MAX_COMPANY_RECORD_BYTES + 4_096) + MAX_COMPANIES_BYTES * ORIGIN_PER_BYTE;
+export const COMPANIES_REQUEST = request("heavy", 14 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES + 4 * MAX_COMPANY_RECORD_BYTES + 4_096) + MAX_COMPANIES_BYTES * ORIGIN_PER_BYTE;
 /**
  * A page's reading of every company at the most (the companies page, a person's page; 639 [GL7](4)): about a
  * megabyte from the database and its studio requests counted. Counted as COMPANIES_READ_UNITS studio requests

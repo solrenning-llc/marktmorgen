@@ -93,7 +93,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
   "lib/mail-health.ts": { how: "marks", what: "A mark that your address was counted in this week's delivery checks, with nothing else in it" },
   "lib/crm.ts": { how: "copied", what: "The store's fields about you, its deals with you, and the tasks its team wrote about you" },
-  "lib/crm-companies.ts": { how: "copied", what: "Which of the store's companies you are linked to (639 [GL7](4)); the companies themselves are the store's" },
+  "lib/crm-companies.ts": { how: "copied", what: "Which of the store's companies you are linked to (639 [GL7](4)), and a company it deleted in the last day that listed you, kept so the deletion can be undone; the companies themselves are the store's" },
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
   "lib/agreement-store.ts": { how: "copied", what: "Proposals and agreements the store sent you, each version's text, and your signature" },
   "lib/buyer-profile.ts": { how: "copied", what: "Notes the store's team wrote about you" },
@@ -242,7 +242,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     ];
   },
   // The store's companies you are linked to, by name and site; the store's note about a company is the store's, left out.
-  "lib/crm-companies.ts": async (s) => (await companiesOfPerson(s.statsId, s.person)).map((c) => ({ company: c.name, website: c.website })),
+  // A company deleted in the last day that lists you is kept for its undo, and said so.
+  "lib/crm-companies.ts": async (s) => (await companiesOfPerson(s.statsId, s.person)).map((c) => ({ company: c.name, website: c.website, ...(c.deleted ? { deleted: "Deleted by the store; kept for a day so the deletion can be undone" } : {}) })),
   "lib/buyer-profile.ts": async (s) => (await readPersonNotes(s.statsId, s.person)).map((n) => ({ note: n.text, at: iso(n.at) })),
   "lib/form-store.ts": async (s) => {
     const out: unknown[] = [];

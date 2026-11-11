@@ -11,7 +11,7 @@ import test from 'node:test';
 import {NextRequest} from 'next/server';
 import {POST} from '@/app/api/store/companies/route';
 import {SESSION_COOKIE,openSession} from '@/lib/auth';
-import {addCompany,changeCompanies,readCompanies,linkPerson,dropCompany} from '@/lib/crm-companies';
+import {addCompany,changeCompanies,readCompanies,linkPerson,dropCompany,forgetCompanyPerson,UNDO_SECONDS} from '@/lib/crm-companies';
 import {companiesPageData} from '@/lib/companies-read';
 import {claimHandle,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
 import {ERASERS,erasePerson} from '@/lib/person-erasure';
@@ -95,4 +95,46 @@ test('An undo whose read came before a whole erasure cannot write the person bac
  const body=await again.json() as {ok:boolean;skipped?:string[]};const rows=await readCompanies(s.store.statsId);
  assert.equal(again.status,200);assert.deepEqual(rows.map(c=>c.people),[[other]]);assert.equal(rows.some(c=>c.people.includes(s.person)),false);assert.deepEqual(body.skipped,[s.person]);
  assert.equal(held(s),weight(s));
+});
+const undoKey=(s:Awaited<ReturnType<typeof seed>>)=>`nl:crm:co:undo:${s.store.statsId}`;
+async function undo(s:Awaited<ReturnType<typeof seed>>,people:string[],name='Synthetic company'){
+ const cookie=`${SESSION_COOKIE}=${await openSession(s.owner)}`;
+ const response=await POST(new NextRequest('https://marktmorgen.com/api/store/companies',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'restore',name,website:'',note:'',people})}));
+ return{status:response.status,body:await response.json() as {ok:boolean;error?:string;skipped?:string[]}};
+}
+test('A company deleted is kept a day for its undo, which puts its people back once, and nobody the page adds',async()=>{
+ const s=await seed(true),statsId=s.store.statsId!,other=personKey(statsId,'other@example.test'),stranger=personKey(statsId,'stranger@example.test');
+ assert.ok((await changeCompanies(statsId,s.store,c=>linkPerson(c,id,other))).ok);assert.ok((await changeCompanies(statsId,s.store,c=>dropCompany(c,id))).ok);
+ const ttl=Number(redis.run(['TTL',undoKey(s)]));assert.ok(ttl>0&&ttl<=UNDO_SECONDS,String(ttl));
+ const first=await undo(s,[s.person,other,stranger]);assert.equal(first.status,200);assert.deepEqual(first.body.skipped,[stranger]);
+ assert.deepEqual((await readCompanies(statsId)).map(c=>c.people),[[s.person,other]]);assert.equal(redis.run(['GET',undoKey(s)]),null,'put back once, then let go of');
+ assert.equal(held(s),weight(s));
+});
+test('A deletion takes the person out of the company kept for an undo, for the time it has left, and the copy said it was kept',async()=>{
+ const s=await seed(true),statsId=s.store.statsId!,other=personKey(statsId,'other@example.test');
+ assert.ok((await changeCompanies(statsId,s.store,c=>linkPerson(c,id,other))).ok);assert.ok((await changeCompanies(statsId,s.store,c=>dropCompany(c,id))).ok);
+ const copied=await COPIERS['lib/crm-companies.ts']({store:s.store,statsId,person:s.person} as never) as {company:string;deleted?:string}[];
+ assert.equal(copied.length,1);assert.equal(copied[0].company,'Synthetic company');assert.ok(copied[0].deleted);
+ redis.run(['EXPIRE',undoKey(s),500]);
+ assert.equal(await forgetCompanyPerson(statsId,s.person,undefined,s.store),1);
+ const kept=String(redis.run(['GET',undoKey(s)]));assert.equal(kept.includes(s.person),false);assert.equal(kept.includes(other),true);
+ const ttl=Number(redis.run(['TTL',undoKey(s)]));assert.ok(ttl>0&&ttl<=500,String(ttl));
+ assert.deepEqual(await COPIERS['lib/crm-companies.ts']({store:s.store,statsId,person:s.person} as never),[]);
+});
+for(const raw of ['not json '+'0'.repeat(4),'{"people":["PERSON"],"note":"x"}'])test('A company kept for an undo that cannot be read whole is let go of by a deletion that it may name, and fails the copy '+raw.slice(0,12),async()=>{
+ const s=await seed(true),statsId=s.store.statsId!;redis.run(['SET',undoKey(s),raw.replace('PERSON',s.person)+(raw.startsWith('not')?s.person:''),'EX',600]);
+ let unknown=false;try{await COPIERS['lib/crm-companies.ts']({store:s.store,statsId,person:s.person} as never);}catch{unknown=true;}assert.equal(unknown,true);
+ await forgetCompanyPerson(statsId,s.person,undefined,s.store);assert.equal(redis.run(['GET',undoKey(s)]),null);
+});
+for(const reply of [[],[null,null],[1]])test('An undo whose kept company Redis does not answer exactly writes nothing, and a deletion meeting it is not done '+JSON.stringify(reply),async()=>{
+ const s=await seed(true),statsId=s.store.statsId!;assert.ok((await changeCompanies(statsId,s.store,c=>dropCompany(c,id))).ok);
+ const original=redis.pipeline.bind(redis);redis.pipeline=async commands=>commands[0]?.[0]==='GET'&&commands[0][1]===undoKey(s)?reply as never:original(commands);
+ let result,threw=false;try{result=await undo(s,[s.person]);await forgetCompanyPerson(statsId,s.person,undefined,s.store).catch(()=>{threw=true;});}finally{redis.pipeline=original;}
+ assert.equal(result.status,503);assert.deepEqual(await readCompanies(statsId),[]);assert.equal(threw,true,'a deletion said done while what an undo keeps was not read');
+ assert.equal(String(redis.run(['GET',undoKey(s)])).includes(s.person),true,'nothing was written');
+});
+test('An undo of a company other than the one kept puts nobody back, and leaves the kept one',async()=>{
+ const s=await seed(true),statsId=s.store.statsId!;assert.ok((await changeCompanies(statsId,s.store,c=>dropCompany(c,id))).ok);
+ const other=await undo(s,[s.person],'Another company');assert.equal(other.status,200);assert.deepEqual(other.body.skipped,[s.person]);
+ assert.deepEqual((await readCompanies(statsId)).map(c=>[c.name,c.people]),[['Another company',[]]]);assert.notEqual(redis.run(['GET',undoKey(s)]),null);
 });

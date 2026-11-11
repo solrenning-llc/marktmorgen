@@ -10,6 +10,7 @@ import {
   MAX_COMPANY_PEOPLE,
   addCompany,
   changeCompanies,
+  companyNameKey,
   companyOf,
   dropCompany,
   editCompany,
@@ -107,6 +108,7 @@ export async function POST(request: NextRequest) {
     } else if (body.action === "remove") {
       if ((refused = await countRead(store))) return refused;
       // A record that cannot be read is deleted the same way, so the creator can free its place (round 3, L3).
+      // A company deleted is kept a day with its people, in place of the last one, for its undo (changeCompanies).
       result = await changeCompanies(statsId, store, (companies, unreadable) => (unreadable.includes(id) ? { ok: true, companies, drop: [id] } : dropCompany(companies, id)));
     } else if (body.action === "link") {
       if (!PERSON.test(person)) return refuse("unknown");
@@ -120,11 +122,16 @@ export async function POST(request: NextRequest) {
       const madeId = newCompanyId();
       let skipped: string[] = [];
       if ((refused = await countRead(store))) return refused;
-      result = await changeCompanies(statsId, store, (companies) => {
-        const restored = restoreCompany(companies, input.value, madeId, Date.now() / 1000, body.people as unknown[]);
-        if (restored.ok) skipped = restored.skipped;
-        return restored;
-      });
+      // Only the people the store kept with the company deleted come back, never others the page sends: a person
+      // deleted from the store since was taken out of what was kept (Codex G2, MEDIUM 3 on #2574). What was kept is
+      // let go of once it is put back.
+      result = await changeCompanies(statsId, store, (companies, _unreadable, undo) => {
+        const same = undo !== null && companyNameKey(undo.name) === companyNameKey(input.value.name);
+        const restored = restoreCompany(companies, input.value, madeId, Date.now() / 1000, body.people as unknown[], same ? undo.people : []);
+        if (!restored.ok) return restored;
+        skipped = restored.skipped;
+        return same ? { ok: true, companies: restored.companies, undo: null } : restored;
+      }, true);
       if (result.ok) return Response.json({ ok: true, companies: result.companies, added: madeId, skipped }, { headers: NO_STORE });
     } else if (body.action === "unlink") {
       if (!PERSON.test(person)) return refuse("unknown");

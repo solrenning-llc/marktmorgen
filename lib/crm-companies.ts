@@ -8,6 +8,7 @@
  *
  *   nl:crm:co:<statsId>   hash: <company id> -> the company, as JSON
  *   nl:crm:co:lock:<statsId>   held for at most 10 seconds while one change is written
+ *   nl:crm:co:undo:<statsId>   the last company deleted, as JSON, for a day: what its undo may put back
  *
  * One change at a time (the lock): two people saving at once never write
  * over each other, and a person linked to two companies at once is never
@@ -29,7 +30,16 @@
  * again, and only Redis's own answers count: a reply that is not one, whole,
  * is CompaniesUnreadable, never "no companies";
  * a person deleted from the store is taken off every company
- * (forgetCompanyPerson, from forgetCrmPerson in lib/crm.ts).
+ * (forgetCompanyPerson, its own row of lib/person-erasure.ts).
+ *
+ * An erased person never comes back by an undo (Codex G2, MEDIUM 3 on
+ * #2574). The undo of a deleted company puts back only the people the store
+ * itself kept with it (UNDO_SECONDS, one company at a time, the last one
+ * deleted), never the ones the page sends back from what it showed: a
+ * person's deletion takes them out of what was kept, under the same lock and
+ * in the same step as every other write (WRITE_COMPANIES), so an undo whose
+ * read came before a deletion is refused ("busy") and one after it no longer
+ * has them. Nothing is kept about the person once they are deleted.
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -46,18 +56,31 @@ const companiesKey = (statsId: string) => `nl:crm:co:${statsId}`;
 const COMPANIES_SLOT = "crm:co";
 const lockKey = (statsId: string) => `nl:crm:co:lock:${statsId}`;
 const LOCK_SECONDS = 10;
+const undoKey = (statsId: string) => `nl:crm:co:undo:${statsId}`;
+/** How long the last company deleted is kept for its undo: a day. */
+export const UNDO_SECONDS = 86_400;
 
 /**
- * KEYS[1] the companies' lock, KEYS[2] their hash; ARGV[1] the token of the
- * change that took the lock, then (company id, record) two at a time, an
- * empty record deleting it. Writes only while the lock holds that token:
- * 1 when written, 0 (nothing written) when the lock ran out or went to
- * another change.
+ * KEYS[1] the companies' lock, KEYS[2] their hash, KEYS[3] the last company
+ * deleted (undoKey); ARGV[1] the token of the change that took the lock,
+ * ARGV[2] what becomes of the company deleted ("" as it is, "-" deleted,
+ * otherwise that record, kept ARGV[3] seconds, or, when ARGV[3] is "",
+ * written over the one kept, only while it is, for the time it has left),
+ * then (company id, record) two at a time, an empty record deleting it.
+ * Writes only while the lock holds that token: 1 when written, 0 (nothing
+ * written) when the lock ran out or went to another change.
  */
-export const WRITE_COMPANIES = `-- marktmorgen:crm-companies-write:v1
+export const WRITE_COMPANIES = `-- marktmorgen:crm-companies-write:v2
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-for i = 2, #ARGV, 2 do
+for i = 4, #ARGV, 2 do
   if ARGV[i + 1] == "" then redis.call("HDEL", KEYS[2], ARGV[i]) else redis.call("HSET", KEYS[2], ARGV[i], ARGV[i + 1]) end
+end
+if ARGV[2] == "-" then
+  redis.call("DEL", KEYS[3])
+elseif ARGV[2] ~= "" and ARGV[3] == "" then
+  redis.call("SET", KEYS[3], ARGV[2], "XX", "KEEPTTL")
+elseif ARGV[2] ~= "" then
+  redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[3])
 end
 return 1`;
 
@@ -137,6 +160,23 @@ export async function companiesKept(statsId: string | null): Promise<number> {
   return n;
 }
 
+/** The last company deleted, as kept for its undo: its text, or null when none is kept; CompaniesUnreadable when Redis's answer is not one. */
+async function readUndo(statsId: string): Promise<string | null> {
+  const raw = await oneReply(["GET", undoKey(statsId)]);
+  if (raw !== null && typeof raw !== "string") throw new CompaniesUnreadable("GET");
+  return raw;
+}
+
+/** The last company deleted, read as a company; null when none is kept or it cannot be read as one. */
+function undoCompany(raw: string | null): Company | null {
+  if (raw === null || raw.length > MAX_STORED_COMPANY) return null;
+  try {
+    return parseCompany(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
 /** Every company of the store, oldest first; CompaniesUnreadable when Redis's answer is not one whole reply. */
 export async function readCompanies(statsId: string | null): Promise<Company[]> {
   if (!statsId || !isRedisConfigured()) return [];
@@ -165,8 +205,12 @@ const total = (weights: Map<string, number>) => [...weights.values()].reduce((su
  * after a written change that shrank it. "written" on Redis's exact 1;
  * "refused" (the lock was lost, nothing written) on its exact 0; anything
  * else is "unconfirmed": it may have landed, so the room it took stays taken.
+ * `undo`: the company deleted to keep for its undo (for UNDO_SECONDS, or,
+ * with `undoLeft`, written over the one kept for the time it has left), null
+ * to delete what is kept, left out to leave it as it is (outside the room:
+ * it goes by itself).
  */
-async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null, drop: readonly string[] = [], rewrite: ReadonlyMap<string, string> = new Map()): Promise<"written" | "refused" | "unconfirmed"> {
+async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null, drop: readonly string[] = [], rewrite: ReadonlyMap<string, string> = new Map(), undo?: Company | null, undoLeft = false): Promise<"written" | "refused" | "unconfirmed"> {
   const was = new Map(stored.companies.map((c) => [c.id, c]));
   const now = new Map(after.map((c) => [c.id, c]));
   const weights = new Map(stored.weights);
@@ -195,14 +239,15 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
     weights.delete(id);
     pairs.push(id, "");
   }
-  if (!pairs.length) return "written";
+  if (!pairs.length && undo === undefined) return "written";
   // What the change grows (or shrinks) the hash by, against what every record in it weighs as read under the lock.
   const grown = total(weights) - total(stored.weights);
   const slot = (bytes: number) => [{ slot: COMPANIES_SLOT, bytes }];
   // Room first, by what it grows: a change that does not fit throws DataRoomError and nothing is written.
   if (room && grown > 0) await needData(room, slot(grown));
   // A write that throws may or may not have landed: the room it took stays taken (never less than what is kept).
-  const reply = await redisPipeline([["EVAL", WRITE_COMPANIES, 2, lockKey(statsId), companiesKey(statsId), held.token, ...pairs]]);
+  const kept = undo === undefined ? "" : undo === null ? "-" : JSON.stringify(undo);
+  const reply = await redisPipeline([["EVAL", WRITE_COMPANIES, 3, lockKey(statsId), companiesKey(statsId), undoKey(statsId), held.token, kept, undoLeft ? "" : UNDO_SECONDS, ...pairs]]);
   // Only Redis's own answer to the one script counts (Codex G2, #2574): exactly 1 written, exactly 0 nothing written.
   const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
   const outcome = answer === 1 ? "written" : answer === 0 ? "refused" : "unconfirmed";
@@ -220,10 +265,15 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
  * write landed ("busy"); a write Redis did not answer exactly is
  * "unconfirmed", and the room it took stays taken.
  */
-/** A change asked of the companies: given them and the ids of the unreadable records; it may delete some of those (`drop`). */
-export type CompanyChange = (companies: Company[], unreadable: readonly string[]) => CompanyResult | { ok: true; companies: Company[]; drop: string[] };
+/**
+ * A change asked of the companies: given them, the ids of the unreadable records (it may delete some of those,
+ * `drop`) and, when asked for (`readsUndo`), the last company deleted as kept for its undo. A company it deletes
+ * is kept for its undo, with its people, in place of the one kept before; it may say otherwise (`undo`: null lets
+ * go of the one kept).
+ */
+export type CompanyChange = (companies: Company[], unreadable: readonly string[], undo: Company | null) => CompanyResult | { ok: true; companies: Company[]; drop?: string[]; undo?: Company | null };
 
-export async function changeCompanies(statsId: string, room: DataStore, change: CompanyChange): Promise<CompanyResult> {
+export async function changeCompanies(statsId: string, room: DataStore, change: CompanyChange, readsUndo = false): Promise<CompanyResult> {
   let held: Held;
   try {
     held = await takeLock(lockKey(statsId), LOCK_SECONDS, 0);
@@ -234,13 +284,17 @@ export async function changeCompanies(statsId: string, room: DataStore, change: 
   try {
     const stored = await readStored(statsId);
     const unreadable = unreadableOf(stored);
-    const asked = change(stored.companies, unreadable);
+    const asked = change(stored.companies, unreadable, readsUndo ? undoCompany(await readUndo(statsId)) : null);
     if (!asked.ok) return asked;
-    const drop = "drop" in asked ? asked.drop : [];
+    const drop = ("drop" in asked && asked.drop) || [];
+    // A company deleted is kept a day for its undo, with its people (the last one, if one change deleted more).
+    const now = new Set(asked.companies.map((c) => c.id));
+    const deleted = stored.companies.filter((c) => !now.has(c.id)).at(-1);
+    const undo = "undo" in asked ? asked.undo : deleted;
     // An unreadable record still takes its place: a change that adds a company counts them (round 3, L3).
     const left = unreadable.filter((id) => !drop.includes(id)).length;
     if (asked.companies.length > stored.companies.length && asked.companies.length + left > MAX_COMPANIES) return { ok: false, error: "full" };
-    const outcome = await writeChanges(statsId, held, stored, asked.companies, room, drop);
+    const outcome = await writeChanges(statsId, held, stored, asked.companies, room, drop, new Map(), undo);
     if (outcome !== "written") return { ok: false, error: outcome === "refused" ? "busy" : "unconfirmed" };
     return { ok: true, companies: asked.companies };
   } finally {
@@ -270,6 +324,13 @@ export async function forgetCompanyPerson(statsId: string | null, person: string
   }
   try {
     const stored = await readStored(statsId);
+    // The company kept for an undo is taken out of them, for the time it has left, or let go of when that cannot be
+    // done whole: whatever else, an undo never puts them back, and nothing kept names them.
+    const raw = await readUndo(statsId);
+    const forgetUndo = raw !== null && namesPerson(raw, person) !== false;
+    const kept = forgetUndo ? undoCompany(raw) : null;
+    const cleaned = kept ? { ...kept, people: kept.people.filter((p) => p !== person) } : null;
+    const undo = cleaned && !holds(cleaned, person) ? cleaned : null;
     const after = unlinkPerson(stored.companies, person);
     const changed = after.filter((c, i) => c.people.length !== stored.companies[i].people.length);
     // A record that cannot be read as a company but names the person (Codex G2, #2574): taken off it when its list
@@ -283,10 +344,10 @@ export async function forgetCompanyPerson(statsId: string | null, person: string
       if (edited === null) throw new Error("a company record that cannot be read names the person: the deletion is not done");
       rewrite.set(id, edited);
     }
-    if (!changed.length && !rewrite.size) return 0;
-    const outcome = await writeChanges(statsId, held, stored, after, room, [], rewrite);
+    if (!changed.length && !rewrite.size && !forgetUndo) return 0;
+    const outcome = await writeChanges(statsId, held, stored, after, room, [], rewrite, forgetUndo ? undo : undefined, true);
     if (outcome !== "written") throw new Error(`companies ${outcome === "refused" ? "busy" : "unconfirmed"}: the person could not be taken off them`);
-    return changed.length + rewrite.size;
+    return changed.length + rewrite.size + (forgetUndo ? 1 : 0);
   } finally {
     await releaseLock(held);
   }
@@ -339,13 +400,20 @@ function namesPerson(raw: string, person: string): boolean | "unknown" {
 }
 
 /**
- * The companies a person is linked to, for their copy (lib/person-copy.ts):
- * CompaniesUnreadable when a record that cannot be read names them, so their
- * copy is never said complete while it leaves a link out (Codex G2, #2574).
+ * The companies a person is linked to, for their copy (lib/person-copy.ts),
+ * and the company deleted that is kept for its undo when it lists them
+ * (`deleted`): CompaniesUnreadable when a record that cannot be read names
+ * them, so their copy is never said complete while it leaves a link out
+ * (Codex G2, #2574).
  */
-export async function companiesOfPerson(statsId: string | null, person: string): Promise<Company[]> {
+export async function companiesOfPerson(statsId: string | null, person: string): Promise<(Company & { deleted?: true })[]> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
   const stored = await readStored(statsId);
   if ([...stored.unreadable.values()].some((raw) => namesPerson(raw, person) !== false)) throw new CompaniesUnreadable("a record that cannot be read names this person");
-  return stored.companies.filter((c) => c.people.includes(person));
+  const linked: (Company & { deleted?: true })[] = stored.companies.filter((c) => c.people.includes(person));
+  const raw = await readUndo(statsId);
+  if (raw === null || namesPerson(raw, person) === false) return linked;
+  const deleted = undoCompany(raw);
+  if (!deleted || !deleted.people.includes(person)) throw new CompaniesUnreadable("the company kept for an undo names this person and cannot be read");
+  return [...linked, { ...deleted, deleted: true }];
 }

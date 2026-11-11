@@ -180,13 +180,16 @@ export function addCompany(companies: readonly Company[], value: Pick<Company, "
  * A deleted company put back, with its people (the studio's undo): one
  * change, so nobody is linked one at a time. Only the people who are not at
  * another company now come back; someone who moved since stays where they
- * went. `skipped` are those left out.
+ * went. `kept`, when given, are the people the store itself kept with the
+ * company deleted: nobody else comes back, so a person deleted from the
+ * store since, taken out of what was kept, never does (Codex G2, MEDIUM 3 on
+ * #2574). `skipped` are those left out.
  */
-export function restoreCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number, people: readonly unknown[]): { ok: true; companies: Company[]; skipped: string[] } | { ok: false; error: CompanyRefusal } {
+export function restoreCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number, people: readonly unknown[], kept?: readonly string[]): { ok: true; companies: Company[]; skipped: string[] } | { ok: false; error: CompanyRefusal } {
   const added = addCompany(companies, value, id, nowSeconds);
   if (!added.ok) return added;
   const asked = [...new Set(people.filter((p): p is string => typeof p === "string" && PERSON.test(p)))].slice(0, MAX_COMPANY_PEOPLE);
-  const back = asked.filter((p) => !companies.some((c) => c.people.includes(p)));
+  const back = asked.filter((p) => (!kept || kept.includes(p)) && !companies.some((c) => c.people.includes(p)));
   return { ok: true, companies: added.companies.map((c) => (c.id === id ? { ...c, people: back } : c)), skipped: asked.filter((p) => !back.includes(p)) };
 }
 

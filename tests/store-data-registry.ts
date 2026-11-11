@@ -89,6 +89,7 @@ import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS 
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
+import { MAX_COMPANY_RECORD_BYTES } from "@/lib/crm-companies-rules";
 
 const KB = 1_024;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
@@ -501,6 +502,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research."),
   "nl:crm:deals:@lib/crm.ts": { what: "Deals: one slot a deal, at what it weighs, at most MAX_DEALS", room: ["lib/crm.ts"] },
   "nl:crm:co:@lib/crm-companies.ts": { what: "Companies and the people linked to them, at what each weighs, at most MAX_COMPANIES", room: ["lib/crm-companies.ts"] },
+  "nl:crm:co:undo:@lib/crm-companies.ts": short("The last company the studio deleted, with its people, kept a day so the deletion can be undone: one a store, replaced by the next, let go of by its undo or a deletion of a person it lists", "studio", 1, MAX_COMPANY_RECORD_BYTES + KEY),
   "nl:crm:co:lock:@lib/crm-companies.ts": short("One change to a store's companies at a time, ten seconds at the most", "studio", 1, 128),
   "nl:crm:tasks:@lib/crm.ts": {
     what: "Tasks about a person, at what they weigh, at most MAX_STORE_TASKS, and the store's count of them (TASK_COUNT_WEIGHT)",

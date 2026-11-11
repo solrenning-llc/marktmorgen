@@ -171,7 +171,8 @@ export function CompaniesEditor({
     }
   }
 
-  // Put back in one change, with the people who are not at another company now (review A2/A3); says who did not come back.
+  // Put back in one change, with the people the store kept with it who are not at another company now (review A2/A3;
+  // Codex G2, MEDIUM 3 on #2574: never one deleted from the store since); says who did not come back.
   async function undo() {
     if (!gone || busy) return;
     const back = await send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }, null);
@@ -179,7 +180,7 @@ export function CompaniesEditor({
     const left = back.skipped?.length ?? 0;
     setPutBack(
       left
-        ? `${gone.name} is back with ${gone.people.length - left} of its ${gone.people.length} people. ${left === 1 ? "One person had" : `${left} people had`} moved to another company since, and ${left === 1 ? "stays" : "stay"} there.`
+        ? `${gone.name} is back with ${gone.people.length - left} of its ${gone.people.length} people. ${left === 1 ? "One person is" : `${left} people are`} not back: they moved to another company since, were deleted from your store, or the company was deleted more than a day ago.`
         : gone.people.length
           ? `${gone.name} is back with its people.`
           : `${gone.name} is back.`,

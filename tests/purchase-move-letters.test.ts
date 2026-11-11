@@ -6,9 +6,8 @@
  * What is checked, with a stand-in Stripe account answering by address:
  * after a move, the new address reads what the old one bought and the old
  * one no longer does; a mark without its line moves nothing; an index that
- * cannot be read changes nothing (the old address keeps what it bought, the
- * new one gains nothing from it, and keeps what it bought itself), never
- * "nothing"; the store deleting the move gives the old address its reading
+ * cannot be read gives unknown for either address, never a definite access
+ * or closed answer; the store deleting the move gives the old address its reading
  * back; and at most MAX_MOVED_INTO old addresses are asked about, as the
  * index never holds more for one address.
  */
@@ -121,13 +120,13 @@ async function main(): Promise<void> {
   is("no room to read the old address: unknown, never \"holds none\"", await reads("ana.new@example.com"), "unknown");
   odd = null;
 
-  part("An index that cannot be read changes nothing, and is never read as nothing");
+  part("An unreadable index gives unknown, never restored access or a definite denial");
   odd = { command: "GET", prefix: "nl:pm:moved:", reply: 7, times: 1 };
-  is("the old address keeps what it bought", await reads("ana.old@example.com"), true);
+  is("the old address does not regain access on unknown evidence", await reads("ana.old@example.com"), "unknown");
   odd = { command: "HGETALL", prefix: "nl:pm:into:", reply: ["odd"], times: 1 };
-  is("the new address gains nothing from it", await reads("ana.new@example.com"), false);
+  is("the new address is unknown rather than definitively closed", await reads("ana.new@example.com"), "unknown");
   odd = { command: "HGETALL", prefix: "nl:pm:into:", reply: ["odd"], times: 1 };
-  is("and keeps what it bought itself", await reads("ana.new@example.com", knifeLetter), true);
+  is("own purchases do not turn an unreadable move index into known evidence", await reads("ana.new@example.com", knifeLetter), "unknown");
   odd = null;
 
   part("A mark without its line moves nothing");

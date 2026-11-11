@@ -176,6 +176,31 @@ async function main(): Promise<void> {
   const cy2 = await askStockAlert({ store: s3, productId: a.product.id, email: "cy@example.com", left: 0 });
   is("control: asked again, its leave link works and says done", [cy2.ok, cy2.ok && (await leaveStockAlert(cy2.leave, s3)), (await confirmedForRestock(s3, a.product.id)).includes("cy@example.com")], [true, true, false]);
   void pid2;
+  part("Leaving between a confirmation's read and its write: the place stays gone (Codex G on #3616)");
+  {
+    const rae = await ask("rae@example.com");
+    if (!rae.ok) throw new Error("not asked");
+    const real = redis.pipeline.bind(redis);
+    let left = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      // The confirmation's write arrives: the buyer's leave has just finished first.
+      const writes = commands.some((c) => (c[0] === "HSET" && c[1] === listKey && c[2] === "rae@example.com") || (c[0] === "EVAL" && commands.length >= 1 && String(c[1]).includes("stock-alert-confirm")));
+      if (writes && !left) {
+        left = true;
+        redis.run(["HDEL", listKey, "rae@example.com"]);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      is("the confirmation does not bring the place back", await confirmStockAlert(rae.confirm, store), { ok: false });
+    } finally {
+      redis.pipeline = real;
+    }
+    is("the leave happened in between", left, true);
+    is("the address is not on the list", redis.run(["HEXISTS", listKey, "rae@example.com"]), 0);
+    is("and nobody new to email", (await confirmedForRestock(store, pid)).includes("rae@example.com"), false);
+  }
+
   done();
 }
 

@@ -13,14 +13,17 @@ import { campaignQr, campaignQrTag } from "@/lib/campaign-qr";
  */
 export function CampaignQr({ url, title, campaign, content = "" }: { url: string; title: string; campaign: string; content?: string }) {
   const code = useMemo(() => campaignQr(url, campaign, title, content), [url, campaign, title, content]);
-  const personal = "refused" in campaignQrTag(campaign) || (content.trim() !== "" && "refused" in campaignQrTag(content));
+  const personalName = "refused" in campaignQrTag(campaign);
+  const personalVariant = !personalName && content.trim() !== "" && "refused" in campaignQrTag(content);
 
   if (!code) {
     return (
       <p className="text-sm text-ink-soft" role="status">
-        {personal
+        {personalName
           ? "No QR code for this name: it looks like an email address or phone number, and the code is printed for anyone to read. Use a campaign name instead, like spring-fair."
-          : "The QR code could not be drawn for this name. Use a campaign name with letters or numbers, like spring-fair."}
+          : personalVariant
+            ? "No QR code for this variant: it looks like an email address or phone number, and the code is printed for anyone to read. Change the variant, or leave it empty."
+            : "The QR code could not be drawn for this name. Use a campaign name with letters or numbers, like spring-fair."}
       </p>
     );
   }

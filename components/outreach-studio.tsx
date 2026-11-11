@@ -40,7 +40,7 @@ const MESSAGES: Record<string, string> = {
   notes: "Say in a sentence or two what you would offer them.",
   used: "This month's writing help is used up. It starts again on the first of the month.",
   off: "Writing help is not switched on for this store yet.",
-  failed: "The email could not be written just now. Try again in a moment. This try counted as one of this month's writing jobs.",
+  failed: "The email could not be written just now. Try again in a moment. If the request reached the AI, it counted as one of this month's writing jobs.",
   full: "Your list of pitches is full. Mark the old ones as answered or delete old drafts first.",
   room: STUDIO_MESSAGES.store_full,
   busy: "This can't be saved right now. Nothing was counted. Try again in a minute.",

@@ -12,7 +12,8 @@
  *   - the outreach pitch (lib/ai.ts writePitch, the only source of the
  *     outreach route's "failed"): "failed", the month's job counter one
  *     higher, and the outreach studio's words for "failed" say the try
- *     counted, never that nothing was;
+ *     counted when the request reached the AI, never that nothing was
+ *     (tests/hf1-returned-failure-words.test.ts: the job given back before it);
  *   - the question about the store's numbers (lib/numbers-ask.ts askNumbers):
  *     the same, with the Numbers panel's words for "failed";
  *   - the Numbers panel shows its "server_error" words for any answer that is
@@ -98,7 +99,7 @@ async function main(): Promise<void> {
   );
   const outreachFailed = said("components/outreach-studio.tsx", "failed");
   is(
-    "so the outreach studio's failed words never say nothing was counted, and say the try counted",
+    "so the outreach studio's failed words never say nothing was counted, and say when the try counted",
     [/nothing was counted/i.test(outreachFailed), /counted as one of this month's writing jobs/i.test(outreachFailed)],
     [false, true],
   );
@@ -128,7 +129,7 @@ async function main(): Promise<void> {
   );
   const askFailed = said("components/numbers-ask.tsx", "failed");
   is(
-    "so the Numbers panel's failed words never say nothing was counted, and say the try counted",
+    "so the Numbers panel's failed words never say nothing was counted, and say when the try counted",
     [/nothing was counted/i.test(askFailed), /counted as one of this month's AI jobs/i.test(askFailed)],
     [false, true],
   );

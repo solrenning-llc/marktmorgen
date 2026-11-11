@@ -1,0 +1,13 @@
+import net from 'node:net';
+import tls from 'node:tls';
+import http from 'node:http';
+import https from 'node:https';
+import {syncBuiltinESMExports} from 'node:module';
+const counts={redis:0,http:0};
+globalThis.__vRedis=()=>{if(++counts.redis>20000)throw Error('V2892 Redis budget exceeded BEFORE dispatch');};
+let mock;
+Object.defineProperty(globalThis,'fetch',{configurable:false,get:()=>mock??(()=>{throw Error('V2892 external fetch denied');}),set:fn=>{mock=(...args)=>{if(++counts.http>100)throw Error('V2892 HTTP mock budget exceeded BEFORE dispatch');return fn(...args);};}});
+const deny=()=>{throw Error('V2892 external socket denied before graph');};
+for(const api of [net,tls,http,https])for(const key of ['connect','createConnection','request','get'])if(typeof api[key]==='function')api[key]=deny;
+syncBuiltinESMExports();
+process.on('exit',()=>process.stderr.write('V2892_VOLUME '+JSON.stringify(counts)+'\n'));

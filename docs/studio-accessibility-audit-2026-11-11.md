@@ -21,9 +21,11 @@ The public pages and the checkout were audited by another session (cloud K) and 
 
 All of these load: start page (`/studio`), products and the product editor, the page editor and its blocks (`/studio/pages`), sales (`/studio/totals`), customers (`/studio/people`), email (`/studio/email`), settings (`/studio/site`, `/studio/tax`, `/studio/team`), inbox, checkup, funnels and "Pages in order", bundles, blog, forms, import, affiliates, community, integrations, deals, payment requests, agreements, phone, outreach, growth, reviews, Path, calendar, meetings, memberships, invoices, labels, disputes, refunds, closing refunds, copy, invite, agent, add, business card (`/studio/card`) and a course (`/studio/course/[id]`).
 
-## What was fixed (pull requests)
+## Fixes tested in pull requests
 
-| PR | Criterion | What |
+On 11 November 2026, every one of these is in the state **tested in a PR**. None is merged, published or available to customers yet. Each PR's own "Acessibilidade" section has its evidence. This table records what each PR does once it is merged; it does not say that the studio already behaves this way.
+
+| PR | Criterion | What it changes |
 | --- | --- | --- |
 | #3757 | 2.5.5, 2.4.11, 2.4.12 | The "Studio sections" bar's links went from 36 px to at least 44 × 44 px. Pages that draw the bar keep a scroll padding of 8.5rem, so a focused control is not hidden under the bar. On `/studio` at 1280 px, focused controls hidden went from 2 wholly and 25 partly to 0 and 0. |
 | #3758 | 2.5.5 | Underlined-text buttons on the start page (Ship it, license keys, podcast, bundle, the month's goal, "Already done") are now 44 px tall. |
@@ -55,6 +57,8 @@ These are in files that other agents' open PRs hold. Each was reported in the ag
   - in the course editor: "See it as a student does", "Move module up/down" and "Remove module".
 - The checkbox on `/studio/inbox` (13 px; its label is 27 px tall).
 - Adding a question or a result in `/studio/forms`, and adding a lesson or a module in a course, leaves the focus on the button and announces nothing.
+- A course quiz's "Add a quiz" replaces the button with the quiz editor, and the focus falls to the body. #3790 should hand it to the editor on a studio page, but that was not checked inside a course page.
+- The same Move up/down pattern that #3791 and #3792 fix is still present in other editors: the end buttons are turned off (`disabled`), so the focus falls to the body when an item reaches an end, and no move is announced. They are `components/faq-editor.tsx`, `components/link-editor.tsx`, `components/site-pages-editor.tsx`, `components/product-editor.tsx` (a product's prices), `components/mail-designer.tsx`, `components/socials-editor.tsx`, `components/page-funnel-editor.tsx` (a funnel's steps) and `components/forms-editor.tsx`. Several of these files are held by other open PRs. `lib/move-words.ts` and `components/said-line.tsx` from #3792 are there to reuse.
 
 ## Proposed, not yet done
 
@@ -78,5 +82,5 @@ These are in files that other agents' open PRs hold. Each was reported in the ag
 
 - Screen readers (NVDA, JAWS, VoiceOver, TalkBack), Firefox, WebKit, real devices, and testing with people.
 - States the seed cannot create: email sending with a real sending domain, refunds, a full course with videos, imported funnels, and saved quizzes.
-- Dark mode: the studio does not change its colours. Dark mode is already in the queue (complement WG (a)).
+- Dark mode: the studio does not change its colors. Dark mode is already in the queue (complement WG (a)).
 - Whether the 5-second confirmation toast meets 2.2.3. It pauses on hover and focus, closes with Escape and is used only for confirmations; this needs a person's judgement.

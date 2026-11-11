@@ -3,7 +3,7 @@
 import { funnelLaunchChecklist } from "@/lib/funnel-launch-checklist";
 import { FunnelNextCheck } from "@/components/funnel-next-check";
 import { funnelNextCheck } from "@/lib/funnel-next-check";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { FunnelStepEditorLink } from "@/lib/funnel-editor-links";
 import { FunnelSharingReview, type FunnelPaymentReview } from "@/components/funnel-sharing-review";
@@ -99,6 +99,43 @@ export function PageFunnelEditor({
     );
   }
 
+  // The focus through the form and the remove question (WCAG 2.4.3): a button that opens either is turned off or taken
+  // away under the focus, so the focus goes on with it. The form: into its first field when it opens; back to the button
+  // that opened it when it closes, else New funnel, else the section's heading. The question: onto Keep it, the choice
+  // that changes nothing; back to Remove on Keep it; on to New funnel, else the heading, once the funnel is removed.
+  const returnTo = useRef<string | null>(null);
+  const keptRemove = useRef<string | null>(null);
+  const formOpen = draft !== null;
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (formOpen === wasOpen.current) return;
+    wasOpen.current = formOpen;
+    if (formOpen) {
+      document.getElementById("pf-name")?.focus();
+      return;
+    }
+    const back = returnTo.current;
+    returnTo.current = null;
+    focusFirst([back, "pf-new", "page-funnels-title"]);
+  }, [formOpen]);
+  const wasRemoving = useRef<string | null>(null);
+  useEffect(() => {
+    const was = wasRemoving.current;
+    wasRemoving.current = removing;
+    if (was === removing) return;
+    if (removing !== null) {
+      document.getElementById(`pf-keep-${removing}`)?.focus();
+      return;
+    }
+    if (was === null) return;
+    if (keptRemove.current === was) {
+      keptRemove.current = null;
+      document.getElementById(`pf-remove-${was}`)?.focus();
+      return;
+    }
+    focusFirst(["pf-new", "page-funnels-title"]);
+  }, [removing]);
+
   function patch(change: Partial<Draft>) {
     if (flight.current || recovery.current) return;
     setDraft((d) => (d ? { ...d, ...change } : d));
@@ -188,7 +225,7 @@ export function PageFunnelEditor({
     <section aria-labelledby="page-funnels-title" className="card min-w-0 p-5 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 max-w-2xl">
-          <h2 id="page-funnels-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+          <h2 id="page-funnels-title" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">
             Pages in order
           </h2>
           <p className="mt-1 text-sm text-ink-soft">
@@ -196,7 +233,16 @@ export function PageFunnelEditor({
           </p>
         </div>
         {draft === null && saved.length < MAX_PAGE_FUNNELS ? (
-          <button type="button" className="btn btn-primary" onClick={() => start(null)} disabled={locked || choices.length === 0}>
+          <button
+            id="pf-new"
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              returnTo.current = "pf-new";
+              start(null);
+            }}
+            disabled={locked || choices.length === 0}
+          >
             <Icon name="plus" size={18} />
             New funnel
           </button>
@@ -249,21 +295,39 @@ export function PageFunnelEditor({
                     <Icon name="copy" size={16} />
                     Copy address
                   </button>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => start(funnel)} disabled={locked || draft !== null}>
+                  <button
+                    id={`pf-edit-${funnel.id}`}
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      returnTo.current = `pf-edit-${funnel.id}`;
+                      start(funnel);
+                    }}
+                    disabled={locked || draft !== null}
+                  >
                     Edit
                   </button>
                   {removing === funnel.id ? (
-                    <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-                      Remove it?
+                    <span role="group" aria-labelledby={`pf-remove-q-${funnel.id}`} className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+                      <span id={`pf-remove-q-${funnel.id}`}>Remove it?</span>
                       <button type="button" className="btn btn-danger btn-sm" disabled={locked} onClick={() => send({ action: "remove", id: funnel.id }, "Funnel removed.")}>
                         Yes, remove
                       </button>
-                      <button type="button" className="btn btn-ghost btn-sm" disabled={locked} onClick={() => setRemoving(null)}>
+                      <button
+                        id={`pf-keep-${funnel.id}`}
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={locked}
+                        onClick={() => {
+                          keptRemove.current = funnel.id;
+                          setRemoving(null);
+                        }}
+                      >
                         Keep it
                       </button>
                     </span>
                   ) : (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRemoving(funnel.id)} disabled={locked || draft !== null}>
+                    <button id={`pf-remove-${funnel.id}`} type="button" className="btn btn-ghost btn-sm" onClick={() => setRemoving(funnel.id)} disabled={locked || draft !== null}>
                       Remove
                     </button>
                   )}
@@ -521,4 +585,16 @@ export function PageFunnelEditor({
       {error && !draft ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
     </section>
   );
+}
+
+/** Puts the focus on the first of these elements that is drawn and can take it (page funnels; WCAG 2.4.3). */
+function focusFirst(ids: (string | null)[]) {
+  for (const id of ids) {
+    if (!id) continue;
+    const element = document.getElementById(id);
+    if (element && !(element as HTMLButtonElement).disabled) {
+      element.focus();
+      return;
+    }
+  }
 }

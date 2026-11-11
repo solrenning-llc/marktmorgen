@@ -26,5 +26,7 @@ export async function countSent(statsId: string | null, kind: "failed" | "cards"
   await redisPipeline([
     ["HINCRBY", key, kind, 1],
     ["EXPIRE", key, COUNT_SECONDS],
-  ]).catch(() => {});
+  ]).catch((error) => {
+    console.error("recording a payment recovery email count failed", error);
+  });
 }

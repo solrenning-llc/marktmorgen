@@ -58,7 +58,7 @@ async function main() {
 
   for (const [name, call] of routes) {
     part(`${name}: healthy answers are written and said`);
-    for (const [answer, charges, word] of [["active", true, "ready"], ["inactive", false, "pending"]] as const) {
+    for (const [answer, charges, word] of [["active", true, "ready"], ["restricted", false, "pending"]] as const) {
       await seed(!charges);
       status = answer;
       stripeCalls = 0;
@@ -70,7 +70,7 @@ async function main() {
 
     part(`${name}: a record not written is never said ready or pending`);
     for (const [label, reply] of [["gone (null)", null], ["number", 42], ["not JSON", "{broken"], ["array", ["x"]], ["object", { a: 1 }]] as const) {
-      for (const [answer, charges] of [["active", true], ["inactive", false]] as const) {
+      for (const [answer, charges] of [["active", true], ["restricted", false]] as const) {
         await seed(!charges);
         status = answer;
         underLock(reply);

@@ -6,8 +6,12 @@
  *
  * One open case per order: the mark
  *
- *   nl:oprob:<sid>:<reference>   "pending" for PENDING_SECONDS while it is filed, then "filed" for the seven days
+ *   nl:oprob:<sid>:<reference>   "pending" for PENDING_SECONDS while it is filed, then
+ *                                "filed:<conversation id>" for the seven days
  *
+ * The conversation's id is kept so the seven days' check can tell whether the
+ * creator answered. A report of an order whose case is open is answered from
+ * the mark alone, before any room is taken.
  * is taken with SET NX before anything is filed, so two clicks never file
  * two cases. Its bytes are counted in the store's data room before it is
  * written, and it goes by itself. A filing that fails gives the mark back;
@@ -25,6 +29,7 @@ import { takeData } from "@/lib/store-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { fileOrderProblem } from "@/lib/inbox";
+import { CONVERSATION_ID } from "@/lib/inbox-rules";
 import type { Store } from "@/lib/store";
 import type { Purchase } from "@/lib/buyer-orders";
 import { ORDER_PROBLEM_REPLY_DAYS, type OrderProblem, caseText, replyDueAt } from "@/lib/order-problem-rules";
@@ -56,7 +61,13 @@ export async function reportOrderProblem(
   if (due === null || !text) return "error";
   const key = orderProblemKey(store.sid, purchase.reference);
 
-  const room = await takeData(store, [{ until: due, bytes: dataBytes([key, "filed"]) }], nowMs);
+  // An open case answers before anything is taken; an unreadable mark is not known.
+  const seen = await readMark(key);
+  if (seen === "unknown") return "error";
+  if (seen === "filed") return "already";
+  if (seen === "pending") return "busy";
+
+  const room = await takeData(store, [{ until: due, bytes: dataBytes([key, `filed:${"0".repeat(12)}`]) }], nowMs);
   if (!room.ok) return room.reason === "full" ? "full" : "error";
 
   let claim: unknown[] | null;
@@ -67,17 +78,9 @@ export async function reportOrderProblem(
   }
   if (!claim) return "error";
   if (claim[0] === null) {
-    // Taken already: what it says decides the answer; an answer of any other shape is not known.
-    let read: unknown[] | null;
-    try {
-      read = repliesFor(await redisPipeline([["GET", key]]), 1);
-    } catch {
-      return "error";
-    }
-    if (!read) return "error";
-    if (read[0] === "filed") return "already";
-    if (read[0] === "pending") return "busy";
-    return "error";
+    // Taken in the meantime: what it says decides the answer; anything else is not known.
+    const now = await readMark(key);
+    return now === "filed" ? "already" : now === "pending" ? "busy" : "error";
   }
   if (claim[0] !== "OK") return "error";
 
@@ -85,18 +88,34 @@ export async function reportOrderProblem(
     console.error("filing a problem with an order failed", error);
     return "error" as const;
   });
-  if (filed !== "filed") {
+  if (filed === "error" || filed.state !== "filed") {
     // Given back so the buyer can try again; if this fails too, the pending mark ends by itself.
     await redisPipeline([["DEL", key]]).catch(() => null);
-    return filed;
+    return filed === "error" ? "error" : filed.state;
   }
   let kept: unknown[] | null = null;
   try {
-    kept = repliesFor(await redisPipeline([["SET", key, "filed", "XX", "EX", ORDER_PROBLEM_REPLY_DAYS * 86_400]]), 1);
+    kept = repliesFor(await redisPipeline([["SET", key, `filed:${filed.id}`, "XX", "EX", ORDER_PROBLEM_REPLY_DAYS * 86_400]]), 1);
   } catch {
     kept = null;
   }
   // The case is in the inbox either way; only the guard against a second case may end early.
   if (!kept || kept[0] !== "OK") console.error("a problem with an order was filed but its mark could not be kept");
   return "filed";
+}
+
+/** What an order's mark says: none, a filing in progress, an open case, or not known (no reply, or one of another shape). */
+async function readMark(key: string): Promise<"none" | "pending" | "filed" | "unknown"> {
+  let read: unknown[] | null;
+  try {
+    read = repliesFor(await redisPipeline([["GET", key]]), 1);
+  } catch {
+    return "unknown";
+  }
+  if (!read) return "unknown";
+  const value = read[0];
+  if (value === null) return "none";
+  if (value === "pending") return "pending";
+  if (typeof value === "string" && value.startsWith("filed:") && CONVERSATION_ID.test(value.slice(6))) return "filed";
+  return "unknown";
 }

@@ -260,7 +260,8 @@ export async function handOver(input: { store: Store; email: unknown; name: unkn
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
-export type FiledProblem = "filed" | "limited" | "full" | "error";
+/** "filed" with the conversation that holds the case; otherwise why nothing was filed. */
+export type FiledProblem = { state: "filed"; id: string } | { state: "limited" | "full" | "error" };
 
 /**
  * A buyer's report of a problem with an order (567 [GD1] (a), lib/order-problem.ts):
@@ -270,14 +271,14 @@ export type FiledProblem = "filed" | "limited" | "full" | "error";
  */
 export async function fileOrderProblem(input: { store: Store; email: string; text: string; now?: number }): Promise<FiledProblem> {
   const { store } = input;
-  if (!store.statsId || !isRedisConfigured()) return "error";
+  if (!store.statsId || !isRedisConfigured()) return { state: "error" };
   const made = await open({ ...input, name: "", source: "contact" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const, reason: "full" as const };
     throw error;
   });
-  if (!made.ok) return made.reason === "limited" ? "limited" : made.reason === "full" ? "full" : "error";
+  if (!made.ok) return { state: made.reason === "limited" ? "limited" : made.reason === "full" ? "full" : "error" };
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a problem with an order failed", error));
-  return "filed";
+  return { state: "filed", id: made.conversation.id };
 }
 
 async function fromToken(token: unknown): Promise<{ statsId: string; id: string; handle: string } | null> {

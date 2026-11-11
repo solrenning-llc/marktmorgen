@@ -102,6 +102,7 @@ export function saleFeeMonths(
       currency: line.currency, sales: 0, gross: 0, stripeFee: 0, feeTax: 0, applicationFee: 0, otherFee: 0,
       refunds: 0, disputes: 0, accountFees: 0, net: 0,
     };
+    // Every sum stays a whole number a double holds exactly; past that the report is unavailable, never rounded.
     if (line.kind === "sale") {
       sum.sales += 1;
       sum.gross += line.amount;
@@ -115,6 +116,9 @@ export function saleFeeMonths(
       sum.otherFee += line.otherFee;
     }
     sum.net += line.net;
+    if (![sum.gross, sum.refunds, sum.disputes, sum.accountFees, sum.stripeFee, sum.feeTax, sum.applicationFee, sum.otherFee, sum.net].every(Number.isSafeInteger)) {
+      return { available: false, why: "unreadable" };
+    }
     byCurrency.set(line.currency, sum);
     sums.set(month, byCurrency);
   }

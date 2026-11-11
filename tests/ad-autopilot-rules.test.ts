@@ -3,7 +3,7 @@
  * limits, judges a campaign only once measured enough, never reads an
  * unknown as no sale, and never touches a campaign outside what it may.
  */
-import { AUTOPILOT_KIND, JUDGE_AFTER_TIMES, RAISE_PERCENT, autopilotChanges, checkRules, withinLimits, type AutopilotRules, type CampaignNow } from "@/lib/ad-autopilot-rules";
+import { AUTOPILOT_KIND, JUDGE_AFTER_TIMES, RAISE_PERCENT, autopilotChanges, checkRules, type AdPlatform, type AutopilotRules, type CampaignNow } from "@/lib/ad-autopilot-rules";
 import { done, is, part } from "./check";
 
 const TODAY = Date.UTC(2026, 10, 2) / 86_400_000; // a Monday
@@ -16,6 +16,46 @@ const afterOf = (changes: ReturnType<typeof autopilotChanges>, list: readonly Ca
     const s = changes.find((x) => x.campaign === c.id)?.after ?? c;
     return [c.id, s.status === "ACTIVE" ? s.dailyBudgetCents : 0] as const;
   }));
+
+/**
+ * Independent test oracle for the platform ceilings. Do not call production
+ * withinLimits() or worstCaseCents() here: this check must catch a shared
+ * calculation bug in both the planner and its production helper.
+ */
+function referenceWorstCase(platform: AdPlatform, dailyCents: number, first: number, days: number): number {
+  if (platform === "meta" && days < 7) return dailyCents * days;
+  const periods = new Map<string, number>();
+  for (let offset = 0; offset < days; offset += 1) {
+    const dayNumber = first + offset;
+    const date = new Date(dayNumber * 86_400_000);
+    const key = platform === "google"
+      ? date.toISOString().slice(0, 7)
+      : String(dayNumber - date.getUTCDay());
+    periods.set(key, (periods.get(key) ?? 0) + 1);
+  }
+  let total = 0;
+  for (const daysInPeriod of periods.values()) {
+    const dailyNumerator = platform === "meta" ? 7 : platform === "google" ? 2 : 5;
+    const dailyDenominator = platform === "meta" || platform === "tiktok" ? 4 : 1;
+    const perDayCeiling = Math.ceil((dailyCents * dailyNumerator * daysInPeriod) / dailyDenominator);
+    const periodCeiling = platform === "google" ? Math.ceil((dailyCents * 152) / 5) : dailyCents * 7;
+    total += Math.min(perDayCeiling, periodCeiling);
+  }
+  return total;
+}
+
+function referenceWithinLimits(r: AutopilotRules, campaigns: readonly CampaignNow[], daily: ReadonlyMap<string, number>): boolean {
+  let day = 0;
+  let week = 0;
+  let total = 0;
+  for (const campaign of campaigns) {
+    const budget = daily.get(campaign.id) ?? 0;
+    day += budget;
+    week += referenceWorstCase(campaign.platform, budget, campaign.today, Math.min(7, Math.max(0, campaign.daysLeft)));
+    total += campaign.spentCents + referenceWorstCase(campaign.platform, budget, campaign.today, Math.max(0, campaign.daysLeft));
+  }
+  return day <= r.maxDailyCents && week <= r.maxWeekCents && total <= r.maxTotalCents;
+}
 
 part("Approving the limits");
 is("a complete set is accepted", checkRules(rules).ok, true);
@@ -69,7 +109,7 @@ const over = autopilotChanges({ ...rules, maxDailyCents: 8_000 }, [camp("cheap",
 is("the dearest per sale gives way first", over.map((c) => [c.campaign, c.kind, c.after.dailyBudgetCents]), [["dear", "lower", 2_500]]);
 const pair = [camp("a", { spentCents: 1_000, sales: 1 }), camp("b", { spentCents: 1_500, sales: 1 })];
 const tight = autopilotChanges({ ...rules, maxDailyCents: 1_000 }, pair);
-is("lowered, then paused, until the limit holds", withinLimits({ ...rules, maxDailyCents: 1_000 }, pair, afterOf(tight, pair)), true);
+is("lowered, then paused, until the limit holds", referenceWithinLimits({ ...rules, maxDailyCents: 1_000 }, pair, afterOf(tight, pair)), true);
 
 part("Approve each change, or carry out within the limits");
 is("approve mode: every change waits for the creator", lost[0].apply, "ask");
@@ -99,7 +139,7 @@ for (let round = 0; round < 400; round += 1) {
   if (changes.some((c) => c.kind === "raise" && c.after.dailyBudgetCents > Math.floor((c.before.dailyBudgetCents * (100 + RAISE_PERCENT)) / 100))) raisedTooMuch += 1;
   const after = afterOf(changes, own);
   const allPaused = [...after.values()].every((d) => d === 0);
-  if (!withinLimits(r, own, after) && !allPaused) broken += 1;
+  if (!referenceWithinLimits(r, own, after) && !allPaused) broken += 1;
 }
 is("after its changes every limit holds (or all its campaigns are paused)", broken, 0);
 is("no raise above the step", raisedTooMuch, 0);

@@ -2697,6 +2697,13 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 .st-title-link:hover {
   background-size: 100% 2px;
 }
+/* The embedded card's title: its click area covers the block of the title and the store's name, at least 44 px tall
+   (2.5.5 AAA, tests/embed-title-target.test.ts); the two-line clamp and the focus ring on the words stay. */
+.em-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
 .st-title-link:focus-visible,
 .st-cover-link:focus-visible,
 .st-callout-link:focus-visible {

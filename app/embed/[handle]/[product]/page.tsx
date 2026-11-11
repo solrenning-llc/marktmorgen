@@ -396,9 +396,9 @@ export default async function EmbedCard({ params, searchParams }: Params) {
               <img src={imageUrl(image)} alt={image.alt} width={64} height={64} className="h-16 w-16 rounded-2xl object-cover" decoding="async" />
             </a>
           ) : null}
-          <div className="min-w-0 flex-1">
+          <div className="relative min-h-11 min-w-0 flex-1">
             <h1 className="font-display line-clamp-2 text-[1.0625rem] font-semibold leading-snug">
-              <a href={page} {...aside} className="st-title-link">
+              <a href={page} {...aside} className="st-title-link em-title">
                 {product.title}
               </a>
             </h1>

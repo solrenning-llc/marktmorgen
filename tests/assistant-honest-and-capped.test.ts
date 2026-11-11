@@ -43,6 +43,18 @@ import { paidPeriod } from "./billing-period-fixture";
 const facts = "Store: Assist Shop\n\n[1] Meal Planner\nPrice: $27, paid once.\nHow it is delivered: a PDF download\nIts guarantee (refund promise), in the creator's words: Email me within 14 days and I refund you in full.";
 
 part("A. Figures and deals in words are held to the facts, and a figure to what it was published as");
+{
+  // Claude 3's focal on #3484 (6750227382, MEDIUM, confirmed by Claude 1 6787674397): in a sentence about a price, a
+  // figure followed by a word it does not count ("total", "flat") was a plain count, held by a fact of any unit, so a
+  // reply showed a price the store never published. It is a count of that word only when the facts hold the same.
+  const course = "Sourdough Basics. A video course. Price: $49. Refunds within 14 days. 12 lessons.";
+  for (const said of ["The price is 14 total.", "It costs 14 flat.", "It is 14 plus tax.", "Pay 14 today.", "The price is $99."]) {
+    is(`a price the store never published is held: "${said}"`, heldToFacts(said, course), false);
+  }
+  for (const said of ["Get 12 lessons for $49.", "Refunds within 14 days.", "The price is $49."]) {
+    is(`what the store published still shows: "${said}"`, heldToFacts(said, course), true);
+  }
+}
 is("a price in words that is not the store's ($20 vs $27)", heldToFacts("It costs twenty dollars.", facts), false);
 is("a refund window in words that is not the store's (30 vs 14 days)", heldToFacts("You can get a refund within thirty days, no questions asked.", facts), false);
 is("a count of buyers in words", heldToFacts("Over five thousand students bought it.", facts), false);
@@ -195,7 +207,7 @@ async function main(): Promise<void> {
 
   part("B. An unanswered question keeps nothing the buyer typed about themselves");
   next = { status: "unknown", reply: "" };
-  await askAssistant({ store, text: "Do you ship to Lisbon? I am jane.doe@example.com, +351 912 345 678", now });
+  await askAssistant({ store, text: "Do you ship to Lisbon? I am jane.doe@example.com, \u002B351 912 345 678", now });
   const [rows] = await redis.pipeline([["LRANGE", `nl:assist:missed:${statsId}`, 0, -1]]);
   const kept = (Array.isArray(rows) ? rows : []).map(String).join(" ");
   is("the creator's list keeps the question", kept.includes("Lisbon"), true);

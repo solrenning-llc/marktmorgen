@@ -130,6 +130,26 @@ async function main(): Promise<void> {
   is("the product is marked taken down", await isTakenDown(await store(), drafted.product.id), true);
   const after = await makeDraftPreview(await store(), drafted.product.id);
   is("a link written after it never opens", await readDraftPreview(after.code), null);
+
+  part("A draft still hidden, reported by its preview address, has its preview closed (Claude 6's focal on #3597)");
+  const hiddenDraft = await addProduct(owner, "Quiet Draft", "", "9", null);
+  if (!hiddenDraft.ok) throw new Error("setup");
+  await setProductHidden(owner, hiddenDraft.product.id, true);
+  const shared = await makeDraftPreview(await store(), hiddenDraft.product.id);
+  const draftNotice = { ...report, url: `https://marktmorgen.com/@noticeshop/preview/${shared.code}` };
+  is("its preview address points at the draft", (await reportedProduct(draftNotice, await store()))?.id, hiddenDraft.product.id);
+  is("the link opens before", (await readDraftPreview(shared.code))?.productId, hiddenDraft.product.id);
+  is(
+    "taken down while it stays a draft: its preview link is closed",
+    await takeDown(draftNotice, await store(), { type: "product", id: hiddenDraft.product.id }, "https://marktmorgen.com"),
+    'The preview link of the draft product "Quiet Draft", now closed',
+  );
+  is("the link made before no longer opens", await readDraftPreview(shared.code), null);
+  is("the draft is marked taken down", await isTakenDown(await store(), hiddenDraft.product.id), true);
+  is("it stays a draft", ((await store()).catalog.items.find((p) => p.id === hiddenDraft.product.id)?.kind ?? 0) & KIND.hidden, KIND.hidden);
+  const later = await makeDraftPreview(await store(), hiddenDraft.product.id);
+  is("a link written after it never opens", await readDraftPreview(later.code), null);
+  is("a second press finds nothing more to do", await takeDown(draftNotice, await store(), { type: "product", id: hiddenDraft.product.id }, "https://marktmorgen.com"), null);
   done();
 }
 

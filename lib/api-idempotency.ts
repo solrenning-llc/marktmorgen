@@ -23,12 +23,13 @@ import {
 
 const recordKey = (sid: string, key: string) => `nl:api:idem:${sid}:${createHash("sha256").update(key).digest("hex")}`;
 /**
- *   nl:api:idem:p:<sha(store id, address)>  set  the records whose answer is about that address, 24 hours
+ *   nl:api:idem:p:<store id>:<sha(address)>  set  the records whose answer is about that address, 24 hours
  *
  * (unit 3) so deleting a person from the store deletes those answers at once (forgetIdempotentPerson), instead of
- * leaving them until they expire. The name says neither the store nor the address.
+ * leaving them until they expire. The name says the store, as every store key does, and never the address: only its
+ * hash, and no store value goes into a fast hash.
  */
-const personKey = (sid: string, email: string) => `nl:api:idem:p:${createHash("sha256").update(`${sid}\n${email.trim().toLowerCase()}`).digest("hex")}`;
+const personKey = (sid: string, email: string) => `nl:api:idem:p:${sid}:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
 /** The most records one person's index lists: every keyed write about them in 24 hours is one API request, and a month's figure is at most 10,000. */
 const MAX_PERSON_RECORDS = 10_000;
 const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Type": "application/json" };

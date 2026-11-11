@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1882,17 +1882,52 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
  * its place among its account's stores and in the company's lists go. Its
  * owner's account and sign-in stay, and may make a store again. Run after
  * everything that needed the record has read it.
+ *
+ * The record is read again under the store's lock right before it goes, and
+ * `beforeDelete` is handed what it holds then (null when it is already gone):
+ * a write that landed since the caller's own read (a photo put on, an id
+ * made) is seen there, so the caller can name its keys while the record
+ * still does (Codex G on #3614). A write after this waits for the lock and
+ * then finds no store. A read again that does not read is never "unchanged"
+ * (rule 24): it throws, with the record still there. The record goes last,
+ * and only while the lock is still this call's (deleteIfHeldOnly).
  */
-export async function closeStoreRecord(store: Store, extraKeys: string[] = []): Promise<void> {
+export async function closeStoreRecord(
+  store: Store,
+  extraKeys: string[] = [],
+  beforeDelete?: (fresh: Store | null) => Promise<void>,
+): Promise<void> {
   const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
   const owner = await ownerKey(storeRef(store));
-  await redisPipeline([
-    ...[store.handle, ...store.previousHandles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
-    ["DEL", owner, beforeMoveKeyOf(owner), ...extraKeys],
-    ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
-    ["ZREM", ENDED_INDEX, storeRef(store)],
-    ["SREM", SHARING_INDEX, storeRef(store)],
-  ]);
+  let held: Held;
+  try {
+    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, LOCK_WAIT_MS);
+  } catch (error) {
+    if (error instanceof LockBusyError) throw new StoreBusyError();
+    throw error;
+  }
+  try {
+    const read = repliesFor(await redisPipeline([["GET", owner]]), 1);
+    const raw = read?.[0];
+    // Only nil is "gone", and only a record that parses is what it holds now.
+    if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a closing store's record, read again before it goes");
+    const fresh = raw === null ? null : parseStore(raw);
+    if (raw !== null && !fresh) throw new UnknownReplyError("a closing store's record, read again before it goes");
+    await beforeDelete?.(fresh);
+    // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
+    // go first, and the record last: a step that fails here leaves the record, so the closing walk prepares the store
+    // again and every step is run again.
+    const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
+    await redisPipeline([
+      ...[...handles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
+      ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
+      ["ZREM", ENDED_INDEX, storeRef(store)],
+      ["SREM", SHARING_INDEX, storeRef(store)],
+    ]);
+    if (!(await deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner), ...extraKeys]))) throw new StoreBusyError();
+  } finally {
+    await releaseLock(held);
+  }
 }
 
 export type RenameResult =

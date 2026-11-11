@@ -30,6 +30,8 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2
 let inWindow: (() => Promise<void>) | null = null;
 // The record's read right before it goes answers what Redis never says for a GET (armed by the window).
 let rereadUnknown = false;
+// The entry's rewrite with the new marks answered with what HSET never says (armed by the window).
+let rewriteUnconfirmed = false;
 let ownerOf = "";
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (commands: (string | number)[][]) => {
@@ -37,6 +39,9 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     const run = inWindow;
     inWindow = null;
     await run();
+  } else if (rewriteUnconfirmed && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) {
+    rewriteUnconfirmed = false;
+    return [null];
   }
   if (rereadUnknown && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === ownerOf) {
     rereadUnknown = false;
@@ -147,6 +152,28 @@ async function main(): Promise<void> {
     is("the next walk prepares it and finishes", [next.stores, next.finished], [1, 1]);
     is("the record is gone then", await storeForEmail(email), null);
     is("and no store photo is left", photoKeys(), []);
+    is("nothing named by its ids or the photo is left", leftNamedBy([store.sid, store.statsId ?? "-", put]), []);
+  }
+
+  part("Rule 24: an entry's rewrite with the new photo's id not confirmed keeps the record, and the store waits a walk");
+  redis.clear();
+  {
+    const email = "rewrite@example.com";
+    const store = await makeStore(email, "rewritephoto");
+    let put = "";
+    inWindow = async () => {
+      put = await putPhoto(email);
+      rewriteUnconfirmed = true;
+    };
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    await erase(T);
+    const score = redis.run(["ZSCORE", DUE_KEY, email]);
+    is("the record is not deleted while the new photo is not a mark", (await storeForEmail(email))?.photoId ?? null, put);
+    is("the store is still in line, moved back a walk", score !== null && Number(score) >= T + WALK_GAP_MS, true);
+    const next = await erase(T + WALK_GAP_MS + 1);
+    is("the next walk prepares it and finishes", [next.stores, next.finished], [1, 1]);
+    is("no store photo is left", photoKeys(), []);
     is("nothing named by its ids or the photo is left", leftNamedBy([store.sid, store.statsId ?? "-", put]), []);
   }
 

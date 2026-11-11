@@ -154,14 +154,19 @@ export async function marksOf(store: Store): Promise<{ marks: string[]; files: {
   const flows = store.listId ? await readFlows(store.listId) : [];
   const courseIds = listings.flatMap((l) => (l.course ? [l.course.id] : []));
   const courses = courseIds.length ? [...(await readCourses(courseIds)).values()] : [];
-  const own = [store.sid, store.statsId, store.listId, store.callsId, store.catalog?.id, store.community?.id, await storeFolder(storeRef(store)), store.photoId];
-  const found = new Set<string>([...own.filter((id): id is string => typeof id === "string" && id.length >= 6), ...idsIn(JSON.stringify(store), JSON.stringify(listings), JSON.stringify(flows), JSON.stringify(courses))]);
+  const found = new Set<string>([...(await recordIds(store)), ...idsIn(JSON.stringify(listings), JSON.stringify(flows), JSON.stringify(courses))]);
   for (const id of [...courseIds, ...listings.flatMap((l) => (l.podcast ? [l.podcast.id] : [])), ...flows.map((f) => f.id)]) if (id) found.add(id);
   for (const ours of [store.stripeCustomerId, store.subscriptionId]) if (ours) found.delete(ours);
   if (store.stripeAccountId && (await sharedAccount(store))) found.delete(store.stripeAccountId);
   // The owner's address and the store's addresses are not ids: the walk matches them only where a family says so.
   found.delete(store.email);
   return { marks: [...found].sort(), files: filesIn([listings, courses]) };
+}
+
+/** The ids the store record itself names: its own (store, stats, list, calls, catalog, community, files' folder, photo) and every id-like word in it. */
+async function recordIds(store: Store): Promise<string[]> {
+  const own = [store.sid, store.statsId, store.listId, store.callsId, store.catalog?.id, store.community?.id, await storeFolder(storeRef(store)), store.photoId];
+  return [...own.filter((id): id is string => typeof id === "string" && id.length >= 6), ...idsIn(JSON.stringify(store))];
 }
 
 /** Whether another store of the same owner sells through the same Stripe account: then its account's records are not this store's to delete. */
@@ -266,9 +271,28 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // keys. A write that fails throws with the record still there, and the walk tries the store again later.
   // Only HSET's own count (0 for an entry rewritten, 1 for a new one) is a write; any other answer is not known to
   // have landed and throws before the record goes (Codex T on #3181).
-  const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
-  if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
-  await closeStoreRecord(store);
+  const write = async (batched: Batched) => {
+    const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(batched)]]), 1)?.[0];
+    if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
+  };
+  await write(entry);
+  // The record is read again under its lock right before it goes (closeStoreRecord), since all of the above worked
+  // from the walk's first read: an id it names now and the entry does not (a photo put on meanwhile, through the photo
+  // route's setPhotoId; an id made since) becomes a mark, and an address it moved to since one of the entry's, before
+  // the record goes, so the walk erases their keys too and nothing is left that no record names (Codex G on #3614).
+  // Only ids never to be marks stay out: our own Stripe customer and subscription, its Stripe account (a mark already,
+  // unless another store shares it) and its owner's address. The entry rewritten is confirmed or this throws, with the
+  // record still there, and the store waits a walk.
+  await closeStoreRecord(store, [], async (fresh) => {
+    if (!fresh) return;
+    const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
+    const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
+    const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
+    if (!added.length && !moved.length) return;
+    entry.marks = [...new Set([...marks, ...added])].sort();
+    entry.handles = [...entry.handles, ...moved];
+    await write(entry);
+  });
   return entry;
 }
 

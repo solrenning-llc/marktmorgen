@@ -1648,6 +1648,15 @@ export class MemoryRedis {
         for (const value of args) list.unshift(value);
         return list.length;
       }
+      case "LPOP": {
+        // LPOP key, no count (lib/licence-keys.ts, a key from the pool): the first item, or null; an emptied list is gone.
+        if (args.length) throw new Error("ERR LPOP with a count is not implemented in MemoryRedis");
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
+      }
       case "LTRIM": {
         const list = this.list(key);
         const [from, to] = [Number(args[0]), Number(args[1])];

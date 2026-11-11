@@ -34,7 +34,8 @@
  *   nl:alert:seen:<day>:<statsId>        looked at today
  *   nl:alert:<statsId>:<kind>[:<month>]  said this week, or this month
  */
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { formatMoney } from "@/lib/money";
@@ -199,8 +200,9 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return { said: 0, skipped: true };
   const today = new Date(now).toISOString().slice(0, 10);
-  const [first] = await redisPipeline([["SET", seenKey(today, store.statsId), "1", "NX", "EX", 2 * 86400]]);
-  if (first === null) return { said: 0, skipped: true };
+  // The day's look and each alert are ours only on an exact claim (lib/claim-mark.ts): an unknown answer
+  // reads and says nothing this run, and lets nothing go.
+  if ((await claimMark(seenKey(today, store.statsId), 2 * 86400)) !== "ours") return { said: 0, skipped: true };
 
   const [stats, sales, goal] = await Promise.all([readStats(store, now), readSales(store, now), readSalesGoal(store.statsId, store.currency)]);
   if (!stats || !sales) return { said: 0, skipped: false };
@@ -220,8 +222,7 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   let said = 0;
   for (const alert of alerts) {
     const key = saidKey(store.statsId, alert, today);
-    const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", alert.kind.startsWith("goal") ? 40 * 86400 : 7 * 86400]]);
-    if (claimed === null) continue;
+    if ((await claimMark(key, alert.kind.startsWith("goal") ? 40 * 86400 : 7 * 86400)) !== "ours") continue;
     said += 1;
     const studio = `/studio${store.sid ? `?store=${store.sid}` : ""}#numbers`;
     await alertCreator(store, "alert", { title: alert.title, body: alert.lines[0], url: studio }, { seed: key, at: now }).catch((error) =>

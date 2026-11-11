@@ -125,7 +125,6 @@ export function ArticleData({ post }: { post: BlogPost }) {
         headline: post.title,
         description: post.excerpt,
         datePublished: post.date,
-        dateModified: post.date,
         articleSection: post.category,
         image: `${SITE_URL}/blog/${post.slug}/opengraph-image`,
         author: { "@type": "Organization", name: "Marktmorgen" },

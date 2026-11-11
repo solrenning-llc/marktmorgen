@@ -1,4 +1,10 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
+import { API_SALES_READ } from "./plan-cost-registry";
+import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
+import { MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
+import { MAX_BUMPS } from "@/lib/product-extras";
+import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
+import { bundleItemRead, collectionRead } from "./plan-cost-registry";
 import { checkUnits, searchUnits, walkUnits } from "@/lib/community-read-rules";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
@@ -6,10 +12,11 @@ import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
 import { TEST_SALES_PAGES } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { AGENDA_UNITS } from "@/lib/person-agenda";
+import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/person-agenda";
+import { IncludedBytes, PAGE_INCLUDED_BYTES, STUDIO_UNIT_SENT_BYTES, sentUnits } from "@/lib/sent-bytes";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
-import { ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
+import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
@@ -19,7 +26,7 @@ import {
   EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
 } from "@/lib/api-read-rules";
 import { DELIVERY_MAX_BYTES, LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
-import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+import { BOOK_STRIPE_PAGES, STUDIO_UNIT_BYTES, STUDIO_UNIT_COMMANDS, bulkUnits } from "@/lib/affiliates";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -35,6 +42,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
+import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
@@ -52,12 +60,12 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
-import { affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
+import { LIBRARY_WAITING_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
-import { affiliateLoadRead, affiliatePageRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
+import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
-import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
@@ -84,10 +92,10 @@ function scopesInCode(): Map<string, string[]> {
   const add = (scope: string, file: string) => found.set(scope, [...(found.get(scope) ?? []), file]);
   for (const file of code) {
     const text = read(file);
-    // withinServiceWhy is withinService that also says why it refused (lib/metered-limits.ts): the same count.
-    for (const m of text.matchAll(/\bwithin(EssentialLimit|Limit|Month|Store|Service)(?:Why)?\(([^,]+),/g)) {
+    // withinServiceWhy and essentialLimitState expose refusal reasons for the same counters.
+    for (const m of text.matchAll(/\b(?:within(EssentialLimit|Limit|Month|Store|Service)(?:Why)?|essentialLimitState)\(([^,]+),/g)) {
       const literals = [...m[2].matchAll(/"([^"]+)"/g)].map((l) => l[1]);
-      if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1]])); }
+      if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1] ?? "EssentialLimit"])); }
       else add(`<dynamic:${m[2].trim()}>`, file);
     }
     for (const m of text.matchAll(/\bcountUse\(([^,]+),/g)) add(`countUse:${m[1].trim().slice(0, 60)}`, file);
@@ -225,10 +233,18 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(STUDIO_PAGE_UNITS * UNIT_COST.studio >= request("heavy", 80, 400_000));
   // A contact added or a product given is API_WRITE_UNITS requests: more than a write of sixty commands.
   assert.ok(API_WRITE_UNITS * UNIT_COST.api >= request("write", 60, 20_000));
+  // A page of sales read through the API is API_SALES_UNITS requests: more than its wait on Stripe, its reads and its answer cost (lib/api-sales.ts).
+  // With room: at least 5% more than that worst page.
+  assert.ok(API_SALES_UNITS * UNIT_COST.api >= 1.05 * API_SALES_READ, `${API_SALES_UNITS} x ${UNIT_COST.api} < 1.05 x ${API_SALES_READ}`);
   // A booked call is CALL_ORDER_UNITS orders: its confirmation to buyer and host and its two reminders are four emails.
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);
+  // A collection's products (lib/page-read-rules.ts, 4 November 2026): at every size the requests taken cost more than what they read.
+  for (let products = 1; products <= MAX_COLLECTION_PRODUCTS; products += 1) assert.ok(collectionUnits(products) * laterPageCost() >= collectionRead(products), `collection of ${products}`);
+  // The items its bundles hold (Codex G2 on #2583): every product and every one its checkout boxes offer may be a bundle of MAX_BUNDLE_ITEMS.
+  for (let items = 1; items <= MAX_COLLECTION_PRODUCTS * (1 + MAX_BUMPS) * MAX_BUNDLE_ITEMS; items += 1) assert.ok(bundleItemUnits(items) * laterPageCost() >= bundleItemRead(items), `${items} bundle items`);
+  console.log(`a collection of 8 products: ${1 + collectionUnits(8)} requests with its page ($${collectionRead(8).toFixed(6)} past it), ${1 + collectionUnits(MAX_COLLECTION_PRODUCTS)} at the largest`);
   // A community search, its access checks and each step of the walk of its archive (lib/community-read-rules.ts,
   // 4 November 2026): at every size the requests taken cost more than what they read.
   for (const room of [false, true]) for (let conversations = 0; conversations <= SEARCH_CONVERSATIONS; conversations += 1) {
@@ -270,6 +286,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
       assert.ok(sitemapUnits(size) * laterPageCost() >= sitemapRead(size), `store map ${JSON.stringify(size)}: ${sitemapUnits(size)} x ${laterPageCost()} < ${sitemapRead(size)}`);
     }
   }
+  // A store's card in the buyer's library pays for what it reads of what waits there, at its largest (Codex J, #1969), and no more than that needs.
+  assert.ok(LIBRARY_WAITING_UNITS * laterPageCost() >= libraryWaitingRead(), `library card: ${LIBRARY_WAITING_UNITS} x ${laterPageCost()} < ${libraryWaitingRead()}`);
+  // And the card's own wait on Redis, held by a test rather than only a comment (Claude 5 on #1969).
+  assert.ok(LIBRARY_WAITING_UNITS * laterPageCost() >= libraryWaitingRead() + libraryCardWait(), `library card with its wait: ${LIBRARY_WAITING_UNITS} x ${laterPageCost()} < ${libraryWaitingRead()} + ${libraryCardWait()}`);
+  assert.ok((LIBRARY_WAITING_UNITS - 1) * laterPageCost() < libraryWaitingRead(), `library card: ${LIBRARY_WAITING_UNITS} units, one more than needed`);
   const typicalBook = { fields: 50 + 50 + 1_000 + 40 + 20, rows: 5, listings: 20, stripePages: 23 };
   const typicalLoad = { sliceBytes: 12_000, listings: 3, codes: null };
   console.log(`an affiliate program's book worked out: ${affiliatePageUnits(typicalBook)} requests for 50 affiliates and 1,000 sales ($${affiliatePageRead(typicalBook).toFixed(6)}), at most once a day; each other load ${affiliateLoadUnits(typicalLoad)} ($${affiliateLoadRead(typicalLoad).toFixed(6)}), ${affiliateLoadUnits({ ...typicalLoad, codes: 5 })} with codes; at $${laterPageCost().toFixed(6)} a request`);
@@ -303,6 +324,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
+  // A store's own plan invoices are one billing request of the day, priced as a heavy request (studio line) and two Stripe GETs
+  // (platform-subscription-search): more than one Stripe list waited on to its ceiling, with room (601 [KB22] U5).
+  const billingRequest = request("heavy", 40, 200_000) + PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD;
+  assert.ok(billingRequest >= 1.05 * PLAN_INVOICES_READ, `${billingRequest} < 1.05 x ${PLAN_INVOICES_READ}`);
+  console.log(`a store's plan invoices: $${PLAN_INVOICES_READ.toFixed(6)} at most, inside one billing request priced at $${billingRequest.toFixed(6)}`);
   // Making a store's count of its tasks again reads every task once, after tasksRecountUnits(people) studio requests are taken:
   // more than four commands and what that many people can keep cost, at a whole studio request's shape (lib/crm.ts).
   for (const people of [1, 3, 49, 50, 51, MAX_STORE_TASKS]) {
@@ -359,12 +385,26 @@ test("what the buyers' copy and the imported buyers weigh is counted a studio re
  assert.ok(IMPORTED_BUYER_BYTES >= 2 * (254 + 10), "an imported buyer is read and written in the copy: never priced as less");
  // BUYER_LEDGER prices Stripe's pages and rows only; the imported are counted by size, so the source must count them.
  const source = read("lib/segments.ts");
- assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };") && !source.includes("store.paypalSeller ? await paypalKept") && source.includes("ledgerUnits(moved)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
+ assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };") && !source.includes("store.paypalSeller ? await paypalKept") && source.includes("ledgerUnits(moved, included)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
  assert.ok(source.includes('["STRLEN", ledgerKey(store.statsId)]') && source.indexOf("STRLEN") < source.indexOf('["GETRANGE", ledgerKey(store.statsId)'), "the copy is measured and counted before it is read, and read no further");
  // PayPal's reading is counted in full (round 5, H1): what ledgerReadBytes counts for the most PayPal kept covers PAYPAL_LEDGER.
  const paypalUnits = ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER }));
  assert.ok(PAYPAL_LEDGER <= UNIT_COST.studio * paypalUnits, `${PAYPAL_LEDGER} > ${paypalUnits} x ${UNIT_COST.studio}`);
  assert.ok(ledgerReadBytes({ imported: 0, paypalSales: 3_000, paypalRefunds: 500 }) >= PAYPAL_LEDGER_BYTES, "every PayPal record read is counted");
+});
+
+test("an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits)", () => {
+ // Each more studio request covers STUDIO_UNIT_COMMANDS commands, or STUDIO_UNIT_BYTES bytes, at a light request's shape.
+ assert.ok(request("light", STUDIO_UNIT_COMMANDS, 0) <= UNIT_COST.studio, `${request("light", STUDIO_UNIT_COMMANDS, 0)} > ${UNIT_COST.studio}`);
+ assert.ok(request("light", 0, STUDIO_UNIT_BYTES) <= UNIT_COST.studio, `${request("light", 0, STUDIO_UNIT_BYTES)} > ${UNIT_COST.studio}`);
+ // Accepting a partnership by its emailed link pays the same units from the store's public requests (lib/affiliates.ts
+ // paidPeople, app/api/store/affiliates/open/route.ts), each priced as a later page: each covers as much.
+ assert.ok(request("light", STUDIO_UNIT_COMMANDS, 0) <= laterPageCost(), `${request("light", STUDIO_UNIT_COMMANDS, 0)} > ${laterPageCost()}`);
+ assert.ok(request("light", 0, STUDIO_UNIT_BYTES) <= laterPageCost(), `${request("light", 0, STUDIO_UNIT_BYTES)} > ${laterPageCost()}`);
+ // The shares add up: any mix of commands and bytes is inside what bulkUnits takes for it.
+ for (const [commands, bytes] of [[1, 0], [400, 0], [0, 24_000_000], [325, 641_246], [1_107, 45_760_958], [17, 999_999]] as const) {
+  assert.ok(request("light", commands, bytes) <= UNIT_COST.studio * bulkUnits(commands, bytes), `${commands} commands, ${bytes} bytes`);
+ }
 });
 
 test("a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads)", () => {
@@ -382,6 +422,60 @@ test("a scheduled email's readings of the buyers are each paid in studio request
 test("the tasks agenda at its most fits the studio requests it counts", () => {
  assert.ok(AGENDA_READ <= UNIT_COST.studio * AGENDA_UNITS, `${AGENDA_READ} > ${AGENDA_UNITS} x ${UNIT_COST.studio}`);
  // AGENDA_UNITS is what agendaReadUnits and the rows' size count at the most (lib/person-agenda.ts): never less than the cost.
+});
+
+test("the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2))", () => {
+ // UNIT_COST.studio prices one request moving PAGE_INCLUDED_BYTES, no more.
+ assert.equal(request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, PAGE_INCLUDED_BYTES), UNIT_COST.studio);
+ assert.ok(LEDGER_BYTES_PER_UNIT === STUDIO_UNIT_SENT_BYTES && request("light", 2, STUDIO_UNIT_SENT_BYTES) <= UNIT_COST.studio, "a studio request counted past the included bytes covers its megabyte");
+ // The page at its worst: a task's person looked up (?who=) and not there, so the agenda is drawn below; every part
+ // that reads or sends by size at the most it moved without a request of its own before: the lookup's copy of the
+ // buyers and its reading of the imported and PayPal ones, the agenda's tasks (as many people as fit), its own copy
+ // and reading, and what it sends on.
+ const people = Math.floor(PAGE_INCLUDED_BYTES / (MAX_PERSON_TASKS * MAX_TASK_RECORD_BYTES));
+ const taskBytes = people * MAX_PERSON_TASKS * MAX_TASK_RECORD_BYTES;
+ const included = new IncludedBytes();
+ const parts = [
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  agendaReadUnits(people, included),
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  sentUnits(PAGE_INCLUDED_BYTES, included),
+ ];
+ const bytes = 5 * PAGE_INCLUDED_BYTES + taskBytes;
+ const units = parts.reduce((a, b) => a + b, 0);
+ assert.deepEqual(parts, [0, 1, 1, 1, 1, 1], "the first part rides on the page's own request; every later one is counted");
+ // Every byte past the request's own fifty kilobytes is covered by a studio request counted for it, and the
+ // whole page fits in its own request and those counted.
+ assert.ok(bytes - PAGE_INCLUDED_BYTES <= units * LEDGER_BYTES_PER_UNIT, `${bytes} bytes, ${units} counted`);
+ assert.ok(request("studio", 20 + TAKE_COMMANDS, bytes) <= UNIT_COST.studio * (1 + units), `${request("studio", 20 + TAKE_COMMANDS, bytes)} > ${1 + units} x ${UNIT_COST.studio}`);
+ // Any parts in any order: what rides free never passes PAGE_INCLUDED_BYTES, and no part counts less than alone.
+ let seed = 7;
+ const next = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648);
+ for (let round = 0; round < 500; round++) {
+  const page = new IncludedBytes();
+  let free = 0;
+  for (let part = 0; part < 1 + (next() % 7); part++) {
+   const size = next() % (next() % 2 ? 60_000 : 2_500_000);
+   const shared = page.take(size, LEDGER_BYTES_PER_UNIT);
+   const alone = new IncludedBytes().take(size, LEDGER_BYTES_PER_UNIT);
+   assert.ok(shared.units >= alone.units && shared.covers >= size, `${size}: ${shared.units} < ${alone.units}`);
+   if (shared.units === 0) free += size;
+  }
+  assert.ok(free <= PAGE_INCLUDED_BYTES && page.left === PAGE_INCLUDED_BYTES - free, `${free} bytes rode free`);
+ }
+ // An unknown size is never none.
+ for (const size of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) assert.throws(() => new IncludedBytes().take(size, LEDGER_BYTES_PER_UNIT), RangeError);
+ // The page makes one and hands it to every part; each reading passes it on.
+ const page = read("app/studio/people/page.tsx").replace(/\s+/g, " ");
+ assert.equal(page.match(/new IncludedBytes\(\)/g)?.length, 1, "one budget for the page");
+ assert.ok(page.includes("addressForPerson(store, who, lookupLedger.count, included)") && page.includes("<TasksAgenda store={store} included={included} />") && page.includes("agendaData(store, today, included)"), "the lookup and the agenda draw on the page's budget");
+ const agenda = read("lib/person-agenda-read.ts");
+ assert.ok(agenda.includes("agendaReadUnits(kept, included)") && agenda.includes("personAddresses(store, persons, ledger.count, included)") && agenda.includes("AGENDA_ROW_MARKUP_BYTES, included)"), "the agenda's tasks, buyers and sending draw on it");
+ assert.ok(read("lib/person-agenda.ts").includes("buyerLedger(store, count, included)") && read("lib/person-agenda.ts").includes("personAddresses(store, new Set([person]), count, included)"), "the lookup passes it to the buyers' reading");
+ const ledger = read("lib/segments.ts");
+ assert.ok(ledger.includes("included.take(bytes, LEDGER_BYTES_PER_UNIT)") && ledger.includes('["GETRANGE", ledgerKey(store.statsId), 0, taken.covers - 1]') && ledger.includes("ledgerUnits(moved, included)"), "the copy and the rest of a reading draw on it, and the copy is read no further than counted");
 });
 
 test("Path push fits its reserved studio requests", () => {

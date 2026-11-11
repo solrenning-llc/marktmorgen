@@ -335,7 +335,7 @@ export function coveredByShare(store: Parameters<typeof shareBps>[0], paidCents:
 export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now(), admission?: { hour: unknown; items: number; createdAtMs: number }): Promise<boolean> {
   if (!isRedisConfigured() || !reference) return false;
   try {
-    if (admission) return (await countLegacyCheckout(store, reference, paidCents, now, admission)) === "committed";
+    if (admission) return (await countLegacyCheckoutForConfirmation(store, reference, paidCents, now, admission)) === "committed";
     const reply: unknown = await redisPipeline([["SET", seenKey(reference), "1", "NX", "EX", SEEN_SECONDS]]);
     if (!Array.isArray(reply)) return false;
     const length = Object.getOwnPropertyDescriptor(reply, "length"), fresh = Object.getOwnPropertyDescriptor(reply, "0");

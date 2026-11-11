@@ -59,6 +59,7 @@ try {
   const page=await open([{ok:true,blocked:false},{ok:true,blocked:true},{ok:true,blocked:false}]);
   await until(page,()=>Boolean(document.querySelector('summary')));
   out.openText=await text(page);
+  out.noteLabel=await page.evaluate(()=>document.querySelector('[data-inbox-block] label')?.textContent??'');
   await press(page,'summary');
   out.heights=await tall(page);
   await page.fill('[data-inbox-block] input','Insults in every message',{timeout:5000}).catch(()=>null);
@@ -92,6 +93,7 @@ try {
   await press(page,'[data-inbox-block] button[type=submit]');
   await until(page,()=>document.querySelector('[data-inbox-block] [role=status]')?.textContent.length>0);
   out.refused=await page.evaluate(()=>document.querySelector('[data-inbox-block] [role=status]')?.textContent??'');
+  out.refusedSeen=await page.evaluate(()=>{const x=document.querySelector('[data-inbox-block] [role=status]');if(!x)return false;const r=x.getBoundingClientRect();return !x.className.split(/\s+/).includes('sr-only')&&r.width>1&&r.height>1;});
   out.refusedText=await text(page);
   await page.close();
  }
@@ -113,6 +115,8 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
   secondText: string;
   secondCalls: Record<string, unknown>[];
   refused: string;
+  refusedSeen: boolean;
+  noteLabel: string;
   refusedText: string;
 };
 
@@ -132,6 +136,8 @@ is("the route was asked: check, block with the note, unblock", result.calls, [
 is("not known: said so, never as not blocked", [result.unknownText.includes("could not check"), result.unknownText.includes("Block this person")], [true, false]);
 is("checked again on request", [result.secondText.includes("Spam"), result.secondCalls.length], [true, 2]);
 is("a refused block is said", result.refused.length > 0, true);
+is("review: a refusal is seen on the screen, not only heard", result.refusedSeen, true);
+is("review: the note's label says the team sees it too", /only you and your team see it/.test(result.noteLabel), true);
 is("and the person stays not blocked", [result.refusedText.includes("You blocked this person"), result.refusedText.includes("Block this person")], [false, true]);
 
 done();

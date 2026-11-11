@@ -384,8 +384,12 @@ async function readStored(id: string): Promise<{ job: ImportJob; raw: string } |
   const replies = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1);
   const raw = replies?.[0];
   if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("an import");
+  if (raw === null) return null;
+  // The record GET nl:import:B answers is import B's only when it says so; a text that is not an import, or one naming
+  // another import, is unknown, never read as B's nor as gone (Revisor 2 on #3686, rule 30).
   const job = parseJob(raw);
-  return job && typeof raw === "string" ? { job, raw } : null;
+  if (!job || job.id !== id) throw new UnknownReplyError("an import");
+  return { job, raw };
 }
 
 /** readStored for one import of this store, or null when it is not this store's. */

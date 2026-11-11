@@ -173,6 +173,25 @@ async function main(): Promise<void> {
     [["ana@example.com", "active"], ["dee@example.com", "removed"], ["zed@example.com", "none"]],
   );
 
+  // Codex G on #3035 @edb93681 (MEDIUM, CX-123 rule 24): a learner's record that does not read as the record the course
+  // keeps is not known, never "active", so a revoke never acts on it by guess.
+  const studentsKey = `nl:course:${course.id}:students`;
+  const [cyRow] = await redisPipeline([["HGET", studentsKey, emailKey("cy@example.com")]]);
+  for (const [what, raw] of [
+    ["text that does not parse", "{not json"],
+    ["a record without its times", JSON.stringify({ e: "cy@example.com" })],
+    ["a record of another address", JSON.stringify({ e: "zed@example.com", s: now, l: now })],
+    ["a record that is not an object", JSON.stringify([1, 2])],
+  ] as const) {
+    await redisPipeline([["HSET", studentsKey, emailKey("cy@example.com"), raw]]);
+    is(`a learner's record that is ${what}: unknown, never active`, (await accessStates(course.id, ["cy@example.com"])).get("cy@example.com"), "unknown");
+  }
+  const guessed = await applyAccess(store, course.id, { change: "revoke", emails: ["cy@example.com"], expect: 0 }, async () => ({ ok: true }));
+  const cyFlag = (await redisPipeline([["SISMEMBER", `nl:course:${course.id}:blocked`, emailKey("cy@example.com")]]))[0];
+  await redisPipeline([["HSET", studentsKey, emailKey("cy@example.com"), String(cyRow)]]);
+  is("and a revoke leaves it unchanged, said as unread", [guessed.kind === "done" ? guessed.done.unread : guessed.kind, cyFlag, await blocked()], [["cy@example.com"], 0, ["dee@example.com"]]);
+  is("control: cy's own record back, active again", (await accessStates(course.id, ["cy@example.com"])).get("cy@example.com"), "active");
+
   part("The list, read exactly and paid for before it is read");
   const list = store.listId!;
   await upsertContact(list, "ana@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);

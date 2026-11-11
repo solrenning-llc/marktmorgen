@@ -473,6 +473,16 @@ export async function studentDates(courseId: string, email: string): Promise<{ s
   return { since: row.s, lastSeen: row.l };
 }
 
+/**
+ * Whether `raw` is the row the course keeps for `email`: JSON with both times as whole seconds and that address. Any
+ * other value is not this learner's record, read as unknown by whoever asks (lib/student-bulk.ts accessStates; Codex G
+ * on #3035, CX-123 rule 24), never as a student.
+ */
+export function isStudentRowOf(raw: unknown, email: string): boolean {
+  const row = studentTimes(raw);
+  return row !== null && typeof row.e === "string" && normaliseEmail(row.e) === normaliseEmail(email);
+}
+
 /** A kept student row's address (as kept) and times, only when the row is JSON with both times as whole seconds; otherwise null. */
 function studentTimes(raw: unknown): { e: unknown; s: number; l: number } | null {
   if (typeof raw !== "string") return null;

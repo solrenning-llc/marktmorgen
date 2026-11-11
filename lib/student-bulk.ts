@@ -16,7 +16,7 @@
  */
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
 import { type Course } from "@/lib/course";
-import { emailKey, setBlocked, studentPage } from "@/lib/learn";
+import { emailKey, isStudentRowOf, setBlocked, studentPage } from "@/lib/learn";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
@@ -102,7 +102,9 @@ export type AccessState = "active" | "removed" | "none" | "unknown";
  * Each address's access to a course, read exactly, ACCESS_READ_BATCH at a
  * command pair: whether they are one of its students (the row the course
  * keeps) and whether they were taken off it. An answer not in its exact shape,
- * or none at all, is "unknown" for that batch.
+ * or none at all, is "unknown" for that batch; a row that is not the record the
+ * course keeps for that address (lib/learn.ts isStudentRowOf) is "unknown" for
+ * that person.
  */
 export async function accessStates(courseId: string, emails: readonly string[]): Promise<Map<string, AccessState>> {
   const out = new Map<string, AccessState>();
@@ -128,7 +130,8 @@ export async function accessStates(courseId: string, emails: readonly string[]):
       const row = rows ? rows[i] : undefined;
       const flag = flags ? flags[i] : undefined;
       if (row === null) out.set(email, "none");
-      else if (typeof row === "string" && row && (flag === 0 || flag === 1)) out.set(email, flag === 1 ? "removed" : "active");
+      // Only the record the course keeps for this address is a student; anything else is unknown, never active.
+      else if (isStudentRowOf(row, email) && (flag === 0 || flag === 1)) out.set(email, flag === 1 ? "removed" : "active");
       else out.set(email, "unknown");
     });
   }

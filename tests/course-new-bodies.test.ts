@@ -75,7 +75,8 @@ async function main(): Promise<void> {
   const g = newItemId();
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((command) => command[0] === "SET")) return commands.map(() => "QUEUED?");
+    // Written for real, then a reply in no known shape.
+    if (commands.some((command) => command[0] === "SET")) return (await original(commands)).map(() => "QUEUED?");
     return original(commands);
   }) as typeof redis.pipeline;
   let unknown: unknown;

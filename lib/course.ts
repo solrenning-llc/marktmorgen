@@ -725,6 +725,44 @@ export async function saveBody(courseId: string, lessonId: string, text: string,
   if (grown < 0) await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes: -grown }]);
 }
 
+/**
+ * The lesson texts of a course made by an import (260 [KJ5], lib/course-import-apply.ts),
+ * written at once: each text already as the editor keeps it (cleanBody), for
+ * a lesson id given once. The room for all of them is taken in one step
+ * before anything is written (DataRoomError when it does not fit, and then
+ * nothing is); each is written only where no text is kept yet; anything
+ * that comes back otherwise takes away what this call wrote, gives its room
+ * back and throws. Never a partial import left behind.
+ */
+export async function saveNewBodies(courseId: string, bodies: { lessonId: string; text: string }[], room: DataStore): Promise<void> {
+  if (!COURSE_ID_PATTERN.test(courseId)) throw new Error("not a course id");
+  const ids = new Set<string>();
+  for (const { lessonId, text } of bodies) {
+    if (!ITEM_ID_PATTERN.test(lessonId) || ids.has(lessonId)) throw new Error("not a new lesson's text");
+    if (typeof text !== "string" || !text || cleanBody(text) !== text) throw new Error("not a lesson text as the editor keeps it");
+    ids.add(lessonId);
+  }
+  if (!bodies.length) return;
+  if (!isRedisConfigured()) throw new Error("lesson texts cannot be written here");
+  const bytes = bodies.reduce((sum, { text }) => sum + bodyBytes(text), 0);
+  await needData(room, [{ slot: BODIES_SLOT(courseId), bytes }]);
+  let replies: unknown[] | null = null;
+  try {
+    replies = repliesFor(await redisPipeline(bodies.map(({ lessonId, text }) => ["SET", bodyKey(courseId, lessonId), text, "NX"])), bodies.length);
+  } catch {
+    replies = null;
+  }
+  if (replies && replies.every((reply) => reply === "OK")) return;
+  // Only what this call wrote goes: a text kept before it (NX refused) stays; an unknown reply could be either, so only a key now holding this call's own text goes.
+  const mine = bodies.filter((body, i) => replies?.[i] === "OK");
+  const unsure = bodies.filter((body, i) => !replies || (replies[i] !== "OK" && replies[i] !== null));
+  const held = unsure.length ? await readBodies(courseId, unsure.map((body) => body.lessonId)) : {};
+  const back = [...mine, ...unsure.filter((body) => held[body.lessonId] === body.text)];
+  if (back.length) await redisPipeline(back.map((body) => ["DEL", bodyKey(courseId, body.lessonId)]));
+  await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes }]);
+  throw new UnknownReplyError("an imported course's lesson texts");
+}
+
 /** Takes a course's records away, and gives back their room. Its files are the caller's to delete. */
 export async function dropCourse(course: Course, room: DataStore): Promise<void> {
   const keys = [courseKey(course.id), ...lessonsInOrder(course).map(({ lesson }) => bodyKey(course.id, lesson.id))];

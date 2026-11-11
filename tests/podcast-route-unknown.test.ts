@@ -135,6 +135,14 @@ async function main(): Promise<void> {
   part("readPodcast: null only for Redis's exact null, a podcast for its exact record");
   {
     is("a podcast with no record reads as null", await readPodcast("0123456789abcdef0123456789abcdef"), null);
+    const redisEnv = ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_URL", "KV_REST_API_TOKEN"] as const;
+    const savedRedisEnv = redisEnv.map((name) => process.env[name]);
+    for (const name of redisEnv) delete process.env[name];
+    try {
+      is("unconfigured Redis is unknown, not a missing podcast", await thrown(() => readPodcast("0123456789abcdef0123456789abcdef")), "UnknownReplyError");
+    } finally {
+      redisEnv.forEach((name, index) => { const value = savedRedisEnv[index]; if (value === undefined) delete process.env[name]; else process.env[name] = value; });
+    }
     const { podcastId } = await setUp("Show R");
     is("a stored podcast reads whole", await titles(podcastId), ["Episode one", "Episode two"]);
     for (const [label, reply] of UNKNOWN) {

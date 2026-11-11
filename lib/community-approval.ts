@@ -59,7 +59,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { CREATOR, type Comment, type CommunityImage, type NewPost, type Post, addComment, createPost, newItemId, readComment, readPost } from "@/lib/community";
 import { type Poll, parsePoll } from "@/lib/community-polls";
 import { ITEM_ID, MAX_COMMENT_TEXT, MAX_POST_TEXT, MAX_POST_TITLE, cleanLine } from "@/lib/community-text";
-import { dropCommunityImage } from "@/lib/community-files";
+import { removeCommunityImage } from "@/lib/community-files";
 import { DataRoomError, type DataStore, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
@@ -429,15 +429,21 @@ function noteOf(held: Held, state: Exclude<HeldState, "held">, why: string, now:
   };
 }
 
-/** Writes the note in the item's place, for what is left of its time; its picture is deleted, and its line. */
+/**
+ * A held item's picture deleted, and only then its line in the pictures list (removeCommunityImage): a file that could
+ * not be deleted keeps its line, where its author's erasure finds it again (Codex G on #3020, 6751455863). True when
+ * both are gone.
+ */
+async function dropHeldPicture(id: string, item: string, path: string): Promise<boolean> {
+  return removeCommunityImage(path, async () => countOf(repliesFor(await redisPipeline([["HDEL", picturesKey(id), item]]), 1)?.[0]) !== null);
+}
+
+/** Writes the note in the item's place, for what is left of its time; its picture is deleted, then its line. */
 async function leaveNote(id: string, note: Held, picture: string | null | undefined, now: number): Promise<void> {
   // At most TOLD_DAYS from now, and never past the record's own end.
   const left = Math.min(note.at + KEEP_SECONDS - now, TOLD_DAYS * DAY);
-  await redisPipeline([
-    left > 0 ? ["SET", itemKey(id, note.id), JSON.stringify(note), "EX", left, "XX"] : ["DEL", itemKey(id, note.id)],
-    ...(picture ? [["HDEL", picturesKey(id), note.id]] : []),
-  ]);
-  await dropCommunityImage(picture);
+  await redisPipeline([left > 0 ? ["SET", itemKey(id, note.id), JSON.stringify(note), "EX", left, "XX"] : ["DEL", itemKey(id, note.id)]]);
+  if (picture) await dropHeldPicture(id, note.id, picture);
 }
 
 /** One line of the pictures list: whose post it was and its path, or null for anything else. */
@@ -460,8 +466,10 @@ async function dropListedPicture(id: string, item: string): Promise<void> {
   const replies = repliesFor(await redisPipeline([["HGET", picturesKey(id), item]]), 1);
   if (!replies) throw new UnknownReplyError("a held community picture");
   if (replies[0] === null) return;
-  await redisPipeline([["HDEL", picturesKey(id), item]]);
-  await dropCommunityImage(pictureOf(replies[0])?.p);
+  const path = pictureOf(replies[0])?.p;
+  // A line that does not read names no file: it goes; otherwise the file first, then the line.
+  if (!path) await redisPipeline([["HDEL", picturesKey(id), item]]);
+  else await dropHeldPicture(id, item, path);
 }
 
 /** Whether an item has waited HELD_DAYS: refused by itself, as its author already reads it (heldOf). */
@@ -707,9 +715,9 @@ export async function withdrawHeld(id: string, item: string, who: string): Promi
   await redisPipeline([
     ["DEL", itemKey(id, item)],
     ["ZREM", mineKey(id, who), item],
-    ...(held.state === "held" && held.img ? [["HDEL", picturesKey(id), item]] : []),
   ]);
-  if (held.state === "held") await dropCommunityImage(held.img?.path);
+  // Its picture, then its line: a file not deleted keeps the line its author's erasure finds it by.
+  if (held.state === "held" && held.img?.path) await dropHeldPicture(id, item, held.img.path);
   return "done";
 }
 
@@ -753,23 +761,33 @@ export async function forgetHeldPerson(id: string, who: string): Promise<number>
   }
   for (const item of pictures.keys()) if (!theirs.some((h) => h.id === item)) theirs.push({ id: item } as Held);
   const items = theirs.map((h) => h.id);
-  const pictured = [...pictures.keys()];
+  // Each picture once, by the item it is held for: from the list, or from the record while it waits. One the record
+  // names and the list does not is written into the list with the records' deletion, so it is never left unnamed.
+  const held = new Map<string, string>(pictures);
+  const unlisted: [string, string][] = [];
+  for (const h of theirs) {
+    if (h.state === "held" && h.img?.path && !held.has(h.id)) {
+      held.set(h.id, h.img.path);
+      unlisted.push([h.id, h.img.path]);
+    }
+  }
   const kept = items.length ? 4 : 2;
   const done = repliesFor(
     await redisPipeline([
       ...(items.length ? [["ZREM", queueKey(id), ...items], ["DEL", ...items.map((item) => itemKey(id, item))]] : []),
       ["DEL", mineKey(id, who)],
       ["HDEL", countKey(id), `${who}:p`, `${who}:c`],
-      ...(pictured.length ? [["HDEL", picturesKey(id), ...pictured]] : []),
+      ...unlisted.map(([item, path]) => ["HSET", picturesKey(id), item, JSON.stringify({ a: who, p: path })]),
     ]),
-    kept + (pictured.length ? 1 : 0),
+    kept + unlisted.length,
   );
   const counts = done?.map(countOf);
   if (!counts || counts.some((n) => n === null)) throw new Error("Community held items erasure was not confirmed");
-  // Each picture once: from the record while it waits, or from the list.
-  const paths = new Set<string>(pictures.values());
-  for (const held of theirs) if (held.state === "held" && held.img?.path) paths.add(held.img.path);
-  for (const path of paths) await dropCommunityImage(path);
+  // The pictures last, each file before its line (Codex G on #3020, 6751455863): one that could not be deleted keeps
+  // its line, and the erasure says it did not finish, so the next one deletes it.
+  let left = 0;
+  for (const [item, path] of held) if (!(await dropHeldPicture(id, item, path))) left += 1;
+  if (left) throw new Error("Community held items erasure: a picture could not be deleted");
   // The records, the member's list and their counts that went (a picture's line is not a record of its own).
   const tail = counts.slice(items.length ? 1 : 0, kept) as number[];
   return tail.reduce((sum, n) => sum + n, 0);

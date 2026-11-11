@@ -148,6 +148,9 @@ async function main(): Promise<void> {
   part("6. A share set from the studio and an acceptance at the same instant: the same lock");
   const small = (await listAffiliates(await store())).find((p) => p.share?.products.includes(product2));
   if (!small) throw new Error("no partner");
+  // 630 [HN6](39): changing a share in force waits for the partner's yes, so the share is set to 1% by ending the
+  // one running until revoked (at once) and starting 1% (at once): the same starting point as before HN6.
+  await post2({ action: "share", id: small.id, percent: null });
   await post2({ action: "share", id: small.id, percent: 1, products: [product2] });
   const raced = await Promise.all([
     post2({ action: "share", id: small.id, percent: 80, products: [product2] }),
@@ -163,6 +166,9 @@ async function main(): Promise<void> {
   const ten = await shop("ten@example.com", "tenshop");
   const parked = await offerPartnership("ten@example.com", { sid: (await store()).sid, storeName: "makershop store", handle: "makershop", share: { percent: 1, products: [product2] }, titles: ["Bread Basics"] });
   if (!parked.ok) throw new Error("no offer");
+  // 630 [HN6](39): changing a share in force waits for the partner's yes, so the share is set to 1% by ending the
+  // one running until revoked (at once) and starting 1% (at once): the same starting point as before HN6.
+  await post2({ action: "share", id: small.id, percent: null });
   await post2({ action: "share", id: small.id, percent: 1, products: [product2] });
   const lockKey = `nl:aff:${(await store()).statsId}:partners:lock`;
   await redis.pipeline([["SET", lockKey, "somebody-else", "EX", 60]]);

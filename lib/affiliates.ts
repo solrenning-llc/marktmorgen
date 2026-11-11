@@ -582,6 +582,16 @@ export async function partnerChangeFor(store: Store, affiliate: Affiliate | null
   return { nowSeconds, change, titles };
 }
 
+/** A share's last day in the store's language: the day before the moment it ends (lib/partner-terms-rules.ts). */
+function lastDayIn(store: Store, until: number): string {
+  return new Date((until - 24 * 60 * 60) * 1000).toLocaleDateString(LANGUAGES[parseLanguage(store.language)].locale, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+/** A share the partner accepted from an invitation, written as the start of its history; any change waiting is replaced. */
+function startedBy(terms: PartnerTerms, share: PartnerShare): PartnerTerms {
+  return { change: null, history: withStep(terms.history, stepOf("started", "partner", share, Math.floor(Date.now() / 1000))) };
+}
+
 /** A record with these terms, or without the field when there is nothing to keep. */
 function withTerms(affiliate: Affiliate, terms: PartnerTerms): Affiliate {
   const { terms: _old, ...rest } = affiliate;
@@ -1263,6 +1273,9 @@ export async function invitePartner(input: {
         "",
         ...listed.map((title) => `  • ${title}`),
         "",
+        // How long it runs, which they agree to by accepting it (630 [HN6](39)).
+        a.partnerRuns(share.until === undefined ? null : lastDayIn(store, share.until)),
+        "",
         a.partnerInStudio,
         "",
         `${SITE_URL}/studio/affiliates`,
@@ -1287,6 +1300,8 @@ export async function invitePartner(input: {
       ...listed.map((title) => `  • ${title}`),
       "",
       a.partnerTerms(share.percent),
+      // How long it runs, which they agree to by opening it (630 [HN6](39)).
+      a.partnerRuns(share.until === undefined ? null : lastDayIn(store, share.until)),
       "",
       a.partnerOpen,
       "",
@@ -1392,7 +1407,11 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   // them is the creator changing their mind, in their own words.
   if (affiliate && grant.k === 1) {
     // Only the decision and the share are changed, over exactly the record read: an address set meanwhile is kept.
-    const changed = await changeAffiliate(store, affiliate.id, (now) => ({ ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share }));
+    // An accepted share starts the partnership's history, replacing any change waiting (630 [HN6](39)).
+    const changed = await changeAffiliate(store, affiliate.id, (now) => {
+      const next: Affiliate = { ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share };
+      return grant.p ? withTerms(next, startedBy(now.terms ?? NO_TERMS, grant.p)) : next;
+    });
     if (!changed?.next) return { ok: false, reason: "expired" };
     affiliate = changed.next;
   }
@@ -1429,6 +1448,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
         share: invited ? grant.p ?? null : null,
         cleared: null,
         by,
+        ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p) } : {}),
       };
       await writeNewAffiliate(store, affiliate);
       created = true;

@@ -1,0 +1,56 @@
+import { withinStore } from "@/lib/metered-limits";
+import type { NextRequest } from "next/server";
+import { originFrom } from "@/lib/request-origin";
+import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { affiliateCookieName, affiliateForSession, answerShareChange, partnerShareProblem } from "@/lib/affiliates";
+import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { LockBusyError } from "@/lib/redis-lock";
+import { UnknownReplyError } from "@/lib/redis-reply";
+
+/**
+ * A signed-in partner answering a change to their share that the store asked
+ * for (630 [HN6](39); lib/affiliates.ts answerShareChange): yes applies it
+ * after the cap is checked again with what the products promise today; no
+ * keeps the share in force. Nothing already earned moves either way. Under the
+ * program's partner lock (rewritten on main from #1924): the cap is
+ * partnerShareProblem, read exactly as the studio's share save reads it.
+ */
+export async function POST(request: NextRequest) {
+  const origin = originFrom(request);
+  if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
+  let handle = "";
+  let answer = "";
+  let seen = "";
+  try {
+    const form = await (await limited(request, 2_000)).formData();
+    const read = (name: string) => {
+      const value = form.get(name);
+      return typeof value === "string" ? value : "";
+    };
+    handle = normaliseHandle(read("handle"));
+    answer = read("answer");
+    // Which change the partner read (lib/affiliates.ts changeIdentity): the answer applies to that one only.
+    seen = read("change").slice(0, 64);
+  } catch {
+    return new Response("Bad request", { status: 400 });
+  }
+  if (answer !== "yes" && answer !== "no") return new Response("Bad request", { status: 400 });
+  const store = handle ? await storeForHandle(handle) : null;
+  if (!store) return new Response("No such store.", { status: 404 });
+  const back = (status: string) =>
+    new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/affiliates?status=${status}#partner`, "Cache-Control": "no-store" } });
+  const affiliate = await affiliateForSession(store, request.cookies.get(affiliateCookieName(store.handle))?.value);
+  if (!affiliate) return back("signedout");
+  if (!(await withinStore("aff-partner", `${store.handle}|${affiliate.id}`, 5, 3600, store))) return back("payto-slow");
+  const now = Math.floor(Date.now() / 1000);
+  let result;
+  try {
+    result = await answerShareChange(store, affiliate.id, answer === "yes", seen, now, async (share) => (await partnerShareProblem(store, share, affiliate.id)) === null);
+  } catch (error) {
+    // The store was changing this partner at the same moment and held it past our wait, or a reply could not be read
+    // exactly (rule 24): nothing was applied.
+    if (error instanceof LockBusyError || error instanceof UnknownReplyError) return back("partner-busy");
+    throw error;
+  }
+  return back(result.ok ? `partner-${result.state === "changed" ? "yes" : "no"}` : `partner-${result.reason}`);
+}

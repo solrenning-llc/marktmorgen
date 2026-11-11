@@ -5,6 +5,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_COMMISSION, MIN_COMMISSION, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
 import { parsePartnerShare } from "@/lib/partner-share";
+import { readTermEnd } from "@/lib/partner-terms-rules";
 import { LockBusyError, holdLock } from "@/lib/redis-lock";
 import { readListings } from "@/lib/catalog";
 import { answerInvite, waitingOne } from "@/lib/partner-invites";
@@ -14,8 +15,9 @@ import {
   acceptPartnership,
   addPayout,
   MAX_BULK_DECISIONS,
-  decide,
   decideMany,
+  decideWhy,
+  proposePartnerShare,
   setRatesMany,
   undoMany,
   undoRates,
@@ -27,7 +29,6 @@ import {
   releaseHold,
   removePayout,
   setAffiliateRate,
-  setPartnerShare,
   ShareCapError,
   StudioNotPaidError,
   type Charge,
@@ -232,12 +233,14 @@ export async function POST(request: NextRequest) {
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
       // A share that would pass the cap once its holder is approved again: refused, nothing written (lib/affiliates.ts).
-      const done = await decide(store, text(body.id, 20), action, charge).catch((error: unknown) => {
+      const done = await decideWhy(store, text(body.id, 20), action, Math.floor(Date.now() / 1000), charge).catch((error: unknown) => {
         if (error instanceof ShareCapError) return error;
         throw error;
       });
       if (done instanceof ShareCapError) return fail(`share_${done.problem}`, 409);
-      return done ? Response.json({ ok: true }) : fail("unknown");
+      // A dated share still in force is not ended by the store alone (630 [HN6](39)): the studio says what to do instead.
+      if (!done.ok && done.reason === "term") return fail("share_term_held");
+      return done.ok ? Response.json({ ok: true }) : fail("unknown");
     }
     if (action === "payout") {
       // In the store's currency, which is what the payout is written down in.
@@ -296,7 +299,10 @@ export async function POST(request: NextRequest) {
       // A partner the creator brings from outside: they need no account here,
       // only an address that can receive PayPal. Checked against the same cap
       // as any other share, before the email goes out.
-      const share = parsePartnerShare({ percent: body.percent, products: body.products });
+      // An end date, when the creator chose one (630 [HN6](39)); empty is until revoked.
+      const end = readTermEnd(body.ends, Math.floor(Date.now() / 1000));
+      if (!end.ok) return fail("share_ends");
+      const share = parsePartnerShare({ percent: body.percent, products: body.products, until: end.until ?? undefined });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
       // Checked again, under the partner lock, when the invitation is accepted.
       const problem = await partnerShareProblem(store, share, null, charge);
@@ -318,27 +324,26 @@ export async function POST(request: NextRequest) {
       return fail(sent === "email" ? "invite_email" : sent);
     }
     if (action === "share") {
+      // A partner's share changes only under lib/partner-terms-rules.ts (630 [HN6](39), rewritten on the partner
+      // lock): a new one starts at once, ending one that runs until revoked applies at once, anything else waits for
+      // the partner's yes on their own page. Nothing already earned is touched either way. Every share asked for is
+      // checked against the cap first, under the program's partner lock (lib/affiliates.ts proposePartnerShare), and
+      // again at the partner's yes. Awaited here, so a busy lock or an unknown read reaches the catch below (503).
       const id = text(body.id, 20);
       const affiliate = await readAffiliate(store, id);
       if (!affiliate) return fail("unknown");
-      // Clearing it: nothing already earned is touched.
+      const now = Math.floor(Date.now() / 1000);
       if (body.share === null || body.percent === "" || body.percent === null) {
-        return (await setPartnerShare(store, id, null)) ? Response.json({ ok: true }) : fail("unknown");
+        const ended = await proposePartnerShare(store, id, null, now, charge);
+        return ended.ok ? Response.json({ ok: true, state: ended.state }) : fail("unknown");
       }
-      const share = parsePartnerShare({ percent: body.percent, products: body.products });
+      const end = readTermEnd(body.ends, now);
+      if (!end.ok) return fail("share_ends");
+      const share = parsePartnerShare({ percent: body.percent, products: body.products, until: end.until ?? undefined });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
-
-      // The cap counts everything promised on each of these products at once:
-      // the other partners' shares and the affiliate commission, which rides
-      // on the same sale (lib/partner-share.ts). Checked and written under the
-      // program's partner lock, the same one an accepted partnership takes.
-      // Awaited here, so a busy lock or an unknown read reaches the catch below (503), not the framework.
-      return await withPartnerLock(store, async (held) => {
-        const problem = await partnerShareProblem(store, share, id, charge);
-        if (problem) return fail(`share_${problem}`);
-        if (!(await holdLock(held))) return fail("unavailable", 503);
-        return (await setPartnerShare(store, id, share)) ? Response.json({ ok: true }) : fail("unknown");
-      });
+      const saved = await proposePartnerShare(store, id, share, now, charge);
+      if (saved.ok) return Response.json({ ok: true, state: saved.state });
+      return fail(saved.reason === "cap" ? `share_${saved.problem}` : "unknown");
     }
     if (action === "code") {
       const promo = text(body.promo, 90);

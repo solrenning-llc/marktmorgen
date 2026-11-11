@@ -31,6 +31,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type PartnerShare, parsePartnerShare } from "@/lib/partner-share";
+import { lastDayWords } from "@/lib/partner-terms-rules";
 
 /** How long an unanswered offer stays in a studio before it lapses. */
 export const INVITE_SECONDS = 30 * 24 * 60 * 60;
@@ -149,5 +150,6 @@ export async function answerInvite(email: string, id: string): Promise<boolean> 
 /** The sentence the invited creator reads, before they decide. */
 export function offerWords(invite: PartnerInvite): string {
   const named = invite.titles.length ? invite.titles.join(", ") : `${invite.share.products.length} of their products`;
-  return `${invite.storeName} is offering you ${invite.share.percent}% of every sale of ${named} — on every sale, not only the ones you send them.`;
+  const runs = invite.share.until === undefined ? "It runs until either of you ends it." : `It runs through ${lastDayWords(invite.share.until)}.`;
+  return `${invite.storeName} is offering you ${invite.share.percent}% of every sale of ${named} — on every sale, not only the ones you send them. ${runs}`;
 }

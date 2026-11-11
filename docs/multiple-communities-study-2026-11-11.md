@@ -45,7 +45,7 @@ Os espaços com `only` ganhariam uma opção "private group" (nome provisório).
   - mexe em leituras que outros agentes estão alterando agora: `claude3/community-search-ceiling`, `claude5/cm1-locked-community` e os ramos `claude2/*community*`. Exige coordenação de reservas.
 - **Custo (MR):**
   - o diretório e a classificação filtrados leem, por página, a mesma confirmação de compra que `visibleSpaces` já faz, em cache por `config.v`;
-  - o pior caso é uma resposta da Stripe por espaço fechado e por visitante, até 20, já contada hoje para a lista de espaços. Precisa de uma linha medida em `tests/plan-cost-registry.ts` antes do código.
+  - custo ainda não medido, pergunta aberta: `visibleSpaces` (`lib/community-access.ts`) responde só se *quem vê* pode ver cada espaço fechado. Um diretório, ranking ou chat que mostre apenas os membros de um espaço precisa dessa resposta para *cada membro listado* (uma página do diretório × espaços fechados), ou de um índice de membros por espaço gravado na entrada. A unidade 2 mede esse custo e põe a linha em `tests/plan-cost-registry.ts` antes do código.
 
 ### (B) Várias comunidades de verdade por loja
 
@@ -55,7 +55,7 @@ A loja passaria a guardar uma lista: `communities: CommunityRef[]`, com um ender
   - marcas, nomes e endereços separados;
   - tudo separado de fato.
 - **Contra (medido):**
-  - 49 arquivos de `lib/` e `app/` leem `store.community` ou `community.id` (110 ocorrências). Cada um precisaria escolher qual comunidade;
+  - 44 arquivos de `lib/` e `app/` leem a comunidade da loja, em 95 linhas, contados neste ramo com `git grep -cE 'store\??\.community|community\??\.id' -- lib app` (o `-c` conta linhas). Cada um precisaria escolher qual comunidade;
   - a exclusão de pessoa, a cópia de dados, o fechamento da loja e os registros `tests/store-data-registry.ts` e `tests/plan-cost-registry.ts` teriam de percorrer N comunidades;
   - a mesma pessoa vira N registros de membro, um por comunidade: mais espaço na sala de dados e mais pontos de falha na exclusão (regra 28 da CX-123);
   - surge um limite novo por plano: quantas comunidades. Acrescentar um limite não corta nenhum limite visível, mas o número e o custo de cada comunidade a mais precisam entrar no pior caso de cada plano (MR) antes de qualquer venda.
@@ -63,7 +63,7 @@ A loja passaria a guardar uma lista: `communities: CommunityRef[]`, com um ender
 
 ## 4. Recomendação
 
-1. **Fazer (A) primeiro, em unidades pequenas**, porque entrega ao criador a separação de públicos que (B) daria, sem duplicar perfis nem mexer em 49 arquivos.
+1. **Fazer (A) primeiro, em unidades pequenas**, porque entrega ao criador a separação de públicos que (B) daria, sem duplicar perfis nem mexer em 44 arquivos.
    - Unidade 1: regras puras, ou seja, quem um "private group" deixa ver no diretório, na classificação e no chat, com teste que falha antes.
    - Unidade 2: o diretório filtrado, com a linha de custo.
    - Unidade 3: a classificação.

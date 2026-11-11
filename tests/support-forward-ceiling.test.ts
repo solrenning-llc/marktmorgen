@@ -384,6 +384,18 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   is("a paying creator's message after 1,000 made-up announcements is still read and sent on", [await announce("paying@studio.example"), mailReads - readsBeforeCreator], ["sent", 1]);
   is("the made-up ones read at Resend stay within the day's announcements less the creators' reserve", readsBeforeCreator <= ANNOUNCED - (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? ANNOUNCED), true);
 
+  // Claude 1's review of #3481 at 35957521 (6787676349, MEDIUM): the reserve was granted on owning any store, free ones
+  // included, and spent before any count of the sender, so one free store's owner writing 200 times from its own real
+  // address used it up, and 800 made-up senders the public share: a paying creator's mail was then held unread.
+  part("one free store's owner cannot use up the creators' reserve: each store owner's address takes a few of it a day");
+  fresh();
+  makeCreator("free@self.example", false);
+  makeCreator("paying@studio.example");
+  for (let i = 0; i < (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200); i++) await announce("free@self.example");
+  for (let i = 0; i < ANNOUNCED - (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200); i++) await announce(`junk${i}@made${i}.example`);
+  const readsBeforePaying = mailReads;
+  is("a paying creator's message is still read and sent on", [await announce("paying@studio.example"), mailReads - readsBeforePaying], ["sent", 1]);
+
   part("an announcement with no From is counted with the public, never in the reserve");
   fresh();
   makeCreator("paying@studio.example");

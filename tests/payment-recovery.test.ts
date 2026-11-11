@@ -22,6 +22,7 @@
 import { cardLapsesBefore, cardNoticeDue, parseDunning, reminderDue } from "@/lib/dunning-rules";
 import { cardNoticeEmail, failedPaymentEmail, recoverFailedPayments } from "@/lib/payment-recovery";
 import { cardGrant, cardView, finishCardUpdate, openCardUpdate } from "@/lib/card-update";
+import { membershipWords } from "@/lib/buyer-words/membership";
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -45,6 +46,11 @@ const state = {
   subs: new Map<string, Record<string, unknown>>(),
   invoices: [] as Record<string, unknown>[],
   payDeclines: false,
+  /** When set, what Stripe answers the POST that sets the card (else the membership with the card asked for). */
+  setReply: undefined as unknown,
+  /** When set, what Stripe answers the invoice's pay (else the invoice paid); `payStatus` its HTTP status. */
+  payReply: undefined as unknown,
+  payStatus: 200,
 };
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -63,7 +69,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
   if (sub && method === "GET") return state.subs.has(sub[1]) ? answer(state.subs.get(sub[1])) : answer({ error: { message: "no such" } }, 404);
-  if (sub && method === "POST") return answer({ id: sub[1] });
+  if (sub && method === "POST") {
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    return state.setReply !== undefined ? answer(state.setReply) : answer({ id: sub[1], default_payment_method: body.get("default_payment_method") });
+  }
   if (path === "/checkout/sessions" && method === "POST") {
     const id = `cs_test_${"c".repeat(20)}${state.sessions.size}`;
     state.sessions.set(id, { id, mode: "setup", status: "open", customer: "cus_Member000001", metadata: Object.fromEntries([...new URLSearchParams(String(init?.body))].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) });
@@ -72,7 +81,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const session = path.match(/^\/checkout\/sessions\/(cs_test_\w+)$/);
   if (session) return answer(state.sessions.has(session[1]) ? state.sessions.get(session[1]) : {});
   const pay = path.match(/^\/invoices\/(in_\w+)\/pay$/);
-  if (pay) return state.payDeclines ? answer({ error: { code: "card_declined", message: "Your card was declined." } }, 402) : answer({ id: pay[1], status: "paid" });
+  if (pay) return state.payDeclines ? answer({ error: { code: "card_declined", message: "Your card was declined." } }, 402) : state.payReply !== undefined ? answer(state.payReply, state.payStatus) : answer({ id: pay[1], status: "paid" });
   if (path === "/invoices" && method === "GET") return answer({ object: "list", data: state.invoices, has_more: false });
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;
@@ -268,6 +277,45 @@ async function main(): Promise<void> {
     is(`${label}: no card is set from it`, [await finishCardUpdate(store, sessionId), touched(before)], ["error", []]);
   }
   state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
+
+  part("Rules 24 and 30: what Stripe answers the card's setting and the payment decides only when it is read");
+  // The card is set, but Stripe's answer to it is not its own membership with that card: the page never says it is
+  // set, nothing is paid with it, and the page stays open for the daily job to finish it.
+  const owedHere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900 } };
+  state.subs.set("sub_Running000001", owedHere);
+  for (const [label, reply] of [
+    ["another membership's id", { id: "sub_Another0000001", default_payment_method: "pm_NewCard0000001" }],
+    ["no id", { default_payment_method: "pm_NewCard0000001" }],
+    ["another card", { id: "sub_Running000001", default_payment_method: "pm_OldCard0000001" }],
+    ["no card", { id: "sub_Running000001" }],
+    ["a null body", null],
+  ] as const) {
+    state.setReply = reply;
+    const before = posts.length;
+    is(`the card's setting answered with ${label}: not said set, nothing paid`, [await finishCardUpdate(store, sessionId), touched(before)], ["unsure", ["/subscriptions/sub_Running000001"]]);
+  }
+  state.setReply = undefined;
+  // The payment: "paid" only from the invoice's own reply saying paid.
+  for (const [label, reply] of [
+    ["another invoice's id", { id: "in_OtherOwed00001", status: "paid" }],
+    ["no id", { status: "paid" }],
+    ["still open", { id: "in_Owed00000000001", status: "open" }],
+    ["no status", { id: "in_Owed00000000001" }],
+    ["a null body", null],
+  ] as const) {
+    state.payReply = reply;
+    is(`the payment answered with ${label}: the card is set, the payment is not said made`, await finishCardUpdate(store, sessionId), "updated");
+  }
+  // A request Stripe refuses (400: the invoice no longer payable, a bad request) is not the card declined.
+  state.payReply = { error: { type: "invalid_request_error", message: "Invoice is already paid" } };
+  state.payStatus = 400;
+  is("a refused request is not told as a declined card", await finishCardUpdate(store, sessionId), "updated");
+  state.payReply = undefined;
+  state.payStatus = 200;
+  is("control: its own invoice paid is paid", await finishCardUpdate(store, sessionId), "paid");
+  state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
+  // Unsure is never a notice on a guess: the daily job neither says the card is set nor asks for a new one.
+  is("the page has words for it", typeof membershipWords("en").cardNotices.unsure?.title, "string");
 
   part("What came back");
   const nowS = Math.floor(Date.now() / 1000);

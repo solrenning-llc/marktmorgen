@@ -27,6 +27,12 @@ export function agreementLink(store: Store, a: Pick<Agreement, "id">): string {
 
 const NOT_SENT = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";
 
+/** What an email wrote on the record did not land, or is not known to have landed: logged, and the email's own result stands. */
+const notWritten = (error: unknown): null => {
+  console.error("writing down an agreement email failed", error);
+  return null;
+};
+
 /**
  * Emails the link to the person it is for: the first version, a new version,
  * or the same version again by hand. From the store's name, with replies
@@ -64,8 +70,11 @@ export async function sendAgreementEmail(store: Store, a: Agreement, version: Ag
     idempotencyKey: `nimbus-agree:${a.id}:${a.sent.length}`,
   }).catch(() => false);
   // Written onto the record as it is now: a signature or a version given
-  // while the email was on its way stays (MM-SA-03).
-  const next = await changeAgreement(store, a.id, (current) => (sent ? { ...current, sent: [...current.sent, now], failed: "" } : { ...current, failed: NOT_SENT }), now);
+  // while the email was on its way stays (MM-SA-03). An email that went is
+  // still said as sent when the record cannot be read or written just now
+  // (CX-123 rule 24): saying "could not be done" would invite a second
+  // agreement, and a second email, to the same person.
+  const next = await changeAgreement(store, a.id, (current) => (sent ? { ...current, sent: [...current.sent, now], failed: "" } : { ...current, failed: NOT_SENT }), now).catch(notWritten);
   return { sent, agreement: next ?? a };
 }
 
@@ -203,6 +212,6 @@ export async function resendSignedCopy(store: Store, id: string, now = Date.now(
     attachments: [{ filename: `signed-${a.id.slice(0, 8)}-v${version.n}.html`, content: Buffer.from(html, "utf8").toString("base64") }],
     idempotencyKey: `nimbus-agree:${a.id}:${a.sent.length}`,
   }).catch(() => false);
-  await changeAgreement(store, a.id, (current) => (sent ? { ...current, sent: [...current.sent, now], copies: current.copies + 1, failed: "" } : { ...current, failed: NOT_SENT }), now);
+  await changeAgreement(store, a.id, (current) => (sent ? { ...current, sent: [...current.sent, now], copies: current.copies + 1, failed: "" } : { ...current, failed: NOT_SENT }), now).catch(notWritten);
   return { ok: true, sent };
 }

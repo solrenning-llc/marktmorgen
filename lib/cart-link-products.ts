@@ -21,7 +21,7 @@
  */
 import { KIND, MAX_PRODUCT_BYTES, STORE_PAGE_SIZE, listingSizes, readListingsMeasured } from "@/lib/catalog";
 import { cartable } from "@/lib/cart-rules";
-import { soonState } from "@/lib/preorders";
+import { knownNotSoon, soonState } from "@/lib/preorders";
 import { redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
@@ -104,7 +104,8 @@ export async function cartLinkProducts(store: Store): Promise<{ id: string; titl
     // lists nothing.
     const due = toRead.length ? cartLinkUnits(2 * toRead.length, read) - taken : 0;
     if (due > 0 && !(await forceAllowance(counted, "studio", due))) return [];
-    return listed.filter((p) => cartable(p) && !coming.soon.has(p.id)).map((p) => ({ id: p.id, title: p.title }));
+    // Only a product known not to be coming soon: with the reading in part, one outside it is unknown and left out.
+    return listed.filter((p) => cartable(p) && knownNotSoon(coming, p.id)).map((p) => ({ id: p.id, title: p.title }));
   } catch {
     return [];
   }

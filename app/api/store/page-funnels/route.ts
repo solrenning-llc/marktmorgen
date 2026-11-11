@@ -75,11 +75,12 @@ export async function POST(request: NextRequest) {
       const chosen = body.products && typeof body.products === "object" ? (body.products as Record<string, unknown>) : {};
       const free = new Set(idsOfKind(store, "free"));
       const calls = new Set(idsOfKind(store, "call"));
+      const bundles = new Set(idsOfKind(store, "bundle"));
       const known = new Set(store.catalog.items.map((item) => item.id));
       const picked: Record<string, string> = {};
       for (const slot of choicesOf(type)) {
         const id = text(chosen[slot.key], 40);
-        const problem = slotProblem(slot, id && known.has(id) ? { free: free.has(id), call: calls.has(id) } : null);
+        const problem = slotProblem(slot, id && known.has(id) ? { free: free.has(id), call: calls.has(id), bundle: bundles.has(id) } : null);
         if (problem) return Response.json({ ok: false, error: `slot_${problem}`, slot: slot.key }, { status: 400 });
         if (Object.values(picked).includes(id)) return Response.json({ ok: false, error: "slot_twice", slot: slot.key }, { status: 400 });
         picked[slot.key] = id;

@@ -59,6 +59,20 @@ part("A. Figures and deals in words are held to the facts, and a figure to what 
   is(`"12 total" is a price, not the facts' 12 lessons`, heldToFacts("The price is 12 total.", course), false);
   is("a count beside a price, in another store language than the facts", heldToFacts("Es kostet 49 Dollar und hat 12 Lektionen.", course), true);
   is("but never a count the facts hold only as days", heldToFacts("Es kostet 49 Dollar und hat 14 Lektionen.", course), false);
+  // Claude 4's focal (6798863884) and Claude 1's review (6799181835) at 94a7cc36: "total" before the number, a bare
+  // number after a word of paying the vocabulary did not list, a currency in slang, and Spanish and Italian forms of
+  // "pay" (Claude 3's LOW) were still shown, held by the 14 days or the 12 lessons. A bare number is held only by a
+  // fact that is a count; a day, a price or a percent never holds it.
+  for (const said of [
+    "The total is 14.", "Total: 14.", "The total is 12.", "The total comes to 12.", "It costs 12 quid.", "It costs 12 quid in all.",
+    "Pagas 14.", "Paghi 14.", "You will be charged 14.", "Your card is charged 14 at checkout.", "You will be billed 14.", "It's 14.",
+    "That will be 14.", "It comes to 14.", "Tuition is 14.", "Enrollment is 14.", "Admission is 14.", "Checkout shows 14.", "It runs 14.",
+  ]) {
+    is(`a price the store never published is held: "${said}"`, heldToFacts(said, course), false);
+  }
+  for (const said of ["It has 12 lessons.", "The price is $49 and you get 12 lessons.", "Yes, you can ask for a refund within 14 days.", "The page shows 12 lessons."]) {
+    is(`what the store published still shows: "${said}"`, heldToFacts(said, course), true);
+  }
 }
 is("a price in words that is not the store's ($20 vs $27)", heldToFacts("It costs twenty dollars.", facts), false);
 is("a refund window in words that is not the store's (30 vs 14 days)", heldToFacts("You can get a refund within thirty days, no questions asked.", facts), false);

@@ -78,7 +78,7 @@ import { PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ENDED_INDEX, SETUP_STORAGE_BYTES, standingOf } from "@/lib/plan-standing";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
@@ -1182,8 +1182,10 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
   let from: string = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
   const out = finals;
   for (;;) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]);
-    const flat = Array.isArray(raw) ? raw : [];
+    // Read exactly (rule 24): a page cut short or of another shape stops the walk with its cursor kept and the month
+    // not recorded, never an empty page that ended the walk as complete.
+    const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]), 1)?.[0]);
+    if (!flat || flat.length % 2 !== 0 || flat.length > PAGE * 2) throw new Error("ended closing page is unknown");
     const rows: { key: string; score: string }[] = [];
     for (let i = 0; i + 1 < flat.length; i += 2) rows.push({ key: String(flat[i]), score: String(flat[i + 1]) });
     for (const row of rows) {

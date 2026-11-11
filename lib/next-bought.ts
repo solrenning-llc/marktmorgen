@@ -25,6 +25,7 @@
  *   nl:next:<statsId>   JSON { at, starts, next }
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
 
 /** Below this many buyers, a sequence is not said. */
@@ -140,9 +141,8 @@ export function parsePaths(raw: unknown): BuyerPaths | null {
 /** How many bytes what buyers bought next holds as kept, 0 when none, looked up before it is read by a reading that pays for its size (lib/mcp-tools.ts, productsTool); null when it did not come back. */
 export async function pathsBytes(statsId: string | null): Promise<number | null> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["STRLEN", nextKey(statsId)]]);
-  const bytes = Number(n);
-  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  // STRLEN answers a whole number from 0 up (0 for no key); anything else is unknown, never 0 bytes (rule 24).
+  return countOf(repliesFor(await redisPipeline([["STRLEN", nextKey(statsId)]]), 1)?.[0]);
 }
 
 export async function readPaths(statsId: string | null): Promise<BuyerPaths | null> {

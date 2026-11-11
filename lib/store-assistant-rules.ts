@@ -822,7 +822,8 @@ function figureKind(folded: string, start: number, end: number): string {
   const priced = SENTENCE_MONEY.test(sentenceOf(folded, start, end)) || PRICE_BEFORE.test(folded.slice(Math.max(0, start - 8), start));
   // In a sentence about a price, a word that makes the figure the price ("14 total", "14 flat") keeps it one; any other
   // word it counts makes it a count ("count:lessons"), held only by a fact that is a count of the same value, never by
-  // a fact of another unit (Claude 3's focal on #3484: "The price is 14 total." was shown on "Refunds within 14 days").
+  // a fact of another unit (Claude 3's focal on #3484: "The price is 14 total." was shown on a fact that refunds come
+  // within that many days).
   // The word itself is not matched: the facts may be in one store language and the reply in another ("10 lessons",
   // "zehn Lektionen").
   if (priced && next && PRICE_TAIL.has(next)) return "money:?";

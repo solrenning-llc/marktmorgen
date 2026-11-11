@@ -54,8 +54,19 @@ const render = (numbers: Numbers) => renderToStaticMarkup(createElement(Membersh
 /** The cells of the row whose header is this price, as text. */
 const rowOf = (html: string, price: string) => {
   const row = html.split("<tr").find((tr) => tr.includes(`<th scope="row"`) && tr.includes(`>${price}<`));
-  return row ? [...row.matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/g)].map((m) => m[1].replace(/<[^>]*>/g, "").replace(/[<>]/g, "")) : null;
+  return row ? [...row.matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/g)].map((m) => textOf(m[1])) : null;
 };
+/** A cell's text: every character outside a tag, read one by one, so no part of a tag can be left (CodeQL 210). */
+function textOf(cell: string): string {
+  let out = "";
+  let inTag = false;
+  for (const ch of cell) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out;
+}
 
 part("Each price of a membership, with how many members are on it");
 {

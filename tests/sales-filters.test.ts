@@ -25,7 +25,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
 type Saved = { id: string; name: string; query: string };
-type Reply = { ok?: boolean; error?: string; message?: string; filters?: Saved[]; most?: number; filter?: Saved };
+type Reply = { ok?: boolean; error?: string; message?: string; filters?: Saved[]; most?: number; filter?: Saved; removed?: boolean };
 
 async function threw(run: () => Promise<unknown>): Promise<string> {
   try {
@@ -185,15 +185,21 @@ async function main(): Promise<void> {
   is("and nothing an editor sent was kept", (await readSavedFilters(statsId)).map((f) => f.name), ["Calls"]);
 
   part("Could not be read: said so, never none, never written over");
-  await redis.pipeline([["DEL", key], ["HSET", key, "0123456789ab", "{"]]);
+  await redis.pipeline([["DEL", key], ["HSET", key, "0123456789ab", "{"], ["HSET", key, "fedcba987654", "{"]]);
   const unread = await list();
   is("503 with plain words, no list", [unread.status, unread.body.error, unread.body.filters, unread.body.message], [503, "unavailable", undefined, SAVED_FILTER_REFUSALS.unavailable]);
   const blind = await post({ action: "save", name: "Products", query: "kind=products" });
   is("a save then refused, 503", [blind.status, blind.body.error], [503, "unavailable"]);
   const removedUnreadable = await post({ action: "remove", id: "0123456789ab" });
-  is("the damaged entry can be deleted by id without parsing it first", [removedUnreadable.status, removedUnreadable.body.filters, (await redis.pipeline([["HGETALL", key]]))[0]], [200, [], []]);
+  is(
+    "a damaged entry is deleted exactly even while another damaged entry keeps the list unreadable",
+    [removedUnreadable.status, removedUnreadable.body.removed, removedUnreadable.body.filters, (await redis.pipeline([["HGETALL", key]]))[0]],
+    [200, true, undefined, ["fedcba987654", "{"]],
+  );
+  const removedLast = await post({ action: "remove", id: "fedcba987654" });
+  is("deleting the last damaged entry returns the readable empty list", [removedLast.status, removedLast.body.removed, removedLast.body.filters], [200, true, []]);
   const absentAgain = await post({ action: "remove", id: "0123456789ab" });
-  is("a second removal is still an exact successful request", [absentAgain.status, absentAgain.body.filters], [200, []]);
+  is("a second removal is still an exact successful request", [absentAgain.status, absentAgain.body.removed, absentAgain.body.filters], [200, false, []]);
 
   done();
 }

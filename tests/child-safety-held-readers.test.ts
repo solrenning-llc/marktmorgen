@@ -6,10 +6,12 @@
  * The MCP server hands an AI client what it reads, so its product tools give
  * nothing of a held product, for anyone (as the studio's AI writing help).
  * The studio's course and podcast pages are the owner's only, as the course
- * route already is. And when taking the product off the store did not go
- * through after its mark was written, its public page and the store's front
- * page and search still show it to nobody. A mark that cannot be read refuses
- * the same way. Neutral, synthetic products; nothing here names or describes
+ * route already is. When taking the product off the store did not go through
+ * after its mark was written, its own page shows it to nobody at once, and the
+ * hourly job keeps taking it off until it is confirmed off (a reply that
+ * cannot be read is "not off"), so the store's lists drop it too, at no cost
+ * per visit (coordinator, 11/11/2026). A mark that cannot be read refuses the
+ * same way. Neutral, synthetic products; nothing here names or describes
  * reported material.
  */
 import { NextRequest } from "next/server";
@@ -18,10 +20,11 @@ import StudioCoursePage from "@/app/studio/course/[product]/page";
 import StudioPodcastPage from "@/app/studio/podcast/[product]/page";
 import ProductPage from "@/app/[handle]/p/[product]/page";
 import { productTextTool, readCourseTool, readLessonTool, readPageReadingTool, readPageTestTool, readPageVersionsTool, readSalesPageTool } from "@/lib/mcp-tools";
-import { readPage, searchStore } from "@/lib/catalog";
+import { readListing, readPage, searchStore } from "@/lib/catalog";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { saveCourse, type Course } from "@/lib/course";
 import { putMember } from "@/lib/team";
+import * as childSafety from "@/lib/child-safety";
 import { holdReported } from "@/lib/child-safety";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setProductHidden, setProductPodcast, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { answering } from "./security/next-headers";
@@ -144,22 +147,51 @@ async function main(): Promise<void> {
   is("someone on the team is sent back to the studio", [await studioCourse("editor"), await studioPodcast("editor")], [`redirect /studio?store=${store.sid}&team=held`, `redirect /studio?store=${store.sid}&team=held`]);
   is("the owner is not sent back for it", [(await studioCourse("owner")).includes("team=held"), (await studioPodcast("owner")).includes("team=held")], [false, false]);
 
-  part("A hold whose taking off the store did not go through: its public page and the store's lists show it to nobody");
-  for (const id of [courseId, showId, pageId]) if (!(await setProductHidden(OWNER, id, false)).ok) throw new Error("not shown again");
-  is("its public page sends a visitor to the store", await productPage(pageId), `redirect /@${HANDLE}`);
-  is("the store's front page leaves it out", (await front()).some((id) => [courseId, showId, pageId].includes(id)), false);
-  is("so does the store's search", (await found()).some((id) => [courseId, showId, pageId].includes(id)), false);
+  part("A hold whose taking off the store did not go through: its own page at once, then the hourly job takes it off");
+  // The store's lock answers off its shape, so taking a product off cannot be written (lib/store.ts withStore).
+  const real = redis.pipeline.bind(redis);
+  const lockBusy = () => {
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.some((command) => command[0] === "SET" && String(command[1]).startsWith("nl:store:lock:")) ? commands.map(() => "BUSY") : real(commands)) as typeof redis.pipeline;
+  };
+  const queued = async () => ((await real([["ZRANGEBYSCORE", "nl:csa:hide", "-inf", "+inf"]]))[0] as string[]).length;
+  const run = (at = Date.now()) => (childSafety as unknown as { hideHeldProducts?: (now: number) => Promise<unknown> }).hideHeldProducts?.(at);
+  is("a hold whose taking off went through leaves nothing waiting", await queued(), 0);
+  const lateMade = await addProduct(OWNER, "Held Product late", "", "19", null);
+  if (!lateMade.ok) throw new Error("no late product");
+  const lateId = lateMade.product.id;
+  // A new day for the automatic step's cap, which the three holds above reached.
+  redis.run(["DEL", ...redis.keys().filter((key) => key.startsWith("nl:csa:held:"))]);
+  lockBusy();
+  const outcome0 = await holdReported({ kind: "child_safety", url: `${BASE}/@${HANDLE}/p/${lateId}` }, await now());
+  redis.pipeline = real as typeof redis.pipeline;
+  is("taking it off did not go through: the owner is told it could not be confirmed", outcome0, "unknown");
+  is("it is still on the store", (await readListing(await now(), lateId))?.hidden, false);
+  is("its public page sends a visitor to the store at once", await productPage(lateId), `redirect /@${HANDLE}`);
+  is("and it waits to be taken off", await queued(), 1);
+  lockBusy();
+  for (let n = 0; n < 3; n++) await run(Date.now() + (n + 1) * 2 * 3_600_000);
+  redis.pipeline = real as typeof redis.pipeline;
+  is("while taking it off keeps failing, it stays off nowhere and waiting: never dropped", [(await readListing(await now(), lateId))?.hidden, await queued()], [false, 1]);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands.some((command) => command.slice(1).some((arg) => String(arg).startsWith("nl:csa:keep:"))) ? commands.map(() => 42) : real(commands)) as typeof redis.pipeline;
+  await run(Date.now() + 8 * 3_600_000);
+  redis.pipeline = real as typeof redis.pipeline;
+  is("a mark that cannot be read is not a reason to drop it", await queued(), 1);
+  await run(Date.now() + 10 * 3_600_000);
+  is("the next run that can write takes it off", (await readListing(await now(), lateId))?.hidden, true);
+  is("and, confirmed off, it waits no more", await queued(), 0);
+  is("the store's front page no longer lists it", (await front()).includes(lateId), false);
+  is("nor does its search", (await found()).includes(lateId), false);
+  is("nor another product's page", await productPage(freeId), "drawn without it");
   is("a product that is not held is still listed", (await front()).includes(freeId), true);
-  is("and its page shows none of the held ones among the store's other products", await productPage(freeId), "drawn without it");
 
   part("A mark that cannot be read refuses, never shows the content");
-  const real = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) =>
     commands.some((command) => command.slice(1).some((arg) => String(arg).startsWith("nl:csa:keep:"))) ? commands.map(() => 42) : real(commands)) as typeof redis.pipeline;
   is("the MCP lesson: try again later", (await mcp(freeId)).lesson, 503);
   is("the team's studio course page sends them back, saying it could not be opened just now", await studioCourse("editor"), `redirect /studio?store=${store.sid}&team=unchecked`);
   is("the public page of a product that is not held either", await productPage(freeId), `redirect /@${HANDLE}`);
-  is("the front page shows none of the products whose mark it could not read", (await front()).length, 0);
   redis.pipeline = real as typeof redis.pipeline;
 
   done();

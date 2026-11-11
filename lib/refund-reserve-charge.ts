@@ -27,7 +27,18 @@
  *   - a refund already made but `pending` or `requires_action` is still
  *     needed in the balance (support.stripe.com/questions/understanding-
  *     refund-statuses, read 31/10/2026); `succeeded`, `failed` and `canceled`
- *     are not; any other status, or a list not read whole, is unknown;
+ *     are not; any other status, a list not read whole, or one whose
+ *     succeeded, pending and requires_action refunds do not add up to the
+ *     charge's `amount_refunded`, is unknown;
+ *   - where the policy has no answer yet for a charge it can read (a switch
+ *     to the yearly plan, a payment partly made by credit, a partial
+ *     dispute, a billing reason, fee, monthly price or currency it does not
+ *     price), the whole payment left is counted: no refund gives back more
+ *     than was paid (lib/plan-refund-rules.ts), so this is the ceiling,
+ *     never zero, and the reserve stays known. Leaving it unknown would stop
+ *     every payout and sale for as long as the charge is counted, more than
+ *     a year for a yearly switch (Claude 3 on #3685). Only what cannot be
+ *     read at all stays unknown;
  *   - a failed charge took nothing and is left out (null); a pending one, or
  *     a status this code does not know, is unknown, never zero.
  * An unknown charge makes the whole reserve unknown (refundReserve), so no
@@ -76,11 +87,17 @@ export function reserveChargeOf(read: ReserveRead, nowSeconds: number): ReserveC
   };
 
   let pendingRefundCents = 0;
+  // Stripe's amount_refunded counts succeeded, pending and requires_action refunds; the list must say the same.
+  let listedCents = 0;
   let readable = read.status === "succeeded" && c.succeeded === true && read.refunds !== null;
   for (const refund of read.refunds ?? []) {
     if (!refund || !whole(refund.amount) || (!KEPT_REFUND.has(refund.status) && !DONE_REFUND.has(refund.status))) readable = false;
-    else if (KEPT_REFUND.has(refund.status)) pendingRefundCents += refund.amount;
+    else {
+      if (KEPT_REFUND.has(refund.status)) pendingRefundCents += refund.amount;
+      if (KEPT_REFUND.has(refund.status) || refund.status === "succeeded") listedCents += refund.amount;
+    }
   }
+  if (readable && (!whole(c.refundedCents) || listedCents !== c.refundedCents)) readable = false;
   if (!whole(read.periodStartSeconds) || !whole(read.periodEndSeconds) || read.periodEndSeconds < read.periodStartSeconds) readable = false;
   if (!readable) return { ...base, refund: UNKNOWN, pendingRefundCents: whole(pendingRefundCents) ? pendingRefundCents : 0 };
 
@@ -99,6 +116,11 @@ export function reserveChargeOf(read: ReserveRead, nowSeconds: number): ReserveC
       nowSeconds,
       charge: c,
     });
+  }
+  // The policy cannot price it yet, but the charge was read: count its ceiling, the whole payment left.
+  if (refund.kind === "unknown" && refund.reason !== "unreadable") {
+    const left = whole(c.amountCents) && whole(c.refundedCents) && c.refundedCents <= c.amountCents ? c.amountCents - c.refundedCents : null;
+    refund = left === null ? UNKNOWN : left > 0 ? { kind: "guarantee", cents: left } : { kind: "none", reason: "already_refunded" };
   }
   return { ...base, refund, pendingRefundCents };
 }

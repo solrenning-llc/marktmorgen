@@ -64,7 +64,7 @@ part("A plan payment inside the guarantee's days");
   is("its period end is kept for the dispute window", one?.periodEndSeconds, NOW + 25 * DAY);
   const renewal = reserveChargeOf(read({ charge: charge({ billingReason: "subscription_cycle" }) }), NOW);
   is("a renewal inside the days is counted at the whole payment too (the guarantee covers it when the first was within 30 days)", renewal?.refund, { kind: "guarantee", cents: 6_900 });
-  const part1 = reserveChargeOf(read({ charge: charge({ refundedCents: 2_000 }) }), NOW);
+  const part1 = reserveChargeOf(read({ charge: charge({ refundedCents: 2_000 }), refunds: [{ status: "succeeded", amount: 2_000 }] }), NOW);
   is("less what was already refunded", part1?.refund, { kind: "guarantee", cents: 4_900 });
   const lastDay = reserveChargeOf(read({ charge: charge({ paidAtSeconds: NOW - REFUND_DAYS * DAY }) }), NOW);
   is("on the last day it is still the guarantee", lastDay?.refund.kind, "guarantee");
@@ -153,7 +153,7 @@ part("What the policy cannot price yet is counted at its ceiling, never left unk
     read({ cycle: "year", monthlyCents: 6_900, periodStartSeconds: later, periodEndSeconds: later + 365 * DAY, refunds: [{ status: "succeeded", amount: 10_000 }], charge: charge({ billingReason: "subscription_update", amountCents: 60_000, invoiceTotalCents: 60_000, refundedCents: 10_000, paidAtSeconds: later }) }),
     NOW,
   );
-  is("less what was already refunded", partRefunded?.refund, { kind: "guarantee", cents: 50_000 });
+  is("a yearly switch less what was already refunded", partRefunded?.refund, { kind: "guarantee", cents: 50_000 });
   const reserve = refundReserve([switchYear!, split!], NOW);
   is("and the reserve stays known, holding both", [reserve.kind, reserve.kind === "known" ? reserve.byCurrency.usd.refundCents : -1], ["known", 120_000]);
   is("what is unreadable stays unknown", reserveChargeOf(read({ charge: charge({ amountCents: 1.5 }) }), NOW)?.refund.kind, "unknown");

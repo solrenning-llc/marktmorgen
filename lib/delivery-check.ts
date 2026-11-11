@@ -99,6 +99,10 @@ export function addressReader(fetcher: Fetcher = safeFetch): DeliveryReaders["ad
       const answer = await fetcher(url, { method: "GET", maxBytes: ADDRESS_READ_BYTES, timeoutMs: ADDRESS_TIMEOUT_MS, maxRedirects: ADDRESS_REDIRECTS });
       return Number.isSafeInteger(answer?.status) ? { status: answer.status } : { problem: "network" };
     } catch (error) {
+      // A page too long to read whole has still answered with its status, and that status is what counts: a long
+      // 404 is gone, not fine (Codex C2 on #3623). A 3xx was not followed, so it says nothing of where it lands; and
+      // a status that was lost stays unknown, never fine.
+      if (error instanceof SafeFetchError && error.problem === "too_big" && Number.isSafeInteger(error.status) && (error.status! < 300 || error.status! >= 400)) return { status: error.status! };
       if (error instanceof SafeFetchError) return { problem: error.problem };
       return { problem: "network" };
     }

@@ -130,9 +130,10 @@ export type AddressAnswer = { status: number } | { problem: SafeFetchProblem };
 export function addressVerdict(what: string, where: string, answer: AddressAnswer): DeliveryVerdict {
   if ("problem" in answer) {
     switch (answer.problem) {
-      // A long answer is an answer: the page is there.
+      // Too long to read whole, and its status not known (lib/delivery-check.ts passes it on when it is): an error
+      // page can be long too, so this is never called fine (Codex C2 on #3623).
       case "too_big":
-        return { state: "ok", found: `${what} answers.` };
+        return { state: "not-checked", found: `${what} answered with more than we read, and we could not tell whether it opens. Open it yourself to check.` };
       case "scheme":
         return { state: "problem", found: `${what}, ${where}, is not a secure web address (https), so buyers' browsers may warn about it or not open it.`, fix: "Change it to the https address of the page." };
       case "address":
@@ -186,7 +187,7 @@ export function verdictFor(target: DeliveryTarget, read: { size: number } | "mis
 export const MAX_DELIVERY_ITEMS = 16;
 /** Each thing is given at most this long, whatever reads it; an answer later is "not checked", never fine. */
 export const DELIVERY_ITEM_MS = 20_000;
-/** An address is read this far and no further: a longer page has answered (too_big, above). */
+/** An address is read this far and no further: a longer page is judged by its status (too_big, above). */
 export const ADDRESS_READ_BYTES = 16_384;
 /** How long an address is waited on, redirects included. */
 export const ADDRESS_TIMEOUT_MS = 8_000;

@@ -109,6 +109,42 @@ async function main(): Promise<void> {
     is(`${label}: the next try, read exactly, forgets everything`, [await forgetServer(ROOM, SID), ...(await kept(ROOM, SID))], [2, ...NONE]);
   }
 
+  // Codex G on #3017 (CXG-20261109-B3-3017): a reading of the people that is not whole (a shorter list, from a bent
+  // reply or a person joining or leaving between the two reads) deleted every person while forgetting only the
+  // addresses it read, so a buyer's address stayed linked to their Discord id for good, and Disconnect said "done".
+  const CUT: [string[], string][] = [
+    [["HVALS"], "HVALS answers one row short"],
+    [["HKEYS"], "HKEYS answers one person short"],
+    [["HKEYS", "HVALS"], "both answer one short"],
+  ];
+  for (const [commands, label] of CUT) {
+    part(`A reading that is not whole: ${label}`);
+    redis.clear();
+    await seed(ROOM, SID);
+    const cut = new Set(commands);
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      const answers = await real(sent);
+      if (sent.length === 1 && cut.has(String(sent[0][0]))) {
+        cut.delete(String(sent[0][0]));
+        return answers.map((answer) => (Array.isArray(answer) ? answer.slice(0, -1) : answer)) as never;
+      }
+      return answers;
+    }) as typeof redis.pipeline;
+    let thrown: unknown = null;
+    try {
+      await forgetServer(ROOM, SID);
+    } catch (error) {
+      thrown = error;
+    }
+    unbend();
+    is(`${label}: not "forgotten": forgetServer throws UnknownReplyError`, thrown instanceof UnknownReplyError, true);
+    const [server, people, ana, ben] = await kept(ROOM, SID);
+    const members = new Set((await membersOf(ROOM)).map((m) => m.id));
+    is(`${label}: no buyer's address outlives their person`, [ana !== null && !members.has(ANA), ben !== null && !members.has(BEN)], [false, false]);
+    is(`${label}: the server is kept while anybody is`, server === null && (people as number) > 0, false);
+    is(`${label}: the next try, read exactly, forgets everything`, [await forgetServer(ROOM, SID).then(() => "done", () => "threw"), ...(await kept(ROOM, SID))], ["done", ...NONE]);
+  }
+
   part("The studio's \"Disconnect the server\" answers honestly");
   redis.clear();
   const OWNER = "discord-forget-server@example.com";

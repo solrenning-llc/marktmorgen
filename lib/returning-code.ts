@@ -37,11 +37,14 @@ import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
-import { type ReturningCode, readLinkToken, returningCodeFor } from "@/lib/returning-code-rules";
+import { type ReturningCode, otherDiscountForAll, readLinkToken, returningCodeFor } from "@/lib/returning-code-rules";
+import { activePwyw } from "@/lib/pay-what-you-want";
+import { fairOff } from "@/lib/fair-price";
+import { saleOff } from "@/lib/store-sale";
 import { returningLinkWords } from "@/lib/buyer-words/returning-link";
 import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
-import { type Store, saleHandles } from "@/lib/store";
+import { type Listing, type Store, saleHandles } from "@/lib/store";
 
 /** Public requests one check counts as: the same reads and Stripe calls as ownedHere for the next product after a purchase. */
 export const RETURNING_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
@@ -57,6 +60,10 @@ export const RETURNING_LINKS_PER_ADDRESS = 3;
 export const RETURNING_LINK_SECONDS = 1800;
 
 const linkKey = (token: string) => `nl:rcode:link:${createHash("sha256").update(`nimbus-rcode:${token}`).digest("hex").slice(0, 40)}`;
+/** The mark a use of a link holds while its checkout opens, so a second use at the same time is refused ("busy"). */
+const claimKey = (token: string) => `${linkKey(token)}:claim`;
+/** Long enough for the checkout to open at Stripe; a use that never ends lets the link work again after it. */
+export const RETURNING_CLAIM_SECONDS = 120;
 
 /** What a link holds: the store, the product, the code and the address it was sent to. Exactly this shape. */
 type LinkRecord = { s: string; p: string; c: string; e: string };
@@ -83,6 +90,19 @@ export async function requestReturningLink(input: { store: Store; productId: str
   const typed = input.email.trim().slice(0, MAX_EMAIL_LENGTH);
   later(() => sendReturningLink(store, input.productId, input.productTitle, code, email, input.origin, sendEmail, typed));
   return "sent";
+}
+
+/**
+ * Whether another discount wins this product's checkout for this buyer, so the
+ * checkout would refuse the code ("other", lib/store-checkout.ts): the same
+ * branches, in the same order. Answered before anything is read, held or sent.
+ * A come-back offer (a winback coupon) is only known at the checkout, which
+ * still refuses it there.
+ */
+export function otherDiscountWins(store: Store, product: Listing, country: string, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  if (activePwyw(product) || otherDiscountForAll(store, product, nowSeconds)) return true;
+  const saleNow = saleOff(store.sale, product, nowSeconds);
+  return !product.recurring && fairOff(store.fair, product, country) > saleNow;
 }
 
 /** Runs after the answer, so how long the answer takes tells nothing either; at once when there is no request. */
@@ -119,38 +139,63 @@ export async function sendReturningLink(store: Store, productId: string, product
 }
 
 /**
- * The link a buyer opened: its record is read, and spent (spendReturningLink)
- * only once the checkout it opens exists, so a buyer who goes back from
- * Stripe's page, or is sent back for a box, can press buy again. Refused
+ * The link a buyer opened: claimed first (one use at a time), its record read,
+ * and spent (spendReturningLink) only once the checkout it opens exists; a
+ * checkout that does not open lets it go (releaseReturningLink), so a buyer
+ * who goes back from Stripe's page, or is sent back, can press buy again. Refused
  * ("link") when it is gone, not in its exact shape, or for another store or
  * product; refused ("code") when its code has since been stopped or ended.
  * Whoever holds it can only open a checkout for the address it was sent to.
  */
-export async function redeemReturningLink(store: Store, productId: string, rawToken: string, now = Date.now()): Promise<{ ok: true; code: ReturningCode; email: string } | { ok: false; reason: "link" | "code" | "unknown" }> {
+export async function redeemReturningLink(store: Store, productId: string, rawToken: string, now = Date.now()): Promise<{ ok: true; code: ReturningCode; email: string } | { ok: false; reason: "link" | "code" | "unknown" | "busy" }> {
   const token = readLinkToken(rawToken);
   if (!token) return { ok: false, reason: "link" };
   if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
-  let raw: unknown;
+  // Claimed first, in one step on the database's side (SET NX): of two uses at once, one opens the checkout and the
+  // other is refused, so the link works once (review 6803880536). Only an exact "OK" is the claim (CX-123 rule 24).
+  let claim: unknown;
   try {
-    const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+    const replies = repliesFor(await redisPipeline([["SET", claimKey(token), "1", "NX", "EX", RETURNING_CLAIM_SECONDS]]), 1);
     if (!replies) return { ok: false, reason: "unknown" };
-    raw = replies[0];
+    claim = replies[0];
   } catch {
     return { ok: false, reason: "unknown" };
   }
-  if (raw === null) return { ok: false, reason: "link" };
+  if (claim === null) return { ok: false, reason: "busy" };
+  if (claim !== "OK") return { ok: false, reason: "unknown" };
+  const refused = async (reason: "link" | "code" | "unknown") => {
+    await releaseReturningLink(token);
+    return { ok: false as const, reason };
+  };
+  let raw: unknown;
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+    if (!replies) return refused("unknown");
+    raw = replies[0];
+  } catch {
+    return refused("unknown");
+  }
+  if (raw === null) return refused("link");
   const record = readRecord(raw);
-  if (!record || record.s !== store.handle || record.p !== productId) return { ok: false, reason: "link" };
+  if (!record || record.s !== store.handle || record.p !== productId) return refused("link");
   const code = returningCodeFor(store.returningCodes, record.c, Math.floor(now / 1000));
-  if (!code) return { ok: false, reason: "code" };
+  if (!code) return refused("code");
   return { ok: true, code, email: record.e };
+}
+
+/** Lets a claimed link go again when its checkout did not open: a failure only waits for the claim to run out. */
+export async function releaseReturningLink(rawToken: string): Promise<void> {
+  const token = readLinkToken(rawToken);
+  if (!token) return;
+  await redisPipeline([["DEL", claimKey(token)]]).catch((error) => console.error("letting a returning-buyer code link go failed; its claim runs out by itself", error));
 }
 
 /** Spends a link once its checkout is open; a failure is only logged, the link then runs out by itself within half an hour. */
 export async function spendReturningLink(rawToken: string): Promise<void> {
   const token = readLinkToken(rawToken);
   if (!token) return;
-  await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("spending a returning-buyer code link failed; it runs out by itself", error));
+  // The link first, then its claim, in this order: a later use finds no link ("link"), never a free claim on a live one.
+  await redisPipeline([["DEL", linkKey(token)], ["DEL", claimKey(token)]]).catch((error) => console.error("spending a returning-buyer code link failed; it runs out by itself", error));
 }
 
 function readRecord(raw: unknown): LinkRecord | null {

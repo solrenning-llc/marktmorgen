@@ -133,9 +133,15 @@ export async function POST(request: NextRequest) {
 
     if (action === "poll_results") {
       // The record is read inside this request's own unit; the votes only after the units their size needs are taken.
-      const read = await studioPollResults(store, text(body.id, 40), async (units) => (await countStudio(store!, null, units)).ok, Date.now());
+      let refused = "";
+      const read = await studioPollResults(store, text(body.id, 40), async (units) => {
+        const counted = await countStudio(store!, null, units);
+        if (!counted.ok) refused = counted.message;
+        return counted.ok;
+      }, Date.now());
       if (read.state === "ok") return Response.json({ ok: true, ...read });
-      if (read.state === "used") return fail("studio_used", 429);
+      // Its own sentence, as every refusal of the studio's requests (review, LOW): never a bare code read as "try again".
+      if (read.state === "used") return notCounted(refused);
       return fail(read.state === "none" ? "poll_none" : "poll_unknown", read.state === "none" ? 404 : 503);
     }
 

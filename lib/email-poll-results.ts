@@ -1,7 +1,7 @@
 /**
  * The totals of a poll, read for its creator in the studio (125
  * [F2-EMAIL-POLLS], unit 7c; the mail route's "poll_results"). Only an email
- * of this store's list that keeps a poll and has gone out. The record is read
+ * of this store's list that keeps a poll and has reached someone. The record is read
  * inside the route's own studio request, as the other actions on one email
  * are; the votes are read only after pollResultsUnits(total) more are taken,
  * by the email's size. Totals only: never who answered what. Anything that
@@ -27,7 +27,9 @@ export async function studioPollResults(store: Pick<Store, "listId">, id: string
     return { state: "unknown" };
   }
   if (!broadcast || broadcast.listId !== store.listId || !broadcast.poll) return { state: "none" };
-  if (broadcast.status !== "sending" && broadcast.status !== "sent") return { state: "none" };
+  // Read once it reached anyone, whatever its status since: it may wait part-way (review, ALTO).
+  if (!Number.isSafeInteger(broadcast.sent) || broadcast.sent < 0) return { state: "unknown" };
+  if (broadcast.sent === 0) return { state: "none" };
   // In seconds on the broadcast (createBroadcast), in milliseconds for the poll's rules.
   const sentAt = broadcast.sendAt * 1000;
   const closesAt = pollClosesAt(sentAt, broadcast.poll.days);

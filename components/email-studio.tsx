@@ -1715,7 +1715,7 @@ function History({
             <AudienceSummary audience={b} products={products} currency={currency} />
             {b.note ? <p className="mt-1 text-sm text-ink-soft">{b.note}</p> : null}
             {b.test ? <TestLine test={b.test} status={b.status} /> : null}
-            {b.poll && (b.status === "sent" || b.status === "sending") ? <PollResults id={b.id} poll={b.poll} /> : null}
+            {b.poll && b.sent > 0 ? <PollResults id={b.id} poll={b.poll} /> : null}
             {/* Said only for an email whose links were tagged: for an older
                 one nothing could be counted, and "no sales" would be a guess. */}
             {b.status === "sent" && b.tagged ? (

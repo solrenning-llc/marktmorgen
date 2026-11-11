@@ -133,7 +133,7 @@ async function main() {
   }
   console.log(`  MEDIO record reads per burst: ${reads.join(", ")} (total ${recordReads}); shared hour ${await hourCount()}`);
   is("MEDIO: each burst after the first reads the record at most once", reads.slice(1).every((r) => r <= 1), true);
-  const priced = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore as Record<string, number>;
+  const priced = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore as unknown as Record<string, number>;
   const bound = (priced.storeReadsPerHour ?? 0) + (priced.coldReadsPerLapse ?? 0);
   is("MEDIO: what the hour read stays inside what the registry prices for one resting store", recordReads <= bound && Number.isFinite(bound), true);
   is("MEDIO: the shared hour is left as it was", await hourCount(), 0);

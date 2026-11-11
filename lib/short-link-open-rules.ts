@@ -159,10 +159,14 @@ export const SHORT_LINK_PAID_FLIGHT_PER_STORE = 40;
  * A paying store's opens refused past its paid reads in flight (SHORT_LINK_PAID_FLIGHT_PER_STORE) that may be refused
  * one by one in an hour (Claude 2's focal on #3330 @39da7f44db, LEVE 2: each such refusal sent six pipelines and was
  * counted in no hour). Every one is counted, in a count of that store's own (shortLinkPaidRefusedKey), with the
- * give-back of its places; past this figure, or a count that cannot be read, the refusal is the store's own refusal
- * past its counts: counted in the resting hour, the store marked resting a minute where it had no mark and kept so in
- * the instance's memory, so the opens after it send nothing more than an open refused on its mark. A store with room
- * opens SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE at once all the same.
+ * give-back of its places; past this figure, or a count that cannot be read, the store pauses on its own
+ * (paidPauseMark): SHORT_LINK_TIRED_MS, its mark written where none is and kept so in the instance's memory, never
+ * doubled, never counted in the resting hour other stores share (Claude 2's focal on #3330 @f6b792b9c3, MEDIUM), so
+ * the opens after it send nothing more than an open refused on its mark, still counted in the store's own count; the
+ * minute past, it opens again. The figure bounds refusals one by one: within one burst at once, every open past the
+ * paid flight on an instance takes this path before any mark exists (Claude 2's LEVE 2 on f6b792b9c3), as the resting
+ * stores' paths do. A store with room opens SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE at once
+ * all the same.
  */
 export const SHORT_LINK_PAID_REFUSALS_PER_HOUR = 20;
 /** A paying store's opens refused past its paid reads in flight this hour (SHORT_LINK_PAID_REFUSALS_PER_HOUR), kept two hours. */
@@ -192,18 +196,27 @@ export const shortLinkStoreFlightKey = (sid: string) => `nl:slink:rest:${sid}:fl
 export const shortLinkBackKey = (sid: string) => `nl:slink:rest:${sid}:back`;
 /**
  * What a resting mark holds: "<until>" (a store that pays, a store found past its own count, or a mark written before
- * 9 November 2026), or "<until>:<since>:<read>" for a store without a paid plan: since when it has rested without a
- * gap, and when its record last said so. Null for anything else, read as resting.
+ * 9 November 2026), "<until>:<since>:<read>" for a store without a paid plan: since when it has rested without a
+ * gap, and when its record last said so; or "<until>:paid" (paidPauseMark), a paying store paused on its own past its
+ * refusals of the hour (`paid`). Null for anything else, read as resting.
  */
-export function readRestMark(value: unknown): { until: number; since: number | null; read: number | null } | null {
+export function readRestMark(value: unknown): { until: number; since: number | null; read: number | null; paid?: true } | null {
   const text = typeof value === "number" ? String(value) : value;
   if (typeof text !== "string") return null;
-  const found = /^([0-9]{13,15})(?::([0-9]{13,15}):([0-9]{13,15}))?$/.exec(text);
+  const found = /^([0-9]{13,15})(?::([0-9]{13,15}):([0-9]{13,15})|(:paid))?$/.exec(text);
   if (!found) return null;
   const [until, since, read] = [found[1], found[2], found[3]].map((part) => (part === undefined ? null : Number(part)));
   if (until === null || !Number.isSafeInteger(until) || (since !== null && !Number.isSafeInteger(since)) || (read !== null && !Number.isSafeInteger(read))) return null;
-  return { until, since, read };
+  return found[4] ? { until, since: null, read: null, paid: true } : { until, since, read };
 }
+
+/**
+ * A paying store's own pause, written on its resting mark (shortLinkRestKey, read in every open's first pipeline, so no
+ * command is added) when it is refused past its paid reads in flight more than SHORT_LINK_PAID_REFUSALS_PER_HOUR times
+ * in an hour, or that count cannot be read: SHORT_LINK_TIRED_MS, never doubled, counted in no shared hour, and never
+ * remembered as resting (Claude 2's focal on #3330 @f6b792b9c3, MEDIUM). Written only where no mark is (NX).
+ */
+export const paidPauseMark = (until: number) => `${until}:paid`;
 
 /**
  * Whether a store's links are turned off at `now`: its mark says it has rested without a paid plan, without a gap,

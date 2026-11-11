@@ -12,6 +12,7 @@ import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/li
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 import * as rules from "@/lib/short-link-open-rules";
+import { SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -106,6 +107,29 @@ async function main() {
   const much = await Promise.all(store.codes.slice(20, 25).map((c) => open(c)));
   is("+11 min on the same instance: 5 of 5 open", much.every((r) => r.status === 302), true);
   is("and the resting hour is still not moved by it", await restHour(), before);
+
+  // Added with the fix: an open refused on the store's own pause, on another instance, measured against the registry.
+  part("an open refused on the paying store's own pause, on an instance that has not seen it: measured, counted in the store's own count");
+  const t = Date.now();
+  await real([["SET", rules.shortLinkRestKey(store.s.sid), rules.paidPauseMark(t + 30_000), "EX", 60]]);
+  forgetShortLinkOpenMemory();
+  const ownBefore = Number((await real([["GET", rules.shortLinkPaidRefusedKey(store.s.sid, t)]]))[0] ?? 0);
+  pipelines = 0;
+  commands = 0;
+  const paused = await open(store.codes[30]);
+  const measured = { pipelines, commands };
+  const ownAfter = Number((await real([["GET", rules.shortLinkPaidRefusedKey(store.s.sid, t)]]))[0] ?? 0);
+  const again = await open(store.codes[30]);
+  const cost = SHORT_LINK_UNPAID_COMPANY_COST;
+  console.log(`  paused: ${paused.status}, ${measured.pipelines} pipelines, ${measured.commands} commands; counted ${ownBefore} -> ${ownAfter}; the same link again ${again.status}, ${pipelines - measured.pipelines} more pipelines`);
+  is("refused on its pause, counted once in the store's own count", [paused.status, ownAfter - ownBefore], [503, 1]);
+  is("inside the registry's price for it, and cheaper than the heaviest unpaid open", [
+    measured.pipelines <= cost.perRestingStore.paidPause.waits, measured.commands <= cost.perRestingStore.paidPause.commands,
+    cost.perRestingStore.paidPause.waits <= cost.heaviestUnpaid.waits, cost.perRestingStore.paidPause.commands <= cost.heaviestUnpaid.commands,
+  ], [true, true, true, true]);
+  is("the same link again on that instance: refused from memory, nothing sent", [again.status, pipelines - measured.pipelines], [503, 0]);
+  later(31_000);
+  is("its pause past, the store opens again", (await open(store.codes[31])).status, 302);
   done();
 }
 main();

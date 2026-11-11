@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PlanFitCalculator } from "@/components/plan-fit-calculator";
@@ -36,5 +37,15 @@ is("the number input has an associated label", /<label[^>]*for="plan-fit-list-em
 is("the tools are grouped under a legend", /<fieldset[^>]*>[\s\S]*<legend[^>]*>Built-in tools you need<\/legend>/.test(html), true);
 is("changes are announced through a status region", /<div[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/.test(html), true);
 is("the published allowance comparison remains linked", /href="#selling-and-delivery"/.test(html), true);
+
+part("A custom domain is offered only where this deployment can connect one");
+const withoutDomains = renderToStaticMarkup(createElement(PlanFitCalculator, { domains: false }));
+const withDomains = renderToStaticMarkup(createElement(PlanFitCalculator, { domains: true }));
+is("without domain support the calculator never offers a custom domain", withoutDomains.includes("Use a custom domain"), false);
+is("by default (unknown) the custom domain is not offered", html.includes("Use a custom domain"), false);
+is("with domain support the custom domain choice is shown", withDomains.includes("Use a custom domain"), true);
+is("the other two tools stay offered without domain support", withoutDomains.includes("Send email to a list") && withoutDomains.includes("Remove Marktmorgen branding"), true);
+const page = readFileSync("app/pricing/page.tsx", "utf8");
+is("the pricing page passes its real domain availability", /<PlanFitCalculator\s+domains=\{DOMAINS\}\s*\/>/.test(page), true);
 
 done();

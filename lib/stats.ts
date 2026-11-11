@@ -253,7 +253,11 @@ export async function recordHit(
     // Not known whether this visitor was new to the day: the day's visitors keep their expiry, and nobody is counted.
     follow.push(["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
   }
-  if (follow.length) await redisPipeline(follow);
+  // Each key's expiry once: an unknown answer already sends the visitors' expiry, and a visitor new to the day would
+  // send it again (Claude 1's review of #3676).
+  const expiring = new Set<string>();
+  const once = follow.filter((c) => c[0] !== "EXPIRE" || (!expiring.has(String(c[1])) && Boolean(expiring.add(String(c[1])))));
+  if (once.length) await redisPipeline(once);
   // The store page's views so far today, for the busy-day alert (lib/stats-report.ts).
   return hit.kind === "view" ? values[firstAt] || null : null;
 }

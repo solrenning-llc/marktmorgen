@@ -99,6 +99,16 @@ test("a long name is cut at a word when one fits, otherwise at the room left", (
   });
 });
 
+test("a prefix in a shape Stripe does not give is unknown, never a verified prefix (Codex H2 on #3594)", () => {
+  // Stripe's shortened prefix: 2 to 10 characters, at least one letter, none of < > \\ ' " * (docs.stripe.com/get-started/account/statement-descriptors, read by Codex H2 on 10 November 2026).
+  for (const prefix of ["1", "12", "A", "A*B", "A<B", "A>B", "A\\B", "A'B", 'A"B', "AB\nCD", "AB\tCD", "ABCDEFGHIJK", " ABC", "ABC "]) {
+    assert.deepEqual(statementSuffix("Yoga Flow", prefix), { kind: "skip", reason: "prefix-unknown" }, JSON.stringify(prefix));
+  }
+  for (const prefix of ["JS", "J SMITH", "J.SMITH", "ABCDEFGHIJ", "SHOP 24"]) {
+    assert.equal(statementSuffix("Yoga Flow", prefix).kind, "send", JSON.stringify(prefix));
+  }
+});
+
 test("a prefix that leaves no useful room sends nothing", () => {
   assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(19)), { kind: "skip", reason: "no-room" });
   assert.deepEqual(statementSuffix("Yoga Flow", "X".repeat(20)), { kind: "skip", reason: "no-room" });

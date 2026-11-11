@@ -1511,6 +1511,7 @@
     "components/picture-viewer.tsx",
     "components/pixel-editor.tsx",
     "components/plan-dispute-notice.tsx",
+    "components/plan-fit-calculator.tsx",
     "components/plan-invoices-list.tsx",
     "components/podcast-editor.tsx",
     "components/podcast-toggle.tsx",

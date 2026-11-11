@@ -8,13 +8,17 @@ function numberWords(value: number): string {
   return value.toLocaleString("en-US");
 }
 
-/** A browser-only, descriptive first slice of the public plan-fit calculator (266 [CI4]). */
-export function PlanFitCalculator() {
+/**
+ * A browser-only, descriptive first slice of the public plan-fit calculator (266 [CI4]).
+ * `domains` is the deployment's real custom-domain availability (isDomainsConfigured()):
+ * without it the custom-domain choice is not offered, and an unknown answer counts as off.
+ */
+export function PlanFitCalculator({ domains = false }: { domains?: boolean }) {
   const [monthlyListEmails, setMonthlyListEmails] = useState("");
   const [needsListEmail, setNeedsListEmail] = useState(false);
   const [needsCustomDomain, setNeedsCustomDomain] = useState(false);
   const [needsBrandingRemoval, setNeedsBrandingRemoval] = useState(false);
-  const result = findPlanFit({ monthlyListEmails, needsListEmail, needsCustomDomain, needsBrandingRemoval });
+  const result = findPlanFit({ monthlyListEmails, needsListEmail, needsCustomDomain: domains && needsCustomDomain, needsBrandingRemoval });
 
   let answer: React.ReactNode;
   if (result.kind === "incomplete") {
@@ -67,7 +71,7 @@ export function PlanFitCalculator() {
           value={monthlyListEmails}
           onChange={(event) => setMonthlyListEmails(event.currentTarget.value)}
           aria-describedby="plan-fit-list-emails-help"
-          className="mt-3 min-h-12 w-full max-w-sm rounded-xl border border-line-strong bg-white px-3 text-ink"
+          className="mt-3 block min-h-12 w-full max-w-sm rounded-xl border border-line-strong bg-white px-3 text-ink"
         />
 
         <fieldset className="mt-6">
@@ -77,10 +81,12 @@ export function PlanFitCalculator() {
               <input type="checkbox" checked={needsListEmail} onChange={(event) => setNeedsListEmail(event.currentTarget.checked)} />
               <span>Send email to a list</span>
             </label>
-            <label className="flex min-h-11 items-center gap-3">
-              <input type="checkbox" checked={needsCustomDomain} onChange={(event) => setNeedsCustomDomain(event.currentTarget.checked)} />
-              <span>Use a custom domain</span>
-            </label>
+            {domains ? (
+              <label className="flex min-h-11 items-center gap-3">
+                <input type="checkbox" checked={needsCustomDomain} onChange={(event) => setNeedsCustomDomain(event.currentTarget.checked)} />
+                <span>Use a custom domain</span>
+              </label>
+            ) : null}
             <label className="flex min-h-11 items-center gap-3">
               <input type="checkbox" checked={needsBrandingRemoval} onChange={(event) => setNeedsBrandingRemoval(event.currentTarget.checked)} />
               <span>Remove Marktmorgen branding</span>

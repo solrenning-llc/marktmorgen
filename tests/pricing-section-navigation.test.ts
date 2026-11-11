@@ -7,13 +7,14 @@ import { PRICING_GROUPS, PRICING_PLANS } from "@/lib/pricing-page-data";
 // facts without executing Next font loaders in the standalone Node runner.
 const page = readFileSync("app/pricing/page.tsx", "utf8");
 const calculator = readFileSync("components/tools-calculator.tsx", "utf8");
+const planFit = readFileSync("components/plan-fit-calculator.tsx", "utf8");
 
-test("pricing has six native section links with unique real destinations", () => {
+test("pricing has seven native section links, in page order, with unique real destinations", () => {
   const nav = /<nav\b[^>]*aria-label="Pricing sections"[^>]*>([\s\S]*?)<\/nav>/.exec(page);
   assert.ok(nav, "the long page needs its own section index, separate from the shared header");
   const links = [...nav[1].matchAll(/<a\b[^>]*href="(#[^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(links, ["#plans", "#limits-heading", "#addons-heading", "#calculator-heading", "#compare-heading", "#faq-heading"]);
-  const ids = [...(page + calculator).matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(links, ["#plans", "#limits-heading", "#addons-heading", "#plan-fit-heading", "#calculator-heading", "#compare-heading", "#faq-heading"]);
+  const ids = [...(page + calculator + planFit).matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
   for (const href of links) assert.equal(ids.filter(id => id === href.slice(1)).length, 1);
 });
 

@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1265,21 +1265,34 @@ export async function storeForId(sid: string): Promise<Store | null> {
 export async function accountStores(email: string): Promise<Store[]> {
   if (!isRedisConfigured()) return [];
   const address = email.toLowerCase();
-  const [first, members] = await redisPipeline([
+  // Read exactly (rule 24): a reply cut short or of another shape throws, never a shorter list. Callers read "no
+  // other store" as leave to delete what the owner's other stores share (lib/closed-store-data.ts), to make a second
+  // Stripe customer (billing checkout), or to move only the first store and drop the account's list (moveAccount).
+  const listed = repliesFor(await redisPipeline([
     ["GET", await ownerKey(address)],
     ["SMEMBERS", await accountKey(address)],
-  ]);
-  const ids = Array.isArray(members)
-    ? members.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id))
+  ]), 2);
+  const members = listed ? stringList(listed[1]) : null;
+  if (!listed || !members) throw new UnknownReplyError("an account's stores");
+  const ids = members.filter((id) => STORE_ID_PATTERN.test(id));
+  const records = ids.length
+    ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length)
     : [];
-  const others = ids.length
-    ? (await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))))
-        .map(parseStore)
-        .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    : [];
-  const main = parseStore(first);
+  if (!records) throw new UnknownReplyError("an account's other stores");
+  const others = records
+    // A null is an id whose store is gone; anything else must be a store record.
+    .map((raw) => (raw === null ? null : exactStore(raw, "an account's other store")))
+    .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const main = listed[0] === null ? null : exactStore(listed[0], "an account's first store");
   return main ? [main, ...others] : others;
+}
+
+/** A store record that must read: text that parses as a store, or UnknownReplyError. */
+function exactStore(raw: unknown, what: string): Store {
+  const store = parseStore(raw);
+  if (!store) throw new UnknownReplyError(what);
+  return store;
 }
 
 /**
@@ -2216,11 +2229,15 @@ export async function moveAccount(
 
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
     // The address it is moving to must not already own a store of its own.
-    const [existing, theirs] = await redisPipeline([
+    const read = repliesFor(await redisPipeline([
       ["GET", await ownerKey(to)],
       ["SCARD", await accountKey(to)],
-    ]);
-    if ((typeof existing === "string" && existing) || Number(theirs) > 0) {
+    ]), 2);
+    // A count that does not read is unknown (rule 24), never NaN passed as "it owns no store".
+    const theirs = read ? countOf(read[1]) : null;
+    if (!read || theirs === null) throw new UnknownReplyError("the stores of the address moved to");
+    const existing = read[0];
+    if ((typeof existing === "string" && existing) || theirs > 0) {
       return { ok: false, reason: "taken" };
     }
 

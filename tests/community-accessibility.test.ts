@@ -16,6 +16,9 @@ import { readFileSync } from "node:fs";
  *   notifications pages ran 82 to 108 characters a line at 1280 px. Every
  *   paragraph after the community's bar (a notice box excepted) is now at most
  *   46ch: none over 80 in the browser, also with 1.4.12 text spacing.
+ * - 2.5.5, with the room on: the tabs filled the bar's row and the name
+ *   (min-w-0 flex-1) shrank to 24 px wide on the room, leaderboard and search
+ *   pages at 1280 px. It now keeps at least 44 px of width too.
  *
  * All from app/globals.css, so the components (open in several pull requests)
  * are not edited; the last test keeps the hooks honest.
@@ -29,6 +32,7 @@ const body = (selector: string): string => {
 
 test("2.5.5: the bar's name, the tabs, a post's title and the poll label are 44 px targets", () => {
   assert.match(body(".cm-home"), /min-height:\s*2\.75rem;/);
+  assert.match(body(".cm-home"), /min-width:\s*2\.75rem;/);
   assert.match(body(".cm-tab:where(*)"), /min-width:\s*2\.75rem;/);
   const title = body(".cm-post h2 > a.st-title-link");
   assert.match(title, /display:\s*inline-flex;/);

@@ -4263,9 +4263,11 @@ fieldset:disabled .cm-poll-row {
 }
 /* A store's community, held to WCAG 2.2 AAA (tests/community-accessibility.test.ts): its name in the bar, a tab
    however short its word, a post's title in the feed and the composer's poll label are 44 px targets (2.5.5); no
-   paragraph after the bar is wider than 80 characters (1.4.8), a notice box excepted. */
+   paragraph after the bar is wider than 80 characters (1.4.8), a notice box excepted. The name keeps its width
+   too when a full row of tabs would shrink it. */
 .cm-home {
   min-height: 2.75rem;
+  min-width: 2.75rem;
 }
 .cm-tab:where(*) {
   min-width: 2.75rem;

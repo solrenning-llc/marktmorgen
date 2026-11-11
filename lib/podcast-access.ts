@@ -388,36 +388,58 @@ export async function dropListeners(
   }
   if (exists === 0) return { dropped: 0, noted };
   let dropped = 0;
-  let cursor = "0";
-  do {
-    if (!(await options.pay(1))) throw new ListenersUnpaidError();
-    const page = scanPage(await redisPipeline([["SSCAN", key, cursor, "COUNT", LISTENERS_PER_UNIT]]));
-    if (!page) throw new UnknownReplyError("a page of a podcast's listeners");
-    const listed = page.items.filter((member) => member !== LISTED_FROM_START);
-    const addresses = listed.filter((member) => ADDRESS_KEY.test(member));
-    if (addresses.length) {
-      if (!(await options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT)))) throw new ListenersUnpaidError();
-      const indexes = addresses.map((address) => `nl:pod:by:${sid}:${productId}:${address}`);
-      const tokens = repliesFor(await redisPipeline([["MGET", ...indexes]]), 1);
-      const held = listSlots(tokens?.[0]);
-      if (!held || held.length !== addresses.length || !held.every((t) => t === null || typeof t === "string")) {
-        throw new UnknownReplyError("a podcast's listeners' feeds");
+  for (let pass = 0; ; pass += 1) {
+    let cursor = "0";
+    do {
+      if (!(await options.pay(1))) throw new ListenersUnpaidError();
+      const page = scanPage(await redisPipeline([["SSCAN", key, cursor, "COUNT", LISTENERS_PER_UNIT]]));
+      if (!page) throw new UnknownReplyError("a page of a podcast's listeners");
+      const listed = page.items.filter((member) => member !== LISTED_FROM_START);
+      const addresses = listed.filter((member) => ADDRESS_KEY.test(member));
+      // The page off the list first, before its feeds are read and deleted (Claude 3's review of #3473, MEDIUM 1): a feed
+      // made again after this lists its address again, so the read below finds it and deletes it, and a feed made after
+      // that read is still listed for the next pass or the erasure; taken off after the deletion, a feed made in between
+      // was named by no list and stayed for good.
+      if (listed.length) {
+        const taken = repliesFor(await redisPipeline([["SREM", key, ...listed]]), 1);
+        if ((taken ? countOf(taken[0]) : null) === null) throw new UnknownReplyError("a podcast's list of listeners");
       }
-      const grants = (held as (string | null)[]).filter((t): t is string => t !== null && FEED_TOKEN.test(t)).map(tokenKey);
-      const answers = addresses.map((address) => `nl:pod:ok:${sid}:${productId}:${address}`);
-      const reply = repliesFor(await redisPipeline([["DEL", ...indexes, ...answers, ...grants]]), 1);
-      const gone = reply ? countOf(reply[0]) : null;
-      if (gone === null) throw new UnknownReplyError("the deletion of a podcast's listeners' feeds");
-      dropped += addresses.length;
-    }
-    if (listed.length) {
-      const taken = repliesFor(await redisPipeline([["SREM", key, ...listed]]), 1);
-      if ((taken ? countOf(taken[0]) : null) === null) throw new UnknownReplyError("a podcast's list of listeners");
-    }
-    cursor = page.next;
-  } while (cursor !== "0");
-  // Every listed feed is gone; the list, its mark with it.
-  const last = repliesFor(await redisPipeline([["DEL", key]]), 1);
-  if ((last ? countOf(last[0]) : null) === null) throw new UnknownReplyError("a podcast's list of listeners");
+      if (addresses.length) {
+        if (!(await options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT)))) throw new ListenersUnpaidError();
+        const indexes = addresses.map((address) => `nl:pod:by:${sid}:${productId}:${address}`);
+        const tokens = repliesFor(await redisPipeline([["MGET", ...indexes]]), 1);
+        const held = listSlots(tokens?.[0]);
+        if (!held || held.length !== addresses.length || !held.every((t) => t === null || typeof t === "string")) {
+          throw new UnknownReplyError("a podcast's listeners' feeds");
+        }
+        const grants = (held as (string | null)[]).filter((t): t is string => t !== null && FEED_TOKEN.test(t)).map(tokenKey);
+        const answers = addresses.map((address) => `nl:pod:ok:${sid}:${productId}:${address}`);
+        const reply = repliesFor(await redisPipeline([["DEL", ...indexes, ...answers, ...grants]]), 1);
+        const gone = reply ? countOf(reply[0]) : null;
+        if (gone === null) throw new UnknownReplyError("the deletion of a podcast's listeners' feeds");
+        dropped += addresses.length;
+      }
+      cursor = page.next;
+    } while (cursor !== "0");
+    // Every listed feed is gone; the list, its mark with it, only while it lists nothing else, in one step: a feed made
+    // again while this ran is listed again and read in one more pass, never wiped off with the list (Claude 3's review of
+    // #3473, MEDIUM 1). Still listed after LISTENER_PASSES, the removal is not finished, and a retry goes on.
+    const last = repliesFor(await redisPipeline([["EVAL", LISTENERS_DROP, 1, key, LISTED_FROM_START]]), 1)?.[0];
+    if (last === 1) break;
+    if (last !== 0) throw new UnknownReplyError("a podcast's list of listeners");
+    if (pass + 1 >= LISTENER_PASSES) throw new Error("a podcast's listeners kept coming back while their feeds were deleted");
+  }
   return { dropped, noted };
 }
+
+/** How many passes over a removed podcast's listeners one removal makes at most (dropListeners). */
+const LISTENER_PASSES = 3;
+/**
+ * A podcast's list of listeners deleted only while it lists nothing but its mark (dropListeners): 1 when deleted, 0
+ * when an address is listed again. Modeled step for step in lib/redis-memory.ts.
+ */
+export const LISTENERS_DROP = `-- marktmorgen:pod-listeners-drop:v1
+local left = redis.call("SCARD", KEYS[1]) - redis.call("SISMEMBER", KEYS[1], ARGV[1])
+if left ~= 0 then return 0 end
+redis.call("DEL", KEYS[1])
+return 1`;

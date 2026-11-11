@@ -58,4 +58,5 @@ is("while it saves, saving says so and cannot be pressed twice", [busy.includes(
 
 const page = readFileSync("app/studio/email/page.tsx", "utf8");
 is("the Email page draws it only for those who may save workflows", /can\(role, "send"\) \? \(\s*<AutomationDraftBox/.test(page), true);
+is("the Email page's allowance read does not turn a failed read into 0 left (Revisor 2's LOW on #3458)", [/aiLeft\(store\)\.catch\(\(\) => 0\)/.test(page), /known: false as const/.test(page)], [false, true]);
 done();

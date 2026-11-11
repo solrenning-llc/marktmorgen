@@ -15,7 +15,7 @@ import { POST as checkPOST } from "@/app/api/stripe/check/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { within } from "@/lib/checkup";
 import { stripeCheck } from "@/lib/checkup-rules";
-import { readAccount } from "@/lib/stripe-connect";
+import { type AccountState, readAccount } from "@/lib/stripe-connect";
 import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
 import "./redis-stub";
 import { done, is, part } from "./check";
@@ -79,16 +79,16 @@ const UNKNOWN: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /** Confirmed shapes, read as before. */
-const HEALTHY: ReadonlyArray<readonly [string, string, { chargesEnabled: boolean; detailsSubmitted: boolean }]> = [
-  ["active, eventually due", shaped("active", { summary: { minimum_deadline: { status: "eventually_due" } } }), { chargesEnabled: true, detailsSubmitted: true }],
-  ["active, currently due", shaped("active", { summary: { minimum_deadline: { status: "currently_due" } } }), { chargesEnabled: true, detailsSubmitted: true }],
-  ["active, past due", shaped("active", { summary: { minimum_deadline: { status: "past_due" } } }), { chargesEnabled: true, detailsSubmitted: false }],
-  ["restricted, past due", shaped("restricted", { summary: { minimum_deadline: { status: "past_due" } } }), { chargesEnabled: false, detailsSubmitted: false }],
-  ["pending, nothing due (empty summary)", shaped("pending", { summary: {} }), { chargesEnabled: false, detailsSubmitted: true }],
-  ["active, minimum_deadline null (nothing due)", shaped("active", { summary: { minimum_deadline: null } }), { chargesEnabled: true, detailsSubmitted: true }],
-  ["active, summary null (confirmed none)", shaped("active", { summary: null }), { chargesEnabled: true, detailsSubmitted: true }],
-  ["active, requirements null (confirmed none)", shaped("active", null), { chargesEnabled: true, detailsSubmitted: true }],
-  ["unsupported, nothing due", shaped("unsupported", { summary: {} }), { chargesEnabled: false, detailsSubmitted: true }],
+const HEALTHY: ReadonlyArray<readonly [string, string, AccountState]> = [
+  ["active, eventually due", shaped("active", { summary: { minimum_deadline: { status: "eventually_due" } } }), { chargesEnabled: true, cardPayments: "active", detailsSubmitted: true }],
+  ["active, currently due", shaped("active", { summary: { minimum_deadline: { status: "currently_due" } } }), { chargesEnabled: true, cardPayments: "active", detailsSubmitted: true }],
+  ["active, past due", shaped("active", { summary: { minimum_deadline: { status: "past_due" } } }), { chargesEnabled: true, cardPayments: "active", detailsSubmitted: false }],
+  ["restricted, past due", shaped("restricted", { summary: { minimum_deadline: { status: "past_due" } } }), { chargesEnabled: false, cardPayments: "restricted", detailsSubmitted: false }],
+  ["pending, nothing due (empty summary)", shaped("pending", { summary: {} }), { chargesEnabled: false, cardPayments: "pending", detailsSubmitted: true }],
+  ["active, minimum_deadline null (nothing due)", shaped("active", { summary: { minimum_deadline: null } }), { chargesEnabled: true, cardPayments: "active", detailsSubmitted: true }],
+  ["active, summary null (confirmed none)", shaped("active", { summary: null }), { chargesEnabled: true, cardPayments: "active", detailsSubmitted: true }],
+  ["active, requirements null (confirmed none)", shaped("active", null), { chargesEnabled: true, cardPayments: "active", detailsSubmitted: true }],
+  ["unsupported, nothing due", shaped("unsupported", { summary: {} }), { chargesEnabled: false, cardPayments: "unsupported", detailsSubmitted: true }],
 ];
 
 async function read(): Promise<string> {

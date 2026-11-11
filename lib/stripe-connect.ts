@@ -301,12 +301,23 @@ export async function createOnboardingLink(
 export type AccountState = {
   chargesEnabled: boolean;
   detailsSubmitted: boolean;
+  /**
+   * card_payments' status exactly as Stripe gave it, one of the values of the
+   * pinned API version (Account.Configuration.Merchant.Capabilities.CardPayments
+   * .Status in stripe-node at 2026-08-26.dahlia), or null for any other shape.
+   * Only a known status is written down without the creator asking
+   * (lib/stripe-charges.ts).
+   */
+  cardPayments: CardPaymentsStatus | null;
 };
 
 /** A JSON object, never null or an array. */
 function objectOf(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
+
+const CARD_PAYMENTS_STATUSES = ["active", "pending", "restricted", "unsupported"] as const;
+export type CardPaymentsStatus = (typeof CARD_PAYMENTS_STATUSES)[number];
 
 /** Thrown where Stripe's account answer is not in its exact shape: nothing about the account is known. */
 function unknownShape(what: string): never {
@@ -324,7 +335,7 @@ function unknownShape(what: string): never {
 // unsupported. Anything else (another value such as v1's "inactive", another letter case, blank) is unknown and
 // throws, so nothing is written on it (Codex Z and Codex U on #3311): a value Stripe adds later reads as "not
 // checked" until it is added here, never as "card payments off".
-const CARD_STATUSES = new Set(["active", "pending", "restricted", "unsupported"]);
+const CARD_STATUSES: ReadonlySet<string> = new Set(CARD_PAYMENTS_STATUSES);
 // The statuses of a requirements deadline (same source): currently_due | eventually_due | past_due.
 const DEADLINE_STATUSES = new Set(["currently_due", "eventually_due", "past_due"]);
 
@@ -376,6 +387,7 @@ export async function readAccount(accountId: string): Promise<AccountState> {
 
   return {
     chargesEnabled: status === "active",
+    cardPayments: CARD_PAYMENTS_STATUSES.find((known) => known === status) ?? null,
     // Onboarding still has something outstanding while a deadline is past due.
     detailsSubmitted: deadline !== "past_due",
   };

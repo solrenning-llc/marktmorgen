@@ -1,6 +1,6 @@
 import { advanceAnnouncement, type AnnouncementJob } from "@/lib/community-mail";
 import { advanceEventJob, type EventMailJob } from "@/lib/community-event-mail";
-import { commandsSeen, db, event, members, released, reset, sent, setReadReply, setTokenWriteFails, store } from "./community-mail-read-world";
+import { commandsSeen, db, event, members, released, reserved, reset, sent, setReadReply, setTokenWriteFails, store } from "./community-mail-read-world";
 import { done, is, part } from "./check";
 
 const id = "e".repeat(24);
@@ -89,7 +89,10 @@ async function main(): Promise<void> {
     let result: Awaited<ReturnType<typeof advanceAnnouncement>> | "thrown" = null;
     try { result = await advanceAnnouncement(id, async () => store, Date.now() + 10_000); } catch { result = "thrown"; }
     const saved = JSON.parse(String(db.run(["GET", "nl:cm:mail:" + id])));
-    is("nothing sent, no progress, the reservation given back", [sent.length, saved.done, saved.sent, released], [0, 0, 0, [2]]);
+    // Nothing of the store's email room stays held: whatever was reserved for this batch was given back (merge with
+    // #3140, which keeps every stop link before it reserves anything, so here nothing is reserved at all).
+    const held = reserved.reduce((a, b) => a + b, 0) - released.reduce((a, b) => a + b, 0);
+    is("nothing sent, no progress, nothing of the reservation held", [sent.length, saved.done, saved.sent, held], [0, 0, 0, 0]);
     is("said as still pending, never thrown out of the mail job", result !== "thrown" && [result?.status, /couldn.t save/i.test(result?.note ?? "")], ["waiting", true]);
     is("the list and the pending queue survive", [db.run(["LRANGE", "nl:cm:mail:" + id + ":to", 0, -1]), db.run(["SMEMBERS", "nl:cm:mailq"])], [keys, [id]]);
     setTokenWriteFails(false);

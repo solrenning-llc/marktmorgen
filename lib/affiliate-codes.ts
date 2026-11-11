@@ -38,8 +38,8 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { DataRoomError, TAKE_DATA, dataKey, dataTakenOf, giveData, monthOf } from "@/lib/store-data";
+import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
 /** Stripe's id for a promotion code: the thing a buyer's code resolves to. */
@@ -88,31 +88,82 @@ export async function codeOwners(store: Store): Promise<Map<string, string>> {
   return new Map(pairs.filter(([id]) => PROMO_ID_PATTERN.test(id)));
 }
 
+/** A one-field HDEL reply, read exactly (CX-123 rule 24): 0 or 1, else UnknownReplyError. */
+function oneOrNone(reply: unknown, what: string): 0 | 1 {
+  const n = countOf(reply);
+  if (n !== 0 && n !== 1) throw new UnknownReplyError(what);
+  return n;
+}
+
 /**
  * Gives a code to an affiliate, replacing whoever had it before. A code
  * belongs to one affiliate at a time: two people sharing one code cannot be
  * told apart by the thing that is supposed to tell them apart.
+ *
+ * Whether the code is held, its room and the write are one step (GIVE_CODE; Claude 2's MEDIUM on #3300): read in
+ * separate steps, a take-back landing between the HEXISTS and the HSET left the code held with its room not counted,
+ * and two first gives at once took the room twice. A code given for the first time takes room in the store's data
+ * room (DataRoomError when it does not fit, and nothing is written); a move takes none.
+ *
+ * The script's reply is read exactly (CX-123 rule 24; audit R24 round 8, finding 2): {2, 0} moved, {1, total} given
+ * with its room, {0, total} full; anything else throws UnknownReplyError, which the route answers as 503
+ * "unavailable". Never true on a reply nobody understood: a code moved from one affiliate to another and not written
+ * keeps crediting the first one's sales, so the creator must not be told it moved. What a script that did run took
+ * stays taken, which errs toward room counted, never toward room missing.
  */
 export async function giveCode(store: Store, promoId: string, affiliateId: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
   if (!PROMO_ID_PATTERN.test(promoId) || !/^[0-9a-f]{12}$/.test(affiliateId)) return false;
-  // A code given for the first time takes room in the store's data room (DataRoomError when it does not fit).
-  const [held] = await redisPipeline([["HEXISTS", promoKey(store.statsId), promoId]]);
-  if (Number(held) !== 1) await needData(store, [{ slot: CODES_SLOT, bytes: dataBytes([promoId, affiliateId], 1) }]);
-  await redisPipeline([["HSET", promoKey(store.statsId), promoId, affiliateId]]);
-  return true;
+  const room = dataKey(store);
+  if (!room) throw new Error("the store's data room could not be counted");
+  const now = Date.now();
+  const reply = repliesFor(await redisPipeline([["EVAL", GIVE_CODE, 2, room, promoKey(store.statsId), contentRoomFor(store, now / 1000), monthOf(now), dataBytes([promoId, affiliateId], 1), promoId, affiliateId]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === 2 && reply[1] === 0) return true;
+  const taken = dataTakenOf(store, reply, now / 1000);
+  if (taken.ok) return true;
+  if (taken.reason === "full") throw new DataRoomError(taken);
+  throw new UnknownReplyError("giving an affiliate a code");
 }
 
-/** Takes a code back, and gives back its room. Sales already credited through it stay credited. */
+/**
+ * Takes a code back, and gives back its room. Sales already credited through it stay credited. The HGET and HDEL
+ * replies are read exactly (rule 30 of the fix above): a confirmed 0 is "not held" (false), a confirmed 1 gives back
+ * the room of the affiliate id read beside it, and any other shape throws UnknownReplyError rather than "not held".
+ */
 export async function takeCodeBack(store: Store, promoId: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured() || !PROMO_ID_PATTERN.test(promoId)) return false;
-  const [held, removed] = await redisPipeline([["HGET", promoKey(store.statsId), promoId], ["HDEL", promoKey(store.statsId), promoId]]);
-  if (Number(removed) === 1 && typeof held === "string") await giveData(store, [{ slot: CODES_SLOT, bytes: dataBytes([promoId, held], 1) }]);
-  return Number(removed) === 1;
+  const replies = repliesFor(await redisPipeline([["HGET", promoKey(store.statsId), promoId], ["HDEL", promoKey(store.statsId), promoId]]), 2);
+  const held = replies?.[0];
+  if (held !== null && typeof held !== "string") throw new UnknownReplyError("the affiliate a code was given to");
+  const removed = oneOrNone(replies?.[1], "taking a code back from an affiliate");
+  if (removed === 1 && typeof held === "string") await giveData(store, [{ slot: CODES_SLOT, bytes: dataBytes([promoId, held], 1) }]);
+  return removed === 1;
 }
 
 /** Where the codes given to affiliates are counted in the store's data room (lib/store-data.ts). */
 const CODES_SLOT = "aff:codes";
+
+/**
+ * KEYS[1] the store's data room, KEYS[2] the codes hash; ARGV the room's limit, this month, the code's bytes, the
+ * promotion code id and the affiliate id. A code already held is moved (HSET over it) and answers {2, 0}, taking no
+ * room. A code not held takes its room with the data room's own steps (TAKE_DATA, slot CODES_SLOT) and is written
+ * only when that answers {1, total}; {0, total} (full) and {-1, total} write nothing. One step, so nothing can land
+ * between the check, the room and the write. Modelled by lib/redis-memory.ts.
+ */
+export const GIVE_CODE = `-- marktmorgen:affiliate-code-give:v1
+local function codeRoom(limit, month, bytes)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, '0', month, 'a', '${CODES_SLOT}', bytes}
+${TAKE_DATA}
+end
+if redis.call('HEXISTS', KEYS[2], ARGV[4]) == 1 then
+  redis.call('HSET', KEYS[2], ARGV[4], ARGV[5])
+  return {2, 0}
+end
+local taken = codeRoom(ARGV[1], ARGV[2], ARGV[3])
+if taken[1] ~= 1 then return taken end
+redis.call('HSET', KEYS[2], ARGV[4], ARGV[5])
+return taken`;
 
 type DiscountLike = { promotion_code?: unknown } | null | undefined;
 

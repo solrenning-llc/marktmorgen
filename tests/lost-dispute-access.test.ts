@@ -99,7 +99,8 @@ const disputeOf = (state: string) => {
 };
 /** A charge with a dispute in this state (or none). */
 const chargeIn = (id: string, status: string | null) => {
-  if (status) disputes[id] = [disputeOf(status)];
+  // Each row names its charge, as Stripe lists it (main's rule 30 check reads it), in the state this test writes.
+  if (status) disputes[id] = [{ charge: id, ...disputeOf(status) }];
   return charge(id, 4900, status !== null);
 };
 const paid = (id: string, product: string, status: string | null, over: Record<string, unknown> = {}) => ({
@@ -153,9 +154,9 @@ async function main(): Promise<void> {
   part("A payment plan, by its first invoice's payment");
   const plan = { mode: "subscription", invoice: "in_TestPlanLost01", metadata: { kind: "plan" } };
   invoices.in_TestPlanLost01 = { id: "in_TestPlanLost01", payment_intent: "pi_TestPlanLost01" };
-  paymentIntents.pi_TestPlanLost01 = { object: "payment_intent", latest_charge: chargeIn("ch_TestPlanLost01", "lost") };
+  paymentIntents.pi_TestPlanLost01 = { id: "pi_TestPlanLost01", object: "payment_intent", latest_charge: chargeIn("ch_TestPlanLost01", "lost") };
   is("its first payment lost to a dispute: closed", await purchaseRefunded(ACCOUNT, plan), true);
-  paymentIntents.pi_TestPlanLost01 = { object: "payment_intent", latest_charge: chargeIn("ch_TestPlanOpen01", "under_review") };
+  paymentIntents.pi_TestPlanLost01 = { id: "pi_TestPlanLost01", object: "payment_intent", latest_charge: chargeIn("ch_TestPlanOpen01", "under_review") };
   is("still under review: open", await purchaseRefunded(ACCOUNT, plan), false);
 
   await claimHandle(OWNER, "nightpaint", "Night Paint", "");

@@ -52,9 +52,18 @@ is("the smallest list a test needs is the subject test's", MIN_TEST_REACH, 100);
 part("Read back as stored");
 is("what was stored", parseContentTest({ ...(made as object), a: 60, b: 60, endsAt: 1_800_000_000, winner: "b", visits: { a: 3, b: 9 } }), { ...(made as object), a: 60, b: 60, endsAt: 1_800_000_000, winner: "b", visits: { a: 3, b: 9 } });
 is("nothing usable is no test", [parseContentTest(null), parseContentTest({ bodyB: "" }), parseContentTest({ share: 20 })], [null, null, null]);
-is("counts that are not whole numbers are not read as more", parseContentTest({ bodyB: B, a: -4, b: "9", visits: { a: 1.7, b: -1 } }), { bodyB: B, share: 20, hours: 4, by: "visits", a: 0, b: 0, endsAt: 0, winner: "", visits: { a: 1, b: 0 }, sales: null, why: "", skipped: false });
+is("counts that are not whole numbers are not read as more", parseContentTest({ bodyB: B, a: -4, b: "9", visits: { a: 1.7, b: -1 } }), { bodyB: B, share: 20, hours: 4, by: "visits", a: 0, b: 0, endsAt: 0, winner: "", visits: null, sales: null, why: "", skipped: false });
+// A stored pair with a count that does not read is unknown, never an invented 0 or a count cut down (rule 24; Claude 3
+// and Codex G on #3654).
+is("a pair with one count that does not read is unknown", [parseContentTest({ bodyB: B, sales: { a: "x", b: 5 } })?.sales, parseContentTest({ bodyB: B, visits: { a: 1.7, b: 3 } })?.visits], [null, null]);
+is("control: a whole pair is read as it is", parseContentTest({ bodyB: B, sales: { a: 0, b: 5 } })?.sales, { a: 0, b: 5 });
 
 part("The better version, by what it brought per email sent");
+is(
+  "by sales, sales not read and visits even: says the sales could not be read, never a tie (Codex G on #3654)",
+  chooseContent({ a: 100, b: 100, by: "sales" }, { a: 5, b: 5 }, null).why,
+  "Sales could not be read when the time was up, and visits did not set the versions apart, so the rest got the first one. It was not chosen on merit.",
+);
 const sent = { a: 100, b: 50, by: "visits" as const };
 is("by visits", chooseContent(sent, { a: 10, b: 8 }, null), { winner: "b", why: "The second version brought 8 visits to your store from 50 emails, against 10 from 100, so the rest got it." });
 is("by sales", chooseContent({ ...sent, by: "sales" }, { a: 1, b: 1 }, { a: 4, b: 1 }), { winner: "a", why: "The first version brought 4 sales from 100 emails, against 1 from 50, so the rest got it." });

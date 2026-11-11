@@ -799,11 +799,14 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
  * Deletes every review one buyer wrote in this store (lib/person-erasure.ts),
  * as their own delete does: its stars leave the average with it. Returns the
  * photos to delete from the picture folder; each also goes into `files`, when
- * given, before its review's delete is tried. The count of photos each review
- * was granted (photoCountKey) goes too, for every product asked about, even
- * one whose review the buyer had already deleted: its id is computed from
- * their address. One erased person who writes again may get at most
- * MAX_REVIEW_PHOTOS more, bounded by the erasures themselves.
+ * given, before its review's delete is tried. `leaving`, when given, is handed
+ * every review found before the first is deleted (the store page's quotes,
+ * lib/store-quotes.ts); when it throws, this throws. The caller keeps the
+ * quotes again once this returns, from the reviews as they then stand. The
+ * count of photos each review was granted (photoCountKey) goes too, for every
+ * product asked about, even one whose review the buyer had already deleted:
+ * its id is computed from their address. One erased person who writes again
+ * may get at most MAX_REVIEW_PHOTOS more, bounded by the erasures themselves.
  */
 export async function forgetReviewsPerson(
   statsId: string | null,
@@ -811,6 +814,7 @@ export async function forgetReviewsPerson(
   email: string,
   room: DataStore,
   files?: string[],
+  leaving?: (reviews: Review[]) => Promise<void>,
 ): Promise<{ records: number; photos: string[] }> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return { records: 0, photos: [] };
   const wanted = productIds.filter((p) => PRODUCT_ID_PATTERN.test(p));
@@ -822,6 +826,10 @@ export async function forgetReviewsPerson(
   const raws = wanted.length ? repliesFor(await redisPipeline(wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]])), wanted.length) : [];
   if (!raws) throw new UnknownReplyError(what);
   const reviews = raws.map((raw) => storedReview(raw, what));
+  const found = reviews.filter((review): review is Review => review !== null);
+  // Their words leave the store page's quotes before any review goes: when that fails, every review is still here
+  // for the retry to find them by.
+  if (leaving && found.length) await leaving(found);
   if (wanted.length) {
     // Then one request for every product's photo count; each answer read exactly, its room given back only when it
     // removed one. Before any review is deleted: a failure here throws while every review, and so every photo to

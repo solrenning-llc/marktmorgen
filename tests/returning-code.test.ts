@@ -188,6 +188,8 @@ async function main(): Promise<void> {
     f.set("handle", "returnshop");
     f.set("product", fields.product ?? productId);
     for (const [k, v] of Object.entries(fields)) if (k !== "product") f.set(k, v);
+    // The field's own button asks for the link; the buy button never does.
+    if (fields.rcode !== undefined && fields.buy !== "yes") f.set("rask", "1");
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com", "x-forwarded-for": ip } }));
     const location = response.headers.get("location") ?? "";
     const writesBefore = linkWrites;
@@ -213,9 +215,14 @@ async function main(): Promise<void> {
   bare.set("product", productId);
   bare.set("rcode", "THANKYOU");
   bare.set("remail", PAST);
+  bare.set("rask", "1");
   const asked = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: bare, headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.50" } }));
   await runAfter();
   is("'sent', not sent back for the consent box", asked.headers.get("location"), back("sent"));
+
+  part("A code left in the field never stops the buy button");
+  r = await post({ rcode: "THANKYOU", remail: PAST, buy: "yes" }, "198.51.100.51");
+  is("the buy button buys, at the full price, with nothing asked or read", [r.location, r.session?.get("discounts[0][coupon]"), r.link, r.reads], ["https://checkout.stripe.com/c/pay/test", null, false, 0]);
 
   part("Typed with an address that did not pay here: the same answer, and nothing sent");
   for (const [who, ip] of [[NEW, "198.51.100.8"], [TRIAL, "198.51.100.9"], [REFUNDED, "198.51.100.10"], [FREE, "198.51.100.11"]] as const) {
@@ -226,6 +233,14 @@ async function main(): Promise<void> {
   r = await post({ rcode: "THANKYOU", remail: PAST }, "198.51.100.12");
   is("a list that cannot be read: the same answer, no link", [r.location, r.session, r.link], [back("sent"), null, false]);
   sessionsAnswer = "documented";
+
+  part("Sent back for the consent box, the link is kept");
+  const noBox = new FormData();
+  noBox.set("handle", "returnshop");
+  noBox.set("product", productId);
+  noBox.set("rtoken", token);
+  const boxed = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: noBox, headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.52" } }));
+  is("back to the page with the link, asking for the box", boxed.headers.get("location"), `https://marktmorgen.com/@returnshop/p/${productId}?consent=needed&rtoken=${token}#returning`);
 
   part("The link opens the checkout with the code, for that address, once");
   r = await post({ rtoken: token }, "198.51.100.13");

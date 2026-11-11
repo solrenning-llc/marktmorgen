@@ -37,6 +37,7 @@
  * moves the count off the old option and on to the new one in the same call.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { cleanLine } from "@/lib/community-text";
@@ -134,8 +135,12 @@ export async function vote(
 ): Promise<boolean> {
   if (pollClosed(poll)) return false;
   const picked = cleanChoice(poll, choice);
-  const [raw] = await redisPipeline([["HGET", votesKey(id, post), who]]);
-  const before = typeof raw === "string" && raw ? raw.split(",").filter(Boolean) : [];
+  // Rule 24: no earlier vote only for Redis's null or the empty string; any
+  // other reply is unknown, never "no vote" (the tally would count it twice).
+  const read = repliesFor(await redisPipeline([["HGET", votesKey(id, post), who]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a member's poll vote");
+  const before = raw ? raw.split(",").filter(Boolean) : [];
   const gone = before.filter((one) => !picked.includes(one));
   const added = picked.filter((one) => !before.includes(one));
   if (!gone.length && !added.length) return true;

@@ -17,10 +17,13 @@
  * two emails, one link to each address, the current one first. Each is
  * taken from the store's access emails before it goes (lib/email.ts,
  * EmailMeter "store", "transactional"; the new address, typed by the buyer,
- * as `asked`, so a stranger's inbox only ever gets a share of them). An
- * email whose figure is spent or cannot be read is not sent, and the page
- * says which went: none ("unsent"), or only the current address's ("half").
- * Nothing is said to have been sent that was not.
+ * as `asked`, so a stranger's inbox only ever gets a share of them). The
+ * sender answers false both when it refused and when the provider's answer
+ * was lost after it took the email, so a false is never said as "not sent":
+ * the page says the first email is not confirmed ("unconfirmed"), or that the
+ * second is not ("half"), and asks the buyer to look in the inbox before
+ * asking again (Codex V on #3621). Nothing is said to have been sent, or not
+ * sent, that is not known.
  *
  * A link opens a page that says what would move, from where to where, and
  * asks for Confirm: opening it confirms nothing (mail scanners open links).
@@ -135,7 +138,7 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
     subject: words.oldSubject(store.name),
     text: words.oldText(store.name, addresses.to, link(asked.fromToken)),
   });
-  if (!toCurrent) return "unsent";
+  if (!toCurrent) return "unconfirmed";
   const toNew = await send({
     meter: { by: "store", store, kind: "transactional", asked: true },
     from,

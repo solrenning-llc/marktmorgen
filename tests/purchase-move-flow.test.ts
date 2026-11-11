@@ -179,7 +179,8 @@ async function main(): Promise<void> {
     const [m, q] = [mails.length, await used()];
     seen = [];
     const answer = await askToMovePurchases({ store: moss, token, to: "ana.new@example.com", origin: ORIGIN });
-    const commands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c)).length;
+    // The day's count is one script: its EVAL is billed too, besides the INCR and EXPIRE it runs (lib/purchase-moves.ts MOVE_DAY_COUNT).
+    const commands = seen.filter((c) => /nl:(orders:link|erased|pm):/.test(c) || c.startsWith("EVAL -- marktmorgen:purchase-move-day:")).length;
     seen = null;
     is("sent", answer, "sent");
     const sent = mails.slice(m);
@@ -276,7 +277,7 @@ async function main(): Promise<void> {
     const one = await signIn("spent.buyer@example.com");
     const [m, q] = [mails.length, await used()];
     odd = { command: "INCRBY", prefix: "nl:allow:transactional:", reply: "not a count", times: 1, skip: 0 };
-    is("none taken: no email, unsent", await askToMovePurchases({ store: moss, token: one, to: "spent.new@example.com", origin: ORIGIN }), "unsent");
+    is("none taken: no email, and the page cannot say more than that it is not confirmed", await askToMovePurchases({ store: moss, token: one, to: "spent.new@example.com", origin: ORIGIN }), "unconfirmed");
     odd = null;
     is("nothing went out", mails.length - m, 0);
     const two = await signIn("half.buyer@example.com");

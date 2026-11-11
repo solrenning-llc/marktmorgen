@@ -5,12 +5,15 @@
  * but the read never threw, so a product with reviews was described as having none, and the studio's reviews page
  * showed 0 reviews as real.
  *
- * Now both throw UnknownReplyError on such a reply; a product never reviewed still reads as none. Synthetic only.
+ * Its sibling visibleReviews read such a reply as no reviews to show: the AI summary (lib/review-ai-summary.ts)
+ * then told the creator the product had too few reviews to sum up.
+ *
+ * Now each throws UnknownReplyError on such a reply; a product never reviewed still reads as none. Synthetic only.
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { store as redis } from "./redis-stub";
-import { saveReview, summaries, summaryOf } from "@/lib/reviews";
+import { saveReview, summaries, summaryOf, visibleReviews } from "@/lib/reviews";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { ROOM } from "./data-room";
 
@@ -55,4 +58,16 @@ test("readable replies: the review is counted, and a product never reviewed read
   assert.equal(all.get("synthbread01")?.count, 1);
   assert.equal(all.size, 1);
   assert.equal((await summaries("fedcba9876543210fedcba9876543210")).size, 0);
+});
+
+for (const [command, reply] of [["ZREVRANGEBYSCORE", "LOST"], ["ZREVRANGEBYSCORE", 7], ["ZREVRANGEBYSCORE", { a: 1 }], ["ZREVRANGEBYSCORE", [1]], ["HMGET", "LOST"], ["HMGET", "x"], ["HMGET", []], ["HMGET", [7]]] as const) {
+  test(`the reviews to show, with ${command} read ${JSON.stringify(reply)}, are unknown, never none`, async () => {
+    odd = { command, reply };
+    await assert.rejects(visibleReviews(statsId, "synthbread01"), unknown);
+  });
+}
+
+test("readable replies: the review to show is read, and a product never reviewed shows none", async () => {
+  assert.equal((await visibleReviews(statsId, "synthbread01")).length, 1);
+  assert.deepEqual(await visibleReviews(statsId, "synthnever01"), []);
 });

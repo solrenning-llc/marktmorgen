@@ -104,7 +104,8 @@ export async function POST(request: NextRequest) {
     // The request's id, for the code in the email (652 [WG12]): given to this browser for every address alike.
     return Response.json({ ok: true, request: asked.request }, { status: 200, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    console.error("sign-in request failed", error);
+    // Provider and storage errors can include the address or sign-in material; keep logs data-free.
+    console.error("sign-in request failed");
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

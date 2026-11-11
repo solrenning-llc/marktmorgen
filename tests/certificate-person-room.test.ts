@@ -3,7 +3,7 @@
  * gives back to the store's data room exactly what each took when it was
  * issued (lib/certificate.ts, issueCertificate), withdrawn or not, once.
  */
-import { certificatesFor, forgetCertificatesPerson, issueCertificate, withdrawCertificate } from "@/lib/certificate";
+import { certificatesFor, forgetCertificatesPerson, issueCertificate, withdrawCertificate, withdrawForRefund } from "@/lib/certificate";
 import type { Course } from "@/lib/course";
 import { emailKey } from "@/lib/learn";
 import { dataUsed } from "@/lib/store-data";
@@ -46,6 +46,21 @@ async function main(): Promise<void> {
   if (!cy.ok) throw new Error("not issued");
   is("withdrawing a deleted certificate writes nothing", await withdrawCertificate(course.id, cy.certificate.id), false);
   is("and it is not there again", (await redis.pipeline([["EXISTS", `nl:cert:${cy.certificate.id}`]]))[0], 0);
+
+  part("A certificate withdrawn for a refund gives back exactly what it took, too");
+  const beforeEve = await used();
+  const eve = await issueCertificate(input("eve@example.com", "Eve Stone"));
+  if (!eve.ok) throw new Error("not issued");
+  is("withdrawn for the refund", await withdrawForRefund(course.id, "eve@example.com"), true);
+  is("Eve deleted", await forgetCertificatesPerson([course.id], "eve@example.com", ROOM), 1);
+  is("the room is back where it was, not below it", await used(), beforeEve);
+  const beforeFay = await used();
+  const fay = await issueCertificate(input("fay@example.com", "Fay Lin"));
+  if (!fay.ok) throw new Error("not issued");
+  is("withdrawn by the creator first", await withdrawCertificate(course.id, fay.certificate.id), true);
+  is("then the refund marks it", await withdrawForRefund(course.id, "fay@example.com"), true);
+  is("Fay deleted", await forgetCertificatesPerson([course.id], "fay@example.com", ROOM), 1);
+  is("the room is back where it was for her too", await used(), beforeFay);
 
   part("Without a room nothing is counted, and nothing breaks");
   is("Ben deleted", await forgetCertificatesPerson([course.id], "ben@example.com"), 1);

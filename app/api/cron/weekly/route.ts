@@ -7,7 +7,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { readSpends } from "@/lib/ad-spend";
@@ -64,27 +64,39 @@ export async function GET(request: NextRequest) {
         continue;
       }
       const emailOff = await weeklyOff(store.handle);
-      const chat = await chatAddress(store.statsId).catch(() => null);
+      // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
+      const chat = await chatAddress(store.statsId).catch(() => undefined);
+      if (chat === undefined) {
+        out.failed += 1;
+        continue;
+      }
       if (emailOff && !chat) {
         out.stopped += 1;
         continue;
       }
-      if (!(await claimWeek(store.handle))) continue;
+      const at = Date.now();
+      if (!(await claimWeek(store.handle, at))) continue;
       out.looked += 1;
       const data = await readNumbers(store).catch(() => null);
+      if (!data) {
+        // Not read this time, so not a quiet week: the week is let go and a later run tries again, as the monthly email does.
+        await releaseWeek(store.handle, at).catch((error) => console.error("weekly: letting the week go failed", error));
+        out.failed += 1;
+        continue;
+      }
       // Its rates, for the ranges stores its size are set beside (lib/benchmarks.ts): read here anyway.
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
       const spends = await readSpends(store.statsId).catch(() => []);
       const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }))).cents;
-      const message = withGoalAvailability(data && token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
+      const message = withGoalAvailability(token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
       if (!message) {
         out.quiet += 1;
         continue;
       }
       // A few sentences written from the same numbers, first, where the creator turned it on (lib/numbers-ask.ts).
-      if (store.weeklyAi && data && aiAvailableFor(store)) {
+      if (store.weeklyAi && aiAvailableFor(store)) {
         const lead = await weeklySummary(store, data).catch(() => null);
         if (lead) message.text = `In short: ${lead}\n\n${message.text}`;
       }

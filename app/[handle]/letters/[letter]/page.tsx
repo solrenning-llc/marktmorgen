@@ -74,11 +74,13 @@ export default async function LetterPage({ params, searchParams }: Params) {
   const kept = membersOnly(letter);
   const reader = kept ? await letterReader(store, letter, await cookies()) : ({ state: "public" } as const);
   const readable = reader.state === "public" || reader.state === "owner" || reader.state === "in";
-  const products = kept ? await readListings(store, letter.products) : [];
+  // A listing that does not read throws (lib/catalog.ts, CX-123 rule 24): then none is shown, and the list says so.
+  const read = kept ? await readListings(store, letter.products).catch(() => null) : [];
+  const products = read ?? [];
   // Which of its products the store still has, from the store's own record (the set lib/letter-access.ts asks about), not from the listings read for the page.
   const known = kept ? (letter.products ?? []).filter((id) => hasProduct(store, id)) : [];
   // A listing that did not read is not a product gone: the list says it is incomplete, and the form stays.
-  const incomplete = products.length < known.length;
+  const incomplete = read === null || products.length < known.length;
   // Nobody but the creator can open it once every product it was kept for is gone.
   const gone = kept && !readable && known.length === 0;
   const query = kept ? await searchParams : {};

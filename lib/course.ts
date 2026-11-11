@@ -15,7 +15,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -753,13 +753,45 @@ export async function saveNewBodies(courseId: string, bodies: { lessonId: string
     replies = null;
   }
   if (replies && replies.every((reply) => reply === "OK")) return;
-  // Only what this call wrote goes: a text kept before it (NX refused) stays; an unknown reply could be either, so only a key now holding this call's own text goes.
-  const mine = bodies.filter((body, i) => replies?.[i] === "OK");
-  const unsure = bodies.filter((body, i) => !replies || (replies[i] !== "OK" && replies[i] !== null));
-  const held = unsure.length ? await readBodies(courseId, unsure.map((body) => body.lessonId)) : {};
-  const back = [...mine, ...unsure.filter((body) => held[body.lessonId] === body.text)];
-  if (back.length) await redisPipeline(back.map((body) => ["DEL", bodyKey(courseId, body.lessonId)]));
-  await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes }]);
+  // Taking back: only what this call wrote goes, and only the room of what is known to be gone (or never
+  // written) comes back; anything whose fate cannot be read keeps its room counted, more and never less.
+  const gone: { lessonId: string; text: string }[] = [];
+  const mine: { lessonId: string; text: string }[] = [];
+  const unsure: { lessonId: string; text: string }[] = [];
+  bodies.forEach((body, i) => {
+    const reply = replies?.[i];
+    if (replies && reply === null) gone.push(body); // NX refused: another text is kept there, and this one was never written.
+    else if (reply === "OK") mine.push(body);
+    else unsure.push(body);
+  });
+  if (unsure.length) {
+    let held: unknown[] | null = null;
+    try {
+      const read = repliesFor(await redisPipeline([["MGET", ...unsure.map((body) => bodyKey(courseId, body.lessonId))]]), 1);
+      held = read && Array.isArray(read[0]) && read[0].length === unsure.length ? read[0] : null;
+    } catch {
+      held = null;
+    }
+    unsure.forEach((body, i) => {
+      const value = held?.[i];
+      if (value === body.text) mine.push(body);
+      else if (held && (value === null || typeof value === "string")) gone.push(body); // nothing, or someone else's text: not written by this call.
+    });
+  }
+  if (mine.length) {
+    let deleted: unknown[] | null = null;
+    try {
+      deleted = repliesFor(await redisPipeline(mine.map((body) => ["DEL", bodyKey(courseId, body.lessonId)])), mine.length);
+    } catch {
+      deleted = null;
+    }
+    mine.forEach((body, i) => {
+      const count = deleted ? countOf(deleted[i]) : null;
+      if (count === 0 || count === 1) gone.push(body);
+    });
+  }
+  const back = gone.reduce((sum, { text }) => sum + bodyBytes(text), 0);
+  if (back > 0) await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes: back }]);
   throw new UnknownReplyError("an imported course's lesson texts");
 }
 

@@ -88,6 +88,40 @@ async function main(): Promise<void> {
   is("refused", unknown instanceof Error, true);
   is("nothing left", await readBody(course.id, g), "");
   is("room given back", (await dataUsed(ROOM))!.used, usedBefore);
+  part("A text whose fate cannot be read keeps its room counted (Revisor 1 on e-kj5-u3a)");
+  const [h, k] = [newItemId(), newItemId()];
+  const roomBefore = (await dataUsed(ROOM))!.used;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // Written for real, answered in another shape; and read back in another shape too.
+    if (commands.some((command) => command[0] === "SET")) return (await original(commands)).map(() => ({ shape: "other" }));
+    if (commands.some((command) => command[0] === "MGET")) return [{ shape: "other" }];
+    return original(commands);
+  }) as typeof redis.pipeline;
+  let lost: unknown;
+  try {
+    lost = await thrown(() => saveNewBodies(course.id, [{ lessonId: h, text: "kept one" }, { lessonId: k, text: "kept two" }], ROOM));
+  } finally {
+    redis.pipeline = original;
+  }
+  is("refused", lost instanceof Error, true);
+  const left = [await readBody(course.id, h), await readBody(course.id, k)].filter(Boolean).length;
+  is("what may still be there keeps its room: never counted less than is kept", left === 0 || (await dataUsed(ROOM))!.used > roomBefore, true);
+
+  part("A delete whose reply cannot be read keeps its room counted");
+  const m = newItemId();
+  const before2 = (await dataUsed(ROOM))!.used;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "SET")) return (await original(commands)).map(() => "QUEUED?");
+    if (commands.some((command) => command[0] === "DEL")) return commands.map(() => ({ shape: "other" }));
+    return original(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await thrown(() => saveNewBodies(course.id, [{ lessonId: m, text: "still here" }], ROOM));
+  } finally {
+    redis.pipeline = original;
+  }
+  is("the text is still there", await readBody(course.id, m), "still here");
+  is("and its room still counted", (await dataUsed(ROOM))!.used > before2, true);
   done();
 }
 

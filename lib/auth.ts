@@ -468,7 +468,7 @@ export async function spendMoveLink(
   } catch {
     const [read] = await redisPipeline([["GET", key]]);
     const [removed] = await redisPipeline([["DEL", key]]);
-    raw = Number(removed) === 1 ? read : null;
+    raw = countOf(removed) === 1 ? read : null;
   }
   if (typeof raw !== "string" || !raw) return null;
 
@@ -775,7 +775,7 @@ export async function takeGoogleState(state: string): Promise<string | null> {
   } catch {
     const [read] = await redisPipeline([["GET", key]]);
     const [removed] = await redisPipeline([["DEL", key]]);
-    value = Number(removed) === 1 ? read : null;
+    value = countOf(removed) === 1 ? read : null;
   }
   return typeof value === "string" && value ? value : null;
 }

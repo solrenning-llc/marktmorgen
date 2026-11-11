@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { lookStyle } from "@/lib/store-look";
 import { readListing } from "@/lib/catalog";
 import { GROUP_ID, PLACE_TOKEN, placesWords } from "@/lib/group-rules";
@@ -54,6 +56,9 @@ export default async function GroupPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@") || !GROUP_ID.test(id)) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Reached through a person's own link: one of the store's counted requests (lib/traffic.ts, isResting), resting
+  // only once the whole month's are used, as a buyer's course does, before its records are read.
+  if (await isResting(store, Date.now(), "buyer")) return <StoreResting store={store} buyer />;
   const group = await readGroup(id);
   // Not this store's, or never paid for: there is nothing here to describe.
   if (!group || !store.statsId || group.s !== store.statsId || !group.paid) notFound();

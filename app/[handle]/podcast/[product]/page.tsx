@@ -4,6 +4,8 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { lookStyle } from "@/lib/store-look";
 import { readListing } from "@/lib/catalog";
 import { readFeedToken } from "@/lib/podcast-access";
@@ -46,6 +48,9 @@ export default async function PodcastPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Reached through a person's own link: one of the store's counted requests (lib/traffic.ts, isResting), resting
+  // only once the whole month's are used, as a buyer's course does, before its records are read.
+  if (await isResting(store, Date.now(), "buyer")) return <StoreResting store={store} buyer />;
   const product = await readListing(store, productId);
   if (!product?.podcast) redirect(`/@${store.handle}`);
   const said = speech(store);

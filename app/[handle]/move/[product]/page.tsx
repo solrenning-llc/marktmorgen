@@ -4,6 +4,8 @@ import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { speech } from "@/lib/buyer-words";
 import { moveWords } from "@/lib/buyer-words/move";
 import { lookStyle } from "@/lib/store-look";
@@ -45,6 +47,9 @@ export default async function MovePage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Reached through a person's own link: one of the store's counted requests (lib/traffic.ts, isResting), resting
+  // only once the whole month's are used, as a buyer's course does, before its records are read.
+  if (await isResting(store, Date.now(), "buyer")) return <StoreResting store={store} buyer />;
   const say = speech(store);
   const m = moveWords(store.language);
   const product = (await readListing(store, productId)) ?? null;

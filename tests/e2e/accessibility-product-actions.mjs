@@ -234,6 +234,8 @@ try{
     await next.click();await page.waitForURL(url=>url.searchParams.get("page")==="2");await page.waitForLoadState("networkidle");await restoreDarkAfterNavigation();
    }
    try{await page.getByText(title,{exact:true}).waitFor({state:"attached"});}catch(error){console.error("PRODUCT_STOREFRONT_DIAGNOSTIC:"+JSON.stringify({engine,width,mode,createdId,url:page.url(),titleCount:await page.getByText(title,{exact:true}).count(),pager:await page.locator(".st-pager").allTextContents()}));throw error;}
+   // The visit waits for a pause in the buyer's input before its check runs (lib/quiet-moment.ts): waited for here, never assumed.
+   for(let wait=0;wait<100&&interceptedVisits<expectedVisits;wait++)await page.waitForTimeout(100);
    if(writes||foreign||localProductWrites!==expectedWrites||interceptedVisits!==expectedVisits)throw Error("Unexpected operation count "+JSON.stringify({writes,foreign,localProductWrites,expectedWrites,interceptedVisits,expectedVisits,blockedWrites}));
    console.log("PRODUCT_ACTION_PROOF:"+JSON.stringify({engine,width,mode,title,localProductWrites,expectedWrites,interceptedVisits,createdAndReloaded:true,explicitPublication:true,storefrontVisible:true,scope:"Disposable local fixture only; no checkout, email, delivery or real account."}));
   }catch(error){failed++;console.error("PRODUCT_MATRIX_FAILURE:"+JSON.stringify({engine,path,width,mode,error:String(error)}));}

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { startBrowserCheck } from "@/lib/browser-check-client";
+import { whenQuiet } from "@/lib/quiet-moment";
 import { sourceTag } from "@/lib/source-rules";
 
 // One count per page load, however many times React runs the effect.
@@ -36,24 +37,38 @@ function beacon(payload: Record<string, string>) {
  * On a page of the store other than its front one (`front` false), it says
  * only that the page was opened, so that somebody who arrives by a link
  * straight to a product is a visit too.
+ *
+ * The count goes at the buyer's first pause (lib/quiet-moment.ts): the page
+ * loaded and two seconds without a tap or a key, or the page hidden. Its check
+ * runs the host's script in one long block, which on a slow phone used to
+ * hold the buyer's first tap past 200 ms.
  */
 export function StoreBeacon({ handle, front = true, product = "" }: { handle: string; front?: boolean; product?: string }) {
   useEffect(() => {
     const key = `${handle}|${location.href}`;
-    if (!sent.has(key)) {
-      sent.add(key);
-      if (front) {
-        const query = new URLSearchParams(location.search);
-        const tag = (name: string) => (query.get(name) ?? "").slice(0, 60);
-        beacon({ h: handle, k: "v", r: document.referrer.slice(0, 500), u: sourceTag(query), m: tag("utm_medium"), g: tag("utm_campaign") });
-      } else {
-        // Any other page of the store: only that somebody came (lib/traffic.ts),
+    // Where the visitor came from is read as the page opens, not when the count goes: a move inside the store before
+    // then (its next page, say) changes the address, never the visit's source.
+    const query = new URLSearchParams(location.search);
+    const tag = (name: string) => (query.get(name) ?? "").slice(0, 60);
+    const payload: Record<string, string> = front
+      ? { h: handle, k: "v", r: document.referrer.slice(0, 500), u: sourceTag(query), m: tag("utm_medium"), g: tag("utm_campaign") }
+      : // Any other page of the store: only that somebody came (lib/traffic.ts),
         // and on a product's own page, which product: what its sales are measured against.
-        beacon(product ? { h: handle, k: "p", p: product } : { h: handle, k: "p" });
-      }
-    }
+        product
+        ? { h: handle, k: "p", p: product }
+        : { h: handle, k: "p" };
+    // The count goes through the host's check, whose script is one long block of work: it waits for a pause in what
+    // the buyer is doing (lib/quiet-moment.ts), so it never lands on a tap. Marked sent only when it goes, so an
+    // effect React runs twice still sends it once.
+    const cancel = sent.has(key)
+      ? null
+      : whenQuiet(() => {
+          if (sent.has(key)) return;
+          sent.add(key);
+          beacon(payload);
+        });
     // Which links are followed is counted on the front page, where they are.
-    if (!front) return;
+    if (!front) return () => cancel?.();
     const onClick = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target.closest("a[data-link]") : null;
       const id = target?.getAttribute("data-link");
@@ -63,6 +78,7 @@ export function StoreBeacon({ handle, front = true, product = "" }: { handle: st
     document.addEventListener("click", onClick);
     document.addEventListener("auxclick", onClick);
     return () => {
+      cancel?.();
       document.removeEventListener("click", onClick);
       document.removeEventListener("auxclick", onClick);
     };
@@ -80,8 +96,12 @@ export function FunnelBeacon({ handle, funnel, kind, id }: { handle: string; fun
   useEffect(() => {
     const key = `${handle}|${location.href}|funnel`;
     if (sent.has(key)) return;
-    sent.add(key);
-    beacon({ h: handle, k: "f", f: funnel, t: kind === "page" ? "g" : "p", id });
+    // Checked like a visit, so it waits for the same pause (lib/quiet-moment.ts).
+    return whenQuiet(() => {
+      if (sent.has(key)) return;
+      sent.add(key);
+      beacon({ h: handle, k: "f", f: funnel, t: kind === "page" ? "g" : "p", id });
+    });
   }, [handle, funnel, kind, id]);
   return null;
 }

@@ -201,7 +201,10 @@ async function main(): Promise<void> {
     let asked = false;
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request) => {
-      if (new URL(input instanceof Request ? input.url : String(input)).hostname.endsWith("anthropic.com")) asked = true;
+      // The model, by its exact host or by its messages path (lib/ai.ts may point it at a local stand-in): never a host
+      // that only ends with the name (CodeQL js/incomplete-url-substring-sanitization).
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.hostname === "api.anthropic.com" || url.pathname === "/v1/messages") asked = true;
       return new Response("", { status: 404 });
     }) as typeof fetch;
     try {

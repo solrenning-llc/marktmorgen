@@ -112,6 +112,18 @@ export type JoinAnswer = { v: number; choice: string; label: string; comment: st
 
 const LINK = /\b(?:https?:\/\/|www\.)\S+/gi;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
+/**
+ * The most of a comment the link and address patterns read: far more than is kept (MAX_JOIN_COMMENT), so the
+ * patterns never run over an unbounded text (a long one with no spaces took seconds; Claude 3 and Codex G on #3652).
+ * A word cut at that edge is dropped whole, so half a link or address is never kept; a head that is one word only
+ * keeps its letters but never what follows an "@" in it.
+ */
+const COMMENT_READ = 2_000;
+function commentHead(text: string): string {
+  if (text.length <= COMMENT_READ) return text;
+  const head = text.slice(0, COMMENT_READ);
+  return /\s/.test(head) ? head.replace(/\S*$/, "") : head.replace(/@.*$/, "");
+}
 
 /** What is kept of an answer, or why nothing is. */
 export function cleanJoinAnswer(
@@ -122,6 +134,6 @@ export function cleanJoinAnswer(
   if (raw.v !== setting.version) return { ok: false, problem: "version" };
   const choice = joinChoices(setting).find((c) => c.id === raw.choice);
   if (!choice) return { ok: false, problem: "choice" };
-  const comment = typeof raw.comment === "string" ? words(raw.comment.replace(LINK, " ").replace(EMAIL, " "), MAX_JOIN_COMMENT) : "";
+  const comment = typeof raw.comment === "string" ? words(commentHead(raw.comment).replace(LINK, " ").replace(EMAIL, " "), MAX_JOIN_COMMENT) : "";
   return { ok: true, answer: { v: setting.version, choice: choice.id, label: choice.label, comment } };
 }

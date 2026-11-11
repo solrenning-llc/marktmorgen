@@ -461,7 +461,8 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
  * out; one that names another store is never shown. Anything else (an answer
  * not in its shape, an entry that is not an id, a kept record that is not an
  * import, an import whose store is missing, empty or not text) is `unknown`,
- * never an empty or shorter history. `bytes` is what it read, to settle what
+ * never an empty or shorter history; so is a record that names another import
+ * than the id it was read under. `bytes` is what it read, to settle what
  * it was paid for at.
  */
 export async function storeImportsRead(store: Store): Promise<{ jobs: ImportJob[]; ids: number; bytes: number } | "unknown"> {
@@ -475,12 +476,15 @@ export async function storeImportsRead(store: Store): Promise<{ jobs: ImportJob[
   const raws = repliesFor(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length);
   if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) return "unknown";
   const jobs: ImportJob[] = [];
-  for (const raw of raws) {
+  for (const [i, raw] of raws.entries()) {
     if (raw === null) continue;
     bytes += Buffer.byteLength(raw as string, "utf8");
     // A record kept that is not an import at all is unknown, never left out of the history (Codex A3 on #1933).
     const job = parseJob(raw);
     if (!job) return "unknown";
+    // The record GET nl:import:A answers is import A's only when it says so: one naming another import is unknown,
+    // never shown as A's (Codex V on #3661).
+    if (job.id !== ids[i]) return "unknown";
     // Another store's only when it names one: an import whose store is missing, null, empty or not text says nothing of
     // whose it is, so it is unknown, never left out as another store's (Codex G on #1933).
     const sid: unknown = (job as { sid?: unknown }).sid;

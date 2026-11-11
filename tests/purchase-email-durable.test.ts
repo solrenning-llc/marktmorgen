@@ -183,6 +183,34 @@ test("unpaid, other-store, tip and protected-source checkouts cannot enter legac
   } finally { mail.restore(); }
 });
 
+test("an unknown paid-order count blocks SES and retries before marking confirmation sent", async () => {
+  const f = await fixture(), held = await admitOrders(f.store, 2); assert.ok(held.ok);
+  const id = "cs_test_C97UnknownCountBlocksMail001";
+  const session = { id, status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now()/1000),
+    amount_total: 4000, currency: "usd", metadata: { store: f.store.handle, product: f.product.id, [ADMITTED_FIELD]: String(held.hour) },
+    customer_details: { email: "unknown-count-buyer@example.test" } };
+  const original = redis.pipeline, mail = installSesMailFixture();
+  let refused = false;
+  try {
+    mail.configure(); await mail.setReady(true);
+    redis.pipeline = async commands => {
+      if (!refused && commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION)) {
+        refused = true;
+        throw Error("Synthetic accounting write refused before application");
+      }
+      return original(commands);
+    };
+    assert.equal(await confirmPurchase(f.store, id, session), "failed");
+    assert.equal(mail.calls.ses, 0, "email cannot proceed while paid-order accounting is unknown");
+    assert.equal(redis.run(["GET", confirmationKey(id)]), null, "unknown accounting cannot set the sent marker");
+    redis.pipeline = original;
+    assert.equal(await confirmPurchase(f.store, id, session), "sent");
+    assert.equal(await storeOrdersThisMonth(f.store), 1, "retry commits the paid order before delivery");
+    assert.equal(mail.calls.ses, 1);
+    assert.equal(redis.run(["GET", confirmationKey(id)]), "sent");
+  } finally { redis.pipeline = original; mail.restore(); }
+});
+
 test("legacy accounting recovers a refused write and never applies a partial or lost ACK twice", async t => {
   for (const mode of ["before-count", "partial-replay", "lost-count-ack"] as const) {
     await t.test(mode, async () => {

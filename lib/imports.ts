@@ -61,6 +61,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { handsOver } from "@/lib/product-option";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import {
   type DraftProduct,
@@ -1356,7 +1357,14 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
       continue;
     }
     if (!canSellProduct(store, product)) {
-      problems.push({ line, column: "product", problem: "Not on sale in your store now: publish it first", value: rawProduct });
+      // Said by its own reason, so the advice fixes it: "publish it first" only for a draft (canSellProduct's other
+      // reasons; found end to end checking #3384, where a published membership with nothing to hand over was told to publish).
+      const problem = product.hidden
+        ? "Not on sale in your store now: publish it first"
+        : !handsOver(product)
+          ? "Nothing to hand over yet: add what members get (a file, a link, a course or a podcast) first"
+          : "Not on sale in your store now";
+      problems.push({ line, column: "product", problem, value: rawProduct });
       continue;
     }
     let option = "";

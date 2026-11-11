@@ -65,7 +65,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:hostcal:good:", "nl:hostcal:lock:", "nl:house:seed", "nl:house:seed:lock", "nl:import:",
   "nl:imports:active", "nl:imports:busy:", "nl:imports:cf:", "nl:imports:cf:lock:", "nl:imports:list:",
   "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:seen:", "nl:indexnow:sent", "nl:join:t:",
-  "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:rate:addr:",
+  "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:play:", "nl:learn:playing:", "nl:learn:rate:addr:",
   "nl:learn:rate:ip:", "nl:leave:", "nl:letters:link:", "nl:letters:ok:", "nl:letters:rl:addr:", "nl:letters:rl:ip:", "nl:lib:joined:", "nl:lib:link:", "nl:list:try:", "nl:listed:", "nl:lostdispute:cursor:", "nl:mail-check:last",
   "nl:mail-check:lock", "nl:mail-check:runs", "nl:mail:clk:", "nl:mail:day:", "nl:mail:drafts:", "nl:mail:flowq:lease",
   "nl:mail:flowstats:", "nl:mail:health:", "nl:mail:lock", "nl:mail:paused:", "nl:mail:queue",
@@ -114,7 +114,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
   "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
-  "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
+  "nl:watch:anon:", "nl:watch:hold:", "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
@@ -295,6 +295,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A student's private lesson notes (290 [SQ1], lib/lesson-notes.ts), named by the store's statsId.
   "nl:lnote:": E,
   "nl:learn:enr:": E, "nl:learn:link:": X(1), "nl:learn:paid:": E, "nl:learn:pass:": T("nl:learn:passes:", 90), "nl:learn:passes:": E,
+  // A press of Play on a lesson video (lib/lesson-play.ts): a ticket of two minutes, a viewer's token of four hours at most.
+  "nl:learn:play:": X(1), "nl:learn:playing:": X(1),
   "nl:learn:rate:addr:": X(1), "nl:learn:rate:ip:": X(1),
   "nl:leave:": E,
   "nl:lib:": L, "nl:lib:joined:": L, "nl:lib:link:": X(1),
@@ -436,7 +438,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:voice:": E, "nl:voice:lock:": E,
   // A product's AI summary of its reviews (lib/review-ai-summary.ts): kept eight days, and goes with the store.
   "nl:rsum:": E, "nl:rsum:last:": E, "nl:rsum:lock:": E, "nl:rsum:ver:": E,
-  "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
+  "nl:watch:anon:": E, "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:hold:": E, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
   "nl:wb:": E, "nl:wb:cursor": C, "nl:wb:link:": T("nl:erase:ix:", 60), "nl:wb:n:": E, "nl:wb:once:": E,
   "nl:weekly:lock": C, "nl:weekly:off": I, "nl:weekly:sent:": Cr(14), "nl:weekly:to:": { how: "erase", by: "handle" },
   "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E,

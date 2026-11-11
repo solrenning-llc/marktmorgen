@@ -330,7 +330,12 @@ test("lesson pages supply the store's video allowance", () => {
   // The actual admission behavior, including failed reads and exact exhaustion,
   // is exercised in video-admission.test.ts. Keep this route wiring check.
   const page = readFileSync(join(process.cwd(), "app/[handle]/course/[product]/[lesson]/page.tsx"), "utf8");
-  assert.match(page, /lessonVideo\(lesson\.video, videoLimitFor\(store\), windowId\(store\), store\)/, "the lesson page must supply the store's allowance and its window");
+  // Rule 23 (9 November 2026, pre-review of the video hours ceiling): was lessonVideo(lesson.video, ...) on the page. The
+  // page now draws without holding (lessonPageVideo) and a press of Play holds (app/api/store/course/play/route.ts):
+  // both supply the store's allowance and its window.
+  assert.match(page, /lessonPageVideo\(file, videoLimitFor\(store\), windowId\(store\), store\)/, "the lesson page must supply the store's allowance and its window");
+  const play = readFileSync(join(process.cwd(), "app/api/store/course/play/route.ts"), "utf8");
+  assert.match(play, /lessonVideo\(video, videoLimitFor\(store\), windowId\(store\), store, \{ anonymous \}\)/, "a press of Play must supply the store's allowance and its window");
 });
 
 test("a store that pays nothing can cost next to nothing", () => {

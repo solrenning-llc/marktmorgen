@@ -160,8 +160,30 @@ const en = {
   pausedStrong: "This video is paused for now.",
   pausedRest: (store: string) =>
     `${store} has no paid plan, and its videos have been watched for all the hours a store without one has this month. It plays again as soon as the store's plan is paid, or when the month turns. The rest of the lesson is here as usual.`,
+  /** The same pause for a store whose plan is paid (lib/plan-standing.ts): its plan's own hours are used, never "no paid plan" (VR 2). */
+  pausedPaidRest: (store: string) =>
+    `${store}'s videos have been watched for all the hours its plan includes in this billing period. It plays again when the plan's next period starts. The rest of the lesson is here as usual.`,
   videoFailed: (store: string) => `This lesson's video could not be prepared. ${store} has to upload it again.`,
   videoNotLoaded: "The video could not be loaded just now. Refresh the page in a moment.",
+  /**
+   * A lesson's video starts with a press of this button (app/api/store/course/play/route.ts): nothing is held for it
+   * until then. What kept a press from playing is said under playWaitStrong, each sentence true of its own case.
+   */
+  playLesson: "Play lesson",
+  playWaitStrong: "The video cannot start right now.",
+  playBusyRest: (hours: number) =>
+    `Other viewers are using this store's video time right now. Time they do not use comes back within about ${hours} ${plural(hours, "hour", "hours")}; then press Play lesson again.`,
+  playKeptRest: "The video time this store has left this month is kept for its students.",
+  playManyRest: "Lesson videos were started many times in the last hour. Try again within an hour.",
+  playPlayingRest: "A lesson video of yours is playing. You can start another one when it ends, in 30 minutes at most.",
+  playPreviewsRest: "Many people are watching this store's free previews right now. Try again within an hour.",
+  playAgainRest: "Press Play lesson again in a moment.",
+  /**
+   * Under a lesson's player: a press plays a block of PLAY_BLOCK_SECONDS at most (lib/lesson-play-rules.ts; the owner's
+   * decision 16), and another press goes on.
+   */
+  playBlockRest: (minutes: number) =>
+    `Each press of Play lesson plays up to ${minutes} minutes. If the video stops before the end, press Play lesson again to keep watching.`,
   /** The button under a stamped lesson video (602 [WP1]): puts the video and the buyer's mark in full screen together. */
   fullScreen: "Full screen",
   exitFullScreen: "Exit full screen",
@@ -483,8 +505,21 @@ const es: CoursesWords = {
   pausedStrong: "Este video está en pausa por ahora.",
   pausedRest: (store) =>
     `${store} no tiene un plan de pago, y sus videos ya se vieron durante todas las horas que tiene este mes una tienda sin plan. Se vuelve a reproducir en cuanto se pague el plan de la tienda, o cuando empiece el mes siguiente. El resto de la lección está aquí como siempre.`,
+  pausedPaidRest: (store) =>
+    `Los videos de ${store} ya se vieron durante todas las horas que incluye su plan en este período de facturación. Se vuelve a reproducir cuando empiece el siguiente período del plan. El resto de la lección está aquí como siempre.`,
   videoFailed: (store) => `No se pudo preparar el video de esta lección. ${store} tiene que volver a subirlo.`,
   videoNotLoaded: "No se pudo cargar el video en este momento. Actualiza la página en un momento.",
+  playLesson: "Reproducir lección",
+  playWaitStrong: "El video no puede empezar en este momento.",
+  playBusyRest: (hours) =>
+    `Otras personas están usando ahora el tiempo de video de esta tienda. El tiempo que no usen vuelve en ${plural(hours, "aproximadamente una hora", `unas ${hours} horas`)}; luego pulsa Reproducir lección de nuevo.`,
+  playKeptRest: "El tiempo de video que le queda a esta tienda este mes está reservado para sus estudiantes.",
+  playManyRest: "Los videos de las lecciones se iniciaron muchas veces en la última hora. Vuelve a intentarlo dentro de una hora.",
+  playPlayingRest: "Se está reproduciendo un video de una de tus lecciones. Podrás iniciar otro cuando termine, en 30 minutos como máximo.",
+  playPreviewsRest: "Muchas personas están viendo ahora las vistas previas gratuitas de esta tienda. Vuelve a intentarlo dentro de una hora.",
+  playAgainRest: "Pulsa Reproducir lección de nuevo en un momento.",
+  playBlockRest: (minutes) =>
+    `Cada vez que pulsas Reproducir lección, el video se reproduce hasta ${minutes} minutos. Si se detiene antes del final, pulsa Reproducir lección de nuevo para seguir viéndolo.`,
   fullScreen: "Pantalla completa",
   exitFullScreen: "Salir de pantalla completa",
   resumeLabel: "Dónde te detuviste",
@@ -789,8 +824,21 @@ const fr: CoursesWords = {
   pausedStrong: "Cette vidéo est en pause pour le moment.",
   pausedRest: (store) =>
     `${store} n'a pas de forfait payant, et ses vidéos ont été regardées pendant toutes les heures dont dispose ce mois-ci une boutique sans forfait. Elle sera de nouveau lue dès que le forfait de la boutique sera payé, ou au début du mois prochain. Le reste de la leçon est disponible comme d'habitude.`,
+  pausedPaidRest: (store) =>
+    `Les vidéos de ${store} ont été regardées pendant toutes les heures que comprend son forfait pour cette période de facturation. Elle sera de nouveau lue au début de la prochaine période du forfait. Le reste de la leçon est disponible comme d'habitude.`,
   videoFailed: (store) => `La vidéo de cette leçon n'a pas pu être préparée. ${store} doit la mettre en ligne à nouveau.`,
   videoNotLoaded: "La vidéo n'a pas pu être chargée pour le moment. Actualisez la page dans un instant.",
+  playLesson: "Lire la leçon",
+  playWaitStrong: "La vidéo ne peut pas démarrer pour le moment.",
+  playBusyRest: (hours) =>
+    `D'autres personnes utilisent en ce moment le temps vidéo de cette boutique. Le temps qu'elles n'utilisent pas revient d'ici environ ${hours}${S}${frPlural(hours, "heure", "heures")}${S}; appuyez ensuite de nouveau sur Lire la leçon.`,
+  playKeptRest: "Le temps vidéo qu'il reste à cette boutique ce mois-ci est réservé à ses élèves.",
+  playManyRest: "Des vidéos de leçons ont été lancées de nombreuses fois au cours de la dernière heure. Réessayez d'ici une heure.",
+  playPlayingRest: "Une vidéo de l'une de vos leçons est en cours de lecture. Vous pourrez en lancer une autre quand elle sera finie, dans 30 minutes au plus.",
+  playPreviewsRest: "Beaucoup de personnes regardent en ce moment les aperçus gratuits de cette boutique. Réessayez d'ici une heure.",
+  playAgainRest: "Appuyez de nouveau sur Lire la leçon dans un instant.",
+  playBlockRest: (minutes) =>
+    `Chaque appui sur Lire la leçon lance jusqu'à ${minutes}${S}minutes de vidéo. Si la vidéo s'arrête avant la fin, appuyez de nouveau sur Lire la leçon pour continuer.`,
   fullScreen: "Plein écran",
   exitFullScreen: "Quitter le plein écran",
   resumeLabel: "Où vous en étiez",
@@ -1089,8 +1137,21 @@ const de: CoursesWords = {
   pausedStrong: "Dieses Video ist vorerst pausiert.",
   pausedRest: (store) =>
     `${store} hat keinen bezahlten Tarif, und seine Videos wurden in diesem Monat bereits so viele Stunden angesehen, wie ein Shop ohne Tarif hat. Es wird wieder abgespielt, sobald der Tarif des Shops bezahlt ist oder der neue Monat beginnt. Der Rest der Lektion ist wie gewohnt hier.`,
+  pausedPaidRest: (store) =>
+    `Die Videos von ${store} wurden in diesem Abrechnungszeitraum bereits so viele Stunden angesehen, wie der Tarif enthält. Es wird wieder abgespielt, sobald der nächste Zeitraum des Tarifs beginnt. Der Rest der Lektion ist wie gewohnt hier.`,
   videoFailed: (store) => `Das Video dieser Lektion konnte nicht vorbereitet werden. ${store} muss es erneut hochladen.`,
   videoNotLoaded: "Das Video konnte gerade nicht geladen werden. Laden Sie die Seite gleich neu.",
+  playLesson: "Lektion abspielen",
+  playWaitStrong: "Das Video kann gerade nicht starten.",
+  playBusyRest: (hours) =>
+    `Andere Personen nutzen gerade die Videozeit dieses Shops. Zeit, die sie nicht nutzen, steht in etwa ${plural(hours, "einer Stunde", `${hours} Stunden`)} wieder zur Verfügung; drücken Sie dann erneut auf „Lektion abspielen“.`,
+  playKeptRest: "Die Videozeit, die diesem Shop in diesem Monat bleibt, ist für seine Teilnehmenden reserviert.",
+  playManyRest: "Lektionsvideos wurden in der letzten Stunde sehr oft gestartet. Versuchen Sie es innerhalb einer Stunde erneut.",
+  playPlayingRest: "Ein Video einer Ihrer Lektionen läuft gerade. Sie können ein anderes starten, wenn es endet, spätestens in 30 Minuten.",
+  playPreviewsRest: "Gerade sehen sich viele Personen die kostenlosen Vorschauen dieses Shops an. Versuchen Sie es innerhalb einer Stunde erneut.",
+  playAgainRest: "Drücken Sie gleich erneut auf „Lektion abspielen“.",
+  playBlockRest: (minutes) =>
+    `Jedes Drücken auf „Lektion abspielen“ spielt bis zu ${minutes} Minuten ab. Wenn das Video vor dem Ende anhält, drücken Sie erneut auf „Lektion abspielen“, um weiterzuschauen.`,
   fullScreen: "Vollbild",
   exitFullScreen: "Vollbild beenden",
   resumeLabel: "Wo Sie aufgehört haben",
@@ -1391,8 +1452,21 @@ const it: CoursesWords = {
   pausedStrong: "Questo video è in pausa per ora.",
   pausedRest: (store) =>
     `${store} non ha un piano a pagamento, e i suoi video sono già stati guardati per tutte le ore che un negozio senza piano ha questo mese. Si potrà riprodurre di nuovo non appena il piano del negozio sarà pagato, o all'inizio del mese prossimo. Il resto della lezione è qui come sempre.`,
+  pausedPaidRest: (store) =>
+    `I video di ${store} sono già stati guardati per tutte le ore incluse nel suo piano in questo periodo di fatturazione. Si potrà riprodurre di nuovo all'inizio del prossimo periodo del piano. Il resto della lezione è qui come sempre.`,
   videoFailed: (store) => `Non è stato possibile preparare il video di questa lezione. ${store} deve caricarlo di nuovo.`,
   videoNotLoaded: "Non è stato possibile caricare il video in questo momento. Ricarica la pagina tra un momento.",
+  playLesson: "Riproduci la lezione",
+  playWaitStrong: "Il video non può partire in questo momento.",
+  playBusyRest: (hours) =>
+    `Altre persone stanno usando ora il tempo video di questo negozio. Il tempo che non usano torna disponibile entro ${plural(hours, "circa un'ora", `circa ${hours} ore`)}; poi premi di nuovo Riproduci la lezione.`,
+  playKeptRest: "Il tempo video che resta a questo negozio questo mese è riservato ai suoi studenti.",
+  playManyRest: "I video delle lezioni sono stati avviati molte volte nell'ultima ora. Riprova entro un'ora.",
+  playPlayingRest: "È in riproduzione il video di una tua lezione. Potrai avviarne un altro quando finisce, entro 30 minuti al massimo.",
+  playPreviewsRest: "Molte persone stanno guardando ora le anteprime gratuite di questo negozio. Riprova entro un'ora.",
+  playAgainRest: "Premi di nuovo Riproduci la lezione tra un momento.",
+  playBlockRest: (minutes) =>
+    `Ogni volta che premi Riproduci la lezione, il video va avanti fino a ${minutes} minuti. Se si ferma prima della fine, premi di nuovo Riproduci la lezione per continuare a guardarlo.`,
   fullScreen: "Schermo intero",
   exitFullScreen: "Esci da schermo intero",
   resumeLabel: "Ultima posizione",
@@ -1694,8 +1768,21 @@ const nl: CoursesWords = {
   pausedStrong: "Deze video is voorlopig gepauzeerd.",
   pausedRest: (store) =>
     `${store} heeft geen betaald abonnement, en de video's van deze winkel zijn deze maand al bekeken voor alle uren die een winkel zonder abonnement heeft. Hij speelt weer af zodra het abonnement van de winkel is betaald, of wanneer de nieuwe maand begint. De rest van de les staat hier zoals gewoonlijk.`,
+  pausedPaidRest: (store) =>
+    `De video's van ${store} zijn in deze factuurperiode al bekeken voor alle uren die het abonnement bevat. Hij speelt weer af zodra de volgende periode van het abonnement begint. De rest van de les staat hier zoals gewoonlijk.`,
   videoFailed: (store) => `De video van deze les kon niet worden voorbereid. ${store} moet hem opnieuw uploaden.`,
   videoNotLoaded: "De video kon nu niet worden geladen. Vernieuw de pagina zo.",
+  playLesson: "Les afspelen",
+  playWaitStrong: "De video kan nu niet starten.",
+  playBusyRest: (hours) =>
+    `Andere kijkers gebruiken nu de videotijd van deze winkel. Tijd die zij niet gebruiken komt binnen ongeveer ${plural(hours, "een uur", `${hours} uur`)} terug; druk dan opnieuw op Les afspelen.`,
+  playKeptRest: "De videotijd die deze winkel deze maand nog heeft, is bewaard voor de cursisten.",
+  playManyRest: "Lesvideo's zijn het afgelopen uur heel vaak gestart. Probeer het binnen een uur opnieuw.",
+  playPlayingRest: "Er speelt nu een video van een van je lessen. Je kunt een andere starten als die afgelopen is, uiterlijk over 30 minuten.",
+  playPreviewsRest: "Veel mensen bekijken nu de gratis voorproefjes van deze winkel. Probeer het binnen een uur opnieuw.",
+  playAgainRest: "Druk zo opnieuw op Les afspelen.",
+  playBlockRest: (minutes) =>
+    `Elke druk op Les afspelen speelt tot ${minutes} minuten af. Stopt de video voor het einde, druk dan opnieuw op Les afspelen om verder te kijken.`,
   fullScreen: "Volledig scherm",
   exitFullScreen: "Volledig scherm sluiten",
   resumeLabel: "Waar je gebleven was",
@@ -1997,8 +2084,21 @@ const pt: CoursesWords = {
   pausedStrong: "Este vídeo está em pausa por agora.",
   pausedRest: (store) =>
     `${store} não tem um plano pago, e os vídeos desta loja já foram vistos durante todas as horas que uma loja sem plano tem este mês. Volta a ser reproduzido assim que o plano da loja for pago, ou quando começar o próximo mês. O resto da aula está aqui como de costume.`,
+  pausedPaidRest: (store) =>
+    `Os vídeos de ${store} já foram vistos durante todas as horas que o plano inclui neste período de faturação. Volta a ser reproduzido quando começar o próximo período do plano. O resto da aula está aqui como de costume.`,
   videoFailed: (store) => `Não foi possível preparar o vídeo desta aula. ${store} tem de o carregar novamente.`,
   videoNotLoaded: "Não foi possível carregar o vídeo neste momento. Atualize a página daqui a pouco.",
+  playLesson: "Reproduzir aula",
+  playWaitStrong: "O vídeo não pode começar neste momento.",
+  playBusyRest: (hours) =>
+    `Outras pessoas estão a usar agora o tempo de vídeo desta loja. O tempo que não usarem volta dentro de ${plural(hours, "cerca de uma hora", `cerca de ${hours} horas`)}; depois prima Reproduzir aula de novo.`,
+  playKeptRest: "O tempo de vídeo que resta a esta loja este mês está reservado para os seus alunos.",
+  playManyRest: "Os vídeos das aulas foram iniciados muitas vezes na última hora. Tente novamente dentro de uma hora.",
+  playPlayingRest: "O vídeo de uma das suas aulas está tocando. Você pode iniciar outro quando ele terminar, em no máximo 30 minutos.",
+  playPreviewsRest: "Muitas pessoas estão a ver agora as pré-visualizações gratuitas desta loja. Tente novamente dentro de uma hora.",
+  playAgainRest: "Prima Reproduzir aula de novo daqui a pouco.",
+  playBlockRest: (minutes) =>
+    `Cada vez que prime Reproduzir aula, o vídeo é reproduzido até ${minutes} minutos. Se parar antes do fim, prima Reproduzir aula de novo para continuar a ver.`,
   fullScreen: "Tela cheia",
   exitFullScreen: "Sair da tela cheia",
   resumeLabel: "Onde você parou",

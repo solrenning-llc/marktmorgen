@@ -436,6 +436,7 @@ async function main(): Promise<void> {
     "course": ["act:products:lesson-remove", "act:products:module-remove", "act:products:media-remove", "act:products:task-remove", "act:products:quiz-remove", "act:products:withdraw", "act:products:cm-delete", "lockedFor"],
     "course/comment": ["lockedFor"],
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
+    "course/play": ["not:a student or a visitor pressing Play on a lesson video, which deletes only their own claim on its player, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
     "creator-card": ["act:page:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
@@ -610,6 +611,7 @@ async function main(): Promise<void> {
     "waitlist": { launch: "act:products", soon: "open:takes the mark off and emails nobody on the waitlist; paid pre-orders get the fixed delivery email" },
     "webhooks": "need:settings",
     "course/task": "not:a student replacing or taking back their own handed-in work",
+    "course/play": "not:a student or a visitor pressing Play on a lesson video, which deletes only their own claim on its player, never the creator's content",
   };
   const ACTION = /\b(?:action|asked|op)\s*[!=]==\s*"([a-z][a-z0-9-]*)"|\bcase\s+"([a-z][a-z0-9-]*)"/g;
   const holdsWay = (text: string, action: string, way: string): boolean => {

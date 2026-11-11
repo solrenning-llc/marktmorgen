@@ -73,6 +73,10 @@ import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
+import { HOLD_UNITS_MOST, HOLD_UNIT_SECONDS } from "@/lib/watch-rules";
+import { paidVideoSeconds } from "@/lib/video-admission-rules";
+/** A held unit as Redis keeps it: its member (a 12-hex mark and its index), its score and the set's own overhead, rounded up. */
+const HOLD_MEMBER_BYTES = 64;
 import { MAX_TEAM, LOG_LINES } from "@/lib/team";
 import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
@@ -643,6 +647,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:learn:enr:@lib/learn.ts": { what: "What a buyer is enrolled in", parts: [kept(KEY, "The record itself, one a buyer."), item(128, "Each product's place in it.")] },
   "nl:learn:link:@lib/learn.ts": short("A course link and its opens, an hour", "store", 1, LINK_BYTES, MAIL("course link")),
   "nl:learn:passes:@lib/learn.ts": { what: "The passes a buyer was given, so a deletion can find them", parts: [per("store", 90, MARK, "A pass's place, ninety days.", MAIL("course link"))] },
+  "nl:learn:play:@lib/lesson-play.ts": short("A press of Play's player for the page it sends back to, taken once, two minutes", "request", 1, 2 * KB, REQ("lesson play")),
+  "nl:learn:playing:@lib/lesson-play.ts": short("A signed-in viewer's live lesson token in one store, or their claim while a press holds: half an hour at most", "request", 1, 2 * KB, REQ("lesson play")),
   "nl:learn:paid:@lib/learn.ts": short("A buyer's paid courses, ten minutes", "request", 1, 2 * KB, REQ("page")),
   "nl:learn:pass:@lib/learn.ts": short("A buyer's pass into the store, ninety days, from an emailed link", "store", 90, LINK_BYTES, MAIL("course link")),
   "nl:learn:rate:addr:@lib/learn.ts": short("Links asked per address", "request", 1, KEY, REQ("course link")),
@@ -1009,7 +1015,17 @@ export const FAMILIES: Record<string, Family> = {
   "nl:watch:due@lib/watch.ts": company("Stores whose video watching to read", "One sorted set for every store."),
   "nl:watch:folders:@lib/watch.ts": company("Stores that had any watching, a month", "One set a month for every store."),
   "nl:watch:last:@lib/watch.ts": { what: "Each video's total when last read", room: ["app/api/store/stream/route.ts"] },
-  "nl:watch:opened:@lib/watch.ts": { what: "When a lesson video last opened", parts: [capped(KEY, "One a store, seven days.")] },
+  "nl:watch:hold:@lib/watch.ts": {
+    what: "Playback held for lesson player tokens still out",
+    parts: [capped(
+      (tier) => (paidVideoSeconds(tier) / HOLD_UNIT_SECONDS + HOLD_UNITS_MOST) * HOLD_MEMBER_BYTES,
+      "One sorted set a store: a member a unit held, at most the plan's hours in units and one opening's units over them while it gives its excess back (more only while a give-back's answer is lost, until the next reading); units go at the first reading an interval after their token ran out, and the set with the store's other records at its closing.",
+      src("lib/watch-rules.ts", "HOLD_UNIT_SECONDS", "HOLD_UNITS_MOST", "HOLD_SETTLE_MS"),
+      src("lib/video-admission-rules.ts", "paidVideoSeconds"),
+    )],
+  },
+  "nl:watch:anon:@lib/watch.ts": { what: "Seconds held for anonymous previews in the window", parts: [capped(2 * KEY, "One a window, 40 days: at most two windows alive.")] },
+  "nl:watch:opened:@lib/watch.ts": { what: "When a lesson video's token was last signed", parts: [capped(KEY, "One a store, seven days.")] },
   "nl:watch:sec:@lib/watch.ts": { what: "Seconds watched in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:hooks:anchor:@lib/webhooks.ts": { what: "The last Stripe event read", parts: [capped(KEY, "One a store.")] },
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },

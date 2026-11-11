@@ -46,9 +46,13 @@ const WALL = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 const MINUTE_MS = 60_000;
 const DAY_MS = 86_400_000;
 
-/** The zone's own name, or null when it is not a zone. */
+/**
+ * The zone's own name, or null when it is not a zone: only a named zone (Region/City), which follows the clocks there
+ * through summer time, or "UTC". A fixed offset ("+05:00") or an abbreviation ("EST") is refused: kept as a zone, it
+ * would read the wrong hour half the year (Claude 3 and Codex G on #3653).
+ */
 function zoneName(zone: unknown): string | null {
-  if (typeof zone !== "string" || !zone.trim()) return null;
+  if (typeof zone !== "string" || !(zone === "UTC" || /^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+$/.test(zone))) return null;
   try {
     return new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone;
   } catch {
@@ -58,9 +62,12 @@ function zoneName(zone: unknown): string | null {
 
 const two = (n: number) => String(n).padStart(2, "0");
 
+/** An instant (seconds) a Date can hold: past ±8.64e15 ms it is no date, and formatting it throws. */
+const inRange = (at: number) => Number.isFinite(at) && Math.abs(at * 1000) <= 8.64e15;
+
 /** The local clock in `zone` at instant `at` (seconds), as 2027-01-11T09:00; null when `zone` is not one. */
 export function wallIn(at: number, zone: string): string | null {
-  if (!Number.isFinite(at) || !zoneName(zone)) return null;
+  if (!inRange(at) || !zoneName(zone)) return null;
   const p = partsIn(at * 1000, zone);
   return `${p.year}-${two(p.month)}-${two(p.day)}T${two(p.hour)}:${two(p.minute)}`;
 }
@@ -138,8 +145,10 @@ export function releaseState(at: number | null, now: number): "open" | "waits" |
   return now >= at ? "open" : "waits";
 }
 
-/** What a student reads before it opens, in the zone the creator set: "Opens Monday, January 11, 2027 at 9:00 AM EST". */
-export function releaseWords(release: FixedRelease): string {
+/** What a student reads before it opens, in the zone the creator set: "Opens Monday, January 11, 2027 at 9:00 AM EST"; null when the kept date cannot be read. */
+export function releaseWords(release: FixedRelease): string | null {
+  // A kept date that cannot be read (out of range, a zone that is not one) is said as unknown by the caller, never thrown.
+  if (!inRange(release.at) || !zoneName(release.zone)) return null;
   const ms = release.at * 1000;
   const date = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: release.zone }).format(ms);
   const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: release.zone }).format(ms);

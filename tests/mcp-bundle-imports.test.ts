@@ -1,8 +1,9 @@
 /**
  * 631 [AA1] (a): two more reads an agent makes through the real MCP route,
- * with a synthetic store. list_bundle_choices gives the same products, order
- * and reasons as the creator's own bundle picker (app/api/store/bundle, GET,
- * both reading lib/bundle-choices.ts); get_imports gives the store's imports
+ * with a synthetic store. list_bundle_choices gives the same rule and reasons
+ * as the creator's own bundle picker (app/api/store/bundle, GET, both reading
+ * lib/bundle-choices.ts), with each page in the creator's order
+ * (bundleChoicesPage); get_imports gives the store's imports
  * as counts, never the file's name, who started it or the rows.
  */
 import { POST } from "@/app/api/mcp/route";
@@ -206,8 +207,12 @@ async function main(): Promise<void> {
     {
       const under = "d".repeat(24);
       await redis.pipeline([["SET", `nl:import:${under}`, JSON.stringify({ ...job, id: "e".repeat(24) })], ["LPUSH", `nl:imports:list:${store.sid}`, under]]);
+      const usedBefore = await allowanceUsed((await storeForEmail(OWNER))!, "api");
       const read = await call("get_imports");
+      const keptUnits = (await allowanceUsed((await storeForEmail(OWNER))!, "api")) - usedBefore;
       is("another import's id under this one: an error, not a history", [read.isError, "imports" in read.value, /imports could not be read/.test(String(read.value.error))], [true, false, true]);
+      // Claude 1 (cloud reviewer C3) LEVE on #3661 (6797509439): all that was set aside is kept, as for a malformed record.
+      is("another import's id under this one: all set aside kept", keptUnits, 1 + apiReadUnits(IMPORTS_MOST));
       await redis.pipeline([["LREM", `nl:imports:list:${store.sid}`, 0, under], ["DEL", `nl:import:${under}`]]);
     }
     // Claude 4 (cloud B) and Codex Nuvem 3 on #3661: a kept record with an import's id is not an import by that alone.

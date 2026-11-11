@@ -20,7 +20,7 @@ export function audienceBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
   return [
     {
       q: "How do I start my own store?",
-      a: `Choose “${w.start}” at the end of this page and type your email; the link we email you logs you in, with no password. If your email has no store yet, your studio shows “${w.address}”: type the address and the “${w.name}”, then choose “${w.create}”. Then “${w.list}” lists your first steps in order, from “${w.first}” to “${w.last}”, with a check mark beside each one your store has done. If logging in is not switched on yet, the sign-in page says so and sends nothing.`,
+      a: `Choose “${w.start}” at the end of this page and type your email; the link we email you logs you in, with no password. If your email has no store yet, your studio shows “${w.address}”: type the address and, if you like, the “${w.name}”, then choose “${w.create}”. Then “${w.list}” lists your first steps in order, from “${w.first}” to “${w.last}”, with a check mark beside each one your store has done. If logging in is not switched on yet, the sign-in page says so and sends nothing.`,
     },
     {
       q: "Can I try my store before paying?",

@@ -109,19 +109,22 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
 
       <div>
         <label htmlFor="store-name" className="field-label">
-          Store name
+          Store name <span className="font-semibold text-ink-soft">(optional)</span>
         </label>
         <input
           id="store-name"
           name="name"
           type="text"
-          required
           maxLength={60}
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="What people should see at the top"
+          aria-describedby="store-name-hint"
           className="field mt-2"
         />
+        <p id="store-name-hint" className="mt-2 text-sm text-ink-soft">
+          Leave it empty and your address is used. You can change it any time.
+        </p>
       </div>
 
       <div>

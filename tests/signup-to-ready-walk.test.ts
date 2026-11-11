@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   const formRequired = [...form.matchAll(/<input[^>]*>/g)].map((tag) => tag[0]).filter((tag) => / required=""/.test(tag)).map((tag) => /name="([^"]+)"/.exec(tag)?.[1] ?? "");
   // 251 [ST4] unit 2: the name was required by the form only; the store takes its address as its name when left empty.
   is("the studio's form requires the address only", formRequired, ["handle"]);
-  is("and says the name is optional and what an empty one becomes", /Store name \(optional\)/.test(form) && /your address is used/.test(form), true);
+  is("and says the name is optional and what an empty one becomes", /Store name <span[^>]*>\(optional\)<\/span>/.test(form) && /your address is used/.test(form), true);
   const claimed = await claim(asJson(claimUrl, { handle: "walkergoods" }, true));
   is("the route accepts the address without a name", claimed.status, 200);
   is("and names the store by its address", (await storeForEmail(EMAIL))?.name, "walkergoods");

@@ -28,7 +28,7 @@ is("the sign-in page says so when logging in is off, and sends nothing", flat(re
 const studio = flat(read("app/studio/page.tsx"));
 is("the address card", studio.includes(`> ${w.address} </p>`), true);
 const form = flat(read("components/handle-form.tsx"));
-is("the store name and the button", [form.includes(` ${w.name} </`), form.includes(`"${w.create}"`)], [true, true]);
+is("the store name and the button", [form.includes(` ${w.name} <span className="font-semibold text-ink-soft">(optional)</span>`), form.includes(`"${w.create}"`)], [true, true]);
 const steps = studio.slice(studio.indexOf("const startSteps: StartStep[] = store ? ["), studio.indexOf("] : []; const connectTestMode"));
 const all3 = [...steps.matchAll(/title: "([^"]+)"/g)].map((m) => m[1]);
 // The list shows the steps to the first sale (lib/studio-start-rules.ts): "Your address", always done, is not shown.

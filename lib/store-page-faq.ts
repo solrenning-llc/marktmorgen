@@ -25,7 +25,7 @@ export function storeBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL
     },
     {
       q: "How do I start my store page?",
-      a: `Press “${START_WORDS.start}”, type your email and press “${START_WORDS.email}”. Open the link we email you and press “${START_WORDS.confirm}”, then fill in “${START_WORDS.address}”, “${START_WORDS.name}” and, if you like, “${START_WORDS.line}”, and press “${START_WORDS.create}”. No password is needed.`,
+      a: `Press “${START_WORDS.start}”, type your email and press “${START_WORDS.email}”. Open the link we email you and press “${START_WORDS.confirm}”, then fill in “${START_WORDS.address}” and, if you like, “${START_WORDS.name}” and “${START_WORDS.line}”, and press “${START_WORDS.create}”. No password is needed.`,
     },
     {
       q: "Can I try a store page before paying?",

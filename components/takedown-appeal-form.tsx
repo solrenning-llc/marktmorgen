@@ -81,7 +81,7 @@ export function TakedownAppealForm({ decision, what }: { decision: string; what:
           />
           <p id={`${id}-left`} className="field-hint mt-1">{left.toLocaleString("en-US")} characters left.</p>
           {problem ? <p id={`${id}-problem`} role="alert" className="field-error mt-1">{problem}</p> : null}
-          <button type="submit" className="btn btn-primary mt-4 min-h-11">Check my request</button>
+          <button type="submit" className="btn btn-primary mt-4 inline-flex min-h-11 items-center">Check my request</button>
         </form>
       ) : step === "done" ? null : (
         <section aria-labelledby={`${id}-check`}>
@@ -90,10 +90,10 @@ export function TakedownAppealForm({ decision, what }: { decision: string; what:
           <blockquote className="mt-2 max-w-[80ch] whitespace-pre-wrap border-l-4 border-line pl-4">{words}</blockquote>
           {problem ? <p role="alert" className="field-error mt-2">{problem}</p> : null}
           <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" className="btn btn-primary min-h-11" onClick={send} disabled={step === "sending"} aria-disabled={step === "sending" ? true : undefined}>
+            <button type="button" className="btn btn-primary inline-flex min-h-11 items-center" onClick={send} disabled={step === "sending"} aria-disabled={step === "sending" ? true : undefined}>
               {step === "sending" ? "Sending…" : "Send my request"}
             </button>
-            <button type="button" className="btn btn-secondary min-h-11" onClick={() => go("write")} disabled={step === "sending"}>
+            <button type="button" className="btn btn-secondary inline-flex min-h-11 items-center" onClick={() => go("write")} disabled={step === "sending"}>
               Change it
             </button>
           </div>
@@ -131,7 +131,7 @@ export function TakedownAppealSendAgain({ decision, number }: { decision: string
     <div className="mt-3">
       <p className="max-w-[80ch]">We could not pass this request on to our team yet.</p>
       {state === "sent" ? null : (
-        <button type="button" className="btn btn-primary mt-2 min-h-11" onClick={again} disabled={state === "sending"}>
+        <button type="button" className="btn btn-primary mt-2 inline-flex min-h-11 items-center" onClick={again} disabled={state === "sending"}>
           {state === "sending" ? "Sending…" : "Send it again"}
         </button>
       )}

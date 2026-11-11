@@ -63,13 +63,14 @@ export function touchesHeld(product: Pick<Listing, "id" | "bundle">, held: Reado
 
 /**
  * The listings a checkout box may offer, from those read for it: neither a
- * product kept for a report nor a bundle holding one. A held product is always
- * off the store (hidden), so only a hidden one and a bundle's products are
- * read, and a page whose boxes offer neither reads nothing more. A hold that
- * cannot be read leaves out what it was read for.
+ * product kept for a report nor a bundle holding one. Every target and every
+ * product of its bundle is read, hidden or not: a hold whose hide did not go
+ * in leaves the product listed (Claude 4 and Claude 1 on #3471), so being
+ * listed says nothing. One read for the page's boxes; a hold that cannot be
+ * read leaves out what it was read for.
  */
 export async function offerableTargets(store: Pick<Store, "statsId" | "handle">, targets: Listing[]): Promise<Listing[]> {
-  const asked = targets.flatMap((target) => [...(target.hidden ? [target.id] : []), ...(target.bundle ?? [])]);
+  const asked = targets.flatMap((target) => [target.id, ...(target.bundle ?? [])]);
   if (asked.length === 0) return targets;
   const held = await heldOrUnreadable(store, asked);
   return held.size ? targets.filter((target) => !touchesHeld(target, held)) : targets;

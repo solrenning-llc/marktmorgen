@@ -7,6 +7,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSellProduct } from "@/lib/store-checkout";
+import { isHeldForReport } from "@/lib/child-safety";
 import { holdAndCheckout, isCallProduct, releaseOwnHold } from "@/lib/calls";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
 import { countHit } from "@/lib/visit";
@@ -107,6 +108,11 @@ export async function POST(request: NextRequest) {
     });
 
   if (!canSellProduct(store, product)) return back("unavailable");
+  // A product kept for a child-safety report is not booked, even when its hide did not go in (Claude 4 and Claude 1 on
+  // #3471): its own mark is read; one that cannot be read refuses.
+  const kept = await isHeldForReport(store, product.id).catch(() => null);
+  if (kept === null) return back("error");
+  if (kept) return back("unavailable");
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return back("error");
   if (comingSoon) return back("unavailable");

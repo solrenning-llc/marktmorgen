@@ -3,10 +3,10 @@
  * functions. No Redis, no secrets, nothing sent; the studio's page can import
  * them. Making the events is the next unit; until then nothing calls this.
  *
- * Read before it was built (10 November 2026): Skool's calendar and Circle's
- * events both let a creator repeat an event, and Google Calendar words a
- * monthly repeat as "Monthly on the fourth Tuesday". A creator who runs a
- * weekly call today makes the same event again every week by hand.
+ * Why: a creator who runs a weekly or monthly call today makes the same
+ * event again every time, by hand, and a member cannot see the next ones
+ * ahead. The owner's P4 list (E2) asks for recurring events; no competitor
+ * claim is made here.
  *
  * The rules:
  *

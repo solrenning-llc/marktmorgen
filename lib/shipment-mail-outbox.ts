@@ -230,8 +230,16 @@ local function drop()
  -- Erasure is never blocked by corrupt financial counters. Keep an uncertain
  -- reserve charged rather than releasing any amount that cannot be proved.
  if a and b and a[1]>=1 and b[1]>=1 and a[2]>=r.bytes and b[2]>=r.bytes then
-  redis.call('HINCRBY',KEYS[6],'items',-1); redis.call('HINCRBY',KEYS[6],'bytes',-r.bytes)
-  redis.call('HINCRBY',KEYS[7],'items',-1); redis.call('HINCRBY',KEYS[7],'bytes',-r.bytes)
+  if op=='cancel' and r.bytes%1==0 then
+   -- Both exact pool snapshots were read inside this same atomic script.
+   -- Write each pair together: pay for the two erasure HDELs without raising
+   -- the existing cancel command count. Keep canonical safe-integer decimals.
+   redis.call('HSET',KEYS[6],'items',string.format('%.0f',a[1]-1),'bytes',string.format('%.0f',a[2]-r.bytes))
+   redis.call('HSET',KEYS[7],'items',string.format('%.0f',b[1]-1),'bytes',string.format('%.0f',b[2]-r.bytes))
+  else
+   redis.call('HINCRBY',KEYS[6],'items',-1); redis.call('HINCRBY',KEYS[6],'bytes',-r.bytes)
+   redis.call('HINCRBY',KEYS[7],'items',-1); redis.call('HINCRBY',KEYS[7],'bytes',-r.bytes)
+  end
   if b[1]==1 and b[2]==r.bytes then redis.call('HDEL',KEYS[7],'items','bytes') end
  end
  redis.call('DEL',KEYS[1]); redis.call('ZREM',KEYS[3],r.id)

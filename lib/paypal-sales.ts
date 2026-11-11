@@ -129,6 +129,18 @@ const REFUND_TELL_MARK_SECONDS = 30 * 86_400;
 /** When telling of this order's refund first failed (whole seconds), set by the first failure and read by every later one. */
 const tellKey = (order: string) => `nl:ppsell:tell:${order}`;
 
+/**
+ * The time telling of this order's refund first failed: `at` is kept when none is (SET NX), then read back exactly
+ * (CX-123 rule 24): "OK" or null, then whole seconds not ahead of `now`. Anything else, an error included, is null:
+ * not known, never "inside the bound" nor "past it" (Codex C2's M1 on #3499).
+ */
+async function tellFirst(order: string, at: number, now: number): Promise<number | null> {
+  const mark = repliesFor(await redisPipeline([["SET", tellKey(order), String(at), "NX", "EX", REFUND_TELL_MARK_SECONDS], ["GET", tellKey(order)]]).catch(() => null), 2);
+  if (!mark || (mark[0] !== "OK" && mark[0] !== null) || typeof mark[1] !== "string" || !REDIS_SCORE.test(mark[1])) return null;
+  const first = Number(mark[1]);
+  return first <= now ? first : null;
+}
+
 type Partner = { client: string; secret: string; merchant: string; bn: string };
 
 function partner(): Partner | null {
@@ -863,15 +875,34 @@ export async function watchPayPal(
     // Told before anything is taken back (Claude 5's L4 on #3491): a telling that fails keeps the order watched, looked
     // at again in an hour, for at most REFUND_TELL_RETRY_SECONDS after the first failure; the event's own id makes a
     // later try find one already told (emitEvent). Past that, the store's webhook log says it was not sent, and the
-    // refund goes on. The first failure's time is set once (SET NX) and read back exactly (CX-123 rule 24): "OK" or
-    // null, then whole seconds; anything else is unknown, and the order is looked at again in an hour.
+    // refund goes on. The tries stay inside REFUND_TELL_TRIES_AT_MOST whatever the store answers (Codex C2's M1 on
+    // #3499): only the first look at a refund (its refund mark newly added, a ZADD answering 1) tells without the first
+    // failure's time; every later look tells only once that time is known, read back exactly, not ahead of the clock
+    // and inside the bound. A time that is not known is never "inside the bound" nor "past it" (CX-123 rule 24): the
+    // order is looked at again in an hour and nothing is told, said not sent or taken back.
     if (on.refunded) {
-      try {
-        await on.refunded(paid);
-      } catch (error) {
-        console.error("telling of a PayPal refund failed", order, error);
-        const mark = repliesFor(await redisPipeline([["SET", tellKey(order), String(now), "NX", "EX", REFUND_TELL_MARK_SECONDS], ["GET", tellKey(order)]]).catch(() => null), 2);
-        const first = mark && (mark[0] === "OK" || mark[0] === null) && typeof mark[1] === "string" && REDIS_SCORE.test(mark[1]) ? Number(mark[1]) : null;
+      let first: number | null = null;
+      if (marked[0] === 0) {
+        // A later look. When no failure's time was kept (its write got no answer), the try that failed is taken to
+        // have been an hour ago, the earliest a look comes back, so the tries in all still fit the bound.
+        first = await tellFirst(order, now - 3600, now);
+        if (first === null) {
+          console.error("when telling of a PayPal refund first failed is unknown; looked at again in an hour", order);
+          await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+          continue;
+        }
+      }
+      let told = false;
+      if (first === null || now - first <= REFUND_TELL_RETRY_SECONDS) {
+        try {
+          await on.refunded(paid);
+          told = true;
+        } catch (error) {
+          console.error("telling of a PayPal refund failed", order, error);
+        }
+      }
+      if (!told) {
+        if (first === null) first = await tellFirst(order, now, now);
         if (first === null || now - first < REFUND_TELL_RETRY_SECONDS) {
           await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
           continue;

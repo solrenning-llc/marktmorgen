@@ -133,8 +133,11 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
   return handed;
 }
 
-/** What the store's webhook log says of a PayPal refund whose event could not be made after its tries. */
-const REFUND_NOT_SENT_WORDS = `We could not prepare the event for this PayPal refund, so it was skipped after ${REFUND_TELL_TRIES_AT_MOST} tries. Look up the refund in your PayPal account.`;
+/**
+ * What the store's webhook log says of a PayPal refund whose event could not be made after its tries: "up to", since a
+ * look whose first failure's time is unknown, or one that comes late, tells nothing (Codex C2's M1 on #3499).
+ */
+const REFUND_NOT_SENT_WORDS = `We could not prepare the event for this PayPal refund after up to ${REFUND_TELL_TRIES_AT_MOST} tries, so it was skipped. Look up the refund in your PayPal account.`;
 
 /**
  * The checkout sweep's PayPal part for one store: pending payments cleared, refunds taken back, and paid orders

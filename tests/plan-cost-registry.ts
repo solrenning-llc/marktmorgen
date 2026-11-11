@@ -598,7 +598,11 @@ export const WEBHOOK_ERASED_READ_COMMANDS = 1;
  * tests/paypal-refund-told-retry.test.ts:
  * - triesAtMost: one telling an hour, the first included, for REFUND_TELL_RETRY_SECONDS (REFUND_TELL_TRIES_AT_MOST);
  * - ownCommandsPerFailedTry: a failed try's own commands: the SET NX and GET of the first failure's time
- *   (nl:ppsell:tell:) and the ZADD that keeps the order watched an hour (none at the last try, which goes on);
+ *   (nl:ppsell:tell:; after the try at the first look, before it at every later one, which tells only once that time
+ *   reads back known, not ahead of the clock and inside the bound: Codex C2's M1 on #3499) and the ZADD that keeps the
+ *   order watched an hour (none at the last try, which goes on). A later look whose time is not known tells nothing
+ *   and sends these same three commands, besides the look's own below: the watch's hourly look again at an unknown
+ *   read (CX-123 rule 24), as for its paid record, capture or refund mark, inside the job's 25 orders a store a run;
  * - lookCommandsPerFailedTry: each try after the first looks at the order again: the GET of its paid record and the
  *   ZADD and EXPIRE of its refund mark, besides one read of the capture from PayPal, which bills no API call; and
  *   emitEvent up to the read that failed, inside the webhook unit's own commands (UNIT_COST.webhook);

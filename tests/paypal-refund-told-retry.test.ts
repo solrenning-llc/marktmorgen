@@ -242,12 +242,17 @@ async function main(): Promise<void> {
 
   part("The tries stay inside REFUND_TELL_TRIES_AT_MOST whatever the mark answers (Codex C2's M1 on #3499)");
   /** The tellings the sweep tried over `looks` hourly looks: each try reads the deletion print, which fails. */
+  /** Each look's own commands for `order` (its first-failure mark, and the ZADD that keeps it watched), in `own`. */
+  const ownLooks: number[] = [];
   const triesOver = async (looks: number, order: string) => {
     let n = 0;
+    ownLooks.length = 0;
     for (let look = 0; look < looks && (await watchedAt(order)) !== null; look += 1) {
       const before = sent.length;
       await sweep();
-      if (sent.slice(before).some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) n += 1;
+      const pass = sent.slice(before);
+      if (pass.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) n += 1;
+      ownLooks.push(pass.filter((c) => String(c[1]) === `nl:ppsell:tell:${order}` || (c[0] === "ZADD" && String(c[1]) === watch && c[3] === order && Number(c[2]) > 0)).length);
       hour();
     }
     return n;
@@ -264,6 +269,7 @@ async function main(): Promise<void> {
     set();
     const unsure = await triesOver(12, odd.order);
     is(`${name}: twelve hourly looks try the telling at most REFUND_TELL_TRIES_AT_MOST times`, unsure <= (triesAtMost as number), true);
+    is(`${name}: a look while unknown sends the own commands the registry prices for a failed try, and tells nothing`, [unsure, ownLooks.every((n) => n === PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry)], [1, true]);
     is(`${name}: unknown, so still watched, not told, nothing said not sent, the purchase held`, [(await watchedAt(odd.order)) !== null, await told(odd.capture), (await notSent()).length, await holds(odd.email)], [true, 0, linesBefore, 1]);
     oddMark = undefined;
     markWrites = undefined;

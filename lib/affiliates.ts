@@ -3377,13 +3377,17 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
   // passes (notePayPalPendings), as a Stripe order is; whether the program is on now or not.
   const pending = !paid.via && typeof paid.meta?.[VIA_PENDING_META] === "string";
   const now = Math.floor(Date.now() / 1000);
-  if (pending) await paypalDue(store.statsId, paid.order, now);
-  let partners: unknown = null;
-  await notePartners(store, { ...sale, buyer: paid.email }).catch((error: unknown) => {
-    partners = error;
-  });
-  if (pending) await settlePayPalPending(store, paid, title, now, send);
-  if (partners) throw partners;
+  // Each step runs whatever the one before it answered, and the first failure is thrown at the end, so the hand-over
+  // logs it: the sweep's list not written never drops the partners' shares (cloud G on #3479), and the partners
+  // failing never drops the link (settlePayPalPending writes the sweep's list again itself).
+  let first: unknown = null;
+  const keep = (error: unknown) => {
+    first ??= error;
+  };
+  if (pending) await paypalDue(store.statsId, paid.order, now).catch(keep);
+  await notePartners(store, { ...sale, buyer: paid.email }).catch(keep);
+  if (pending) await settlePayPalPending(store, paid, title, now, send).catch(keep);
+  if (first) throw first;
 }
 
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {

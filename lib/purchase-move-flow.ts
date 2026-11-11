@@ -53,8 +53,8 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 export const MOVE_ASK_UNITS = 1;
 /** Public requests a link's page, or its Confirm, holds before it reads. */
 export const MOVE_LINK_UNITS = 1;
-/** Commands an ask makes besides the hold and its two emails: the purchases link, the deleted people, the day's count (2) and the request with its two links (3). */
-export const MOVE_ASK_COMMANDS = 7;
+/** Commands an ask makes besides the hold and its two emails: the purchases link, the deleted people, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT) and the request with its two links (3). */
+export const MOVE_ASK_COMMANDS = 8;
 /** Commands a link's page reads: the link, the request with both confirmations and the claim (4), the deleted people. */
 export const MOVE_LINK_COMMANDS = 6;
 /** Commands a Confirm makes: the page's reads, then the link, the request, the mark (with its read-back) and the request again. */

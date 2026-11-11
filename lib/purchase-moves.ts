@@ -86,6 +86,18 @@ function markTime(raw: unknown, what: string): number | null {
   return Math.floor(Number(match[1]) / 1000);
 }
 
+/**
+ * The day's count and its expiry in one step: Redis runs a script whole, so
+ * a count is never left without its end, whatever the batch around it
+ * answers (Codex T on #3608). Billed as three commands (the EVAL, INCR and
+ * EXPIRE), one more than the two-command batch it replaces. Answers the new
+ * count. lib/redis-memory.ts models it for the tests.
+ */
+export const MOVE_DAY_COUNT = `-- marktmorgen:purchase-move-day:v1
+local n = redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+return n`;
+
 export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string } | { ok: false; reason: "email" | "same" | "scope" | "over" | "unknown" };
 
 /**
@@ -103,7 +115,7 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
   const day = dayKey(made.from, now);
-  const counted = repliesFor(await redisPipeline([["INCR", day], ["EXPIRE", day, MOVE_MARK_SECONDS]]), 2);
+  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
   const count = counted ? countOf(counted[0]) : null;
   const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
   if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };

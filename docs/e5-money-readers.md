@@ -124,6 +124,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `app/[handle]/p/[product]/page.tsx` | SETTING | 188–200: structured data priceCurrency and prices | no (unit 3: what the page says) |
 | `app/api/store/agreements/route.ts` | SETTING | 40/62: agreement line amounts typed | partly: each version keeps its currency |
 | `app/api/store/ai/route.ts` | SETTING | 99/213/261/306: product prices as facts for AI writing | no |
+| `app/api/store/automation-draft/route.ts` | SETTING | 44: product prices are formatted in the store's currency as facts for AI drafting; no charge is created | no |
 | `app/api/store/call-package/route.ts` | SETTING | 26–27: the package price field | no |
 | `app/api/store/cart/route.ts` | SETTING | 59–174: cart prices and total on the store page | no (unit 3) |
 | `app/api/store/currency/route.ts` | SETTING | 37/47/74: changing the store's currency itself | n/a |

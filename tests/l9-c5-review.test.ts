@@ -246,7 +246,7 @@ test("C: an unknown first-sale claim is retried later, and the yearly offer goes
       if (url.pathname === "/v1/checkout/sessions") return new Response(JSON.stringify({ data: [], has_more: false }), { status: 200 });
       if (url.pathname === "/v1/subscriptions/sub_c5yearly0001") {
         return new Response(JSON.stringify({
-          id: "sub_c5yearly0001", status: "active", cancel_at_period_end: false,
+          id: "sub_c5yearly0001", status: "active", cancel_at: null, cancel_at_period_end: false,
           items: { data: [{ current_period_end: YEAR_NOW + 20 * 86_400, price: { lookup_key: "nimbus_labs_creator_month", unit_amount: 2900, recurring: { interval: "month" } } }] },
         }), { status: 200 });
       }
@@ -290,7 +290,7 @@ test("C: an unknown once-per-subscription claim is retried at the next pass, onc
       if (url.pathname === "/v1/checkout/sessions") return new Response(JSON.stringify({ data: [], has_more: false }), { status: 200 });
       if (url.pathname === "/v1/subscriptions/sub_c5yearly0002") {
         return new Response(JSON.stringify({
-          id: "sub_c5yearly0002", status: "active", cancel_at_period_end: false,
+          id: "sub_c5yearly0002", status: "active", cancel_at: null, cancel_at_period_end: false,
           items: { data: [{ current_period_end: YEAR_NOW + 20 * 86_400, price: { lookup_key: "nimbus_labs_creator_month", unit_amount: 2900, recurring: { interval: "month" } } }] },
         }), { status: 200 });
       }

@@ -23,6 +23,13 @@ import { fromAnotherSite, limited } from "@/lib/request-guard";
 /** How long the creator has to start the upload after asking for the door. */
 const UPLOAD_WINDOW_MS = 10 * 60 * 1000;
 
+/** A studio admission refusal, carried out of the SDK callback with its message. */
+class AdmissionRefusal extends Error {
+  constructor(reason: string, readonly words: string | undefined) {
+    super(reason);
+  }
+}
+
 /**
  * Hands the browser a one-off, time-limited door into the private file store.
  *
@@ -61,7 +68,7 @@ export async function POST(request: NextRequest) {
         // Who, which store and whether their role has "products"
         // (lib/studio-route.ts); the folder below is that store's own.
         const access = await studioAccess(request, "products");
-        if (!access.ok) throw new Error(access.reason === "no_store" ? "none" : access.reason);
+        if (!access.ok) throw new AdmissionRefusal(access.reason === "no_store" ? "none" : access.reason, access.message);
         const { store, ref } = access.access;
 
         /*
@@ -152,8 +159,11 @@ export async function POST(request: NextRequest) {
     const reason = error instanceof Error ? error.message : "server_error";
     const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "used", "two_step", "locked", "storage_full", "storage_trial", "storage_setup", "files_unavailable", "upload_budget_unavailable", "renewal_unpaid", "plan_disputed"].includes(reason);
     if (!known) console.error("signing an upload failed", error);
+    // An admission refusal keeps the studio's own words, as refusedJson does on
+    // the sibling routes: "used" can also mean the count could not be read.
+    const message = error instanceof AdmissionRefusal && known ? error.words : undefined;
     return Response.json(
-      { ok: false, error: known ? reason : "server_error" },
+      { ok: false, error: known ? reason : "server_error", ...(message ? { message } : {}) },
       { status: reason === "signed_out" ? 401 : reason === "used" ? 429 : reason === "forbidden" || reason === "gone" || reason === "two_step" || reason === "locked" ? 403 : reason === "files_unavailable" || reason === "upload_budget_unavailable" ? 503 : reason === "renewal_unpaid" || reason === "plan_disputed" ? 409 : known ? 400 : 500 },
     );
   }

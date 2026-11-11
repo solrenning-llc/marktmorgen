@@ -4,6 +4,8 @@
 
 The legacy Blob upload route returned HTTP 500 and `server_error` when studio admission refused a request because the studio allowance was used or the team required a second login step. Those are ordinary refusals, not unexpected server failures. The route now preserves `used` with HTTP 429 and `two_step` with HTTP 403.
 
+The refusal body also carries the studio's own `message`, as `refusedJson` does on the sibling routes. `used` covers both a spent allowance and a count that could not be read (`why: "unknown"`), so the message is what tells the creator which one it was (Claude 5's LEVE, fixed by Claude 4 cloud O on 11 Nov 2026 with a RED test).
+
 Only the catch block's known reasons and status mapping change. The SDK callback, admission order, storage checks, upload budget, provider selection and production gates are unchanged. This is a LOW inherited error-mapping correction; it is not an authorization bypass repair or evidence of an active production Blob upload.
 
 ## Provenance and RED

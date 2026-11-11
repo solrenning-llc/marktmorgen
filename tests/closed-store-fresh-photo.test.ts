@@ -196,12 +196,21 @@ async function main(): Promise<void> {
       other = await writePhoto(PNG, "image/png");
       const record = JSON.parse(String(redis.run(["GET", ownerOf])));
       redis.run(["SET", ownerOf, JSON.stringify({ ...record, sid: otherSid, photoId: other, planEndedAt: "" })]);
+      // The new store's break and its last break, kept under the same ref (lib/plan-pause.ts, recordKey and lastKey).
+      redis.run(["SET", `nl:pause:${email}`, otherBreak]);
+      redis.run(["SET", `nl:pause:last:${email}`, otherLast]);
     };
+    const otherBreak = JSON.stringify({ subscription: "sub_againother1", customer: "cus_againother1", paymentMethod: "pm_againother1", tier: "creator", from: 2_000_000_000, until: 2_005_000_000, told: 0 });
+    const otherLast = "1900000000";
     const T = Date.now();
     await markDue(email, T - 1000);
-    await erase(T);
+    const first = await erase(T);
     const now = await storeForEmail(email);
     is("the other store's record is not deleted", now?.sid ?? null, otherSid);
+    // Revisor 2 on #3643: the closing store's entry stayed in the walk's batch with its ref and its owner's folder,
+    // both the other store's now, and the walk erased the other store's break and last break by that ref.
+    is("the other store's break and last break are kept", [redis.run(["GET", `nl:pause:${email}`]), redis.run(["GET", `nl:pause:last:${email}`])], [otherBreak, otherLast]);
+    is("the closing store, its record already gone, is not counted as prepared, and nothing is walked for it", [first.stores, first.started], [0, false]);
     is("its photo is kept", photoKeys().some((key) => key.includes(other)), true);
     const entry = redis.run(["HGET", BATCH_KEY, `${store.sid}`]) ?? Object.values(Object.fromEntries((redis.run(["HGETALL", BATCH_KEY]) as string[] | null ?? []).reduce<[string, string][]>((acc, v, i, all) => (i % 2 ? acc : [...acc, [v, all[i + 1]]]), []))).join("");
     is("and the closing store's entry never names it", String(entry ?? "").includes(other) || String(entry ?? "").includes(otherSid), false);

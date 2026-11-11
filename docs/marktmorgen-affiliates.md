@@ -31,16 +31,40 @@ The lowest of them is **75.97%**. One percentage for every plan, as most program
 
 ## What is unknown, and so never zero
 
-**The cost of paying one affiliate.** It is unknown and **never zero**, and it is not in the net above, so **no percentage is certified** by this table. The candidates:
-- PayPal Payouts;
-- Stripe Connect payouts to the affiliate;
-- Wise, through the batch file the creators' affiliate payouts already build (`lib/affiliate-payouts.ts`).
+**The cost of paying one affiliate.** It is unknown and **never zero**, and it is not in the net above, so **no percentage is certified** by this table.
 
-Their fees per payment and per country, their minimums, and the tax forms each needs were not read from dated official sources here:
-- W-9 for a US person and W-8BEN for anyone else, which a US company collects before paying;
-- whether a 1099 is due.
+### What paying an affiliate costs: what was read (unit 2)
 
-That is the next unit. Until it is done, the largest commission that keeps MR is lower than the table by that unknown cost, and none can be proposed as final.
+Each page was read on 11 November 2026. Quotes are as read.
+
+**Stripe Connect, paying an affiliate who has their own connected account**
+- Source: https://stripe.com/connect/pricing, read on 11 November 2026.
+- When the platform sets the pricing:
+  - "$2 per monthly active account" (a month with a payout);
+  - "0.25% + 25¢ per payout sent";
+  - for a payout to another country, "Starting at 0.25% of payout volume".
+- A fee "starting at" a figure is not a ceiling, so the cross-border cost stays unknown. The worst cost per country is not on the page.
+- Where it can pay: https://docs.stripe.com/connect/cross-border-payouts, read on 11 November 2026. "Platforms based in the US, UK, EEA, Canada, or Switzerland can transfer funds to connected accounts in any of those regions." Stripe "doesn’t support self-serve cross-border payouts to countries outside the listed regions".
+- An affiliate in Brazil, or anywhere else outside those regions, cannot be paid this way.
+- Each affiliate would also go through Stripe's own identity checks to open a connected account.
+
+**Stripe Global Payouts, paying a person by bank, card or wire**
+- Source: https://docs.stripe.com/global-payouts, read on 11 November 2026.
+- Available to businesses in the US and the UK. It "requires Treasury". SR5 records that Stripe Treasury was mentioned only for whoever is eligible, not as a contract or a promise.
+- The page gives no fee, so its cost is unknown.
+- Recipients: https://docs.stripe.com/global-payouts/recipient-requirements, read on 11 November 2026. For a US sender and an individual recipient, the list of countries runs from Albania to Vietnam. **Brazil is not in the list**, so an affiliate in Brazil cannot be paid this way either.
+
+**Not read here.** This session's network does not reach these sites, so each stays unknown, never zero:
+- **PayPal** Payouts: its fee per payment and per country could not be read.
+- **Wise**: its transfer fee could not be read. The creators' payout batch file is already shaped for it (`lib/affiliate-payouts.ts`).
+- The IRS forms a US company collects before paying:
+  - **W-9** for a US person could not be read;
+  - **W-8BEN** for anyone else could not be read;
+  - whether a **1099** is due, and from what amount, could not be read.
+
+  Any withholding on a payment to a foreign person also stays unknown. TX point 8 (no US federal tax on the LLC's foreign-source income) is about the LLC's own income, not about what it pays others.
+
+**What this means for the proposal.** No payout channel has a known worst cost per payment for every country an affiliate may live in. The next step is for a session that can reach paypal.com, wise.com and irs.gov to read them, dated, and add the dearest cost to the net. Until then, the programme can only be planned for affiliates in the regions Stripe Connect reaches, and still with that unknown cross-border fee.
 
 **The company's fixed costs and funded exposures** stay outside the unit, as MR says: they are covered from the minimum base of paying customers, not by any one customer.
 

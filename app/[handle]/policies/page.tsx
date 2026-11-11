@@ -10,7 +10,9 @@ import { speech } from "@/lib/buyer-words";
 import { POLICY_WORDS } from "@/lib/buyer-words/policies";
 import { parseLanguage } from "@/lib/store-language";
 import { notAdvice, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
-import { policyInput } from "@/lib/store-policy-input";
+import { paidPolicyInput } from "@/lib/store-policy-input";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = { params: Promise<{ handle: string }> };
 
@@ -40,8 +42,13 @@ export default async function PoliciesPage({ params }: Params) {
   const reachedOn = (await headers()).get("x-nimbus-domain");
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) redirect(`${SITE_URL}/@${store.handle}/policies`);
 
+  // As the store's other public pages: the drawing is one of the window's requests (isResting), and the listings
+  // it reads are paid for before they are read (paidPolicyInput); past the window, the resting page, nothing read.
+  if (await isResting(store)) return <StoreResting store={store} />;
+  const input = await paidPolicyInput(store);
+  if (!input) return <StoreResting store={store} />;
   const words = POLICY_WORDS[parseLanguage(store.language)];
-  const sections = policyFacts(await policyInput(store), store.language);
+  const sections = policyFacts(input, store.language);
   if (sections.length === 0) notFound();
   const version = policyFingerprint(sections);
   const said = speech(store);

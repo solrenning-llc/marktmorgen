@@ -1197,6 +1197,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
+      // The store's policy page reads every visible product's listing: the drawing is counted (isResting) and its listings
+      // are taken as listingUnits before any is read; refused, it rests and reads none (Claude 1 on #1824, 11 November 2026).
+      { file: "lib/store-policy-input.ts", names: ["listingUnits(visibleIds(store).length)", "takePublicRequest(store, \"public\", undefined, units)"] },
+      { file: "app/[handle]/policies/page.tsx", names: ["if (await isResting(store)) return <StoreResting store={store} />;", "await paidPolicyInput(store)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

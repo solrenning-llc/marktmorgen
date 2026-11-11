@@ -15,6 +15,8 @@ import { readListingsAll, visibleIds } from "@/lib/catalog";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
+import { listingUnits } from "@/lib/public-read-rules";
+import { takePublicRequest } from "@/lib/traffic";
 import type { PolicyFactsInput } from "@/lib/store-policy-facts";
 
 type Sold = { priceCents?: number; recurring?: unknown; pwyw?: unknown; plan?: unknown } & Parameters<typeof deliversDigitally>[0];
@@ -41,4 +43,17 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   // must not quietly leave out the 14-day rules or the subscription terms (Codex G's review of #1824).
   const products = await readListingsAll(store, visibleIds(store));
   return policyInputFrom(store, products as unknown as Sold[], sellsThroughPayPal(store));
+}
+
+/**
+ * The input for the public page, its listings paid for first (Claude 1's review of #1824): the page is public and
+ * reads every visible product's listing, so those reads are taken as the store's own public requests
+ * (listingUnits, PUBLIC_LISTINGS_PER_UNIT listings each, held against the reads in tests/plan-cost-registry.test.ts)
+ * before any is made, as the collection page and the store's map do. Null when the window refuses them: nothing
+ * of the catalog is read, and the page rests.
+ */
+export async function paidPolicyInput(store: Store): Promise<PolicyFactsInput | null> {
+  const units = listingUnits(visibleIds(store).length);
+  if (units > 0 && !(await takePublicRequest(store, "public", undefined, units))) return null;
+  return policyInput(store);
 }

@@ -39,7 +39,7 @@ is("no postal address: no contact section", policyFacts(policyInputFrom({ ...sto
 
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
-is("built from the store as it is now, in its language", page.includes("policyFacts(await policyInput(store), store.language)"), true);
+is("built from the store as it is now, in its language", page.includes("policyFacts(input, store.language)") && readFileSync("lib/store-policy-input.ts", "utf8").includes("return policyInput(store);"), true);
 is("its version is the fingerprint of its words", page.includes("const version = policyFingerprint(sections);"), true);
 is("says it is not legal advice", page.includes("{notAdvice(store.language)}"), true);
 is("one h1, a titled h2 per section, the page's language marked", [(page.match(/<h1\b/g) ?? []).length, page.includes("aria-labelledby={`policy-${section.id}`}"), page.includes("lang={said.lang.locale}")], [1, true, true]);
@@ -113,16 +113,15 @@ async function paidReads() {
   for (let i = 0; i < 60; i++) if (!(await addProduct(owner, `Guide ${i}`, "", "5", null)).ok) throw Error("fixture product failed");
   const seen: string[] = [];
   const real = redis.pipeline.bind(redis);
+  let spent = false;
   redis.pipeline = async (commands: (string | number)[][]) => {
     for (const c of commands) seen.push(`${c[0]} ${c[1]}`);
+    // A window already spent: its count is far past any plan's figure when this request is counted.
+    if (spent) for (const c of commands) if (c[0] === "INCRBY") await real([["SET", c[1], 1_000_000_000]]);
     return real(commands);
   };
   const listingReads = () => seen.filter((c) => /^(GET|MGET) nl:catalog:[^:]+:l:/.test(c)).length;
   try {
-    const unpaid = (await storeForEmail(owner))!;
-    seen.length = 0;
-    const refused = paidPolicyInput ? await paidPolicyInput(unpaid).catch(() => "threw") : "missing";
-    is("a store whose window cannot be charged: refused, and no listing read", [refused, listingReads()], [null, 0]);
     await setSubscription(owner, { customerId: "cus_PolicyPaid01", subscriptionId: "sub_PolicyPaid01", active: true, period: paidPeriod() });
     const shop = (await storeForEmail(owner))!;
     seen.length = 0;
@@ -130,6 +129,11 @@ async function paidReads() {
     const firstRead = seen.findIndex((c) => /^(GET|MGET) nl:catalog:[^:]+:l:/.test(c));
     const firstCount = seen.findIndex((c) => /^INCRBY /.test(c));
     is("a paid store: built, its requests counted before the first listing is read", [input?.sellsDigital, listingReads() > 0, firstCount >= 0 && firstCount < firstRead], [true, true, true]);
+    seen.length = 0;
+    spent = true;
+    const refused = paidPolicyInput ? await paidPolicyInput(shop).catch(() => "threw") : "missing";
+    spent = false;
+    is("a store whose window is spent: refused, and no listing read", [refused, listingReads()], [null, 0]);
   } finally {
     redis.pipeline = real;
   }

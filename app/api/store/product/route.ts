@@ -191,6 +191,12 @@ export async function POST(request: NextRequest) {
     if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });
   }
 
+  // The product's delivery link, when the add step sends one (251 [ST4] unit 4): checked like the link action's before
+  // anything is written, so a product is never added half of what the creator asked for, nor pointing at a link no
+  // buyer could open. Absent or empty on add: added as before, with nothing to hand over yet.
+  const addLink = action === "add" && link ? readLink(link) : null;
+  if (addLink && !addLink.ok) return Response.json({ ok: false, error: "link", reason: addLink.reason }, { status: 400 });
+
   // A membership's introductory price (lib/intro-price.ts) and its yearly
   // price (lib/yearly-price.ts), each only written when it was sent, so an
   // older screen never wipes it. Checked before anything is saved, against the
@@ -246,6 +252,8 @@ export async function POST(request: NextRequest) {
     let result: Outcome;
     // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
     let cleanupPending = false;
+    // An added product whose delivery link could not be kept (251 [ST4] unit 4).
+    let linkNotKept = false;
     if (action === "add" || action === "edit") {
       const done =
         action === "add"
@@ -267,6 +275,13 @@ export async function POST(request: NextRequest) {
         if (!result.ok) break;
         const priced = await step();
         result = priced.ok ? { ok: true, product: priced.product } : { ok: false, reason: priced.reason };
+      }
+      // Its delivery, kept as the link action keeps it, once the product is written (251 [ST4] unit 4).
+      if (result.ok && result.product && addLink?.ok) {
+        // The product is added already: a link not kept is said, never answered as a failed add, which would have the
+        // creator add it twice. The row's own link action gives it again.
+        const linked = await setProductLink(ref, result.product.id, addLink.url).catch(() => null);
+        if (!linked?.ok) linkNotKept = true;
       }
       if (result.ok && result.product && about !== null) {
         const saved = result.product;
@@ -447,7 +462,7 @@ export async function POST(request: NextRequest) {
     // everything that offered it does).
     const quiet =
       (action === "edit" || action === "visibility" || action === "remove") && id ? await silenced(ref, id) : [];
-    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined, cleanupPending: cleanupPending || undefined });
+    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined, cleanupPending: cleanupPending || undefined, linkNotKept: linkNotKept || undefined });
   } catch (error) {
     if (error instanceof StoreFullError) {
       return Response.json({ ok: false, error: "store_full" }, { status: 409 });

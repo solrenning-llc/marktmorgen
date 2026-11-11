@@ -63,7 +63,7 @@ import {
 import { activePlan } from "@/lib/product-extras";
 import { activeShipping } from "@/lib/shipping";
 import type { Listing } from "@/lib/store";
-import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
+import { LINK_PROBLEMS, MAX_LINK_LENGTH, type LinkProblem, linkHost } from "@/lib/product-link";
 import {
   INTERVALS,
   type Interval,
@@ -204,6 +204,8 @@ type Draft = {
   suggested: string;
   /** The long description, on the product's own page. */
   about: string;
+  /** What it delivers, as a link, when adding (251 [ST4] unit 4); "" is none yet. Its row changes it afterwards. */
+  deliveryLink: string;
 };
 
 const EMPTY: Draft = {
@@ -219,6 +221,7 @@ const EMPTY: Draft = {
   pwyw: false,
   suggested: "",
   about: "",
+  deliveryLink: "",
 };
 
 /** What the form sends for a draft, add or edit alike. */
@@ -235,6 +238,8 @@ function payloadOf(draft: Draft): Record<string, unknown> {
     yearly: draft.every === "month" && draft.yearlyPrice.trim() ? { price: draft.yearlyPrice.trim() } : null,
     pwyw: draft.pwyw && !draft.every ? draft.suggested.trim() || draft.price.trim() : null,
     about: draft.about,
+    // Read by the add step only (251 [ST4] unit 4); an edit changes a link on the product's row.
+    ...(draft.deliveryLink.trim() ? { link: draft.deliveryLink.trim() } : {}),
   };
 }
 
@@ -256,7 +261,7 @@ function typedFree(price: string): boolean {
 async function send(
   payload: Record<string, unknown>,
   currency: Currency,
-): Promise<{ problem: string | null; quiet: string[]; pending?: boolean }> {
+): Promise<{ problem: string | null; quiet: string[]; pending?: boolean; linkNotKept?: boolean }> {
   const wrong = (message: string) => ({ problem: message, quiet: [] });
   try {
     const response = await fetch("/api/store/product", {
@@ -271,8 +276,9 @@ async function send(
       reason?: string;
       quiet?: string[];
       cleanupPending?: boolean;
+      linkNotKept?: boolean;
     };
-    if (data.ok) return { problem: null, quiet: Array.isArray(data.quiet) ? data.quiet : [], pending: data.cleanupPending === true };
+    if (data.ok) return { problem: null, quiet: Array.isArray(data.quiet) ? data.quiet : [], pending: data.cleanupPending === true, linkNotKept: data.linkNotKept === true };
     if (data.error === "link") {
       // The server says which way the link was wrong; the creator gets that
       // sentence rather than a generic failure they cannot act on.
@@ -482,6 +488,29 @@ function ProductForm({
           {`On the card on your page. ${MAX_SUMMARY_LENGTH - draft.summary.length} characters left.`}
         </p>
       </div>
+
+      {!product ? (
+        <div>
+          <label htmlFor="product-delivery-new" className="field-label">
+            Link to what the buyer gets <span className="font-normal text-ink-soft">(optional)</span>
+          </label>
+          <input
+            id="product-delivery-new"
+            name="link"
+            type="url"
+            inputMode="url"
+            maxLength={MAX_LINK_LENGTH}
+            value={draft.deliveryLink}
+            onChange={(event) => setDraft({ ...draft, deliveryLink: event.target.value })}
+            placeholder="https://"
+            aria-describedby="product-delivery-new-hint"
+            className="field mt-2"
+          />
+          <p id="product-delivery-new-hint" className="mt-1 text-sm text-ink-soft">
+            A page, a download or a folder the buyer is sent to after paying. Without it, the product shows on your store but cannot be bought until you add a file or a link on its row.
+          </p>
+        </div>
+      ) : null}
 
       <div className={pagePreview ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"}>
       <div className="min-w-0">
@@ -2032,7 +2061,7 @@ export function ProductEditor({
   async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
     setBusy(true);
     setError(null);
-    const { problem, quiet, pending } = await send(payload, currency);
+    const { problem, quiet, pending, linkNotKept } = await send(payload, currency);
     setBusy(false);
     if (problem) {
       setError(problem);
@@ -2043,7 +2072,9 @@ export function ProductEditor({
     // and change, which is not something to read in three seconds.
     setSilenced(quiet);
     // Removed, but its campaign words could not be confirmed deleted (#1947): said, never a plain "removed".
-    if (pending) toast("Product removed. Its campaign words could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
+    // Added, but its link could not be kept just now (251 [ST4] unit 4): said, never a plain "added".
+    if (linkNotKept) toast("Product added. Its link could not be saved just now. Add it on the product's row: until then it cannot be bought.");
+    else if (pending) toast("Product removed. Its campaign words could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
     else if (confirmation) toast(confirmation);
     router.refresh();
   }

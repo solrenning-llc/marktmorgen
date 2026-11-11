@@ -13,7 +13,7 @@
  *   - made only with enough to read, once a calendar month, as one of the
  *     month's AI jobs, and given back unchanged after that.
  */
-import { KEEP_SECONDS, LOCK_SECONDS, MIN_TEXTS, cleanVoice, keptMonths, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, type VoiceItem } from "@/lib/customer-voice";
+import { KEEP_SECONDS, LOCK_SECONDS, MIN_TEXTS, cleanVoice, keptMonths, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, logVoiceFailure, type VoiceItem } from "@/lib/customer-voice";
 import { keepAnswer } from "@/lib/answers";
 import { saveReview } from "@/lib/reviews";
 import { countSearchMiss } from "@/lib/stats";
@@ -47,6 +47,17 @@ async function main(): Promise<void> {
     cleanVoice(("Write to me at pat.smith@example.com or " + ("+" + "1 (415) 555-0199") + ", see https://example.com/x")),
     "Write to me at [email] or [number], see [link]",
   );
+
+  part("Provider errors are not copied into server logs");
+  const originalConsoleError = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    logVoiceFailure("review", new Error("buyer@example.test wrote private health details"));
+  } finally {
+    console.error = originalConsoleError;
+  }
+  is("the log contains only a fixed operation label", logged, [["reading customer reviews for the customer summary failed"]]);
 
   part("The model only sorts");
   const items: VoiceItem[] = [

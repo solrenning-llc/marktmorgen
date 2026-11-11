@@ -167,6 +167,19 @@ redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
 redis.call("DEL", KEYS[1])
 return 1`;
 
+const VOICE_FAILURE_MESSAGES: Record<VoiceSource | "save", string> = {
+  cancel: "reading cancellation feedback for the customer summary failed",
+  question: "reading customer questions for the customer summary failed",
+  review: "reading customer reviews for the customer summary failed",
+  search: "reading customer searches for the customer summary failed",
+  save: "keeping the customer summary failed",
+};
+
+/** Logs only a fixed operation label: provider errors may contain customer text or request data. */
+export function logVoiceFailure(kind: VoiceSource | "save", _error: unknown): void {
+  console.error(VOICE_FAILURE_MESSAGES[kind]);
+}
+
 /** A text as it may be sent: one line, short, with addresses, phone numbers and links taken out. Pure. */
 export function cleanVoice(value: string, max = MAX_TEXT): string {
   return value
@@ -190,7 +203,7 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   const items: Omit<VoiceItem, "id">[] = [];
   const unread: VoiceSource[] = [];
   const failed = (source: VoiceSource) => (error: unknown) => {
-    console.error(`reading the ${source} texts for what customers are saying failed`, error);
+    logVoiceFailure(source, error);
     unread.push(source);
     return null;
   };
@@ -380,7 +393,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     // Kept, and shown, only when nobody was deleted from the store while it was read (forgetVoicePerson took the lock).
     // The job is counted by now: a write that cannot be made says so with "changed", whose words say it counted.
     const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]).catch((error: unknown) => {
-      console.error("keeping the summary of what customers say failed", error);
+      logVoiceFailure("save", error);
       return null;
     });
     if (!Array.isArray(kept) || kept[0] !== 1) return { ok: false, reason: "changed" };

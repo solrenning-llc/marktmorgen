@@ -80,15 +80,16 @@ async function main(): Promise<void> {
 
   part("A full store gets nothing written");
   const store = (await storeForEmail(owner))!;
-  const filler = await takeData(store, [{ slot: "test:fill", bytes: 10 ** 12, set: true }]);
-  if (filler.ok) throw new Error("the filler should not fit");
-  const room = await import("@/lib/store-data").then((m) => m.dataUsed(store));
-  const fill = await takeData(store, [{ slot: "test:fill", bytes: room!.room - room!.used - 10, set: true }]);
-  is("filled", fill.ok, true);
+  // A change may grow the room only so far at once: filled in steps, each smaller, until even ten bytes do not fit.
+  let n = 0;
+  for (let step = 1_000_000; step >= 10; step = Math.floor(step / 10)) {
+    while ((await takeData(store, [{ slot: `test:fill:${n}`, bytes: step, set: true }])).ok) n += 1;
+  }
+  is("filled", (await takeData(store, [{ slot: "test:last", bytes: 10, set: true }])).ok, false);
   const full = await post({ id, outline: good, confirm: true });
   is("said as full", [full.status, full.body.error], [409, "store_full"]);
   is("no lesson saved", lessonCount((await readCourse(courseId))!), 0);
-  await takeData(store, [{ slot: "test:fill", bytes: 0, set: true }]);
+  for (let i = 0; i < n; i += 1) await takeData(store, [{ slot: `test:fill:${i}`, bytes: 0, set: true }]);
 
   part("If the outline cannot be written, its texts go too");
   const original = redis.pipeline.bind(redis);
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
   }
   is("failed", broken.status, 500);
   is("no lesson saved", lessonCount((await readCourse(courseId))!), 0);
-  is("no text left behind", redis.run(["KEYS", `nl:course:${courseId}:body:*`]), []);
+  is("no text left behind", redis.run(["SCAN", 0, "MATCH", `nl:course:${courseId}:body:*`, "COUNT", 1000]), ["0", []]);
 
   part("Saved only when confirmed, whole");
   const saved = await post({ id, outline: good, confirm: true });

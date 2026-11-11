@@ -77,3 +77,20 @@ export function planCourseImport(course: Course, draft: CourseImportDraft): Cour
   if (lessonsInOrder(step.course).length !== draft.modules.reduce((n, m) => n + m.lessons.length, 0)) return { ok: false, why: "refused" };
   return { ok: true, course: step.course, bodies, toUpload, changed };
 }
+
+/** The outline's size one studio request covers (a studio request's own transfer, tests/plan-cost-registry.ts). */
+export const IMPORT_BYTES_PER_UNIT = 50_000;
+/** The largest outline the import route reads: under the hosting's request body limit. */
+export const IMPORT_MAX_BYTES = 4_000_000;
+
+/**
+ * Studio requests an import takes beyond the one its request already took
+ * (lib/studio-route.ts, countStudio), before the work: one for each part of
+ * the outline's size past the first; and, to save, one for each lesson
+ * (its text written, at most MAX_BODY_LENGTH) and one for the outline's
+ * write. `lessons` is null for a preview, which writes nothing.
+ */
+export function importUnits(outlineLength: number, lessons: number | null): number {
+  const read = Math.max(0, Math.ceil(outlineLength / IMPORT_BYTES_PER_UNIT) - 1);
+  return lessons === null ? read : read + lessons + 1;
+}

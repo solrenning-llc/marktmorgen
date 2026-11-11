@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     part(`The versions' read answers ${mode}: never "no earlier versions"`);
     redis.pipeline = async (commands) => {
       const reply = await original.call(redis, commands);
-      return commands.length === 1 && commands[0][0] === "LRANGE" && String(commands[0][1]).startsWith(`nl:product:pages:${statsId}:`) ? (bad as unknown[]) : reply;
+      return commands.length === 1 && commands[0][0] === "LRANGE" && String(commands[0][1]).startsWith(`nl:product:pages:${statsId}:`) ? (bad as unknown as unknown[]) : reply;
     };
     const unread = await ask();
     redis.pipeline = original;

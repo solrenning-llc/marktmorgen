@@ -84,7 +84,14 @@ export function soldAMembership(product: Listing, session: { mode?: unknown; met
  * check whether someone still pays stays shut rather than open.
  */
 export async function membershipStatus(store: Store, subscription: unknown): Promise<string | null> {
-  if (subscription && typeof subscription === "object") return memberState(subscription);
+  if (subscription && typeof subscription === "object") {
+    if (Array.isArray(subscription)) return null;
+    // An expanded status only proves access when its own data identity is
+    // a subscription id. Do not read inherited or accessor identities.
+    const id = Object.getOwnPropertyDescriptor(subscription, "id");
+    if (!id || !("value" in id) || typeof id.value !== "string" || !SUBSCRIPTION_PATTERN.test(id.value)) return null;
+    return memberState(subscription);
+  }
   const account = store.stripeAccountId;
   if (typeof subscription !== "string" || !SUBSCRIPTION_PATTERN.test(subscription) || !account) return null;
   if (isRedisConfigured()) {

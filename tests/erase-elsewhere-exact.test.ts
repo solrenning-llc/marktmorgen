@@ -29,6 +29,10 @@ import { store as redis } from "./redis-stub";
 import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 import { DECIDE_CALENDARS_COMMANDS, PREPARE_COMMANDS } from "./plan-cost-registry";
+import { MEMBER_STORES_READ } from "@/lib/team";
+
+/** How many reads of a host's index decide them at the most, for an index of `ids` (tests/plan-cost-registry.ts has it once its cost is counted). */
+const decideCalendarRuns = (ids: number) => (ids <= MEMBER_STORES_READ ? 1 : 1 + Math.ceil((ids - MEMBER_STORES_READ) / (MEMBER_STORES_READ - 1)));
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
 
@@ -211,12 +215,90 @@ async function main(): Promise<void> {
     is("more stores than are read, the live one found among them: the calendar kept and nothing left to decide", [calendarKept(X), batchLeft()], [[1, 1, 1, 1], 0]);
   }
   {
-    // The same, the live one past those read: still not known, so kept and decided again, but the store is told once.
-    const { at } = await teammate(50);
+    // The same, the live one past those read and its team never reading: still not known, so kept and decided again,
+    // but the store is told once.
+    const { at, sid } = await teammate(50);
+    replaced = [{ word: "GET", key: teamKey(sid), reply: 42 }];
     let told = 0;
     const count = async () => { told += 1; };
     for (let k = 0; k <= 2; k += 1) await eraseClosed(Date.now() + 60_000, count, walkTime(at, k));
-    is("the live one past those read: the calendar kept, still to decide, and the store's last mark written once", [calendarKept(X), batchLeft(), told], [[1, 1, 1, 1], 1, 1]);
+    replaced = [];
+    is("the live one past those read, its team unreadable: the calendar kept, still to decide, and the store's last mark written once", [calendarKept(X), batchLeft(), told], [[1, 1, 1, 1], 1, 1]);
+  }
+
+  part("MEDIUM (Codex G on #3660 at 777ac085cd): more stale ids than are read are read past, run after run, to a decision");
+  /** X's index: `stale` ids of no store X serves, then, when `live`, Y's live store with X on its team, last. */
+  async function crowded(stale: number, live: boolean): Promise<{ at: number; sid: string }> {
+    fresh();
+    await claimHandle(Y, "owneryb", "Owner Y", "");
+    const b = (await ensureStoreId(Y))!;
+    for (let i = 0; i < stale; i += 1) redis.run(["SADD", teamIndexKey(X), createHash("md5").update(`stale${i}`).digest("hex")]);
+    if (live && !(await putMember(b, X, "admin"))) throw new Error("setup: X is not on Y's team");
+    return { at: await closing(X, "hostxa"), sid: b.sid };
+  }
+  /** Walks until the store leaves the batch, `most` runs at the most; answers how many it took. */
+  async function until(at: number, most: number): Promise<number> {
+    let runs = 0;
+    while (runs < most) {
+      await walkAt(walkTime(at, runs));
+      runs += 1;
+      if (batchLeft() === 0 && line(X, at) === "out") break;
+    }
+    return runs;
+  }
+  for (const stale of [51, 120]) {
+    const { at } = await crowded(stale, false);
+    const bound = decideCalendarRuns(stale);
+    const runs = await until(at, bound + 5);
+    is(`${stale} stale ids, no live store: the store erased, the host's calendar gone and the store out of the batch`, [(await storeForEmail(X)) === null, calendarKept(X), batchLeft()], [true, [0, 0, 0, 0], 0]);
+    is(`... within the reads counted for it (decideCalendarRuns(${stale}) = ${bound})`, [runs <= bound, runs], [true, runs]);
+  }
+  for (const stale of [50, 120]) {
+    const { at, sid } = await crowded(stale, true);
+    const bound = decideCalendarRuns(stale + 1);
+    let kept = true;
+    let runs = 0;
+    while (runs < bound + 5) {
+      await walkAt(walkTime(at, runs));
+      runs += 1;
+      if (calendarKept(X).some((n) => n !== 1)) kept = false;
+      if (batchLeft() === 0) break;
+    }
+    is(`${stale} stale ids, the live store past those read: the calendar kept on every run, and known at last (out of the batch)`, [kept, calendarKept(X), batchLeft(), runs <= bound], [true, [1, 1, 1, 1], 0, true]);
+    is("... the live store never leaves X's index", redis.run(["SISMEMBER", teamIndexKey(X), sid]), 1);
+  }
+  {
+    // The live store past those read, its team never reading: unknown is never "no other store", on any run.
+    const { at, sid } = await crowded(120, true);
+    replaced = [{ word: "GET", key: teamKey(sid), reply: 42 }];
+    let kept = true;
+    for (let k = 0; k < decideCalendarRuns(121) + 3; k += 1) {
+      await walkAt(walkTime(at, k));
+      if (calendarKept(X).some((n) => n !== 1)) kept = false;
+    }
+    replaced = [];
+    is("the live store's team unreadable on every run: the calendar kept on every run, still to decide, its id kept", [kept, batchLeft(), redis.run(["SISMEMBER", teamIndexKey(X), sid])], [true, 1, 1]);
+  }
+
+  part("MEDIUM (Codex G on #3660): an id in a host's index that is not a store's id is never read as no other store");
+  {
+    const staleId = createHash("md5").update("stale-one").digest("hex");
+    for (const [what, list] of [["only an id that is not a store's", ["not-a-confirmed-store-id"]], ["a stale id and one that is not a store's", [staleId, "not-a-confirmed-store-id"]]] as const) {
+      fresh();
+      const at = await closing(OWNER, "badindex");
+      replaced = [{ word: "SMEMBERS", key: teamIndexKey(OWNER), reply: [...list] }];
+      for (let k = 0; k <= 2; k += 1) await walkAt(walkTime(at, k));
+      replaced = [];
+      is(`${what}: the store erased, the owner's calendar kept, still to decide`, [(await storeForEmail(OWNER)) === null, calendarKept(OWNER), batchLeft()], [true, [1, 1, 1, 1], 1]);
+    }
+    for (const [what, list] of [["a healthy empty list", []], ["a list of stale ids (no team, nil)", [staleId]]] as const) {
+      fresh();
+      const at = await closing(OWNER, "goodindex");
+      replaced = [{ word: "SMEMBERS", key: teamIndexKey(OWNER), reply: [...list] }];
+      await walkAt(walkTime(at, 0));
+      replaced = [];
+      is(`control, ${what}: decided, the calendar gone`, [calendarKept(OWNER), batchLeft()], [[0, 0, 0, 0], 0]);
+    }
   }
 
   part("LOW: a page of a host's claims that does not read is never their end");

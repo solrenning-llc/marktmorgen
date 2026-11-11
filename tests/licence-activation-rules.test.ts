@@ -67,6 +67,11 @@ is("a bad identifier", parseKeyActivations({ devices: [{ device: "bad id", at: N
 is("more devices than any limit allows", parseKeyActivations({ devices: Array.from({ length: MAX_ACTIVATIONS + 1 }, (_, i) => ({ device: `device-${String(i).padStart(4, "0")}`, at: NOW })), releases: [] }), null);
 is("a release that is not a time", parseKeyActivations({ devices: [], releases: ["yesterday"] }), null);
 is("no releases list", parseKeyActivations({ devices: [] }), null);
+// Codex C2 on #3622: the writer never keeps more than RELEASES_PER_WINDOW releases, so a longer list is not a record it wrote.
+const releasesOf = (n: number, at: (i: number) => number) => Array.from({ length: n }, (_, i) => at(i));
+is("more releases than a window allows, all recent: null", parseKeyActivations({ devices: [], releases: releasesOf(RELEASES_PER_WINDOW + 1, (i) => NOW - i * 60) }), null);
+is("more releases than a window allows, all long past: null", parseKeyActivations({ devices: [], releases: releasesOf(RELEASES_PER_WINDOW + 1, (i) => NOW - 400 * DAY - i * 60) }), null);
+is("control: exactly as many as a window allows is read whole", parseKeyActivations({ devices: [], releases: releasesOf(RELEASES_PER_WINDOW, (i) => NOW - i * 60) })?.releases.length, RELEASES_PER_WINDOW);
 
 part("Activating a device");
 const first = decideActivation({ key: "valid", limit: 2, record: empty, device: A, now: NOW });

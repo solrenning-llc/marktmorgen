@@ -1,3 +1,5 @@
+import { RECIPIENT_DAYS as RECIPIENT_LIST_DAYS } from "@/lib/broadcasts";
+import { POLL_RESULTS_DAYS } from "@/lib/email-polls";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { IDLE_WARN_DAYS } from "@/lib/affiliate-idle-rules";
 import {CERTIFICATE_PRIVACY} from "@/lib/path-certificate";
@@ -790,6 +792,21 @@ export default function PrivacyPage() {
           any labels their import brought or their automatic emails gave you
           (a step can give a label, take one off, or start another of their
           automatic emails) — and never by whether you open an email.
+        </p>
+        <p id="email-polls">
+          <strong className="text-black">A poll in a creator&apos;s email.</strong>{" "}
+          A creator&apos;s email to their list may ask one question with a few
+          answers. Each answer is a link of your own: it carries your place in
+          that email&apos;s list of people it went to, signed so that nobody
+          else&apos;s link can stand for yours, and never your address. Opening
+          a link shows a page and counts nothing; only pressing Confirm there
+          keeps your answer, under that place, and you can change it or take it
+          back while the poll is open. The creator sees only how many chose
+          each answer, never who chose what. The answers are deleted {POLL_RESULTS_DAYS} days
+          after the poll closes, or with the store when it closes. The list of
+          who the email went to, which is what could tie a place back to an
+          address, is kept for {RECIPIENT_LIST_DAYS} days, as for every email
+          to a list.
         </p>
         <p id="links">
           <strong className="text-black">Which links you use, only if you allow it.</strong>{" "}

@@ -38,6 +38,7 @@ import type { DraftSubjectTest } from "@/lib/mail-draft-test";
 import { subjectTestPreview, type SubjectTestPreview } from "@/lib/mail-test-preview";
 import { readMailSchedule } from "@/lib/mail-schedule";
 import { PublishControl } from "@/components/letter-publish-control";
+import { PollComposer, emptyPoll, pollAsked } from "@/components/email-poll-composer";
 import { channelName } from "@/lib/channel-names";
 import { type Narrow, ACTIVE_DAYS, MAX_SPENT, readSegmentSpend, QUIET_DAYS, type Segment } from "@/lib/segments-rules";
 
@@ -56,6 +57,7 @@ const MESSAGES: Record<string, string> = {
   broadcast_write_unconfirmed: "The campaign could not be confirmed. Your text is still here. It may already have been created; check Sent and scheduled before trying again.",
   product: "That product is not in your store anymore.",
   empty: "Nobody on your list matches, so there is nobody to send it to yet.",
+  poll: "The poll needs a question and 2 to 5 different answers, and it can stay open from 1 to 30 days.",
   test_subject: "Write a second subject line that is different from the first, or uncheck the test.",
   test_small: `Trying two subject lines needs at least ${MIN_TEST_REACH} people, or each line reaches too few for the result to mean anything. Send it without the test, or to a bigger group.`,
   test_links:
@@ -790,6 +792,11 @@ function Compose(props: {
   const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;
   const testPreview = testing ? subjectTestPreview(subject, { subjectB, share, hours, by }, reach) : null;
   const invalidTest = testing && testPreview?.state !== "ready";
+  // A poll answered by a click (125 [F2-EMAIL-POLLS]): checked by the server's own rules before it can be sent; drafts do not keep it.
+  const [polling, setPolling] = useState(false);
+  const [pollDraft, setPollDraft] = useState(emptyPoll);
+  const pollToSend = pollAsked(polling, pollDraft);
+  const invalidPoll = !pollToSend.ok;
   const reachPending = !invalidSpent && (reachResult?.key !== countKey || cleanLabel !== countedLabel);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -874,7 +881,7 @@ function Compose(props: {
   }
 
   async function send(payload: Record<string, unknown>, success: string) {
-    if (locked || (payload.action === "broadcast" && (props.broadcastUnconfirmed || reach === null || reach === 0 || invalidTest))) return false;
+    if (locked || (payload.action === "broadcast" && (props.broadcastUnconfirmed || reach === null || reach === 0 || invalidTest || invalidPoll))) return false;
     if (payload.action === "broadcast" && later) {
       const sendAt = readMailSchedule(at, Date.now());
       if (sendAt === null) {
@@ -1059,6 +1066,7 @@ function Compose(props: {
         <p className="text-sm text-ink-soft">
           Blank lines make paragraphs, lines starting with &quot;- &quot; make a list, web addresses become links, and a picture you add shows where its line is. Design lays it out in blocks, with headings, buttons and templates. Why they are getting it, the unsubscribe link and your postal address are added at the bottom.
         </p>
+        {props.canSend ? <PollComposer on={polling} value={pollDraft} onToggle={setPolling} onChange={setPollDraft} /> : null}
         {segments.length ? (
           <label className="block">
             <span className="field-label">Saved groups</span>
@@ -1340,7 +1348,7 @@ function Compose(props: {
             <>
               <button
                 type="button"
-                aria-busy={busy} disabled={busy || props.broadcastUnconfirmed || invalidSchedule || invalidTest || !subject.trim() || !body.trim()}
+                aria-busy={busy} disabled={busy || props.broadcastUnconfirmed || invalidSchedule || invalidTest || invalidPoll || !subject.trim() || !body.trim()}
                 aria-describedby="mail-send-note"
                 className="btn btn-primary"
                 onClick={async () => {
@@ -1359,6 +1367,7 @@ function Compose(props: {
                       draftId: draftId || undefined,
                       draftSavedAt: draftId ? draftSavedAt : undefined,
                       test: testing ? { subjectB, share, hours, by } : undefined,
+                      poll: pollToSend.ok ? pollToSend.poll : undefined,
                     },
                     props.switchedOff ? (later ? "Your email is scheduled. It goes out once your store is back on." : "Your email is saved. It goes out once your store is back on.") : later ? "Your email is scheduled." : "Your email is on its way.",
                   );
@@ -1368,6 +1377,8 @@ function Compose(props: {
                     setDraftId("");
                     setTesting(false);
                     setSubjectB("");
+                    setPolling(false);
+                    setPollDraft(emptyPoll());
                     props.onDone();
                     router.refresh();
                   }
@@ -1382,10 +1393,10 @@ function Compose(props: {
           ) : (
             <button
               type="button"
-              disabled={busy || props.broadcastUnconfirmed || !subject.trim() || !body.trim() || reach === null || reach === 0 || invalidSchedule || invalidTest}
+              disabled={busy || props.broadcastUnconfirmed || !subject.trim() || !body.trim() || reach === null || reach === 0 || invalidSchedule || invalidTest || invalidPoll}
               className="btn btn-primary"
               onClick={() => {
-                if (props.broadcastUnconfirmed || invalidTest) return;
+                if (props.broadcastUnconfirmed || invalidTest || invalidPoll) return;
                 if (later && readMailSchedule(at, Date.now()) === null) { setScheduleNow(Date.now()); setError(MESSAGES.when); return; }
                 setConfirming(true);
                 // The review opens with the focus on its heading, so it is read once, in order.

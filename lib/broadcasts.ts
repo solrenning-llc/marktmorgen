@@ -143,7 +143,7 @@ export class BroadcastCancellationUnconfirmed extends Error {
 export const MAX_SCHEDULE_DAYS = 365;
 /** How long a broadcast's record is kept after its last change, and who it went to after it was made. */
 const RECORD_DAYS = 400;
-const RECIPIENT_DAYS = 60;
+export const RECIPIENT_DAYS = 60;
 /**
  * Readings of the buyers the scheduled job may make for one email beyond its
  * first (C3-80 (d)): a list that could not be made for another reason (the

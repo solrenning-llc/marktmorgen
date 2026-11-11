@@ -83,7 +83,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeForRefExact, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -753,7 +753,16 @@ export type Closing = {
 
 /** One store whose plan has ended, looked at for today. */
 export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
-  const store = await storeForEmail(key);
+  // Only a record Redis says is not there (nil) is gone. One that does not read (a failed request, a record that does
+  // not parse, or one under that key for another owner) is unknown (rule 24): the store stays in its lines, its
+  // closing state kept, and is looked at again tomorrow (storeForRefExact, lib/store.ts).
+  let store: Store | null;
+  try {
+    store = await storeForRefExact(key);
+  } catch (error) {
+    console.error("a closing store's record could not be read; it stays in line and is looked at again tomorrow", error);
+    return { key, state: "held", note: "its record could not be read" };
+  }
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);
     return { key, state: "gone" };

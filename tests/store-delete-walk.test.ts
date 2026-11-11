@@ -21,6 +21,7 @@ import { finishClosed } from "@/lib/plan-closing";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { type Store, claimHandle, createStore, ensureListId, ensureStatsId, setPhotoId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { readPhoto, writePhoto } from "@/lib/store-photo";
+import { makeKey, resolveKey } from "@/lib/api-keys";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -33,8 +34,10 @@ const stateKey = (key: string) => `nl:plan:closing:${createHash("sha256").update
 let garble: ((command: (string | number)[]) => unknown[] | undefined) | undefined;
 // Run once right after one command's reply is read, before the caller sees it: another request landing in between.
 let after: { when: (command: (string | number)[]) => boolean; run: () => Promise<void> } | undefined;
+// The same for a whole pipeline of several commands.
+let garbleMany: ((commands: (string | number)[][]) => unknown[] | undefined) | undefined;
 redis.pipeline = async (commands: (string | number)[][]) => {
-  const swapped = commands.length === 1 && garble ? garble(commands[0]) : undefined;
+  const swapped = commands.length === 1 && garble ? garble(commands[0]) : commands.length > 1 && garbleMany ? garbleMany(commands) : undefined;
   const reply = swapped ?? (await pipe(commands));
   const hook = after;
   if (hook && commands.length === 1 && hook.when(commands[0])) {
@@ -191,6 +194,26 @@ async function main(): Promise<void> {
   is("the retry's fresh entry survives the stale admission", [typeof e1, e1 !== e0], ["string", true]);
   await eraseClosed(deadline(), finishClosed, t2 + 30 * HOUR);
   is("a later walk erases every key named by its ids", [await erasableBy(idsOf(againStore)), await readPhoto(againStore.photoId!), await inBatch(againRef)], [[], null, null]);
+
+  part("the record gone, then the addresses' holds answered in an unknown shape: what reaches the store is still forgotten (Claude 6's Q5 on #3670)");
+  redis.clear();
+  await claimHandle(OWNER, "keepshome", "Keeps Home", "");
+  const half = await createStore(OWNER, "keepshalf", "Keeps Half", "");
+  if (!half.ok) throw new Error("no half store");
+  const halfStore = await furnished(storeRef(half.store));
+  const halfRef = storeRef(halfStore);
+  const apiKey = await makeKey(halfStore.sid, "Synthetic key");
+  if (!apiKey.ok) throw new Error("no key");
+  is("before: its API key answers for it", (await resolveKey(apiKey.key))?.sid, halfStore.sid);
+  // The pipeline that holds its addresses back and releases its places, sent once its record is gone, answers [].
+  garbleMany = (commands) => (commands.some((command) => command[0] === "SET" && String(command[1]).startsWith("nl:store:handle:") && String(command[2]).startsWith("released:")) ? [] : undefined);
+  const halfAnswer = await deleteFromStudio(OWNER, halfStore);
+  garbleMany = undefined;
+  is("its record is gone", await storeForEmail(halfRef), null);
+  is("the studio says it was deleted with a last step not confirmed, never that nothing was deleted", halfAnswer.includes("stores=partly"), true);
+  is("its API key no longer answers, its lookup gone", [await resolveKey(apiKey.key), (await allKeys()).filter((key) => key.startsWith("nl:api:k:"))], [null, []]);
+  await eraseClosed(deadline(), finishClosed, Date.now());
+  is("after the walk, every key named by its ids is gone and no API key lookup is left", [await erasableBy(idsOf(halfStore)), (await allKeys()).filter((key) => key.startsWith("nl:api:")), await inBatch(halfRef)], [[], [], null]);
 
   part("rule 24: a record not read at the walk leaves the entry waiting, never walked nor dropped");
   redis.clear();

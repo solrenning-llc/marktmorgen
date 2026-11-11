@@ -47,6 +47,7 @@ export function StudioApp() {
       const target = element(event.target);
       if (target) keeper.focusOut(target);
     };
+    const onPointer = () => keeper.pointerDown();
     const watch = new MutationObserver((records) => {
       let tree = false;
       for (const record of records) {
@@ -62,10 +63,12 @@ export function StudioApp() {
     watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled"] });
     document.addEventListener("focusin", onIn);
     document.addEventListener("focusout", onOut);
+    document.addEventListener("pointerdown", onPointer, true);
     return () => {
       watch.disconnect();
       document.removeEventListener("focusin", onIn);
       document.removeEventListener("focusout", onOut);
+      document.removeEventListener("pointerdown", onPointer, true);
     };
   }, []);
   return null;

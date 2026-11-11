@@ -164,7 +164,8 @@ part("It never takes the focus from anything else");
   card.first = el("field", card);
   active = button;
   k.focusIn(button);
-  k.focusOut(button); // left on purpose, still on the page
+  k.pointerDown(); // left on purpose: a click elsewhere on the page
+  k.focusOut(button);
   active = body;
   button.isConnected = false;
   k.treeChanged();

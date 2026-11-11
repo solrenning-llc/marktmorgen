@@ -19,8 +19,10 @@
  *
  * It only acts while the focus is nowhere (the body, or no element). It never
  * takes the focus from anything else: a person who moved on keeps their
- * place, and a control left on purpose (a click elsewhere, a Tab) is not taken
- * back. Pure apart from what it is given, so tests/focus-keeper.test.ts and
+ * place (the focus arrived somewhere else), and a control left on purpose (a
+ * click or a touch elsewhere) is not taken back. A blur alone does not say a
+ * person left: Chromium sends blur and focusout to a button still on the page,
+ * a moment before React takes it away. Pure apart from what it is given, so tests/focus-keeper.test.ts and
  * tests/focus-keeper-removed.test.ts drive it with their own elements;
  * components/studio-app.tsx wires it to the document.
  */
@@ -41,8 +43,10 @@ export type KeeperPlace = {
 export type FocusKeeper = {
   /** The focus arrived on an element (a focusin event). */
   focusIn: (element: KeptElement) => void;
-  /** The focus left an element (a focusout event). */
+  /** The focus left an element (a focusout event). Not a person leaving it on its own: see pointerDown. */
   focusOut: (element: KeptElement) => void;
+  /** A click or a touch somewhere (a pointerdown event): a person leaving the control on purpose. */
+  pointerDown: () => void;
   /** An element's disabled attribute changed (a MutationObserver attributes record). */
   disabledChanged: (element: KeptElement) => void;
   /** Elements were added or taken away somewhere (MutationObserver childList records). */
@@ -68,10 +72,14 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       around = [];
       for (let at = element.parentElement; at; at = at.parentElement) around.push(at);
     },
-    focusOut(element) {
-      // Left while still on the page and on: a click elsewhere, a Tab. Left because it was turned off, moved or
-      // taken away: kept.
-      if (element === last && element.isConnected && !element.disabled) last = null;
+    focusOut() {
+      // Nothing to do: a Tab brings a focusin elsewhere, and a click a pointerdown first. A blur alone also comes to
+      // a control being turned off, moved or taken away, which is when the focus must go on.
+    },
+    pointerDown() {
+      last = null;
+      waiting = null;
+      around = [];
     },
     disabledChanged(element) {
       if (element.disabled) {

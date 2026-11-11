@@ -72,6 +72,21 @@ async function main(): Promise<void> {
     is(`payouts answered ${label}: never owed again, the book is not known`, await owedTo(store), "unknown");
   }
 
+  part("A payout row this code did not write: the book is not known, never owed again (Revisor 1 on #3719, MEDIUM)");
+  garble = undefined;
+  for (const [label, row] of [
+    ["cents as text", JSON.stringify({ id: "p_odd1", aff: ANA, cents: "1250", currency: store.currency, date: "2026-11-02", reference: "x" })],
+    ["not JSON", "{not json"],
+    ["no affiliate", JSON.stringify({ id: "p_odd1", cents: 1250, currency: store.currency })],
+    ["fractional cents", JSON.stringify({ id: "p_odd1", aff: ANA, cents: 12.5, currency: store.currency })],
+    ["a currency Stripe has no code like", JSON.stringify({ id: "p_odd1", aff: ANA, cents: 1250, currency: "US Dollars" })],
+  ] as const) {
+    await real([["HSET", `nl:aff:${statsId}:payouts`, "p_odd1", row]]);
+    is(`a payout row with ${label}: the book is not known`, await owedTo(store), "unknown");
+  }
+  await real([["HDEL", `nl:aff:${statsId}:payouts`, "p_odd1"]]);
+  is("(the odd row gone: nothing owed)", await owedTo(store), 0);
+
   part("The people or sales hash answered in a shape that cannot be read");
   for (const key of [/:people$/, /:sales$/, /:shares$/, /:clicks$/, /:paid$/, /:leads$/]) {
     garble = { key, reply: "?" };

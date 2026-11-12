@@ -233,6 +233,28 @@ try{
   finally{emptyCases++;cases++;await context.close();}
  }
  console.log("EMPTY_STATE_COST:"+JSON.stringify({engine,cases:emptyCases,milliseconds:Date.now()-emptyStarted}));
+ // Where a buyer lands on a wrong address: a store that does not exist (the site's own 404, app/not-found.tsx), a page
+ // a store does not have (the store's own 404, app/[handle]/not-found.tsx), and the help written for buyers
+ // (app/help/buyers). Everything is inside a landmark (axe "region": the site's preview bar sits in the header),
+ // and the 1.4.8 checks above hold. Baseline at 320 and 1280 px; its time is printed so its cost is measured.
+ const missingStarted=Date.now();let missingCases=0;
+ for(const width of [320,1280])for(const [path,want] of [["/@nosuchstore",404],["/@localshop/nothing-here",404],["/help/buyers",200]]){
+  const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(100+missingCases)}});
+  try{
+   const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
+   await context.route("**/*",route=>{const url=new URL(route.request().url());if(url.origin!==origin&&url.origin!==FAKE)return route.abort();if(url.pathname==="/api/store/hit")return route.fulfill({status:204,body:""});if(!["GET","HEAD"].includes(route.request().method()))return route.abort();return route.continue();});
+   const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});
+   if(response?.status()!==want)throw Error("HTTP "+response?.status());
+   await page.addScriptTag({content:axe});
+   const result=await page.evaluate(async()=>{const root=document.documentElement,run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {scroll:root.scrollWidth,client:root.clientWidth,violations:run.violations.map(v=>({id:v.id,targets:v.nodes.map(n=>n.target).slice(0,6)})),incomplete:run.incomplete.map(v=>v.id)};});
+   const off=await blocksOff148(page);
+   audits++;console.log("MISSING_PAGE_AUDIT:"+JSON.stringify({engine,width,path,off,...result}));
+   if(result.scroll>result.client||result.violations.length||off.length||errors.length)throw Error("Missing-page accessibility failure "+JSON.stringify({violations:result.violations,off,errors}));
+   if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"missing "+path,manualReview:result.incomplete});
+  }catch(error){failed++;console.error("MISSING_PAGE_FAILURE:"+JSON.stringify({engine,width,path,error:redact(error)}));}
+  finally{missingCases++;cases++;await context.close();}
+ }
+ console.log("MISSING_PAGE_COST:"+JSON.stringify({engine,cases:missingCases,milliseconds:Date.now()-missingStarted}));
  // The cart (components/store-cart.tsx), the checkout for several products at once, by keyboard only: every control in it
  // 44 by 44 px (2.5.5); removing a product keeps the focus in the cart (2.4.3); Escape and Close shut it and give the focus
  // back to its button (2.4.3, 2.1.1); and moving the focus out of it shuts it, so the open panel never covers the control

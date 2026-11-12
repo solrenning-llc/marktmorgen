@@ -18,7 +18,9 @@ export const metadata: Metadata = {
 export default function BuyerHelpPage() {
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
-      <SiteNav />
+      <header>
+        <SiteNav />
+      </header>
       <main id="content" className="flex-1">
         <section className="surface-dawn border-b border-line">
           <div className="container-page py-14 sm:py-18">

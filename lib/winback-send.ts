@@ -49,11 +49,13 @@ const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
 /**
  * Before a come-back checkout is opened, every membership that has not ended counts (R43, follow-up to #3371): only
- * these two statuses have. One still taking its first payment ("incomplete"), paused, unpaid, or in a status not known
- * here is read as running, so a second membership is never opened beside it.
+ * these two statuses have. One still taking its first payment ("incomplete"), paused or unpaid is read as running, so a
+ * second membership is never opened beside it; a status not in SUB_STATUSES is not read at all (unknown, null).
  */
 const ENDED = new Set(["canceled", "incomplete_expired"]);
 const NOT_ENDED = { has: (status: string) => !ENDED.has(status) };
+/** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 11/11/2026). */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (account: string, sub: string) => `nl:wb:${account}:${sub}`;
@@ -146,12 +148,14 @@ async function cameBack(
     const listed = await onAccount("GET", account, `/subscriptions?customer=${customer}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
     const subs: unknown = listed.data;
     if (!Array.isArray(subs) || (listed.has_more !== true && listed.has_more !== false)) return null;
-    // Each membership read whole (Codex N on #2714): a status in words and its metadata as an object. A row missing
-    // either cannot show it is to another product, so the answer is unknown, never "has not come back".
+    // Each membership read whole (Codex N on #2714): a status Stripe names and its metadata as a map of strings. A row
+    // with a status Stripe has no name for, or a product that is not a string, cannot show it is to another product
+    // either (rule 24, the class of Codex CX1's MEDIUM on #3598), so the answer is unknown, never "has not come back".
     for (const sub of subs as unknown[]) {
       if (!sub || typeof sub !== "object") return null;
       const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
-      if (typeof status !== "string" || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+      if (typeof status !== "string" || !SUB_STATUSES.has(status) || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+      if (!Object.values(metadata).every((value) => typeof value === "string")) return null;
       if (live.has(status) && (metadata as Record<string, unknown>).product === product) return true;
     }
     if (listed.has_more === false) return false;
@@ -387,7 +391,10 @@ export async function sendWinBacks(deadline: number, now = Date.now()): Promise<
         continue;
       }
       if (Date.now() >= deadline) break;
-      if (winbackOn(store) && store.stripeAccountId && store.statsId && store.listId) {
+      // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
+      // 24): nothing is read from its Stripe account, no mark is taken and nothing is sent (canSellProduct already
+      // refused each offer), so a membership still in its window is offered once the store is back on.
+      if (winbackOn(store) && store.stripeAccountId && store.statsId && store.listId && !store.suspended) {
         counts.stores += 1;
         try {
           counts.sent += await sweepStore(store, deadline, now);

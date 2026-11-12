@@ -28,7 +28,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 
 const store = {
   sid: "sidrefl01", handle: "reflshop", name: "Refl Shop", previousHandles: [], releasedHandles: [], statsId: STATS,
-  stripeAccountId: "acct_1TestRefundLists", currency: "usd",
+  stripeAccountId: "acct_1TestRefunds", currency: "usd",
   affiliates: { enabled: true, percent: 30, days: 30, rates: {}, payday: 5, hold: 0 },
 } as unknown as Store;
 
@@ -75,6 +75,40 @@ test("a dispute the bank holds with no readable amount: unchecked", async () => 
   refundsBody = { object: "list", data: [], has_more: false };
   disputesBody = { object: "list", data: [{ id: "du_1", status: "lost", payment_intent: "pi_refl1", amount: null }], has_more: false };
   assert.equal((await readBook(store)).refundsChecked, false);
+});
+
+const ROWS: [string, unknown[], unknown[]][] = [
+  ["a refund with no status", [{ id: "re_1", payment_intent: "pi_refl1", amount: 10000 }], []],
+  ["a refund whose status is not text", [{ id: "re_1", status: 5, payment_intent: "pi_refl1", amount: 10000 }], []],
+  ["a refund whose payment is an object with no id", [{ id: "re_1", status: "succeeded", payment_intent: {}, amount: 10000 }], []],
+  ["a refund whose payment is a number", [{ id: "re_1", status: "succeeded", payment_intent: 5, amount: 10000 }], []],
+  ["a dispute with no status", [], [{ id: "du_1", payment_intent: "pi_refl1", amount: 10000 }]],
+  ["a dispute whose payment is an object with no id", [], [{ id: "du_1", status: "lost", payment_intent: {}, amount: 10000 }]],
+];
+
+for (const [label, refunds, disputes] of ROWS) {
+  test(`${label}: unchecked, never "nothing taken" (rule 24)`, async () => {
+    await seed();
+    refundsBody = { object: "list", data: refunds, has_more: false };
+    disputesBody = { object: "list", data: disputes, has_more: false };
+    assert.equal((await readBook(store)).refundsChecked, false);
+  });
+}
+
+test("a refund whose payment is given as an object with its id takes the commission", async () => {
+  await seed();
+  refundsBody = { object: "list", data: [{ id: "re_1", status: "succeeded", payment_intent: { id: "pi_refl1" }, amount: 10000 }], has_more: false };
+  disputesBody = { object: "list", data: [], has_more: false };
+  const book = await readBook(store);
+  assert.equal(book.refundsChecked, true);
+  assert.equal(book.rows[0]?.payable ?? 0, 0);
+});
+
+test("a refund Stripe says has no payment (null) is read, and skipped as before", async () => {
+  await seed();
+  refundsBody = { object: "list", data: [{ id: "re_1", status: "succeeded", payment_intent: null, amount: 10000 }], has_more: false };
+  disputesBody = { object: "list", data: [], has_more: false };
+  assert.equal((await readBook(store)).refundsChecked, true);
 });
 
 test("lists read exactly: checked, and a full refund takes the commission", async () => {

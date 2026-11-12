@@ -109,12 +109,15 @@ export const IMPORT_ROWS_KEPT_DAYS = 3;
 export const IMPORTS_PAUSED = {
   renewal_unpaid: `Your plan's renewal payment did not go through, so imports are paused. Check the notice at the top of your studio to pay it. An import already started goes on where it stopped once it is paid, and what it already brought in stays. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload; after that, start again with the rows not brought in.`,
   plan_disputed: `A payment for your plan is disputed with your bank, so imports are paused. Check the notice at the top of your studio for what happens next. An import already started goes on where it stopped if everything starts again, and what it already brought in stays. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload; after that, start again with the rows not brought in.`,
+  // 232 [CA1], the original 4c (lib/plan-standing.ts newCostCode).
+  plan_ended: `Your plan has ended, so imports are paused. Check your studio's main page for your store's closing date. An import already started goes on where it stopped if a plan starts again before then, and what it already brought in stays until then. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload.`,
 } as const;
 
 /** The same, for a ClickFunnels funnel migration, which keeps no rows. */
 export const FUNNEL_PAUSED = {
   renewal_unpaid: "Your plan's renewal payment did not go through, so funnel imports are paused. Check the notice at the top of your studio to pay it; you can import the funnel once it is paid. Pages already made stay as they are.",
   plan_disputed: "A payment for your plan is disputed with your bank, so funnel imports are paused. Check the notice at the top of your studio for what happens next. Pages already made stay as they are.",
+  plan_ended: "Your plan has ended, so funnel imports are paused. Check your studio's main page for your store's closing date. Pages already made stay as they are until then.",
 } as const;
 
 /** "2,000 rows", for the studio. */

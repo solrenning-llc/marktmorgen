@@ -27,6 +27,8 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   // A plan payment the creator disputed (232 [CA1] unit 5, lib/plan-dispute-rules.ts).
   plan_disputed: "A payment for your plan is disputed with your bank, so new uploads are paused. Check the notice at the top of your studio for what happens next. Files already uploaded stay as they are.",
   renewal_unpaid: "Your plan's renewal payment did not go through, so new uploads are paused. Check the notice at the top of your studio to pay it; uploads start again once it is paid. Files already uploaded stay as they are.",
+  // A plan that has ended (232 [CA1], the original 4c, lib/plan-standing.ts newCostCode).
+  plan_ended: "Your plan has ended, so new uploads are paused. Check your studio's main page for your store's closing date. Files already uploaded stay as they are until then.",
   upload_budget_unavailable: "New uploads are paused right now. Existing files and downloads are not changed by this pause.",
   uploads_pending: "Other uploads are using the remaining space. Finish or cancel them before trying again. If an earlier upload stopped, try again later.",
   upload_stopped: "The upload stopped before it finished. Check your connection, then choose the file again.",

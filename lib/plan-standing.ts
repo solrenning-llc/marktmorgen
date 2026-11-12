@@ -74,6 +74,21 @@ export function costPauseCode(store: Pick<PlanFields, "subscriptionActive" | "re
   return store.subscriptionActive && planDisputed(store, nowSeconds) ? "plan_disputed" : null;
 }
 
+/**
+ * The reason new work that costs us to run or keep is refused for, or null
+ * (232 [CA1], the original unit 4c): `costPauseCode` while a running plan's
+ * renewal is unpaid or a payment for it is disputed, and "plan_ended" once a
+ * plan has ended, because nobody pays for that store any more and it is on
+ * its way to closing (lib/plan-closing.ts). It covers what still ran there on
+ * Store's figures: imports and funnel migrations, a new photo on the
+ * creator's page and a buyer's new review photo. A store that never had a
+ * plan ("none") is not refused here: setting a store up is what its own
+ * room is for. Removing, exporting and deleting are never refused by this.
+ */
+export function newCostCode(store: PlanFields, nowSeconds = Date.now() / 1000): "renewal_unpaid" | "plan_disputed" | "plan_ended" | null {
+  return costPauseCode(store, nowSeconds) ?? (standingOf(store, nowSeconds) === "ended" ? "plan_ended" : null);
+}
+
 /** Historical trial storage threshold; all-cost review remains required. */
 export const TRIAL_STORAGE_BYTES = 50 * GB;
 /** Historical setup/ended storage threshold; not a certified cost budget. */

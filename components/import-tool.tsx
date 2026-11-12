@@ -161,6 +161,7 @@ const MESSAGES: Record<string, string> = {
   // 232 [CA1] unit 4b2: in place of the studio's words about uploads.
   renewal_unpaid: IMPORTS_PAUSED.renewal_unpaid,
   plan_disputed: IMPORTS_PAUSED.plan_disputed,
+  plan_ended: IMPORTS_PAUSED.plan_ended,
 };
 
 /**
@@ -345,13 +346,13 @@ export function ImportTool({
         if (data.ok && data.import) {
           moved = true;
           // Paid again: the pause words go.
-          setError((e) => (e === MESSAGES.renewal_unpaid || e === MESSAGES.plan_disputed ? null : e));
+          setError((e) => (e === MESSAGES.renewal_unpaid || e === MESSAGES.plan_disputed || e === MESSAGES.plan_ended ? null : e));
           setJob(data.import);
           if (!running(data.import.state)) {
             toast(data.import.state === "done" ? "Import finished." : "Import stopped.");
             router.refresh();
           }
-        } else if (data.error === "renewal_unpaid" || data.error === "plan_disputed") {
+        } else if (data.error === "renewal_unpaid" || data.error === "plan_disputed" || data.error === "plan_ended") {
           // Said beside the import; it is tried again below and goes on once paid (232 [CA1] unit 4b2).
           setError(MESSAGES[data.error]);
         }

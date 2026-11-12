@@ -87,7 +87,7 @@ import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
-import { costsPaused } from "@/lib/plan-standing";
+import { newCostCode } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
@@ -1674,7 +1674,9 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     // Rows not yet brought in are kept RAW_DAYS from their upload, as always;
     // the job and the addresses still to be emailed are kept alive meanwhile
     // (one write each, every five minutes), so a long pause loses neither.
-    if (costsPaused(store, Date.now() / 1000)) {
+    // The same once the plan has ended (the original 4c, newCostCode): the
+    // store is closing, and its records go with it on the closing day.
+    if (newCostCode(store, Date.now() / 1000)) {
       const [, , , holder] = await redisPipeline([saveJob(job), ["EXPIRE", mailKey(id), KEEP_SECONDS], ["EXPIRE", errorsKey(id), KEEP_SECONDS], ["GET", busyKey(job.sid)]]);
       // The store's one-import slot only while this import holds it.
       if (holder === id) await redisPipeline([["EXPIRE", busyKey(job.sid), KEEP_SECONDS]]);

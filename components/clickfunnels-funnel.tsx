@@ -49,6 +49,7 @@ const MESSAGES: Record<string, string> = {
   // 232 [CA1] unit 4b2: in place of the studio's words about uploads.
   renewal_unpaid: FUNNEL_PAUSED.renewal_unpaid,
   plan_disputed: FUNNEL_PAUSED.plan_disputed,
+  plan_ended: FUNNEL_PAUSED.plan_ended,
 };
 
 function summary(draft: PageDraft): string {

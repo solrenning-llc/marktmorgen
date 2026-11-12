@@ -1,5 +1,6 @@
 /** Build a separate disposable app with a named synthetic account fixture.
- * Production is built/checked first by the caller and remains byte-identical.
+ * The production source stays byte-identical. Callers that also serve the checkout build it first
+ * (verify's agreements step); the buyer and signup accessibility legs serve only this copy.
  * This changes exactly one transport import in a copy, never the guard, its
  * null production reviews, or a production config/environment switch.
  */

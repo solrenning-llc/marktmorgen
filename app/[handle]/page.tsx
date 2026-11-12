@@ -119,7 +119,10 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   return {
     title: `${store.name} — Marktmorgen`,
     description: store.bio || speech(store).w.storeDescription(store.name),
-    ...(ownDomain ? { alternates: { canonical: ownDomain } } : {}),
+    // Otherwise its address here, spelled as the store spells it: handles are
+    // read without regard to case, so /@LocalShop draws this same page, and
+    // the layout's relative "./" would make each spelling its own address.
+    ...(ownDomain ? { alternates: { canonical: ownDomain } } : { alternates: { canonical: `${SITE_URL}/@${store.handle}` } }),
     // An empty store has nothing to offer a search engine yet. One with
     // something on it does, so it stops hiding the moment it has. A page of
     // links alone counts: it is a page somebody may be looking for.

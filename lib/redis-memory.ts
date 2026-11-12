@@ -132,8 +132,8 @@ export class MemoryRedis {
         // lib/traffic-reset.ts RESET_SCRIPT: under the caller's own lock token only, the record first, then the people
         // lowered by the delta, with the live room's parts as they are now; nothing written on a lost lock or a count or
         // a room read otherwise.
-        if (key.startsWith("-- marktmorgen:traffic-reset:v2\n") && args[0] === "4" && args.length === 10) {
-          const [, visits, log, lock, room, before, delta, entry, token, keep] = args;
+        if (key.startsWith("-- marktmorgen:traffic-reset:v2\n") && args[0] === "4" && args.length === 11) {
+          const [, visits, log, lock, room, before, delta, entry, token, keep, keepSeconds] = args;
           if (this.run(["GET", lock]) !== token) return [-2];
           const held = this.run(["GET", visits]);
           const current = held === null ? "0" : held;
@@ -148,6 +148,7 @@ export class MemoryRedis {
           if (record !== undefined && !Array.isArray(record)) throw new Error("WRONGTYPE");
           this.run(["LPUSH", log, entry]);
           this.run(["LTRIM", log, 0, Number(keep) - 1]);
+          this.run(["EXPIRE", log, keepSeconds]);
           return [1, this.run(["DECRBY", visits, delta]), Number(parts)];
         }
         // lib/traffic-reset.ts RELEASE_SCRIPT: the lock let go only by the token that took it.

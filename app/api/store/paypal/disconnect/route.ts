@@ -2,6 +2,7 @@ import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { setPayPalSeller } from "@/lib/store";
+import { endOnboarding } from "@/lib/paypal-sales";
 
 /**
  * Stops selling through the creator's PayPal, on this side. What was already
@@ -14,6 +15,8 @@ export async function POST(request: NextRequest) {
   const { ref, store, origin, studio } = creator;
   const saved = await setPayPalSeller(ref, null);
   if (!saved) return away(origin, studio("paypal=error#paypal"));
+  // A connect started before this is not finished by its way back afterwards.
+  if (saved.statsId) await endOnboarding(saved.statsId);
   if (store.paypalSeller) after(() => noticeCreator(store, { kind: "paypal-disconnected" }));
   return away(origin, studio("paypal=forgotten#paypal"));
 }

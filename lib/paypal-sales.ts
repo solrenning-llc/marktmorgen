@@ -264,6 +264,35 @@ export async function onboardingUrl(store: Store, returnUrl: string): Promise<st
   return typeof action?.href === "string" && action.href.startsWith("https://") ? action.href : null;
 }
 
+/**
+ * A connect started from this store's studio (app/api/store/paypal/connect), kept a day: the way back from PayPal
+ * (app/api/store/paypal/onboarded) is a GET any page can send the creator to, and PayPal answers for the store's
+ * tracking id for as long as the creator has not removed Marktmorgen in their PayPal settings. So the way back is
+ * taken only while this mark is there: a visit from the browser's history, or from a link on another site, after
+ * the creator stopped selling with PayPal (or before they ever asked) connects nothing. Ended by a way back that
+ * connected, and by disconnecting. One per store, holding only "1".
+ */
+export const ONBOARDING_SECONDS = 86_400;
+const onboardingKey = (statsId: string) => `nl:ppsell:start:${statsId}`;
+
+/** Writes the mark before the creator is sent to PayPal; throws when the write is not confirmed (rule 24). */
+export async function markOnboarding(statsId: string): Promise<void> {
+  const set = repliesFor(await redisPipeline([["SET", onboardingKey(statsId), "1", "EX", ONBOARDING_SECONDS]]), 1);
+  if (!set || set[0] !== "OK") throw new UnknownReplyError("a PayPal connect's start");
+}
+
+/** Whether a connect was started from the studio: true, false, or "unknown" for any reply not exactly GET's (rule 24). */
+export async function onboardingStarted(statsId: string): Promise<boolean | "unknown"> {
+  const read = repliesFor(await redisPipeline([["GET", onboardingKey(statsId)]]), 1);
+  if (!read) return "unknown";
+  return read[0] === null ? false : read[0] === "1" ? true : "unknown";
+}
+
+/** Ends the mark; a write that fails leaves it to run out within ONBOARDING_SECONDS. */
+export async function endOnboarding(statsId: string): Promise<void> {
+  await redisPipeline([["DEL", onboardingKey(statsId)]]).catch((error) => console.error("ending a PayPal connect's start failed", error));
+}
+
 export type SellerCheck = { ok: true; merchant: string } | { ok: false; reason: "id" | "email" | "receivable" | "permissions" | "error" };
 
 /**

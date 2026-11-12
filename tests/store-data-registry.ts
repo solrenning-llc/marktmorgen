@@ -780,6 +780,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
   "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),
+  // ONBOARDING_SECONDS of lib/paypal-sales.ts: the way back from PayPal is taken only while it is there.
+  "nl:ppsell:start:@lib/paypal-sales.ts": { what: "A PayPal connect started from the studio, a day", parts: [capped(MARK, "One a store, holding \"1\", gone within a day.")] },
   "nl:ppsell:receipt:@lib/paypal-delivery.ts": short("When a paid order's receipt was first tried, a week", "order", 7, MARK, KIND("paypal")),
   // RECEIPT_MAIL_BYTES and RECEIPT_MAIL_SECONDS of lib/paypal-delivery.ts (held by tests/paypal-receipt-once.test.ts, part J).
   "nl:ppsell:mail:@lib/paypal-delivery.ts": short("A paid order's receipt as first made, so every try sends the same email, a day", "order", 1, 8 * KB, KIND("paypal")),

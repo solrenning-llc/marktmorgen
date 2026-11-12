@@ -1,7 +1,7 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { away, creatorFrom } from "@/lib/studio-route";
-import { checkSeller, paypalSalesConfigured } from "@/lib/paypal-sales";
+import { checkSeller, endOnboarding, onboardingStarted, paypalSalesConfigured } from "@/lib/paypal-sales";
 import { setPayPalSeller } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
@@ -19,10 +19,17 @@ export async function GET(request: NextRequest) {
   if (!paypalSalesConfigured()) return away(origin, studio("paypal=unavailable#paypal"));
   if (!store.statsId) return away(origin, studio("paypal=error#paypal"));
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return away(origin, studio("paypal=limited#paypal"));
+  // Only after a connect started from this store's studio: opened again from the history, or from a link on another
+  // site, this address connects nothing (a store that stopped selling with PayPal stays stopped). A connected store
+  // is shown as it is; one that is not is told nothing was finished.
+  const started = await onboardingStarted(store.statsId);
+  if (started === "unknown") return away(origin, studio("paypal=error#paypal"));
+  if (!started) return away(origin, studio(store.paypalSeller ? "#paypal" : "paypal=id#paypal"));
   const checked = await checkSeller(store.statsId);
   if (!checked.ok) return away(origin, studio(`paypal=${checked.reason}#paypal`));
   const saved = await setPayPalSeller(ref, checked.merchant);
   if (!saved) return away(origin, studio("paypal=error#paypal"));
+  await endOnboarding(store.statsId);
   if (store.paypalSeller?.merchant !== checked.merchant) after(() => noticeCreator(store, { kind: "paypal-connected" }));
   return away(origin, studio("paypal=ready#paypal"));
 }

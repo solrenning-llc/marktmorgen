@@ -160,7 +160,34 @@ async function main(): Promise<void> {
   await sweep();
   is("read again in its shape, it is handed over at the next sweep", [toBuyer(odd).length, (await listed()).includes(odd)], [receiptsBefore + 1, false]);
 
+  part("The deletion lands between the retry's check and its hand-over (Codex G on #4163): nothing stays written");
+  mail = "422";
+  const raced = await pay(4);
+  mail = "up";
+  is("control: granted on the return and kept for its receipt", [await grants(), (await listed()).includes(raced)], [1, true]);
+  const realRace: Pipe = redis.pipeline.bind(redis);
+  let erasedMidway = false;
+  (redis as unknown as { pipeline: Pipe }).pipeline = async (commands) => {
+    const answer = await realRace(commands);
+    // Right after the retry has read the person's deletion print (none yet), the person is deleted from the store.
+    if (!erasedMidway && commands.length === 1 && commands[0][0] === "HGET" && String(commands[0][1]).startsWith("nl:erased:")) {
+      erasedMidway = true;
+      (redis as unknown as { pipeline: Pipe }).pipeline = realRace;
+      await erasePerson(await fresh(), BUYER, { kind: "person" });
+    }
+    return answer;
+  };
+  const receiptsBeforeRace = toBuyer(raced).length;
+  await sweep();
+  (redis as unknown as { pipeline: Pipe }).pipeline = realRace;
+  is("control: the deletion did land between the check and the hand-over", erasedMidway, true);
+  is("no grant is left written about them", await grants(), 0);
+  is("no receipt is sent", toBuyer(raced).length, receiptsBeforeRace);
+  is("and the order leaves the list", (await listed()).includes(raced), false);
+
   part("Control: deleted before paying again, the new purchase is handed over");
+  // A payment made after the deletion, at a later second than it.
+  ahead += 120_000;
   const before = await grants();
   const again = await pay(2);
   is("granted and receipted on the return", [(await grants()) >= before, toBuyer(again).length, (await listed()).includes(again)], [true, 1, false]);

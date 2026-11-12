@@ -99,6 +99,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/mcp-tools.ts` | TOTALS | 248–277: revenue in the store's currency, sales_in_another_currency apart (unit 2d) | yes |
 | `lib/member-health.ts` | TOTALS | 164–170: each member's monthly amount in its own currency; 196–200 the at-risk total in the store's, the rest counted (unit 2e) | yes |
 | `lib/membership-numbers.ts` | TOTALS | 523/541: membership numbers and MRR movements in the store's currency | partly: "elsewhere" for live subscriptions only |
+| `lib/next-actions-rules.ts` | TOTALS | 247: "Do this next" ranks recorded money only in the store's currency (`options.currency`); another currency is never compared or converted | no |
 | `lib/meta-ads.ts` | TOTALS | 611: ad spend only for an account in the store's currency | partly: refused |
 | `lib/meta-routes.ts` | TOTALS | 84/88: Meta picks an account in the store's currency | partly |
 | `lib/path-facts.ts` | TOTALS | 81/123: Path's revenue in the store's currency only | partly: other sales count, not their money |

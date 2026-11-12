@@ -17,7 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DEEMED_SUPPLIER_RECORDS, type DeemedSupplierRecord } from "@/lib/deemed-supplier";
-import { COVERED_OPENINGS, NOT_A_SALE, SALE_OPENINGS, openingCalls, openingsWithoutRefusal } from "@/lib/sale-openings";
+import { COVERED_OPENINGS, NOT_A_SALE, NOT_A_STORE_OPENING, SALE_OPENINGS, openingCalls, openingsWithoutRefusal } from "@/lib/sale-openings";
 import { done, is, part } from "./check";
 
 const ROOT = process.cwd();
@@ -49,6 +49,9 @@ part("The scanner itself, on synthetic sources");
   is("capturing a PayPal order opens nothing new", openingCalls(`await call("POST", \`/v2/checkout/orders/\${encodeURIComponent(order)}/capture\`, {})`).length, 0);
   // A provider chosen at run time, with onAccount as the default (LEVE on #3682).
   is("onAccount as a default provider is found", openingCalls(`await (runtime.provider ?? onAccount)("POST", claim.row.accountId, "/checkout/sessions", body)`), ["/checkout/sessions"]);
+  // An account worked out by a call with a comma in it, and a PayPal helper under another name (out-of-family review of #3682, LOW 3).
+  is("an account argument with a comma inside a call is found", openingCalls(`await onAccount("POST", accountOf(store, "live"), "/checkout/sessions", body)`), ["/checkout/sessions"]);
+  is("a PayPal order through a helper not named call is found", openingCalls(`const made = await paypal("POST", "/v2/checkout/orders", { body })`), ["/v2/checkout/orders"]);
 }
 
 part("Every real opening is listed, and every listed file still opens one");
@@ -75,6 +78,28 @@ part("Every real opening is listed, and every listed file still opens one");
   is("PayPal's order is a sale opening", SALE_OPENINGS.some((entry) => entry.file === "lib/paypal-sales.ts" && entry.opens === "/v2/checkout/orders"), true);
   is("an opening covered by another is covered by a listed sale opening, and is not one itself", COVERED_OPENINGS.every((entry) => SALE_OPENINGS.some((sale) => sale.file === entry.by) && !SALE_OPENINGS.some((sale) => sale.file === entry.file)), true);
   is("the confirmation outbox's session is reached only from createCheckout", COVERED_OPENINGS.map((entry) => [entry.file, entry.by]), [["lib/order-confirmation-outbox.ts", "lib/store-checkout.ts"]]);
+}
+
+part("A covered opening is reached only from the sale opening that covers it, read from the sources (out-of-family review of #3682, LOW 2)");
+for (const entry of COVERED_OPENINGS) {
+  const name = new RegExp(`\\b${entry.through}\\b`);
+  is(`${entry.file} defines ${entry.through}, the function that opens the session`, new RegExp(`export\\s+async\\s+function\\s+${entry.through}\\s*\\(`).test(read(entry.file)), true);
+  is(`${entry.by} calls ${entry.through}`, new RegExp(`\\b${entry.through}\\s*\\(`).test(read(entry.by)), true);
+  // lib/sale-openings.ts names it only as data, in this very entry.
+  const elsewhere = files.filter((file) => file !== entry.file && file !== entry.by && file !== "lib/sale-openings.ts" && name.test(read(file)));
+  is(`no other file in lib/ or app/ names ${entry.through}`, elsewhere, []);
+}
+
+part("Every file that names an opening endpoint is accounted for, whatever the call looks like (out-of-family review of #3682, LOW 3)");
+{
+  // The exact path as a whole string, however it is called: a helper under another name or an argument with a comma cannot hide it.
+  const endpoint = /["'`]\/(checkout\/sessions|payment_intents|v2\/checkout\/orders)["'`]/;
+  const accounted = new Set([...listed, ...NOT_A_STORE_OPENING.map((entry) => entry.file)]);
+  // lib/sale-openings.ts names the endpoints only as data, in its own types and list.
+  const unaccounted = files.filter((file) => file !== "lib/sale-openings.ts" && endpoint.test(read(file)) && !accounted.has(file));
+  is("every file with an opening endpoint is a sale opening, not a sale, covered, or not a store's", unaccounted, []);
+  is("and every file said not to be a store's still names one, so the list never goes stale", NOT_A_STORE_OPENING.filter((entry) => !endpoint.test(read(entry.file))).map((entry) => entry.file), []);
+  is("a file is never both a store's opening and not a store's", NOT_A_STORE_OPENING.filter((entry) => listed.has(entry.file)).map((entry) => entry.file), []);
 }
 
 part("Nothing opens a checkout or a payment past onAccount");

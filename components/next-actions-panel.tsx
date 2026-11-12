@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { NextView } from "@/lib/next-actions-rules";
 
 /**
- * "Do this next" on the studio's Today (484 [IT1] complement WG, unit 2): one to three actions from numbers the
+ * "Do this next" on the studio's Today (484 [IT1] complement WG, unit 2): one to five actions from numbers the
  * store already keeps (lib/next-actions-rules.ts chooses them, lib/next-actions-read.ts reads them). Each is a short
  * list item in plain words: the count, the recorded money with it, where the number comes from and when it was
  * counted, and a link named by where it goes (2.4.9), the size of a button (2.5.5). Nothing is sent, switched on or

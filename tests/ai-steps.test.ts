@@ -292,6 +292,17 @@ async function main(): Promise<void> {
   const bad = await writePage(store, input, Date.now(), stepsOf("not a run!", []));
   is("refused before anything is taken or asked", [bad.ok, calls, before - (await ai.aiLeft(store))], [false, 0, 0]);
 
+  part("A stepped request the month's allowance refuses writes no live mark (cloud O's LOW on #3435)");
+  fresh();
+  // The month is already used up: the reservation is refused, so nothing of the run may be written before it.
+  redis.run(["SET", monthKey, String(1_000_000)]);
+  const usedUp = await writePage(store, input, Date.now(), stepsOf("runrefused000001", []));
+  is("refused for the month's allowance, with no model call", [usedUp.ok ? "ok" : usedUp.reason, calls], ["used", 0]);
+  is("and no live mark is written before the reservation", [sent.filter((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:")).length, redis.run(["GET", stopKey("runrefused000001")])], [0, null]);
+  fresh();
+  const reserved = await writePage(store, input, Date.now(), stepsOf("runreserved00001", []));
+  is("a reserved run still marks itself live before its first step, so a stop finds it", [reserved.ok, sent.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:")) > sent.findIndex((c) => c[0] === "INCRBY" && c[1] === monthKey)], [true, true]);
+
   part("Every command and byte a stepped generation adds is priced");
   const line = COST_LINES.find((l) => l.id === "ai")!;
   is("the ai line reads the step figures from lib/ai-steps.ts", line.sources.some((s) => s.file === "lib/ai-steps.ts" && s.names.includes("AI_STOP_COMMANDS") && s.names.includes("AI_STEP_EXTRA_BYTES")), true);

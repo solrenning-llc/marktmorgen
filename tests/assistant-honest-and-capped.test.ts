@@ -59,6 +59,15 @@ part("A. Figures and deals in words are held to the facts, and a figure to what 
   is(`"12 total" is a price, not the facts' 12 lessons`, heldToFacts("The price is 12 total.", course), false);
   is("a count beside a price, in another store language than the facts", heldToFacts("Es kostet 49 Dollar und hat 12 Lektionen.", course), true);
   is("but never a count the facts hold only as days", heldToFacts("Es kostet 49 Dollar und hat 14 Lektionen.", course), false);
+  // Claude 1 cloud's review of #3484 at 9288beabe7 (MÉDIO): a figure that names what it counts ("49 students", "14
+  // lessons") was held by a fact of any kind with its value, a price or a refund window in days, so an invented count of
+  // buyers, students or lessons was shown. It is held only by a fact that counts, as a bare figure is.
+  {
+    const store = "Price: $49 a month. What it is: 12 video lessons on sourdough. Email me within 14 days and I refund you in full.";
+    const invented = ["49 students have already joined.", "14 people already bought this course.", "Our 49 graduates got jobs.", "The course has 14 lessons."];
+    is("a count is never held by a price or a day of the same value", invented.filter((said) => heldToFacts(said, store)), []);
+    is("a count the store published is still held", heldToFacts("It has 12 video lessons.", store), true);
+  }
   // Claude 4's focal (6798863884) and Claude 1's review (6799181835) at 94a7cc36: "total" before the number, a bare
   // number after a word of paying the vocabulary did not list, a currency in slang, and Spanish and Italian forms of
   // "pay" (Claude 3's LOW) were still shown, held by the 14 days or the 12 lessons. A bare number is held only by a

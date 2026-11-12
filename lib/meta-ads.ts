@@ -119,6 +119,9 @@ export const linesKey = (statsId: string) => `nl:stats:${statsId}:spend:meta`;
 const stateKey = (state: string) => `nl:metaads:state:${hash(`metaads-state:${state}`)}`;
 const userKey = (user: string) => `nl:metaads:user:${hash(`metaads-user:${user}`)}`;
 const STORES_KEY = "nl:metaads:stores";
+/** The daily pass's mark and the generation it holds (readMetaDue). */
+const PASS_KEY = "nl:metaads:pass";
+const GEN_KEY = "nl:metaads:gen";
 const readingKey = (statsId: string) => `nl:metaads:reading:${statsId}`;
 const context = (statsId: string) => `metaads|${statsId}|token`;
 
@@ -391,6 +394,8 @@ export async function finishMeta(input: {
     ["SET", connKey(input.statsId), JSON.stringify(connection)],
     ["DEL", readKey(input.statsId)],
     ["SADD", STORES_KEY, input.statsId],
+    // Due now: the daily pass's mark no longer holds (readMetaDue).
+    ["INCR", GEN_KEY],
     ["SADD", userKey(user), input.statsId],
   ]);
   // Another person's token in its place: theirs is given back.
@@ -413,6 +418,8 @@ export async function chooseAccount(statsId: string, id: unknown): Promise<boole
     ["SET", connKey(statsId), JSON.stringify({ ...c, account: id })],
     ["DEL", readKey(statsId)],
     ["DEL", linesKey(statsId)],
+    // Due now: the daily pass's mark no longer holds (readMetaDue).
+    ["INCR", GEN_KEY],
   ]);
   return true;
 }
@@ -686,8 +693,22 @@ function sameHost(link: string): boolean {
 }
 
 /**
+ * The daily pass's mark (C1 cost audit, 12 November 2026): a run that walked
+ * every connected store and found none due keeps PASS_KEY, holding the
+ * generation it read, until the first moment one can be due again (the next
+ * UTC day, or the earliest wait out of a problem). Each five-minute run before
+ * then reads only the mark and the generation, one command, instead of two
+ * keys of every connected store (1 + 2M commands, 288 runs a day, for a read
+ * owed once a day). Whatever makes a store due before then moves GEN_KEY on in
+ * the same write (a new connection, another account chosen), so the next run
+ * no longer finds its mark and walks. A run that did not see every store
+ * exactly (out of time, a reply it could not read, a store it could not look
+ * up) or asked Meta for anything leaves no mark: the next run walks, as before.
+ */
+/**
  * The daily pass, a few stores at a time, from the five-minute job: every
- * connected store not yet read today, and not waiting out a problem.
+ * connected store not yet read today, and not waiting out a problem. A store
+ * whose plan's costs are paused is tried again the next day.
  */
 export async function readMetaDue(
   deadline: number,
@@ -696,12 +717,23 @@ export async function readMetaDue(
 ): Promise<{ read: number; skipped: number }> {
   const counts = { read: 0, skipped: 0 };
   if (!isMetaConfigured() || !isRedisConfigured()) return counts;
+  // The mark and the generation, read together: only the exact same generation skips the walk; anything else walks.
+  const marks = repliesFor(await redisPipeline([["MGET", PASS_KEY, GEN_KEY]]), 1)?.[0];
+  const pair = Array.isArray(marks) && marks.length === 2 ? marks : null;
+  const generation = pair && (pair[1] === null || (typeof pair[1] === "string" && /^\d{1,20}$/.test(pair[1]))) ? (pair[1] ?? "0") : null;
+  if (generation !== null && pair?.[0] === generation) return counts;
   // Read exactly (CX-123 rule 24): an unknown list throws, so the daily job says it failed and the next run reads it.
   const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", STORES_KEY]]), 1)?.[0]);
   if (!stores) throw new UnknownReplyError("the stores with Meta connected");
-  const today = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  // The next UTC day, when every store read today is due again.
+  let wake = Date.parse(`${today}T00:00:00Z`) + 86_400_000;
+  let whole = generation !== null;
+  let seen = 0;
   for (const statsId of stores) {
     if (Date.now() >= deadline) break;
+    seen += 1;
     const replies = repliesFor(await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]), 2);
     // Only a connection confirmed absent takes the store off the list; one that cannot be read is skipped this time.
     if (replies && replies[0] === null) {
@@ -711,18 +743,31 @@ export async function readMetaDue(
     const c = replies ? parseConnection(replies[0]) : null;
     if (!replies || !c) {
       counts.skipped += 1;
+      whole = false;
       continue;
     }
     const read = parseRead(replies[1]);
-    if (c.broken || !c.account || read?.day === today || (read?.after ?? 0) * 1000 > Date.now()) continue;
+    if (c.broken || !c.account || read?.day === today) continue;
+    if ((read?.after ?? 0) * 1000 > Date.now()) {
+      wake = Math.min(wake, (read?.after ?? 0) * 1000);
+      continue;
+    }
     const store = await storeFor(c.sid).catch(() => null);
     if (!store || store.statsId !== statsId) {
       counts.skipped += 1;
+      whole = false;
       continue;
     }
     const result = await readMetaSpend(statsId, store.currency, Date.now(), onBroken);
     if (result === "read") counts.read += 1;
     else counts.skipped += 1;
+    // Paused (lib/integration-pause.ts): tried again the next day. Anything else asked of this pass is looked at
+    // again by the next run, which finds what it wrote and only then may leave the mark.
+    if (result !== "paused") whole = false;
+  }
+  if (whole && seen === stores.length) {
+    const seconds = Math.max(1, Math.ceil((wake - Date.now()) / 1000));
+    await redisPipeline([["SET", PASS_KEY, generation as string, "EX", seconds]]);
   }
   return counts;
 }

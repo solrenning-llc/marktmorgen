@@ -38,19 +38,33 @@ async function txtRecords(host: string): Promise<string[]> {
   }
 }
 
+/** Whether the domain carries this store's own TXT record (proofRecord). */
+async function hasProof(store: Pick<Store, "sid">, name: string): Promise<boolean> {
+  const proof = proofRecord(store, name);
+  const found = await txtRecords(proof.host);
+  return found.some((value) => value.trim() === proof.value);
+}
+
 export type ProofResult = "proved" | "waiting" | "taken";
 
 /**
  * Looks for the store's TXT record and, when it is there, lets the domain
  * serve the store. A claim that lapsed is claimed again for the store, if
- * nobody else took it meanwhile.
+ * nobody else took it meanwhile. Another store's claim not proved yet gives
+ * way to the store whose record is there (#4108); a proved one never does.
  */
 export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previousHandles">, name: string): Promise<ProofResult> {
   const ours = [store.handle, ...store.previousHandles];
   const [raw] = await redisPipeline([["GET", domainKey(name)]]);
   let held = typeof raw === "string" ? raw : "";
   const holder = held.replace(/^\?/, "");
-  if (held && !ours.includes(holder)) return "taken";
+  if (held && !ours.includes(holder)) {
+    // Another store's claim. A proved one is theirs. One not proved serves nothing and keeps nobody out (#4108):
+    // the store whose TXT record is there takes it, only while the key still holds that same claim.
+    if (!held.startsWith(UNPROVED) || !(await hasProof(store, name))) return "taken";
+    const [won] = await redisPipeline([["EVAL", SWAP, 1, domainKey(name), held, store.handle]]);
+    return Number(won) === 1 ? "proved" : "waiting";
+  }
   // Held under an older address of this same store: moved to the current one.
   if (held && holder !== store.handle) {
     const now = held.startsWith(UNPROVED) ? `${UNPROVED}${store.handle}` : store.handle;
@@ -66,9 +80,7 @@ export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previou
     if (claimed === "taken") return "taken";
     if (claimed === "unknown") return "waiting";
   }
-  const proof = proofRecord(store, name);
-  const found = await txtRecords(proof.host);
-  if (!found.some((value) => value.trim() === proof.value)) return "waiting";
+  if (!(await hasProof(store, name))) return "waiting";
   // Only while the claim is still this store's: it may have lapsed and been
   // taken while the DNS was asked.
   const [set] = await redisPipeline([["EVAL", SWAP, 1, domainKey(name), `${UNPROVED}${store.handle}`, store.handle]]);

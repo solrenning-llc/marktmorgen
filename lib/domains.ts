@@ -274,6 +274,8 @@ export type ConnectResult =
 /**
  * Adds a domain to a store: claims it here first, so two stores cannot both
  * have it, then asks Vercel to serve it. A claim Vercel refuses is let go.
+ * Another store's claim not proved yet does not keep this store out: the
+ * store that adds its TXT record proves it (#4108).
  */
 export async function connectDomain(store: Store, raw: string): Promise<ConnectResult> {
   if (!canUseDomain(store)) return { ok: false, reason: "plan" };
@@ -285,7 +287,15 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   // Claimed as not proved yet: it serves nothing, and lapses, until the
   // creator adds the TXT record that proves it is theirs.
   const [claimed] = await redisPipeline([["SET", domainKey(name), `${UNPROVED}${store.handle}`, "NX", "EX", UNPROVED_SECONDS]]);
-  if (claimed === null) return { ok: false, reason: "taken" };
+  // Another store's claim not proved yet serves nothing and keeps nobody out (#4108): this store connects it too,
+  // leaving that claim as it is, and the TXT record decides (lib/domain-proof.ts). A proved one is theirs.
+  let ours = true;
+  if (claimed === null) {
+    const [raw] = await redisPipeline([["GET", domainKey(name)]]);
+    const holder = typeof raw === "string" && raw.startsWith(UNPROVED) ? raw.slice(UNPROVED.length) : "";
+    if (!holder || holder === store.handle) return { ok: false, reason: "taken" };
+    ours = false;
+  }
 
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });
   // Already on this project (a second press, or added by hand) is fine;
@@ -293,7 +303,8 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   const alreadyHere =
     added.status === 409 && (await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`)).status === 200;
   if (added.status !== 200 && !alreadyHere) {
-    await redisPipeline([["DEL", domainKey(name)]]);
+    // Only a claim this call took is let go: never another store's.
+    if (ours) await redisPipeline([["DEL", domainKey(name)]]);
     cache.delete(name);
     if (added.status === 409) return { ok: false, reason: "elsewhere" };
     if (added.status === 400) return { ok: false, reason: "shape" };

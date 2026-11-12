@@ -50,6 +50,12 @@ const promos: Promo[] = [];
 const opened: { id: string; body: URLSearchParams; account: string | null }[] = [];
 const sessions = new Map<string, Record<string, unknown>>();
 const emails: { to: string[]; subject: string; text: string }[] = [];
+/** As Stripe answers: the payment is only its id unless the request expanded it. */
+const asAsked = (session: Record<string, unknown>, url: URL) => {
+  const pi = session.payment_intent as { id?: string } | string | undefined;
+  const expanded = url.searchParams.getAll("expand[]").some((field) => field.startsWith("payment_intent"));
+  return pi && typeof pi === "object" && !expanded ? { ...session, payment_intent: pi.id } : session;
+};
 const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const promoRow = (promo: Promo) => ({ object: "promotion_code", id: promo.id, code: promo.code, active: promo.active, max_redemptions: promo.max_redemptions, times_redeemed: promo.times_redeemed, promotion: { type: "coupon", coupon: promo.coupon }, restrictions: {} });
 
@@ -104,7 +110,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const one = /^\/v1\/checkout\/sessions\/([^/]+)$/.exec(url.pathname);
   if (one && method === "GET") {
     const found = sessions.get(decodeURIComponent(one[1]));
-    return found ? answer(found) : answer({ error: { message: "No such checkout.session" } }, 404);
+    return found ? answer(asAsked(found, url)) : answer({ error: { message: "No such checkout.session" } }, 404);
   }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;

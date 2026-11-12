@@ -62,17 +62,31 @@ export type ErasureSize = {
   roomMessages: number;
   events: number;
   certificates: number;
+  /**
+   * The lines of the person's index of API answers kept under an Idempotency-Key (lib/api-idempotency.ts,
+   * idempotentLines): each a record to delete and a line to take out (since 12 November 2026, review of #3542).
+   */
+  apiAnswers: number;
+  /** Those lines in batches of ERASE_BATCH (lib/api-idempotency.ts): one DEL and one ZREM each. */
+  apiAnswerBatches: number;
 };
 
 /**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,
  * and (since 18 October 2026) a person's payment requests at their cap, four commands each for twice MAX_PER_PERSON
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
- * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them.
+ * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
+ * and (since 12 November 2026) the four on a person's index of kept API answers (lib/api-idempotency.ts: its count,
+ * then the erasure's mark, its expiry and the read), whatever it lists: 550 before them.
  */
-export const ERASE_FIXED_COMMANDS = 550;
-/** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
-export const ERASE_FIXED_BYTES = 310_000;
+export const ERASE_FIXED_COMMANDS = 554;
+/**
+ * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
+ * again, and those commands; and (since 12 November 2026) the four on the index of kept API answers, under 1,000 bytes
+ * with their replies, which also cover the erasure's mark kept for a day (a byte moved is priced above a byte kept a
+ * day, lib/spend-cost-table.ts): 310,000 before them.
+ */
+export const ERASE_FIXED_BYTES = 311_000;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],
@@ -84,6 +98,10 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   roomMessages: [0, 1_200],
   events: [1, 150],
   certificates: [0, 500],
+  // A line read (a key's hash, 64 hex), its record named in a DEL (nl:api:idem:<sid>:<hash>, 109) and the line in a
+  // ZREM (64), each quoted: under 250 bytes.
+  apiAnswers: [0, 300],
+  apiAnswerBatches: [2, 0],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;

@@ -45,6 +45,7 @@
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import type { Tier } from "@/lib/plan";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { PERSON_INDEX_LINE_BYTES } from "@/lib/api-idempotency-rules";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { CALL_ORDER_UNITS, ORDERS_INCLUDED } from "@/lib/order-rules";
@@ -296,7 +297,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:api:hold:@lib/api-keys.ts": { what: "Which of the store's API keys are paused (the team's two-step rule, a maker who left or whose role changed) or were turned back on (owner C3-100)", parts: [capped(1 * KB, "One short mark for each of MAX_KEYS keys; a revoked key's mark goes with it.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:api:used:@lib/api-keys.ts": { what: "When each of the store's API keys was last used, kept apart from its record", parts: [capped(1 * KB, "One time for each of MAX_KEYS keys; a revoked key's goes with it.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:api:idem:@lib/api-idempotency.ts": short("An API write under an Idempotency-Key: the write under way or its answer, one per keyed request, 24 hours from when it began (lib/api-idempotency-rules.ts MAX_IDEMPOTENCY_RECORD_BYTES)", "api", 1, 8_448),
-  "nl:api:idem:p:@lib/api-idempotency.ts": short("Which kept API answers are about one address, so deleting the person deletes them at once: one key per record, 24 hours", "api", 1, 128),
+  // A line lives until a keep a minute past its end drops it, or its index ends 24 hours after the latest keep: under 3 days.
+  "nl:api:idem:p:@lib/api-idempotency.ts": short("Which kept API answers are about one address, so deleting the person deletes them at once: a line per keyed answer, and for a day after the person is deleted the erasure's mark (lib/api-idempotency-rules.ts PERSON_INDEX_LINE_BYTES)", "api", 3, PERSON_INDEX_LINE_BYTES),
   "nl:course:@lib/assignment.ts": { what: "A course's assignments, the work handed in and what came back", room: ["lib/assignment.ts"], parts: [per("studio", 1, KEY, "The creator told of new work, an hour.")] },
   "nl:tasks:bytes:@lib/assignment.ts": { what: "What a store's students keep handed in, in bytes", parts: [capped(KEY, "One count a store.")] },
   "nl:tasks:taken:@lib/assignment.ts": short("A handed-in file's mark of the bytes it took of the store's room, an hour, so a lost answer gives them back", "buyer", 1, 128),

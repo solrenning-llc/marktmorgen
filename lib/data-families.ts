@@ -211,7 +211,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E,
   "nl:alert:": E, "nl:alert:seen:": Cr(2), "nl:allow:": E,
   "nl:api:hold:": E, "nl:api:k:": T("prepare"), "nl:api:keys:": E, "nl:api:used:": E,
-  "nl:api:idem:": X(1), "nl:api:idem:p:": X(1),
+  "nl:api:idem:": X(1), "nl:api:idem:p:": X(3),
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,
   "nl:assist:c:": X(1), "nl:assist:missed:": E, "nl:assist:next:": X(3), "nl:assist:nextlock:": X(1), "nl:assist:pool:": E, "nl:assist:remind:": X(3), "nl:assist:remindq": I, "nl:assist:remindwho:": X(3),
   "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's

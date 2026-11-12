@@ -13,7 +13,8 @@ import { makeKey } from "@/lib/api-keys";
 import { POST as postLead } from "@/app/api/v1/leads/route";
 import { POST as postAccess } from "@/app/api/v1/access/route";
 import { erasePerson, erasureScope, erasureSize } from "@/lib/person-erasure";
-import { forgetIdempotentPerson } from "@/lib/api-idempotency";
+import { ERASE_BATCH, forgetIdempotentPerson, idempotentLines } from "@/lib/api-idempotency";
+import { erasureWork } from "@/lib/erasure-rules";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -96,20 +97,21 @@ async function main(): Promise<void> {
 
   part("An unknown read is never 'nothing kept'");
   const real = redis.pipeline.bind(redis);
-  const shapes: unknown[] = [[{ weird: true }], [["ok", 7]], null, []];
+  const shapes: unknown[] = [[1, 1, { weird: true }], [1, 1, ["ok", 7]], null, [], [1, 0, []], ["OK", 1, []]];
   const thrown: boolean[] = [];
   for (const reply of shapes) {
-    (redis as unknown as { pipeline: typeof real }).pipeline = async (commands) => (commands[0]?.[0] === "SMEMBERS" ? (reply as unknown[]) : real(commands));
+    // The erasure's one read of the index: its mark, the expiry and the lines, answered here in another shape.
+    (redis as unknown as { pipeline: typeof real }).pipeline = async (commands) => (commands.some((c) => c[0] === "ZRANGEBYSCORE") ? (reply as unknown[]) : real(commands));
     thrown.push(await forgetIdempotentPerson(a.sid, BO).then(() => false, () => true));
   }
   (redis as unknown as { pipeline: typeof real }).pipeline = real;
-  is("each reply of another shape throws, so the erasure is pressed again rather than said done", thrown, [true, true, true, true]);
+  is("each reply of another shape throws, so the erasure is pressed again rather than said done", thrown, [true, true, true, true, true, true]);
   is("and Bo's answer was not touched by any of them", has(kept[2]), true);
 
   part("An answer is kept only where an erasure can find it");
   const original = redis.pipeline.bind(redis);
   // The person's index cannot be written: the answer must not be kept (the claim stays, a repeat is told 409).
-  (redis as unknown as { pipeline: typeof original }).pipeline = async (commands) => commands.some((c) => c[0] === "SADD") ? [null, null] : original(commands);
+  (redis as unknown as { pipeline: typeof original }).pipeline = async (commands) => commands.some((c) => c[0] === "ZADD" && String(c[1]).startsWith("nl:api:idem:p:")) ? [null, null, null, null] : original(commands);
   const noIndex = await call(postAccess, a.key, { email: "cy-erase@example.test", product: a.product }, "a-cy-access");
   (redis as unknown as { pipeline: typeof original }).pipeline = original;
   const again = await call(postAccess, a.key, { email: "cy-erase@example.test", product: a.product }, "a-cy-access");
@@ -199,6 +201,30 @@ async function main(): Promise<void> {
   const scope = await erasureScope(await storeNow(), HAL);
   const size = scope ? await erasureSize(scope) : null;
   is("the erasure's size counts Hal's kept answers", (size as Record<string, unknown> | null)?.apiAnswers, 3);
+  {
+    // A person with more answers than one batch: what the erasure sends on them is no more than its size counts.
+    const IVY = "ivy-erase@example.test";
+    const n = ERASE_BATCH + 7;
+    const until = Date.now() + IDEMPOTENCY_SECONDS * 1_000;
+    const hashes = Array.from({ length: n }, (_, i) => createHash("sha256").update(`ivy-${i}`).digest("hex"));
+    await plain(hashes.flatMap((h) => [["ZADD", pk(a.sid, IVY), until, h], ["SET", `nl:api:idem:${a.sid}:${h}`, JSON.stringify({ state: "done", fp: "0".repeat(64), at: Date.now(), status: 200, body: `{"data":{"email":"${IVY}"}}` }), "EX", 3600]]));
+    const lines = await idempotentLines(a.sid, IVY);
+    const counted = { apiAnswers: lines, apiAnswerBatches: Math.ceil(lines / ERASE_BATCH) };
+    const work = { commands: 0, bytes: 0 };
+    setPipe(async (commands) => {
+      const reply = await plain(commands);
+      work.commands += commands.length;
+      work.bytes += JSON.stringify(commands).length + JSON.stringify(reply).length;
+      return reply;
+    });
+    const gone = await forgetIdempotentPerson(a.sid, IVY);
+    setPipe(plain);
+    const priced = erasureWork(counted);
+    const fixed = erasureWork({});
+    is("every one of them is deleted", [lines, gone, (await keptAbout(a.sid, IVY)).length], [n, n, 0]);
+    // The mark, the expiry and the read are 3 of the 4 fixed commands (the count is the fourth), under 1,000 bytes.
+    is("its commands and bytes fit what is counted for them", [work.commands <= priced.commands - fixed.commands + 3, work.bytes <= priced.bytes - fixed.bytes + 1_000], [true, true]);
+  }
 
   done();
 }

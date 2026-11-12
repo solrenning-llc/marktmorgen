@@ -1,0 +1,4 @@
+{
+  "next/og": "certificate-card-world.ts",
+  "next/headers": "security/next-headers.ts"
+}

@@ -238,9 +238,10 @@ export async function startChat(input: { store: Store; email: unknown; name: unk
 }
 
 /** A message sent with the store's contact form, filed in the inbox too. Nothing more is sent: the form already emailed the creator. */
-export async function fileContact(input: { store: Store; email: string; name: string; text: string; now?: number }): Promise<boolean> {
+export async function fileContact(input: { store: Store; email: string; name: string; text: string; now?: number; source?: "contact" | "withdrawal" }): Promise<boolean> {
   if (!input.store.statsId || !isRedisConfigured()) return false;
-  const made = await open({ ...input, source: "contact" }).catch((error) => {
+  // An EU withdrawal notice (lib/withdrawal.ts) is its own source, so a block never stops the buyer writing in it (review of #3839).
+  const made = await open({ ...input, source: input.source === "withdrawal" ? "withdrawal" : "contact" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const };
     throw error;
   });
@@ -360,8 +361,9 @@ export async function visitorSend(
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
   const conversation = await readKept(found.statsId, found.id);
   if (!conversation || conversation.token !== token) return { ok: false, reason: "gone" };
-  // A buyer's own order case is never stopped by a block (567 [GD1]): it protects what they already paid for.
-  if (conversation.source !== "order" && !(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
+  // A buyer's own order case and their own withdrawal are never stopped by a block (567 [GD1]): they protect what they
+  // already paid for (review of #3839).
+  if (conversation.source !== "order" && conversation.source !== "withdrawal" && !(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
   if (!(await withinLimit("chat-send", `${found.statsId}:${found.id}`, VISITOR_PER_HOUR, 3_600))) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };

@@ -6,7 +6,7 @@
  *   - with no data, or every count at zero, no action is invented;
  *   - a count that cannot be read is "unknown", never zero: no action on it, and the view names it;
  *   - a role without the permissions sees neither the action nor that its number is missing;
- *   - at most three, money owed first, then recorded money highest first, money not known or in another currency
+ *   - up to five (the item asks for up to five, one per kind), money owed first, then recorded money highest first, money not known or in another currency
  *     after, then by count, then the fixed order;
  *   - the time each count was made, or that it is not known; no forecast, no percentage in any words.
  */
@@ -43,7 +43,7 @@ part("The item's acceptance case");
   const view = nextActions({ failedPayments: { count: 86, owed: usd(258_000), at: AT } }, as("owner"));
   is("one action", view.kind === "actions" ? view.actions.length : -1, 1);
   const first = view.kind === "actions" ? view.actions[0] : null;
-  is("it says 86", first?.words, "86 card payments for memberships failed this week and are still unpaid.");
+  is("it says 86", first?.words, "86 card payments for memberships failed in the last 7 days and are still unpaid.");
   is("with the recorded money", first?.money, "$2,580 unpaid.");
   is("where the number comes from", first?.source, "From your failed membership payments in Stripe.");
   is("when it was counted", first?.asOf, "Counted November 10, 2026 (UTC).");
@@ -80,6 +80,8 @@ is("a course pointing to itself: unknown", nextActions({ courseNext: { count: 4,
   is("money that is not whole: the action stays, without money", view.kind === "actions" ? view.actions[0].money : "x", null);
   const odd = nextActions({ failedPayments: { count: 3, owed: { amount: 500, currency: "zzz" }, at: AT } }, as("owner"));
   is("money in a currency that is not one: without money", odd.kind === "actions" ? odd.actions[0].money : "x", null);
+  const zero = nextActions({ failedPayments: { count: 3, owed: usd(0), at: AT }, monthlyMembers: { count: 2, monthly: usd(0), at: AT }, formerMembers: { count: 1, monthly: usd(0), at: AT } }, as("owner"));
+  is("a count above zero with money of 0: no money line, never \"$0.00 unpaid\"", zero.kind === "actions" ? zero.actions.map((a) => a.money) : "x", [null, null, null]);
 }
 
 part("Only for a role that may act on it");
@@ -98,9 +100,10 @@ for (const role of ["owner", "admin", "editor", "support"] as Role[]) {
   is("without draft: no draft actions", ids(nextActions(full, noDraft)), ["welcome"]);
 }
 
-part("At most three, in order");
-is("at most three", ids(nextActions(full, as("owner"))).length, NEXT_ACTIONS_MAX);
-is("money owed first, then the most money", ids(nextActions(full, as("owner"))), ["failed_payments", "yearly_switch", "winback"]);
+part("Up to five, in order");
+is("up to five, as the item asks", NEXT_ACTIONS_MAX, 5);
+is("a store with all five kinds above zero shows all five", ids(nextActions(full, as("owner"))).length, 5);
+is("money owed first, then the most money, then by count", ids(nextActions(full, as("owner"))), ["failed_payments", "yearly_switch", "winback", "welcome", "course_next"]);
 {
   const owedSmall: NextFacts = { ...full, failedPayments: { count: 1, owed: usd(500), at: AT } };
   is("money owed first even when smaller", ids(nextActions(owedSmall, as("owner")))[0], "failed_payments");

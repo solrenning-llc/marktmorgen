@@ -919,6 +919,9 @@ export async function forEachContact(
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
+  // HSCAN may answer one field more than once while it walks (redis.io, SCAN guarantees): each address is passed on
+  // once, so an email's audience never holds anybody twice (counted twice, a batch refused for good, or sent twice).
+  const seen = new Set<string>();
   let cursor = "0";
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
     // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
@@ -930,6 +933,8 @@ export async function forEachContact(
     if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
     cursor = nextCursor;
     for (let i = 0; i + 1 < flat.length; i += 2) {
+      if (seen.has(flat[i])) continue;
+      seen.add(flat[i]);
       const contact = parseContact(flat[i + 1]);
       if (contact) each(flat[i], contact);
     }

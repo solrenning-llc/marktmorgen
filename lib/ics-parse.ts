@@ -257,14 +257,25 @@ function yearlyDate(rule: Record<string, string>, y: number, mo: number, d: numb
 /**
  * The instant at which a clock in `zone` shows this date and time. A time in
  * the hour skipped when clocks go forward lands just after the jump, which is
- * what a calendar app shows for it too.
+ * what a calendar app shows for it too; a time the clock shows twice when it
+ * goes back is the first of the two (RFC 5545 3.3.5). Both read the same way
+ * east and west of UTC: the offsets in force a day before and a day after are
+ * each tried, and the one the zone really has at its instant wins.
  */
 function localToUtc(zone: Zone, y: number, mo: number, d: number, minute: number, second = 0): number {
   const naive = Date.UTC(y, mo - 1, d, 0, minute, second);
   if (zone.kind === "utc") return naive;
-  let guess = naive - offsetAt(zone, naive) * 60000;
-  guess = naive - offsetAt(zone, guess) * 60000;
-  return guess;
+  const before = offsetAt(zone, naive - 86_400_000);
+  const after = offsetAt(zone, naive + 86_400_000);
+  const early = naive - before * 60000;
+  const late = naive - after * 60000;
+  const earlyHolds = offsetAt(zone, early) === before;
+  const lateHolds = offsetAt(zone, late) === after;
+  if (earlyHolds && lateHolds) return Math.min(early, late);
+  if (lateHolds) return late;
+  // Held by neither: the skipped hour, read with the offset before the jump,
+  // which lands just after it.
+  return early;
 }
 
 // ---- Dates ------------------------------------------------------------------

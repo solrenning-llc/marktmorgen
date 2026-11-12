@@ -208,6 +208,17 @@ async function del(keys: string[]): Promise<void> {
  * is found only through it, and then the record. Answers what the walk
  * needs of it. Safe to run again.
  */
+const DOMAIN_RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+/** Deletes a domain's key only when it holds one of these handles' claims, proved or not (#4109). */
+async function letGoOwnDomain(key: string, handles: string[]): Promise<void> {
+  for (const value of handles.filter(Boolean).flatMap((handle) => [handle, `?${handle}`])) {
+    // The same compare-and-delete as a lock's release (lib/redis-lock.ts): 1 deleted, 0 not this value; read exactly.
+    const reply = repliesFor(await redisPipeline([["EVAL", DOMAIN_RELEASE, 1, key, value]]), 1)?.[0];
+    if (reply === 1) return;
+    if (reply !== 0) throw new Error("a closing store's custom domain could not be let go");
+  }
+}
+
 export async function prepareStore(store: Store, now = Date.now()): Promise<Batched> {
   const ref = storeRef(store);
   const { marks } = await marksOf(store);
@@ -244,8 +255,12 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   await forgetStorePhones(store.statsId);
   // The owner's path: their answers and the days they showed up (lib/path.ts).
   await forgetPath(store);
-  if (store.domain?.name) extra.push(domainKey(store.domain.name));
   await del(extra);
+  // Its custom domain goes only while the key still holds this store's own claim, proved ("handle") or not
+  // ("?handle"), under any of its handles (#4109): the record keeps a domain whose claim lapsed and that another
+  // store has taken since, and that store's key is never deleted from here. One compare-and-delete each; an answer
+  // that cannot be read throws, and the walk tries this store again (rule 24).
+  if (store.domain?.name) await letGoOwnDomain(domainKey(store.domain.name), [store.handle, ...store.previousHandles]);
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).

@@ -42,3 +42,7 @@ next-env.d.ts
 
 .vercel
 zapier/node_modules/
+
+# Python bytecode left by running scripts/test_*.py locally (Claude 1 on #3423)
+__pycache__/
+*.py[co]

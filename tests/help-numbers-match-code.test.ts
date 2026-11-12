@@ -1,6 +1,7 @@
 /**
  * Every number the help center types by hand (lib/help-content.ts) and the
- * buyer help (lib/buyer-help.ts) is the number the code enforces (Claude 7,
+ * buyer help (lib/buyer-help.ts), and the ones the feature pages
+ * (lib/feature-pages.ts) got wrong, are the number the code enforces (Claude 7,
  * help-truth audit, 12 November 2026; AGENTS.md VR Part A item 2: a page never
  * shows a limit the product does not keep).
  *
@@ -63,6 +64,11 @@ import { MAX_FIELDS } from "@/lib/forms";
 import { KEEP_DAYS as INBOX_KEEP_DAYS, MAX_CONVERSATIONS } from "@/lib/inbox-rules";
 import { RELEASE_QUARANTINE_DAYS } from "@/lib/store";
 import { RESET_DAYS } from "@/lib/two-step";
+import { CREATOR_PAGES, FEATURE_PAGES } from "@/lib/feature-pages";
+import { CLOSING_DAYS, ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
+import { IMPORT_ALLOWANCES, IMPORT_ROWS_KEPT_DAYS } from "@/lib/import-limits";
+import { IMPORT_LIMITS, RAW_DAYS } from "@/lib/imports";
+import { HOLD_SECONDS } from "@/lib/stripe-account";
 
 const DAY = 86_400;
 const n = (x: number) => x.toLocaleString("en-US");
@@ -186,4 +192,50 @@ test("no public help text makes a claim AX274 item 7 prohibits", () => {
   const banned = /fully accessible|ADA compliant|WCAG AAA certified|the most accessible platform/i;
   assert.doesNotMatch(help, banned);
   assert.doesNotMatch(buyer, banned);
+});
+
+/** Every string the feature pages hold, in one text. */
+function strings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) value.forEach((v) => strings(v, out));
+  else if (value && typeof value === "object") Object.values(value).forEach((v) => strings(v, out));
+  return out;
+}
+const features = strings([FEATURE_PAGES, CREATOR_PAGES]).join("\n");
+
+test("the feature pages say the numbers the code enforces, where they once did not", () => {
+  const rows = (x: number) => x.toLocaleString("en-US");
+  const claims: [string, string][] = [
+    // The checkout holds a booked time HOLD_SECONDS (32 minutes): "about 30", as the help center says.
+    ["booking hold", "held for them for about 30 minutes while they pay"],
+    ["booking hold, FAQ", "holds it for about 30 minutes"],
+    ["exports after a plan ends", `and ${ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`} once it has ended, before your store closes ${CLOSING_DAYS} days later`],
+    ["contact file size", `from a CSV file of up to ${rows(IMPORT_LIMITS.contacts)} rows`],
+    ["import rows a month", `up to ${rows(IMPORT_ALLOWANCES.creator.rows)} rows on Store, ${rows(IMPORT_ALLOWANCES.pro.rows)} on Studio and ${rows(IMPORT_ALLOWANCES.scale.rows)} on Scale`],
+    ["moved-purchase emails", `On Store, up to ${IMPORT_ALLOWANCES.creator.movedEmails} go out a month`],
+    ["import rows kept", `Rows not brought in yet are deleted ${RAW_DAYS} days after their upload`],
+    ["past buyers per file", `Past buyers, up to ${rows(IMPORT_LIMITS.purchases)} a file`],
+  ];
+  assert.equal(Math.round(HOLD_SECONDS / 600) * 10, 30, "the booking hold is no longer about 30 minutes");
+  assert.equal(RAW_DAYS, IMPORT_ROWS_KEPT_DAYS);
+  assert.match(readFileSync("lib/imports.ts", "utf8"), /const KEEP_SECONDS = 14 \* 86_400;/, "an import's report is no longer kept two weeks");
+  const missing = claims.filter(([, phrase]) => !features.includes(phrase)).map(([what, phrase]) => `${what}: "${phrase}"`);
+  assert.deepEqual(missing, []);
+});
+
+test("the feature pages no longer say what the code stopped doing", () => {
+  // Before: five exports after a plan ends (the code allows ENDED_STORE_EXPORTS), 20,000 import emails in
+  // 30 days on top of any plan (ended 17 October 2026, lib/imports.ts), a 30-minute hold (32 in the code)
+  // and every import row kept two weeks (rows waiting go after RAW_DAYS).
+  for (const old of [
+    "up to five times once it has ended",
+    "Up to 20,000 buyers per store in 30 days",
+    "held for them for 30 minutes",
+    "holds it for 30 minutes",
+    "Those rows, the report of what was left out and the import's counts are deleted two weeks",
+  ]) assert.ok(!features.includes(old), `still says: ${old}`);
+});
+
+test("no feature page makes a claim AX274 item 7 prohibits", () => {
+  assert.doesNotMatch(features, /fully accessible|ADA compliant|WCAG AAA certified|the most accessible platform/i);
 });

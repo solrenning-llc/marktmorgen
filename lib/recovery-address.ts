@@ -104,6 +104,10 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
   if (!address || address.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(address)) return "invalid";
   if (address === normaliseEmail(email)) return "same";
   if (!(await withinLimit("recovery-address", normaliseEmail(email), 5, 60 * 60))) return "limited";
+  // Per inbox as well as per account: any number of accounts asking for the same address still send it at most
+  // five codes an hour, so this form is never a way to fill a stranger's inbox from our domain (MM-SA-35). Hashed,
+  // so the counter's name never holds the address.
+  if (!(await withinLimit("recovery-address-to", sha(`nimbus-rec-to:${address}`), 5, 60 * 60))) return "limited";
   const code = String(randomInt(1_000_000)).padStart(6, "0");
   // The code is only worth sending once it is kept: the pending record is written first, and only a SET answered
   // exactly "OK" lets the email go (CX-123 rule 24). Any other reply sends nothing and answers "unsent", so the form

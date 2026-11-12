@@ -18,7 +18,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, sendBatchOutcome, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
@@ -405,9 +405,10 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         const r = render(sender, words.subject, words.body, null, door);
         return { from: fromLine(sender), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers };
       });
-      const outcome = await sendBatch(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" });
-      if (outcome === "retry") {
-        await releaseDay(chunk.length);
+      const outcome = await sendBatchOutcome(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" });
+      if (outcome === "retry" || outcome === "uncertain") {
+        // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
+        if (outcome === "retry") await releaseDay(chunk.length);
         break;
       }
       if (outcome === "refused") await releaseDay(chunk.length);

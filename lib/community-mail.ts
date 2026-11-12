@@ -28,7 +28,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { type BatchMessage, sendBatch } from "@/lib/email";
+import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -419,9 +419,10 @@ export async function advanceAnnouncement(
           });
           messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
+        const outcome = await sendBatchOutcome(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
         if (outcome !== "sent") {
-          await release(store, recipients.length);
+          // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
+          if (outcome !== "uncertain") await release(store, recipients.length);
           const failures = job.failures + 1;
           job = failures >= 5
             ? { ...job, status: "failed", failures, note: "The email service would not take it. Nothing more was sent." }

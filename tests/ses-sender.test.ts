@@ -20,7 +20,7 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/mail/ses/route";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { isMailable, upsertContact } from "@/lib/contacts";
-import { hasResend, isSenderConfigured, sendBatch, sendListBatch, sendEmail, sentKey, sentThisMonth } from "@/lib/email";
+import { hasResend, isSenderConfigured, sendBatch, sendBatchOutcome, sendListBatch, sendEmail, sentKey, sentThisMonth } from "@/lib/email";
 import { listCeiling, reserve as reserveMail, reserveDay, senderRoom } from "@/lib/mail";
 import { LIST_TAG, STORE_TAG, healthId, listHealth } from "@/lib/mail-health";
 import { HOLD_SECONDS, isSesConfigured, notYetTaken, sesBulkRoom, sesConfig, sesSentLast24h, sesState } from "@/lib/ses";
@@ -956,6 +956,8 @@ async function main(): Promise<void> {
     const pending = await notYetTaken(`bc:uncertain:${prefix}`, messages);
     is(`${prefix}: only confirmed acceptance gets the existing completion marker`,
       pending?.map(m => m.to), ["batch-unknown@example.com", "batch-not-attempted@example.com"]);
+    is(`${prefix}: told apart from a batch nothing of which went, so a caller keeps its count`,
+      [await sendBatchOutcome(messages, `bc:uncertain:${prefix}:outcome`, { by: "company" }), resend.length], ["uncertain", 0]);
     amazonLosesReply = () => null;
   }
   account = approved();

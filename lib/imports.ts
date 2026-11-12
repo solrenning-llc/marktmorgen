@@ -84,7 +84,7 @@ import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
-import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendBatchOutcome } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
@@ -1597,12 +1597,15 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "more";
   }
-  const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
-  if (sent === "retry") {
+  const sent = await sendBatchOutcome(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
+  if (sent === "retry" || sent === "uncertain") {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
-    if (held) held.n += sending.length;
-    else await releaseMoved(store, sending.length);
-    await releaseDay(sending.length);
+    // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
+    if (sent === "retry") {
+      if (held) held.n += sending.length;
+      else await releaseMoved(store, sending.length);
+      await releaseDay(sending.length);
+    }
     await unsent(portion);
     return "retry";
   }
@@ -1882,7 +1885,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         if (opens && opens < invite.r * 1000) await remindLater(sid, field, opens - 3_600_000);
         continue;
       }
-      const sent = await sendBatch(
+      const sent = await sendBatchOutcome(
         [
           {
             from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
@@ -1899,9 +1902,12 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (sent === "sent") {
         await noteSent(sid, 1);
         counts.sent += 1;
-      } else if (sent === "retry") {
-        await releaseMoved(store, 1);
-        await releaseDay(1);
+      } else if (sent === "retry" || sent === "uncertain") {
+        // An answer not known (lib/email.ts, sendBatchOutcome) may have sent it: its count is kept, never given back.
+        if (sent === "retry") {
+          await releaseMoved(store, 1);
+          await releaseDay(1);
+        }
         await remindLater(sid, field, now);
       }
     } catch (error) {

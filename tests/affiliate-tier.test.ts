@@ -16,11 +16,18 @@
  *   - each affiliate's own page shows their second tier and never the
  *     recruit's sales as their own.
  */
+import { mock } from "node:test";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { type Affiliate, type Line, openAffiliateLink, readAffiliate, readBook, recruiterFor, requestAffiliateLink, tierLines } from "@/lib/affiliates";
 import { claimHandle, ensureStatsId, setAffiliateSetting, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// A store with no plan counts its emails in the calendar month (lib/allowance-window.ts), and sendEmail (lib/email.ts)
+// refuses a send whose window changed while it was going out: a run crossing 00:00 UTC on a month's last day during the
+// invitation email answered with no link sent. Only Date is stopped, for the whole run; timers and performance.now()
+// run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 process.env.RESEND_API_KEY = "re_test_tier_only_a_stand_in";
 process.env.STRIPE_SECRET_KEY = "sk_test_tier_only_a_stand_in";

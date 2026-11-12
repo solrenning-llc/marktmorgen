@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{afterEach,mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {canonicalFinancialSnapshot,contractCoverageDays,contractFundingConfiguration,CONTRACT_ADMISSION_COVERAGE,CONTRACT_KEYS,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
 import {assessCustomerWorstCase} from '@/lib/net-margin-rules';
@@ -8,6 +8,14 @@ import {reset,seed,ledger,calls,settings} from './contract-funding-redis';
 import {txCustomerFixture} from './customer-tax-review-fixture';
 import {contractTaxFixture,applyContractTaxCoverage} from './contract-tax-fixture';
 import {CUSTOMER_COST_CATEGORIES} from '@/lib/net-margin-rules';
+// contractFixture() names the review month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again at every reservation and acknowledgement (lib/contract-funding.ts): a run crossing 00:00
+// UTC on a month's last day failed "64 concurrent stores cannot reuse two funded grant slots" and "checkout activation
+// binds one receipt". Only Date is stopped, for the whole run; the tests that move the clock move this one, and it is
+// put back after each test. Timers and performance.now() run as usual.
+const STARTED=Date.now();
+mock.timers.enable({apis:['Date'],now:STARTED});
+afterEach(()=>{mock.timers.setTime(STARTED);});
 const key='nl:contract-reserve:v1';
 function start(){reset();const f=contractFixture(),config=contractFundingConfiguration(f.policy,f.context,f.now)!;assert.ok(config);seed(config);return {...f,config};}
 test('TX assessment does not authorize a contract before admission and liability periods are bound',async()=>{
@@ -95,8 +103,8 @@ test('missing TX cannot authorize any paying contract, including descriptor swit
   assert.equal(calls.length,0);assert.deepEqual([...ledger.get(key)!],before);
  }
 });
-test('actual contract coverage includes every calendar book across a November admission and its existing liability horizon',t=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-11-01T12:00:00.000Z')});
+test('actual contract coverage includes every calendar book across a November admission and its existing liability horizon',()=>{
+ mock.timers.setTime(new Date('2026-11-01T12:00:00.000Z').getTime());
  try{
   const f=contractTaxFixture(),r=f.review.scenarios.creator_year_full!;
   assert.deepEqual(r.taxReview!.books.map(book=>book.year),[2026,2027,2028]);
@@ -111,7 +119,7 @@ test('actual contract coverage includes every calendar book across a November ad
    const old=structuredClone(r);mutate();f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;
    assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);Object.assign(r,old);
   }
- }finally{t.mock.timers.reset();}
+ }finally{mock.timers.setTime(STARTED);}
 });
 test('contract TX cannot authorize expired, future, mismatched or incompletely covered obligations',async()=>{
  for(const mutate of [
@@ -400,13 +408,13 @@ test('switch activation rejects executable data and malformed acknowledgements',
  }
 });
 
-test('committed checkout observations survive the initial deadline only for the exact current period',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.000Z')});
+test('committed checkout observations survive the initial deadline only for the exact current period',async()=>{
+ mock.timers.setTime(new Date('2026-10-10T12:00:00.000Z').getTime());
  reset();const f=contractFixture();f.policy.admissionsUntil=new Date(Date.now()+10*86400000).toISOString();applyContractTaxCoverage(f);
  const config=contractFundingConfiguration(f.policy,f.context)!;seed(config);
  assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_activate'));
  const input=activation();assert.equal(await activateCheckoutContract(input,f.policy,f.context),true);
- const h=ledger.get(key)!,before=[...h];t.mock.timers.tick(2*86400000);
+ const h=ledger.get(key)!,before=[...h];mock.timers.tick(2*86400000);
  assert.equal(await activateCheckoutContract(input,f.policy,f.context),true);assert.deepEqual([...h],before);
  for(const changes of [{subscriptionId:'sub_Other0001'},{trialing:true},{periodStartSeconds:input.periodStartSeconds+1},{periodEndSeconds:input.periodEndSeconds+1}]){
   assert.equal(await activateCheckoutContract({...input,...changes},f.policy,f.context),false);assert.deepEqual([...h],before);
@@ -414,15 +422,15 @@ test('committed checkout observations survive the initial deadline only for the 
  h.delete('activated:'+input.grantId);const uncommitted=[...h];
  assert.equal(await activateCheckoutContract(input,f.policy,f.context),false);assert.deepEqual([...h],uncommitted);
 });
-test('committed switch observations retain both principals after its initial deadline and cannot roll into renewal',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.000Z')});
+test('committed switch observations retain both principals after its initial deadline and cannot roll into renewal',async()=>{
+ mock.timers.setTime(new Date('2026-10-10T12:00:00.000Z').getTime());
  reset();const f=contractFixture();f.policy.admissionsUntil=new Date(Date.now()+10*86400000).toISOString();applyContractTaxCoverage(f);
  const config=contractFundingConfiguration(f.policy,f.context)!;seed(config);
  assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_source'));
  const source=activation('one','ctr_source');assert.equal(await activateCheckoutContract(source,f.policy,f.context),true);
  assert.ok(await reserveSwitchContractFunding('one',source.subscriptionId,'creator','month',f.policy,f.context,'ctr_switch'));
  const input={...source,grantId:'ctr_switch'};assert.equal(await activateSwitchContract(input,f.policy,f.context),true);
- const h=ledger.get(key)!,before=[...h];t.mock.timers.tick(2*86400000);
+ const h=ledger.get(key)!,before=[...h];mock.timers.tick(2*86400000);
  assert.equal(await activateSwitchContract(input,f.policy,f.context),true);assert.deepEqual([...h],before);
  assert.equal(await activateCheckoutContract(source,f.policy,f.context),false);
  assert.equal(await activateSwitchContract({...input,periodStartSeconds:input.periodEndSeconds,periodEndSeconds:input.periodEndSeconds+30*86400},f.policy,f.context),false);
@@ -431,29 +439,29 @@ test('committed switch observations retain both principals after its initial dea
  h.delete('activated:'+input.grantId);const uncommitted=[...h];
  assert.equal(await activateSwitchContract(input,f.policy,f.context),false);assert.deepEqual([...h],uncommitted);
 });
-test('a committed acknowledgement cannot authorize an ended period or bypass a stale admission policy',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.000Z')});
+test('a committed acknowledgement cannot authorize an ended period or bypass a stale admission policy',async()=>{
+ mock.timers.setTime(new Date('2026-10-10T12:00:00.000Z').getTime());
  const f=start();assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_activate'));
  const input=activation();assert.equal(await activateCheckoutContract(input,f.policy,f.context),true);
- const h=ledger.get(key)!,before=[...h];t.mock.timers.tick(2*86400000);
+ const h=ledger.get(key)!,before=[...h];mock.timers.tick(2*86400000);
  assert.equal(await activateCheckoutContract(input,f.policy,f.context),false);assert.deepEqual([...h],before);
- settings({response:[[2,input.periodEndSeconds]]});t.mock.timers.tick(30*86400000);
+ settings({response:[[2,input.periodEndSeconds]]});mock.timers.tick(30*86400000);
  assert.equal(await activateCheckoutContract(input,f.policy,f.context),false);assert.deepEqual([...h],before);
 });
 
-test('a committed reservation acknowledgement cannot outlive admission, its exposure month, or its issuing clock',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.000Z')});
+test('a committed reservation acknowledgement cannot outlive admission, its exposure month, or its issuing clock',async()=>{
+ mock.timers.setTime(new Date('2026-10-10T12:00:00.000Z').getTime());
  for(const mode of ['admission','month','rollback','policy'] as const){
-  t.mock.timers.setTime(new Date(mode==='month'?'2026-10-31T23:59:59.000Z':'2026-10-10T12:00:00.000Z').getTime());
+  mock.timers.setTime(new Date(mode==='month'?'2026-10-31T23:59:59.000Z':'2026-10-10T12:00:00.000Z').getTime());
   reset();const f=contractFixture();
   if(mode==='admission')f.policy.admissionsUntil=new Date(Date.now()+1000).toISOString();
   applyContractTaxCoverage(f);const config=contractFundingConfiguration(f.policy,f.context)!;assert.ok(config);seed(config);
   const pending=reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_late_ack');
   const h=ledger.get(key)!;assert.equal(h.get('pending:one'),'ctr_late_ack');
   const committed=[...h];
-  if(mode==='admission')t.mock.timers.tick(1001);
-  if(mode==='month')t.mock.timers.tick(1001);
-  if(mode==='rollback')t.mock.timers.setTime(Date.now()-1);
+  if(mode==='admission')mock.timers.tick(1001);
+  if(mode==='month')mock.timers.tick(1001);
+  if(mode==='rollback')mock.timers.setTime(Date.now()-1);
   if(mode==='policy')f.policy.reserveEvidence+=' changed while awaiting acknowledgement';
   assert.equal(await pending,null,mode);
   assert.deepEqual([...h],committed,mode+' never releases committed cash, slot or lock');
@@ -463,11 +471,11 @@ test('a committed reservation acknowledgement cannot outlive admission, its expo
  }
 });
 
-test('checkout and switch acknowledgements revalidate admission, exposure, policy and the issuing clock after committing',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.000Z')});
+test('checkout and switch acknowledgements revalidate admission, exposure, policy and the issuing clock after committing',async()=>{
+ mock.timers.setTime(new Date('2026-10-10T12:00:00.000Z').getTime());
  for(const action of ['checkout','switch'] as const){
   for(const mode of ['admission','month','rollback','policy'] as const){
-   t.mock.timers.setTime(new Date(mode==='month'?'2026-10-31T23:59:59.000Z':'2026-10-10T12:00:00.000Z').getTime());
+   mock.timers.setTime(new Date(mode==='month'?'2026-10-31T23:59:59.000Z':'2026-10-10T12:00:00.000Z').getTime());
    reset();const f=contractFixture();
    if(mode==='admission')f.policy.admissionsUntil=new Date(Date.now()+1000).toISOString();
    applyContractTaxCoverage(f);const config=contractFundingConfiguration(f.policy,f.context)!;assert.ok(config);seed(config);
@@ -482,8 +490,8 @@ test('checkout and switch acknowledgements revalidate admission, exposure, polic
    const pending=action==='checkout'?activateCheckoutContract(input,f.policy,f.context):activateSwitchContract(input,f.policy,f.context);
    const h=ledger.get(key)!;assert.ok(h.get('activated:'+input.grantId));assert.equal(h.has('pending:one'),false);
    const committed=[...h];
-   if(mode==='admission'||mode==='month')t.mock.timers.tick(1001);
-   if(mode==='rollback')t.mock.timers.setTime(Date.now()-1);
+   if(mode==='admission'||mode==='month')mock.timers.tick(1001);
+   if(mode==='rollback')mock.timers.setTime(Date.now()-1);
    if(mode==='policy')f.policy.reserveEvidence+=' changed while awaiting activation acknowledgement';
    assert.equal(await pending,false,action+' '+mode);
    assert.deepEqual([...h],committed,action+' '+mode+' preserves all committed proofs and funds');
@@ -563,13 +571,13 @@ test('closed final submission check cannot authorize POST for fabricated ownersh
 
 test('closed recovery wrapper performs no Redis reads or writes for fabricated ownership',async()=>{reset();assert.equal(await takeRestartRecovery(null as never),null);assert.equal(calls.length,0);});
 
-test('actual checkout and switch activation reject non-own ACKs before member traversal',async(t)=>{
+test('actual checkout and switch activation reject non-own ACKs before member traversal',async()=>{
  // C4-20261106-1835-C56-109: the clock is pinned a millisecond before a whole second and turns between the steps below,
  // as it did in CI (verify on #2672 and #2721), so the order of reserving and observing is checked, not left to chance.
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.999Z')});
+ mock.timers.setTime(new Date('2026-10-10T12:00:00.999Z').getTime());
  for(const mode of ['checkout','switch'] as const){
   const setup=mode==='switch'?await switchSetup():null,f=setup??start();
-  t.mock.timers.tick(1);
+  mock.timers.tick(1);
   if(mode==='checkout')assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_activate'));
   // The provider's subscription exists only after the reservation, so it is observed after it (as in the other
   // activation tests). A switch keeps the exact provider subscription and original creation time.

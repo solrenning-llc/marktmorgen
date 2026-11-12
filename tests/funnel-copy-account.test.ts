@@ -17,6 +17,7 @@
  *   - it is counted as an export of the first store and an import of the
  *     other, so it is inside both plans' priced monthly figures.
  */
+import { mock } from "node:test";
 import { NextRequest } from "next/server";
 import { readPageFunnels } from "@/lib/page-funnel-store";
 import { readPage, writePage } from "@/lib/sales-page-store";
@@ -29,6 +30,10 @@ import { POST } from "@/app/api/store/funnel-share/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+// Each store's copies are counted in its calendar month, read again at each copy: a run crossing 00:00 UTC on a month's
+// last day inside the loop below started a new month's count, and the copy past the limit went through. Only Date is
+// stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 async function main(): Promise<void> {
   redis.clear();

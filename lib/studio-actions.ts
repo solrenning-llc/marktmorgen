@@ -78,7 +78,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "discord", title: "Let buyers into your Discord server", segment: "discord", permission: "settings", words: ["discord", "server", "roles"] },
   { id: "reviews", title: "Collect and answer reviews", segment: "reviews", permission: "reviews", words: ["review", "rating", "testimonial", "stars", "feedback"] },
   { id: "inbox", title: "Answer messages from buyers", segment: "inbox", permission: "orders", words: ["inbox", "message", "chat", "contact form", "support", "reply", "question", "saved replies"] },
-  { id: "people", title: "Look up a buyer and what they paid", segment: "people", permission: "orders", words: ["buyer", "customer", "people", "contact", "order", "purchase", "refund", "refunded", "notes"] },
+  { id: "people", title: "Look up buyers, their orders and refunds", segment: "people", permission: "orders", words: ["buyer", "customer", "people", "contact", "order", "purchase", "refund", "refunded", "notes"] },
   { id: "growth", title: "Choose a goal to grow your store", segment: "growth", permission: "member", words: ["grow", "growth", "goal", "more sales", "marketing", "traffic"] },
   { id: "email", title: "Send an email to your list", segment: "email", permission: "draft", words: ["email", "send email", "newsletter", "broadcast", "sequence", "mail", "campaign", "automation", "list"] },
   { id: "outreach", title: "Write a pitch to a sponsor or a partner", segment: "outreach", permission: "draft", words: ["sponsor", "pitch", "partnership", "brand deal", "outreach", "collaboration"] },
@@ -96,6 +96,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "team", title: "Invite someone to help run your store", segment: "team", permission: "team", words: ["team", "staff", "helper", "role", "permission", "admin", "assistant", "activity log"] },
   { id: "invite", title: "Invite other creators for plan credit", segment: "invite", permission: "billing", words: ["invite", "refer", "referral", "credit", "invite creator"] },
   { id: "refund", title: "Ask for a refund of your Marktmorgen plan", segment: "refund", permission: "billing", words: ["refund", "money back", "plan refund", "refund plan"] },
+  { id: "invoices", title: "See the billing history of your plan", segment: "invoices", permission: "billing", words: ["invoice", "receipt", "plan invoice", "billing history", "plan receipt", "past payments"] },
   { id: "copy", title: "Copy this store into another of your stores", segment: "copy", permission: "page", words: ["copy", "duplicate", "clone"] },
   { id: "agent", title: "Review what the AI proposes", segment: "agent", permission: "settings", words: ["ai", "agent", "proposed changes", "api", "confirm changes"] },
 ];

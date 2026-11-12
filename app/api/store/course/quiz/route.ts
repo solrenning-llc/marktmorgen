@@ -12,6 +12,7 @@ import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submi
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
+import { blankQuestions } from "@/lib/quiz-answer-check";
 
 /**
  * "Check my answers": marks one try at a lesson's quiz and goes back to the
@@ -53,11 +54,17 @@ export async function POST(request: NextRequest) {
   const quiz = await readQuizFor(course.id, lessonId);
   if (!quiz || !found.lesson.quiz) return away(`${base}/${lessonId}`);
 
+  // The question ids the page showed, so a try drawn from a bank is marked on those (lib/quiz.ts).
+  const shown = String(form.get("shown") ?? "").split(",").filter(Boolean).slice(0, MAX_QUESTIONS);
+  const answers = readAnswers(quiz, form);
+  // A question left blank is never an answer (each has a right one): the try goes back, nothing counted and
+  // no try used, naming the blank ones (WCAG 3.3.4/3.3.6, lib/quiz-answer-check.ts).
+  const blank = blankQuestions(quiz, answers, shown);
+  if (blank.length) return away(`${base}/${lessonId}?quiz=blank&blank=${blank.map(encodeURIComponent).join(".")}#quiz`);
+
   let result: Awaited<ReturnType<typeof submitQuiz>>;
   try {
-    // The question ids the page showed, so a try drawn from a bank is marked on those (lib/quiz.ts).
-    const shown = String(form.get("shown") ?? "").split(",").filter(Boolean).slice(0, MAX_QUESTIONS);
-    result = await submitQuiz(course.id, lessonId, who, quiz, readAnswers(quiz, form), store.sid, windowId(store), store, shown);
+    result = await submitQuiz(course.id, lessonId, who, quiz, answers, store.sid, windowId(store), store, shown);
   } catch (error) {
     // No room in the store's data room: the try was not counted (lib/store-data.ts).
     if (error instanceof DataRoomError) return new Response(DATA_FULL_BUYER_WORDS, { status: 409, headers: { "Cache-Control": "no-store" } });

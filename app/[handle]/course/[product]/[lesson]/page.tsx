@@ -14,6 +14,7 @@ import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
 import { courseAccess, doneLessonsOrUnknown, emailKey, lessonVideo } from "@/lib/learn";
 import { type Attempt, attemptOf, heldBack, passedForGate, readQuizFor, studentQuiz } from "@/lib/quiz";
+import { blankFromQuery } from "@/lib/quiz-answer-check";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -349,6 +350,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 attempt={attempt}
                 waitSeconds={asked?.wait ?? 0}
                 stale={query.quiz === "stale"}
+                blank={query.quiz === "blank" ? blankFromQuery(query.blank, asked?.quiz ?? quiz) : []}
                 mode={quizMode}
                 action="/api/store/course/quiz"
                 hidden={{ handle: store.handle, product: product.id, lesson: lesson.id }}

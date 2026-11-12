@@ -226,6 +226,8 @@ const en = {
   bankWait: (span: string) => `Students wait ${span} between tries.`,
   waitAgain: (span: string) => `You can try again in ${span}. Come back to this page then.`,
   staleTry: "Your questions changed since you opened this page, so nothing was checked and no try was used. Here are your questions now.",
+  blankTry: "Some questions have no answer yet, so nothing was checked and no try was used. Answer each question marked “Not answered yet,” then check your answers.",
+  blankQuestion: "Not answered yet.",
 
   // ---- A lesson's comments ------------------------------------------------------------
   commentNotices: {
@@ -541,6 +543,8 @@ const es: CoursesWords = {
   bankWait: (span) => `Los estudiantes esperan ${span} entre intentos.`,
   waitAgain: (span) => `Puedes volver a intentarlo dentro de ${span}. Vuelve a esta página entonces.`,
   staleTry: "Tus preguntas cambiaron desde que abriste esta página, así que no se comprobó nada y no se usó ningún intento. Estas son tus preguntas ahora.",
+  blankTry: "Algunas preguntas todavía no tienen respuesta, así que no se comprobó nada y no se usó ningún intento. Responde cada pregunta marcada «Sin responder», y luego comprueba tus respuestas.",
+  blankQuestion: "Sin responder.",
 
   commentNotices: {
     posted: "Publicado.",
@@ -848,6 +852,8 @@ const fr: CoursesWords = {
   bankWait: (span) => `Les participants attendent ${span} entre deux tentatives.`,
   waitAgain: (span) => `Vous pourrez réessayer dans ${span}. Revenez sur cette page à ce moment-là.`,
   staleTry: `Vos questions ont changé depuis l'ouverture de cette page${S}: rien n'a été vérifié et aucune tentative n'a été utilisée. Voici vos questions maintenant.`,
+  blankTry: `Certaines questions n’ont pas encore de réponse${S}: rien n’a été vérifié et aucune tentative n’a été utilisée. Répondez à chaque question marquée «${S}Pas encore répondu${S}», puis vérifiez vos réponses.`,
+  blankQuestion: "Pas encore répondu.",
 
   commentNotices: {
     posted: "Publié.",
@@ -1149,6 +1155,8 @@ const de: CoursesWords = {
   bankWait: (span) => `Zwischen zwei Versuchen warten Teilnehmende ${span}.`,
   waitAgain: (span) => `Sie können es in ${span} erneut versuchen. Kommen Sie dann auf diese Seite zurück.`,
   staleTry: "Ihre Fragen haben sich geändert, seit Sie diese Seite geöffnet haben. Deshalb wurde nichts geprüft und kein Versuch verbraucht. Hier sind Ihre Fragen jetzt.",
+  blankTry: "Einige Fragen haben noch keine Antwort. Deshalb wurde nichts geprüft und kein Versuch verbraucht. Beantworten Sie jede Frage mit dem Hinweis „Noch nicht beantwortet“ und prüfen Sie dann Ihre Antworten.",
+  blankQuestion: "Noch nicht beantwortet.",
 
   commentNotices: {
     posted: "Veröffentlicht.",
@@ -1452,6 +1460,8 @@ const it: CoursesWords = {
   bankWait: (span) => `Gli studenti aspettano ${span} tra un tentativo e l'altro.`,
   waitAgain: (span) => `Puoi riprovare tra ${span}. Torna su questa pagina allora.`,
   staleTry: "Le tue domande sono cambiate da quando hai aperto questa pagina, quindi non è stato controllato nulla e non hai usato nessun tentativo. Ecco le tue domande adesso.",
+  blankTry: "Alcune domande non hanno ancora una risposta, quindi non è stato controllato nulla e non hai usato nessun tentativo. Rispondi a ogni domanda segnata «Senza risposta», poi controlla le tue risposte.",
+  blankQuestion: "Senza risposta.",
 
   commentNotices: {
     posted: "Pubblicato.",
@@ -1756,6 +1766,8 @@ const nl: CoursesWords = {
   bankWait: (span) => `Cursisten wachten ${span} tussen twee pogingen.`,
   waitAgain: (span) => `Je kunt het over ${span} opnieuw proberen. Kom dan terug naar deze pagina.`,
   staleTry: "Je vragen zijn veranderd sinds je deze pagina opende, dus er is niets gecontroleerd en geen poging gebruikt. Dit zijn nu je vragen.",
+  blankTry: "Sommige vragen hebben nog geen antwoord, dus er is niets gecontroleerd en geen poging gebruikt. Beantwoord elke vraag met „Nog niet beantwoord” en controleer dan je antwoorden.",
+  blankQuestion: "Nog niet beantwoord.",
 
   commentNotices: {
     posted: "Geplaatst.",
@@ -2060,6 +2072,8 @@ const pt: CoursesWords = {
   bankWait: (span) => `Os alunos esperam ${span} entre tentativas.`,
   waitAgain: (span) => `Pode tentar novamente dentro de ${span}. Volte a esta página nessa altura.`,
   staleTry: "As suas perguntas mudaram desde que abriu esta página, por isso nada foi verificado e nenhuma tentativa foi usada. Estas são agora as suas perguntas.",
+  blankTry: "Algumas perguntas ainda não têm resposta, por isso nada foi verificado e nenhuma tentativa foi usada. Responda a cada pergunta marcada «Sem resposta» e depois verifique as suas respostas.",
+  blankQuestion: "Sem resposta.",
 
   commentNotices: {
     posted: "Publicado.",

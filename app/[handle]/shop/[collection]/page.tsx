@@ -61,7 +61,8 @@ async function load(rawHandle: string, rawSegment: string) {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, collection: segment } = await params;
   const found = await load(handle, segment);
-  if (!found || found.store.suspended) return { title: "Not found — Marktmorgen" };
+  // Switched off after notices: drawn as the resting store, and out of search as its other pages are.
+  if (!found || found.store.suspended) return { title: "Not found — Marktmorgen", robots: { index: false, follow: true } };
   const { store, collection } = found;
   const url = `${storeRoot(store)}/shop/${collectionSegment(collection)}`;
   const title = `${collection.title} — ${store.name}`;

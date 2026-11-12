@@ -84,7 +84,7 @@ async function main(): Promise<void> {
 
   part("Exact replies decide as before");
   sessions["ana@example.com"] = [paid("cs_test_ana000000001", product)];
-  await recordEnrollment(store, "ana@example.com", product, START);
+  await recordEnrollment(store, "ana@example.com", product, START, "stripe");
   is("bought: open, from when it began", await outcome(store, "ana@example.com"), JSON.stringify([[product, START]]));
   await setBlocked(store, COURSE, "ana@example.com", true);
   is("taken off the course by the creator: shut", await outcome(store, "ana@example.com"), "[]");
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 
   part("When a course began is read in whole seconds, never as 1970");
   sessions["ben@example.com"] = [paid("cs_test_ben000000001", product)];
-  await recordEnrollment(store, "ben@example.com", product, START);
+  await recordEnrollment(store, "ben@example.com", product, START, "stripe");
   is("bought: open from its real start", await outcome(store, "ben@example.com"), JSON.stringify([[product, START]]));
   for (const [label, value] of [
     ["empty", ""],

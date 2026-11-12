@@ -74,7 +74,7 @@ async function world(handle: string, review: boolean): Promise<World> {
   const store = (await storeForEmail(owner))!;
   await saveCourse(course, store);
   await saveTask(course.id, lessonId, { prompt: "Write your opening paragraph.", review, gate: false, file: true }, store);
-  await recordEnrollment(store, BUYER, productId, Math.floor(Date.now() / 1000) - 60);
+  await recordEnrollment(store, BUYER, productId, Math.floor(Date.now() / 1000) - 60, "stripe");
   const token = await mintPass(store, BUYER, "all");
   const folder = taskFolder(await storeFolder(storeRef(store)), course.id, lessonId, emailKey(BUYER));
   return { store, productId, courseId: course.id, lessonId, cookie: `${passCookieName(store)}=${token}`, folder, room: storeKey(store) };

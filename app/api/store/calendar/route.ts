@@ -2,6 +2,9 @@ import type { NextRequest } from "next/server";
 import { ensureStatsId, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_FEED_URL, addFeed, newFeedToken, removeFeed } from "@/lib/calendar-sync";
+import { CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES, CALENDAR_ADDS_PER_TEN_MINUTES } from "@/lib/calendar-limits";
+import { clientAddress, essentialLimitState } from "@/lib/request-guard";
+import { shareAddress } from "@/lib/traffic-rules";
 
 /**
  * The creator's calendars: adds one (after reading it once), removes one, or
@@ -19,6 +22,19 @@ export async function POST(request: NextRequest) {
 
     const action = text(guarded.body.action, 20);
     if (action === "add") {
+      // Each add reads a remote calendar: counted per connection, then per store, before any read (R27).
+      // "busy" when a count is not known, never "slow"; removing or a new address reads nothing remote.
+      // One connection is its shareAddress: an IPv6 /48, an IPv4 address however it is spelled.
+      const statsId = store.statsId;
+      const connection = shareAddress(clientAddress(request)) || "unknown";
+      for (const check of [
+        () => essentialLimitState("calendar-add-ip", connection, CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES, 600),
+        () => essentialLimitState("calendar-add", statsId, CALENDAR_ADDS_PER_TEN_MINUTES, 600),
+      ]) {
+        const state = await check();
+        if (state === "unknown") return Response.json({ ok: false, error: "busy" }, { status: 503 });
+        if (state === "exceeded") return Response.json({ ok: false, error: "slow" }, { status: 429 });
+      }
       const result = await addFeed(store, text(guarded.body.url, MAX_FEED_URL + 1));
       if (!result.ok) return Response.json({ ok: false, error: result.reason, message: result.message }, { status: result.reason === "unavailable" ? 503 : 400 });
       return Response.json({ ok: true, view: result.view, busyTimes: result.busyTimes });

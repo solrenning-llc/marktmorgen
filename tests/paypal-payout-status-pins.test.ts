@@ -16,16 +16,14 @@ import { done, is, part } from "./check";
 const STATS = "statsid1";
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
-let scope = "https://uri.paypal.com/services/invoicing https://uri.paypal.com/payments/payouts openid";
-let tokenStatus = 200;
-let funds = true;
+const scope = "https://uri.paypal.com/services/invoicing https://uri.paypal.com/payments/payouts openid";
+const tokenStatus = 200;
+const funds = true;
 let itemStatus: Record<string, string> = {};
 let batchStatus = "SUCCESS";
 const created: { body: Record<string, unknown>; requestId: string | null }[] = [];
-let fetches = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  fetches += 1;
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });

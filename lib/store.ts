@@ -4339,6 +4339,27 @@ export async function setSitePages(email: string, raw: unknown): Promise<Section
   return result ?? { ok: false, reason: "none" };
 }
 
+export type SitePagesChange = { ok: true; store: Store } | { ok: false; reason: string };
+
+/**
+ * Changes the store's own pages from the list as it is under the store's write lock, never from a copy a request
+ * read before it: `change` gets the latest pages and the store, and answers the whole new list, or a reason to
+ * refuse that is passed back as it is (nothing is written). The new list is held to the same rules as setSitePages.
+ */
+export async function changeSitePages(
+  email: string,
+  change: (pages: SitePage[], store: Store) => SitePage[] | { refuse: string },
+): Promise<SitePagesChange> {
+  const result = await withStore<SitePagesChange>(email, async (store, save) => {
+    const next = change(store.sitePages, store);
+    if (!Array.isArray(next)) return { ok: false, reason: next.refuse };
+    const sitePages = parseSitePages(next);
+    if (sitePages.length !== next.length || sitePages.some((page) => page.target && !hasProduct(store, page.target))) return { ok: false, reason: "unknown" };
+    return { ok: true, store: await save({ ...store, sitePages, statsId: store.statsId ?? newListId() }) };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
 /** Adds pages to the latest store under its existing fenced write lock.
  * Never replaces pages with a request's older snapshot or silently drops an addition.
  */

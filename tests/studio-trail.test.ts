@@ -61,8 +61,6 @@ const EXEMPT = ["app/studio/page.tsx", "app/studio/paused/page.tsx"];
 // trail. They may not exist yet here, and are then simply not checked.
 const FROM_OPEN_PRS = [
   "app/studio/declines/page.tsx", // #1913
-  "app/studio/companies/page.tsx", // #2574
-  "app/studio/invoices/page.tsx", // #2990
   "app/studio/notifications/page.tsx", // #3013
   "app/studio/email/links/page.tsx", // #3034
   "app/studio/students/page.tsx", // #3035

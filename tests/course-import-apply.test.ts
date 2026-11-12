@@ -8,7 +8,7 @@
  */
 import { COURSE_IMPORT_FORMAT, previewCourseImport, type CourseImportDraft } from "@/lib/course-import";
 import { planCourseImport } from "@/lib/course-import-apply";
-import { MAX_LESSONS, cleanBody, editCourse, emptyCourse, lessonCount, lessonsInOrder } from "@/lib/course";
+import { MAX_LESSONS, MAX_MODULES, cleanBody, editCourse, emptyCourse, lessonCount, lessonsInOrder } from "@/lib/course";
 import { done, is, part } from "./check";
 
 function draftOf(modules: CourseImportDraft["modules"]): CourseImportDraft {
@@ -69,4 +69,9 @@ part("At the course editor's own lesson limit, whole or nothing");
 const many = draftOf([{ title: "All", lessons: Array.from({ length: MAX_LESSONS }, (_, i) => ({ title: `L${i + 1}`, text: "", video: null, files: [] })) }]);
 const full = planCourseImport(emptyCourse(), many);
 is("all of them fit", full.ok && lessonCount(full.course), MAX_LESSONS);
+
+part("At the course editor's own module limit, as the preview accepted it");
+const widest = draftOf(Array.from({ length: MAX_MODULES }, (_, i) => ({ title: `M${i + 1}`, lessons: [{ title: `L${i + 1}`, text: "", video: null, files: [] }] })));
+const wide = planCourseImport(emptyCourse(), widest);
+is("all of them fit", wide.ok && wide.course.modules.map((m) => m.title), widest.modules.map((m) => m.title));
 done();

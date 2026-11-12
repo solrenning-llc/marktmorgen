@@ -14,6 +14,7 @@ import { POST } from "@/app/api/store/help/support/route";
 import { SupportHandoff, StudioHelp } from "@/components/studio-help";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription } from "@/lib/store";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import {
   MAX_SUPPORT_TEXT,
   SUPPORT_NUMBER,
@@ -196,9 +197,26 @@ async function main() {
   const bad = await send(otherCookie, { text: "A question with a made-up number.", number: "help-support-x" });
   is("a number not in the shape is never used: a fresh one", [bad.status, SUPPORT_NUMBER.test((bad.data.value as { number: string }).number), (bad.data.value as { number: string }).number === "help-support-x"], [200, true, false]);
   is("each key is scoped to the store, so a number never reaches another store's request", sent.every((s) => !s.key || s.key.includes(":")), true);
+
+  part("A try sent again counts toward the day, and every word says so (Claude 1, LOW)");
+  const third = await creator("help-support-c@example.test", "helpsupportc");
+  sent.length = 0;
+  calls = 0;
+  lostReply = [1];
+  const kept = "SR-4D2F-H8JN";
+  const tries: { status: number; data: Record<string, unknown> }[] = [];
+  for (let i = 0; i <= SUPPORT_PER_DAY; i++) tries.push(await send(third, { text: "A question whose answer stays lost.", number: kept }));
+  lostReply = [];
+  is("the provider is asked once and support holds one request", [calls, sent.filter((s) => recipients(s.body) === "support@marktmorgen.com").length], [1, 1]);
+  is("each try is counted: unconfirmed until the day is full, then refused", tries.map((t) => t.data.error), [...Array(SUPPORT_PER_DAY).fill("unconfirmed"), "busy"]);
+  const unsureWords = String(tries[0].data.words);
+  is("the unconfirmed words say how to be sure, and that each try counts", [unsureWords.includes(`write to ${SUPPORT_EMAIL} and give that number`), unsureWords.includes(`each try counts toward your store's ${SUPPORT_PER_DAY} requests a day`)], [true, true]);
+  const busyWords = String(tries[SUPPORT_PER_DAY].data.words);
+  is("the busy words count tries, never say the store sent that many requests", [busyWords.includes("has sent"), busyWords.includes("each try counts"), busyWords.includes("Try again tomorrow")], [false, true, true]);
   const form = (await import("node:fs")).readFileSync("components/studio-help.tsx", "utf8");
   is("the form keeps one number for every try of the same request", [form.includes("const [number] = useState(() => supportNumberOf(crypto.getRandomValues(new Uint8Array(5))));"), form.includes("JSON.stringify({ text: draft, screen: window.location.pathname, number })")], [true, true]);
   is("and a lost answer in the browser is never said unsent", form.includes("nothing was sent"), false);
+  is("and the browser says the same unconfirmed words as the server", [form.includes("unconfirmedWords(number)"), /const unconfirmed = /.test(form)], [true, false]);
 
   part("The form: nothing is sent before the creator reads, can change and sends the words");
   const help = renderToStaticMarkup(createElement(StudioHelp, { left: 10 }));
@@ -212,6 +230,10 @@ async function main() {
   is("bounded like the server", open.includes(`maxLength="${MAX_SUPPORT_TEXT}"`), true);
   is("it says what is added and that no buyer's data goes", [open.includes("We add your store, your plan and this screen."), open.includes("Nothing about your buyers is sent.")], [true, true]);
   is("and the send is a button the creator presses, with a way back", [open.includes(">Send to support</button>"), open.includes(">Cancel</button>")], [true, true]);
+
+  part("A refusal is announced: the status region is there, empty, before any words go into it (Claude 1 cloud, LOW)");
+  is("the open form has its status region before anything was sent", /<p role="status"[^>]*><\/p>/.test(open), true);
+  is("and the help box has its own before any note", /<p role="status"[^>]*><\/p>/.test(help), true);
 
   done();
 }

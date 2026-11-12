@@ -874,17 +874,17 @@ export async function forgetStoreSync(statsId: string | null, apply: (commands: 
     const id = member.slice(statsId.length + 1);
     if (JOB_ID.test(id)) ids.add(id);
   }
-  // `apply` sends the deletes: the closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
   // The records go before the queue lets go of them (Claude 4 on #2860), so a batch cut short never leaves one
-  // holding an address off the queue; the log is deleted last.
+  // holding an address off the queue; the log is deleted last. `apply` sends the deletes: the closing walk's makes
+  // them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
   const commands: (string | number)[][] = [
     ...[...ids].map((id) => ["DEL", jobKey(id)]),
     ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : [])],
   ];
   const replies = await apply(commands);
-  // The pipeline's replies are read here, one count for each command; the fenced deletes (fencedBy) read each of
-  // their own steps and throw on one that is unknown, answering nothing more.
+  // A plain pipeline's replies are read exactly, one count per command. The closing walk's fenced apply answers no
+  // counts: it reads its own EVAL reply exactly and throws itself on a lost lock or a reply in another shape.
   if (apply === redisPipeline && !countsFor(replies, commands.length)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
   if (unread) throw new UnknownReplyError("a deleted store's email platform jobs");
 }

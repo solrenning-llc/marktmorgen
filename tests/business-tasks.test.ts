@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BusinessTasks } from "@/components/business-tasks";
+import { BusinessTasks, decodeBusinessTasksAnswer } from "@/components/business-tasks";
 import { BUSINESS_TASKS_SLOT, BusinessTasksUnreadable, BusinessTasksWriteUnconfirmed, changeBusinessTasks, readBusinessTasks } from "@/lib/business-tasks";
 import { MAX_BUSINESS_TASKS, addBusinessTask, markBusinessTask, removeBusinessTask, editBusinessTask, type BusinessTask } from "@/lib/business-tasks-rules";
 import { CLOSING, COUNTED_FAMILIES, ELSEWHERE_FAMILIES } from "@/lib/data-families";
@@ -164,8 +164,33 @@ async function main(): Promise<void> {
   const exported = readFileSync("lib/store-export.ts", "utf8");
   is("the data copy holds it, read whole, never as none", /,"tasks":\$\{JSON\.stringify\(businessTaskCopy\(await readBusinessTasks\(statsId\)\)\)\}/.test(exported), true);
 
+  part("Client replies are exact and an unknown write is never called unchanged");
+  const oneTask: BusinessTask = { id: ids[0], title: "Record the welcome video", due: "", done: false, createdAt: NOW, doneAt: 0 };
+  const exactListed = { ok: true, tasks: [oneTask], progress: { done: 0, total: 1, words: "0 of 1 done" } };
+  is("an exact list is accepted", decodeBusinessTasksAnswer(exactListed, true), exactListed);
+  is("ok without the list shape is unconfirmed", decodeBusinessTasksAnswer({ ok: true }, true), { ok: false, error: "unconfirmed", message: "We could not confirm this change. Reload the page to see your tasks." });
+  is("non-JSON after a write is unconfirmed", decodeBusinessTasksAnswer(null, true), { ok: false, error: "unconfirmed", message: "We could not confirm this change. Reload the page to see your tasks." });
+  is("a parsed pre-write refusal stays a refusal", decodeBusinessTasksAnswer({ ok: false, error: "invalid" }, true), { ok: false, error: "invalid" });
+  is("non-JSON on a reading is unreadable", decodeBusinessTasksAnswer(null, false), { ok: false, error: "unreadable", message: "Your tasks could not be reached. Check your connection and try again." });
+  const clientSource = readFileSync("components/business-tasks.tsx", "utf8");
+  is("an unconfirmed write is re-read before writes are offered again", /const refreshed = await ask\(\);[\s\S]*setBusy\(false\);[\s\S]*setError\(UNCONFIRMED\)/.test(clientSource), true);
+  is("the team copy names the actual settings permission", clientSource.includes("People on your team who can change store settings see it."), true);
+  is("the remove confirmation name is announced", /setSaid\(`Press again to remove/.test(clientSource), true);
+
   part("The block");
-  const html = renderToStaticMarkup(createElement(BusinessTasks));
+  // SSR and hydration must not depend on a clock read during render.
+  const originalNow = Date.now;
+  let html = "";
+  let renderError: unknown = null;
+  try {
+    Date.now = () => { throw new Error("clock read during render"); };
+    html = renderToStaticMarkup(createElement(BusinessTasks));
+  } catch (error) {
+    renderError = error;
+  } finally {
+    Date.now = originalNow;
+  }
+  is("render never reads the current clock", renderError, null);
   is("a section named by its heading", /<section aria-labelledby="([^"]+)-title"[^>]*><h2 id="\1-title"[^>]*>Tasks<\/h2>/.test(html), true);
   is("it says it is loading, never no tasks, before it read", html.includes("Loading your tasks") && !html.includes("No tasks yet"), true);
   is("a polite live region for what happened", /role="status" aria-live="polite"/.test(html), true);

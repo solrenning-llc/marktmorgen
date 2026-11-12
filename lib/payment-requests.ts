@@ -352,37 +352,47 @@ const REFUND_UNDER_WAY = new Set(["pending", "requires_action"]);
  * whether every one was read (rule 24): a list still marked has_more after
  * the last page read, a page or a row in another shape (a status Stripe does
  * not list, an empty payment id), or the same refund twice leaves `complete`
- * false. What was read is still counted, once each: it is a floor of what
- * was refunded, never the total. `underWay` names the payments with a refund
- * still pending or waiting on an action: not counted, and not checked.
- * Throws when Stripe cannot be read.
+ * false, and so does a page that is not Stripe's list (`object: "list"`) or
+ * a refund of nothing (Stripe never refunds 0). What was read is still
+ * counted, once each: it is a floor of what was refunded, never the total.
+ * `underWay` names the payments with a refund still pending or waiting on an
+ * action: not counted, and not checked. `otherMoney` names the payments in
+ * `currencyOf` with a refund in another currency, or in none: its amount is
+ * never added to the request's own (unlike cents), and the payment is not
+ * checked. Throws when Stripe cannot be read.
  */
-async function readRefunds(account: string, since: number): Promise<{ back: Map<string, number>; complete: boolean; underWay: Set<string> }> {
+async function readRefunds(account: string, since: number, currencyOf: Map<string, string>): Promise<{ back: Map<string, number>; complete: boolean; underWay: Set<string>; otherMoney: Set<string> }> {
   const back = new Map<string, number>();
   const underWay = new Set<string>();
+  const otherMoney = new Set<string>();
   const seen = new Set<string>();
   let complete = true;
   let after = "";
   for (let page = 0; ; page += 1) {
-    if (page === REFUND_PAGES) return { back, complete: false, underWay };
+    if (page === REFUND_PAGES) return { back, complete: false, underWay, otherMoney };
     const listed = await onAccount("GET", account, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
-    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false, underWay };
+    if (listed.object !== "list" || !Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false, underWay, otherMoney };
     for (const item of listed.data as unknown[]) {
       const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
       const id = row && typeof row.id === "string" && row.id ? row.id : "";
       const intent = row?.payment_intent;
-      if (!row || !id || seen.has(id) || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) {
+      if (!row || !id || seen.has(id) || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0) {
         complete = false;
         continue;
       }
       seen.add(id);
       if (typeof intent !== "string") continue;
+      const own = currencyOf.get(intent);
+      if (own !== undefined && row.currency !== own) {
+        otherMoney.add(intent);
+        continue;
+      }
       if (row.status === "succeeded") back.set(intent, (back.get(intent) ?? 0) + (row.amount as number));
       else if (REFUND_UNDER_WAY.has(row.status)) underWay.add(intent);
     }
-    if (!listed.has_more) return { back, complete, underWay };
+    if (!listed.has_more) return { back, complete, underWay, otherMoney };
     const last = (listed.data as unknown[]).at(-1) as Record<string, unknown> | null | undefined;
-    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false, underWay };
+    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false, underWay, otherMoney };
     after = last.id;
   }
 }
@@ -412,9 +422,9 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
   const paid = requests.filter((r) => onStripe(r) && PAYMENT_INTENT.test(r.payment));
   if (!paid.length || !store.stripeAccountId) return requests.map((r) => shown(r, false));
   const since = Math.floor(Math.min(...paid.map((r) => r.paidAt)) / 1000) - 60;
-  let read: { back: Map<string, number>; complete: boolean; underWay: Set<string> };
+  let read: Awaited<ReturnType<typeof readRefunds>>;
   try {
-    read = await readRefunds(store.stripeAccountId, since);
+    read = await readRefunds(store.stripeAccountId, since, new Map(paid.map((r) => [r.payment, r.currency.toLowerCase()])));
   } catch (error) {
     console.error("reading a store's refunds for payment requests failed", error);
     return requests.map((r) => shown(r, false, true));
@@ -443,7 +453,10 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
     // A refund still under way may yet give the money back, and a write that failed may not fail again: not checked,
     // and reading again may change that. A list not read in full reads the same next time.
     const passing = unsaved.has(r.id) || read.underWay.has(r.payment);
-    return shown(latest, read.complete && !short && !passing, read.complete && !short && passing);
+    // A refund of this payment in another currency (or none) was not added: what is shown may be short of it, and a
+    // reload reads the same list.
+    const otherMoney = read.otherMoney.has(r.payment);
+    return shown(latest, read.complete && !short && !passing && !otherMoney, read.complete && !short && !otherMoney && passing);
   });
 }
 

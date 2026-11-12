@@ -75,7 +75,9 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
-      - run: node scripts/ci-build.mjs
+      # No workflow build: this leg's browser script builds a disposable copy of the tree
+      # itself and serves only that copy (tests/e2e/reviewed-mail-app.mjs);
+      # tests/ci-accessibility-build-use.test.ts holds this.
       - name: Synthetic local checkout, receipt, library and buyer orders
         run: node tests/e2e/accessibility-buyer-actions.mjs
 

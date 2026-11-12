@@ -57,7 +57,7 @@ export function CourseNextStep({
         setError(data.error === "next_step" && data.message ? data.message : "That could not be saved just now. Try again in a moment.");
         return;
       }
-      toast(picked ? "Saved. Students see this next step on the course and after its last lesson." : "Saved. No next step is shown.");
+      toast(picked ? "Saved. Students see this next step on the course's page." : "Saved. No next step is shown.");
       router.refresh();
     } catch {
       setError("That could not be saved just now. Try again in a moment.");

@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 297 [SQ8] unit 1, a quiz's answers kept in the student's browser while they answer | claude1/sq8-quiz-keep | `lib/quiz-keep-rules.ts` (new), `components/quiz-keep.tsx` (new), `tests/quiz-keep.test.ts` (new), `tests/e2e/quiz-keep.mjs` (new), `components/lesson-quiz.tsx` (the QuizKeep line only), `lib/buyer-words/courses.ts` (the three quiz-kept phrases only), `lib/person-data.ts` (its one row), `.github/workflows/accessibility-studio-matrix.yml` (its one step only); app/privacy/page.tsx (shared: the #quiz-drafts paragraph only) | 12/11/2026 19h38 |

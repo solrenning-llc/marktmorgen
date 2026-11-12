@@ -1541,6 +1541,7 @@
     "components/promotion-planner.tsx",
     "components/purchase-card.tsx",
     "components/quiz-editor.tsx",
+    "components/quiz-keep.tsx",
     "components/quiz-scoring.tsx",
     "components/recent-sales-switch.tsx",
     "components/recent-sales.tsx",

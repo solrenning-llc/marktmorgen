@@ -215,6 +215,10 @@ const en = {
   gotIt: "✓ You got this one right.",
   notQuite: "✗ Not quite.",
   checkAgain: "Check my answers again",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Your answers from last time are back. They are not checked until you press the button below.",
+  quizKeptClear: "Clear my answers",
+  quizKeptCleared: "Your answers are cleared.",
   check: "Check my answers",
   triesLeft: (left: number) => `${left} ${plural(left, "try", "tries")} left`,
   /** A stretch of time in minutes, said in hours when it is whole hours. */
@@ -532,6 +536,10 @@ const es: CoursesWords = {
   gotIt: "✓ Acertaste esta.",
   notQuite: "✗ No del todo.",
   checkAgain: "Volver a comprobar mis respuestas",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Tus respuestas de la última vez están de vuelta. No se comprueban hasta que pulses el botón de abajo.",
+  quizKeptClear: "Borrar mis respuestas",
+  quizKeptCleared: "Tus respuestas se han borrado.",
   check: "Comprobar mis respuestas",
   triesLeft: (left) => `${plural(left, "Queda", "Quedan")} ${left} ${plural(left, "intento", "intentos")}`,
   span: (minutes) =>
@@ -839,6 +847,10 @@ const fr: CoursesWords = {
   gotIt: "✓ Vous avez trouvé la bonne réponse.",
   notQuite: "✗ Pas tout à fait.",
   checkAgain: "Vérifier à nouveau mes réponses",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Vos réponses de la dernière fois sont revenues. Elles ne sont vérifiées que lorsque vous appuyez sur le bouton ci-dessous.",
+  quizKeptClear: "Effacer mes réponses",
+  quizKeptCleared: "Vos réponses sont effacées.",
   check: "Vérifier mes réponses",
   triesLeft: (left) => `${left}${S}${frPlural(left, "tentative restante", "tentatives restantes")}`,
   span: (minutes) =>
@@ -1140,6 +1152,10 @@ const de: CoursesWords = {
   gotIt: "✓ Diese haben Sie richtig.",
   notQuite: "✗ Nicht ganz.",
   checkAgain: "Meine Antworten erneut prüfen",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Ihre Antworten vom letzten Mal sind wieder da. Sie werden erst geprüft, wenn Sie unten auf die Schaltfläche drücken.",
+  quizKeptClear: "Meine Antworten löschen",
+  quizKeptCleared: "Ihre Antworten sind gelöscht.",
   check: "Meine Antworten prüfen",
   triesLeft: (left) => `Noch ${left} ${plural(left, "Versuch", "Versuche")}`,
   span: (minutes) =>
@@ -1443,6 +1459,10 @@ const it: CoursesWords = {
   gotIt: "✓ Questa è giusta.",
   notQuite: "✗ Non proprio.",
   checkAgain: "Controlla di nuovo le mie risposte",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Le tue risposte dell'ultima volta sono tornate. Vengono controllate solo quando premi il pulsante qui sotto.",
+  quizKeptClear: "Cancella le mie risposte",
+  quizKeptCleared: "Le tue risposte sono state cancellate.",
   check: "Controlla le mie risposte",
   triesLeft: (left) => `${plural(left, "Resta", "Restano")} ${left} ${plural(left, "tentativo", "tentativi")}`,
   span: (minutes) =>
@@ -1747,6 +1767,10 @@ const nl: CoursesWords = {
   gotIt: "✓ Deze had je goed.",
   notQuite: "✗ Niet helemaal.",
   checkAgain: "Controleer mijn antwoorden opnieuw",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "Je antwoorden van de vorige keer zijn terug. Ze worden pas gecontroleerd als je op de knop hieronder drukt.",
+  quizKeptClear: "Mijn antwoorden wissen",
+  quizKeptCleared: "Je antwoorden zijn gewist.",
   check: "Controleer mijn antwoorden",
   triesLeft: (left) => `Nog ${left} ${plural(left, "poging", "pogingen")} over`,
   span: (minutes) =>
@@ -2051,6 +2075,10 @@ const pt: CoursesWords = {
   gotIt: "✓ Acertou nesta.",
   notQuite: "✗ Não exatamente.",
   checkAgain: "Verificar de novo as minhas respostas",
+  // 297 [SQ8]: a quiz's answers kept in the student's browser (components/quiz-keep.tsx).
+  quizKeptBack: "As suas respostas da última vez voltaram. Só são verificadas quando carregar no botão abaixo.",
+  quizKeptClear: "Apagar as minhas respostas",
+  quizKeptCleared: "As suas respostas foram apagadas.",
   check: "Verificar as minhas respostas",
   triesLeft: (left) => `${plural(left, "Resta", "Restam")} ${left} ${plural(left, "tentativa", "tentativas")}`,
   span: (minutes) =>

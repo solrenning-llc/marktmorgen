@@ -688,6 +688,22 @@ export default function PrivacyPage() {
           course. Clearing the browser&apos;s site data removes all of it at
           any time.
         </p>
+        <p id="quiz-drafts">
+          <strong className="text-black">A quiz you are answering.</strong>{" "}
+          While a student answers a lesson&apos;s quiz, their own browser keeps
+          the choices they made, so leaving the page, closing the browser or
+          losing the connection loses nothing: in its storage, under{" "}
+          <code>mm:quiz:</code> followed by the store, the course and the
+          lesson. It holds which choices were picked for which questions, the
+          questions that try showed, and when, and is never sent to us until
+          they press the quiz&apos;s own button, which sends the answers as
+          before and removes what was kept. Coming back to the lesson puts the
+          choices back, and &quot;Clear my answers&quot; removes them at once.
+          Kept choices for other questions (a quiz that draws its questions
+          again) are never put back and are removed, and none older than 30
+          days is used. Clearing the browser&apos;s site data removes all of it
+          at any time.
+        </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
           A student who comments under a lesson chooses a name, and we keep that

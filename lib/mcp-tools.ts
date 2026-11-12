@@ -24,16 +24,17 @@ import { type StatsData, readsSales, productsInStats, readSales, readStats, stud
 import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { readAboutExact } from "@/lib/product-about";
-import { type Course, findLesson, readBody, readCourseExact } from "@/lib/course";
-import { readQuizFor } from "@/lib/quiz";
-import { readTaskFor } from "@/lib/assignment";
+import { type Course, findLesson, readBodyExact, readCourseExact } from "@/lib/course";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { readQuizForExact } from "@/lib/quiz";
+import { readTaskForExact } from "@/lib/assignment";
 import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
 import { countSections, readSectionsExact } from "@/lib/saved-block-store";
 import type { PageBlock } from "@/lib/sales-page";
 import { EMPTY_PAGE, type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
 import { expectedShareB, readCounts } from "@/lib/headline-test";
 import { type Counts, testState } from "@/lib/headline-test-rules";
-import { reachShares, readDepth } from "@/lib/page-depth";
+import { reachShares, readDepthExact } from "@/lib/page-depth";
 import { isFree } from "@/lib/store-field-rules";
 import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
 import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
@@ -593,7 +594,10 @@ export async function readLessonTool(store: Store, id: string, lessonId: string,
   const course = listing?.course ? await readCourseExact(listing.course.id) : null;
   const found = course ? findLesson(course, lessonId) : null;
   if (!listing || !course || !found) return null;
-  const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
+  // Read exactly: only what Redis says is not there is no text, quiz or task; another answer throws, never "" or none (CX-123 rule 24).
+  const [text, quiz, task] = await Promise.all([readBodyExact(course.id, lessonId), readQuizForExact(course.id, lessonId), readTaskForExact(course.id, lessonId)]);
+  // readBodyExact answers null for a reply it cannot read: unknown, never a lesson with no text.
+  if (text === null) throw new UnknownReplyError("a lesson's text");
   return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
 }
 
@@ -642,9 +646,15 @@ export async function readPageReadingTool(store: Store, id: string, charge: Char
   if (refused) return refused;
   const listing = await readListing(store, id);
   if (!listing) return null;
-  // The page read exactly: an answer that is not known is "unavailable", never a page with no blocks.
-  const [kept, depth] = await Promise.all([store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 }, readDepth(store.statsId, listing.id)]);
+  // The page and its counts read exactly: an answer that is not known is "unavailable", never a page with no blocks
+  // or no visitors measured (CX-123 rule 24). A store with no stats id has never counted a visitor.
+  const nothing = { visitors: 0, stopped: {}, whyNot: {}, videos: {} };
+  const [kept, depth] = await Promise.all([
+    store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 },
+    store.statsId ? readDepthExact(store.statsId, listing.id).catch(() => undefined) : nothing,
+  ]);
   if (kept === undefined) return { error: "The page could not be read just now. Try again in a moment." };
+  if (depth === undefined) return { error: "How far visitors read could not be read just now. Try again in a moment." };
   const page = kept.page ?? { ...EMPTY_PAGE, blocks: [] };
   // While a whole second version is tested, each visitor reads one of two pages: no single depth means anything.
   const reach = page.variant ? null : reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);

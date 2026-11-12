@@ -42,6 +42,8 @@ const E = Date.UTC(2026, 10, 1);
 const DAY = E + 30 * 86_400_000;
 
 let made = 0;
+/** The PayPal order id of a test store's `i`th sale. */
+const orderOf = (handle: string, i: number) => `ORDER${handle.toUpperCase()}${i}XXXXXX`.slice(0, 20);
 /** A closing store with no Stripe account (so only the first step runs) and two PayPal sales kept. */
 async function closingStore(handle: string): Promise<{ store: Store; buyers: string[] }> {
   made += 1;
@@ -54,7 +56,7 @@ async function closingStore(handle: string): Promise<{ store: Store; buyers: str
   await startClosingCredit(await storeFolder(storeRef(store)), 100);
   const buyers = [`one.${handle}@example.com`, `two.${handle}@example.com`];
   for (const [i, email] of buyers.entries()) {
-    const order = `ORDER${handle.toUpperCase()}${i}XXXXXX`.slice(0, 20);
+    const order = orderOf(handle, i);
     await redis.pipeline([
       ["ZADD", `nl:ppsell:sales:${store.statsId}`, String(1000 + i), order],
       ["SET", `nl:ppsell:paid:${order}`, JSON.stringify({ store: store.statsId, order, capture: `CAP${order}`, email, product: "p1", cents: 1900, currency: "usd", at: 1000 + i })],
@@ -63,9 +65,9 @@ async function closingStore(handle: string): Promise<{ store: Store; buyers: str
   return { store, buyers };
 }
 
-const run = async (store: Store): Promise<Told | "rejected"> => {
+const run = async (store: Store, day = DAY, after = ""): Promise<Told | "rejected"> => {
   try {
-    return await tellBuyers(store, E, DAY, "", Date.now() + 60_000);
+    return await tellBuyers(store, E, day, after, Date.now() + 60_000);
   } catch {
     return "rejected";
   }
@@ -105,6 +107,32 @@ async function main(): Promise<void> {
   const again = await run(faulty.store);
   is("asked again with Redis healthy: done", again === "rejected" ? again : again.after, "start");
   is("each PayPal buyer told, exactly once", faulty.buyers.map(count), [1, 1]);
+
+  part("One PayPal record out of shape while the full notice can still be given: the readable buyer is told, the step waits (Codex X5 on #4236)");
+  // Days relative to the clock, so the window does not move under the test: the closing a month off.
+  const soon = Date.now() + 30 * 86_400_000;
+  const mixed = await closingStore("ppmix");
+  const order = [orderOf("ppmix", 1)];
+  const kept = (await redis.pipeline([["GET", `nl:ppsell:paid:${order[0]}`]]))[0] as string;
+  await redis.pipeline([["SET", `nl:ppsell:paid:${order[0]}`, "{not json"]]);
+  const firstMixed = await run(mixed.store, soon);
+  is("the first step is not marked done", firstMixed === "rejected" ? firstMixed : [firstMixed.after, firstMixed.done], ["", false]);
+  is("the readable buyer is told now, the other not yet", mixed.buyers.map(count), [1, 0]);
+  await redis.pipeline([["SET", `nl:ppsell:paid:${order[0]}`, kept]]);
+  const restored = await run(mixed.store, soon);
+  is("asked again with the record back: done", restored === "rejected" ? restored : restored.after, "start");
+  is("both PayPal buyers told, each exactly once", mixed.buyers.map(count), [1, 1]);
+
+  part("Still out of shape once the full notice can no longer wait: the readable buyer is told, the rest counted untold, and the closing goes on");
+  const late = await closingStore("pplate");
+  const lateOrder = [orderOf("pplate", 1)];
+  await redis.pipeline([["SET", `nl:ppsell:paid:${lateOrder[0]}`, "{not json"]]);
+  const near = Date.now() + 3 * 86_400_000;
+  const lateRun = await run(late.store, near);
+  is("the first step is done, one untold counted", lateRun === "rejected" ? lateRun : [lateRun.after, lateRun.untold], ["start", 1]);
+  is("the readable buyer told once", late.buyers.map(count), [1, 0]);
+  const lateAgain = await run(late.store, near, "");
+  is("counted once however often it is asked", lateAgain === "rejected" ? lateAgain : lateAgain.untold, 0);
 
   done();
 }

@@ -1,4 +1,4 @@
-import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
+import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -373,8 +373,14 @@ export async function POST(request: NextRequest) {
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
           if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;
-          await del(file.pathname).catch((error: unknown) => {
-            console.error("could not delete the file of a removed product", error);
+          // A delete that fails is not lost: nothing points at the file any more, so the creator could never delete it
+          // and it would count against the store's storage for good. It goes to the daily job that deletes uploads
+          // nobody keeps (sweepTaskUploads, app/api/cron/courses), as a deleted person's files do (lib/person-erasure.ts).
+          await del(file.pathname).catch(async (error: unknown) => {
+            console.error("could not delete the file of a removed product; it goes to the daily job", error);
+            await noteTaskUpload(file.pathname, 0).catch((noteError: unknown) =>
+              console.error("could not hand a removed product's file to the daily job; it is kept until the store closes", noteError),
+            );
           });
         }
         for (const file of filesOnProduct(going)) await dropStamped(file);

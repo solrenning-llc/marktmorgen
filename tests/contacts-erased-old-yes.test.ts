@@ -47,9 +47,12 @@ async function main(): Promise<void> {
 
   part("Their own yes, given after the deletion, still lifts it");
   reset();
-  is("a new order's box ticked after the deletion: agreeing again, the print lifted", [await write({ agreed: true, explicit: true, source: "buyer", at: AFTER }), row()?.agreed, row()?.agreedAt, print()], ["written", true, AFTER, null]);
+  is("a new order's box checked after the deletion: agreeing again, the print lifted", [await write({ agreed: true, explicit: true, source: "buyer", at: AFTER }), row()?.agreed, row()?.agreedAt, print()], ["written", true, AFTER, null]);
   reset();
   is("a yes given now (no time given, a free download): agreeing again, the print lifted", [await write({ agreed: true, explicit: true, source: "free" }), row()?.agreed, print()], ["written", true, null]);
+
+  reset();
+  is("a yes given now, in the very second of the deletion (their own link, opened at once): it lifts it", [await write({ agreed: true, explicit: true, source: "free" }), row()?.agreed, print()], ["written", true, null]);
 
   part("What never lifts it, as before");
   reset();
@@ -61,7 +64,7 @@ async function main(): Promise<void> {
   for (const [what, value] of [["text", "yesterday"], ["a fraction", "1730.5"], ["nothing", ""]] as const) {
     reset();
     redis.run(["HSET", suppressedKey(LIST), suppressionPrint(LIST, WHO), value]);
-    is(`a print of ${what}: their yes now changes nothing and writes nothing`, [await write({ agreed: true, explicit: true, source: "free" }), row(), print()], ["threw", null, value]);
+    is(`a print of ${what}: a yes with a time to compare changes nothing and writes nothing`, [await write({ agreed: true, explicit: true, source: "buyer", at: AFTER }), row(), print()], ["threw", null, value]);
   }
   done();
 }

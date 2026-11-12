@@ -52,7 +52,7 @@ test("a yes in the very second of the deletion is not known to be after it", asy
   assert.equal(queueSize(), 0);
 });
 
-test("a new purchase with the box ticked after the deletion is handed over as anyone's", async () => {
+test("a new purchase with the box checked after the deletion is handed over as anyone's", async () => {
   reset();
   assert.equal(await queuePerson(store, person(WHO, (ERASED_SECONDS + 60) * 1000)), "queued");
   assert.equal(queueSize(), 1);

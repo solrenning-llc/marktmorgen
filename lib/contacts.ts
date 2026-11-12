@@ -251,7 +251,9 @@ export async function upsertContact(
   // written to again: only their own yes, given after the deletion, lifts it.
   // A purchase without the box still records the purchase, as anyone's does.
   const deleted = wasSuppressed(erased);
-  const ownYes = input.agreed && input.explicit && (!deleted || (await saidAfterErased(listId, email, saidAt)));
+  // A yes given now (no time given) is after the deletion by definition; one given with the time of an earlier
+  // moment, as a reloaded thank-you page gives the order's, is compared with the deletion's own second.
+  const ownYes = input.agreed && input.explicit && (!deleted || !input.at || (await saidAfterErased(listId, email, saidAt)));
   const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
   const leftAt = Date.parse(before?.unsubAt || "");
   const resubscribe =

@@ -60,6 +60,9 @@ async function main(): Promise<void> {
     is("the store is still there", (await storeForId(store.sid))?.handle ?? null, "assiststudioextra");
     const page = readFileSync("app/studio/page.tsx", "utf8");
     is("the studio has a notice for that reason, saying how to stop the add-on", /\n\s+assistant: \{\n\s+title: "This store still has the Store assistant running",/.test(page), true);
+    const button = "Stop at the end of this month";
+    is("the button the notice names is the one the assistant's card shows", readFileSync("components/store-assistant-editor.tsx", "utf8").includes(`"${button}"`), true);
+    is("and the notice names it", page.includes(`press \\u201c${button}\\u201d`), true);
   }
 
   part("An add-on set to stop at the end of its month charges nothing more: the store can go");

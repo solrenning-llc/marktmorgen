@@ -263,14 +263,6 @@ export function modelKeySet(): boolean {
   return apiKey() !== null;
 }
 
-/**
- * One request to the model, already bounded (lib/ai-request-rules.ts), for
- * a caller that reserved its own worst cost before calling and settles it
- * after (lib/store-assistant.ts, the Store assistant's pool). Nothing is
- * reserved here. `billed` is false only when the provider answered with an
- * error status, which it does not bill; a timeout or a lost connection may
- * have been billed, and says so.
- */
 /** The first few hundred characters of an error answer, for the log; the rest of its body is never read (cancelled). */
 async function errorStart(response: Response, max = 300): Promise<string> {
   const reader = response.body?.getReader();
@@ -291,6 +283,14 @@ async function errorStart(response: Response, max = 300): Promise<string> {
   return text.slice(0, max);
 }
 
+/**
+ * One request to the model, already bounded (lib/ai-request-rules.ts), for
+ * a caller that reserved its own worst cost before calling and settles it
+ * after (lib/store-assistant.ts, the Store assistant's pool). Nothing is
+ * reserved here. `billed` is false only when the provider answered with an
+ * error status, which it does not bill; a timeout or a lost connection may
+ * have been billed, and says so.
+ */
 export async function postToModel(body: string, timeoutMs: number): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; billed: boolean }> {
   const key = apiKey();
   if (!key) return { ok: false, billed: false };

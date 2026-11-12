@@ -49,6 +49,8 @@ async function main(): Promise<void> {
             ? "Not cleared: a move of one of these addresses is running now. Wait for it to end."
             : answer === "confirm"
             ? "Not cleared: type the same address after --clear=."
+            : answer === "sessions"
+            ? "Not cleared: logging out one of the addresses could not be confirmed. Nothing was cleared; run it again."
             : "Nothing to clear: this address has no broken move.",
     );
   }

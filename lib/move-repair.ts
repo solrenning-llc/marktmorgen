@@ -42,7 +42,8 @@ export async function repairMove(email: string): Promise<boolean> {
     }
     // An index a lost answer left on the other address is pointed back at the list's (C3-117).
     await repointPasskeys(home);
-    await endAllSessions(away);
+    // A log-out that cannot be confirmed (null) is not a repair: the record stays, and the next login tries again.
+    if ((await endAllSessions(away)) === null) return false;
     await clearBrokenMove(from, to);
     return true;
   } catch (error) {
@@ -75,7 +76,7 @@ export async function describeMove(email: string): Promise<Record<string, unknow
  * other: clearing it would let a login by the emailed link into the store
  * with no second step again. Its two addresses are logged out.
  */
-export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<"cleared" | "none" | "confirm" | "split" | "running"> {
+export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<"cleared" | "none" | "confirm" | "split" | "running" | "sessions"> {
   const broken = await readBrokenMove(email);
   if (!broken) return "none";
   if (confirm.trim().toLowerCase() !== email.trim().toLowerCase()) return "confirm";
@@ -87,8 +88,10 @@ export async function clearBrokenMoveByHand(email: string, confirm: string): Pro
   });
   const [a, b] = await Promise.all([holds(broken.from), holds(broken.to)]);
   if ((a.store && !a.ways && b.ways) || (b.store && !b.ways && a.ways)) return "split";
+  // Both addresses logged out first, and confirmed: otherwise the record stays and the person is told to try again,
+  // never "cleared, and both addresses logged out" (CX-123 rule 24).
+  const [outFrom, outTo] = [await endAllSessions(broken.from), await endAllSessions(broken.to)];
+  if (outFrom === null || outTo === null) return "sessions";
   await clearBrokenMove(broken.from, broken.to);
-  await endAllSessions(broken.from);
-  await endAllSessions(broken.to);
   return "cleared";
 }

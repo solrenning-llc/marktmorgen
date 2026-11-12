@@ -15,7 +15,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -726,6 +726,14 @@ export async function saveBody(courseId: string, lessonId: string, text: string,
 }
 
 /**
+ * Deletes the key only while it holds exactly this value, in one step on the
+ * Redis side: 1 deleted, 0 left. The same script, line for line, as
+ * lib/redis-lock.ts RELEASE, so the tests' Redis (lib/redis-memory.ts) runs
+ * the same check.
+ */
+const DELETE_IF_SAME = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+
+/**
  * The lesson texts of a course made by an import (260 [KJ5], lib/course-import-apply.ts),
  * written at once: each text already as the editor keeps it (cleanBody), for
  * a lesson id given once. The room for all of them is taken in one step
@@ -753,41 +761,27 @@ export async function saveNewBodies(courseId: string, bodies: { lessonId: string
     replies = null;
   }
   if (replies && replies.every((reply) => reply === "OK")) return;
-  // Taking back: only what this call wrote goes, and only the room of what is known to be gone (or never
-  // written) comes back; anything whose fate cannot be read keeps its room counted, more and never less.
+  // Taking back: only what this call is known to have written goes, each by an atomic compare-and-delete of its exact text,
+  // and only the room of what is known to be gone (or never written) comes back. An unknown reply is never taken as this
+  // call's own (the key may hold another writer's equal text), so nothing of it is deleted and its room stays counted:
+  // more, never less (Revisor 1 and Codex L on #3821).
   const gone: { lessonId: string; text: string }[] = [];
   const mine: { lessonId: string; text: string }[] = [];
-  const unsure: { lessonId: string; text: string }[] = [];
   bodies.forEach((body, i) => {
     const reply = replies?.[i];
     if (replies && reply === null) gone.push(body); // NX refused: another text is kept there, and this one was never written.
     else if (reply === "OK") mine.push(body);
-    else unsure.push(body);
   });
-  if (unsure.length) {
-    let held: unknown[] | null = null;
-    try {
-      const read = repliesFor(await redisPipeline([["MGET", ...unsure.map((body) => bodyKey(courseId, body.lessonId))]]), 1);
-      held = read && Array.isArray(read[0]) && read[0].length === unsure.length ? read[0] : null;
-    } catch {
-      held = null;
-    }
-    unsure.forEach((body, i) => {
-      const value = held?.[i];
-      if (value === body.text) mine.push(body);
-      else if (held && (value === null || typeof value === "string")) gone.push(body); // nothing, or someone else's text: not written by this call.
-    });
-  }
   if (mine.length) {
     let deleted: unknown[] | null = null;
     try {
-      deleted = repliesFor(await redisPipeline(mine.map((body) => ["DEL", bodyKey(courseId, body.lessonId)])), mine.length);
+      deleted = repliesFor(await redisPipeline(mine.map((body) => ["EVAL", DELETE_IF_SAME, 1, bodyKey(courseId, body.lessonId), body.text])), mine.length);
     } catch {
       deleted = null;
     }
+    // 1: this call's text, deleted. 0: replaced or deleted by someone else since; theirs, so left and still counted.
     mine.forEach((body, i) => {
-      const count = deleted ? countOf(deleted[i]) : null;
-      if (count === 0 || count === 1) gone.push(body);
+      if (deleted?.[i] === 1) gone.push(body);
     });
   }
   const back = gone.reduce((sum, { text }) => sum + bodyBytes(text), 0);

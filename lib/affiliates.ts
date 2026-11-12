@@ -2829,9 +2829,12 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
     const rows = listed.data as Record<string, unknown>[];
     for (const refund of rows) {
       if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      const amount = typeof refund.amount === "number" ? refund.amount : 0;
-      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      // A refund whose amount or payment does not read is never 0 nor nobody's (AFF-E2E-2); a refund
+      // Stripe says has no payment (an old Charges API one) belongs to no sale on the book.
+      if (refund.payment_intent === null) continue;
+      if (typeof refund.payment_intent !== "string" || !refund.payment_intent || !Number.isSafeInteger(refund.amount) || (refund.amount as number) < 0) return { byIntent, complete: false };
+      const pi = refund.payment_intent;
+      byIntent.set(pi, (byIntent.get(pi) ?? 0) + (refund.amount as number));
     }
     const last = rows[rows.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
@@ -2867,9 +2870,11 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
     for (const dispute of rows) {
       if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
       const raw = dispute.payment_intent;
+      if (raw === null) continue;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
-      if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      // A dispute that takes money but whose amount or payment does not read is unknown (AFF-E2E-2).
+      if (!pi || !Number.isSafeInteger(dispute.amount) || (dispute.amount as number) <= 0) return { byIntent, complete: false };
+      byIntent.set(pi, (byIntent.get(pi) ?? 0) + (dispute.amount as number));
     }
     const last = rows[rows.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };

@@ -5,11 +5,13 @@
  * next window.
  *
  * What it may do, and nothing more:
- *   - lower the visits of the store's current window, as admission reads
- *     them (the people who came plus the live room's hundredths made into
- *     whole visits), to a figure the operator gives, by lowering the people
- *     only; never raise them, never below zero, and refuse a figure below what
- *     the live room alone holds, since the room is never given back;
+ *   - lower the visits of the store's current window to a
+ *     figure the operator gives, never raise them and never below zero. The
+ *     visits are what admission and the plan's limit read: the people counted
+ *     plus the live room's parts (lib/traffic.ts, trafficForAdmission). Only
+ *     the people counter is lowered, so a figure below what the live room
+ *     alone holds is refused ("room"), never answered as done (Claude 1 on
+ *     #3380);
  *   - never touch the window's requests, its connections'
  *     shares or the live room: the requests' ceiling is what bounds what the
  *     store's pages cost us in a window, so it is never given back here
@@ -41,24 +43,25 @@ const LOCK_KEY = "nl:operator:traffic-reset:lock";
 const LOCK_SECONDS = 30;
 
 /**
- * Under this reset's own lock token only (KEYS[4], ARGV[4]): a people count or a live room in another shape writes
+ * Under this reset's own lock token only (KEYS[3], ARGV[4]): a people count or a live room in another shape writes
  * nothing; a people count lower than the one read (another reset got in) writes nothing; otherwise the record first,
- * then the people lowered by the delta, so visits counted meanwhile stay counted. Both or neither. Answers the people
- * left and the live room as it is now, so the caller says the visits as admission reads them.
+ * then the people lowered by the delta, so visits counted meanwhile stay counted, and the live room's parts as they
+ * are now (KEYS[4]) for the total admission reads. Both or neither. The record expires ARGV[6] seconds after its last
+ * reset (TRAFFIC_LOG_DAYS).
  */
 const RESET_SCRIPT = `-- marktmorgen:traffic-reset:v2
-if redis.call('GET', KEYS[4]) ~= ARGV[4] then return {-2} end
+if redis.call('GET', KEYS[3]) ~= ARGV[4] then return {-2} end
 local current = redis.call('GET', KEYS[1])
 if current == false then current = '0' end
 if not string.match(current, '^%d+$') then return {-3} end
-local room = redis.call('GET', KEYS[2])
-if room == false then room = '0' end
-if not string.match(room, '^%d+$') then return {-3} end
+local parts = redis.call('GET', KEYS[4])
+if parts == false then parts = '0' end
+if not string.match(parts, '^%d+$') then return {-3} end
 if tonumber(current) < tonumber(ARGV[1]) then return {-1, tonumber(current)} end
-redis.call('LPUSH', KEYS[3], ARGV[3])
-redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[5]) - 1)
-redis.call('EXPIRE', KEYS[3], ARGV[6])
-return {1, redis.call('DECRBY', KEYS[1], ARGV[2]), tonumber(room)}`;
+redis.call('LPUSH', KEYS[2], ARGV[3])
+redis.call('LTRIM', KEYS[2], 0, tonumber(ARGV[5]) - 1)
+redis.call('EXPIRE', KEYS[2], ARGV[6])
+return {1, redis.call('DECRBY', KEYS[1], ARGV[2]), tonumber(parts)}`;
 
 /** The lock let go only by the token that took it. */
 const RELEASE_SCRIPT = `-- marktmorgen:traffic-reset-release:v1
@@ -81,7 +84,10 @@ function storedCount(reply: unknown): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
-/** Lowers this store's visits in its current window to `to`. Never raises them; never touches anything else. */
+/**
+ * Lowers this store's visits in its current window to `to`, as admission reads them (people + the live room's
+ * parts / PARTS_PER_VISIT). Never raises them; lowers only the people counter; never touches anything else.
+ */
 export async function resetVisits(input: { store: Store; to: number; now?: number }): Promise<ResetResult> {
   const { store, to } = input;
   const now = input.now ?? Date.now();
@@ -91,7 +97,7 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
   const folder = await storeFolder(storeRef(store));
   if (!FOLDER_PATTERN.test(folder)) return { ok: false, reason: "unknown" };
   const key = countKey(folder, window.id);
-  const roomKey = partsKey(folder, window.id);
+  const room = partsKey(folder, window.id);
 
   // The lock is this reset's own token: a reset that waited past its lease can neither change the visits (the
   // script checks the token) nor let go of a lock another reset now holds (the release checks it too).
@@ -100,33 +106,31 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
   if (!lock) return { ok: false, reason: "unknown" };
   if (lock[0] !== "OK") return lock[0] === null ? { ok: false, reason: "busy" } : { ok: false, reason: "unknown" };
   try {
-    // The visits as admission and the plan limit read them (lib/traffic.ts trafficForAdmission): the people plus the
-    // live room's hundredths made into whole visits (Claude 1's MEDIUM on #3380). Only the people are lowered.
-    const read = repliesFor(await redisPipeline([["GET", key], ["GET", roomKey]]), 2);
+    const read = repliesFor(await redisPipeline([["GET", key], ["GET", room]]), 2);
     const people = read ? storedCount(read[0]) : null;
-    const room = read ? storedCount(read[1]) : null;
-    if (people === null || room === null) return { ok: false, reason: "unknown" };
-    const roomVisits = Math.floor(room / PARTS_PER_VISIT);
-    const before = people + roomVisits;
+    const parts = read ? storedCount(read[1]) : null;
+    if (people === null || parts === null) return { ok: false, reason: "unknown" };
+    // The visits admission and the plan's limit read (lib/traffic.ts, trafficForAdmission), not the people alone.
+    const before = people + Math.floor(parts / PARTS_PER_VISIT);
     if (!Number.isSafeInteger(before)) return { ok: false, reason: "unknown" };
     if (to > before) return { ok: false, reason: "above", before };
     if (to === before) return { ok: false, reason: "same", before };
-    // The live room alone holds more than the figure asked for: it is never given back here, so it cannot be reached.
-    if (to < roomVisits) return { ok: false, reason: "room", before };
-    // One script: the record, then the people lowered by what was asked, both or neither (Codex M on #3380).
+    // Only the people counter is lowered: a figure below what the live room alone holds cannot be reached.
+    const delta = before - to;
+    if (delta > people) return { ok: false, reason: "room", before };
+    // One script: the record, then the people lowered by what is over the figure, both or neither (Codex M on #3380).
     const entry: TrafficReset = { at: now, sid: store.sid, handle: store.handle, window: window.id, before, after: to };
     const replies = repliesFor(
       await redisPipeline([
-        ["EVAL", RESET_SCRIPT, 4, key, roomKey, LOG_KEY, LOCK_KEY, String(people), String(before - to), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP, TRAFFIC_LOG_DAYS * 86_400],
+        ["EVAL", RESET_SCRIPT, 4, key, LOG_KEY, LOCK_KEY, room, String(people), String(delta), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP, TRAFFIC_LOG_DAYS * 86_400],
       ]),
       1,
     );
     const answer = replies && Array.isArray(replies[0]) ? (replies[0] as unknown[]) : null;
     if (answer && answer[0] === -2) return { ok: false, reason: "busy" };
-    const whole = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-    const after = answer && answer[0] === 1 && answer.length === 3 && whole(answer[1]) && whole(answer[2]) ? (answer[1] as number) + Math.floor((answer[2] as number) / PARTS_PER_VISIT) : null;
-    // DECRBY keeps visits counted while this ran, and the live room only grows: the visits are `to` plus them, never
-    // less than `to`.
+    const whole = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+    const after = answer && answer[0] === 1 && answer.length === 3 && whole(answer[1]) && whole(answer[2]) ? answer[1] + Math.floor(answer[2] / PARTS_PER_VISIT) : null;
+    // DECRBY keeps visits counted while this ran, and the room may have grown: the total is `to` plus them, never less.
     if (after === null || after < to) return { ok: false, reason: "unknown" };
     return { ok: true, window: window.id, before, after };
   } finally {

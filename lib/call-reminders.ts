@@ -226,7 +226,7 @@ export async function sendCallReminders(
     const bySession = new Map(paid.map((call) => [call.session, call]));
     const find = listingFinder(store);
 
-    for (const { member } of members) {
+    for (const { member, score } of members) {
       const item = parseMember(member);
       done.push(member);
       if (!item) continue;
@@ -237,8 +237,11 @@ export async function sendCallReminders(
       try {
         call = bySession.get(item.session) ?? await paidCall(store, item.session);
       } catch (error) {
+        // Unknown, not unpaid: kept for the next run while it can still be of use, and given up on once it is hours
+        // late, as when the whole list does not answer, so one session Stripe never answers for cannot hold the queue.
         console.error("reading one paid call for reminders failed", error);
-        done.pop();
+        if (now - score > GIVE_UP_MS) counts.dropped += 1;
+        else done.pop();
         continue;
       }
       const product = call ? await find(call.product) : null;

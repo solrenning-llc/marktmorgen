@@ -97,8 +97,13 @@ is("a fitting message with the budget exactly enough: starts, reserving the whol
 is("one micro-dollar short: nothing is asked", planTurn(120, sum - 1), { ok: false, why: "no_budget" });
 is("a budget that could not be read: refused, never taken as enough", [planTurn(120, null), planTurn(120, -1), planTurn(120, Number.NaN), planTurn(120, 1.5)], Array(4).fill({ ok: false, why: "budget_unknown" }));
 is("a model with no price: refused before the budget is looked at", planTurn(120, 10 ** 12, "gpt-x"), { ok: false, why: "cost_unknown" });
-is("an empty message or one past the most: refused", [planTurn(0, sum), planTurn(TURN_LIMITS.askBytes + 1, sum), planTurn(TURN_LIMITS.askBytes, sum).ok], [{ ok: false, why: "too_long" }, { ok: false, why: "too_long" }, true]);
-is("every refusal has words for the creator, and says nothing was used when nothing was", Object.entries(TURN_REFUSALS).map(([k, w]) => [k, w.length > 20, k === "too_long" || w.includes("Nothing was used.")]), [["too_long", true, true], ["cost_unknown", true, true], ["budget_unknown", true, true], ["no_budget", true, true]]);
+is("an empty message is refused as empty, never as too long", planTurn(0, sum), { ok: false, why: "empty" });
+is("one past the most: refused; exactly the most: starts", [planTurn(TURN_LIMITS.askBytes + 1, sum), planTurn(TURN_LIMITS.askBytes, sum).ok], [{ ok: false, why: "too_long" }, true]);
+// The bound is UTF-8 bytes: 1,000 Chinese characters are 3,000 bytes and are refused, so the words never promise a
+// number of characters the bound does not keep, and say other alphabets take more room.
+const chinese = new TextEncoder().encode("字".repeat(1_000)).length;
+is("1,000 Chinese characters are refused, and the words do not say they fit", [planTurn(chinese, sum), /\bunder [\d,]+ characters\b/.test(TURN_REFUSALS.too_long), /other alphabets/.test(TURN_REFUSALS.too_long)], [{ ok: false, why: "too_long" }, false, true]);
+is("every refusal has words for the creator, and says nothing was used", Object.entries(TURN_REFUSALS).map(([k, w]) => [k, w.length > 20, w.includes("Nothing was used.")]), [["empty", true, true], ["too_long", true, true], ["cost_unknown", true, true], ["budget_unknown", true, true], ["no_budget", true, true]]);
 
 part("Each tool step");
 is("a read tool offered: runs, nothing waits", gateStep("get_numbers", owner, 0), { ok: true, reach: "read", waitsForCreator: false });

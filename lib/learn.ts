@@ -43,7 +43,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
-import { folderFromPathname, recordDelivery } from "@/lib/delivery";
+import { folderFromPathname, freeDeliveryPause, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
 import { isStreamPath } from "@/lib/stream-rules";
 import { opened, watchedForAdmission } from "@/lib/watch";
@@ -803,10 +803,18 @@ export type LessonVideo =
  * including for paid plans. Missing, invalid or unreadable limits never mint
  * a player token. This meter does not bound provider bytes, replay or buffering.
  */
-export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store): Promise<LessonVideo | null> {
+export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store, { free = false }: { free?: boolean } = {}): Promise<LessonVideo | null> {
   // The creator contract funds each new media admission before signing a URL or querying a player.
   if (store?.period?.funded === true && !(await reservePaidResourceWindow(store))) return null;
   if (!isStreamPath(file.pathname)) {
+    // A preview played to somebody who does not hold the course is a free copy of the file: it pauses with the
+    // store's other free downloads (lib/serve-file.ts), and a count that cannot be read signs nothing (rule 24).
+    if (free) {
+      const folder = folderFromPathname(file.pathname);
+      const pause = folder ? await freeDeliveryPause(folder) : "open";
+      if (pause === "over") return { kind: "paused" };
+      if (pause === "unknown") return null;
+    }
     const src = await signedMedia(file, VIDEO_URL_SECONDS);
     return src ? { kind: "file", src } : null;
   }

@@ -129,7 +129,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.hasBody ? readBody(course.id, lesson.id) : Promise.resolve(""),
     // A store with no plan that can be charged plays video for the hours
     // it has, and is paused past them (lib/plan-standing.ts).
-    lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store) : Promise.resolve(null),
+    lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store, { free: access.state !== "open" }) : Promise.resolve(null),
     lesson.quiz ? readQuizFor(course.id, lesson.id) : Promise.resolve(null),
     lesson.quiz && student ? attemptOf(course.id, lesson.id, who) : Promise.resolve<Attempt | null>(null),
     // An assignment, and what this student handed in for it (lib/assignment.ts).

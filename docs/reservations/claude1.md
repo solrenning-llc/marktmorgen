@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 562 [QZ1], unit 1 ("Where should I start?" at /start-here: three questions answered in the browser) | claude/modest-faraday-f25rzq-start-here | `app/start-here/page.tsx`, `components/start-quiz.tsx`, `lib/start-quiz.ts`, `tests/start-quiz.test.ts`, `tests/e2e/start-quiz.mjs` (also one line of `app/sitemap.ts` and the review line of `lib/accessibility-statement.ts`, not reserved: other open PRs touch them) | 12/11/2026 12h53 |

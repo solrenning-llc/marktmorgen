@@ -45,7 +45,12 @@ export async function noteIfOpened(store: Store, productId: string, courseId: st
     if (!email || !isRedisConfigured()) return false;
     const claim = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
     if (!confirmedClaim(claim)) return false;
-    await enroll(store, email, { joined: false, started: productId });
+    // Starting the sequences failed on its way (enroll logged it): the mark goes, so the moment can start them when it
+    // comes again; a start is claimed per person and sequence, never twice (lib/flows.ts startFlows).
+    if (!(await enroll(store, email, { joined: false, started: productId }))) {
+      await redisPipeline([["DEL", openedKey(courseId, email)]]);
+      return false;
+    }
     return true;
   } catch (error) {
     console.error("noting an opened course failed", error);
@@ -68,7 +73,12 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     if (!lessons.every((id) => done.has(id))) return false;
     const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
     if (!confirmedClaim(claim)) return false;
-    await enroll(store, email, { joined: false, finished: productId });
+    // Starting the sequences failed on its way (enroll logged it): the mark goes, so the moment can start them when it
+    // comes again; a start is claimed per person and sequence, never twice (lib/flows.ts startFlows).
+    if (!(await enroll(store, email, { joined: false, finished: productId }))) {
+      await redisPipeline([["DEL", finishedKey(courseId, email)]]);
+      return false;
+    }
     return true;
   } catch (error) {
     console.error("noting a finished course failed", error);

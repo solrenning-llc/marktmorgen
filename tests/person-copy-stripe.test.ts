@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   redis.run(["SADD", packagesKey(statsId), "cs_test_" + "p".repeat(24), "cs_test_" + "q".repeat(24)]);
   redis.run(["SET", "nl:pkg:cs_test_" + "p".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: PERSON, total: 4, at: 1_790_000_000, until: 0, token: "secret-token-1", holds: [] })]);
   redis.run(["SET", "nl:pkg:cs_test_" + "q".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: OTHER, total: 4, at: 1_790_000_000, until: 0, token: "secret-token-2", holds: [] })]);
-  redis.run(["HSET", paidKey(await storeFolder(storeRef(store))), "sub_1", JSON.stringify({ inv: "in_1", amt: 900, cur: "usd", ps: 1, pe: 2, e: PERSON }), "sub_2", JSON.stringify({ inv: "in_2", amt: 900, cur: "usd", ps: 1, pe: 2, e: OTHER })]);
+  redis.run(["HSET", paidKey(await storeFolder(storeRef(store))), "sub_PersonCopy0001", JSON.stringify({ inv: "in_1", amt: 900, cur: "usd", ps: 1, pe: 2, e: PERSON }), "sub_PersonCopy0002", JSON.stringify({ inv: "in_2", amt: 900, cur: "usd", ps: 1, pe: 2, e: OTHER })]);
   const scope = (await erasureScope(store, PERSON))!;
 
   part("Found through their payments");
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   is("the places they bought for a group, as a number", records("lib/group-buy.ts"), [{ youBought: true, product: "prod000001", places: 5, at: "2026-09-21T14:13:20.000Z" }]);
   is("their call package, not the other buyer's", records("lib/call-packages.ts").length, 1);
   is("their shipment", records("lib/shipments.ts").map((r) => (r as { tracking: string }).tracking), ["https://track.example.com/1"]);
-  is("their membership's last payment kept while the store closes", records("lib/closing-holds.ts").map((r) => (r as { subscription: string }).subscription), ["sub_1"]);
+  is("their membership's last payment kept while the store closes", records("lib/closing-holds.ts").map((r) => (r as { subscription: string }).subscription), ["sub_PersonCopy0001"]);
   const text = JSON.stringify(copy);
   is("no booking link's key, nor another store's gift, nor the other buyer", ["secret-token", "gft_" + "f".repeat(24), OTHER].map((w) => text.includes(w)), [false, false, false]);
 

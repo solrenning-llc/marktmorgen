@@ -585,17 +585,11 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
 export async function heldPaymentsOf(store: Store, email: string): Promise<(PaidPeriod & { subscription: string })[]> {
   if (!isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const folder = await storeFolder(storeRef(store));
-  const [raw] = await redisPipeline([["HGETALL", paidKey(folder)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Read as the closing reads it, exactly (paidPeriods; issue #4310): a list or a row that does not read throws, so the
+  // copy fails (copyPerson) rather than being handed over with this person's payments silently left out.
   const out: (PaidPeriod & { subscription: string })[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
-      if (typeof row.e === "string" && row.e.trim().toLowerCase() === address) out.push({ ...row, subscription: flat[i] });
-    } catch {
-      // Not a payment row: skipped, as the closing itself skips it.
-    }
+  for (const [subscription, row] of await paidPeriods(store)) {
+    if (typeof row.e === "string" && row.e.trim().toLowerCase() === address) out.push({ ...row, subscription });
   }
   return out;
 }

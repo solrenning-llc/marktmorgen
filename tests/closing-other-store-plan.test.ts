@@ -10,11 +10,15 @@
  * not have, or be refused and canceled though it pays for a store that is
  * not closing.
  *
- * Two checks keep it out today: the list's own filter on metadata.store and
- * ownedBy (lib/billing.ts), which already requires the same handles. Either
- * one alone is enough, so removing only one is an equivalent change no test
- * can catch; removing both, before this file, failed no test. Stripe is
- * simulated; nothing real is read or written.
+ * Two checks keep it out today: the list's own filter on metadata.store
+ * (saleHandles: the handle, previous handles and released ones) and ownedBy
+ * (lib/billing.ts). ownedBy only accepts a name among those same handles, so
+ * removing only the metadata filter is an equivalent change no test can
+ * catch. Removing only ownedBy is not (Claude 3 on #3684, LEVE): a plan under
+ * an address the store let go of, or under its own name, paid by another
+ * customer with another email, passes the handle filter and only ownedBy
+ * keeps it out; the last part below catches that. Removing both, before this
+ * file, failed no test. Stripe is simulated; nothing real is read or written.
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -37,12 +41,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return json({ error: { message: `not simulated: ${method} ${url.pathname}` } }, 400);
 }) as typeof fetch;
 
-const plan = (id: string, handle: string, status: string, created: number) => ({
+const SAME = { id: CUSTOMER, email: "two@example.com" };
+const plan = (id: string, handle: string, status: string, created: number, customer: { id: string; email: string } = SAME) => ({
   id,
   object: "subscription",
   status,
   created,
-  customer: { id: CUSTOMER, email: "two@example.com" },
+  customer,
   metadata: { store: handle, tier: "creator", cycle: "month" },
   cancel_at_period_end: false,
   cancel_at: null,
@@ -77,6 +82,18 @@ async function main(): Promise<void> {
   rows = [plan("sub_SecondShopLive1", "second-shop", "active", now - 5 * 86_400), plan("sub_FirstShopLive01", "first-shop", "active", now - 1 * 86_400)];
   is("listed alone", (await plansByCustomer(store)).map((row) => row.id), ["sub_FirstShopLive01"]);
   is("and taken as live", (await liveByCustomer(store))?.subscriptionId, "sub_FirstShopLive01");
+
+  part("Another customer's plan under an address it let go of, or under its own name, is not its own (Claude 3 on #3684, LEVE)");
+  // An address the store released may be another store's now: only its own customer makes such a plan its own (ownedBy).
+  const released = { ...store, releasedHandles: ["old-shop"] };
+  const SOMEONE_ELSE = { id: "cus_SomeoneElse01", email: "else@example.com" };
+  rows = [plan("sub_OldShopElse001", "old-shop", "active", now - 4 * 86_400, SOMEONE_ELSE), plan("sub_OldShopOwn0001", "old-shop", "active", now - 6 * 86_400)];
+  is("under the released address, only the plan it pays as its own customer is listed", (await plansByCustomer(released)).map((row) => row.id), ["sub_OldShopOwn0001"]);
+  rows = [plan("sub_OldShopElse001", "old-shop", "active", now - 4 * 86_400, SOMEONE_ELSE)];
+  is("another customer's plan there is never listed", (await plansByCustomer(released)).map((row) => row.id), []);
+  is("and never keeps it alive", await liveByCustomer(released), null);
+  rows = [plan("sub_FirstShopElse1", "first-shop", "active", now - 4 * 86_400, SOMEONE_ELSE)];
+  is("under its own name, a plan another customer pays with another email is not listed", (await plansByCustomer(store)).map((row) => row.id), []);
 
   is("nothing was written to Stripe", asked.filter((a) => !a.startsWith("GET ")), []);
   done();

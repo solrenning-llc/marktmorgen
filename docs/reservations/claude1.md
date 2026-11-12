@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #4051: inbox reply suggestions under the per-minute AI limit | claude/blissful-carson-2v8k2m-inbox-suggest-limit | `app/api/store/inbox/route.ts`, `components/inbox-studio.tsx`, `tests/inbox-suggest-limit.test.ts` | 12/11/2026 17h50 |

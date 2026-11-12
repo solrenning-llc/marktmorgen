@@ -29,6 +29,7 @@ const REASONS: Record<string, string> = {
   off: "The writing help is not on for this store.",
   failed: "No suggestion came back. Try again. This try counted as one of this month's writing jobs.",
   notes: "That conversation is no longer kept.",
+  slow: "A few at a time: wait a minute, then try again.",
 };
 
 /** Said when this device cannot keep the answer as a draft: the words are only in the box (lib/inbox-drafts.ts). */

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, MAX_SLUG, SITE_STARTERS, type SitePage, slugFrom } from "@/lib/site-page-rules";
 
-const MESSAGES: Record<string, string> = {
+export const MESSAGES: Record<string, string> = {
   too_many: `A store has up to ${MAX_SITE_PAGES} pages of its own. Remove one first.`,
   title: "Give the page a title.",
   slug: "An address is lowercase letters and numbers, with a dash between words.",

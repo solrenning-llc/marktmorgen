@@ -15,7 +15,7 @@ import { claimPictures, readPageExact, writePage } from "@/lib/sales-page-store"
 import { emptyBlock, parsePage, type PageBlock } from "@/lib/sales-page";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, MAX_SLUG, type SitePage, siteKey, slugProblem } from "@/lib/site-page-rules";
 import { pageCopySlug, pageCopyTitle } from "@/lib/site-page-copy";
-import { COPY_HELP, copyDoneWords } from "@/components/site-pages-editor";
+import { COPY_HELP, MESSAGES, copyDoneWords } from "@/components/site-pages-editor";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -161,6 +161,39 @@ async function main(): Promise<void> {
     redis.pipeline = pipeline;
   }
   is("a list read out of shape after a lost answer: not known, the blocks kept, the creator told", [garbled, garbledAnswer, pageKeys()], [true, [503, "copy_unknown"], keysBeforeGarbled + 1]);
+  await setSitePages(OWNER, afterLost.slice(0, listedBefore));
+  // The take-back itself failing once (Claude 1's LOW on #3531): it is tried again, so no blocks stay under a page
+  // that no list names, taking the store's room.
+  const keysBeforeRetry = pageKeys();
+  const listBeforeRetry = JSON.stringify((await storeForEmail(OWNER))!.sitePages);
+  let dropFailed = false;
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:"))) return Promise.reject(new Error("synthetic: the list write fails"));
+    if (!dropFailed && commands[0]?.[0] === "DEL" && String(commands[0][1]).startsWith(`nl:product:page:${statsId}:site-`)) {
+      dropFailed = true;
+      return Promise.reject(new Error("synthetic: the first take-back fails"));
+    }
+    return pipeline.call(redis, commands);
+  };
+  let retried = 0;
+  try {
+    retried = (await post({ action: "copy", id: SITE })).status;
+  } catch {
+    retried = -1;
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("a take-back that fails once is tried again: no page listed and no blocks left behind", [dropFailed, retried !== 200, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBeforeRetry, pageKeys()], [true, true, true, keysBeforeRetry]);
+  // A page with no blocks yet (Claude 1's LOW on #3531): a page record with no blocks is not kept (writePage), so its
+  // copy could not be kept back; the editor would open it as shown and its first save would put it out. Refused,
+  // with nothing added.
+  const EMPTY_SITE = "bbbbbbbbbb";
+  await setSitePages(OWNER, [...afterLost.slice(0, listedBefore), { id: EMPTY_SITE, slug: "blank", title: "Blank", nav: true, target: "", from: -1 }]);
+  const listBeforeEmpty = JSON.stringify((await storeForEmail(OWNER))!.sitePages);
+  const keysBeforeEmpty = pageKeys();
+  const emptyCopy = await post({ action: "copy", id: EMPTY_SITE });
+  is("a page with no blocks is not copied: refused, nothing listed, nothing written", [emptyCopy.status, ((await emptyCopy.json()) as { error?: string }).error, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBeforeEmpty, pageKeys()], [400, "copy_empty", true, keysBeforeEmpty]);
+  is("and the creator is told why, and what to do instead", MESSAGES.copy_empty, "This page has no blocks yet, so there is nothing to copy. Add a new page instead.");
   await setSitePages(OWNER, afterLost.slice(0, listedBefore));
   const now = (await storeForEmail(OWNER))!.sitePages;
   await setSitePages(OWNER, [...now, ...Array.from({ length: MAX_SITE_PAGES - now.length }, (_, n) => ({ id: `f${String(n).padStart(9, "0")}`, slug: `filler-${n}`, title: `Filler ${n}`, nav: false, target: "", from: -1 }))]);

@@ -72,7 +72,7 @@ export function MarkShipped({
           {!mail ? (
             <p className="mt-1">The email&apos;s status has not been confirmed here.</p>
           ) : mail.state === "not_recorded" ? (
-            <p className="mt-1">The email&apos;s acceptance was not recorded. No automatic resend is scheduled.</p>
+            <p className="mt-1">No shipping email is on record for this order. None will be sent automatically.</p>
           ) : null}
           {mail && mail.state !== "accepted" && mail.state !== "not_recorded" ? (
             <p className="mt-1">

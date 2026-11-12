@@ -618,7 +618,8 @@ export default function PrivacyPage() {
           page is drawn and when you start paying. It is not stored. When a
           lower price was given, the country and the percentage are written on
           that order on the creator&apos;s own Stripe account, so they can see
-          why it cost what it did.
+          why it cost what it did. On an order paid with PayPal, only the
+          percentage is kept, with that order&apos;s record, never the country.
         </p>
         <p id="team-places">
           <strong className="text-black">Bought for several people.</strong>{" "}
@@ -789,6 +790,9 @@ export default function PrivacyPage() {
           any labels their import brought or their automatic emails gave you
           (a step can give a label, take one off, or start another of their
           automatic emails) — and never by whether you open an email.
+          When a creator narrows an email to some of their buyers, opens their task agenda or looks a buyer up, we read their sales once and keep that copy of who bought what for one hour,
+          so the count they see says when it was read; it is then deleted,
+          and deleted at once if you ask us to delete your data.
         </p>
         <p id="links">
           <strong className="text-black">Which links you use, only if you allow it.</strong>{" "}
@@ -1793,9 +1797,10 @@ export default function PrivacyPage() {
             serves the site, stores the files, pictures and videos creators
             upload (Vercel Blob) and, when a creator adds their own domain,
             receives that domain&apos;s name to check its records and issue its
-            certificate, and, when a login link is asked for, checks that a
-            person&apos;s browser sent the request rather than a program, by
-            reading the browser&apos;s answer to a small challenge;
+            certificate, and, when a login link is asked for or a store&apos;s
+            page counts its visit, checks that a person&apos;s browser sent the
+            request rather than a program, by reading the browser&apos;s answer
+            to a small challenge;
           </li>
           <li>
             <strong className="text-black">Resend</strong>, our email

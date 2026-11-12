@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 201 [P0-BROWSERS-DEVICES] complement (C1-20261105-1919-C4-1): the doc lists the five automatic matrices and keeps only the manual gaps open | claude1/ax-browsers-matrix-doc | `docs/accessibility-browsers-devices.md` (the paragraph after "Etapa1" only) | 12/11/2026 05h40 |

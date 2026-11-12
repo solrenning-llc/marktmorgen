@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_KEY_NAME, makeKey } from "@/lib/api-keys";
 import { afterMake, makerFor, revokeChecked, shownKeys, turnKeyOn } from "@/lib/api-key-pause";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { can } from "@/lib/team-roles";
 
@@ -26,6 +26,12 @@ import { can } from "@/lib/team-roles";
  * account with neither makes keys as before. The key's record says who made
  * it and whether the session had a second step (lib/api-key-pause.ts).
  *
+ * And from a login of the last 15 minutes, on every account (lib/auth.ts
+ * isFreshSession), as adding a passkey or changing the address asks: "Log out
+ * of all devices" ends sessions, never keys, so a key made from a session
+ * cookie someone took would keep reading the store after the owner logged
+ * every device out. An older session is answered "reauth" and nothing is made.
+ *
  * `{ action: "turn_on", id }` turns back on a key the team's two-step rule
  * paused (owner C3-100): by whoever made it, from a session with a second
  * step.
@@ -48,6 +54,7 @@ export async function POST(request: NextRequest) {
     if (action === "make") {
       const write = body.write === true;
       if (write && !can(role, "import")) return Response.json({ ok: false, error: "role" }, { status: 403 });
+      if (!(await isFreshSession(session))) return Response.json({ ok: false, error: "reauth" }, { status: 403 });
       const step = (await liveSecondStep(email, session)) !== null;
       if (!step && (await hasSecondStep(email))) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
       const maker = makerFor(store.sid, role, email, step);

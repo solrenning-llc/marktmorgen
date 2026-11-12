@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #3932: an API key needs a fresh login | claude/blissful-carson-2v8k2m | `app/api/store/api-keys/route.ts`, `components/api-key-editor.tsx`, `tests/api-key-fresh-login.test.ts` | 12/11/2026 12h04 |

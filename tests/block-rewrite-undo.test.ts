@@ -12,6 +12,7 @@
 import * as React from "react";
 import { BlockRewrite } from "@/components/block-rewrite";
 import type { PageBlock, SalesPage } from "@/lib/sales-page";
+import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
@@ -150,6 +151,20 @@ async function main(): Promise<void> {
     await settle(); await settle();
     is("Undo pressed", h.press(/Undo/), true);
     is("the block is as before the rewrite", h.block, original);
+  }
+
+  // Claude 1's MEDIUM on #3871: the page editor's onChange is kept from the render where the button was pressed. Written
+  // by position, a rewrite that comes back after the blocks were reordered (or the page replaced) lands on whatever
+  // block now sits there and its words are lost. Written by the block's own id, it reaches only that block.
+  part("The page editor writes a rewrite into the block it was asked for, by id, never by position");
+  {
+    const editor = readFileSync("components/page-editor.tsx", "utf8");
+    const at = editor.indexOf("<BlockRewrite");
+    const tag = editor.slice(at, editor.indexOf("/>", at));
+    const onChange = /onChange=\{([^\n]*)\}/.exec(tag)?.[1] ?? "";
+    is("the BlockRewrite's onChange is found", onChange.length > 0, true);
+    is("it matches the draft by the block's id", /\.block\.id === block\.id/.test(onChange), true);
+    is("it never matches by the draft's index", /\bi === index\b/.test(onChange), false);
   }
 }
 

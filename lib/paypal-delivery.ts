@@ -11,7 +11,7 @@ import { ordersLinkWithToken } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
-import { tellCanceled } from "@/lib/paypal-cancel";
+import { tellCanceled, tellCanceledWithoutStore } from "@/lib/paypal-cancel";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
@@ -418,13 +418,14 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
  * Tries again, once a run of the five-minute job, the notices of canceled PayPal orders the sender refused, to their
  * buyers and their creators (lib/paypal-sales.ts, retryCancelNotices): each told from its store as it is now, found by the handle kept with the
  * order and checked by its stats id. A store that cannot be read is tried again next time; a store that is gone, or is
- * another store now, leaves nobody to send from, and the page the buyer comes back to still says the order was
- * canceled.
+ * another store now, has no page and no creator left, so its buyer is told from Marktmorgen, in the words the store
+ * spoke (tellCanceledWithoutStore), never dropped from the queue untold.
  */
 export async function retryPayPalCancelNotices(deadline: number): Promise<number> {
   return retryCancelNotices(deadline, async (canceled, who) => {
     const store = await storeForHandle(canceled.handle);
-    if (!store || store.statsId !== canceled.store) return { buyer: "none", creator: "none" };
+    // Gone, or another store's now: the buyer is still told, from Marktmorgen (lib/paypal-cancel.ts); never dropped.
+    if (!store || store.statsId !== canceled.store) return tellCanceledWithoutStore(canceled, who);
     return tellCanceled(store, canceled, who);
   });
 }

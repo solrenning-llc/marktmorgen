@@ -17,6 +17,8 @@ const S = " ";
 
 const en = {
   subject: (title: string) => `Your PayPal order for ${title} was canceled`,
+  /** What stands for the product's title when it cannot be read (the listing, or the store, is gone). */
+  yourOrder: "your order",
   heading: "Your PayPal order was canceled",
   canceled: (title: string, store: string, days: number) =>
     `Your PayPal order for ${title} from ${store} was canceled. PayPal did not confirm your payment within ${days} days, so you do not get ${title} for this order.`,
@@ -35,6 +37,7 @@ export type PayPalCancelWords = typeof en;
 
 const es: PayPalCancelWords = {
   subject: (title) => `Tu pedido de PayPal de ${title} se ha cancelado`,
+  yourOrder: "tu pedido",
   heading: "Tu pedido de PayPal se ha cancelado",
   canceled: (title, store, days) =>
     `Tu pedido de PayPal de ${title} en ${store} se ha cancelado. PayPal no confirmó tu pago en ${days} días, así que no recibes ${title} con este pedido.`,
@@ -51,6 +54,7 @@ const es: PayPalCancelWords = {
 
 const fr: PayPalCancelWords = {
   subject: (title) => `Votre commande PayPal pour ${title} a été annulée`,
+  yourOrder: "votre commande",
   heading: "Votre commande PayPal a été annulée",
   canceled: (title, store, days) =>
     `Votre commande PayPal pour ${title} chez ${store} a été annulée. PayPal n'a pas confirmé votre paiement dans un délai de ${days} jours, vous ne recevez donc pas ${title} pour cette commande.`,
@@ -67,6 +71,7 @@ const fr: PayPalCancelWords = {
 
 const de: PayPalCancelWords = {
   subject: (title) => `Ihre PayPal-Bestellung für ${title} wurde storniert`,
+  yourOrder: "Ihre Bestellung",
   heading: "Ihre PayPal-Bestellung wurde storniert",
   canceled: (title, store, days) =>
     `Ihre PayPal-Bestellung für ${title} bei ${store} wurde storniert. PayPal hat Ihre Zahlung nicht innerhalb von ${days} Tagen bestätigt, daher erhalten Sie ${title} für diese Bestellung nicht.`,
@@ -83,6 +88,7 @@ const de: PayPalCancelWords = {
 
 const it: PayPalCancelWords = {
   subject: (title) => `Il tuo ordine PayPal per ${title} è stato annullato`,
+  yourOrder: "il tuo ordine",
   heading: "Il tuo ordine PayPal è stato annullato",
   canceled: (title, store, days) =>
     `Il tuo ordine PayPal per ${title} da ${store} è stato annullato. PayPal non ha confermato il tuo pagamento entro ${days} giorni, quindi non ricevi ${title} con questo ordine.`,
@@ -99,6 +105,7 @@ const it: PayPalCancelWords = {
 
 const nl: PayPalCancelWords = {
   subject: (title) => `Je PayPal-bestelling voor ${title} is geannuleerd`,
+  yourOrder: "je bestelling",
   heading: "Je PayPal-bestelling is geannuleerd",
   canceled: (title, store, days) =>
     `Je PayPal-bestelling voor ${title} bij ${store} is geannuleerd. PayPal heeft je betaling niet binnen ${days} dagen bevestigd, dus je krijgt ${title} niet voor deze bestelling.`,
@@ -115,6 +122,7 @@ const nl: PayPalCancelWords = {
 
 const pt: PayPalCancelWords = {
   subject: (title) => `A sua encomenda PayPal de ${title} foi cancelada`,
+  yourOrder: "a sua encomenda",
   heading: "A sua encomenda PayPal foi cancelada",
   canceled: (title, store, days) =>
     `A sua encomenda PayPal de ${title}, feita a ${store}, foi cancelada. O PayPal não confirmou o seu pagamento no prazo de ${days} dias, por isso não recebe ${title} com esta encomenda.`,

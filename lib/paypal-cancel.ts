@@ -93,14 +93,15 @@ export function creatorNotice(input: { title: string; money: string; order: stri
  */
 export async function tellCanceled(store: Store, canceled: CanceledOrder, who: TellWho): Promise<TellOutcomes> {
   const product = await readListing(store, canceled.product).catch(() => null);
-  const title = product?.title || "your order";
+  // The listing gone or unread: the buyer's notice says "your order" in the store's words, the creator's in English.
+  const title = product?.title || "";
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
   const told: TellOutcomes = { buyer: "none", creator: "none" };
   if (who !== "creator" && canceled.email) {
     const notice = buyerNotice({
       language: store.language,
       storeName: store.name,
-      title,
+      title: title || paypalCancelWords(store.language).yourOrder,
       money: formatMoney(canceled.cents, canceled.currency, locale),
       order: canceled.order,
       charged: canceled.charged,
@@ -119,7 +120,7 @@ export async function tellCanceled(store: Store, canceled: CanceledOrder, who: T
   }
   if (who !== "buyer") {
     const notice = creatorNotice({
-      title,
+      title: title || "your order",
       money: formatMoney(canceled.cents, canceled.currency, "en-US"),
       order: canceled.order,
       charged: canceled.charged,
@@ -137,5 +138,56 @@ export async function tellCanceled(store: Store, canceled: CanceledOrder, who: T
       idempotencyKey: `nimbus-paypal-cancel-creator:${canceled.order}`,
     }).catch(() => "refused" as const);
   }
+  return told;
+}
+
+/**
+ * What the buyer is told when the store is gone before the notice went (deleted, or its address now another
+ * store's): from Marktmorgen, in the language the store spoke at the cancellation (English for an order canceled
+ * before that was kept), naming the store as it was. No link to a store that is no longer there, and no "reply to
+ * reach the store": replies go to Marktmorgen support. A payment PayPal still held is answered as the page the buyer
+ * comes back to answers it: the money went to the creator's PayPal account, so a dispute in PayPal is the way. Pure.
+ */
+export function buyerNoticeWithoutStore(input: { language: unknown; storeName: string; money: string; order: string; charged: CanceledOrder["charged"] }): Notice {
+  const { storeName, money, order, charged } = input;
+  const w = paypalCancelWords(input.language);
+  return {
+    subject: w.subject(w.yourOrder).slice(0, 200),
+    heading: w.heading,
+    paragraphs: [
+      w.canceled(w.yourOrder, storeName, DAYS),
+      charged === "none" ? w.notCharged : w.pagePending(storeName),
+      w.orderLine(order, money),
+      w.questions("Marktmorgen"),
+    ],
+  };
+}
+
+/**
+ * Tells the buyer of a canceled order whose store is gone (buyerNoticeWithoutStore), under the same idempotency key
+ * as the store's own notice, so one buyer is never told twice. The creator has no store left to be written to:
+ * their side is "none". Returns what became of each, as tellCanceled does.
+ */
+export async function tellCanceledWithoutStore(canceled: CanceledOrder, who: TellWho): Promise<TellOutcomes> {
+  const told: TellOutcomes = { buyer: "none", creator: "none" };
+  if (who === "creator" || !canceled.email) return told;
+  const language = canceled.language ?? "en";
+  const notice = buyerNoticeWithoutStore({
+    language,
+    storeName: canceled.storeName || `@${canceled.handle}`,
+    money: formatMoney(canceled.cents, canceled.currency, LANGUAGES[parseLanguage(language)].locale),
+    order: canceled.order,
+    charged: canceled.charged,
+  });
+  told.buyer = await sendEmailOutcome({
+    meter: { by: "order" },
+    from: NIMBUS_FROM,
+    to: canceled.email,
+    replyTo: SUPPORT,
+    subject: notice.subject,
+    text: noticeText(notice),
+    html: noticeHtml(notice, LANGUAGES[parseLanguage(language)].locale),
+    idempotencyKey: `nimbus-paypal-cancel:${canceled.order}`,
+  }).catch(() => "refused" as const);
   return told;
 }

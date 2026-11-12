@@ -415,6 +415,13 @@ export type CanceledOrder = {
   charged: "pending" | "none";
   /** When it was canceled, in seconds. */
   at: number;
+  /**
+   * The store's name and language when it was canceled, so its buyer is still told in its words if the store is gone
+   * before the notice goes (lib/paypal-delivery.ts, retryPayPalCancelNotices). Absent on orders canceled before
+   * 12 November 2026: then the store's own record, or English with its address, stands in.
+   */
+  storeName?: string;
+  language?: string;
 };
 
 /**
@@ -442,7 +449,8 @@ async function readCanceled(order: string): Promise<CanceledOrder | null> {
   if (
     !c || typeof c !== "object" || c.order !== order || typeof c.store !== "string" || typeof c.handle !== "string" || typeof c.product !== "string" ||
     !Number.isSafeInteger(c.cents) || typeof c.currency !== "string" || (c.email !== null && typeof c.email !== "string") ||
-    (c.charged !== "pending" && c.charged !== "none") || !Number.isSafeInteger(c.at)
+    (c.charged !== "pending" && c.charged !== "none") || !Number.isSafeInteger(c.at) ||
+    (c.storeName !== undefined && typeof c.storeName !== "string") || (c.language !== undefined && typeof c.language !== "string")
   ) {
     throw new UnknownReplyError("a canceled PayPal order");
   }
@@ -936,7 +944,7 @@ export async function deliverPayPal(input: {
  *      buyer nor the creator is left without a word because a sender refused it once.
  */
 async function cancelOrder(
-  statsId: string,
+  about: { statsId: string; name: string; language: string },
   order: string,
   opened: Opened,
   email: string,
@@ -944,8 +952,12 @@ async function cancelOrder(
   tell: ((order: CanceledOrder, who: TellWho) => Promise<TellOutcomes>) | undefined,
 ): Promise<void> {
   if (!tell) return;
+  const statsId = about.statsId;
   const at = Math.floor(Date.now() / 1000);
-  const canceled: CanceledOrder = { order, store: statsId, handle: opened.h, product: opened.p, cents: opened.c, currency: opened.cur, email: email || null, charged, at };
+  const canceled: CanceledOrder = {
+    order, store: statsId, handle: opened.h, product: opened.p, cents: opened.c, currency: opened.cur, email: email || null, charged, at,
+    storeName: about.name.slice(0, 200), language: about.language.slice(0, 10),
+  };
   const wrote = repliesFor(
     await redisPipeline([
       ["SET", canceledKey(order), JSON.stringify(canceled), "NX", "EX", CANCELED_KEPT_SECONDS],
@@ -1085,11 +1097,11 @@ export async function watchPayPal(
     // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
       if (done.status === "VOIDED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
-      else if (overdue && typeof done.status === "string" && NOT_CHARGED.has(done.status)) await cancelOrder(statsId, order, opened, email, "none", on.canceled);
+      else if (overdue && typeof done.status === "string" && NOT_CHARGED.has(done.status)) await cancelOrder({ statsId, name: store.name, language: store.language }, order, opened, email, "none", on.canceled);
       continue;
     }
     if (capture.status === "PENDING") {
-      if (overdue) await cancelOrder(statsId, order, opened, email, "pending", on.canceled);
+      if (overdue) await cancelOrder({ statsId, name: store.name, language: store.language }, order, opened, email, "pending", on.canceled);
       continue;
     }
     if (typeof capture.status !== "string") continue;

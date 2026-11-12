@@ -83,13 +83,15 @@ jobs:
         run: node node_modules/playwright-core/cli.js install ${{ runner.os == 'Windows' && 'chromium' || 'webkit' }}
       - name: Check owned preparation recovery and refusal cases
         working-directory: tooling/screen-reader
-        run: node --test owned-repository.test.mjs setup-owned-reader.test.mjs navigate-to-content.test.mjs windows-foreground.test.mjs
+        run: node --test owned-repository.test.mjs setup-owned-reader.test.mjs install-reader-assets.test.mjs navigate-to-content.test.mjs windows-foreground.test.mjs
       - name: Configure real screen reader on disposable standard runner
         working-directory: tooling/screen-reader
         run: node setup-owned-reader.mjs
       - name: Install version-matched real reader assets
         working-directory: tooling/screen-reader
-        run: node node_modules/@guidepup/setup/bin/guidepup install
+        # Runs the same pinned `guidepup install`; repeats it once only after the
+        # exact pinned asset hit a release-host 504 or fetch failure.
+        run: node install-reader-assets.mjs
       - name: Check bounded reader preflight ownership and refusal cases
         working-directory: tooling/screen-reader
         run: node --test reset-voiceover.test.mjs

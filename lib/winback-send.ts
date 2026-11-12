@@ -45,6 +45,8 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
+/** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 11/11/2026). */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (account: string, sub: string) => `nl:wb:${account}:${sub}`;
@@ -118,12 +120,14 @@ async function cameBack(account: string, customer: string, product: string, budg
     const listed = await onAccount("GET", account, `/subscriptions?customer=${customer}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
     const subs: unknown = listed.data;
     if (!Array.isArray(subs) || (listed.has_more !== true && listed.has_more !== false)) return null;
-    // Each membership read whole (Codex N on #2714): a status in words and its metadata as an object. A row missing
-    // either cannot show it is to another product, so the answer is unknown, never "has not come back".
+    // Each membership read whole (Codex N on #2714): a status Stripe names and its metadata as a map of strings. A row
+    // with a status Stripe has no name for, or a product that is not a string, cannot show it is to another product
+    // either (rule 24, the class of Codex CX1's MEDIUM on #3598), so the answer is unknown, never "has not come back".
     for (const sub of subs as unknown[]) {
       if (!sub || typeof sub !== "object") return null;
       const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
-      if (typeof status !== "string" || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+      if (typeof status !== "string" || !SUB_STATUSES.has(status) || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+      if (!Object.values(metadata).every((value) => typeof value === "string")) return null;
       if (LIVE.has(status) && (metadata as Record<string, unknown>).product === product) return true;
     }
     if (listed.has_more === false) return false;
@@ -344,25 +348,39 @@ export async function sendWinBacks(deadline: number, now = Date.now()): Promise<
 /** `percent` and `months` are the offer as it was emailed, whatever the setting says now. */
 export type WinBackGrant = { email: string; product: string; option: string; coupon: string; until: number; percent: number; months: number };
 
-/** Who a link in a come-back email is for, on this store and product, while it works. */
+/**
+ * Who a link in a come-back email is for, on this store and product, while it works.
+ *
+ * null only for a link that is not one (a malformed token), an absent key (an
+ * offer never sent or ended) or a whole grant for another store, another
+ * product or no offer. Any other reply, or none, throws UnknownReplyError
+ * (CX-123 rule 24): an unknown reading is never told as an offer that has ended.
+ */
 export async function readWinBack(store: Store, product: string, token: string): Promise<WinBackGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !store.statsId || !isRedisConfigured()) return null;
-  const [raw, ttl] = await redisPipeline([["GET", linkKey(token)], ["TTL", linkKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)], ["TTL", linkKey(token)]]), 2);
+  if (!replies) throw new UnknownReplyError("a come-back link");
+  const [raw, ttl] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string" || typeof ttl !== "number" || !Number.isSafeInteger(ttl)) throw new UnknownReplyError("a come-back link");
+  let parsed: unknown;
   try {
-    const g = JSON.parse(raw) as { s?: unknown; e?: unknown; p?: unknown; o?: unknown; c?: unknown; pc?: unknown; m?: unknown };
-    if (g.s !== store.statsId || g.p !== product || typeof g.e !== "string" || typeof g.c !== "string" || !g.c) return null;
-    const left = Number(ttl) > 0 ? Number(ttl) : 0;
-    const percent = typeof g.pc === "number" ? g.pc : 0;
-    const months = typeof g.m === "number" ? g.m : 1;
-    if (!percent) return null;
-    return { email: g.e, product, option: typeof g.o === "string" ? g.o : "", coupon: g.c, until: Math.floor(Date.now() / 1000) + left, percent, months };
+    parsed = JSON.parse(raw);
   } catch {
-    return null;
+    throw new UnknownReplyError("a come-back link");
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError("a come-back link");
+  const g = parsed as { s?: unknown; e?: unknown; p?: unknown; o?: unknown; c?: unknown; pc?: unknown; m?: unknown };
+  if (g.s !== store.statsId || g.p !== product || typeof g.e !== "string" || typeof g.c !== "string" || !g.c) return null;
+  const left = ttl > 0 ? ttl : 0;
+  const percent = typeof g.pc === "number" ? g.pc : 0;
+  const months = typeof g.m === "number" ? g.m : 1;
+  if (!percent) return null;
+  return { email: g.e, product, option: typeof g.o === "string" ? g.o : "", coupon: g.c, until: Math.floor(Date.now() / 1000) + left, percent, months };
 }
 
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
+/** "unknown": the link could not be read just now (readWinBack threw); never said as "expired". */
+export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "unknown" };
 
 /** The checkout a come-back link opens: this product, this address, the offer applied, no second trial. */
 export async function openWinBack(
@@ -373,7 +391,14 @@ export async function openWinBack(
   /** The box to start access at once, checked on the button's page (lib/digital-consent.ts). */
   consent: DigitalConsent | null = null,
 ): Promise<OpenResult> {
-  const grant = await readWinBack(store, productId, token);
+  let grant: WinBackGrant | null;
+  try {
+    grant = await readWinBack(store, productId, token);
+  } catch (error) {
+    // Redis answered the link oddly or not at all: nothing opened, nothing charged, and not said as ended (rule 24).
+    console.error("reading a come-back link failed", store.handle, error);
+    return { ok: false, reason: "unknown" };
+  }
   if (!grant) return { ok: false, reason: "expired" };
   const product = await readProduct(store, productId);
   if (!product?.recurring) return { ok: false, reason: "unavailable" };

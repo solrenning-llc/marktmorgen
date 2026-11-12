@@ -19,14 +19,33 @@ const walk = (dir: string) => {
 };
 walk(root);
 
-test("no sign-in route logs an error object", () => {
-assert.ok(routes.length >= 10, "the sign-in routes were found");
-const leaks: string[] = [];
-for (const path of routes) {
-  readFileSync(path, "utf8").split("\n").forEach((line, i) => {
+/** The 1-based lines of `source` whose console call may carry a value. */
+function consoleLeaks(source: string): number[] {
+  const lines: number[] = [];
+  source.split("\n").forEach((line, i) => {
     // A console call with anything after its label: the label is a fixed string, never a value.
-    if (/console\.(?:error|warn|log|info)\((?:"[^"]*"|`[^`]*`|'[^']*'|\w+)\s*,/.test(line)) leaks.push(`${path.slice(process.cwd().length + 1)}:${i + 1}`);
+    if (/console\.(?:error|warn|log|info)\((?:"[^"]*"|`[^`]*`|'[^']*'|\w+)\s*,/.test(line)) lines.push(i + 1);
   });
+  return lines;
 }
-assert.deepEqual(leaks, [], "no route passes an error or a value to the server log");
+
+test("the scanner lists every console call that is not one fixed string", () => {
+  const leaking = [
+    "console.error(error);",
+    'console.error(new Error("private@example.test token=secret"));',
+    "console.warn(`failed for ${email}`);",
+    'console.log("ok", detail);',
+  ];
+  const missed = leaking.filter((call) => consoleLeaks(`const email = "a";\n${call}\n`).join() !== "2");
+  assert.deepEqual(missed, [], "every leaking call is listed on its own line");
+  assert.deepEqual(consoleLeaks('console.error("Sign-in failed");\n'), [], "a fixed label alone is allowed");
+});
+
+test("no sign-in route logs an error object", () => {
+  assert.ok(routes.length >= 10, "the sign-in routes were found");
+  const leaks: string[] = [];
+  for (const path of routes) {
+    for (const line of consoleLeaks(readFileSync(path, "utf8"))) leaks.push(`${path.slice(process.cwd().length + 1)}:${line}`);
+  }
+  assert.deepEqual(leaks, [], "no route passes an error or a value to the server log");
 });

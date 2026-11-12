@@ -12,7 +12,9 @@
  *     moving, the stage stays chosen, Escape or "Keep it where it is" moves
  *     nothing and gives focus back to "Move", and "Close as won/lost" moves
  *     by the same write as any move; the question stands only while nothing
- *     changed under it.
+ *     changed under it;
+ *   - the deal editor asks the same before saving a deal moved into a won or
+ *     lost stage, with "Keep editing" first.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -59,6 +61,20 @@ part("In the board");
   is("the safer button comes first", group.indexOf("deal-close-keep-") < group.indexOf("deal-close-yes-"), true);
   is("keeping it moves nothing and gives focus back to Move", /const keepOpen = \(id: string\) => \{ setClosing\(null\); focusLater\(`deal-move-\$\{id\}`\); \};/.test(board), true);
   is("closing moves it by the same write as any move", /function confirmClose\(deal: Deal, to: string\) \{[\s\S]*?setClosing\(null\);[\s\S]*?moveDeal\(deal, to\);/.test(board), true);
+}
+
+part("In the deal editor");
+{
+  const board = readFileSync("components/deals-board.tsx", "utf8");
+  const save = board.slice(board.indexOf("function saveDeal("), board.indexOf("const firstOpen ="));
+  is("saving a deal moved into a won or lost stage asks first, before anything is sent", /if \(!closeConfirmed && opened\.id && opened\.stage !== opened\.base\.stage && closesDeal\(kindOf\(opened\.base\.stage\), kindOf\(opened\.stage\)\)\) \{\s*setError\(null\);\s*setSaveClosing\(opened\.stage\);\s*moveFocus\("deal-save-close"\);\s*return;\s*\}/.test(save) && save.indexOf("setSaveClosing(opened.stage)") < save.indexOf("void run("), true);
+  is("a new deal is not asked about (only a saved deal moved)", /opened\.id && opened\.stage !== opened\.base\.stage/.test(save), true);
+  const group = board.slice(board.indexOf('{saveClosing !== null && draft.id && draft.stage === saveClosing ? ('), board.indexOf('{saveClosing !== null && draft.id && draft.stage === saveClosing ? (') + 2200);
+  is("it stands only while the editor still has that stage", group.length > 0 && group.startsWith("{saveClosing !== null && draft.id && draft.stage === saveClosing ? ("), true);
+  is("a named group with its text, Escape keeps editing", [/role="group" tabIndex=\{-1\} aria-labelledby="deal-save-close-title" aria-describedby="deal-save-close-text"/.test(group), /e\.key === "Escape" && !locked\) keepEditing\(\)/.test(group)], [true, true]);
+  is("Keep editing first, then the button that saves and closes", group.indexOf("deal-save-close-keep") < group.indexOf("deal-save-close-yes") && /onClick=\{\(\) => saveDeal\(true\)\}/.test(group), true);
+  is("Keep editing saves nothing and gives focus back to Save", /const keepEditing = \(\) => \{ setSaveClosing\(null\); focusLater\(DEAL_SAVE_ID\); \};/.test(board), true);
+  is("Save itself starts unconfirmed", board.includes("onClick={() => saveDeal()}"), true);
 }
 
 done();

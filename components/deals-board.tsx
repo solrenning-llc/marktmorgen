@@ -150,6 +150,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const [confirming, setConfirming] = useState<{ id: string; stage: string } | null>(null);
   // A move into a stage that closes the deal (won or lost), waiting for its second press (553 [DB1], 3.3.6).
   const [closing, setClosing] = useState<{ id: string; from: string; to: string } | null>(null);
+  // The same question in the deal editor: the stage the editor would save the deal into, waiting for its second press.
+  const [saveClosing, setSaveClosing] = useState<string | null>(null);
   const clearMessages = () => { setError(null); setInvalid(null); setLost(null); setConfirming(null); };
   const openDraft = (deal: Deal, from: string) => { opener.current = from; const base = draftFromDeal(deal, currency); clearMessages(); setDraft({ ...base, base, version: versions[deal.id] ?? "", conflicts: [] }); };
   const dealNameInput = useRef<HTMLInputElement>(null);
@@ -317,9 +319,17 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   };
   const dealInvalidFor = (error: string) => { const id = dealErrorField(error); return id ? [id] : []; };
 
-  function saveDeal() {
+  function saveDeal(closeConfirmed = false) {
     if (!draft || locked || writeUnconfirmed) return;
     const opened = draft;
+    // A saved deal moved by the editor into a won or lost stage asks first, as on the board (553 [DB1]).
+    if (!closeConfirmed && opened.id && opened.stage !== opened.base.stage && closesDeal(kindOf(opened.base.stage), kindOf(opened.stage))) {
+      setError(null);
+      setSaveClosing(opened.stage);
+      moveFocus("deal-save-close");
+      return;
+    }
+    setSaveClosing(null);
     const badMoney = () => showInvalid([dealFieldId("value")], MONEY_WORDS);
     // A deal needs a name: said beside it before anything is sent.
     if (!opened.title.trim()) return showInvalid([dealFieldId("title")], MESSAGES.title);
@@ -424,6 +434,13 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const keepDeal = (id: string) => { setConfirming(null); focusLater(`deal-remove-${id}`); };
   /** The closing question's words for a deal and the stage it would move to (553 [DB1]). */
   const closingWords = (deal: Deal, to: string) => closeWords({ kind: kindOf(to) === "lost" ? "lost" : "won", title: deal.title, stage: stageName(to), amount: deal.cents ? money(deal.cents) : null });
+  /** The editor's closing question: the deal's name and amount as typed in the editor, the stage chosen there. */
+  const editorClosingWords = (d: DealDraft) => {
+    const cents = d.value.trim() ? readMoney(d.value, currency as Currency) : 0;
+    return closeWords({ kind: kindOf(d.stage) === "lost" ? "lost" : "won", title: d.title, stage: stageName(d.stage), amount: cents ? money(cents) : null });
+  };
+  /** "Keep editing": nothing is saved, the editor stays as it is, focus back on Save. */
+  const keepEditing = () => { setSaveClosing(null); focusLater(DEAL_SAVE_ID); };
   /** "Keep it where it is": the stage stays chosen, nothing moves, focus back on "Move". */
   const keepOpen = (id: string) => { setClosing(null); focusLater(`deal-move-${id}`); };
   /** "Close as won/lost": the move the creator asked for, by the same write as any move. */
@@ -680,13 +697,28 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
             {/* Why the editor's controls are off now, beside them (they point here); not a live region. */}
             {why && (locked || writeUnconfirmed) ? <p id={EDITOR_WHY_ID} className="mt-4 text-sm font-semibold text-ink-soft">{why}</p> : null}
             <div className="mt-5 flex flex-wrap gap-3">
-              <button type="button" id={DEAL_SAVE_ID} className="btn btn-primary" {...offProps(locked || writeUnconfirmed, EDITOR_WHY_ID)} onClick={saveDeal}>
+              <button type="button" id={DEAL_SAVE_ID} className="btn btn-primary" {...offProps(locked || writeUnconfirmed, EDITOR_WHY_ID)} onClick={() => saveDeal()}>
                 {busy ? "Saving…" : "Save deal"}
               </button>
               <button type="button" id="deal-cancel" className="btn btn-secondary" {...offProps(locked, EDITOR_WHY_ID)} onClick={() => { if (!locked) closeDeal(); }}>
                 Cancel
               </button>
             </div>
+            {/* Stands only while the editor still has that stage chosen (553 [DB1]); the safer choice first (3.3.6). */}
+            {saveClosing !== null && draft.id && draft.stage === saveClosing ? (
+              <div id="deal-save-close" role="group" tabIndex={-1} aria-labelledby="deal-save-close-title" aria-describedby="deal-save-close-text" className="mt-3 rounded-xl bg-sand p-3" onKeyDown={e => { if (e.key === "Escape" && !locked) keepEditing(); }}>
+                <p id="deal-save-close-title" className="font-semibold text-ink [overflow-wrap:anywhere]">{editorClosingWords(draft).question}</p>
+                <p id="deal-save-close-text" className="mt-1 text-ink-soft">{editorClosingWords(draft).text}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" id="deal-save-close-keep" className="btn btn-secondary btn-sm" {...offProps(locked, EDITOR_WHY_ID)} onClick={() => { if (!locked) keepEditing(); }}>
+                    Keep editing
+                  </button>
+                  <button type="button" id="deal-save-close-yes" className="btn btn-primary btn-sm" {...offProps(locked || writeUnconfirmed, EDITOR_WHY_ID)} onClick={() => saveDeal(true)}>
+                    {editorClosingWords(draft).close}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </fieldset>
         ) : null}
 

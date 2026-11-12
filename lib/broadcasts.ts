@@ -365,7 +365,7 @@ export type CreateResult =
   // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
   // `startsNow`: it is due already, so the request that wrote it starts it (the scheduled job takes up the rest).
   | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined; startsNow: boolean }
-  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" }
+  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" | "who" | "narrow" }
   // Its readings of the buyers could not be held (lib/store-allowance.ts holdAllowanceAt): the sentence says why.
   | { ok: false; reason: "studio_used"; message: string };
 
@@ -417,8 +417,13 @@ export async function createBroadcast(
   if (notProductId && !hasProduct(store, notProductId)) return { ok: false, reason: "product" };
   // "Only the people who got X, who have not got X" is nobody, every time.
   if (notProductId && notProductId === productId) return { ok: false, reason: "empty" };
-  const who: Who = WHO.includes(input.who as Who) ? (input.who as Who) : "all";
+  // A group or a narrowing that cannot be read exactly is refused, never read as a wider one (the whole list): the
+  // same rule a draft and a kept record follow (sameNarrow). Nothing asked is everyone, as before.
+  const askedWho = input.who === undefined || input.who === null || input.who === "" ? "all" : input.who;
+  if (!WHO.includes(askedWho as Who)) return { ok: false, reason: "who" };
+  const who = askedWho as Who;
   const asNarrowed = readNarrow(input.narrow);
+  if (input.narrow !== undefined && input.narrow !== null && (typeof input.narrow !== "object" || Array.isArray(input.narrow) || !sameNarrow(input.narrow as Record<string, unknown>, asNarrowed))) return { ok: false, reason: "narrow" };
   const narrow = isNarrowed(asNarrowed) ? asNarrowed : null;
   // A label as a file or a sequence writes one: cleaned, at most MAX_TAG_LENGTH; empty is none.
   const label = typeof input.label === "string" ? readTags([input.label])[0] ?? null : null;

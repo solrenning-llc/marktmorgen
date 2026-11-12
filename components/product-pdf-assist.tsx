@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AiDraftReview } from "@/components/ai-draft-review";
 import { AiStepsAssist } from "@/components/ai-steps-assist";
+import { freshChecks } from "@/lib/ai-draft-review";
 import { READ_PDF_JOBS } from "@/lib/ai-rules";
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { type AboutState, PDF_ASSIST_COPY, type PdfProposal, benefitsList, pdfAssistSteps, readProposal, withBenefits, withoutList } from "@/lib/product-pdf-assist-rules";
@@ -20,7 +22,11 @@ const isProposal = (value: unknown): value is PdfProposal => readProposal(value)
  * short description that did not stick to the PDF is left as it was, and
  * said so. "Put back what was there" restores all three boxes and moves the
  * focus to what was said. It saves nothing: the creator reads, changes
- * anything and presses the form's Save.
+ * anything and presses the form's Save. What it fills in is an AI draft
+ * (756 [STN3]): the three checks are drawn under it, afresh at each
+ * suggestion, and told to the form through onReviewChange, which holds its
+ * save until all three are checked; putting back what was there takes the
+ * draft and its checks away (Codex G's MEDIUM on #3447).
  *
  * It is offered only once the form holds the full description: while that is
  * still being read, or could not be read, the box is not drawn, because what
@@ -31,14 +37,18 @@ export function ProductPdfAssist({
   fields,
   aboutState,
   onChange,
+  onReviewChange,
 }: {
   productId: string;
   fields: Fields;
   /** Whether the form holds the full description yet (components/product-editor.tsx, loadingAbout and aboutUnread). */
   aboutState: AboutState;
   onChange: (next: Fields) => void;
+  /** The checks under the draft it filled in, as they change, and null once there is none (components/product-editor.tsx). */
+  onReviewChange?: (checks: boolean[] | null) => void;
 }) {
   const [before, setBefore] = useState<Fields | null>(null);
+  const [checks, setChecks] = useState<boolean[] | null>(null);
   const [status, setStatus] = useState("");
   // The list this box put in front of the description, so the next suggestion replaces it instead of adding another.
   const inserted = useRef<string | null>(null);
@@ -47,10 +57,17 @@ export function ProductPdfAssist({
   // The same for the form's own change, so what was typed meanwhile in the other boxes is kept.
   const latest = useRef(fields);
   const change = useRef(onChange);
+  const review = useRef(onReviewChange);
   useEffect(() => {
     latest.current = fields;
     change.current = onChange;
-  }, [fields, onChange]);
+    review.current = onReviewChange;
+  }, [fields, onChange, onReviewChange]);
+
+  function tell(next: boolean[] | null) {
+    setChecks(next);
+    review.current?.(next);
+  }
 
   function fill(proposal: PdfProposal) {
     const now = { ...latest.current };
@@ -59,6 +76,8 @@ export function ProductPdfAssist({
     // The undo puts back what the boxes had before the first suggestion used, not one used before this one.
     setBefore((kept) => kept ?? now);
     change.current({ title: proposal.title ?? now.title, summary: proposal.summary ?? now.summary, about: about ?? now.about });
+    // A new draft, whatever was checked under the one before: its three checks start again.
+    tell(freshChecks());
     setStatus(
       [proposal.title === null ? PDF_ASSIST_COPY.keptTitle : "", proposal.summary === null ? PDF_ASSIST_COPY.keptSummary : "", about === null ? PDF_ASSIST_COPY.tooLong : ""]
         .filter(Boolean)
@@ -71,6 +90,7 @@ export function ProductPdfAssist({
     change.current(before);
     inserted.current = null;
     setBefore(null);
+    tell(null);
     setStatus(PDF_ASSIST_COPY.undone);
     // The button goes away: the focus moves to what was said, never to the top of the page.
     statusRef.current?.focus();
@@ -97,6 +117,7 @@ export function ProductPdfAssist({
       <p ref={statusRef} tabIndex={-1} className="text-sm text-ink" role="status" aria-live="polite">
         {status}
       </p>
+      {checks ? <AiDraftReview checks={checks} onToggle={(index, ticked) => tell(checks.map((was, at) => (at === index ? ticked : was)))} /> : null}
       {before ? (
         <button type="button" className="btn btn-ghost btn-sm inline-flex min-h-11 items-center" onClick={undo}>
           {PDF_ASSIST_COPY.undo}

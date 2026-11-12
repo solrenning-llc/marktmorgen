@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     is("no draft yet: no checks drawn, nothing told to the form", [review(), b.reviews], [undefined, []]);
     stepsBox(b.mounted.tree())?.onResult?.(FIRST);
     await b.mounted.settle();
-    is("the draft fills the form and draws the three checks, none ticked", review()?.props?.checks, [false, false, false]);
+    is("the draft fills the form and draws the three checks, none checked", review()?.props?.checks, [false, false, false]);
     is("the form is told the draft waits on its checks", b.reviews.at(-1), [false, false, false]);
     const toggle = (index: number) => (review()?.props?.onToggle as ((i: number, t: boolean) => void) | undefined)?.(index, true);
     toggle(0);
@@ -117,10 +117,10 @@ async function main(): Promise<void> {
     await b.mounted.settle();
     toggle(2);
     await b.mounted.settle();
-    is("ticking the three is told to the form", b.reviews.at(-1), [true, true, true]);
+    is("checking the three is told to the form", b.reviews.at(-1), [true, true, true]);
     stepsBox(b.mounted.tree())?.onResult?.(SECOND);
     await b.mounted.settle();
-    is("a second suggestion is a new draft: its checks start again, none ticked", [review()?.props?.checks, b.reviews.at(-1)], [[false, false, false], [false, false, false]]);
+    is("a second suggestion is a new draft: its checks start again, none checked", [review()?.props?.checks, b.reviews.at(-1)], [[false, false, false], [false, false, false]]);
     click(button(b.mounted.tree(), PDF_ASSIST_COPY.undo));
     await b.mounted.settle();
     is("put back what was there: no draft left, no checks drawn, the form told so", [review(), b.reviews.at(-1)], [undefined, null]);

@@ -343,8 +343,10 @@ export function ProductForm({
   // MEDIUM on #3441).
   const [describeChecks, setDescribeChecks] = useState<boolean[] | null>(null);
   const [ideaChecks, setIdeaChecks] = useState<boolean[] | null>(null);
+  // The PDF box's own (name, short description and benefits from the product's PDF; Codex G's MEDIUM on #3447).
+  const [pdfChecks, setPdfChecks] = useState<boolean[] | null>(null);
   // The save waits while any drawn review is incomplete.
-  const aiHold = aiDraftHold(ideaChecks) ?? aiDraftHold(describeChecks);
+  const aiHold = aiDraftHold(ideaChecks) ?? aiDraftHold(describeChecks) ?? aiDraftHold(pdfChecks);
   const [aiHeld, setAiHeld] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
@@ -463,6 +465,7 @@ export function ProductForm({
           fields={{ title: draft.title, summary: draft.summary, about: draft.about }}
           aboutState={loadingAbout ? "loading" : aboutUnread ? "unread" : "ready"}
           onChange={(next) => setDraft({ ...draft, ...next })}
+          onReviewChange={setPdfChecks}
         />
       ) : null}
 

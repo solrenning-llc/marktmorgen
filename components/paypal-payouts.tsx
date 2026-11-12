@@ -182,7 +182,13 @@ export function PayPalPayouts({
                 onClick={async () => {
                   const data = await act("settle");
                   if (data) {
-                    toast(Number(data.paid) ? `${data.paid} confirmed as paid.` : "Nothing new from PayPal yet.");
+                    toast(
+                      data.asked === false
+                        ? "PayPal was asked less than a minute ago. Try again in a minute."
+                        : Number(data.paid)
+                          ? `${data.paid} confirmed as paid.`
+                          : "Nothing new from PayPal yet.",
+                    );
                     router.refresh();
                   }
                 }}

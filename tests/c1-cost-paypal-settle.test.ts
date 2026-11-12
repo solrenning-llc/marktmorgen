@@ -22,6 +22,7 @@ const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 
 let tokens = 0;
+let tokenDown = false;
 let reads = 0;
 const items = new Map<string, string>();
 let batches = 0;
@@ -33,6 +34,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   if (url.pathname === "/v1/oauth2/token") {
     tokens += 1;
+    if (tokenDown) return json({ error: "invalid_client" }, 401);
     return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: "https://uri.paypal.com/payments/payouts", expires_in: 32400 });
   }
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
@@ -96,11 +98,47 @@ async function main(): Promise<void> {
   await settlePayPal(store);
   is("it reads the batch right after", [tokens, reads], [1, 1]);
 
-  part("The page and the route ask for the paced reading");
+  part("A press of \"Check with PayPal\" right after the page asks PayPal, and says so honestly (reviews of #4212)");
+  await redis.pipeline([["DEL", `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`]]);
+  tokens = 0;
+  reads = 0;
+  const view = await settlePayPal(store, { paced: true });
+  const press = await settlePayPal(store, { press: true });
+  is("the page's view asked, and the press asked again though inside the view's five minutes", [view.asked !== false, press.asked !== false, tokens], [true, true, 2]);
+  const again = await settlePayPal(store, { press: true });
+  is("a second press within a minute asks nothing and says PayPal was not asked", [again.asked, tokens, again.waiting], [false, 2, 1]);
+  const button = readFileSync("components/paypal-payouts.tsx", "utf8");
+  is("the button never says \"Nothing new\" for a check not made", button.includes('data.asked === false\n                        ? "PayPal was asked less than a minute ago. Try again in a minute."'), true);
+
+  part("A mark that cannot be confirmed asks nothing");
+  await redis.pipeline([["DEL", `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`]]);
+  tokens = 0;
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    if (batch[0]?.[0] === "SET" && String(batch[0]?.[1]).startsWith("nl:pp:")) throw new Error("synthetic lost SET NX");
+    if (batch[0]?.[0] === "GET" && String(batch[0]?.[1]).startsWith("nl:pp:pace:")) return [{ odd: true }];
+    if (batch[0]?.[0] === "GET" && String(batch[0]?.[1]).startsWith("nl:pp:press:")) return [{ odd: true }];
+    return real(batch);
+  }) as typeof redis.pipeline;
+  const unknownView = await settlePayPal(store, { paced: true });
+  const unknownPress = await settlePayPal(store, { press: true });
+  redis.pipeline = real as typeof redis.pipeline;
+  is("no token for either, and both say PayPal was not asked", [tokens, unknownView.asked, unknownPress.asked], [0, false, false]);
+
+  part("A reading whose token fails lets its mark go, so the next one asks again");
+  await redis.pipeline([["DEL", `nl:pp:pace:${STATS}`, `nl:pp:press:${STATS}`]]);
+  tokens = 0;
+  tokenDown = true;
+  const down = await settlePayPal(store, { paced: true });
+  tokenDown = false;
+  const next = await settlePayPal(store, { paced: true });
+  is("the failed one did not ask; the next view asks PayPal at once", [down.asked, next.asked !== false, tokens], [false, true, 2]);
+
+  part("The page asks for the paced reading, the button for its own");
   const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
   const route = readFileSync("app/api/store/affiliates/paypal/route.ts", "utf8");
   is("the affiliates page", page.includes("settlePayPal(store, { paced: true })"), true);
-  is("the settle op", route.includes("settlePayPal(store, { paced: true })"), true);
+  is("the settle op", route.includes("settlePayPal(store, { press: true })"), true);
   is("and neither settles unpaced", [/settlePayPal\(store\)/.test(page), /settlePayPal\(store\)/.test(route)], [false, false]);
   done();
 }

@@ -38,7 +38,7 @@ import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affilia
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
@@ -64,6 +64,13 @@ const STORES = "nl:pp:stores";
 const paceKey = (statsId: string) => `nl:pp:pace:${statsId}`;
 /** How long a reading asked for by a view stands for the next views (settlePayPal, `paced`). */
 const SETTLE_PACE_SECONDS = 300;
+/**
+ * The studio's "Check with PayPal" press: never held back by a view's pace (it would answer a check that was not made,
+ * reviews of #4212), but by its own mark, so a creator who presses again within this time is told PayPal was asked
+ * already, and repeated presses stay bounded.
+ */
+export const PRESS_PACE_SECONDS = 60;
+const pressKey = (statsId: string) => `nl:pp:press:${statsId}`;
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
 
 type Link = { client: string; secret: string; at: number; auto: boolean };
@@ -438,7 +445,8 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   }
 }
 
-export type Settled = { paid: number; released: number; waiting: number };
+/** `asked`: false, and only then present, when PayPal was not asked this time (a paced view or a press within PRESS_PACE_SECONDS, an unknown mark, or no token). */
+export type Settled = { paid: number; released: number; waiting: number; asked?: boolean };
 
 /**
  * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
@@ -462,7 +470,7 @@ async function earlierItemMark(item: string): Promise<boolean> {
  * every SETTLE_PACE_SECONDS and the views between them ask PayPal nothing: everyone is still on their way, as they were,
  * until the next reading or the daily job (which is never paced). A pace mark that cannot be confirmed asks nothing.
  */
-export async function settlePayPal(store: Store, options: { paced?: boolean } = {}): Promise<Settled> {
+export async function settlePayPal(store: Store, options: { paced?: boolean; press?: boolean } = {}): Promise<Settled> {
   const out: Settled = { paid: 0, released: 0, waiting: 0 };
   if (!store.statsId || !isRedisConfigured()) return out;
   const statsId = store.statsId;
@@ -471,10 +479,18 @@ export async function settlePayPal(store: Store, options: { paced?: boolean } = 
     await redisPipeline([["SREM", STORES, store.sid]]);
     return out;
   }
-  const onTheirWayNow = () => ({ ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) });
-  if (options.paced && (await claimMark(paceKey(statsId), SETTLE_PACE_SECONDS)) !== "ours") return onTheirWayNow();
+  const onTheirWayNow = () => ({ ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0), asked: false });
+  // A press is held back only by its own mark; a view by the view's. An unknown mark asks nothing.
+  const pace = options.press ? { key: pressKey(statsId), seconds: PRESS_PACE_SECONDS } : options.paced ? { key: paceKey(statsId), seconds: SETTLE_PACE_SECONDS } : null;
+  const mark = pace ? claimValue() : "";
+  if (pace && (await claimMark(pace.key, pace.seconds, mark)) !== "ours") return onTheirWayNow();
   const auth = await bearer(store).catch(() => null);
-  if (!auth) return onTheirWayNow();
+  if (!auth) {
+    // No token (credentials just replaced, PayPal down): nothing was read, so the mark is let go and the next view or
+    // press asks again (review of #4212, LEVE).
+    if (pace) await releaseMark(pace.key, mark);
+    return onTheirWayNow();
+  }
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a

@@ -13,7 +13,7 @@ import { connectPayPal, disconnectPayPal, payWithPayPal, readPayPal, setAutoPay,
  *   { op: "disconnect" }                forget it
  *   { op: "auto", on }                  pay by itself on payday, or not
  *   { op: "pay" }                       send everyone owed and cleared, now, from their PayPal
- *   { op: "settle" }                    ask PayPal what has been paid since
+ *   { op: "settle" }                    ask PayPal what has been paid since (at most once a minute; a press within it is told so)
  *
  * For the owner and Admins ("settings"): it moves the creator's own money.
  */
@@ -48,7 +48,8 @@ export async function POST(request: NextRequest) {
       return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" || result.reason === "unknown" ? 502 : 409);
     }
     if (op === "settle") {
-      return Response.json({ ok: true, ...(await settlePayPal(store, { paced: true })) });
+      // The creator's own "Check with PayPal": asked now, held back only by its own one-minute mark (review of #4212).
+      return Response.json({ ok: true, ...(await settlePayPal(store, { press: true })) });
     }
     return fail("op");
   } catch (error) {

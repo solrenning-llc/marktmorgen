@@ -769,6 +769,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pp:@lib/paypal-payouts.ts": { what: "The creator's PayPal app, and its lock", parts: [capped(4 * KB, "One a store.")] },
   "nl:pp:item:@lib/paypal-payouts.ts": short("A PayPal payout item written into the book: up to three partners a sale", "order", 400, 3 * MARK),
   "nl:pp:open:@lib/paypal-payouts.ts": { what: "Payout batches not yet settled", parts: [capped((MAX_AFFILIATES + 1) * 512, "A line per affiliate in an open batch.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"))] },
+  "nl:pp:press:@lib/paypal-payouts.ts": { what: "The pace of the studio's \"Check with PayPal\" press: one reading a minute", parts: [capped(KEY, "One mark a store, kept one minute.", src("lib/paypal-payouts.ts", "PRESS_PACE_SECONDS"))] },
   "nl:pp:pace:@lib/paypal-payouts.ts": { what: "The pace of reading a store's open PayPal batches from the studio: one read every five minutes", parts: [capped(KEY, "One mark a store, kept five minutes.", src("lib/paypal-payouts.ts", "SETTLE_PACE_SECONDS"))] },
   "nl:pp:stores@lib/paypal-payouts.ts": company("Stores with a batch open", "One set for every store."),
   "nl:pp:unk:month:@lib/paypal-payouts.ts": company("Monthly counts of PayPal payout batches whose answer was not known", "Three counts a month (unknown, settled, manual), no store or person; at most 14 monthly keys alive for 400 days."),

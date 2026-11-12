@@ -32,6 +32,7 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:taxobs:v1:": ["lib/checkout-sweep.ts", "TAX_OBSERVATION_KEEP_SECONDS"],
   // The pace of a store's PayPal batch reads from the studio (a capped part): one mark kept five minutes.
   "nl:pp:pace:": ["lib/paypal-payouts.ts", "SETTLE_PACE_SECONDS"],
+  "nl:pp:press:": ["lib/paypal-payouts.ts", "PRESS_PACE_SECONDS"],
   // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
   "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],

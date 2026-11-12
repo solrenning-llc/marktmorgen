@@ -139,6 +139,17 @@ export function deliverableItems(bundle: Pick<Listing, "bundle">, listings: List
   return (bundle.bundle ?? []).map((id) => byId.get(id)).filter((p): p is Listing => Boolean(p && canBeInBundle(p)));
 }
 
+/**
+ * The products among these that a bundle also among them already hands over
+ * (deliverableItems), in their order. A cart or a checkout box holding both
+ * would charge the buyer twice for one copy of the product, so neither may
+ * (found by Claude 7's checkout hunt, 12 November 2026).
+ */
+export function heldByABundle(products: Listing[]): Listing[] {
+  const inside = new Set(products.flatMap((p) => (p.bundle ? deliverableItems(p, products).map((item) => item.id) : [])));
+  return products.filter((p) => inside.has(p.id));
+}
+
 // ---- Chosen by the buyer -------------------------------------------------------
 
 /**

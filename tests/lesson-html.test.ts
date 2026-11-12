@@ -24,7 +24,7 @@ const preview = [
 part("Explicit preview");
 is("the explicit language becomes a separate HTML-preview block", lessonBlocks(preview).map((block) => block.kind), ["html"]);
 
-const html = renderToStaticMarkup(createElement(LessonText, { text: preview, htmlPreviewLabel: "HTML preview" }));
+const html = renderToStaticMarkup(createElement(LessonText, { text: preview, htmlPreviewLabel: "HTML preview", lang: "en-US" }));
 is("drawn in a named sandbox, without script permission or referrer data", [
   html.includes('<iframe title="HTML preview"'),
   html.includes('sandbox=""'),
@@ -54,15 +54,15 @@ is("malformed tags cannot smuggle an attribute or active tag into the result", [
   sanitizeLessonHtml("plain < unfinished"),
 ], ['<h2>" onclick="run()"&gt;title</h2>', '<a href="https://example.com/">link</a>', "plain &lt; unfinished"]);
 is("the complete document has only fixed product CSS and a no-referrer policy", [
-  lessonHtmlDocument("<p>Text</p>").includes("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"),
-  lessonHtmlDocument("<p>Text</p>").includes('<meta name="referrer" content="no-referrer">'),
-  lessonHtmlDocument("<p>Text</p>").includes("<style>html{color-scheme:light dark}"),
-  lessonHtmlDocument('<style>@import "https://tracker.example"</style>').match(/<style>/g)?.length,
-  lessonHtmlDocument('<style>@import "https://tracker.example"</style>').includes('&lt;style&gt;@import "https://tracker.example"&lt;/style&gt;'),
+  lessonHtmlDocument("<p>Text</p>", "en-US").includes("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"),
+  lessonHtmlDocument("<p>Text</p>", "en-US").includes('<meta name="referrer" content="no-referrer">'),
+  lessonHtmlDocument("<p>Text</p>", "en-US").includes("<style>html{color-scheme:light dark}"),
+  lessonHtmlDocument('<style>@import "https://tracker.example"</style>', "en-US").match(/<style>/g)?.length,
+  lessonHtmlDocument('<style>@import "https://tracker.example"</style>', "en-US").includes('&lt;style&gt;@import "https://tracker.example"&lt;/style&gt;'),
 ], [true, true, true, 1, true]);
 
 part("Existing code");
-const ordinary = renderToStaticMarkup(createElement(LessonText, { text: `${F}html\n<h2>Code only</h2>\n${F}` }));
+const ordinary = renderToStaticMarkup(createElement(LessonText, { text: `${F}html\n<h2>Code only</h2>\n${F}`, lang: "en-US" }));
 is("the existing html language stays literal code, so old lessons do not change", [ordinary.includes("<iframe"), ordinary.includes("&lt;h2&gt;Code only&lt;/h2&gt;")], [false, true]);
 is("an unclosed or empty explicit block follows the existing safe fence rules", [
   lessonBlocks(`${F}html-preview\n<p>unclosed</p>`).some((block) => block.kind === "html"),

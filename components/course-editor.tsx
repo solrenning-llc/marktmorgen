@@ -944,7 +944,7 @@ function LessonEditor({
         >
           {/* In the same card the lesson page puts behind the words, so the color behind them and the line length match. */}
           <div className="st-card p-5 sm:p-8">
-            {now.trim() ? <LessonText text={now} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
+            {now.trim() ? <LessonText text={now} lang={locale} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
           </div>
         </div>
       </div>

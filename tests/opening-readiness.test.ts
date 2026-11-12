@@ -30,6 +30,10 @@ import {
   openingReadinessDetails,
 } from "@/lib/opening-readiness";
 import { done, is, part } from "./check";
+import { CURRENT_PRICE_AND_RIGHTS_SNAPSHOT as SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS } from "@/lib/commercial-margin";
+import { fundedCustomerWithAi, planPaymentDisputeFixture, zeroExposureFixture, zeroFixedCompanyFixture } from "./margin-test-fixtures";
+
+const others = () => openingReadiness().filter((condition) => condition.id !== "ownerRequest");
 
 const root = process.cwd();
 const source = readFileSync(join(root, "lib/opening.ts"), "utf8");
@@ -55,11 +59,17 @@ is("the deemed-supplier reasons are the gate's own", openingReadinessDetails().d
 
 part("The owner's request is read, never guessed");
 const requestedInSource = /const OPENING_REQUESTED: boolean = true;/.test(source);
-const others = openingReadiness().filter((condition) => condition.id !== "ownerRequest");
-const othersReady = others.every((condition) => condition.ready === true);
-const expectedRequest = PLANS_ON_SALE ? true : othersReady ? false : null;
-is("on sale means requested; closed with every gate ready means not requested; otherwise unknown from the gates", byId.ownerRequest?.ready, expectedRequest);
+const allGates = Object.fromEntries(OPENING_GATES.map((gate) => [gate.id, true])) as Record<(typeof OPENING_GATES)[number]["id"], boolean>;
+const requestOf = (state: Parameters<typeof openingReadiness>[0]) => openingReadiness(state).find((condition) => condition.id === "ownerRequest")?.ready;
+is("plans on sale: the request was given", requestOf({ plansOnSale: true, gates: allGates }), true);
+is("every gate ready while plans are closed: the request was not given", requestOf({ plansOnSale: false, gates: allGates }), false);
+for (const gate of OPENING_GATES) {
+  is(`${gate.id} not ready while plans are closed: the gates cannot tell, so unknown`, requestOf({ plansOnSale: false, gates: { ...allGates, [gate.id]: false } }), null);
+}
+is("today, with the real gates", byId.ownerRequest?.ready, PLANS_ON_SALE ? true : others().every((condition) => condition.ready === true) ? false : null);
 is("and it never says requested while the source says false", byId.ownerRequest?.ready === true && !requestedInSource, false);
+is("while unknown, it says it does not read OPENING_REQUESTED, and where it is", byId.ownerRequest?.ready !== null || /not read here/i.test(byId.ownerRequest?.needs ?? ""), true);
+is("an injected answer replaces only that gate's state in the list", openingReadiness({ gates: { taxGate: !taxGateValid() } }).find((condition) => condition.id === "taxGate")?.ready, !taxGateValid());
 
 part("Ready everywhere exactly when plans are on sale");
 is("every condition ready ⇔ PLANS_ON_SALE", openingReadiness().every((condition) => condition.ready === true), PLANS_ON_SALE);
@@ -103,6 +113,29 @@ part("A record that exists but fails its own check is never ready (Codex G and C
   is("and none of them is ready, because the gate refuses each", [by.exposureBudget?.ready, by.contractFunding?.ready, by.marginReview?.ready], [false, false, false]);
   is("the gate itself agrees: it would not open on that review", commercialPlansMayOpen(true, staleReview), false);
   is("nothing recorded reads as not ready either", commercialReviewParts({ review: null, exposure: null, contract: null }).filter((row) => row.recorded !== undefined).map((row) => [row.recorded, row.ready]), [[false, false], [false, false], [false, false]]);
+}
+
+part("With a review the gate accepts, the exposure and contract validators decide (Claude 1 on #3665 at c7c9db5, LOW)");
+{
+  // Synthetic, same shape as tests/net-margin.test.ts: a review commercialReviewData accepts, so neither part stops at the parse.
+  const accepted = {
+    companyBase: zeroFixedCompanyFixture,
+    planPaymentDisputes: planPaymentDisputeFixture(),
+    priceAndRightsSnapshot: SNAPSHOT,
+    taxEvidence: "TEST ONLY: hypothetical ceilings",
+    costAndLimitEvidence: "TEST ONLY: hypothetical enforced limits",
+    allocatedFixedCostsVerified: true,
+    fundedExposure: zeroExposureFixture(),
+    prepaidUsageEnforced: true,
+    scenarios: Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map((key) => { const gross = BASE_PLAN_REVENUE_CEILINGS[key] ?? 10000; return [key, fundedCustomerWithAi(gross, Math.floor(gross * 0.65), 12, key)]; })),
+  } as unknown as CommercialMarginReview;
+  is("the synthetic review passes the gate's own parse", commercialReviewData(accepted) !== null, true);
+  const staleExposure = { reviewId: "stale-review", termsSnapshot: "stale", review: {}, reservedFundsCents: 1, reserveEvidence: "synthetic" } as unknown as ExposureBudgetPolicy;
+  const staleContract = { reviewId: "stale-review", financialSnapshot: "stale", fundedGrants: {} } as unknown as ContractFundingPolicy;
+  const by = Object.fromEntries(commercialReviewParts({ review: accepted, exposure: staleExposure, contract: staleContract }).map((row) => [row.id, row]));
+  is("a stale exposure budget policy is recorded and not ready", [by.exposureBudget?.recorded, by.exposureBudget?.ready], [true, false]);
+  is("a stale contract funding policy is recorded and not ready", [by.contractFunding?.recorded, by.contractFunding?.ready], [true, false]);
+  is("each is exactly its validator's answer on that review", [by.exposureBudget?.ready, by.contractFunding?.ready], [exposureBudgetConfiguration(staleExposure, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review: commercialReviewData(accepted)!.fundedExposure }) !== null, contractFundingConfiguration(staleContract, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review: commercialReviewData(accepted)! }) !== null]);
 }
 
 part("The owner's dated summary names every gate");

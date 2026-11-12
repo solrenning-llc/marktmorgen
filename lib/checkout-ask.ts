@@ -53,7 +53,7 @@
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type RemindOutcome, remindAsked } from "@/lib/checkout-recovery";
 import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
@@ -83,6 +83,8 @@ export type AskOutcome =
   | "asked"
   | "email"
   | "limited"
+  /** A count could not be read: nothing was kept, and the buyer is not told to slow down. */
+  | "error"
   /** This store has no reminders, or this is not something that can be bought now. */
   | "closed";
 
@@ -150,8 +152,11 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
   const statsId = store.statsId as string;
   const email = normaliseEmail(typed);
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
-  if (!(await withinEssentialLimit("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600))) return "limited";
-  if (!(await withinEssentialLimit("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400))) return "limited";
+  // Past either count is "limited"; a count that cannot be read is "error", never "slow down" (essentialLimitState).
+  const byAddress = await essentialLimitState("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600);
+  const byStore = byAddress === "within" ? await essentialLimitState("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400) : byAddress;
+  if (byStore === "exceeded") return "limited";
+  if (byStore !== "within") return "error";
   const askedAt = Math.floor(Date.now() / 1000);
   await redisPipeline([
     ["ZADD", QUEUE, askedAt + after, askMember({ statsId, handle: store.handle, productId, email, askedAt, from, after })],

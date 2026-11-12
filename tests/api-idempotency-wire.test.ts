@@ -12,7 +12,7 @@ import { makeKey } from "@/lib/api-keys";
 import { importedFor } from "@/lib/imported-purchases";
 import { POST as postLead } from "@/app/api/v1/leads/route";
 import { POST as postAccess } from "@/app/api/v1/access/route";
-import { IDEMPOTENCY_SECONDS } from "@/lib/api-idempotency-rules";
+import { IDEMPOTENCY_COMMANDS, IDEMPOTENCY_SECONDS } from "@/lib/api-idempotency-rules";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -135,7 +135,9 @@ async function main(): Promise<void> {
     // same request again with the same key") and must then leave the key as it found it, so that retry runs once.
     const pipeline = redis.pipeline.bind(redis);
     let cut = true;
+    const sent: string[] = [];
     redis.pipeline = (async (commands: (string | number)[][]) => {
+      for (const c of commands) if (String(c[1]).startsWith("nl:api:idem:")) sent.push(String(c[0]));
       const reply = await pipeline(commands);
       if (cut && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:api:idem:") && c.includes("NX"))) { cut = false; throw new Error("the reply was lost"); }
       return reply;
@@ -146,6 +148,7 @@ async function main(): Promise<void> {
     redis.pipeline = pipeline;
     const owner = () => storeForEmail("idem-owner-a@example.test").then((s) => importedFor(s!, "buyer-eight@example.test"));
     is("the first try ran nothing and said to send it again", [first.status, first.json.error, (await owner()).length], [503, "unavailable", 0]);
+    is("its commands on the record fit the ceiling the cost is priced at", [sent, sent.length <= IDEMPOTENCY_COMMANDS], [["GET", "SET", "GET", "DEL"], true]);
     const retry = await call(postAccess, a.key, body, lostKey);
     is("the retry with the same key runs, once", [retry.status, retry.json.data?.status, retry.replayed, (await owner()).length], [200, "given", null, 1]);
     const repeat = await call(postAccess, a.key, body, lostKey);

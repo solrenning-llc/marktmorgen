@@ -117,8 +117,8 @@ part("The most it can cost, counted before it is turned on, from the plan's own 
   };
   const plans = (["creator", "pro", "scale"] as const).map((tier) => [tier, STORE_ALLOWANCES[tier].api, idempotencyWorstMicroUsd(STORE_ALLOWANCES[tier].api)]);
   is("each paid plan, every API request of its month keyed", plans, (["creator", "pro", "scale"] as const).map((tier) => [tier, STORE_ALLOWANCES[tier].api, by(STORE_ALLOWANCES[tier].api)]));
-  // Store, 500 requests: 1,500 commands = 3,000; 500 × 8,448 bytes = 0.004224 GB, moved twice = 253.44, kept = 1,056.
-  is("today's figures, in micro-dollars (Store, Studio, Scale): at most $0.0044, $0.0173, $0.0862 a month", plans.map((p) => p[2]), [4_310, 17_238, 86_189]);
+  // Store, 500 requests: 2,000 commands = 4,000; 500 × 8,448 bytes = 0.004224 GB, moved twice = 253.44, kept = 1,056.
+  is("today's figures, in micro-dollars (Store, Studio, Scale): at most $0.0054, $0.0213, $0.1062 a month", plans.map((p) => p[2]), [5_310, 21_238, 106_189]);
   is("nothing keyed, nothing spent", idempotencyWorstMicroUsd(0), 0);
   let threw = 0;
   for (const bad of [-1, 1.5, Number.NaN]) { try { idempotencyWorstMicroUsd(bad); } catch { threw++; } }

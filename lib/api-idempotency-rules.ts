@@ -41,8 +41,11 @@ const RECORD_ROOM_BYTES = 256;
  */
 export const MAX_IDEMPOTENCY_RECORD_BYTES = MAX_KEPT_ANSWER_BYTES + RECORD_ROOM_BYTES;
 const recordBytes = (record: string) => new TextEncoder().encode(record).length;
-/** Database commands one keyed write adds at most: read the record, claim it, keep the answer. */
-export const IDEMPOTENCY_COMMANDS = 3;
+/**
+ * Database commands one keyed write adds at most: read the record, claim it, keep the answer; or, when the claim's
+ * reply is unknown, read the record, claim it, read it again and let go of this try's own claim (lib/api-idempotency.ts).
+ */
+export const IDEMPOTENCY_COMMANDS = 4;
 
 export type KeyRead = { kind: "none" } | { kind: "key"; key: string } | { kind: "invalid"; message: string };
 
@@ -178,7 +181,7 @@ export function afterWrite(fp: string, startedAt: number, status: number, body: 
 
 /**
  * The most the header can cost a store in a month, in micro-dollars, before it is turned on: every API request of
- * the plan's month (`apiRequests`, lib/store-allowance-rules.ts) sent with a key, each adding its three commands,
+ * the plan's month (`apiRequests`, lib/store-allowance-rules.ts) sent with a key, each adding its IDEMPOTENCY_COMMANDS commands,
  * moving its largest record twice (write and read) and keeping it, counted as if kept the whole month (it is kept
  * 24 hours). Upstash pay-as-you-go figures with no free quota (lib/spend-cost-table.ts). Rounded up.
  */

@@ -21,9 +21,8 @@ import { StoreTipBox } from "@/components/store-tip-box";
 import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
-import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchStore, searchWords, visibleIds } from "@/lib/catalog";
-import { listingsToRead } from "@/lib/catalog-read-count";
-import { listingUnits } from "@/lib/public-read-rules";
+import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchWords } from "@/lib/catalog";
+import { searchStorePaid } from "@/lib/store-search-index";
 import { StoreQuotes } from "@/components/store-quotes";
 import { showsRating, storeSummary } from "@/lib/review-summary";
 import { RatingLine } from "@/components/review-list";
@@ -78,7 +77,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { summaries } from "@/lib/reviews";
 import { SHOWN_FROM, readSoldCounts, refreshSoldCounts, stale } from "@/lib/sold-count";
 import { readAllTimeSales } from "@/lib/stats";
-import { isResting, takePublicRequest } from "@/lib/traffic";
+import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
 
@@ -222,13 +221,12 @@ export default async function StorePage({ params, searchParams }: Params) {
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
       ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
       : false;
-  // A search reads the listing of every visible product the store record does not carry (up to MAX_PRODUCTS): paid
-  // first, one more request for each PUBLIC_LISTINGS_PER_UNIT of them, as the store's map and an affiliate's page pay
-  // (lib/public-read-rules.ts). Refused, it reads none and the page is drawn without it (c1-cost-store-search).
-  const searchUnits = searchAllowed ? listingUnits(listingsToRead(store, visibleIds(store))) : 0;
-  const searchPaid = searchAllowed && (searchUnits === 0 || (await takePublicRequest(store, "public", undefined, searchUnits)));
-  const searching = searchPaid ? wantedSearch : "";
-  const results = searching ? await searchStore(store, searching) : null;
+  // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
+  // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
+  // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
+  const results = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  const searchRefused = wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0 && !results;
+  const searching = results ? wantedSearch : "";
   // A search that found nothing is counted, by its words only (lib/stats.ts, countSearchMiss).
   if (results && results.total === 0 && store.statsId && !isBot((await headers()).get("user-agent") ?? "")) {
     const statsId = store.statsId;
@@ -436,7 +434,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                           {bw.searchButton}
                         </button>
                       </div>
-                      {wantedSearch && !searchAllowed && searchWords(wantedSearch).length > 0 ? (
+                      {searchRefused ? (
                         <p className="st-note mt-3 text-sm" role="status">{bw.searchSlow}</p>
                       ) : null}
                       {results ? (

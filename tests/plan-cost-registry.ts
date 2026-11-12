@@ -1290,8 +1290,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
-      // A search of the store page reads every listing the store record does not carry: paid the same way, before it reads (c1-cost-store-search).
-      { file: "app/[handle]/page.tsx", names: ["listingUnits(listingsToRead(store, visibleIds(store)))", "takePublicRequest(store, \"public\", undefined, searchUnits)"] },
+      // A search of the store page: the read of every listing the store record does not carry, once for everybody, kept
+      // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid
+      // before it is read (lib/store-search-index.ts, c1-cost-store-search).
+      { file: "app/[handle]/page.tsx", names: ["searchStorePaid(store, wantedSearch)"] },
+      { file: "lib/store-search-index.ts", names: ["takePublicRequest(store, \"public\", undefined, units, { shared: true })", "paidRead(store, shownIds, 1)", "paidRead(store, missing, 0)", "takePublicRequest(store, \"public\", undefined, units)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

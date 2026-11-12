@@ -74,7 +74,7 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
   const review = param(query, "v");
   if (review) return <StopReviewRequests token={review} notSaved={param(query, "done") === "0"} />;
   const update = param(query, "u");
-  if (update) return <StopUpdates token={update} />;
+  if (update) return <StopUpdates token={update} notSaved={param(query, "done") === "0"} />;
   const community = param(query, "c");
   if (community) return <StopAnnouncements token={community} notSaved={param(query, "done") === "0"} />;
   const links = param(query, "l");
@@ -292,8 +292,11 @@ async function StopReviewRequests({ token, notSaved }: { token: string; notSaved
   );
 }
 
-/** The same one button, for a store's emails telling its buyers of an update. */
-async function StopUpdates({ token }: { token: string }) {
+/**
+ * The same one button, for a store's emails telling its buyers of an update. `notSaved`: the route answered done=0, so
+ * the last press was not saved (its read or write was unknown); said while the link is found and not stopped.
+ */
+async function StopUpdates({ token, notSaved }: { token: string; notSaved: boolean }) {
   // A link whose read was unknown (CX-123 rule 24) is never called unknown nor stopped: the page says it could not
   // open it just now, in English, as the store is not known, and offers no button.
   let unread = false;
@@ -329,6 +332,7 @@ async function StopUpdates({ token }: { token: string }) {
           <>
             <h1 className="t-h3">{u.ask(who)}</h1>
             <p className="mt-3 text-ink-soft">{u.forEmail(found.email)}</p>
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?u=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{u.button}</button>

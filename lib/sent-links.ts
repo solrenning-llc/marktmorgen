@@ -23,7 +23,7 @@ import { countOf, repliesFor } from "@/lib/redis-reply";
 import { BROADCAST_ID, RECORD_DAYS, readBroadcast } from "@/lib/broadcasts";
 import { takeData } from "@/lib/store-data";
 import { deriveKey } from "@/lib/secret-box";
-import { type LinkChange, MAX_SENT_LINKS, SENT_LINK_REQUEST_UNITS, changeSentLink, readSentLinkPath, sentLinkGoesTo } from "@/lib/sent-link-rules";
+import { type LinkChange, MAX_SENT_LINKS, SENT_LINK_REQUEST_UNITS, changeSentLink, readSentLinkPath, readSentLinkTarget, sentLinkGoesTo } from "@/lib/sent-link-rules";
 import { type Store, storeForId } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 
@@ -80,7 +80,8 @@ export async function followSentLink(
   deps: SentLinkDeps = DEPS,
 ): Promise<SentLinkAnswer> {
   const link = readSentLinkPath(input.sid, input.id, input.n, input.query, verifySentLink);
-  if (!link.ok) return { kind: "invalid" };
+  // Signed or not, an address that is not plain http(s), or one of these links itself, is never followed (review of #3713).
+  if (!link.ok || !readSentLinkTarget(link.original).ok) return { kind: "invalid" };
   try {
     const store = await deps.loadStore(input.sid);
     if (!store) return { kind: "unknown" };
@@ -97,11 +98,28 @@ export async function followSentLink(
     changes = null;
   }
   if (!changes) return { kind: "unknown" };
-  return { kind: "go", to: sentLinkGoesTo(link.original, changes[0] ?? null) };
+  const to = sentLinkGoesTo(link.original, changes[0] ?? null);
+  return to ? { kind: "go", to } : { kind: "unknown" };
 }
 
 /** Bytes a link's field adds beside its history: the field's name and what Redis keeps with it. */
 const FIELD_BYTES = 64;
+
+/**
+ * A link's history written only while it, and when the email's links go, are still what was read: a second change made
+ * at the same time is refused rather than lost from the history (review of #3713). When the links go is set once, by the
+ * first change, and never pushed back, so no link is kept past the room its own change took (the review's MEDIUM:
+ * an EXPIRE on every write kept every other link's field past its room).
+ * KEYS[1] the links; ARGV: the link's number, its history as read ("" for none), when the links go as read
+ * (PEXPIRETIME: -2 for none yet), the new history, and when the links go if this is the first change (ms).
+ */
+const KEEP_CHANGE = `-- marktmorgen:sent-link-keep:v1
+if tostring(redis.call("PEXPIRETIME", KEYS[1])) ~= ARGV[3] then return 0 end
+local held = redis.call("HGET", KEYS[1], ARGV[1])
+if (held or "") ~= ARGV[2] then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[4])
+if ARGV[3] == "-2" then redis.call("PEXPIREAT", KEYS[1], ARGV[5]) end
+return 1`;
 
 export type KeepRoom = { take: (store: Store, change: { until: number; bytes: number }) => Promise<boolean> };
 const ROOM: KeepRoom = { take: async (store, change) => (await takeData(store, [change])).ok };
@@ -109,8 +127,9 @@ const ROOM: KeepRoom = { take: async (store, change) => (await takeData(store, [
 /**
  * Keeps a change to link `n` of one of the store's own sent emails, `original`
  * being the address it was written to. Its room is taken from the store's
- * data room for as long as it is kept (as long as the email, RECORD_DAYS)
- * before it is written; a history that does not read is never written over.
+ * data room until the email's links go (RECORD_DAYS from the first change,
+ * never pushed back) before it is written; a history that does not read, or
+ * that changed since it was read, is never written over.
  */
 export async function keepLinkChange(
   store: Store,
@@ -130,22 +149,30 @@ export async function keepLinkChange(
     return { ok: false, problem: "unknown" };
   }
   if (!email || email.listId !== store.listId) return { ok: false, problem: "none" };
+  let held: string | null;
   let history: LinkChange[] | null;
+  let ends: number;
   try {
-    const replies = repliesFor(await redisPipeline([["HGET", LINKS_KEY(emailId), String(n)]]), 1);
-    history = replies ? readChanges(replies[0]) : null;
+    const replies = repliesFor(await redisPipeline([["PEXPIRETIME", LINKS_KEY(emailId)], ["HGET", LINKS_KEY(emailId), String(n)]]), 2);
+    ends = replies && typeof replies[0] === "number" && Number.isSafeInteger(replies[0]) ? replies[0] : Number.NaN;
+    held = replies && (replies[1] === null || typeof replies[1] === "string") ? replies[1] : null;
+    history = replies ? readChanges(replies[1]) : null;
   } catch {
     history = null;
+    held = null;
+    ends = Number.NaN;
   }
-  if (!history) return { ok: false, problem: "unknown" };
+  // Links kept with no end (-1) or an end that does not read would be kept for good: unknown, nothing written.
+  if (!history || !(ends === -2 || ends > 0)) return { ok: false, problem: "unknown" };
   const changed = changeSentLink(history, original, raw, now);
   if (!changed.ok) return changed;
   const value = JSON.stringify(changed.history);
-  const keptFor = RECORD_DAYS * 86_400;
+  const until = ends > 0 ? ends : now + RECORD_DAYS * 86_400_000;
   try {
-    if (!(await room.take(store, { until: now + keptFor * 1000, bytes: Buffer.byteLength(value) + FIELD_BYTES }))) return { ok: false, problem: "full" };
-    const replies = repliesFor(await redisPipeline([["HSET", LINKS_KEY(emailId), String(n), value], ["EXPIRE", LINKS_KEY(emailId), keptFor]]), 2);
-    if (!replies || countOf(replies[0]) === null) return { ok: false, problem: "unknown" };
+    if (!(await room.take(store, { until, bytes: Buffer.byteLength(value) + FIELD_BYTES }))) return { ok: false, problem: "full" };
+    const replies = repliesFor(await redisPipeline([["EVAL", KEEP_CHANGE, 1, LINKS_KEY(emailId), String(n), held ?? "", String(ends), value, String(until)]]), 1);
+    // 0: changed since it was read. The room taken stays counted until it ends: over, never under.
+    if (!replies || countOf(replies[0]) !== 1) return { ok: false, problem: "unknown" };
   } catch {
     return { ok: false, problem: "unknown" };
   }

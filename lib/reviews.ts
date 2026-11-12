@@ -281,8 +281,11 @@ async function locked<T>(statsId: string, productId: string, work: () => Promise
 
 /** Counts a product's numbers again from its reviews, and keeps them. */
 async function recount(statsId: string, productId: string): Promise<Summary> {
-  const [raw] = await redisPipeline([["HGETALL", productKey(statsId, productId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
+  // Read exactly (rules 24 and 30; audit F2, 12 November 2026): a reply in another shape is unknown, never "no
+  // reviews", which would take the product's numbers away though its reviews are still there. The change is then
+  // said as failed and the numbers shown stay as they were, for the next change to count again.
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a product's reviews");
   const reviews: Review[] = [];
   for (let i = 1; i < flat.length; i += 2) {
     const review = parseReview(flat[i]);

@@ -315,12 +315,25 @@ export function dayBounds(ms: number, tz: string): [number, number] {
   return [startOfDay(p.year, p.month, p.day, tz), startOfDay(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), tz)];
 }
 
+/**
+ * The instant a stretch's edge stands for: when the clock shows it, or, for a time the clocks skip, the first one
+ * after it that exists, the moment they jump. "24:00" on the evening before a zone moves its clocks at midnight
+ * (Chile, Cuba, Egypt) is such a time; a null here threw the whole stretch away, so the host was never free then.
+ */
+function edgeAt(year: number, month: number, day: number, minute: number, tz: string): number | null {
+  for (const later of [0, 15, 30, 45, 60, 75, 90, 105, 120]) {
+    const at = zonedToUtc(year, month, day, minute + later, tz);
+    if (at !== null) return at;
+  }
+  return null;
+}
+
 /** Whether [start, end) fits inside one of the host's stretches on that day of theirs. */
 export function inHostHours(host: Pick<TeamHost, "tz" | "weekly">, start: number, end: number): boolean {
   const p = localDay(start, host.tz);
   for (const [from, to] of host.weekly[p.weekday] ?? []) {
-    const a = zonedToUtc(p.year, p.month, p.day, from, host.tz);
-    const b = zonedToUtc(p.year, p.month, p.day, to, host.tz);
+    const a = edgeAt(p.year, p.month, p.day, from, host.tz);
+    const b = edgeAt(p.year, p.month, p.day, to, host.tz);
     if (a === null || b === null) continue;
     if (start >= a && end <= b) return true;
   }

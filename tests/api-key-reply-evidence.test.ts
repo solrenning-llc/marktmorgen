@@ -31,7 +31,6 @@ for (const [label, mutate] of [
   ["object listed record", (r: unknown[]) => [{}, r[1], r[2], r[3]]],
   ["invalid listed JSON", (r: unknown[]) => ["broken", r[1], r[2], r[3]]],
   ["numeric hold", (r: unknown[]) => [r[0], 0, r[2], r[3]]],
-  ["unknown hold text", (r: unknown[]) => [r[0], "unread", r[2], r[3]]],
   ["object team", (r: unknown[]) => [r[0], r[1], r[2], {}]],
   ["numeric last use", (r: unknown[]) => [r[0], r[1], 0, r[3]]],
   ["invalid last use", (r: unknown[]) => [r[0], r[1], "unread", r[3]]],
@@ -64,6 +63,34 @@ for (const [label, mutate] of [
     } finally { redis.pipeline = original; }
   });
 }
+
+test("a hold read as text this code does not know refuses read and write as paused, before admission", async () => {
+  const made = await key();
+  let intercepted = 0;
+  let later = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.length === 4 && commands[0]?.[1] === `nl:api:keys:${sid}`) {
+      intercepted += 1;
+      const r = await original(commands);
+      return [r[0], "unread", r[2], r[3]];
+    }
+    if (intercepted && commands[0]?.[0] !== "GET") later += 1;
+    return original(commands);
+  };
+  try {
+    for (const admit of [apiStore, apiWriter]) {
+      const response = await admit(new Request(`${origin}/api/v1/store`, { headers: { authorization: `Bearer ${made.key}` } }));
+      assert.ok(response instanceof Response);
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error, "key_paused");
+    }
+    const resolved = await resolveKey(made.key);
+    assert.equal(resolved?.paused, true, "never accepted, and still resolvable so its owner can see and revoke it");
+    assert.equal(resolved?.why, "unknown");
+    assert.equal(intercepted, 3);
+    assert.equal(later, 0, "no rate, allowance or touch operation for a refused key");
+  } finally { redis.pipeline = original; }
+});
 
 for (const bad of [-1, 2, "1"]) {
   test(`a one-key deletion receipt of ${typeof bad}:${bad} cannot confirm revocation`, async () => {

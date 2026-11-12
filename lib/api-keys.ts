@@ -552,7 +552,9 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   const evidence = repliesFor(await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id], ["HGET", usedKey(sid), id], ["GET", teamRecordKey(sid)]]), 4);
   if (!evidence || evidence.some((reply) => reply !== null && typeof reply !== "string")) throw new UnknownReplyError("an API key's access evidence");
   const [listed, hold, used, team] = evidence as (string | null)[];
-  if (hold !== null && !HOLDS.includes(hold)) throw new UnknownReplyError("an API key hold");
+  // A hold read as text but not one this file knows (a later version's, say) is not unread evidence: it is a
+  // refusing hold (holdOf "unknown", below), so the key is paused and its owner can still see and revoke it
+  // (tests/r24-api-key-hold-team.test.ts). Only a reply in another shape, checked above, throws.
   if (used !== null && (!/^\d+$/.test(used) || countOf(Number(used)) === null)) throw new UnknownReplyError("an API key's last use");
   if (team !== null) {
     let value: unknown;

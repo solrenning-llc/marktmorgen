@@ -20,10 +20,14 @@ const bundle = await build({
     import {createRoot} from 'react-dom/client';
     import {StartQuiz} from '@/components/start-quiz';
     import {FUNNEL_STARTERS} from '@/lib/funnel-starters';
+    import {starterCard} from '@/lib/funnel-starter-catalog';
+    import {STARTER_GALLERY_TITLE} from '@/lib/funnel-niche-feature';
     import {MIGRATION_GUIDES} from '@/lib/migration-guides';
     import {PLAN_TITLES, publishedPriceWords} from '@/lib/plan';
     const facts = {
-      starters: Object.fromEntries(FUNNEL_STARTERS.map((s) => [s.id, { label: s.label, hint: s.hint }])),
+      starters: Object.fromEntries(FUNNEL_STARTERS.map((s) => { const c = starterCard(s); return [s.id, { label: s.label, hint: s.hint, gathers: c.forms > 0 || c.products.some((p) => p.wants === "free") }]; })),
+      gallery: STARTER_GALLERY_TITLE,
+      listPlan: { name: PLAN_TITLES.pro, monthly: publishedPriceWords("pro", "month") },
       guides: MIGRATION_GUIDES.map((g) => ({ slug: g.slug, platform: g.platform })),
       plan: { tier: "creator", name: PLAN_TITLES.creator, monthly: publishedPriceWords("creator", "month"), yearly: publishedPriceWords("creator", "year"), onSale: false },
     };
@@ -74,12 +78,16 @@ try {
   await page.keyboard.press("Tab");
   await page.keyboard.press("Space");
   is("the third: no other platform", await page.getByRole("radio", { name: "No", exact: true }).isChecked(), true);
-  const text = await status.textContent();
-  is("the answer names the pages, the template and the plan", [text?.includes("Marktmorgen for course creators"), text?.includes("How courses work"), text?.includes("Free lesson, then the course"), text?.includes("Store plan: $69 a month, or $690 a year."), text?.includes("Paid plans and paid selling are not open yet.")], [true, true, true, true, true]);
-  is("its links go where they say", await status.getByRole("link").evaluateAll((links) => links.map((a) => a.getAttribute("href"))), ["/for/course-creators", "/platform/courses", "/pricing#plans", "/signin?plan=creator&billing=month"]);
+  is("only a short sentence is announced", await status.textContent(), "Your starting point is below: the template “Free lesson, then the course”, on the Store plan.");
+  const answer = page.locator("section[aria-labelledby='start-result-title']");
+  const text = await answer.textContent();
+  is("the answer names the pages, the template where the studio shows it, and the plan", [text?.includes("Marktmorgen for course creators"), text?.includes("How courses work"), text?.includes("in “Start with a campaign, with first words written”, choose “Free lesson, then the course”"), text?.includes("Store plan: $69 a month, or $690 a year."), text?.includes("Paid plans and paid selling are not open yet.")], [true, true, true, true, true]);
+  is("a template that gathers addresses says writing to them all needs the list plan or an email platform", text?.includes("Sending emails to all of them later is on the Studio plan"), true);
+  is("its links go where they say", await answer.getByRole("link").evaluateAll((links) => links.map((a) => a.getAttribute("href"))), ["/for/course-creators", "/platform/courses", "/platform/email-platforms", "/pricing#plans", "/signin?plan=creator&billing=month"]);
 
   await page.getByRole("radio", { name: "Yes: people already read, watch or follow me" }).check();
   is("changing an answer changes the answer", (await status.textContent())?.includes("Launch a complete course"), true);
+  is("one that gathers no address says nothing of it", (await answer.textContent())?.includes("Sending emails to all of them"), false);
 
   await page.addScriptTag({ content: axe });
   const result = await page.evaluate(async () => {

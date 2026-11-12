@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import "../home.css";
 import { MorningHeader } from "@/components/morning-header";
 import { MORNING_FONTS } from "@/components/morning-fonts";
@@ -28,9 +27,6 @@ export default function StartHerePage() {
           <p className="mt-2">No email needed. Your answers stay in this browser: they are not sent or kept.</p>
         </header>
         <StartQuiz facts={quizFacts()} />
-        <noscript>
-          <p className="mt-8 max-w-3xl text-lg">This quiz needs JavaScript. Without it, <Link className="underline" href="/platform">see every feature</Link> or <Link className="underline" href="/pricing#plans">compare the plans</Link>.</p>
-        </noscript>
       </main>
       <div className="hm-foot"><SiteFooter morning /></div>
     </div>

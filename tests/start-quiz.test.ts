@@ -17,18 +17,17 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AUDIENCE_CHOICES, SELL_CHOICES, SELL_PATHS, type QuizFacts, quizQuestions, quizResult } from "@/lib/start-quiz";
+import { quizFacts } from "@/lib/start-quiz-facts";
+import { STARTER_GALLERY_TITLE } from "@/lib/funnel-niche-feature";
 import { StartQuiz } from "@/components/start-quiz";
 import { PAGES } from "@/lib/site-pages";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
 import { MIGRATION_GUIDES } from "@/lib/migration-guides";
-import { PLAN_TITLES, publishedPriceWords } from "@/lib/plan";
+import { publishedPriceWords } from "@/lib/plan";
 import { done, is, part } from "./check";
 
-const facts = (onSale: boolean): QuizFacts => ({
-  starters: Object.fromEntries(FUNNEL_STARTERS.map((s) => [s.id, { label: s.label, hint: s.hint }])),
-  guides: MIGRATION_GUIDES.map((g) => ({ slug: g.slug, platform: g.platform })),
-  plan: { tier: "creator", name: PLAN_TITLES.creator, monthly: publishedPriceWords("creator", "month"), yearly: publishedPriceWords("creator", "year"), onSale },
-});
+// The facts the pages hand the quiz, read from the code (lib/start-quiz-facts.ts), with plans on sale or not.
+const facts = (onSale: boolean): QuizFacts => ({ ...quizFacts(), plan: { ...quizFacts().plan, onSale } });
 const page = (section: string, slug: string) => PAGES.find((p) => p.section === section && p.slug === slug);
 
 part("Everything it names exists");
@@ -37,7 +36,10 @@ is("every feature page", paths.filter((p) => !page("platform", p.feature)).map((
 is("every page for a kind of creator", paths.filter((p) => p.forPage && !page("for", p.forPage)).map((p) => p.forPage), []);
 is("every template, starting out and with a following", paths.flatMap((p) => Object.values(p.starter)).filter((id) => !FUNNEL_STARTERS.some((s) => s.id === id)), []);
 is("every feature it names is on the plan it recommends", paths.filter((p) => page("platform", p.feature)?.plan !== "creator").map((p) => p.feature), []);
-is("every platform offered has its guide, and the general one exists", [MIGRATION_GUIDES.every((g) => page("platform", g.slug)), Boolean(page("platform", "switching-to-marktmorgen"))], [true, true]);
+is("every platform offered has its guide, and the general one exists", [quizFacts().guides.every((g) => page("platform", g.slug)), Boolean(page("platform", "switching-to-marktmorgen"))], [true, true]);
+is("ClickFunnels is offered with its own guide", quizFacts().guides.some((g) => g.slug === "move-from-clickfunnels" && g.platform === "ClickFunnels"), true);
+is("every page it links to is on the plan it recommends: kinds of creator and guides too", [...paths.flatMap((p) => (p.forPage ? [page("for", p.forPage)] : [])), ...quizFacts().guides.map((g) => page("platform", g.slug)), page("platform", "switching-to-marktmorgen"), page("platform", "email-platforms")].filter((p) => p?.plan !== "creator").map((p) => p?.slug), []);
+is("things shipped point at checkout and shipping, which says so", [SELL_PATHS.physical.feature, JSON.stringify(page("platform", "checkout")).includes("Physical products, shipped by you")], ["checkout", true]);
 
 part("Every answer has an answer");
 const f = facts(true);
@@ -58,12 +60,19 @@ is("a course creator with a following who sells elsewhere", {
   moving: `/platform/${MIGRATION_GUIDES[0].slug}`,
 });
 is("starting out, a template that gathers people first; another platform, the general guide; none, no guide", [quizResult(f, { sell: "files", audience: "starting", from: "other" })!.starter.label, quizResult(f, { sell: "files", audience: "starting", from: "other" })!.moving?.href, quizResult(f, { sell: "files", audience: "starting", from: "no" })!.moving], [FUNNEL_STARTERS.find((s) => s.id === "guide-signup")!.label, "/platform/switching-to-marktmorgen", null]);
+const gathering = quizResult(f, { sell: "membership", audience: "starting", from: "no" })!;
+is("a template that gathers addresses says that writing to all of them is on the list plan, or an email platform", [gathering.starter.gathers, gathering.listPlan.name, gathering.listPlan.monthly], [true, "Studio", publishedPriceWords("pro", "month")]);
+is("one that gathers none says nothing of it", quizResult(f, { sell: "physical", audience: "following", from: "no" })!.starter.gathers, false);
+is("the studio's own name for the templates' gallery", gathering.gallery, STARTER_GALLERY_TITLE);
 is("the plan with its published prices, and sign-up with it", [course.plan.monthly, course.plan.yearly, course.start.href], [publishedPriceWords("creator", "month"), publishedPriceWords("creator", "year"), "/signin?plan=creator&billing=month"]);
 
 part("The page");
 const closed = renderToStaticMarkup(createElement(StartQuiz, { facts: facts(false) }));
+const source2 = () => readFileSync("components/start-quiz.tsx", "utf8");
 is("three questions as radio groups with legends", [(closed.match(/<fieldset/g) ?? []).length, (closed.match(/<legend/g) ?? []).length, closed.includes('type="radio"')], [3, 3, true]);
 is("the answer has a heading and is announced in a status region", [closed.includes('id="start-result-title"'), closed.includes('role="status"'), closed.includes('aria-live="polite"')], [true, true, true]);
+is("only a short sentence is announced; the answer itself sits outside the live region", /role="status"[^>]*>[^<]*<\/p>/.test(closed) && source2().includes("Your starting point is below: the template"), true);
+is("without JavaScript it says so, wherever it is shown", closed.includes("<noscript>") || source2().includes("<noscript>"), true);
 is("before answering, it says what to do", closed.includes("Answer the 3 questions above and your starting point appears here."), true);
 is("no email asked, nothing sent", [/type="email"|name="email"/.test(closed), /action=/.test(closed), readFileSync("components/start-quiz.tsx", "utf8").includes("fetch(")], [false, false, false]);
 const source = readFileSync("components/start-quiz.tsx", "utf8");

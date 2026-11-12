@@ -39,7 +39,7 @@ export const SELL_PATHS: Readonly<Record<SellKind, { feature: string; featureLin
   course: { feature: "courses", featureLink: "How courses work", forPage: "course-creators", forLink: "Marktmorgen for course creators", starter: { starting: "course-free-lesson", following: "course-launch" } },
   membership: { feature: "memberships", featureLink: "How memberships work", forPage: "community-builders", forLink: "Marktmorgen for community builders", starter: { starting: "launch-waitlist", following: "membership" } },
   calls: { feature: "calls", featureLink: "How booked calls work", forPage: "consultants-and-mentors", forLink: "Marktmorgen for consultants and mentors", starter: { starting: "coaching-application", following: "paid-call" } },
-  physical: { feature: "store-page", featureLink: "How your store page works", forPage: null, forLink: null, starter: { starting: "launch-waitlist", following: "physical-product" } },
+  physical: { feature: "checkout", featureLink: "How checkout and shipping work", forPage: null, forLink: null, starter: { starting: "launch-waitlist", following: "physical-product" } },
 };
 
 /** The questions, the third built from the importer's guides that exist (lib/migration-guides.ts). */
@@ -57,7 +57,12 @@ export function quizQuestions(guides: readonly { slug: string; platform: string 
 
 /** What the server hands the quiz: the templates' names, the guides and the plan, all read from the code. */
 export type QuizFacts = {
-  starters: Readonly<Record<string, { label: string; hint: string }>>;
+  /** Each template's name and line, and whether it gathers email addresses (a sign-up form or a free product). */
+  starters: Readonly<Record<string, { label: string; hint: string; gathers: boolean }>>;
+  /** The studio's own name for the templates' gallery (lib/funnel-niche-feature.ts). */
+  gallery: string;
+  /** The plan that writes to a list, with its published monthly price: said beside a template that gathers addresses. */
+  listPlan: { name: string; monthly: string };
   guides: readonly { slug: string; platform: string }[];
   /** The plan every option above is on, with its published prices; `onSale` false says plans are not sold yet. */
   plan: { tier: string; name: string; monthly: string; yearly: string; onSale: boolean };
@@ -66,7 +71,9 @@ export type QuizFacts = {
 export type QuizLink = { href: string; text: string };
 export type QuizResult = {
   links: QuizLink[];
-  starter: { label: string; hint: string };
+  starter: { label: string; hint: string; gathers: boolean };
+  gallery: string;
+  listPlan: QuizFacts["listPlan"];
   plan: QuizFacts["plan"];
   /** Where to start: sign-up with the plan chosen, the way the pricing page's cards go. */
   start: QuizLink;
@@ -94,5 +101,5 @@ export function quizResult(facts: QuizFacts, answers: Partial<Record<QuizQuestio
     : from === "other"
       ? { href: "/platform/switching-to-marktmorgen", text: "Moving from another platform: what comes across, step by step" }
       : null;
-  return { links, starter, plan: facts.plan, start: { href: `/signin?plan=${facts.plan.tier}&billing=month`, text: "Start your store" }, moving };
+  return { links, starter, gallery: facts.gallery, listPlan: facts.listPlan, plan: facts.plan, start: { href: `/signin?plan=${facts.plan.tier}&billing=month`, text: "Start your store" }, moving };
 }

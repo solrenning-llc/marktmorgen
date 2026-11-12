@@ -43,34 +43,45 @@ export function StartQuiz({ facts, level = 2, id = "start" }: { facts: QuizFacts
       </form>
       <section aria-labelledby={`${id}-result-title`} className="mt-12">
         <Heading id={`${id}-result-title`} className={level === 2 ? "t-h2" : "t-h3"}>Where to start</Heading>
-        <div role="status" aria-live="polite" className="mt-4">
-          {result ? (
-            <div className="space-y-6">
-              <p className="text-lg">Read these first:</p>
-              <ul className="space-y-2">
-                {[...result.links, ...(result.moving ? [result.moving] : [])].map((link) => (
-                  <li key={link.href}>
-                    <Link href={link.href} prefetch={false} className="inline-flex min-h-11 items-center text-lg underline">{link.text}</Link>
-                  </li>
-                ))}
-              </ul>
+        {/* Only a short sentence is announced: the answer itself is read where it is, not repeated at each change. */}
+        <p role="status" aria-live="polite" className="mt-4 text-lg">
+          {result
+            ? `Your starting point is below: the template “${result.starter.label}”, on the ${result.plan.name} plan.`
+            : `Answer the ${left === 1 ? "last question" : `${left} questions`} above and your starting point appears here.`}
+        </p>
+        {result ? (
+          <div className="mt-6 space-y-6">
+            <p className="text-lg">Read these first:</p>
+            <ul className="space-y-2">
+              {[...result.links, ...(result.moving ? [result.moving] : [])].map((link) => (
+                <li key={link.href}>
+                  <Link href={link.href} prefetch={false} className="inline-flex min-h-11 items-center text-lg underline">{link.text}</Link>
+                </li>
+              ))}
+            </ul>
+            <p className="text-lg">
+              {`In your studio, under Funnels, in “${result.gallery}”, choose “${result.starter.label}”. ${result.starter.hint}`}
+            </p>
+            {result.starter.gathers ? (
               <p className="text-lg">
-                {`In your studio, under Funnels, start from the template “${result.starter.label}”. ${result.starter.hint}`}
+                {`It gathers the email addresses of people who sign up. Sending emails to all of them later is on the ${result.listPlan.name} plan (${result.listPlan.monthly}), or you can connect your own email platform on any plan. `}
+                <Link href="/platform/email-platforms" prefetch={false} className="underline">How connecting an email platform works</Link>
               </p>
-              <p className="text-lg">
-                {`Everything above is on the ${result.plan.name} plan: ${result.plan.monthly}, or ${result.plan.yearly}. `}
-                <Link href="/pricing#plans" prefetch={false} className="underline">Compare the plans</Link>
-              </p>
-              {result.plan.onSale ? null : <p className="font-semibold">Paid plans and paid selling are not open yet. You can prepare your store now.</p>}
-              <p>
-                <Link href={result.start.href} prefetch={false} className="btn btn-primary inline-flex min-h-12 items-center">{result.start.text}</Link>
-              </p>
-              <p className="text-sm">This is where to start, not a promise of sales. Your answers stay in this browser: they are not sent or kept.</p>
-            </div>
-          ) : (
-            <p className="text-lg">{`Answer the ${left === 1 ? "last question" : `${left} questions`} above and your starting point appears here.`}</p>
-          )}
-        </div>
+            ) : null}
+            <p className="text-lg">
+              {`Everything above is on the ${result.plan.name} plan: ${result.plan.monthly}, or ${result.plan.yearly}. `}
+              <Link href="/pricing#plans" prefetch={false} className="underline">Compare the plans</Link>
+            </p>
+            {result.plan.onSale ? null : <p className="font-semibold">Paid plans and paid selling are not open yet. You can prepare your store now.</p>}
+            <p>
+              <Link href={result.start.href} prefetch={false} className="btn btn-primary inline-flex min-h-12 items-center">{result.start.text}</Link>
+            </p>
+            <p className="text-sm">This is where to start, not a promise of sales. Your answers stay in this browser: they are not sent or kept.</p>
+          </div>
+        ) : null}
+        <noscript>
+          <p className="mt-4 text-lg">This quiz needs JavaScript. Without it, <Link className="underline" href="/platform">see every feature</Link> or <Link className="underline" href="/pricing#plans">compare the plans</Link>.</p>
+        </noscript>
       </section>
     </div>
   );

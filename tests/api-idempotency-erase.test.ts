@@ -6,14 +6,15 @@
  * an erasure could not find it.
  */
 import { createHash } from "node:crypto";
-import { IDEMPOTENCY_COMMANDS } from "@/lib/api-idempotency-rules";
+import { IDEMPOTENCY_COMMANDS, IDEMPOTENCY_SECONDS, PERSON_INDEX_LINE_BYTES } from "@/lib/api-idempotency-rules";
+import { dataBytes } from "@/lib/store-data-rules";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { makeKey } from "@/lib/api-keys";
 import { POST as postLead } from "@/app/api/v1/leads/route";
 import { POST as postAccess } from "@/app/api/v1/access/route";
-import { erasePerson } from "@/lib/person-erasure";
+import { erasePerson, erasureScope, erasureSize } from "@/lib/person-erasure";
 import { forgetIdempotentPerson } from "@/lib/api-idempotency";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -113,6 +114,91 @@ async function main(): Promise<void> {
   (redis as unknown as { pipeline: typeof original }).pipeline = original;
   const again = await call(postAccess, a.key, { email: "cy-erase@example.test", product: a.product }, "a-cy-access");
   is("the write ran once; its answer was not kept, and the repeat is told 409, not run again", [noIndex.status, again.status, again.replayed], [200, 409, null]);
+
+  part("A write the erasure ran beside keeps no answer about the person");
+  // Reviews on #3542 @13c5f213 (Claude 1, Claude 3 cloud J, LOW): a keyed write that passed the grant's check before the
+  // person was deleted, and lists and keeps its answer while the erasure runs or after it ended, must not leave an
+  // answer naming them for 24 hours where no erasure finds it.
+  type Pipe = (commands: (string | number)[][]) => Promise<unknown[]>;
+  const plain = redis.pipeline.bind(redis) as Pipe;
+  const setPipe = (fn: Pipe) => { (redis as unknown as { pipeline: Pipe }).pipeline = fn; };
+  const onIndex = (commands: (string | number)[][], names: string[]) => commands.some((c) => String(c[1] ?? "").startsWith("nl:api:idem:p:") && names.includes(String(c[0])));
+  const isRead = (commands: (string | number)[][]) => onIndex(commands, ["SMEMBERS", "ZRANGEBYSCORE", "ZRANGE"]);
+  const isListing = (commands: (string | number)[][]) => !isRead(commands) && onIndex(commands, ["SADD", "ZADD"]);
+  const keptAbout = async (sid: string, email: string) => {
+    const names = redis.keys().filter((k) => k.startsWith(`nl:api:idem:${sid}:`));
+    const out: string[] = [];
+    for (const name of names) {
+      const [raw] = (await plain([["GET", name]])) as unknown[];
+      try {
+        const r = JSON.parse(String(raw)) as { state?: string; body?: string };
+        if (r.state === "done" && String(r.body).includes(email)) out.push(name);
+      } catch { /* not a record */ }
+    }
+    return out;
+  };
+  const storeNow = async () => (await storeForEmail(a.owner))!;
+  for (const when of ["while the erasure reads the index", "after the erasure ended"] as const) {
+    const who = when === "after the erasure ended" ? "gus-erase@example.test" : "fay-erase@example.test";
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    let atGate!: () => void;
+    const reached = new Promise<void>((resolve) => { atGate = resolve; });
+    let write: Promise<{ status: number }> | null = null;
+    let held = false;
+    setPipe(async (commands) => {
+      if (!held && isListing(commands)) { held = true; atGate(); await gate; return plain(commands); }
+      if (when === "while the erasure reads the index" && isRead(commands)) {
+        const reply = await plain(commands);
+        open();
+        await write;
+        return reply;
+      }
+      return plain(commands);
+    });
+    write = call(postAccess, a.key, { email: who, product: a.product }, `a-race-${who}`);
+    await reached;
+    const erased = await erasePerson(await storeNow(), who, { kind: "person" });
+    if (when === "after the erasure ended") open();
+    await write;
+    setPipe(plain);
+    is(`${when}: the erasure finished`, erased.ok, true);
+    is(`${when}: no answer naming the person is kept`, await keptAbout(a.sid, who), []);
+  }
+
+  part("The person's index lists only answers still kept");
+  // Claude 3 cloud J's LOW on #3542: each keep set the index's expiry again, and answers past their 24 hours stayed
+  // listed, so a busy address's index grew past the cap and the erasure threw until it lapsed.
+  const pk = (sid: string, email: string) => `nl:api:idem:p:${sid}:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
+  const listed = async (name: string) => {
+    try {
+      const [members] = (await plain([["ZRANGEBYSCORE", name, "-inf", "+inf"]])) as unknown[];
+      return Array.isArray(members) ? members : "unreadable";
+    } catch { return "unreadable"; }
+  };
+  const EVE = "eve-erase@example.test";
+  is("a first answer about Eve", (await call(postAccess, a.key, { email: EVE, product: a.product }, "a-eve-1")).status, 200);
+  advance(IDEMPOTENCY_SECONDS * 1_000 + 120_000);
+  const later = redis.now();
+  const realNow = Date.now;
+  Date.now = () => later;
+  try {
+    is("a second one, a day and two minutes later", (await call(postLead, a.key, { email: EVE, agreed: true }, "a-eve-2")).status, 200);
+  } finally {
+    Date.now = realNow;
+  }
+  is("only the answer still kept is listed", await listed(pk(a.sid, EVE)), [createHash("sha256").update("a-eve-2").digest("hex")]);
+
+  part("What the index costs and what deleting it costs are counted");
+  // Claude 3 cloud F's LOW: the index's bytes must cover a new index for every keyed write (its name, its line, its
+  // score), as dataBytes counts what is kept. And the erasure's work on it is counted before it runs (rule MR).
+  const longestIndex = `nl:api:idem:p:${"0".repeat(32)}:${"0".repeat(64)}`;
+  is("one keyed write's index line, a new index each time, fits the figure priced", PERSON_INDEX_LINE_BYTES >= dataBytes([longestIndex, "0".repeat(64), String(9_999_999_999_999)], 2), true);
+  const HAL = "hal-erase@example.test";
+  for (const k of ["a-hal-1", "a-hal-2", "a-hal-3"]) await call(postAccess, a.key, { email: HAL, product: a.product }, k);
+  const scope = await erasureScope(await storeNow(), HAL);
+  const size = scope ? await erasureSize(scope) : null;
+  is("the erasure's size counts Hal's kept answers", (size as Record<string, unknown> | null)?.apiAnswers, 3);
 
   done();
 }

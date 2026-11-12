@@ -59,6 +59,11 @@ for (const label of [
   "What do you use as your password?",
   "Do you remember your Netflix password? If so, what is it?",
   "Which password do you use for Gmail?",
+  // Claude 3 (cloud A) MEDIUM on #3668 @b624a7d4: "what" asks the same as "which" here.
+  "What password do you use for Gmail?",
+  "What password do you use?",
+  // and the LEVE: the secret named without "your", then asked for.
+  "Do you have a Netflix password? What is it?",
   "Do you reuse your passwords? Enter your password",
   "How often do you change your password? Enter your Gmail password",
   "Your feedback on my password course: enter your password",
@@ -138,6 +143,8 @@ for (const label of [
   "What do you use for password reminders?",
   "What do you use to store your passwords?",
   "Which password manager do you use?",
+  "What password manager do you use?",
+  "Do you have a password manager? What is it called?",
   "Do you remember your password? What is it like when you forget it?",
   "Why do you reuse your password?",
   // A survey question that follows one about the visitor's passwords is still a question, not a request.

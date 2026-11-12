@@ -132,6 +132,14 @@ for (const label of [
   "Login email for the shop and its password",
   "Email address for the Instagram business account, plus the password",
   "Instagram account password and after that the login email",
+  // Claude 2 (cloud I), focal review @973c1e1e88 (MEDIUM): a short field name with the secret "for" a service, and
+  // "pass" right after a login.
+  "Admin password for your WordPress site",
+  "Site admin password for WordPress",
+  "Store owner password for Shopify",
+  "Instagram password for our team",
+  "WordPress admin login and pass",
+  "Username/pass",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -200,6 +208,14 @@ for (const label of [
   "Email address, and we will send password tips",
   "Email address and what you think about passwords",
   "How do you use email sign-in and, at work, a password?",
+  // Controls for the same review: advice and topics "for" someone, and "pass" that is not a password.
+  "Tips for a strong password",
+  "Password tips for beginners",
+  "Password policy for staff",
+  "Password manager for teams",
+  "Day pass",
+  "Season pass for members",
+  "Boarding pass number",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");

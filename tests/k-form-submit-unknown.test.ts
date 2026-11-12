@@ -50,8 +50,9 @@ async function main() {
       const definition = (await pipeline([['HGET', formsKey, form.id]]))[0];
       const healthy = scenario === 'healthy';
       const definitionUnknown = scenario === 'unknown-definition' || scenario === 'definition-outage';
-      is('status follows confirmed evidence', response.status, definitionUnknown ? 503 : 303);
-      is('location describes only the evidenced outcome', definitionUnknown ? location === null : healthy ? location?.includes(`/form/${form.id}?`) : location?.includes(`status=${scenario === 'missing' ? 'closed' : 'unsure'}`), true);
+      // An unknown definition sends the buyer back to the form with "nothing was sent" (true: nothing was admitted or kept), never a bare 503 page (#2857 focal LEVE).
+      is('status follows confirmed evidence', response.status, 303);
+      is('location describes only the evidenced outcome', healthy ? location?.includes(`/form/${form.id}?`) : location?.includes(`status=${definitionUnknown ? 'error' : scenario === 'missing' ? 'closed' : 'unsure'}`), true);
       is('successful redirect is offered only after a confirmed keep', location?.includes(`/form/${form.id}?`) ?? false, healthy);
       is('actual response storage agrees with success', saved, healthy ? 1 : 0);
       is('the form record remains unchanged', definition, scenario === 'missing' ? null : JSON.stringify(storedForm));

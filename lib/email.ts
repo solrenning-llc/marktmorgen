@@ -26,6 +26,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
+import { repliesFor } from "@/lib/redis-reply";
 
 /**
  * What an email is counted against (added 17 October 2026), said by every
@@ -374,21 +375,51 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
   return false;
 }
 
+/**
+ * What became of one email, for a caller that must not send twice:
+ *
+ *   sent       a sender took it;
+ *   refused    known not taken: not sent at all (no sender, an address
+ *              that is not one, the figure spent, a stop before any
+ *              request) or a sender said no;
+ *   uncertain  it may have gone: a timeout, a server error or an unknown
+ *              claim after the request may have reached a sender. A job
+ *              that writes once keeps its own mark on this.
+ *
+ * "refused" speaks for this call only. A guarded Resend send that finds its
+ * attempt already reserved, dispatched or completed by another call (the
+ * same body under the same idempotency key) answers "refused" (a blocked
+ * post, or a stop before its own request) although that other call may have
+ * been accepted. Both callers today (call reminders, checkout recovery) use
+ * an attempt of their own each time (a fresh key, or a new stop link in the
+ * body); a caller that repeats a fixed key with the same body must not read
+ * "refused" as "not sent" (Claude 2's LOW on #3377).
+ *
+ * sendEmail answers true only for `sent`, exactly as before (added for
+ * 283 [HG2], 7 November 2026; its other callers are unchanged).
+ */
+export type SendOutcome = "sent" | "refused" | "uncertain";
+
 export async function sendEmail(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<boolean> {
+  return (await sendEmailOutcome(message, runtime)) === "sent";
+}
+
+/** sendEmail, telling a certain refusal from an answer that is not known (SendOutcome). */
+export async function sendEmailOutcome(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<SendOutcome> {
   const to = oneAddress(message.to);
-  if (!to) return false;
-  if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return false;
+  if (!to) return "refused";
+  if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return "refused";
   // Keep one identity across awaits and both routes. Preserve the original
   // string and the existing structural contract, including inherited keys.
   const originalIdempotencyKey = message.idempotencyKey;
   if (isSesConfigured()) {
-    if (!(await metered(message.meter, 1))) return false;
+    if (!(await metered(message.meter, 1))) return "refused";
     const amazon = await viaAmazon(message, to, originalIdempotencyKey);
-    if (amazon === true) return true;
-    if (amazon === null) return false;
-    return viaResend(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
+    if (amazon === true) return "sent";
+    if (amazon === null) return "uncertain";
+    return resendOutcome(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
   }
-  return viaResend(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
+  return resendOutcome(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
 }
 
 /** Durable shipment work owns its lifetime claim in the outbox, not the
@@ -428,13 +459,26 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
 }
 export const sendQueuedShipmentMail: ShipmentMailDispatch = queuedShipmentMailSender();
 
-/** One email through Resend: the first sender, and the floor under the other. */
+/** One email through Resend: the first sender, and the floor under the other. True only when it took it. */
 async function viaResend(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, authorization?: MeterAuthorization): Promise<boolean> {
+  return (await resendOutcome(message, originalIdempotencyKey, runtime, authorization)) === "sent";
+}
+
+/**
+ * viaResend, telling a certain refusal from an unknown answer: a guarded
+ * post that came back unknown after its POST may have been made, a server
+ * error (5xx) and a throw may follow acceptance, so they are `uncertain`; a
+ * 4xx, a blocked post, a refused meter and a guard that stopped before any
+ * POST (`posted: false`: the usage read, a reservation or dispatch reply,
+ * the meter's last step or the deadline; Claude 2's MEDIUM 2 on #3377) are
+ * `refused`.
+ */
+async function resendOutcome(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, authorization?: MeterAuthorization): Promise<SendOutcome> {
   const usageCredential = usageKey() ?? "";
   const key = keyFor(message.from);
-  if (!key) return false;
+  if (!key) return "refused";
   const to = oneAddress(message.to);
-  if (!to) return false;
+  if (!to) return "refused";
   const replyTo = oneAddress(message.replyTo);
   const headers = cleanHeaders(message.headers);
 
@@ -460,18 +504,19 @@ async function viaResend(message: OneMessage, originalIdempotencyKey: string | u
   // waits a moment and tries again.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      if (authorization && !(await authorization.preflight())) return false;
+      if (authorization && !(await authorization.preflight())) return "refused";
       const result = await guardedResendPost({
         base: BASE, path: "/emails", credential: auth,
         usageCredential, body: body(),
         ...(under ? { idempotencyKey: under } : {}), recipients: 1, ...(authorization ? { beforePost: authorization.beforePost } : {}),
       }, runtime);
-      if (result.kind === "accepted_receipt") return true;
-      if (result.kind !== "response") return false;
+      if (result.kind === "accepted_receipt") return "sent";
+      if (result.kind === "blocked") return "refused";
+      if (result.kind !== "response") return result.posted === false ? "refused" : "uncertain";
       const response = result.response;
       if (response.ok) {
         await countSent(1);
-        return true;
+        return "sent";
       }
       if (response.status === 429 && attempt < 2) {
         await pause(1_000 + attempt * 1_000);
@@ -487,13 +532,15 @@ async function viaResend(message: OneMessage, originalIdempotencyKey: string | u
         continue;
       }
       console.error("email rejected", response.status);
-      return false;
+      // The guard answers "unknown", never a response, for a 5xx today; read here anyway as
+      // possibly taken, so a later change to the guard cannot make it a refusal by accident.
+      return response.status >= 500 ? "uncertain" : "refused";
     } catch (error) {
       console.error("email failed", error);
-      return false;
+      return "uncertain";
     }
   }
-  return false;
+  return "refused";
 }
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -740,4 +787,109 @@ async function dispatchBatch(
     console.error("batch failed", error);
     return "retry";
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* One email its caller sends again under the same key                 */
+/* ------------------------------------------------------------------ */
+
+const pinKey = (key: string) => `nl:mail:pin:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+/** How long the sender a key's email went to is kept: a day, as long as SES's once-mark and Resend's own key. */
+export const PINNED_SENDER_SECONDS = 86_400;
+type Sender = "ses" | "resend";
+
+/**
+ * The sender kept for a key: `wanted` when none was (SET NX, read back by the same pipeline's GET), or the one kept
+ * before. Null when a reply is not exactly what those commands answer (CX-123 rule 24): no request is made then.
+ */
+async function keepSender(key: string, wanted: Sender): Promise<Sender | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["SET", pinKey(key), wanted, "NX", "EX", PINNED_SENDER_SECONDS], ["GET", pinKey(key)]]), 2);
+    if (!replies || (replies[0] !== "OK" && replies[0] !== null)) return null;
+    const kept = replies[1];
+    if (kept !== "ses" && kept !== "resend") return null;
+    return replies[0] === "OK" && kept !== wanted ? null : kept;
+  } catch {
+    return null;
+  }
+}
+
+/** The sender kept for a key, "none" when Redis answered that none is; null when the reply is not exact. */
+async function keptSender(key: string): Promise<Sender | "none" | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", pinKey(key)]]), 1);
+    const kept = replies ? replies[0] : undefined;
+    return kept === null ? "none" : kept === "ses" || kept === "resend" ? kept : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * After Amazon said no to a key's email (viaAmazon exactly false: nothing was handed to it, and its once-mark was let
+ * go of), the key is kept for Resend instead. Called only from the Resend guard's beforePost, after its reservation and
+ * right before its one request, so a Resend that cannot post (no review or credential binding, budget denied, usage
+ * unknown) leaves the key kept for Amazon, and a later try sends it there. Amazon's once-mark is taken again first
+ * (SET NX), so no other try of the key can hand the email to Amazon from then on; only then is the kept sender moved
+ * (SET XX), by the one try holding that mark. True only when both replies are exactly "OK" (CX-123 rule 24): a mark
+ * another try holds, a kept sender gone, or any other reply sends nothing to Resend, and the caller tries again later.
+ */
+async function moveToResend(key: string): Promise<boolean> {
+  try {
+    const held = repliesFor(await redisPipeline([["SET", onceKey(key), "1", "NX", "EX", 86_400]]), 1);
+    if (!held || held[0] !== "OK") return false;
+    const moved = repliesFor(await redisPipeline([["SET", pinKey(key), "resend", "XX", "EX", PINNED_SENDER_SECONDS]]), 1);
+    return !!moved && moved[0] === "OK";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * sendEmail for an email its caller tries again under the same idempotencyKey until a sender takes it (a PayPal
+ * receipt, lib/paypal-delivery.ts). The sender is kept for the key (PINNED_SENDER_SECONDS) just before its first
+ * request, and every later try goes only to it, so an email whose answer was lost is never sent again by the other
+ * sender, which has never seen the key. A kept sender that is not ready now sends nothing: the caller tries again
+ * later. A refusal Amazon gave (viaAmazon exactly false, nothing handed over) goes on to Resend in the same call, as
+ * sendEmail falls over, and the key moves to Resend only in the guard's beforePost (moveToResend): a Resend that cannot
+ * post leaves it kept for Amazon. An unknown answer (null) stays kept for Amazon. False
+ * without a key; without Redis it is sendEmail. Every other email goes through sendEmail, unchanged.
+ */
+export async function sendEmailPinned(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<boolean> {
+  const key = message.idempotencyKey;
+  if (typeof key !== "string" || !key.trim()) return false;
+  if (!isRedisConfigured()) return sendEmail(message, runtime);
+  const to = oneAddress(message.to);
+  if (!to) return false;
+  if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return false;
+  if (sesConfig() && (await sesReady())) {
+    const kept = await keepSender(key, "ses");
+    if (kept === "ses") {
+      if (!(await metered(message.meter, 1))) return false;
+      const amazon = await viaAmazon(message, to, key);
+      if (amazon !== false) return amazon === true;
+      // The key moves to Resend only once Resend is about to post (moveToResend, once; a resend of the same call after
+      // a 429 finds it kept). The SES path already took its allowance, as in sendEmail.
+      let moved = false;
+      const toResendAfterAmazon = async () => {
+        if (moved) return (await keepSender(key, "resend")) === "resend";
+        moved = await moveToResend(key);
+        return moved;
+      };
+      return viaResend(message, key, runtime, { preflight: async () => true, beforePost: toResendAfterAmazon });
+    }
+    if (kept !== "resend") return false;
+  } else {
+    // Kept as Amazon, which is not ready now, or not known: nothing goes to Resend.
+    const kept = await keptSender(key);
+    if (kept !== "resend" && kept !== "none") return false;
+  }
+  // Kept as Resend just before its request (the guard's last step before it), never in place of a kept Amazon.
+  const toResend = async () => (await keepSender(key, "resend")) === "resend";
+  if (isSesConfigured()) {
+    if (!(await metered(message.meter, 1))) return false;
+    return viaResend(message, key, runtime, { preflight: async () => true, beforePost: toResend });
+  }
+  const meter = lazyMeter(message.meter, 1);
+  return viaResend(message, key, runtime, { preflight: meter.preflight, beforePost: async () => (await meter.beforePost()) && (await toResend()) });
 }

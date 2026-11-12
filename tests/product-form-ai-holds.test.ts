@@ -13,6 +13,7 @@
  */
 import { AiAssist } from "@/components/ai-assist";
 import { ProductIdeas } from "@/components/product-ideas";
+import { ProductPdfAssist } from "@/components/product-pdf-assist";
 import { EMPTY, ProductForm } from "@/components/product-editor";
 import { find, mount } from "./client-hooks";
 import { done, is, part } from "./check";
@@ -24,9 +25,21 @@ type Node = { type?: unknown; props?: Record<string, unknown> };
 const FRESH = [false, false, false];
 const CHECKED = [true, true, true];
 
-async function form() {
+/** A product the creator is changing, with a PDF the form offers to read (758 [STN5], unit 4). */
+const WITH_PDF = {
+  id: "p1",
+  title: "Recipe Pack",
+  summary: "Forty dinners.",
+  priceCents: 1900,
+  file: { pathname: "private/p1/recipes.pdf", name: "recipes.pdf", bytes: 1_000, contentType: "application/pdf" },
+  options: [],
+  bumps: [],
+};
+
+async function form(product: unknown = null) {
   let saved = 0;
   const box = await mount(ProductForm as (props: Record<string, unknown>) => unknown, {
+    ...(product ? { product } : {}),
     draft: EMPTY,
     setDraft: () => {},
     busy: false,
@@ -46,14 +59,22 @@ async function form() {
     (prop(AiAssist).onReviewChange as (c: boolean) => void)(checked);
     await box.settle();
   };
+  const pdf = async (checks: boolean[] | null) => {
+    const tell = prop(ProductPdfAssist).onReviewChange as ((c: boolean[] | null) => void) | undefined;
+    if (typeof tell !== "function") throw new Error("the PDF box tells the form nothing about its AI draft's checks");
+    tell(checks);
+    await box.settle();
+  };
   const save = async () => {
     const before = saved;
     (prop("form").onSubmit as (e: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
     await box.settle();
     return saved > before;
   };
-  return { box, ideas, assist, save };
+  return { box, ideas, assist, pdf, save };
 }
+
+const prop0 = (box: { tree: () => unknown }, type: unknown) => (find(box.tree(), (n: Node) => n.type === type)[0] as Node | undefined)?.props ?? {};
 
 async function main(): Promise<void> {
   part("Scenario A: an idea, then a description draft, then the idea put back");
@@ -82,6 +103,22 @@ async function main(): Promise<void> {
   is("the idea's unchecked review still holds the save", await f.save(), false);
   await f.ideas([...CHECKED]);
   is("both reviews checked: it saves", await f.save(), true);
+  f.box.unmount();
+
+  part("A draft from the product's PDF holds the save until its own boxes are checked (Codex G's MEDIUM on #3447)");
+  f = await form(WITH_PDF);
+  is("the PDF box is drawn for a product with a readable PDF", typeof prop0(f.box, ProductPdfAssist).onChange, "function");
+  is("the PDF box is told how to tell the form about its checks", typeof prop0(f.box, ProductPdfAssist).onReviewChange, "function");
+  await f.pdf([...FRESH]);
+  is("the PDF's AI draft, unchecked: held", await f.save().catch(() => "threw"), false);
+  await f.assist(false);
+  await f.pdf([...CHECKED]);
+  is("the PDF's checks never release the description's unchecked draft", await f.save(), false);
+  await f.assist(true);
+  is("both checked: it saves", await f.save(), true);
+  await f.pdf([...FRESH]);
+  await f.pdf(null);
+  is("the PDF draft put back, nothing else waiting: it saves", await f.save(), true);
   f.box.unmount();
 
   part("Controls");

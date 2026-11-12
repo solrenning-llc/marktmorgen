@@ -14,6 +14,7 @@
  *     to what was said, never to the top of the page.
  */
 import { ProductPdfAssist } from "@/components/product-pdf-assist";
+import { AiDraftReview } from "@/components/ai-draft-review";
 import { AiStepsAssist } from "@/components/ai-steps-assist";
 import { BENEFITS_HEADING, PDF_ASSIST_COPY, type PdfProposal } from "@/lib/product-pdf-assist-rules";
 import { find, mount, texts } from "./client-hooks";
@@ -36,6 +37,8 @@ const SECOND: PdfProposal = { title: "Weeknight Dinners", summary: "Forty dinner
 async function box(about: "ready" | "loading" | "unread") {
   const fields: Fields = { ...ORIGINAL };
   const changes: Fields[] = [];
+  // What the box tells the form about its AI-draft checks (756 [STN3]), in order.
+  const reviews: (boolean[] | null)[] = [];
   const mounted = await mount(ProductPdfAssist, {
     productId: "p1",
     fields,
@@ -44,8 +47,11 @@ async function box(about: "ready" | "loading" | "unread") {
       changes.push({ ...next });
       Object.assign(fields, next);
     },
+    onReviewChange: (checks: boolean[] | null) => {
+      reviews.push(checks === null ? null : [...checks]);
+    },
   } as Parameters<typeof ProductPdfAssist>[0]);
-  return { mounted, fields, changes };
+  return { mounted, fields, changes, reviews };
 }
 
 async function main(): Promise<void> {
@@ -92,6 +98,32 @@ async function main(): Promise<void> {
     await b.mounted.settle();
     is("the three boxes are as they were before the first suggestion", b.fields, ORIGINAL);
     is("the focus goes to what was said, not to the top of the page", [focused, (status(b.mounted.tree())?.props as { tabIndex?: number } | undefined)?.tabIndex], [1, -1]);
+    b.mounted.unmount();
+  }
+
+  part("A suggestion from the PDF is an AI draft the creator checks before saving (756 [STN3]; Codex G's MEDIUM on #3447)");
+  {
+    const b = await box("ready");
+    const review = () => find(b.mounted.tree(), (n) => n.type === AiDraftReview)[0] as Node | undefined;
+    is("no draft yet: no checks drawn, nothing told to the form", [review(), b.reviews], [undefined, []]);
+    stepsBox(b.mounted.tree())?.onResult?.(FIRST);
+    await b.mounted.settle();
+    is("the draft fills the form and draws the three checks, none ticked", review()?.props?.checks, [false, false, false]);
+    is("the form is told the draft waits on its checks", b.reviews.at(-1), [false, false, false]);
+    const toggle = (index: number) => (review()?.props?.onToggle as ((i: number, t: boolean) => void) | undefined)?.(index, true);
+    toggle(0);
+    await b.mounted.settle();
+    toggle(1);
+    await b.mounted.settle();
+    toggle(2);
+    await b.mounted.settle();
+    is("ticking the three is told to the form", b.reviews.at(-1), [true, true, true]);
+    stepsBox(b.mounted.tree())?.onResult?.(SECOND);
+    await b.mounted.settle();
+    is("a second suggestion is a new draft: its checks start again, none ticked", [review()?.props?.checks, b.reviews.at(-1)], [[false, false, false], [false, false, false]]);
+    click(button(b.mounted.tree(), PDF_ASSIST_COPY.undo));
+    await b.mounted.settle();
+    is("put back what was there: no draft left, no checks drawn, the form told so", [review(), b.reviews.at(-1)], [undefined, null]);
     b.mounted.unmount();
   }
 

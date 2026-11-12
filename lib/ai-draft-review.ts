@@ -178,6 +178,14 @@ const sticky = (pattern: RegExp, text: string, at: number) => ((pattern.lastInde
 const notAFigureAfter = (text: string, at: number) => (sticky(ORDINAL, text, at) && !sticky(CLAIMED_ORDINAL, text, at)) || sticky(SHAPE, text, at);
 
 /**
+ * Digits right after one of these words number a part of the draft, they claim nothing: "Week 1: Getting
+ * started", "Step 2. Rest", "Module 3" (Claude 1's LOW on #3437). Read in English only; another language's
+ * labels stay listed, on the side of a prompt to check, never a refusal.
+ */
+const PART_LABEL = /(?<![\p{L}\p{N}])(?:weeks?|days?|steps?|modules?|lessons?|parts?|chapters?|emails?|sessions?)\s*#?\s*$/iu;
+const labelsAPart = (text: string, at: number) => PART_LABEL.test(text.slice(Math.max(0, at - 24), at));
+
+/**
  * A lowercase "m" is minutes or meters ("a 10m call"), but before a count of
  * people or plays it is millions: "5m followers", "10m views".
  */
@@ -282,7 +290,7 @@ function numbersIn(original: string, codes: readonly string[]): { written: strin
   for (const match of text.matchAll(DIGITS)) {
     const written = match[0].replace(/[.,]+$/, "");
     const after = (match.index ?? 0) + match[0].length;
-    if (notAFigureAfter(text, after)) continue;
+    if (notAFigureAfter(text, after) || labelsAPart(text, match.index ?? 0)) continue;
     const millions = /\dm$/.test(written) && sticky(AUDIENCE, text, after);
     found.push({ written, key: digitsKey(millions ? `${written.slice(0, -1)}M` : written), at: match.index ?? 0 });
   }

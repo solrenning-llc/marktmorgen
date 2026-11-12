@@ -49,8 +49,9 @@ export function AiDraftReview({
         <div id={estimatesId} className="mt-2 text-sm text-ink">
           <p>{ESTIMATE_NOTE}</p>
           <ul className="mt-1 flex flex-wrap gap-2" aria-label="Numbers to check">
-            {estimates.map((figure) => (
-              <li key={figure} className="inline-flex items-center gap-1">
+            {estimates.map((figure, index) => (
+              // Two figures can be written the same ("10m" minutes, "10m" millions): keyed by place, never by text.
+              <li key={index} className="inline-flex items-center gap-1">
                 <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{ESTIMATE_BADGE}</span>
                 <span className="font-semibold">{figure}</span>
               </li>

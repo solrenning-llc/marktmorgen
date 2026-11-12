@@ -7,7 +7,9 @@ A = "a" * 40
 B = "b" * 40
 # The one workflow that is not CI: the MV alarm (AGENTS.md) runs only after the nine below
 # complete on main and has no documentation scope (tests/main-red-alarm.test.ts).
-NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
+# next-build-cache.yml only writes TypeScript's build record on main and tests nothing
+# (scripts/test_ci_next_cache.py).
+NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml", "next-build-cache.yml"}
 
 def ci_workflows():
     paths = list(Path(".github/workflows").glob("*.yml"))

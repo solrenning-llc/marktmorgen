@@ -16,7 +16,7 @@ import {
 const read = (path: string) => readFileSync(path, "utf8");
 const ALARM = ".github/workflows/main-red-alarm.yml";
 const alarm = read(ALARM);
-const required = readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") && !["main-red-alarm.yml", "stale-pr-report.yml"].includes(f)).sort();
+const required = readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") && !["main-red-alarm.yml", "stale-pr-report.yml", "next-build-cache.yml"].includes(f)).sort();
 const nameOf = (file: string) => /^name: (.+)$/m.exec(read(`.github/workflows/${file}`))?.[1] ?? "";
 
 part("the alarm listens only to the nine required workflows, on main, when they complete");

@@ -114,7 +114,7 @@ test("the real reservations files parse: one per lane, rows name exact paths", (
   const text = readFileSync("docs/reservations.md", "utf8");
   const lanes = lanePrefixes(text);
   const real = readdirSync("docs/reservations").filter((n: string) => n.endsWith(".md")).map((n: string) => ({ path: `docs/reservations/${n}`, text: readFileSync(`docs/reservations/${n}`, "utf8") }));
-  assert.deepEqual(real.map((f: { path: string }) => ownerOfReservationFile(f.path, lanes)).sort(), ["claude 1", "claude 2", "claude 3", "claude 4", "codex"]);
+  assert.deepEqual(real.map((f: { path: string }) => ownerOfReservationFile(f.path, lanes)).sort(), ["claude 1", "claude 2", "claude 3", "claude 4", "claude 7", "codex"]);
   for (const r of allReservations(text, real)) assert.match(r.file, /^[\w.\[\]\/-]+$/, r.file);
 });
 

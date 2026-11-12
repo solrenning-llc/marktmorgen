@@ -72,6 +72,25 @@ jobs:
           node-version: "24"
           package-manager-cache: false
       - run: npm ci
+      # TypeScript's incremental record of the build of this tree's base commit (its first parent:
+      # main for a pull request or a merge group, the previous commit on main), written only by
+      # .github/workflows/next-build-cache.yml (rules: scripts/test_ci_next_cache.py). The build below
+      # still type-checks every file; TypeScript only skips re-checking files whose content and whose
+      # dependencies' types are unchanged since that build. No record, or a slow download: a cold build.
+      - name: Base commit of this tree
+        id: base
+        run: |
+          base=$(git cat-file -p HEAD 2>/dev/null | sed -n '/^$/q;s/^parent //p' | head -n 1) || base=none
+          case "$base" in *[!0-9a-f]*|"") base=none ;; esac
+          [ "${#base}" -eq 40 ] || base=none
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+      - name: Restore TypeScript build record of the base commit
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .next/cache/.tsbuildinfo
+          key: next-tsbuildinfo-v1-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ steps.base.outputs.sha }}
       - run: node scripts/ci-build.mjs
       - name: Install isolated locked tooling without lifecycle scripts or optional recording
         working-directory: tooling/screen-reader

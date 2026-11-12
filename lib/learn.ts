@@ -333,10 +333,13 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
   return (await courseLedger(store, email)).paid;
 }
 
-/** The same answer, with the memberships that ended kept apart. */
-async function courseLedger(store: Store, email: string): Promise<Ledger> {
+/**
+ * The same answer, with the memberships that ended kept apart, and the courses left shut only because Stripe's answer
+ * could not be had whole (`undecided`): said to the student as "could not check", never as not bought.
+ */
+async function courseLedger(store: Store, email: string): Promise<Ledger & { undecided: Set<string> }> {
   const result = new Map<string, number>();
-  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set() };
+  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), undecided: new Set() };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
@@ -418,6 +421,10 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     }
   }
 
+  // Shut only for want of Stripe's answer: Stripe alone might have opened it (a membership, a one-off bought, or written
+  // down on the thanks page and perhaps refunded since). Known before anyone is taken off below, which stays "closed".
+  const undecided = new Set(unknown ? courses.filter((p) => p.course && !result.has(p.id)).map((p) => p.id) : []);
+
   // A student the creator took off the course stays off it.
   const withCourse = [...result.keys()]
     .map((id) => courses.find((p) => p.id === id))
@@ -432,7 +439,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
       if (taken[i] === 1) result.delete(p.id);
     });
   }
-  return { paid: result, ended: asked.ended, refunded: asked.refunded };
+  return { paid: result, ended: asked.ended, refunded: asked.refunded, undecided };
 }
 
 export type CourseAccess =
@@ -440,7 +447,12 @@ export type CourseAccess =
   | { state: "preview"; learner: Learner | null }
   | { state: "closed"; learner: Learner | null }
   /** A membership that gave this course has ended: said as such, with the way back. */
-  | { state: "ended"; learner: Learner };
+  | { state: "ended"; learner: Learner }
+  /**
+   * Not open, because whether it opens could not be checked just now (Stripe's answer could not be had whole,
+   * CX-123 rule 24): said as such, with a way to load the page again, never as not bought (lib/course-door.ts).
+   */
+  | { state: "unknown"; learner: Learner };
 
 /** Whether this browser may take this course, and from when. */
 export async function courseAccess(store: Store, product: Listing, cookies: CookieJar): Promise<CourseAccess> {
@@ -448,9 +460,10 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
   if (!learner || !product.course) return { state: "closed", learner };
   if (learner.owner) return { state: "open", learner, start: Math.floor(Date.now() / 1000) - 400 * 86_400 };
   if (learner.scope !== "all" && !learner.scope.includes(product.course.id)) return { state: "closed", learner };
-  const { paid, ended } = await courseLedger(store, learner.email);
+  const { paid, ended, undecided } = await courseLedger(store, learner.email);
   const start = paid.get(product.id);
   if (start !== undefined) return { state: "open", learner, start };
+  if (undecided.has(product.id)) return { state: "unknown", learner };
   return ended.has(product.id) ? { state: "ended", learner } : { state: "closed", learner };
 }
 

@@ -39,6 +39,7 @@ import { videoStampText } from "@/lib/video-stamp";
 import { LessonNotes } from "@/components/lesson-notes";
 import { readNote } from "@/lib/lesson-notes";
 import { EmptyState } from "@/components/empty-state";
+import { AccessUncheckedNote } from "@/components/access-unchecked-note";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -420,8 +421,14 @@ export default async function LessonPage({ params, searchParams }: Params) {
             <div className="mt-3">
               <CourseOutline course={course} base={base} start={start} done={done ?? new Set<string>()} current={lesson.id} held={held} language={store.language} />
             </div>
+            {/* A student whose access could not be checked just now is told so, never sent to buy what they may own
+                (lib/course-door.ts); on a free preview, the only lesson such a student reaches. */}
             {!open ? (
-              <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>
+              access.state === "unknown" ? (
+                <AccessUncheckedNote title={w.uncheckedTitle} body={w.uncheckedBody} retry={w.uncheckedRetry} href={`${base}/${lesson.id}`} className="mt-5" />
+              ) : (
+                <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>
+              )
             ) : null}
           </aside>
 

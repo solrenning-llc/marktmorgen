@@ -1272,6 +1272,7 @@
     }
   ],
   "componentSources": [
+    "components/access-unchecked-note.tsx",
     "components/ad-spend-editor.tsx",
     "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",

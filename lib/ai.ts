@@ -1499,6 +1499,8 @@ export async function readPdfThenWrite<T>(
   const unrun: Unrun = { jobs: 0, asked: false };
   const flow = stepsOf(store, steps, unrun);
   return countedRun(store, now, async () => {
+    // Live before its first step, once its jobs are reserved, as writePage's run (#3435): a stop is written only over it.
+    if (steps) await markAiRunLive(store, steps.run);
     const reading = { answered: false };
     const read = await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf, reading), 1);
     const fileFacts = read.value;

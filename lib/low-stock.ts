@@ -132,6 +132,27 @@ const CAS_HSET = [
 export type LowStockCheck = "crossed" | "no" | "off" | "unknown";
 
 /**
+ * Whether these units left would cross the creator's number, read only:
+ * nothing is written, so a crossing that cannot be said yet (the store's
+ * daily bound, an unreadable count) is still there at the next check.
+ */
+export async function wouldCrossLow(store: DataStore, productId: string, left: unknown): Promise<LowStockCheck> {
+  if (!isLeft(left) || !store.statsId || !productId || !isRedisConfigured()) return "unknown";
+  try {
+    const raw = await readRaw(store.statsId, productId);
+    if (raw === null) return "off";
+    const kept = parse(raw);
+    if (!kept) return "unknown";
+    if (kept.seen === left) return "no";
+    const crossed = crossedLow(kept.seen, left, kept.low);
+    return crossed === "unknown" ? "unknown" : crossed === "yes" ? "crossed" : "no";
+  } catch (error) {
+    console.error("reading a low-stock number failed", error);
+    return "unknown";
+  }
+}
+
+/**
  * The units left of a product now (`left`, as lib/stock.ts reads them):
  * "crossed" once when they fell from above the creator's number to it or
  * under it, "no" otherwise, "off" when no number is set. The count seen moves

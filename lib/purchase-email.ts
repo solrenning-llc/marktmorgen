@@ -61,7 +61,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { creatorAddress } from "@/lib/mail-from";
 import type { Listing, Store } from "@/lib/store";
 import { listingsNamed, readListing, recordListings } from "@/lib/catalog";
-import { recordEnrollment } from "@/lib/learn";
+import { noteBoughtAgain, recordEnrollment } from "@/lib/learn";
 import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preorders";
 import { speechFor } from "@/lib/buyer-words";
 import { ordersWords } from "@/lib/buyer-words/orders";
@@ -607,6 +607,14 @@ async function confirmOnce(
     // Sent: kept, so nobody sends it again. Not sent: let go, so the next
     // pass of the job, or the next open of the thanks page, tries again.
     await redisPipeline(sent ? [["SET", key, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", key]]);
+  }
+  // A course in it bought again by a student whose row holds an earlier day: the drip job reads their start once, so
+  // the modules open again from this purchase are announced even if the course is not opened (Codex G on #3369).
+  if (sent) {
+    const typed = session.customer_details?.email;
+    const buyer = typeof typed === "string" && typed ? typed : typeof session.customer_email === "string" ? session.customer_email : "";
+    const courseIds = listings.flatMap((p) => (p.course ? [p.course.id] : []));
+    if (buyer && courseIds.length && typeof session.created === "number") await noteBoughtAgain(store, courseIds, buyer, session.created);
   }
   // A paid order confirmed while the store asks for reviews goes on the list
   // to be asked, once (lib/review-ask.ts). Nothing is asked of a trial that

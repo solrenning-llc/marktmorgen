@@ -6,7 +6,7 @@
 // own, bounded per store and allowance window (lib/drip-start.ts), never taken from the store's public requests (what
 // its buyers' pages use).
 import type { Course } from "@/lib/course";
-import { emailKey, paidCourses, recordEnrollment, registerDrip, sendDripEmails, studentDates, touchStudent } from "@/lib/learn";
+import { emailKey, noteBoughtAgain, paidCourses, recordEnrollment, registerDrip, sendDripEmails, studentDates, touchStudent } from "@/lib/learn";
 import type { DataStore } from "@/lib/store-data";
 import type { Listing, Store } from "@/lib/store";
 import { catalog } from "./course-repurchase-catalog-world";
@@ -187,6 +187,8 @@ async function main() {
   await fresh([session("cs_test_second", second, false), session("cs_test_first", first, true)]);
   await recordEnrollment(store, buyer, product.id, first);
   await openedOn(first);
+  // The new purchase's confirmation notes it (lib/purchase-email.ts, confirmOnce).
+  await noteBoughtAgain(store, [courseId], buyer, second);
   is("before the new Month 1 opens, nothing is announced", await run(second + 29 * DAY), []);
   is("Month 1 is announced the day the page opens it again, 30 days after buying again", await run(second + 30 * DAY), [subject("Month 1")]);
   is("the studio's start follows the purchase that stands", (await studentDates(courseId, buyer))?.since, second);

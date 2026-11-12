@@ -1009,11 +1009,36 @@ const DRIP_SET = "nl:courses:drip";
 const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;
 /**
- * The mark of a student's start looked at again with no module due under the day their row holds (Codex G on #3369):
- * one of the drip marks, under a name no module id takes (those are 12 letters), so it is counted, kept and deleted
- * with them.
+ * The students of a course who paid for it again after their row's day (lib/purchase-email.ts, noteBoughtAgain), one
+ * place each, so the drip job reads their start once, whatever is due under the row's day (Codex G on #3369): a
+ * course bought again after a full refund and not opened since is found the run after the purchase, and nobody else
+ * is read for it (Claude 7 on #3369). Kept until that read answers; deleted with the person.
  */
-const RESTART_LOOK = "restart-look";
+const againKey = (courseId: string) => `nl:course:${courseId}:again`;
+
+/**
+ * Notes, when a paid checkout is confirmed, that a student whose row holds an earlier day bought one of these courses
+ * again, for the drip job to read their start. A student never seen has no row and nothing to move. Never throws: a
+ * reply it cannot read writes nothing, and the page re-dates the row the next time it is opened.
+ */
+export async function noteBoughtAgain(store: Store, courseIds: string[], email: string, paidSeconds: number): Promise<void> {
+  if (!isRedisConfigured() || !courseIds.length || !Number.isFinite(paidSeconds)) return;
+  const field = emailKey(email);
+  try {
+    const rows = repliesFor(await redisPipeline(courseIds.map((id) => ["HGET", studentsKey(id), field])), courseIds.length);
+    if (!rows) return;
+    const again = courseIds.filter((_, i) => {
+      const raw = rows[i];
+      if (typeof raw !== "string") return false;
+      const row = studentTimes(raw);
+      return row !== null && row.s < Math.floor(paidSeconds);
+    });
+    // The buyer's kept answer is let go with it, so the drip job's read asks Stripe and sees this purchase.
+    if (again.length) await redisPipeline([...again.map((id) => ["SADD", againKey(id), field]), ["DEL", paidCacheKey(store, email)]]);
+  } catch (error) {
+    console.error("noting a course bought again failed", error);
+  }
+}
 
 /** Remembers that this course opens modules over time, for the daily job. */
 export async function registerDrip(store: Store, product: Listing, course: Course): Promise<void> {
@@ -1057,13 +1082,11 @@ export async function sendDripEmails(
     counts.courses += 1;
     const { students } = read;
     const within = (at: number) => at <= nowSeconds && at >= nowSeconds - 3 * 86_400;
-    // The soonest a module opens after a purchase, less the three days a module is announced in: a student with no
-    // module due under the day their row holds, and none due sooner than this under it, has their start looked at
-    // again at most once in this time (RESTART_LOOK), so a course bought again after a full refund and not opened
-    // since is found before its first module opens again (Codex G on #3369). Taken from the same monthly figure as
-    // every start read (lib/drip-start.ts), before the read.
-    const soonest = Math.min(...dripping.map((m) => m.dripDays));
-    const lookEvery = Math.max(1, soonest - 3) * 86_400;
+    // The students who paid for it again after their row's day (noteBoughtAgain): one SMEMBERS, read exactly; unknown
+    // looks at nobody this run, and the next run asks again.
+    const againRead = repliesFor(await redisPipeline([["SMEMBERS", againKey(course.id)]]), 1)?.[0];
+    const boughtAgain = new Set(Array.isArray(againRead) && againRead.every((m) => typeof m === "string") ? (againRead as string[]) : []);
+    if (againRead !== undefined && !Array.isArray(againRead)) console.error("reading a course's students who bought it again failed", course.id);
     // One student's start, read from the store's monthly figure: what the page opens the course from, undefined
     // when it does not open it, null when it cannot be counted or read (nothing is sent, the next run asks again).
     const startOf = async (email: string): Promise<number | null | undefined> => {
@@ -1083,28 +1106,18 @@ export async function sendDripEmails(
       let stands: number | null | undefined;
       let read = false;
       let since = student.since;
-      const opens = dripping.map((unit) => opensAt(course, unit, since));
-      const nextOpen = Math.min(...opens.filter((at) => at > nowSeconds));
-      if (!opens.some(within) && !(nextOpen - nowSeconds <= lookEvery)) {
-        // Nothing due under the row's day and nothing due soon: the start is looked at again, at most once a while.
-        const look = dripMailKey(course.id, student.email, RESTART_LOOK);
-        const lookValue = claimValue();
-        const claimed = await claimMark(look, lookEvery, lookValue);
-        if (claimed === "unknown") await releaseMark(look, lookValue);
-        if (claimed === "ours") {
-          read = true;
-          stands = await startOf(student.email);
-          // Not counted or not read: the mark is let go, so a later run looks again.
-          if (stands === null) await releaseMark(look, lookValue);
-          else if (stands !== undefined && stands !== since) {
-            const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
-            if (moved) since = stands;
-            else {
-              stands = null;
-              await releaseMark(look, lookValue);
-            }
-          }
+      const field = emailKey(student.email);
+      if (boughtAgain.has(field)) {
+        // Bought again after the row's day: the start is read now, whatever is due under the row's day.
+        read = true;
+        stands = await startOf(student.email);
+        if (stands !== null && stands !== undefined && stands !== since) {
+          const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          if (moved) since = stands;
+          else stands = null;
         }
+        // Answered (open from a day, or not open at all): forgotten. Unknown: kept, and the next run reads it again.
+        if (stands !== null) await redisPipeline([["SREM", againKey(course.id), field]]);
       }
       for (let i = 0; i < dripping.length; i += 1) {
         const unit = dripping[i];
@@ -1205,7 +1218,7 @@ export async function forgetLearnerPerson(
     paidCacheKey(store, email),
     passesKey(store, email),
     ...passes.map((hash) => `nl:learn:pass:${hash}`),
-    ...courses.flatMap((c) => [doneKey(c.courseId, email), ...[...c.moduleIds, RESTART_LOOK].map((m) => dripMailKey(c.courseId, email, m))]),
+    ...courses.flatMap((c) => [doneKey(c.courseId, email), ...c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))]),
   ];
   const commands: (string | number)[][] = [["DEL", ...keys], ...courses.map((c) => ["HDEL", studentsKey(c.courseId), emailKey(email)])];
   const replies = repliesFor(await redisPipeline(commands), commands.length);
@@ -1213,5 +1226,9 @@ export async function forgetLearnerPerson(
   // erasure says this part did not finish (lib/person-erasure.ts).
   const counts = replies?.map(countOf);
   if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");
-  return (counts as number[]).reduce((sum, n) => sum + n, 0);
+  // Their place among the students who bought a course again (againKey), read exactly the same way.
+  const again = courses.map((c) => ["SREM", againKey(c.courseId), emailKey(email)]);
+  const left = again.length ? repliesFor(await redisPipeline(again), again.length)?.map(countOf) : [];
+  if (!left || left.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");
+  return [...(counts as number[]), ...(left as number[])].reduce((sum, n) => sum + n, 0);
 }

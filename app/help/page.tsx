@@ -65,10 +65,13 @@ export default function HelpPage() {
               <li key={area.folder} className="min-w-0">
                 <a
                   href={`#${area.answer}`}
-                  className="flex min-h-11 flex-col justify-center rounded-[var(--r-md)] border border-line bg-white px-4 py-3 hover:border-line-strong"
+                  className="flex min-h-11 items-start gap-3 rounded-[var(--r-md)] border border-line bg-white px-4 py-3 hover:border-line-strong"
                 >
-                  <span className="font-semibold text-ink">{area.name}</span>
-                  <span className="text-sm text-ink-soft">{questionOf.get(area.answer)}</span>
+                  <Icon name={area.icon} size={20} className="mt-0.5 shrink-0 text-violet-deep" />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="font-semibold text-ink">{area.name}</span>
+                    <span className="text-sm text-ink-soft">{questionOf.get(area.answer)}</span>
+                  </span>
                 </a>
               </li>
             ))}

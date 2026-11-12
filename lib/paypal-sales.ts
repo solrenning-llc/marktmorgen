@@ -488,6 +488,11 @@ export type Paid = {
   via?: { aff: string; rate: number };
   off?: number;
   sale?: number;
+  /**
+   * The creator's PayPal account the order was paid to (added 12 November 2026; absent on orders paid before): the
+   * refund watch reads the capture as that account, whatever account the store has connected since.
+   */
+  m?: string;
 };
 export type CaptureResult = { ok: true; paid: Paid; fresh: boolean } | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" };
 
@@ -633,6 +638,7 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     currency: opened.cur,
     at: Math.floor(Date.now() / 1000),
     handle: opened.h,
+    ...(MERCHANT_ID.test(opened.m) ? { m: opened.m } : {}),
     ...(opened.meta ? { meta: opened.meta } : {}),
     ...(opened.via ? { via: opened.via } : {}),
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
@@ -886,9 +892,12 @@ export async function watchPayPal(
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
+    // The account the order was paid to, whatever account the store has connected since (C7, 12 November 2026); a
+    // record from before it was kept falls back to the account connected now.
+    const merchant = typeof paid.m === "string" && MERCHANT_ID.test(paid.m) ? paid.m : store.paypalSeller.merchant;
     let status = "";
     try {
-      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
+      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });
       // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
       // "not refunded", and moved back so it cannot hold the place of the orders behind it.
       if (typeof capture.status !== "string" || !capture.status) {

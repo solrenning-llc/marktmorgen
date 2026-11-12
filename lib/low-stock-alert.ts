@@ -24,7 +24,7 @@
  */
 import { claimMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { LOW_STOCK_DUE, noteUnitsLeft, lowStockOf, setLowStock } from "@/lib/low-stock";
+import { LOW_STOCK_DUE, noteUnitsLeft, lowStockOf, setLowStock, wouldCrossLow } from "@/lib/low-stock";
 import { alertCreator } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
@@ -58,14 +58,16 @@ export type LowStockTold = "told" | "no" | "off" | "unknown";
  */
 export async function tellLowStock(store: Store, product: { id: string; title: string }, left: unknown, now = Date.now()): Promise<LowStockTold> {
   if (!store.statsId) return "unknown";
-  const crossed = await noteUnitsLeft(store, product.id, left);
-  if (crossed !== "crossed") return crossed;
+  // Read first, written only once it can be said: past the store's daily bound, or with its count unknown,
+  // nothing of the crossing is spent, so the next check (the job's, a day later at most) says it (Claude 3 and Revisor 1 on #3725).
+  const peek = await wouldCrossLow(store, product.id, left);
+  if (peek === "off" || peek === "unknown") return peek;
+  if (peek === "no") {
+    const noted = await noteUnitsLeft(store, product.id, left);
+    return noted === "unknown" || noted === "off" ? noted : "no";
+  }
   const day = new Date(now).toISOString().slice(0, 10);
-  const key = toldKey(store.statsId, product.id, day);
-  const claimed = await claimMark(key, TOLD_SECONDS);
-  if (claimed === "unknown") return "unknown";
-  if (claimed !== "ours") return "no";
-  // The store's own daily bound, counted before anything is sent; a count that cannot be read sends nothing.
+  // The store's own daily bound, counted before anything is spent or sent; a count that cannot be read spends and sends nothing.
   let count: number | null = null;
   try {
     const replies = repliesFor(await redisPipeline([["INCR", storeDayKey(store.statsId, day)], ["EXPIRE", storeDayKey(store.statsId, day), TOLD_SECONDS]]), 2);
@@ -75,6 +77,12 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   }
   if (count === null || count < 1) return "unknown";
   if (count > LOW_STOCK_ALERTS_A_STORE_DAY) return "no";
+  const crossed = await noteUnitsLeft(store, product.id, left);
+  if (crossed !== "crossed") return crossed;
+  const key = toldKey(store.statsId, product.id, day);
+  const claimed = await claimMark(key, TOLD_SECONDS);
+  if (claimed === "unknown") return "unknown";
+  if (claimed !== "ours") return "no";
 
   let low: number | null = null;
   try {

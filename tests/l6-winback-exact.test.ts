@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   await setWinBack(OWNER, { percent: 25, months: 2, days: 7, coupon: "co_Back0001", address: "1 Main St, Portland, OR 97201" });
   const store = (await storeForEmail(OWNER))!;
   const meta = { store: "lsixback", product: club.product.id };
-  const people = ["ann", "bob", "cat", "dan", "eve", "fay", "gus", "fox"];
+  const people = ["ann", "bob", "cat", "dan", "eve", "fay", "gus", "fox", "hal", "ivy", "jo"];
   for (const name of people) {
     const id = `cus_${name[0].toUpperCase()}${name.slice(1)}0000001`.slice(0, 18);
     customers.set(id, `${name}@example.com`);
@@ -185,6 +185,21 @@ async function main(): Promise<void> {
   is("Dan and Eve are both read, though the window's events come one a page", [sentTo().includes("dan@example.com"), sentTo().includes("eve@example.com")], [true, true]);
   is("and nobody is written to twice", sentTo().length, new Set(sentTo()).size);
   eventsPage = 100;
+
+  part("A row whose status or metadata does not read is unknown (rule 24, the class of Codex CX1's MEDIUM on #3598)");
+  for (const [who, row] of [
+    ["hal", { id: "sub_HalLive0001", status: "a_status_stripe_never_named", metadata: { store: "lsixback", product: meta.product } }],
+    ["ivy", { id: "sub_IvyLive0001", status: "active", metadata: { store: "lsixback", product: 17 } }],
+    ["jo", { id: "sub_JoLive00001", status: "active", metadata: null }],
+  ] as const) {
+    ended(`sub_${who[0].toUpperCase()}${who.slice(1)}0000001`.slice(0, 18), cus(who), 8, meta);
+    subsBody.set(cus(who), { object: "list", data: [row], has_more: false });
+    await sendWinBacks(Date.now() + 30_000, now);
+    is(`${who}: never written to on a row that does not read`, sentTo().includes(`${who}@example.com`), false);
+    subsBody.set(cus(who), { object: "list", data: [{ ...row, status: "canceled", metadata: { store: "lsixback", product: meta.product } }], has_more: false });
+    await sendWinBacks(Date.now() + 30_000, now);
+    is(`${who}: read whole the next time (ended): written to, once`, sentTo().filter((to) => to === `${who}@example.com`).length, 1);
+  }
 
   part("No more than a hundred offers looked at per store per run, however many ended (Claude 3 on #2714)");
   // Ann's memberships read whole now (she came back), so no earlier offer is looked at again in what follows.

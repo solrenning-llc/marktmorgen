@@ -75,6 +75,14 @@ function readable(student: unknown): student is DropoffStudent {
 export function lessonDropoff(lessons: readonly DropoffLesson[], students: readonly DropoffStudent[], now: number): DropoffMap {
   // An unreadable clock is refused (rule 24): read as is, it made every student "still going".
   if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError("lessonDropoff needs the time now as a whole number of milliseconds");
+  // Lessons it cannot tell apart are refused too: with an id twice, a row read 0 done while the summary counted the
+  // student who did it as finished.
+  const ids = new Set<string>();
+  for (const lesson of lessons as readonly unknown[]) {
+    const { id, title } = (lesson ?? {}) as { id?: unknown; title?: unknown };
+    if (typeof id !== "string" || !id || ids.has(id) || typeof title !== "string") throw new TypeError("lessonDropoff needs each lesson once, with an id and a title");
+    ids.add(id);
+  }
   const rows: LessonRow[] = lessons.map((lesson) => ({ id: lesson.id, title: lesson.title, done: 0, of: 0, stoppedHere: 0 }));
   const index = new Map(rows.map((row, i) => [row.id, i]));
   let read = 0;
@@ -126,7 +134,7 @@ export function dropoffLines(map: DropoffMap): { lessons: string[]; summary: str
     const base = `${row.title}: ${row.done.toLocaleString("en-US")} of ${plural(row.of, "student", "students")} marked it done.`;
     return row.stoppedHere > 0 ? `${base} ${row.stoppedHere.toLocaleString("en-US")} stopped here.` : base;
   });
-  const summary = `Of ${plural(map.students, "student", "students")}, ${map.finished.toLocaleString("en-US")} finished, ${map.going.toLocaleString("en-US")} ${map.going === 1 ? "is" : "are"} still going and ${map.stopped.toLocaleString("en-US")} stopped (not seen for ${STOPPED_AFTER_DAYS} days).`;
+  const summary = `Of ${plural(map.students, "student", "students")}, ${map.finished.toLocaleString("en-US")} finished, ${map.going.toLocaleString("en-US")} ${map.going === 1 ? "is" : "are"} still going and ${map.stopped.toLocaleString("en-US")} stopped (not seen for more than ${STOPPED_AFTER_DAYS} days).`;
   const named = map.most === null ? undefined : map.lessons.find((row) => row.id === map.most);
   const most = named
     ? `Students stopped most often at "${named.title}"${map.tiedWith > 0 ? `, as often as at ${plural(map.tiedWith, "other lesson", "other lessons")}` : ""}. This shows where they stopped, not why.`

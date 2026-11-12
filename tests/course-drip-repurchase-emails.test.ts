@@ -91,6 +91,7 @@ async function fresh(sessions: Record<string, unknown>[]) {
   catalog.listings = [product];
   stripe.sessions = sessions;
   stripe.fail = false;
+  stripe.byEmail = undefined;
   await registerDrip(store, product, current);
 }
 
@@ -212,6 +213,33 @@ async function main() {
   is(`with ${figure} past students, the one whose Month 1 opens today is emailed`, await run(late + 30 * DAY), [subject("Month 1")]);
   is("and only that start is read at Stripe", stripe.asked.filter((p) => p.startsWith("/checkout/sessions?")).length, 1);
   current = course;
+
+  part("Students refunded in full never take the reads a paying student's due email needs (Claude 1 and Codex L on #3369)");
+  current = short;
+  await fresh([session("cs_test_refunded", first, true)]);
+  const refundedFigure = allowanceFor(store, "email", first + 30 * DAY);
+  const refunded = Array.from({ length: refundedFigure }, (_, n) => `refunded-${n}@example.test`);
+  for (const who of refunded) {
+    await recordEnrollment(store, who, product.id, first);
+    await redis.pipeline([["HSET", `nl:course:${courseId}:students`, emailKey(who), JSON.stringify({ e: who, s: first, l: first + 29 * DAY })]]);
+  }
+  const payer = "payer@example.test";
+  stripe.byEmail = { [payer]: [session("cs_test_payer", first, false)] };
+  await recordEnrollment(store, payer, product.id, first);
+  await openedOn(first, payer);
+  const firstDays = [...(await run(first + 30 * DAY)), ...(await run(first + 31 * DAY)), ...(await run(first + 32 * DAY))];
+  is("the paying student gets Month 1 within its window, nobody refunded does", firstDays, [subject("Month 1")]);
+  stripe.byEmail = undefined;
+  current = course;
+
+  part("Stripe does not answer at all: a one-off buyer's module is announced from the row, as the page opens it (Claude 7 on #3369)");
+  await fresh([session("cs_test_once", first, false)]);
+  await recordEnrollment(store, buyer, product.id, first);
+  await openedOn(first);
+  stripe.fail = true;
+  const outage = [...(await run(first + 30 * DAY)), ...(await run(first + 31 * DAY)), ...(await run(first + 32 * DAY))];
+  is("Month 1 is announced within its window, once", outage, [subject("Month 1")]);
+  stripe.fail = false;
 
   part("One purchase, written down on its thanks page (unchanged)");
   await fresh([session("cs_test_once", first, false)]);

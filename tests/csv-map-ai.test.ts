@@ -10,7 +10,10 @@
  *     reserves for it (from its real request bounds) is never more than the
  *     ceiling the rules priced, even at the widest file;
  *   - the live call is askModel, which reserves before the provider is asked
- *     (tests/ai-spend-provider.test.ts holds that path);
+ *     (tests/ai-spend-provider.test.ts holds that path), inside counted: each
+ *     ask takes one of the month's writing jobs before the model is called,
+ *     and a month whose jobs are used up asks nothing (out-of-family review
+ *     of #3559 at c720cc496a, MEDIUM 1; run here with the real counted);
  *   - a failed, thrown or malformed answer suggests nothing; a good one only
  *     fills what the names left open;
  *   - the route takes the import permission, stops while a renewal is unpaid,
@@ -24,22 +27,35 @@ import { MAP_MODEL, MAX_COLUMNS, NAME_MAX, type MapRequest, mapHoldMicroUsd, map
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { AGENT_COVERAGE } from "@/lib/agent-coverage";
+import { aiMonthKey, counted } from "@/lib/ai";
+import { AI_MONTHLY } from "@/lib/ai-rules";
+import { redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
 const store = { statsId: "s1", sid: "s1", tier: "pro" } as unknown as Store;
 type Call = { system: string; prompt: string; maxTokens: number; model: string };
-function deps(answer: string | null | Error, available = true): SuggestDeps & { calls: Call[] } {
+/** The month's job, as counted takes it: refused ("used", "off") before the run, or the run's text. */
+function deps(answer: string | null | Error, available = true, refuse: "used" | "off" | null = null): SuggestDeps & { calls: Call[]; counts: number } {
   const calls: Call[] = [];
-  return {
+  const out = {
     calls,
+    counts: 0,
     available: () => available,
-    ask: async (_s, system, prompt, maxTokens, model) => {
+    count: async (_s: Store, _n: number, run: () => Promise<string | null>) => {
+      out.counts++;
+      if (refuse) return { ok: false as const, reason: refuse };
+      const value = await run().catch(() => null);
+      return value === null ? { ok: false as const, reason: "failed" as const } : { ok: true as const, value, left: 1 };
+    },
+    ask: async (_s: Store, system: string, prompt: string, maxTokens: number, model: string) => {
       calls.push({ system, prompt, maxTokens, model });
       if (answer instanceof Error) throw answer;
       return answer;
     },
   };
+  return out;
 }
 const header = ["Correo", "Nombre completo", "Opt-in status"];
 const open = { email: -1, name: -1, tags: -1, consent: -1 };
@@ -76,7 +92,43 @@ async function main(): Promise<void> {
     true,
   );
   const lib = readFileSync("lib/csv-map-ai.ts", "utf8");
-  is("the live call is askModel (reserved in the store's AI budget before the provider), and the help's own switch", lib.includes("const LIVE: SuggestDeps = { ask: askModel, available: aiAvailableFor };"), true);
+  is(
+    "the live call is askModel (reserved in the store's AI budget before the provider), inside counted (one of the month's jobs), and the help's own switch",
+    lib.includes("const LIVE: SuggestDeps = { ask: askModel, available: aiAvailableFor, count: counted };"),
+    true,
+  );
+
+  part("Each ask takes one of the month's writing jobs first (out-of-family review of #3559, MEDIUM 1)");
+  const used = deps('{"email":0,"name":1,"tags":null,"consent":2}', true, "used");
+  is("the month's jobs used up: refused as used, the model never called", [await suggestColumns(store, "contacts", header, open, used), used.counts, used.calls.length], [{ ok: false, why: "used" }, 1, 0]);
+  const unset = deps('{"email":0,"name":1,"tags":null,"consent":2}', true, "off");
+  is("the job cannot be taken (no counter, no window): off, the model never called", [await suggestColumns(store, "contacts", header, open, unset), unset.calls.length], [{ ok: false, why: "off" }, 0]);
+  const once = deps('{"email":0,"name":1,"tags":null,"consent":2}');
+  await suggestColumns(store, "contacts", header, open, once);
+  is("one job taken per ask, the model called inside it", [once.counts, once.calls.length], [1, 1]);
+  is("nothing is counted when nothing would be asked", [await (async () => { const d = deps("{}"); await suggestColumns(store, "contacts", ["ana@mail.test", "Ana"], open, d); return d.counts; })()], [0]);
+
+  // The real counted, on the in-memory store: the job is taken before the model is asked, and a month at its allowance asks nothing.
+  const prior = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-" + "synthetic".repeat(5);
+  try {
+    const at = Date.UTC(2026, 10, 12, 9);
+    const paying = { statsId: "csv-map-jobs", sid: "csv-map-jobs", tier: "pro", period: paidPeriod(at) } as unknown as Store;
+    const key = aiMonthKey(paying, new Date(at)) as string;
+    const real = (answer: string | null) => ({ ...deps(answer), count: counted });
+    await redisPipeline([["SET", key, AI_MONTHLY.pro]]);
+    const full = real('{"email":0,"name":1,"tags":null,"consent":2}');
+    is("with the real counted: a month at its allowance is refused as used, the model never called, nothing more counted", [await suggestColumns(paying, "contacts", header, open, full, at), full.calls.length, (await redisPipeline([["GET", key]]))[0]], [{ ok: false, why: "used" }, 0, String(AI_MONTHLY.pro)]);
+    await redisPipeline([["DEL", key]]);
+    const fresh = real('{"email":0,"name":1,"tags":null,"consent":2}');
+    const fine = await suggestColumns(paying, "contacts", header, open, fresh, at);
+    is("with the real counted: an ask takes exactly one job, then the model is called once", [fine.ok, fresh.calls.length, (await redisPipeline([["GET", key]]))[0]], [true, 1, "1"]);
+    const late = real(null);
+    is("with the real counted: an ask whose call came back empty suggests nothing", await suggestColumns(paying, "contacts", header, open, late, at), { ok: false, why: "failed" });
+  } finally {
+    if (prior === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prior;
+  }
 
   part("What comes back");
   is(

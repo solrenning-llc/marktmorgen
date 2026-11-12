@@ -7,8 +7,8 @@
  *   nl:pm:t:<sha(token)>     string  what a link is for: the request and which address it went to
  *   nl:pm:c:<id>:<side>      string  that address confirmed, and when (a mark, taken once)
  *   nl:pm:done:<id>          string  the request was claimed for its move (a mark, taken once)
- *   nl:pm:day:<fingerprint>  string  how many requests an address started today, under a one-way fingerprint
- *   nl:pm:retry:<fingerprint> string  the chosen request id and private claim nonce for a same-day retry
+ *   nl:pm:day:<fingerprint>  string  how many requests an address started today, under a keyed fingerprint (an HMAC under a key derived from the server's secret)
+ *   nl:pm:retry:<fingerprint> string  the chosen request id and private claim nonce for a same-day retry, under a keyed fingerprint
  *
  * Everything ends by itself: the request, its links and its confirmations
  * when its day is up (MOVE_CONFIRM_SECONDS), the claim and the day's count
@@ -38,6 +38,7 @@ import {
   readMoveScope,
 } from "@/lib/purchase-move-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { deriveKey } from "@/lib/secret-box";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 /** A link's secret: 48 hex characters. */
@@ -56,15 +57,30 @@ const requestKey = (id: string) => `nl:pm:r:${id}`;
 const tokenKey = (token: string) => `nl:pm:t:${sha(token)}`;
 const confirmKey = (id: string, side: MoveSide) => `nl:pm:c:${id}:${side}`;
 const doneKey = (id: string) => `nl:pm:done:${id}`;
-/** One address's count of the day (UTC), under a fingerprint that cannot be turned back into the address. */
-const dayKey = (address: string, nowMs: number) => `nl:pm:day:${sha(`nimbus-pm-day:${Math.floor(nowMs / 86_400_000)}:${address}`).slice(0, 32)}`;
+/**
+ * A fingerprint of addresses for a key name: an HMAC under a key derived from the server's secret (lib/secret-box.ts),
+ * so whoever reads key names and knows an address cannot hash likely ones to match it (Codex G on #3659). Null without
+ * the secret: nothing is then named by an address, and the ask is unknown.
+ */
+const fingerprint = (purpose: string, value: string): string | null => {
+  const key = deriveKey(`purchase-move-${purpose}/v2`);
+  return key ? createHmac("sha256", key).update(value).digest("hex").slice(0, 32) : null;
+};
+/** One address's count of the day (UTC), under a keyed fingerprint that cannot be turned back into the address. */
+const dayKey = (address: string, nowMs: number): string | null => {
+  const fp = fingerprint("day", `${Math.floor(nowMs / 86_400_000)}:${address}`);
+  return fp ? `nl:pm:day:${fp}` : null;
+};
 /** A same-address, same-destination retry finds the existing request without storing either address in a key. */
-const retryKey = (from: string, to: string, scope: MoveRequest["scope"], nowMs: number) =>
-  `nl:pm:retry:${sha(`nimbus-pm-retry:v1:${Math.floor(nowMs / 86_400_000)}:${JSON.stringify([scope, from, to])}`).slice(0, 32)}`;
+const retryKey = (from: string, to: string, scope: MoveRequest["scope"], nowMs: number): string | null => {
+  const fp = fingerprint("retry", `${Math.floor(nowMs / 86_400_000)}:${JSON.stringify([scope, from, to])}`);
+  return fp ? `nl:pm:retry:${fp}` : null;
+};
+/** A request's two links, derived for this purpose from the server's secret, never from the root key itself. */
 const retryToken = (id: string, side: MoveSide): string | null => {
-  const key = process.env.NIMBUS_DATA_KEY;
+  const key = deriveKey("purchase-move-link/v2");
   if (!key) return null;
-  return createHmac("sha256", key).update(`nimbus-pm-link:v1:${id}:${side}`).digest("hex").slice(0, 48);
+  return createHmac("sha256", key).update(`${id}:${side}`).digest("hex").slice(0, 48);
 };
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
@@ -153,12 +169,14 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
   const day = dayKey(made.from, now);
+  if (!day) return { ok: false, reason: "unknown" };
   const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
   const count = counted ? countOf(counted[0]) : null;
   const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
   if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
 
   const retry = retryKey(made.from, made.to, made.scope, now);
+  if (!retry) return { ok: false, reason: "unknown" };
   const id = randomBytes(16).toString("hex");
   const claim = randomBytes(16).toString("hex");
   const indexValue = JSON.stringify({ id, claim } satisfies RetryIndex);

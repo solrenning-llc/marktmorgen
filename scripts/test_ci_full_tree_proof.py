@@ -234,6 +234,29 @@ class WorkflowSourceAndOrderTests(unittest.TestCase):
         self.assertIn("run: node scripts/ci-build.mjs\n        working-directory: measured-app", body)
         self.assertIn("run: node tests/e2e/mobile-render.mjs measured-app", body)
 
+    def test_every_cross_browser_run_is_an_expected_job_and_runs_its_own_shard(self):
+        body = "\n".join(self.jobs["cross-browser"])
+        self.assertIn("    name: Cross-browser (${{ matrix.browser }} ${{ matrix.shard }})", body)
+        browsers = re.findall(r"^        browser: \[(.+)\]$", body, re.MULTILINE)
+        shards = re.findall(r"^        shard: \[(.+)\]$", body, re.MULTILINE)
+        self.assertEqual([len(browsers), len(shards)], [1, 1])
+        browsers = [b.strip() for b in browsers[0].split(",")]
+        shards = [x.strip().strip('"') for x in shards[0].split(",")]
+        # Every run k/N of the split, k = 1..N, so the runs together cover every lane of store-copy.
+        self.assertEqual(shards, [str(k) + "/" + str(len(shards)) for k in range(1, len(shards) + 1)])
+        self.assertEqual(len(shards), 2)  # tests/e2e/store-copy.mjs refuses more than 2 runs
+        self.assertIn("      E2E_SHARD: ${{ matrix.shard }}", body)
+        self.assertNotIn("include:", body)
+        self.assertNotIn("exclude:", body)
+        self.assertNotIn("continue-on-error", body)
+        self.assertIn("fail-fast: false", body)
+        names = {"Cross-browser (" + b + " " + x + ")" for b in browsers for x in shards}
+        self.assertEqual({n for n in WORKFLOWS["product-checks"] if n.startswith("Cross-browser")}, names)
+        self.assertEqual(browsers, ["firefox", "webkit"])
+        root = Path(__file__).resolve().parents[1]
+        self.assertIn("const SHARD = parseShard(process.env.E2E_SHARD);", (root / "tests/e2e/store-copy.mjs").read_text(encoding="utf-8"))
+        self.assertIn("run: node tests/e2e/store-copy.mjs --no-build", body)
+
     def test_actual_order_admission_waits_for_its_node_dependencies(self):
         steps = re.split(r"(?m)^      - ", "\n".join(self.jobs["form-opportunity-redis"]))[1:]
         order = [index for index, step in enumerate(steps) if step.startswith("name: Actual Redis order admission checks\n")]

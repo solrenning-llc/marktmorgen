@@ -268,7 +268,7 @@ jobs:
   cross-browser:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
-    name: Cross-browser (${{ matrix.browser }})
+    name: Cross-browser (${{ matrix.browser }} ${{ matrix.shard }})
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.56.1-noble
@@ -278,9 +278,13 @@ jobs:
       fail-fast: false
       matrix:
         browser: [firefox, webkit]
+        # tests/e2e/store-copy.mjs runs its lanes split between these two runs (E2E_SHARD); together they run every
+        # check once, and all-checks fails when either fails. scripts/test_ci_full_tree_proof.py holds the names.
+        shard: ["1/2", "2/2"]
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       E2E_BROWSER: ${{ matrix.browser }}
+      E2E_SHARD: ${{ matrix.shard }}
       AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -55,7 +55,7 @@ import { checkHomeReasons } from "./home-reasons.mjs";
 import { checkDisputeReview } from "./dispute-review.mjs";
 import { captureHomeStudio } from "./home-studio-capture.mjs";
 import { SALES_COMPARISON_PARTS } from "./sales-comparisons.mjs";
-import { keepCheckContext, runLanes } from "./check-lanes.mjs";
+import { keepCheckContext, lanesOfShard, parseShard, runLanes } from "./check-lanes.mjs";
 import { checkPauseAcknowledgment } from "./pause-acknowledgment.mjs";
 import { checkBillingStudioObservation } from "./billing-studio-observation.mjs";
 import { checkClaimAcknowledgment } from "./claim-acknowledgment.mjs";
@@ -146,6 +146,15 @@ const FAKE = `http://127.0.0.1:${SERVICES}`;
 const BUILD = !process.argv.includes("--no-build");
 // How many lanes of browser checks run at once (tests/e2e/check-lanes.mjs); 1 runs them one after another.
 const LANES = Math.max(1, Number(process.env.E2E_LANES || 3));
+// Which of the separate runs this is (E2E_SHARD=k/N, unset = 1/1, everything). Every run does the serial part (seed,
+// the owner/Path section, the studio observation, shrink's color) and the lanes it owns (SECOND_SHARD below); the N
+// runs together run every lane exactly once. CI runs 1/2 and 2/2 side by side (.github/workflows/product-checks.yml).
+const SHARD = parseShard(process.env.E2E_SHARD);
+if (SHARD.count > 2) throw new Error(`store-copy splits into at most 2 runs, not ${SHARD.count}`);
+// With 2 runs, the run 2/2 owns the lanes led by these checks and all of phase 2: the studio lanes and the template
+// library lane, which phase 2's shipment checks follow on the same fixture. Every other lane, and any lane added
+// later, is run 1/2's. Balance measured on webkit (CI, 12/11/2026): run 1 holds the longest lane (homeDemo, ~6 min).
+const SECOND_SHARD = new Set(["checkPdfStampAcknowledgment","checkLeaveAcknowledgment","checkPackageAcknowledgment","checkExitAcknowledgment","checkNudgeAcknowledgment","checkOfferPlanning"]);
 
 const env = {
   ...process.env,
@@ -948,7 +957,13 @@ try {
     "checkRenameAcknowledgment","checkDetailsAcknowledgment","checkClaimAcknowledgment","checkPauseAcknowledgment","checkEmailCapabilities",
   ];
   const laneOptions={limit:LANES,onError:(name,error)=>{failed+=1;console.error("FAILED_CHECK:"+name);console.error(error);},onSkip:(name,cause)=>console.log("  FAIL  "+name+" not run: "+cause+" failed earlier in its lane")};
-  await runLanes(phase1,{...laneOptions,order:phase1Order});
+  const leaders=new Set(phase1.map(lane=>lane[0].name));
+  const stray=[...SECOND_SHARD].filter(name=>!leaders.has(name));
+  if(stray.length)throw new Error(`SECOND_SHARD names checks that lead no phase 1 lane: ${stray.join(", ")}`);
+  const ownerOf=lane=>SECOND_SHARD.has(lane[0].name)?2:1;
+  const mine1=lanesOfShard(phase1,phase1Order,SHARD,ownerOf);
+  if(SHARD.count>1)console.log(`E2E_SHARD ${SHARD.index}/${SHARD.count}: phase 1 runs ${mine1.order.length} checks here; the other run has ${JSON.stringify(mine1.elsewhere)}`);
+  await runLanes(mine1.lanes,{...laneOptions,order:mine1.order});
   const shipment=services.seedShipment("templatelibraryfixture",libraryFixture.product);
   const phase2=[
     [
@@ -959,7 +974,9 @@ try {
     [step("checkMenuMounting",()=>checkMenuMounting({browser,LOCAL,is}))],
     [step("checkShippingSave",()=>checkShippingSave({browser,LOCAL,fixture:shippingFixture,is}))],
   ];
-  await runLanes(phase2,{...laneOptions,order:["checkShipmentAcknowledgment","checkMenuMounting","checkPurchaseResend","checkShippingSave","checkDiscountAcknowledgment"]});
+  const mine2=lanesOfShard(phase2,["checkShipmentAcknowledgment","checkMenuMounting","checkPurchaseResend","checkShippingSave","checkDiscountAcknowledgment"],SHARD,()=>2);
+  if(SHARD.count>1)console.log(`E2E_SHARD ${SHARD.index}/${SHARD.count}: phase 2 runs ${mine2.order.length} checks here; the other run has ${JSON.stringify(mine2.elsewhere)}`);
+  await runLanes(mine2.lanes,{...laneOptions,order:mine2.order});
   await checkBillingStudioObservation({browser,LOCAL,services,fixture:billingObservation,is});
   await checkShrinkTone({ browser, root, is });
   is("no page threw", errors, []);

@@ -106,3 +106,36 @@ export async function runLanes(lanes, { limit = 3, order, onError, onSkip }) {
   }));
   flush();
 }
+
+/**
+ * Reads E2E_SHARD ("k/N"): which of N separate runs of the same script this is. Unset or empty is "1/1", one run
+ * that does everything. Anything else that is not k/N with 1 <= k <= N stops the script before a browser opens.
+ */
+export function parseShard(value) {
+  if (value === undefined || value === "") return { index: 1, count: 1 };
+  const match = /^([1-9][0-9]*)\/([1-9][0-9]*)$/.exec(value);
+  if (!match || Number(match[1]) > Number(match[2])) throw new Error(`E2E_SHARD must read k/N with 1 <= k <= N, got ${JSON.stringify(value)}`);
+  return { index: Number(match[1]), count: Number(match[2]) };
+}
+
+/**
+ * Splits whole lanes between the N runs: `shardOf(lane)` names the run (1..N) that owns a lane, so a lane always runs
+ * whole, in its order, in exactly one run, and every lane runs in one of them. `order` is checked against every lane
+ * first, as runLanes checks it, then kept only for this run's lanes. With N = 1 every lane is kept.
+ * @returns {{lanes: Array<Array<{name:string}>>, order: string[], elsewhere: string[]}}
+ */
+export function lanesOfShard(lanes, order, { index, count }, shardOf) {
+  const names = lanes.flat().map((check) => check.name);
+  if (new Set(names).size !== names.length) throw new Error("Each check needs one unique name");
+  if (order.length !== names.length || order.some((name) => !names.includes(name))) throw new Error("The printed order must name every check once");
+  const kept = [];
+  const elsewhere = [];
+  for (const lane of lanes) {
+    const owner = count === 1 ? 1 : shardOf(lane);
+    if (!Number.isInteger(owner) || owner < 1 || owner > count) throw new Error(`Lane ${lane[0]?.name} has no shard in 1..${count}: ${owner}`);
+    if (owner === index) kept.push(lane);
+    else elsewhere.push(...lane.map((check) => check.name));
+  }
+  const here = new Set(kept.flat().map((check) => check.name));
+  return { lanes: kept, order: order.filter((name) => here.has(name)), elsewhere };
+}

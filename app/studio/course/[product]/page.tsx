@@ -350,8 +350,8 @@ export default async function StudioCoursePage({
         <section className="card mt-8 p-6 sm:p-8" aria-labelledby="next-step-title" data-next-step="">
           <h2 id="next-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Next step</h2>
           <p className="mt-2 max-w-2xl text-ink-soft">
-            Suggest one of your products for students who are ready for more. They see it on the course&apos;s page, with its
-            price and your line, and can say &quot;No thanks&quot;.
+            Suggest one of your products for students who are ready for more. They see it on the course&apos;s page and right after
+            they finish the last lesson, with its price and your line, and can say &quot;No thanks&quot;.
           </p>
           {nextChoices === null ? (
             <p className="notice notice-error mt-4" role="status">

@@ -336,8 +336,14 @@ export async function erasePerson(
   }
   const records = parts.reduce((sum, p) => sum + p.records, 0);
   // The team's own deletions go in its activity log; a person's own is told to the owner by email (lib/erasure-request.ts).
+  // What really happened, never more (#4333): a deletion with a part that could not finish says it is not complete and
+  // which parts are still to retry, so the owner and the team reading it later know one is owed. Never the address.
   if (scope.sid && by.kind === "team") {
-    await logTeam(scope.sid, { who: by.who, role: by.role, what: `People: deleted a person and everything kept about them (${records} ${records === 1 ? "record" : "records"})` });
+    const counted = `${records} ${records === 1 ? "record" : "records"}`;
+    const what = failed.length
+      ? `People: deleting a person is not complete (${counted} deleted; still to retry: ${failed.join(", ")})`
+      : `People: deleted a person and everything kept about them (${counted})`;
+    await logTeam(scope.sid, { who: by.who, role: by.role, what });
   }
   if (failed.length) return { ok: false, reason: "incomplete", parts, failed };
   return { ok: true, parts, records, notes: [...notes] };

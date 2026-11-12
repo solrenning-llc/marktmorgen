@@ -176,8 +176,8 @@ export class MemoryRedis {
               return "?";
             }
             if (!record || typeof record !== "object") return "?";
-            const fields = record as { k?: unknown; removed?: unknown; muted?: unknown };
-            if (fields.k !== who || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
+            const fields = record as { k?: unknown; e?: unknown; removed?: unknown; muted?: unknown };
+            if (fields.k !== who || typeof fields.e !== "string" || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
             return fields.removed ? "r" : "y";
           }).join("");
         }

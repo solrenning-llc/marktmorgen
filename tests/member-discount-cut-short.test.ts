@@ -37,6 +37,7 @@ let subscriptionPages: Record<string, unknown> = {};
 const membership = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
   status: "active",
+  discounts: [],
   metadata: { store: "cutshortmember", product: "prod000001" },
   items: { data: [{ price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] },
   ...extra,

@@ -28,7 +28,7 @@ let push: (line: unknown) => void = () => {};
 let close: () => void = () => {};
 const stops: unknown[] = [];
 /** When set, the stop request waits for this answer instead of a plain yes. */
-let stopAnswer: Promise<Response> | null = null;
+const stopAnswer: Promise<Response> | null = null;
 globalThis.fetch = (async (_url: string, init: RequestInit) => {
   const body = JSON.parse(String(init.body)) as { kind?: string };
   if (body.kind === "stop") {

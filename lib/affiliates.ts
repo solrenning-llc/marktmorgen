@@ -752,6 +752,19 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
 }
 
 /**
+ * An affiliate's record read exactly (rule 24): null only when Redis confirms there is none; a reply of another shape,
+ * or text that does not read as a record, throws UnknownReplyError. For a caller whose "none" moves money.
+ */
+async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null> {
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) throw new Error("an affiliate's record needs a store and an affiliate id");
+  const reply = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
+  if (reply && reply[0] === null) return null;
+  const affiliate = reply ? parseAffiliate(reply[0]) : null;
+  if (!affiliate) throw new UnknownReplyError("an affiliate's record");
+  return affiliate;
+}
+
+/**
  * Writes a record just made, under an id nobody else has (a fresh random id, after its address was claimed with
  * HSETNX). Every change to a record already there goes through changeAffiliate instead.
  */
@@ -2160,20 +2173,20 @@ export async function undoRates(store: Store, before: RateBefore[], rate: number
   return { undone: done.length, left, used: done.length === 0 && held.some((one) => one.why === "used") };
 }
 
-export async function addPayout(
-  store: Store,
-  input: { aff: string; cents: number; currency: string; date: string; reference: string },
-): Promise<Payout | null> {
+type PayoutInput = { aff: string; cents: number; currency: string; date: string; reference: string };
+
+/** A payout's reference as it is written down: spaces folded, at most MAX_REFERENCE_LENGTH characters. */
+export function payoutReference(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH);
+}
+
+function payoutOf(input: PayoutInput, id: string): Payout {
+  return { id, aff: input.aff, cents: input.cents, currency: input.currency, date: input.date, reference: payoutReference(input.reference), at: Date.now() };
+}
+
+export async function addPayout(store: Store, input: PayoutInput): Promise<Payout | null> {
   if (!(await readAffiliate(store, input.aff))) return null;
-  const payout: Payout = {
-    id: randomBytes(6).toString("hex"),
-    aff: input.aff,
-    cents: input.cents,
-    currency: input.currency,
-    date: input.date,
-    reference: input.reference.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH),
-    at: Date.now(),
-  };
+  const payout = payoutOf(input, randomBytes(6).toString("hex"));
   // What the creator writes down takes room in the store's data room first (DataRoomError when it does not fit).
   const json = JSON.stringify(payout);
   await needData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }]);
@@ -2183,6 +2196,60 @@ export async function addPayout(
   const reply = repliesFor(await redisPipeline([["HSET", payoutsKey(store.statsId as string), payout.id, json]]), 1);
   if (!reply || reply[0] !== 1) throw new UnknownReplyError("a payout written down");
   return payout;
+}
+
+/**
+ * The id of the payout that writes down one PayPal payout item (lib/paypal-payouts.ts, settlePayPal): the same item
+ * gives the same id, 12 hex characters like any payout's, so the creator can still remove it (removePayout).
+ */
+export function payoutIdForItem(item: string): string {
+  return createHash("sha256").update(`paypal-payout-item|${item}`).digest("hex").slice(0, 12);
+}
+
+/**
+ * Writes down a payout under an id that names what it pays (payoutIdForItem), once (Claude 2 on #3272, finding 1):
+ * HSETNX, read exactly. 1 is "written"; 0 is "held", that payout in the book already, and the room taken for this
+ * copy is given back; "gone" only when Redis confirms the affiliate has no record (Claude 5 on #3272, finding 1: a
+ * record read in another shape throws, it is never "gone"). A payout already in the book (HEXISTS, read exactly) is
+ * "held" before any room is taken, so a full data room never keeps it waiting (finding 2). Any other answer may have
+ * written it or not, so UnknownReplyError is thrown, as DataRoomError is when the store's data room is full: the
+ * caller keeps what it pays waiting and asks again, and an answer of 0 then says it was written.
+ */
+export async function addPayoutOnce(store: Store, input: PayoutInput & { id: string }): Promise<"written" | "held" | "gone"> {
+  if (!store.statsId || !/^[0-9a-f]{12}$/.test(input.id)) throw new Error("a payout written once needs a store and a 12-hex id");
+  if (!(await readAffiliateExact(store, input.aff))) return "gone";
+  const there = repliesFor(await redisPipeline([["HEXISTS", payoutsKey(store.statsId), input.id]]), 1);
+  if (there && there[0] === 1) return "held";
+  if (!there || there[0] !== 0) throw new UnknownReplyError("whether a payout is written down");
+  const payout = payoutOf(input, input.id);
+  const json = JSON.stringify(payout);
+  const room = [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }];
+  await needData(store, room);
+  const reply = repliesFor(await redisPipeline([["HSETNX", payoutsKey(store.statsId), payout.id, json]]), 1);
+  if (reply && reply[0] === 1) return "written";
+  if (reply && reply[0] === 0) {
+    await giveData(store, room);
+    return "held";
+  }
+  throw new UnknownReplyError("a payout written down once");
+}
+
+/**
+ * The references of every payout written in the store's book, read exactly; UnknownReplyError when the reply is not
+ * a list of field and value pairs. A value that does not read as a payout is not counted in the book (readBook), so
+ * it is left out here too.
+ */
+export async function payoutReferences(store: Store): Promise<Set<string>> {
+  if (!store.statsId) throw new Error("a store's payouts need its statsId");
+  const reply = repliesFor(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
+  const references = new Set<string>();
+  for (let i = 1; i < flat.length; i += 2) {
+    const payout = parsePayout(flat[i]);
+    if (payout) references.add(payout.reference);
+  }
+  return references;
 }
 
 export async function removePayout(store: Store, id: string): Promise<boolean> {

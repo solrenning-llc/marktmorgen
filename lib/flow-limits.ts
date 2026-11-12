@@ -75,7 +75,9 @@ export const MAX_RUNS_KEPT_PER_FLOW = Math.max(...Object.values(DAILY_RUNS_BY_TI
  * every few hours for as long as the cause lasted, and none of it was in
  * WORST_COMMANDS_PER_RUN.
  *
- *   - MAX_WAITS_PER_RUN: times one run may wait, all its steps together. A
+ *   - MAX_WAITS_PER_RUN: times one run may wait, all its steps together (a
+ *     look while the store is switched off counts as half a wait, since
+ *     9 November 2026: SWITCHED_OFF_LOOKS_PER_WAIT below). A
  *     wait for something with a known end (the month turning, the next UTC
  *     day, a pause's end) is tried once, at that end; anything else is tried
  *     again with a growing delay (lib/flow-retry.ts). One more wait past it
@@ -113,6 +115,15 @@ export const QUEUE_COMMANDS_PER_STEP = 7;
  * 4 November 2026, with the lease read); 32 with room to spare.
  */
 export const WAIT_COMMANDS_PER_TRY = 32;
+/**
+ * A look at a step waiting while its store is switched off (lib/flow-retry.ts) reads only the queue, the store, its
+ * workflows and the run's count, and puts the step back: measured at 13 commands for a batch of one person, the step's
+ * first wait included (tests/suspended-store-mail.test.ts, 9 November 2026), at most half of WAIT_COMMANDS_PER_TRY. So
+ * it counts as half a wait against MAX_WAITS_PER_RUN: a run may look SWITCHED_OFF_LOOKS_PER_WAIT times for each wait
+ * it has left, and its commands stay within MAX_WAITS_PER_RUN × WAIT_COMMANDS_PER_TRY below.
+ */
+export const SWITCHED_OFF_LOOKS_PER_WAIT = 2;
+export const SWITCHED_OFF_LOOK_COMMANDS = WAIT_COMMANDS_PER_TRY / SWITCHED_OFF_LOOKS_PER_WAIT;
 export const WORST_COMMANDS_PER_RUN =
   RUN_START_COMMANDS +
   (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) +

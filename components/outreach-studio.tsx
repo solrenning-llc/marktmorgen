@@ -289,7 +289,7 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
   }
 
   return (
-    <div className="mt-8 grid gap-6">
+    <div className="mt-8 grid gap-6 [overflow-wrap:anywhere] [&>*]:min-w-0">
       <section className="card p-6 sm:p-8" aria-labelledby="who-title">
         <h2 id="who-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
           Who is writing

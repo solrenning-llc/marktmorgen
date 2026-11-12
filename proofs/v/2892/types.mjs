@@ -1,0 +1,10 @@
+import ts from 'typescript';
+const config=ts.readConfigFile('tsconfig.json',ts.sys.readFile);
+if(config.error)throw Error(ts.flattenDiagnosticMessageText(config.error.messageText,'\n'));
+const parsed=ts.parseJsonConfigFileContent(config.config,ts.sys,process.cwd());
+const roots=['lib/short-links.ts','lib/segments.ts','app/api/store/mail/route.ts','app/api/store/short-links/route.ts','components/email-studio.tsx','components/short-links.tsx','tests/list-limits-exact.test.ts','tests/list-limits-unreadable-member.test.ts'];
+const options={...parsed.options,incremental:false,noEmit:true};
+const program=ts.createProgram(roots,options),diagnostics=ts.getPreEmitDiagnostics(program);
+console.log(JSON.stringify({roots,sources:program.getSourceFiles().length,diagnostics:diagnostics.length,target:ts.ScriptTarget[options.target],strict:options.strict,moduleResolution:ts.ModuleResolutionKind[options.moduleResolution]}));
+for(const d of diagnostics)console.log(ts.formatDiagnosticsWithColorAndContext([d],{getCanonicalFileName:x=>x,getCurrentDirectory:ts.sys.getCurrentDirectory,getNewLine:()=> '\n'}));
+process.exitCode=diagnostics.length?1:0;

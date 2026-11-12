@@ -101,7 +101,10 @@ export async function finishPlan(account: string, session: string): Promise<Plan
 export async function settlePlans(limit = 200): Promise<{ done: number; open: number; dropped: number; failed: number }> {
   const counts = { done: 0, open: 0, dropped: 0, failed: 0 };
   if (!isRedisConfigured()) return counts;
-  const [raw] = await redisPipeline([["SMEMBERS", PENDING]]);
+  // Only the members this run settles are read, never the whole set: every plan checkout opened adds one and only
+  // this job takes them out, so a backlog is read once per run at most `limit` (c1-cost-plans-pending). Taken at
+  // random, so members kept (open for their two days, or failing) never stand in front of the same others every run.
+  const [raw] = await redisPipeline([["SRANDMEMBER", PENDING, limit]]);
   const members = Array.isArray(raw) ? (raw as string[]).slice(0, limit) : [];
   const now = Math.floor(Date.now() / 1000);
   for (const member of members) {

@@ -25,7 +25,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_buyer_history_only";
 const OWNER = "mara@example.com";
 const OTHER = "lee@example.com";
 const BUYER = "Buyer@Example.com";
-const ACCOUNT = "acct_1TestHistory0001";
+const ACCOUNT = "acct_TestHistory1";
 
 type Row = Record<string, unknown>;
 const charge = (refunded: boolean, amountRefunded: number, disputed: boolean, extra: Row = {}): Row => ({ id: "ch_1", object: "charge", refunded, amount_refunded: amountRefunded, disputed, ...extra });

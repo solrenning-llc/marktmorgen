@@ -1330,7 +1330,10 @@ a.chip {
    bar rather than by colour alone. */
 
 .toc-link {
-  display: block;
+  /* A 44 px tall target for each entry of a page index (2.5.5 AAA, tests/legal-pages-accessibility.test.ts). */
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
   border-left: 2px solid var(--line);
   padding: 0.3rem 0 0.3rem 0.85rem;
   color: var(--ink-mute);
@@ -1968,6 +1971,11 @@ a.chip {
      break on its own. On a 320px screen one of them is enough to push the
      whole page sideways, so they break wherever they must. */
   overflow-wrap: anywhere;
+}
+/* No block of a legal page's text is wider than 80 characters, at any width or with text spacing (1.4.8 AAA,
+   tests/legal-pages-accessibility.test.ts). */
+.legal-body :where(p, li, dd, blockquote) {
+  max-width: 46ch;
 }
 .legal-body a {
   color: var(--violet-deep);

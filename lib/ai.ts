@@ -1412,10 +1412,11 @@ export async function writePage(
     }
   };
   const unrun: Unrun = { jobs: 0, asked: false };
-  // A stepped run marks itself live before its first step, so the page's Stop (offered only once a step is said)
-  // finds it; a stop is written over nothing else.
-  if (steps) await markAiRunLive(store, steps.run);
   return countedRun(store, now, async () => {
+    // A stepped run marks itself live before its first step, so the page's Stop (offered only once a step is said)
+    // finds it; a stop is written over nothing else. Only once the month's allowance is reserved: a refused
+    // request writes nothing (cloud O's LOW on #3435).
+    if (steps) await markAiRunLive(store, steps.run);
     // Whether a step's call reached the model is read from the job's own
     // budget (noteAiDispatch): a step whose call never did is not charged,
     // whatever the path that ended it (review of #3435, M1).

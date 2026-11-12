@@ -164,6 +164,17 @@ export class MetaError extends Error {
   }
 }
 
+/**
+ * The account's 30 days hold more rows than one read takes (20 pages of 500). Not something an hour changes: the same
+ * read would ask Meta its 20 pages again and refuse the part again, so it is noted busy until the next day, never
+ * tried every hour (each try is 20 calls against the creator's own ad account's rate limit at Meta).
+ */
+class MetaTooBig extends MetaError {
+  constructor() {
+    super("busy", "Meta had more ad spend than one read takes");
+  }
+}
+
 /** One call to the Graph API, answered as JSON or thrown as a MetaError. */
 async function call(method: "GET" | "DELETE", path: string, params: Record<string, string>, token = ""): Promise<Record<string, unknown>> {
   const url = new URL(path.startsWith("http") ? path : graph(path));
@@ -616,7 +627,7 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
       params = {};
     }
     // More pages than one read takes: a part is not the whole, so nothing kept is replaced.
-    if (next) throw new MetaError("busy", "Meta had more ad spend than one read takes");
+    if (next) throw new MetaTooBig();
     const fresh = linesFrom(rows, account.currency);
     // Every cent Meta said was spent must be in the lines kept: a row the lines left out (a day or an amount out of
     // range) would show a cost lower than Meta's, so the read is not taken.
@@ -644,7 +655,9 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     }
     const busy = error instanceof MetaError && error.kind === "busy";
     console.error("reading Meta ad spend failed", error instanceof Error ? error.message : error);
-    await note({ problem: busy ? "busy" : "error", after: Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600) }).catch(() => false);
+    // Too big for one read: looked at again the next day, as a currency that differs is, not every hour.
+    const after = error instanceof MetaTooBig ? Math.floor(Date.parse(`${window.to}T00:00:00Z`) / 1000) + 86_400 : Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600);
+    await note({ problem: busy ? "busy" : "error", after }).catch(() => false);
     return busy ? "busy" : "error";
   } finally {
     // Only this read's own lock: one that ran out may be the next read's now.

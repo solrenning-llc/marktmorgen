@@ -423,7 +423,7 @@ await t.test("a creator's cancel between our read and our take-back is never tol
   world.refundsDown = false;
   const id = String(shop.sub().id);
   // The creator first takes our stop back, so the next GET reads no stop; then cancels in the gap.
-  let creator: "done" | "refused" = "refused";
+  let creator = "refused" as "done" | "refused";
   world.afterSubscriptionGet = async () => {
     try {
       await setCancelAtPeriodEnd(id, true);

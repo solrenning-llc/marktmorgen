@@ -40,6 +40,16 @@ let scheduledStopWrites = 0;
 let beforeRestartAnswer: (() => Promise<void>) | null = null;
 let createAnswer: "ok" | "declined" | "down" | "otherCustomer" | "otherTier" | "yearly" | "trial" | "pastDue" | "otherPrice" | "amount" | "currency" | "intervalCount" | "extraItem" | "intervalMismatch" | "quantity" | "missingQuantity" | "missingPeriod" | "expiredPeriod" | "futurePeriod" | "fractionPeriod" | "longPeriod" = "ok";
 
+/**
+ * The store lock pausePlan and undoPause take since Codex X5's MEDIUM on #3752 (lib/store.ts withStoreLock): taking,
+ * holding and letting go of nl:store:lock:*, and the store record read afresh under it. None of it touches a break, a
+ * mark or the provider, so the counts of pause writes below leave it out.
+ */
+const storeLockStep = (command: (string | number)[]): boolean => {
+  const keys = command[0] === "EVAL" ? command.slice(3, 3 + Number(command[2])) : [command[1]];
+  return keys.some((key) => String(key).startsWith("nl:store:lock:")) || (command[0] === "GET" && String(command[1]).startsWith("nl:store:owner:"));
+};
+
 function subscription(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id,
@@ -186,7 +196,7 @@ async function main() {
       const before = providerCalls;
       let reads = 0, writes = 0;
       pauseRedis.pipeline = async commands => {
-        if (commands.some(command => command[0] !== "EVAL" || command[1] !== PAUSE_OBSERVATION)) writes++;
+        if (commands.some(command => !storeLockStep(command) && (command[0] !== "EVAL" || command[1] !== PAUSE_OBSERVATION))) writes++;
         if (commands.length === 1 && commands[0][0] === "EVAL" && commands[0][1] === PAUSE_OBSERVATION) {
           reads++;
           if (mode === "lost-ack") return [];
@@ -696,7 +706,7 @@ async function main() {
       let otherCommands=0;
       pauseRedis.pipeline=async(commands)=>{
         if(commands.length===1&&commands[0][0]==="EXISTS"&&commands[0][1]===lastKey)return reply;
-        otherCommands+=commands.length;
+        otherCommands+=commands.filter(command=>!storeLockStep(command)).length;
         return originalPipeline(commands);
       };
       try{
@@ -726,7 +736,7 @@ async function main() {
       subs[id]=subscription(id,change);
       const originalPipeline=pauseRedis.pipeline;
       let commandsAfterObservation=0;
-      pauseRedis.pipeline=async(commands)=>{commandsAfterObservation+=commands.length;return originalPipeline(commands);};
+      pauseRedis.pipeline=async(commands)=>{commandsAfterObservation+=commands.filter(command=>!storeLockStep(command)).length;return originalPipeline(commands);};
       try{
         const before=created.length;emails.length=0;
         is("mismatched or missing source ownership is refused",await pausePlan(store,1,NOW),{kind:"refused",reason:"standing"});
@@ -763,7 +773,7 @@ async function main() {
       const originalPipeline=pauseRedis.pipeline;
       let mutationCommands=0;
       pauseRedis.pipeline=async(commands)=>{
-        mutationCommands+=commands.filter(command=>command[0]!=="EXISTS").length;
+        mutationCommands+=commands.filter(command=>command[0]!=="EXISTS"&&!storeLockStep(command)).length;
         return originalPipeline(commands);
       };
       try{

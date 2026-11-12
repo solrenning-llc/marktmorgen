@@ -1672,6 +1672,35 @@ async function withStore<T>(email: string, work: (store: Store, save: Save, held
 }
 
 /**
+ * Runs `work` holding the store's own lock, the one every write to it and moveAccount take, on the store read afresh
+ * under that lock, and hands it the lock so a long step (a provider call) can confirm it still holds it before it
+ * writes. "moved" when the store at that ref is gone or is another one: its address moved, or it was deleted, since
+ * the caller read it. For a write that keys its own records by the store's ref outside the store record (a break,
+ * lib/plan-pause.ts), so it can never land between a move's reads and its last write (Codex X5's MEDIUM on #3752).
+ */
+export async function withStoreLock<T>(store: Pick<Store, "email" | "sid" | "extra">, work: (fresh: Store, held: Held) => Promise<T>): Promise<T | "moved"> {
+  if (!isRedisConfigured()) return "moved";
+  const ref = storeRef(store);
+  const owner = await ownerKey(ref);
+  let held: Held;
+  try {
+    held = await takeLock(lockKeyOf(owner), LOCK_SECONDS, LOCK_WAIT_MS);
+  } catch (error) {
+    if (error instanceof LockBusyError) throw new StoreBusyError();
+    throw error;
+  }
+  try {
+    const read = repliesFor(await redisPipeline([["GET", owner]]), 1);
+    if (!read) throw new UnknownReplyError("a store's record under its lock");
+    const fresh = parseStore(read[0]);
+    if (!fresh || fresh.sid !== store.sid || storeRef(fresh) !== ref) return "moved";
+    return await work(fresh, held);
+  } finally {
+    await releaseLock(held);
+  }
+}
+
+/**
  * Holds the locks of several stores at once, one inside the other, and hands
  * `work` the stores as they are with all of them held. A key with no store
  * behind it is left out. Only for a change that has to write several stores

@@ -6,17 +6,11 @@ import { checkCreatorSituations } from "./creator-situations.mjs";
 import { checkFeatureMechanisms } from "./feature-mechanisms.mjs";
 import { checkCrmFeature } from "./crm-feature.mjs";
 import { checkPricing } from "./pricing.mjs";
-/** Read-only public comparisons; no accounts, emails, payments or API writes. */
-export async function checkSalesComparisons({browser,LOCAL,axeSource,is}){
- await checkHomePath({browser,LOCAL,axeSource,is});
- await checkHomeActions({browser,LOCAL,axeSource,is});
- await checkDecisionFaq({browser,LOCAL,axeSource,is});
- await checkDecisionArticles({browser,LOCAL,axeSource,is});
- await checkCreatorSituations({browser,LOCAL,axeSource,is});
- await checkFeatureMechanisms({browser,LOCAL,axeSource,is});
- await checkCrmFeature({browser,LOCAL,axeSource,is});
- await checkPricing({browser,LOCAL,axeSource,is});
- for(const width of [390,1280]){
+/**
+ * The comparison pages at one width, in their own browser context (read-only; every API write is refused and counted).
+ * @param {{browser:any,LOCAL:string,axeSource:string,is:Function,width:number}} options
+ */
+export async function checkComparisonPages({browser,LOCAL,axeSource,is,width}){
   const context=await browser.newContext({viewport:{width,height:900}});
   try{
    const page=await context.newPage();let writes=0;
@@ -78,5 +72,26 @@ export async function checkSalesComparisons({browser,LOCAL,axeSource,is}){
    is("existing migration links the comparison "+width,await page.locator('main a[href="/proof/clickfunnels"]').count(),1);
    is("comparisons never write an API "+width,writes,0);
   }finally{await context.close();}
- }
+}
+
+/**
+ * Every part of the read-only public comparisons, in their listed order. Each part opens its own browser contexts and
+ * shares nothing with another part, so tests/e2e/store-copy.mjs may run them side by side (tests/e2e/check-lanes.mjs).
+ */
+export const SALES_COMPARISON_PARTS=[
+ ["home Path",checkHomePath],
+ ["home actions",checkHomeActions],
+ ["decision FAQ",checkDecisionFaq],
+ ["decision articles",checkDecisionArticles],
+ ["creator situations",checkCreatorSituations],
+ ["feature mechanisms",checkFeatureMechanisms],
+ ["CRM feature",checkCrmFeature],
+ ["pricing",checkPricing],
+ ["comparison pages at 390",options=>checkComparisonPages({...options,width:390})],
+ ["comparison pages at 1280",options=>checkComparisonPages({...options,width:1280})],
+];
+
+/** Read-only public comparisons; no accounts, emails, payments or API writes. */
+export async function checkSalesComparisons({browser,LOCAL,axeSource,is}){
+ for(const [,part] of SALES_COMPARISON_PARTS)await part({browser,LOCAL,axeSource,is});
 }

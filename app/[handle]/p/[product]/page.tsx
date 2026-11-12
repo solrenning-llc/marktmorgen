@@ -77,6 +77,8 @@ import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
+import { readCourse } from "@/lib/course";
+import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -115,9 +117,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   return product && !product.hidden ? { store, product, asked } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage> {
-  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : { ...EMPTY_PAGE, blocks: [] };
+async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
+  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage). One whose
+  // read is not known is "unread": said so, out of search, never shown as the product with no page
+  // (C4-20261106-2610-C6-153, unit B).
+  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
 }
 
 /**
@@ -146,6 +150,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
   const title = page.seoTitle || `${product.title} — ${store.name}`;
@@ -304,7 +309,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts] = await Promise.all([
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
     stockLeft(store, product).catch(() => null),
     outOfKeys(store, product).catch(() => false),
@@ -316,7 +321,22 @@ export default async function ProductPage({ params, searchParams }: Params) {
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => []) : Promise.resolve(null),
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).
     readSoldCounts(store).catch(() => null),
+    // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
+    product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
   ]);
+  // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
+  if (savedPage === "unread") {
+    return (
+      <div lang={speech(store).lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+          <h1 className="font-display text-3xl font-semibold leading-tight">{product.title}</h1>
+          <p role="status" className="st-muted mt-4">{w.notAvailable}</p>
+          <Link href={`/@${store.handle}`} className="st-footer-link mt-6 inline-block rounded-lg py-3 text-sm font-semibold">{w.backTo(store.name)}</Link>
+        </main>
+      </div>
+    );
+  }
+  const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -543,7 +563,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />
       {page.blocks.some((block) => block.kind === "pictures" && block.items.length > 0) ? <PictureViewer lang={store.language} /> : null}
-      <main id="content" className={`relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
+      <main id="content" className={`st-measure relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
         {children}
       </main>
       {sticky}
@@ -582,7 +602,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
-            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} />
+            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} />
             {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
             {blocks.length > 0 ? <ProductAbout blocks={blocks} language={store.language} /> : null}
             {bundleList}
@@ -650,7 +670,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
       </div>
       {soldLine}
-      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} />
+      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} />
       {bundleList}
       <div className="mt-4">{buyTerms}</div>
     </section>

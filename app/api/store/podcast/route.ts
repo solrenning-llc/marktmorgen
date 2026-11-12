@@ -5,6 +5,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath } from "@/lib/product-file";
 import { readListing } from "@/lib/catalog";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { dropPodcast, editPodcast, newPodcastId, readPodcast, savePodcast, type PodcastEdit } from "@/lib/podcast";
 
 /**
@@ -41,6 +42,8 @@ export async function POST(request: NextRequest) {
     const podcastId = product.podcast.id;
 
     return await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+      // Only Redis's exact "no record" is an empty podcast; an unknown read throws (readPodcast) and nothing is
+      // written, because what is written below is the whole podcast as read.
       const podcast = (await readPodcast(podcastId)) ?? { id: podcastId, episodes: [] };
       if (action === "disable") {
         if (podcast.episodes.length > 0) return fail("not_empty");
@@ -88,6 +91,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof LockBusyError) return fail("busy", 409);
+    if (error instanceof UnknownReplyError) return fail("unavailable", 503);
     console.error("changing a podcast failed", error);
     return fail("server_error", 500);
   }

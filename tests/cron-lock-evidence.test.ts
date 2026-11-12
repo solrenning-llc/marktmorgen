@@ -1,3 +1,13 @@
+/**
+ * Six cron locks read as evidence (CX-123 rule 24; #2519, on top of #2986's lib/claim-mark.ts).
+ *
+ * recount, closed-data, imports, closing, plans and stream claim their run lock with claimMark: "OK" is ours, nil is
+ * another run's, and any other answer is read back with GET. Here each odd SET answer is shown twice: with the read
+ * back unknown too (503 lock_unknown, nothing run, nothing let go) and with the read back showing another run's
+ * value (busy, nothing run, that run's lock kept). A clean run lets go only its own value with the compare-and-delete
+ * script (lib/redis-lock.ts), never a plain DEL. Synthetic only: Redis is the in-memory double and every provider
+ * request throws.
+ */
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { NextRequest } from "next/server";
@@ -44,7 +54,23 @@ function request(name: string, allowed = true) {
 
 for (const route of routes) {
   for (const reply of [[], Array(1), [undefined], [false], [0], [1], [{}], [["OK"]], ["OK", null], [null, "OK"]]) {
-    test(`${route.name}: unknown lock ${JSON.stringify(reply)} cannot start work or release another lock`, async () => {
+    test(`${route.name}: unknown lock ${JSON.stringify(reply)}, read back unknown, cannot start work or release another lock`, async () => {
+      redis.run(["SET", route.key, "another-run", "EX", 300]);
+      const commands: (string | number)[][] = [];
+      redis.pipeline = async batch => {
+        commands.push(...batch);
+        const onLock = (batch[0][0] === "SET" || batch[0][0] === "GET") && batch[0][1] === route.key;
+        return onLock ? reply : pipeline(batch);
+      };
+      const response = await route.run(request(route.name));
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { ok: false, error: "lock_unknown" });
+      assert.deepEqual(commands.map(c => c[0]), ["SET", "GET"]);
+      assert.equal(redis.run(["GET", route.key]), "another-run");
+      assert.equal(providerCalls, 0);
+    });
+
+    test(`${route.name}: unknown lock ${JSON.stringify(reply)}, read back as another run's, is busy without work or release`, async () => {
       redis.run(["SET", route.key, "another-run", "EX", 300]);
       const commands: (string | number)[][] = [];
       redis.pipeline = async batch => {
@@ -52,9 +78,9 @@ for (const route of routes) {
         return batch[0][0] === "SET" && batch[0][1] === route.key ? reply : pipeline(batch);
       };
       const response = await route.run(request(route.name));
-      assert.equal(response.status, 503);
-      assert.deepEqual(await response.json(), { ok: false, error: "unavailable" });
-      assert.deepEqual(commands.map(c => c[0]), ["SET"]);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true, busy: true });
+      assert.deepEqual(commands.map(c => c[0]), ["SET", "GET"]);
       assert.equal(redis.run(["GET", route.key]), "another-run");
       assert.equal(providerCalls, 0);
     });
@@ -71,14 +97,21 @@ for (const route of routes) {
     assert.equal(redis.run(["GET", route.key]), "another-run");
   });
 
-  test(`${route.name}: an explicit OK still runs and releases the existing lock`, async () => {
+  test(`${route.name}: an explicit OK still runs and lets go only its own lock value`, async () => {
     const commands: (string | number)[][] = [];
     redis.pipeline = async batch => { commands.push(...batch); return pipeline(batch); };
     const response = await route.run(request(route.name));
     assert.equal(response.status, 200);
     assert.ok(commands.length > 1);
-    assert.equal(commands.filter(c => c[0] === "SET" && c[1] === route.key).length, 1);
-    assert.equal(commands.filter(c => c[0] === "DEL" && c[1] === route.key).length, 1);
+    const claims = commands.filter(c => c[0] === "SET" && c[1] === route.key);
+    assert.equal(claims.length, 1);
+    const value = claims[0][2];
+    assert.equal(typeof value, "string");
+    assert.notEqual(value, "1");
+    const releases = commands.filter(c => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:release:v1") && c[3] === route.key);
+    assert.equal(releases.length, 1);
+    assert.equal(releases[0][4], value);
+    assert.equal(commands.filter(c => c[0] === "DEL" && c[1] === route.key).length, 0);
     assert.equal(redis.run(["GET", route.key]), null);
     assert.equal(providerCalls, 0);
   });

@@ -1,10 +1,12 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { withCutoff } from "@/lib/fetch-timeout";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { advanceImports, sendMoveReminders } from "@/lib/imports";
 import { readMetaDue } from "@/lib/meta-ads";
 import { sendWelcomeReminders } from "@/lib/welcome-offer-send";
+import { activateScheduledCodes } from "@/lib/discount-schedule";
 import { storeForId } from "@/lib/store";
 import { noticeCreator } from "@/lib/account-notice";
 
@@ -18,7 +20,8 @@ export const maxDuration = 60;
  * seconds. The studio's page does the same while it is open, and each
  * import's own lock keeps the two from working on one import at once.
  * Then, for five seconds at most, what the stores' Meta ad accounts spent,
- * read once a day each (lib/meta-ads.ts). What time is left goes to the one
+ * read once a day each (lib/meta-ads.ts); the welcome offers' reminders; the
+ * discount codes set to start now (lib/discount-schedule.ts). What time is left goes to the one
  * reminder each moved member is owed (lib/move-members.ts).
  */
 export async function GET(request: NextRequest) {
@@ -37,9 +40,13 @@ async function run(request: NextRequest): Promise<Response> {
   if (!isRedisConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const lockReceipt = await redisPipeline([["SET", "nl:imports:lock", "1", "NX", "EX", 90]]);
-  if (Array.isArray(lockReceipt) && lockReceipt.length === 1 && lockReceipt[0] === null) return Response.json({ ok: true, busy: true });
-  if (!Array.isArray(lockReceipt) || lockReceipt.length !== 1 || lockReceipt[0] !== "OK") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+  // own value, so a run never deletes another run's lock.
+  const lock = claimValue();
+  const got = await claimMark("nl:imports:lock", 90, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   const started = Date.now();
   try {
     const counts = await advanceImports(started + 40_000);
@@ -53,13 +60,18 @@ async function run(request: NextRequest): Promise<Response> {
       console.error("sending welcome offer reminders failed", error);
       return null;
     });
+    // Discount codes set to start now, switched on (511 [CK3], lib/discount-schedule.ts), three seconds at most.
+    const codes = await activateScheduledCodes(Math.min(started + 49_000, Date.now() + 3_000)).catch((error: unknown) => {
+      console.error("switching scheduled discount codes on failed", error);
+      return null;
+    });
     // Then the one reminder to members moved from another platform who have not kept theirs yet.
     const reminded = await sendMoveReminders(started + 50_000);
-    return Response.json({ ok: true, ...counts, metaAds, welcome, reminded }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, ...counts, metaAds, welcome, codes, reminded }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("the import job failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:imports:lock"]]).catch(() => {});
+    await releaseMark("nl:imports:lock", lock);
   }
 }

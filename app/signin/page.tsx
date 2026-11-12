@@ -16,7 +16,7 @@ import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
-const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown"]);
+const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
 function isReturning(params: { [key: string]: string | string[] | undefined }): boolean {
   return params.to === "login" || (typeof params.status === "string" && RETURNING_STATUSES.has(params.status));
 }
@@ -45,6 +45,10 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: INVITE_PROGRAM_OPEN ? "Your invite is saved on this browser" : "Previously accepted invitations",
     body: INVITE_PROGRAM_OPEN ? `Type your email below, open the link we send, and take your store address. The invite counts for that store: ${INVITE_HOLD_DAYS} days after your first payment, ${formatMoney(INVITE_BONUS_CENTS, "usd")} of credit goes on your plan.` : "If you previously accepted an invite on this browser, its original terms and expiry still apply. No new invitations are being accepted.",
     tone: "success",
+  },
+  "login-unknown": {
+    title: "We could not finish logging you in",
+    body: "Your account's login settings could not be read just now, so nothing was opened. Ask for a fresh link below and try again in a moment.",
   },
   expired: {
     title: "That link no longer works",
@@ -144,6 +148,10 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "Your other devices may still be logged in",
     body: "This browser is logged out, but we could not log out your other devices just now. Log in again in a moment and choose “Log out of all devices” once more.",
   },
+  "out-unknown": {
+    title: "Your session may still be open on our side",
+    body: "This browser is logged out, but we could not close its session on our side just now. If you think someone else may have it, log in again in a moment and choose “Log out of all devices”.",
+  },
 };
 
 /*
@@ -166,7 +174,7 @@ export default async function SignInPage({
   // The button on the site's own address only (lib/google-signin.ts); its notices only where it can be.
   const sent = await headers();
   const google = googleSignInShown(sent.get("x-forwarded-host") ?? sent.get("host"), params.google);
-  const notice = status.startsWith("google-") && !google ? undefined : NOTICES[status];
+  const notice = status.startsWith("google-") && !google ? undefined : Object.hasOwn(NOTICES, status) ? NOTICES[status] : undefined;
   // Somebody who pressed Log in has a store already, or believes so: the page
   // greets them that way, rather than with "Start your store", which reads as
   // if they had pressed the wrong thing. The form, the link and what it opens

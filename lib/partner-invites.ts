@@ -29,6 +29,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type PartnerShare, parsePartnerShare } from "@/lib/partner-share";
 
 /** How long an unanswered offer stays in a studio before it lapses. */
@@ -77,14 +78,10 @@ function parseInvite(raw: unknown): PartnerInvite | null {
   }
 }
 
-function pairs(reply: unknown): [string, string][] {
+/** A hash's fields and values, from its flat list as HGETALL answers it (already checked to be whole). Pure. */
+function pairs(list: string[]): [string, string][] {
   const out: [string, string][] = [];
-  if (Array.isArray(reply)) {
-    const list = reply.map(String);
-    for (let i = 0; i + 1 < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  } else if (reply && typeof reply === "object") {
-    for (const [k, v] of Object.entries(reply as Record<string, unknown>)) out.push([k, String(v)]);
-  }
+  for (let i = 0; i + 1 < list.length; i += 2) out.push([list[i], list[i + 1]]);
   return out;
 }
 
@@ -115,13 +112,23 @@ export async function offerPartnership(
   return { ok: true, id };
 }
 
-/** Every offer waiting for this creator, newest first. */
+/**
+ * Every offer waiting for this creator, newest first. A key that is not there
+ * is no offers; a reply in any other shape, or a row that is not one this
+ * code wrote under its own id, throws UnknownReplyError (rule 24), never read
+ * as "none" or skipped, so an offer is never hidden by a failed read and the
+ * cap in offerPartnership is never checked against a list that was not read.
+ */
 export async function waitingFor(email: string): Promise<PartnerInvite[]> {
   if (!isRedisConfigured() || !email) return [];
-  const [reply] = await redisPipeline([["HGETALL", inviteKey(email)]]);
-  return pairs(reply)
-    .map(([, raw]) => parseInvite(raw))
-    .filter((i): i is PartnerInvite => i !== null)
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", inviteKey(email)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the partnerships offered to a creator");
+  return pairs(flat)
+    .map(([field, raw]) => {
+      const invite = parseInvite(raw);
+      if (!invite || invite.id !== field) throw new UnknownReplyError("a partnership offered to a creator");
+      return invite;
+    })
     .sort((a, b) => b.at - a.at);
 }
 

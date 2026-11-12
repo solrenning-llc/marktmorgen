@@ -196,6 +196,7 @@ export const it: BuyerWords = {
     busy: { title: "Qualcun altro lo sta acquistando proprio ora", body: "Non è stato addebitato nulla. Premi di nuovo acquista tra un momento." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi premi di nuovo acquista." },
     error: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra un momento." },
+    nocharges: { title: "Questo negozio non può accettare pagamenti con carta in questo momento", body: "Non è stato addebitato nulla. Riprovare non servirà finché il negozio non avrà risolto il problema." },
     paused: { title: "Questo negozio non accetta nuovi ordini in questo momento", body: "Non è stato addebitato nulla. I nuovi ordini riaprono all'inizio del mese prossimo, o prima." },
     "paypal-declined": {
       title: "PayPal non ha accettato il pagamento",
@@ -305,6 +306,8 @@ export const it: BuyerWords = {
   askTermsCut: () => "Qui non ho le condizioni complete. Chiedi al creatore prima di acquistare.",
 
   noLongerOnSale: "Questo prodotto non è più in vendita.",
+  cardUnread: "Non è stato possibile caricare questo prodotto ora. Riprova tra un momento.",
+  cardBuyUnread: "L'acquisto non è disponibile ora. Riprova tra un momento.",
   seeStore: (store) => `Vedi ${store}`,
   cardTestMode: "Modalità di prova: nessuna carta reale viene addebitata.",
   cardCheckout: "Pagamento sicuro con Stripe, in una nuova scheda.",

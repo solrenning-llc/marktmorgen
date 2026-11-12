@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { withCutoff } from "@/lib/fetch-timeout";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { settlePlans } from "@/lib/plans";
 import { isBillingConfigured } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
@@ -67,9 +68,13 @@ async function run(request: NextRequest): Promise<Response> {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const lockReceipt = await redisPipeline([["SET", "nl:plans:lock", "1", "NX", "EX", 120]]);
-  if (Array.isArray(lockReceipt) && lockReceipt.length === 1 && lockReceipt[0] === null) return Response.json({ ok: true, busy: true });
-  if (!Array.isArray(lockReceipt) || lockReceipt.length !== 1 || lockReceipt[0] !== "OK") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+  // own value, so a run never deletes another run's lock.
+  const lock = claimValue();
+  const got = await claimMark("nl:plans:lock", 120, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   // Leaves time to answer inside maxDuration, whatever the jobs find.
   const deadline = Date.now() + 45_000;
   try {
@@ -168,9 +173,11 @@ async function run(request: NextRequest): Promise<Response> {
       return null;
     });
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
-    const ok = plans !== null && ((billing !== null && disputes !== null) || !isBillingConfigured());
+    // A subscription whose paid-up state could not be applied or checked
+    // makes the run a failed one, not a healthy one (lib/billing-sync.ts).
+    const ok = plans !== null && ((billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured());
     return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
   } finally {
-    await redisPipeline([["DEL", "nl:plans:lock"]]).catch(() => {});
+    await releaseMark("nl:plans:lock", lock);
   }
 }

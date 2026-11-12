@@ -17,8 +17,8 @@ let apply = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/balance") return Response.json({ available: [{ amount: 100_000, currency: "usd" }] });
-  if (path === `/payment_intents/${INTENT}`) return Response.json({ id: INTENT, amount: 1000, currency: "usd", latest_charge: { id: "ch_g2699refund", amount: 1000, currency: "usd", amount_refunded: refunded, disputed: false } });
+  if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 100_000, currency: "usd" }] });
+  if (path === `/payment_intents/${INTENT}`) return Response.json({ id: INTENT, amount: 1000, currency: "usd", latest_charge: { id: "ch_g2699refund", amount: 1000, currency: "usd", amount_refunded: refunded, disputed: false, balance_transaction: null } });
   if (path === "/refunds" && init?.method === "POST") {
     posts += 1;
     const body = new URLSearchParams(String(init.body));

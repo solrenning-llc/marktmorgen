@@ -225,6 +225,7 @@ export const en = {
     busy: { title: "Someone else is buying that right now", body: "Nothing was charged. Press buy again in a moment." },
     slow: { title: "That was a lot of tries in a few minutes", body: "Nothing was charged. Wait a few minutes, then press buy again." },
     error: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a moment." },
+    nocharges: { title: "This store can't take card payments right now", body: "Nothing was charged. Trying again won't work until the store fixes this." },
     paused: { title: "This store isn't taking new orders right now", body: "Nothing was charged. New orders open again at the start of next month, or sooner." },
     "paypal-declined": {
       title: "PayPal did not take the payment",
@@ -342,6 +343,10 @@ export const en = {
 
   // ---- The card on the creator's own website ---------------------------------------------
   noLongerOnSale: "This product is no longer on sale.",
+  /** A product that could not be read just now (CX-123 rule 24): never said to be off sale. */
+  cardUnread: "This product could not be loaded just now. Try again in a moment.",
+  /** Whether it can be bought could not be read just now, so no buy button is drawn. */
+  cardBuyUnread: "Buying is not available just now. Try again in a moment.",
   seeStore: (store: string) => `See ${store}`,
   cardTestMode: "Test mode: no real card is charged.",
   cardCheckout: "Secure checkout by Stripe, in a new tab.",

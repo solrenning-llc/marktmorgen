@@ -13,7 +13,7 @@ globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
  const u=new URL(String(input));
  if(u.origin!=="https://api.stripe.com"||!u.pathname.startsWith("/v1/subscriptions/")||init?.method!=="POST")throw Error("Unexpected synthetic provider request");
  writes++;
- return Response.json({id:state.store!.subscriptionId,status:"active",cancel_at_period_end:new URLSearchParams(String(init?.body??"")).get("cancel_at_period_end")==="true",cancel_at:null});
+ return Response.json({id:state.store!.subscriptionId,status:"active",cancel_at_period_end:new URLSearchParams(String(init?.body??"")).get("cancel_at_period_end")==="true",cancel_at:null,items:{object:"list",data:[{price:{unit_amount:6900,recurring:{interval:"month",interval_count:1}}}]}});
 }) as typeof fetch;
 const request=()=>new NextRequest("https://local.example/api/billing/cancel",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"intent=resume"});
 async function main(){

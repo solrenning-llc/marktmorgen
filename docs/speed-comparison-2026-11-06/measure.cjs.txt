@@ -1,0 +1,153 @@
+// Internal speed/mobile measurement for queue item 38 [F7]. Scratchpad only.
+// Usage: node measure.cjs <outfile.json> <url> [url...]
+const { chromium } = require("playwright");
+const fs = require("fs");
+
+const RUNS = Number(process.env.RUNS || 3);
+// Lighthouse "mobileSlow4G" devtools-throttling values (requestLatencyMs 562.5,
+// downloadThroughputKbps 1474.56, uploadThroughputKbps 675), CPU slowdown 4x.
+const NET = { offline: false, latency: 562.5, downloadThroughput: (1474.56 * 1024) / 8, uploadThroughput: (675 * 1024) / 8 };
+const CPU = 4;
+const DEVICE = {
+  viewport: { width: 412, height: 823 },
+  deviceScaleFactor: 1.75,
+  isMobile: true,
+  hasTouch: true,
+  userAgent:
+    "Mozilla/5.0 (Linux; Android 11; moto g power (2022)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+};
+
+const INIT = () => {
+  window.__f7 = { lcp: 0, lcpTag: "", cls: 0, long: [] };
+  new PerformanceObserver((l) => {
+    for (const e of l.getEntries()) {
+      window.__f7.lcp = e.startTime;
+      window.__f7.lcpTag = e.element ? e.element.tagName : e.url ? "url" : "";
+    }
+  }).observe({ type: "largest-contentful-paint", buffered: true });
+  new PerformanceObserver((l) => {
+    for (const e of l.getEntries()) if (!e.hadRecentInput) window.__f7.cls += e.value;
+  }).observe({ type: "layout-shift", buffered: true });
+  new PerformanceObserver((l) => {
+    for (const e of l.getEntries()) window.__f7.long.push([e.startTime, e.duration]);
+  }).observe({ type: "longtask", buffered: true });
+};
+
+async function once(browser, url) {
+  const context = await browser.newContext(DEVICE);
+  const page = await context.newPage();
+  await page.addInitScript(INIT);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+  await cdp.send("Network.emulateNetworkConditions", NET);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU });
+  const reqs = new Map();
+  cdp.on("Network.responseReceived", (e) => {
+    const r = reqs.get(e.requestId) || {};
+    r.type = e.type;
+    r.url = e.response.url;
+    r.status = e.response.status;
+    reqs.set(e.requestId, r);
+  });
+  cdp.on("Network.loadingFinished", (e) => {
+    const r = reqs.get(e.requestId) || {};
+    r.bytes = e.encodedDataLength;
+    reqs.set(e.requestId, r);
+  });
+  cdp.on("Network.loadingFailed", (e) => {
+    const r = reqs.get(e.requestId) || {};
+    r.failed = e.errorText;
+    reqs.set(e.requestId, r);
+  });
+  const t0 = Date.now();
+  let navError = null;
+  let status = null;
+  try {
+    const resp = await page.goto(url, { waitUntil: "load", timeout: 120000 });
+    status = resp ? resp.status() : null;
+    await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+  } catch (err) {
+    navError = String(err.message).split("\n")[0];
+  }
+  const wall = Date.now() - t0;
+  let m = {};
+  if (!navError) {
+    m = await page.evaluate(() => {
+      const nav = performance.getEntriesByType("navigation")[0] || {};
+      const fcpE = performance.getEntriesByName("first-contentful-paint")[0];
+      const fcp = fcpE ? fcpE.startTime : null;
+      const tbt = window.__f7.long
+        .filter(([s]) => fcp == null || s >= fcp)
+        .reduce((a, [, d]) => a + Math.max(0, d - 50), 0);
+      const de = document.documentElement;
+      return {
+        finalUrl: location.href,
+        ttfb: nav.responseStart,
+        fcp,
+        lcp: window.__f7.lcp || null,
+        lcpTag: window.__f7.lcpTag,
+        cls: window.__f7.cls,
+        tbt,
+        dcl: nav.domContentLoadedEventEnd,
+        load: nav.loadEventEnd,
+        viewportMeta: !!document.querySelector('meta[name="viewport"]'),
+        overflow412: de.scrollWidth - de.clientWidth,
+        title: document.title,
+      };
+    });
+    // Horizontal overflow at 320 CSS px (WCAG 1.4.10 reflow width).
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.waitForTimeout(500);
+    m.overflow320 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  }
+  const all = [...reqs.values()].filter((r) => r.url && !r.url.startsWith("data:"));
+  const sum = (arr) => arr.reduce((a, r) => a + (r.bytes || 0), 0);
+  const js = all.filter((r) => r.type === "Script");
+  await context.close();
+  return {
+    url,
+    status,
+    navError,
+    wall,
+    requests: all.length,
+    failedRequests: all.filter((r) => r.failed || (r.status && r.status >= 400)).length,
+    totalBytes: sum(all),
+    jsBytes: sum(js),
+    jsRequests: js.length,
+    cssBytes: sum(all.filter((r) => r.type === "Stylesheet")),
+    imageBytes: sum(all.filter((r) => r.type === "Image")),
+    fontBytes: sum(all.filter((r) => r.type === "Font")),
+    ...m,
+  };
+}
+
+function median(xs) {
+  const v = xs.filter((x) => typeof x === "number" && !Number.isNaN(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+}
+
+(async () => {
+  const [out, ...urls] = process.argv.slice(2);
+  const browser = await chromium.launch();
+  const version = browser.version();
+  const results = [];
+  for (const url of urls) {
+    const runs = [];
+    for (let i = 0; i < RUNS; i++) {
+      const started = new Date().toISOString();
+      const r = await once(browser, url);
+      r.started = started;
+      runs.push(r);
+      console.error(url, i + 1, r.navError || `LCP ${Math.round(r.lcp)} CLS ${r.cls?.toFixed(3)} ${r.totalBytes}B ${r.requests}req`);
+    }
+    const keys = ["ttfb", "fcp", "lcp", "cls", "tbt", "dcl", "load", "requests", "totalBytes", "jsBytes", "jsRequests", "cssBytes", "imageBytes", "fontBytes", "overflow320", "overflow412", "failedRequests"];
+    const med = {};
+    for (const k of keys) med[k] = median(runs.map((r) => r[k]));
+    results.push({ url, median: med, runs });
+  }
+  await browser.close();
+  fs.writeFileSync(out, JSON.stringify({ chromium: version, net: NET, cpu: CPU, device: DEVICE, runsPerPage: RUNS, results }, null, 2));
+})();

@@ -188,6 +188,16 @@ async function main() {
   is("nor is a path that climbs out", isVaultPath(`vault/${FOLDER}/../82f9fc6354/0011223344556677-a.pdf`), false);
   is("a buyer's stamped copy, kept in a folder beside the files, is", isVaultPath(`vault/${FOLDER}/stamped/${"a".repeat(24)}/${"b".repeat(24)}/My-Guide.pdf`), true);
   is("the store it belongs to is read from it, for the month's delivery", folderFromPathname(sample), FOLDER);
+  // A name with dots in a row ("Chapter 1… Draft.pdf": NFKD makes the ellipsis three dots) must still make a path
+  // every rule takes for this store's, or the upload opens at the store and can then never be signed, joined or
+  // canceled (readUpload asks isVaultPath, which refuses "..").
+  const dotted = ["Chapter 1\u2026 Draft.pdf", "Notes..v2.pdf", "Wait....pdf", "a.-.b.pdf", "a-..b.pdf", "x. . .y.zip"];
+  is("a name with dots in a row keeps no two dots together", dotted.map((name) => keyName(name).includes("..")), dotted.map(() => false));
+  is("so every rule reads its path as this store's", dotted.map((name) => {
+    const path = vaultPath(FOLDER, "82f9fc6354", "0011223344556677", name);
+    return [isVaultPath(path), readVaultPath(path) !== null, ownsPath(path, FOLDER, "82f9fc6354")];
+  }), dotted.map(() => [true, true, true]));
+  is("an ellipsis becomes one dot", keyName("Chapter 1\u2026 Draft.pdf"), "Chapter-1.-Draft.pdf");
 
   part("How an upload is cut into pieces");
   is("a small file goes whole", [pieceCount(1), pieceCount(PIECE_BYTES)], [1, 1]);
@@ -221,6 +231,10 @@ async function main() {
   is("the secret is nowhere in it", (addresses?.[0].url ?? "").includes("a-stand-in-secret"), false);
   is("there is no address for a piece the file does not have", await signPieces(pathname, [4]), null);
   is("nor for an upload nobody opened", await signPieces(vaultPath(FOLDER, "82f9fc6354", "ffffffffffffffff", "x.zip"), [1]), null);
+  const ellipsis = await openVaultUpload({ folder: FOLDER, ownerId: "82f9fc6354", name: "Chapter 1\u2026 Draft.pdf", bytes: PIECE_BYTES + 1, type: "application/pdf" });
+  is("a file named with an ellipsis opens", ellipsis.ok, true);
+  is("and its pieces can be signed, as any other's", ellipsis.ok ? (await signPieces(ellipsis.upload.pathname, [1, 2]))?.length : null, 2);
+  if (ellipsis.ok) is("and it can be canceled at the store", await abortVaultUpload(ellipsis.upload.pathname), true);
   const etags: string[] = [];
   for (const [i, address] of (addresses ?? []).entries()) etags.push((await send(address.url, big.slice(i * PIECE_BYTES, (i + 1) * PIECE_BYTES))) ?? "");
   is("closing it with a piece missing from the list is refused", await closeVaultUpload(pathname, etags.slice(0, 2)), { ok: false, reason: "invalid" });

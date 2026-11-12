@@ -28,6 +28,7 @@ import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns } from "@/comp
 import type { MailSettings } from "@/lib/store";
 import { StoreField } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { mailLeftWords } from "@/lib/mail-left";
 import { formatMoney } from "@/lib/money";
 import { MIN_TEST_REACH, TEST_HOURS, TEST_SHARES, type SubjectTest, type TestBy } from "@/lib/mail-test";
 import { type Currency, plainAmount } from "@/lib/money";
@@ -346,6 +347,8 @@ export function EmailStudio(props: {
   allowance: number;
   /** Whether the plan's month can be told (lib/allowance-window.ts windowId); without it no count before sending is shown. */
   monthKnown?: boolean;
+  /** When the month's count starts again, said as a date (UTC), or null when it is not known (357 [ES3], lib/mail-left.ts). */
+  renews?: string | null;
   trial: boolean;
   products: { id: string; title: string }[];
   broadcasts: BroadcastRow[];
@@ -526,6 +529,10 @@ export function EmailStudio(props: {
           </p>
           {!props.trial && emailEquivalence(props.allowance) ? (
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
+          ) : null}
+          {/* From 80% used: how many are left and when the count starts again (357 [ES3], lib/mail-left.ts). */}
+          {props.monthKnown && mailLeftWords(props.used, props.allowance, props.renews ?? null) ? (
+            <p className="mt-3 rounded-[var(--r-md)] bg-sand p-3 text-sm font-medium text-ink" data-mail-left="">{mailLeftWords(props.used, props.allowance, props.renews ?? null)}</p>
           ) : null}
           {props.moveUp ? (
             <details className="mt-4">

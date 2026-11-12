@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 357 [ES3], unit 1 (from 80% of the month's list emails used: how many are left and when the count starts again) | claude/modest-faraday-f25rzq-mail-left | `lib/mail-left.ts`, `tests/mail-left.test.ts` (also a few lines of `components/email-studio.tsx` and `app/studio/email/page.tsx`, not reserved: other open PRs touch them) | 12/11/2026 13h38 |

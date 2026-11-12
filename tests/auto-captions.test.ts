@@ -12,7 +12,10 @@
  *     nothing else it charges for;
  *   - each language listed as it arrives; what never arrives refunded;
  *   - only languages the video has no captions in yet, one request at a time,
- *     only on a store with a plan;
+ *     only on a store with a plan; the request held by an order written
+ *     before the charge (SET NX, lib/claim-mark.ts), and an answer about the
+ *     payment that is not a payment settled from Stripe's own invoice
+ *     (tests/auto-captions-charge-once.test.ts has the lost answers);
  *   - a refund counts only once Stripe confirms it (232 [CA1], 30 October
  *     2026): pending, failed, refused or unreadable refunds keep the record,
  *     are looked at again from Stripe's own list, are never asked for twice
@@ -46,6 +49,8 @@ const CHARGED = 12000;
 /** What the card paid on the captions invoice (less than the price when a credit balance paid part). */
 let cardPaid = CHARGED;
 const FOLDER = "a".repeat(32);
+/** The captions invoice as Stripe keeps it, for its list (the one invoice id the fake makes). */
+let invoiceState: { status: string; mark: string; customer: string } | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -61,11 +66,33 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = new URLSearchParams(String(init?.body ?? ""));
   stripe.push({ path: `${method} ${path}`, body });
   if (path.startsWith("/subscriptions/")) return json({ id: "sub_Store000001", default_payment_method: "pm_card_on_file" });
-  if (path === "/invoices") return json({ id: "in_Captions00001", status: "draft" });
+  if (path === "/invoices" && method === "GET") {
+    const data = invoiceState && invoiceState.customer === url.searchParams.get("customer")
+      ? [{ object: "invoice", id: "in_Captions00001", customer: invoiceState.customer, currency: "usd", status: invoiceState.status, payment_intent: invoiceState.status === "paid" ? "pi_Captions000001" : null, metadata: { mark: invoiceState.mark } }]
+      : [];
+    return json({ object: "list", has_more: false, data });
+  }
+  if (path === "/invoices") {
+    invoiceState = { status: "draft", mark: String(body.get("metadata[mark]")), customer: String(body.get("customer")) };
+    return json({ id: "in_Captions00001", status: "draft" });
+  }
   if (path === "/invoiceitems") return json({ id: "ii_Captions0001" });
-  if (path.endsWith("/finalize")) return json({ id: "in_Captions00001", status: "open" });
-  if (path.endsWith("/pay")) return declineCard ? json({ error: { code: "card_declined", message: "Your card was declined." } }, 402) : json(paidReceipt !== undefined ? paidReceipt : { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001" });
-  if (path.endsWith("/void")) return json({ id: "in_Captions00001", status: "void" });
+  if (path.endsWith("/finalize")) {
+    if (invoiceState) invoiceState.status = "open";
+    return json({ id: "in_Captions00001", status: "open" });
+  }
+  if (path.endsWith("/pay")) {
+    if (declineCard) return json({ error: { code: "card_declined", message: "Your card was declined." } }, 402);
+    // An answer that is not a payment: the invoice stays open, as Stripe keeps it.
+    if (paidReceipt !== undefined) return json(paidReceipt);
+    if (invoiceState) invoiceState.status = "paid";
+    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001" });
+  }
+  if (path.endsWith("/void")) {
+    if (invoiceState?.status === "paid") return json({ error: { code: "invoice_not_voidable", message: "paid" } }, 400);
+    if (invoiceState) invoiceState.status = "void";
+    return json({ id: "in_Captions00001", status: "void" });
+  }
   if (path.startsWith("/payment_intents/") && method === "GET") {
     if (listAnswer === "error") return json({ error: { type: "api_error", message: "down" } }, 500);
     return json({ object: "payment_intent", id: decodeURIComponent(path.slice("/payment_intents/".length)), currency: "usd", amount_received: cardPaid });
@@ -132,15 +159,17 @@ async function main(): Promise<void> {
   part("Only a confirmed single claim can authorize a charge");
   const realPipeline = redis.pipeline;
   const pending = `nl:stream:auto:${VIDEO}`;
+  const orderHeld = () => typeof (JSON.parse(String(redis.run(["GET", pending]) ?? "null")) as { order?: unknown } | null)?.order === "string";
   try {
     for (const receipt of [[], ["OK", "extra"], [undefined], [false], [0], [1], [true], ["ok"], [{}], "OK", null]) {
       redis.run(["DEL", pending]);
       stripe = [];
       bunny.length = 0;
       let claims = 0;
+      // The claim's answer, and the read-back of it (lib/claim-mark.ts), are both in an unknown shape.
       redis.pipeline = async (commands) => {
-        if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === pending) {
-          claims += 1;
+        if (commands.length === 1 && (commands[0][0] === "SET" || commands[0][0] === "GET") && commands[0][1] === pending) {
+          if (commands[0][0] === "SET") claims += 1;
           await realPipeline(commands);
           return receipt as unknown as unknown[];
         }
@@ -148,9 +177,23 @@ async function main(): Promise<void> {
       };
       const answer = await requestAutoCaptions(store, PATH, "en", ["es"]);
       is(`unconfirmed claim ${JSON.stringify(receipt)} refuses without charge, provider request, retry or cleanup`,
-        [answer, stripe.length, bunny.length, claims, redis.run(["GET", pending])],
-        [{ ok: false, reason: "unavailable" }, 0, 0, 1, "charging"]);
+        [answer, stripe.length, bunny.length, claims, orderHeld()],
+        // A read-back holding another string is somebody else's claim: busy, not unknown; refused either way.
+        [{ ok: false, reason: JSON.stringify(receipt) === '["ok"]' ? "busy" : "unavailable" }, 0, 0, 1, true]);
     }
+    // The claim's answer in an unknown shape, and its read-back showing this request's own order: the claim is ours.
+    redis.run(["DEL", pending]);
+    stripe = [];
+    bunny.length = 0;
+    redis.pipeline = async (commands) => {
+      if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === pending) {
+        await realPipeline(commands);
+        return [undefined] as unknown[];
+      }
+      return realPipeline(commands);
+    };
+    const readBack = await requestAutoCaptions(store, PATH, "en", ["es"]);
+    is("a claim read back as this request's own order: charged once, and asked for", [readBack.ok, stripePaths().filter((p) => p.endsWith("/pay")).length, bunny.filter((b) => b.path.includes("/transcribe")).length], [true, 1, 1]);
   } finally {
     redis.pipeline = realPipeline;
     redis.run(["DEL", pending]);

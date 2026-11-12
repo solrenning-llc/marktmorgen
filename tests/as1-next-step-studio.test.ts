@@ -44,7 +44,7 @@ const ACCOUNT = "acct_1TestNextStep01";
 const NOW = Math.floor(Date.now() / 1000);
 
 /** What the stand-in Stripe answers for the student's checkouts: the products bought, or a failure. */
-let bought: string[] | "fail" | "malformed" = [];
+let bought: string[] | "fail" | "malformed" | "search" = [];
 let stripeCalls = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -56,6 +56,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (bought === "fail") return answer({ error: { type: "api_error", message: "synthetic failure" } }, 500);
   // A 200 that is not a list (no object, no data, no has_more): unknown, never "owns nothing" (focal on #3530, MEDIUM).
   if (bought === "malformed") return answer({});
+  // A whole page that is not Stripe's "list" object (a search result has its own paging): not what was asked, so unknown
+  // (#3530 kept Stripe's own object "list" through the merge with main's lib/stripe-list.ts reader).
+  if (bought === "search") return answer({ object: "search_result", data: [], has_more: false, next_page: null, url: url.pathname });
   if (url.pathname === "/v1/checkout/sessions") {
     const data = bought.map((product, i) => ({
       object: "checkout.session",
@@ -166,7 +169,10 @@ test("a product bought with PayPal is never suggested again, and a Stripe answer
 
   bought = "malformed";
   assert.equal(await at(), null, "a 200 {} from Stripe is unknown: no card");
+  bought = "search";
+  assert.equal(await at(), null, "a page that is not Stripe's object \"list\" is unknown: no card");
   bought = [];
+  assert.equal((await at())?.id, advanced, "a whole empty list still shows the card");
 
   const statsId = (await store()).statsId!;
   await redis.pipeline([["SADD", ownKey(statsId, STUDENT, advanced), "PAYPALORDER1"]]);
@@ -231,6 +237,26 @@ test("the card: the product, its price and the creator's line, a real No thanks 
   const page = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
   assert.ok(page.includes('dismissed: jar.get(nextCookie)?.value === "1"'), "the page reads the No thanks before anything else");
   assert.ok(readFileSync("app/privacy/page.tsx", "utf8").includes("<code>nl_ns_</code>"), "the privacy policy names the cookie");
+});
+
+test("No thanks keeps keyboard focus while its answer is sent: never natively disabled, unavailable said with aria-disabled, a second press ignored (WCAG 2.4.3)", () => {
+  const src = readFileSync("components/course-next-step-card.tsx", "utf8");
+  const button = src.slice(src.indexOf("<button"), src.indexOf("</button>"));
+  assert.ok(button.length > 0, "the No thanks button is there");
+  assert.doesNotMatch(button, /\sdisabled=\{/, "a natively disabled focused button drops focus to the page");
+  assert.match(button, /aria-disabled=\{busy\}/, "while sending, the button says it is unavailable");
+  assert.match(src, /event\.preventDefault\(\);\s*if \(busy\) return;/, "a press while sending sends nothing more");
+});
+
+test("the studio promises the card after the last lesson only when the lesson page draws it (each PR of the stack true on its own)", () => {
+  const lessonDraws = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8").includes("CourseNextStepCard");
+  const studio = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
+  const section = studio.slice(studio.indexOf('aria-labelledby="next-step-title"'), studio.indexOf("<CourseNextStep "));
+  const toast = readFileSync("components/course-next-step.tsx", "utf8");
+  const says = (text: string) => /last\s+lesson/.test(text);
+  assert.ok(section.length > 0, "the studio's Next step section is there");
+  assert.equal(says(section), lessonDraws, "the studio's sentence says where students see the card, no more");
+  assert.equal(says(toast), lessonDraws, "the save message says where students see the card, no more");
 });
 
 test("every store language says the card in its own words", () => {

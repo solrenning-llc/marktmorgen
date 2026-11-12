@@ -13,8 +13,10 @@ import { useEffect, useRef, useState } from "react";
  * for a year), with no script needed. With script, the answer is sent without
  * leaving the page, the card goes, and focus moves to the sentence that says it
  * is done, in a status region that was there from the start, so it is read out
- * (review of #3530: focus kept, WCAG 2.4.3, 4.1.3). If the answer is not
- * confirmed, the form is sent the plain way.
+ * (review of #3530: focus kept, WCAG 2.4.3, 4.1.3). While the answer is sent
+ * the button stays focusable, says it is unavailable with aria-disabled and a
+ * second press is ignored, never natively disabled, which would drop focus to
+ * the page. If the answer is not confirmed, the form is sent the plain way.
  */
 export function CourseNextStepCard({
   handle,
@@ -64,6 +66,7 @@ export function CourseNextStepCard({
             className="mt-5 flex flex-wrap items-center gap-3"
             onSubmit={async (event) => {
               event.preventDefault();
+              if (busy) return;
               const form = event.currentTarget;
               setBusy(true);
               const ok = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } })
@@ -82,7 +85,7 @@ export function CourseNextStepCard({
             </a>
             <button
               type="submit"
-              disabled={busy}
+              aria-disabled={busy}
               aria-busy={busy}
               aria-describedby="next-step-title"
               className="st-footer-link inline-flex min-h-11 items-center px-2 text-sm font-semibold underline underline-offset-4"

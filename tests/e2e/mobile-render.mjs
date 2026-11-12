@@ -53,6 +53,14 @@ try{
  const productPath=(await demo.text()).match(new RegExp('href="('+storePath.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+'/p/weekly-meal-planner-[a-z0-9]+)"'))?.[1];
  if(!productPath)throw Error("No product link on the demo store page");
  const STORE_PATHS=new Set([storePath,productPath]);
+ // The browser's own first page and first tap, paid once and not measured. A freshly launched browser pays
+ // process-wide start-up (its first renderer, fonts) on whatever page it opens first, and a freshly started server
+ // serves its static files for the first time: on CI only the first of the 15 samples, "/" #1, missed the 200 ms
+ // tap target (about 2% of runs on 12/11/2026, pointerdown handling 154-216 ms against about 20 ms for "/" #2 and #3,
+ // no script attributed) and once the 2500 ms LCP target. This visit, in a context of its own that is closed before
+ // any sample, takes that cost; every measured sample still opens its own fresh context with the HTTP cache disabled,
+ // the same throttling, the same three samples per page and the same thresholds. Nothing it reads is recorded.
+ {const warm=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true});try{const page=await warm.newPage();await page.route("**/*",route=>{const request=route.request(),url=new URL(request.url());if(!["GET","HEAD"].includes(request.method())||url.pathname.startsWith("/api/")||url.origin!==LOCAL)return route.abort();return route.continue();});const reply=await page.goto(LOCAL+"/",{waitUntil:"load",timeout:60000});if(reply?.status()!==200)throw Error("Warm-up visit: HTTP "+reply?.status());const control=page.locator("main summary,main button[aria-expanded]").first();if(await control.count())await control.click();}finally{await warm.close();}}
  for(const path of ["/","/pricing","/platform/sales-pages",storePath,productPath])for(let sample=1;sample<=3;sample++){
   const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true});
   try{

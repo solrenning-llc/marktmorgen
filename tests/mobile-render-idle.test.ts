@@ -33,3 +33,18 @@ test("the mobile render coverage and strict thresholds stay unchanged", () => {
   assert.match(runner, /interactionMs<200/);
   assert.match(runner, /Object\.values\(result\.targets\)\.some\(value=>!value\)/);
 });
+
+test("the browser's first page is an unmeasured warm-up, closed before any sample", () => {
+  const warm = runner.indexOf("const warm=await browser.newContext(");
+  const closed = runner.indexOf("finally{await warm.close();}", warm);
+  const samples = runner.indexOf("for(let sample=1;sample<=3;sample++)");
+  assert.ok(warm >= 0 && closed > warm, "one warm-up context, always closed");
+  assert.ok(closed < samples, "it ends before the first measured sample");
+  const body = runner.slice(warm, closed);
+  assert.doesNotMatch(body, /results\.push|MOBILE_RENDER_MEASUREMENT|failed=/,
+    "nothing the warm-up sees is recorded or counted");
+  assert.doesNotMatch(body, /setCacheDisabled|setCPUThrottlingRate/,
+    "it changes no measured condition; each sample still sets its own");
+  assert.match(runner.slice(samples), /Network\.setCacheDisabled",\{cacheDisabled:true\}/,
+    "every measured sample still runs with the HTTP cache disabled");
+});

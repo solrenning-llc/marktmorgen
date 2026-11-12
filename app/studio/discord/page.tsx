@@ -23,6 +23,8 @@ const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   error: { tone: "error", text: "The server could not be connected just now. Nothing was changed; try again in a moment." },
   // The server connected now could not be read (app/api/discord/callback/route.ts): nothing was switched.
   unchecked: { tone: "error", text: "We could not check the server connected now. Nothing was changed; try again in a moment." },
+  // The old server's forget let some of its members go, not all (app/api/discord/callback/route.ts): still connected.
+  unfinished: { tone: "error", text: "Your old server is still connected: we let go of some of its members, but not all yet. Choose your new server again to finish switching." },
   // The old server's forget failed and what it left could not be read (app/api/discord/callback/route.ts): unknown.
   unconfirmed: { tone: "error", text: "We could not tell whether your old server was disconnected. Reload this page to see what is connected now, then try again." },
   limited: { tone: "error", text: "That is a lot of tries in a few minutes. Wait a little and try again." },

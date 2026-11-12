@@ -77,23 +77,41 @@ export async function saveServer(room: string, server: DiscordServer): Promise<v
 
 /**
  * The people of a server read by forgetServer, deleted in one step (Codex G on #3017): KEYS[1] the people, KEYS[2] the
- * due list, KEYS[3..] each person's address link as read; ARGV[1] the server's sid, ARGV[2..] each person's id and the
- * row read for them. A person's address link goes while it still points at them (an address they no longer hold is
- * theirs no more); their row and due entry go only while the row is still the one read, so one rewritten meanwhile
- * (another address, from a join under way) is kept whole, with its new link, for the next try. Answers the people
- * deleted, the links deleted and the people left. lib/redis-memory.ts runs it the same way.
+ * due list, KEYS[3..] each person's address link as read; ARGV[1] the server's sid, then for each person their id, the
+ * row read for them and that row's address as it is written in a row (`"e":` and the address, JSON). A person whose row
+ * is still the one read goes whole: their row, their due entry and their address link while it still points at them.
+ * One whose row was rewritten meanwhile keeps their row and due entry for the next try; their link goes only when the
+ * row no longer holds that address (a join with another address: an address they no longer hold is theirs no more),
+ * never when it was only checked again with the same address (Claude 7 on #3017: the check's keepMember rewrites rows
+ * all the time, and a kept row with its link gone is a member nobody can find by address). Answers the people deleted,
+ * the links deleted and the people left. lib/redis-memory.ts runs it the same way.
  */
-export const FORGET_PEOPLE = `-- marktmorgen:discord-forget-people:v1
+export const FORGET_PEOPLE = `-- marktmorgen:discord-forget-people:v2
 local gone, links = 0, 0
 for i = 1, #KEYS - 2 do
-  local id, row = ARGV[2 * i], ARGV[2 * i + 1]
-  if redis.call("GET", KEYS[i + 2]) == id then links = links + redis.call("DEL", KEYS[i + 2]) end
-  if redis.call("HGET", KEYS[1], id) == row then
+  local id, row, mark = ARGV[3 * i - 1], ARGV[3 * i], ARGV[3 * i + 1]
+  local now = redis.call("HGET", KEYS[1], id)
+  if now == row then
+    if redis.call("GET", KEYS[i + 2]) == id then links = links + redis.call("DEL", KEYS[i + 2]) end
     gone = gone + redis.call("HDEL", KEYS[1], id)
     redis.call("ZREM", KEYS[2], ARGV[1] .. "|" .. id)
+  elseif (not now or not string.find(now, mark, 1, true)) and redis.call("GET", KEYS[i + 2]) == id then
+    links = links + redis.call("DEL", KEYS[i + 2])
   end
 end
 return {gone, links, redis.call("HLEN", KEYS[1])}`;
+
+/**
+ * forgetServer let some of the server's people go, not all (one rewritten meanwhile, read again next try): the server
+ * is still connected, but it is not "nothing changed" (Claude 7 on #3017). An UnknownReplyError, so every caller that
+ * already fails closed on one still does.
+ */
+export class ForgetUnfinishedError extends UnknownReplyError {
+  constructor() {
+    // Keeps the name UnknownReplyError: what reads the name (logs, tests) still sees the class it always did.
+    super("the people given Discord roles, some forgotten and not all");
+  }
+}
 
 /**
  * Forgets the server, the roles each product gave and everyone given them.
@@ -133,7 +151,8 @@ export async function forgetServer(room: string, sid: string): Promise<number> {
       DUE_KEY,
       ...addresses.map((e) => addressKey(room, e)),
       sid,
-      ...people.flatMap((id, i) => [id, rows[i]]),
+      // The address as JSON.stringify writes it in a row (keepMember), so a row read again can be matched by it as text.
+      ...people.flatMap((id, i) => [id, rows[i], `"e":${JSON.stringify(normaliseEmail(addresses[i]))}`]),
     ];
     // The deletes are read too, as forgetMember's (#2932, CX-123 rule 24): a missing, short, long or queued answer is
     // not "forgotten". At most the people named go, and at most their address links.
@@ -142,7 +161,10 @@ export async function forgetServer(room: string, sid: string): Promise<number> {
     if (!counts || counts[0] === null || counts[1] === null || counts[2] === null || counts[0] > people.length || counts[1] > people.length) {
       throw new UnknownReplyError("the deletion of a Discord server's people");
     }
-    if (counts[2] !== 0) throw new UnknownReplyError("the people given Discord roles, not all forgotten");
+    if (counts[2] !== 0) {
+      if (counts[0] > 0) throw new ForgetUnfinishedError();
+      throw new UnknownReplyError("the people given Discord roles, not all forgotten");
+    }
   } else {
     const left = repliesFor(await redisPipeline([["HLEN", membersKey(room)]]), 1)?.map(countOf);
     if (!left || left[0] === null) throw new UnknownReplyError("the deletion of a Discord server's people");

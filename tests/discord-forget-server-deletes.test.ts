@@ -46,7 +46,7 @@ let reply: { value: unknown } | null = null;
 const original = redis.pipeline.bind(redis);
 const isDelete = (command: Command | undefined) =>
   Boolean(command) &&
-  ((command![0] === "EVAL" && String(command![1]).startsWith("-- marktmorgen:discord-forget-people:v1\n")) || (command![0] === "DEL" && String(command![1]).startsWith("nl:dc:srv:")));
+  ((command![0] === "EVAL" && String(command![1]).startsWith("-- marktmorgen:discord-forget-people:v2\n")) || (command![0] === "DEL" && String(command![1]).startsWith("nl:dc:srv:")));
 redis.pipeline = (async (commands: Command[]) => {
   if (reply && commands.length && isDelete(commands[0])) {
     const answer = reply.value;

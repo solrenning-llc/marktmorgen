@@ -4,7 +4,7 @@ import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
 import { exchange, isDiscordConfigured, leaveServer, whoIs } from "@/lib/discord";
 import { joinServer } from "@/lib/discord-access";
-import { forgetServer, readServerOrThrow, saveServer, takeTrip } from "@/lib/discord-store";
+import { ForgetUnfinishedError, forgetServer, readServerOrThrow, saveServer, takeTrip } from "@/lib/discord-store";
 import { storeKey } from "@/lib/learn";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
@@ -90,7 +90,9 @@ export async function GET(request: NextRequest) {
         console.error("reading the connected Discord server after a failed forget failed", again);
         return back("discord=unconfirmed");
       }
-      if (now?.id === before.id) return back("discord=unchecked");
+      // Some of its people let go and not all (one rewritten meanwhile): the old server is still the one connected, but
+      // something changed, so never "Nothing was changed" (Claude 7 on #3017); the next try forgets the rest.
+      if (now?.id === before.id) return back(error instanceof ForgetUnfinishedError ? "discord=unfinished" : "discord=unchecked");
       if (now !== null) return back("discord=unconfirmed");
     }
     await leaveServer(before.id).catch(() => false);

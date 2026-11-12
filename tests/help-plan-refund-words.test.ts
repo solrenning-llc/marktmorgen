@@ -14,6 +14,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { helpAnswer } from "@/lib/help-content";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { REFUND_DAYS } from "@/lib/plan";
 import { done, is, part } from "./check";
 
@@ -40,6 +41,11 @@ is("the policy names the same place", policy.includes("Under &ldquo;What you pay
 is("a review page before anything changes", answer.includes("before anything changes"), true);
 is("email stays for whoever cannot use the button", answer.includes("support@marktmorgen.com"), true);
 is("and the policy page is linked by name", answer.includes("refund policy page"), true);
+
+part("Nothing said as if it worked today while plans are not on sale (Claude 3 on #3683, LEVE; VR item 2)");
+is("while paid plans are not on sale, the answer says so first, like the policy page", answer.startsWith("Paid plans are not on sale yet, so no plan payment has been taken. "), !PLANS_ON_SALE);
+is("and the policy page says the same while they are not", policy.includes("{!PLANS_ON_SALE ? ( <p> Paid plans are not on sale yet."), true);
+is("once they are on sale, the answer drops it", answer.includes("not on sale yet"), !PLANS_ON_SALE);
 
 part("Plain words");
 const sentences = answer.split(/(?<=[.!?])\s+/);

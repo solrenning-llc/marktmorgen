@@ -35,7 +35,7 @@ import { tell } from "@/lib/community-notify";
 import { communityWords } from "@/lib/buyer-words/community";
 import { checkCommunityImage } from "@/lib/community-image";
 import { blobImages, dropCommunityImage, noteCommunityUpload, takeCommunityUpload } from "@/lib/community-files";
-import { advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
+import { RecipientsUnreadError, advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
 import {
   ITEM_ID,
   MAX_COMMENT_TEXT,
@@ -239,7 +239,17 @@ export async function POST(request: NextRequest) {
         );
       }
       if (announce && form.get("email") === "1") {
-        const queued = await queueAnnouncement(store, config, made.post);
+        // The post is up either way. Who asked for the emails is read whole or not at all (lib/community.ts
+        // memberPage, rule 24): a list that could not be read, in another shape or with no answer at all
+        // (RecipientsUnreadError), queues nothing, and the creator is told the post went up without the email, never
+        // "nothing was changed" and never a send to part of the members. A failure writing the job is not that.
+        let queued: Awaited<ReturnType<typeof queueAnnouncement>>;
+        try {
+          queued = await queueAnnouncement(store, config, made.post);
+        } catch (error) {
+          if (error instanceof RecipientsUnreadError) return back(`${home}/post/${made.post.id}`, "notemailed");
+          throw error;
+        }
         if (queued.ok) {
           const jobId = queued.job.id;
           after(() => advanceAnnouncement(jobId, storeForHandle, Date.now() + 25_000).then(() => undefined, (error) => console.error("sending an announcement failed", error)));

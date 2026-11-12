@@ -59,6 +59,20 @@ async function main(): Promise<void> {
     is("not answered as ok", unread.body.ok === true, false);
     is("and never as an empty list", Array.isArray(unread.body.versions), false);
   }
+  // Claude 7's LEVE on #3805: the list itself reads, but one kept entry does not. The editor must not show the rest as
+  // the whole list (rule 24, never the part that could be read).
+  for (const [mode, bad] of [["an entry that is not text", 7], ["an entry with no time", "no time here"], ["an entry that does not parse", `${Date.now()}\n{not json`]] as const) {
+    part(`One kept version is ${mode}: never the rest shown as the whole list`);
+    redis.pipeline = async (commands) => {
+      const reply = await original.call(redis, commands);
+      const versions = commands.length === 1 && commands[0][0] === "LRANGE" && String(commands[0][1]).startsWith(`nl:product:pages:${statsId}:`);
+      return versions ? [[...((reply as unknown[][])[0] ?? []), bad]] : reply;
+    };
+    const part1 = await ask();
+    redis.pipeline = original;
+    is("not answered as ok", part1.body.ok === true, false);
+    is("and never as a shorter list", Array.isArray(part1.body.versions), false);
+  }
   console.error = quiet;
   done();
 }

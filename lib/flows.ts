@@ -1417,6 +1417,15 @@ export async function sendDueSteps(
         ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
         ...refused,
       ];
+      // Whoever the sender left out because they left the list after sendGroup read them (sendTo reads each row again:
+      // unsubscribed, bounced, removed) is in none of its lists: nothing went to them, and their run ends as left, so
+      // no attempt stays open for good (Claude 2 (nuvem D) bug hunt).
+      const accounted = new Set([...result.done, ...result.rest, ...uncertain]);
+      const gone = going.filter((email) => !accounted.has(email));
+      if (gone.length) {
+        counts.dropped += gone.length;
+        outcomes.push(...gone.map((email) => ({ email, state: "failed" as const, note: "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", to: -1, status: "left" as const })));
+      }
       if (waiting) {
         const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
         outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));

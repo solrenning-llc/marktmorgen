@@ -17,7 +17,7 @@ import { installSesMailFixture } from "./ses-mail-fixture";
 
 type Command = (string | number)[];
 const realNow = Date.now;
-let shift = 0;
+const shift = 0;
 Date.now = () => realNow() + shift;
 const real = redis.pipeline.bind(redis);
 let leaveAfterRead: string | null = null;

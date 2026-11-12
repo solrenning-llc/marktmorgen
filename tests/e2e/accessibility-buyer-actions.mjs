@@ -138,7 +138,8 @@ try{
     });
     audits++;console.log("BUYER_MATRIX_AUDIT:"+JSON.stringify({engine,width,mode,state,...result}));
     if(result.scroll>result.client||result.violations.length)throw Error("Accessibility/overflow failure at "+state);
-    if(["product-checkout-form","simulated-paid-receipt"].includes(state)){const small=await targetsUnder44(page);if(small.length)throw Error("Target under 44 by 44 px at "+state+" "+JSON.stringify(small));}
+    // Every state the buyer passes through, the site's own header and footer on the library included (2.5.5).
+    const small=await targetsUnder44(page);if(small.length)throw Error("Target under 44 by 44 px at "+state+" "+JSON.stringify(small));
     if(mode!=="text-spacing"){const off=await blocksOff148(page);if(off.length)throw Error("1.4.8 line spacing/justification/width at "+state+" "+JSON.stringify(off));}
     if(result.incomplete.length)gaps.push({width,mode,state,manualReview:result.incomplete});
    }
@@ -236,6 +237,7 @@ try{
  // Where a buyer lands on a wrong address: a store that does not exist (the site's own 404, app/not-found.tsx), a page
  // a store does not have (the store's own 404, app/[handle]/not-found.tsx), and the help written for buyers
  // (app/help/buyers). Everything is inside a landmark (axe "region": the site's preview bar sits in the header),
+ // every control is 44 by 44 px (2.5.5: the site's menu, its footer's short links, the way back to the store, the trail),
  // and the 1.4.8 checks above hold. Baseline at 320 and 1280 px; its time is printed so its cost is measured.
  const missingStarted=Date.now();let missingCases=0;
  for(const width of [320,1280])for(const [path,want] of [["/@nosuchstore",404],["/@localshop/nothing-here",404],["/help/buyers",200]]){
@@ -247,9 +249,9 @@ try{
    if(response?.status()!==want)throw Error("HTTP "+response?.status());
    await page.addScriptTag({content:axe});
    const result=await page.evaluate(async()=>{const root=document.documentElement,run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {scroll:root.scrollWidth,client:root.clientWidth,violations:run.violations.map(v=>({id:v.id,targets:v.nodes.map(n=>n.target).slice(0,6)})),incomplete:run.incomplete.map(v=>v.id)};});
-   const off=await blocksOff148(page);
-   audits++;console.log("MISSING_PAGE_AUDIT:"+JSON.stringify({engine,width,path,off,...result}));
-   if(result.scroll>result.client||result.violations.length||off.length||errors.length)throw Error("Missing-page accessibility failure "+JSON.stringify({violations:result.violations,off,errors}));
+   const small=await targetsUnder44(page),off=await blocksOff148(page);
+   audits++;console.log("MISSING_PAGE_AUDIT:"+JSON.stringify({engine,width,path,small,off,...result}));
+   if(result.scroll>result.client||result.violations.length||small.length||off.length||errors.length)throw Error("Missing-page accessibility failure "+JSON.stringify({violations:result.violations,small,off,errors}));
    if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"missing "+path,manualReview:result.incomplete});
   }catch(error){failed++;console.error("MISSING_PAGE_FAILURE:"+JSON.stringify({engine,width,path,error:redact(error)}));}
   finally{missingCases++;cases++;await context.close();}

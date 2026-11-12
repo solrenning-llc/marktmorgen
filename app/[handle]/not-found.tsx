@@ -47,7 +47,7 @@ export default async function StoreNotFound() {
           <h1 className="font-display mt-2 text-3xl font-semibold leading-tight sm:text-4xl">{w.missingTitle}</h1>
           <p className="st-muted mt-4 text-lg">{w.missingBody(store.name)}</p>
           <div className="mt-8">
-            <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+            <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
               {w.backTo(store.name)}
             </Link>
           </div>

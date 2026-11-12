@@ -393,7 +393,7 @@ export function SiteNav() {
                 aria-controls={`menu-${menu.id}`}
                 onMouseEnter={() => hoverOpen(menu.id)}
                 onClick={() => clickMenu(menu.id)}
-                className={`flex h-10 items-center gap-1 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
+                className={`flex h-11 items-center gap-1 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
                   openMenu === menu.id ? "bg-sand text-ink" : "text-ink-soft hover:bg-sand hover:text-ink"
                 }`}
               >
@@ -410,7 +410,7 @@ export function SiteNav() {
                 key={l.href}
                 href={l.href}
                 onMouseEnter={() => setOpenMenu(null)}
-                className="flex h-10 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink"
+                className="flex h-11 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink"
               >
                 {l.label}
               </Link>
@@ -420,7 +420,7 @@ export function SiteNav() {
           <div className="flex items-center gap-1 sm:gap-2">
             <Link prefetch={false}
               href="/signin?to=login"
-              className="hidden h-10 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink sm:flex"
+              className="hidden h-11 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink sm:flex"
             >
               Log in
             </Link>
@@ -438,7 +438,7 @@ export function SiteNav() {
               onClick={() => setDrawerOpen((v) => !v)}
               aria-expanded={drawerOpen}
               aria-controls="mobile-drawer"
-              className="grid h-11 w-11 place-items-center rounded-[10px] text-ink transition-colors hover:bg-sand lg:hidden"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-[10px] text-ink transition-colors hover:bg-sand lg:hidden"
             >
               <span className="sr-only">{drawerOpen ? "Close the menu" : "Open the menu"}</span>
               <Icon name={drawerOpen ? "close" : "menu"} size={22} />

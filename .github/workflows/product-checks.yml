@@ -260,7 +260,7 @@ jobs:
           cache-dependency-path: measured-app/package-lock.json
       - run: npm ci
         working-directory: measured-app
-      - run: node scripts/ci-build.mjs
+      - run: node scripts/ci-build.mjs --skip-type-check
         working-directory: measured-app
       - name: Measure cold mobile rendering against the same local production server
         run: node tests/e2e/mobile-render.mjs measured-app
@@ -293,7 +293,7 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
-      - run: node scripts/ci-build.mjs
+      - run: node scripts/ci-build.mjs --skip-type-check
       - name: Existing complete studio and public-page browser regressions with synthetic services
         run: node tests/e2e/store-copy.mjs --no-build
 

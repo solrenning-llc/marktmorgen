@@ -231,7 +231,7 @@ class WorkflowSourceAndOrderTests(unittest.TestCase):
         self.assertNotRegex(checkouts[1], r"(?m)^\s+ref:")
         self.assertIn("          ref: ${{ matrix.ref }}\n          path: measured-app", checkouts[2])
         self.assertIn("MOBILE_RENDER_SHA: ${{ matrix.ref }}", body)
-        self.assertIn("run: node scripts/ci-build.mjs\n        working-directory: measured-app", body)
+        self.assertIn("run: node scripts/ci-build.mjs --skip-type-check\n        working-directory: measured-app", body)
         self.assertIn("run: node tests/e2e/mobile-render.mjs measured-app", body)
 
     def test_actual_order_admission_waits_for_its_node_dependencies(self):

@@ -16,6 +16,16 @@ const nextConfig: NextConfig = {
    * read from disk by the one route that needs them, so only its function
    * carries them.
    */
+  /**
+   * Next's TypeScript check, skipped only in a GitHub Actions build that asked
+   * for it (scripts/ci-build.mjs --skip-type-check): the browser and
+   * accessibility jobs, which build the same commit the verify job's build
+   * (product-checks, a required check) type-checks. Every other build, the
+   * host's included, checks types.
+   */
+  typescript: {
+    ignoreBuildErrors: process.env.GITHUB_ACTIONS === "true" && process.env.MARKTMORGEN_CI_SKIP_TYPE_CHECK === "1",
+  },
   outputFileTracingIncludes: {
     "/\\[handle\\]/certificate/\\[id\\]/pdf": ["./lib/fonts/**/*"],
     "/**/certificate/**": ["./lib/fonts/**/*"],

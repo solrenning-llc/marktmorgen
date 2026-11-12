@@ -75,7 +75,7 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
-      - run: node scripts/ci-build.mjs
+      - run: node scripts/ci-build.mjs --skip-type-check
       - name: Generate disposable certificate for local HTTPS only
         run: |
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$RUNNER_TEMP/signup-key.pem" -out "$RUNNER_TEMP/signup-cert.pem" -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"

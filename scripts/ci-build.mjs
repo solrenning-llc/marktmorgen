@@ -7,12 +7,13 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ciBuildNodeEnvironment } from "./ci-build-args.mjs";
+import { ciBuildNodeEnvironment, ciBuildTypeCheckEnvironment } from "./ci-build-args.mjs";
 
 if (process.env.GITHUB_ACTIONS !== "true") {
   throw new Error("ci-build.mjs is only for synthetic GitHub Actions builds; use npm run build elsewhere");
 }
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const typeCheck = ciBuildTypeCheckEnvironment(process.argv.slice(2));
 const font = await readFile(join(root, "node_modules/next/dist/next-devtools/server/font/geist-latin.woff2"));
 if (font.length > 1_048_576 || font.subarray(0, 4).toString() !== "wOF2") {
   throw new Error("The installed Next test font is not a bounded WOFF2 file");
@@ -41,6 +42,7 @@ try {
     env: {
       ...process.env,
       ...ciBuildNodeEnvironment(process.platform, process.env.NODE_OPTIONS),
+      ...typeCheck,
       NEXT_FONT_GOOGLE_MOCKED_RESPONSES: join(root, "tests/e2e/google-fonts-mock.cjs"),
       E2E_FONT_ORIGIN: `http://127.0.0.1:${address.port}`,
     },

@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 
 test("the synthetic build applies the platform-specific Node environment", async () => {
   const source = await readFile(new URL("./ci-build.mjs", import.meta.url), "utf8");
-  assert.match(source, /import \{ ciBuildNodeEnvironment \} from "\.\/ci-build-args\.mjs";/);
+  assert.match(source, /import \{ ciBuildNodeEnvironment, ciBuildTypeCheckEnvironment \} from "\.\/ci-build-args\.mjs";/);
   assert.match(source, /\.\.\.ciBuildNodeEnvironment\(process\.platform, process\.env\.NODE_OPTIONS\),/);
 });
 

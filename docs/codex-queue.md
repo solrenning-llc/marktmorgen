@@ -23115,3 +23115,42 @@ REGRA DE MARGEM (MR, 27/10/2026): nenhum cliente pagante, isoladamente e usando 
 Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; receber, guardar ou transferir dinheiro de criadores, compradores ou afiliados; mostrar recurso que não funciona; afirmar superioridade sobre concorrente sem tabela medida, com fonte e data; depoimento, número ou resultado inventado; "free" como chamada principal; overlay de acessibilidade; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong; usar dados reais nos testes. Assinar plano, fazer compra real ou criar conta para concluir o estudo.
 
 Aplicar a regra VR: registro na fila; nada construído, publicado ou disponível ao cliente por este registro.
+
+## CF7 — Reler as fontes oficiais dos concorrentes antes de 16/12/2026 (12/11/2026)
+
+Etiqueta: [CF7], item 769.
+
+Solicitação do Claude 1 (caixa C1-20261112-1000-C7-141, item 3, 12/11/2026, horário de Fortaleza), registrada pela Claude 7. Conferido antes de gravar (regra Pedidos repetidos): nenhuma etiqueta [CF7], nenhum item 769 e nenhum item ou PR aberto pedindo a releitura das fontes datadas; o item 238 [CF1] criou a rotina que acusa o vencimento (lib/competitor-review.ts, tests/competitor-review.test.ts), não a releitura. Número 769: o próximo livre (768 [STN15] era o maior).
+
+Motivo: o teste `no competitor fact on a public page or in the price table is more than 90 days old` (tests/competitor-review.test.ts, REVIEW_DAYS = 90) passa a falhar no main a partir de 16/12/2026, quando vencem as primeiras datas de leitura, e a execução diária do CI fica vermelha. O teste não é afrouxado: cada fato é relido na página oficial do concorrente, a data é atualizada e o fato é corrigido se mudou.
+
+Descrição: reler, na ordem de vencimento abaixo, cada fonte oficial e cada frase datada ("read <data>", "checked again on <data>") e atualizar a data só depois de conferir o fato na página oficial do dia; um fato que mudou é corrigido no mesmo PR, com a nova fonte e a data. Um fato que não puder ser conferido sai da página em vez de ficar com data antiga. Lista calculada em 12/11/2026 a partir dos próprios dados do teste (lib/competitor-prices.ts e páginas públicas), 148 fatos datados; vencimento = data de leitura + 90 dias (o teste falha no dia do vencimento):
+
+- 16/12/2026 (lidos em 17/09/2026): /platform/webhooks; /platform/quizzes-and-certificates; /proof/everything.
+- 17/12/2026 (18/09/2026): /platform/price-options; /proof/compare; /proof/gumroad; /proof/beacons.
+- 18/12/2026 (19/09/2026): /proof/compare.
+- 19/12/2026 (20/09/2026): /blog/what-selling-on-gumroad-costs; /platform/checkout; /platform/insights.
+- 25/12/2026 (26/09/2026): /platform/calendar-sync.
+- 26/12/2026 (27/09/2026): /platform/community; /platform/live-events; /platform/reviews; /platform/switching-to-marktmorgen; /proof/compare.
+- 27/12/2026 (28/09/2026), 12 fatos: /blog/what-selling-on-gumroad-costs; /platform/store-page; /platform/bundles; /platform/sales-pages; /platform/currencies-and-ways-to-pay; /platform/email-platforms; /platform/teams-and-stores; /proof/compare; /proof/gumroad; /help#getting-started; /help#money; /help#your-store.
+- 29/12/2026 (30/09/2026): /platform/memberships; /proof/compare; /proof/everything.
+- 03/01/2027 (05/10/2026): /platform/outreach.
+- 05/01/2027 (07/10/2026): /proof/everything.
+- 09/01/2027 (11/10/2026): /platform/store-page; /platform/quizzes-and-certificates.
+- 14/01/2027 (16/10/2026): /proof/gumroad.
+- 16/01/2027 (18/10/2026): /proof/compare.
+- 17/01/2027 (19/10/2026), 6 fatos: COMPETITOR_PRICES.kajabi (planos 1–3 em kajabi.com/pricing, trial e branded app nas páginas de ajuda da Kajabi) e /proof/kajabi.
+- 18/01/2027 (20/10/2026), 103 fatos: as fontes de COMPETITOR_PRICES de Circle, ClickFunnels, HighLevel, Hotmart, Kit, Linktree, Patreon, Podia, Skool, Substack, Systeme.io, Teachable, Thinkific e Whop (páginas de preços e de ajuda oficiais citadas em cada `source`), as páginas /proof de cada um e os posts /blog/how-much-kajabi-costs-in-2026, /blog/kajabi-vs-teachable-vs-marktmorgen, /blog/skool-alternatives-community-platforms e /blog/skool-fees-explained.
+- 03/02/2027 (05/11/2026): o fato restante, na mesma rotina.
+
+As datas de uma mesma página podem ser várias (por exemplo, /proof/compare aparece em seis vencimentos): cada frase datada é relida pela sua própria data. Uma releitura em PRs pequenos, por vencimento, mantém o main verde; a primeira precisa estar incorporada antes de 16/12/2026.
+
+Estado inicial: na fila. Urgente pelo prazo: o primeiro lote (vencimentos de 16/12 a 19/12/2026) precisa entrar no main antes de 16/12/2026; a posição na ordem vigente fica com o Claude 1. Faixa: quem tiver as páginas reservadas (docs/reservations/); se ninguém, o Claude 1 distribui.
+
+Acessibilidade (AX274, Parte A): as frases corrigidas continuam em inglês americano simples, com o propósito de cada link claro pelo próprio texto; nenhuma mudança de interface por este registro.
+
+REGRA DE MARGEM (MR, 27/10/2026): nenhum custo variável novo; leitura de páginas públicas pelo WebFetch, sem conta, assinatura ou compra. Leitura tributária pela política TX.
+
+Proibido: afrouxar o teste, mudar REVIEW_DAYS ou atualizar uma data sem reler a fonte; afirmar superioridade sem fonte oficial datada; mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; criar contas, aceitar termos, contratar, pagar ou contatar concorrentes ou terceiros.
+
+Aplicar a regra VR: registro na fila; nada relido, construído ou publicado por este registro.

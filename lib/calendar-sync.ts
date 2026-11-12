@@ -370,26 +370,95 @@ export function subscribeUrl(token: string): string {
 
 export type AddFeedResult =
   | { ok: true; view: CalendarView; busyTimes: number }
-  | { ok: false; reason: "full" | "duplicate" | "long" | "invalid" | "unavailable"; message: string };
+  | { ok: false; reason: "full" | "duplicate" | "long" | "invalid" | "unavailable" | "busy"; message: string };
+
+/**
+ * A store's calendar settings written only over the exact text they were read as (ARGV[1] "1", ARGV[2] that text),
+ * or only while still absent when they were read absent (ARGV[1] "0"); ARGV[3] is what is written. 1: written; 0:
+ * changed by someone else since, nothing written (issue #3984). Billed as the script plus its GET and its SET: 3
+ * commands written, 2 not.
+ */
+export const CALENDAR_CONFIG_SWAP = `-- marktmorgen:calendar-config-swap:v1
+local now = redis.call('GET', KEYS[1])
+if ARGV[1] == '1' then
+  if now ~= ARGV[2] then return 0 end
+elseif now then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1`;
+
+/** How many times a change is read and made in all, when other changes keep writing the settings first, before "busy". */
+const CONFIG_TRIES = 3;
+/** What the studio shows when every try lost to another change: nothing was changed. */
+const CALENDAR_CHANGE_BUSY = "Your calendars were being changed somewhere else at the same moment, so nothing was changed. Try again.";
+/** Thrown by removeFeed and newFeedToken when every try lost to another change, with nothing changed: the route's "busy". */
+export class CalendarChangeBusyError extends Error {
+  constructor() {
+    super(CALENDAR_CHANGE_BUSY);
+    this.name = "CalendarChangeBusyError";
+  }
+}
+
+/**
+ * Changes a store's calendar settings without losing a change made at the same moment (issue #3984): reads them
+ * exactly (rule 24, as readConfig: an unknown read throws), asks `change` what to write from what was read, and
+ * writes it only over that exact text, or only while still absent (CALENDAR_CONFIG_SWAP). On a lost race the
+ * settings are read and the change made again, CONFIG_TRIES times in all, then "busy" with nothing written.
+ * `change` answers a null config to write nothing; its result comes back with "written" or "unchanged".
+ */
+async function changeConfig<T>(
+  store: Store & { statsId: string },
+  change: (config: Config | null) => { config: Config | null; result: T } | Promise<{ config: Config | null; result: T }>,
+): Promise<{ state: "written" | "unchanged"; result: T } | { state: "busy" }> {
+  for (let attempt = 0; attempt < CONFIG_TRIES; attempt += 1) {
+    const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
+    const raw = reply?.[0];
+    let config: Config | null = null;
+    if (!(reply && raw === null)) {
+      let value: unknown;
+      try {
+        value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+      } catch {
+        value = undefined;
+      }
+      config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
+      if (!config) throw new UnknownReplyError("a store's calendar settings");
+    }
+    const next = await change(config);
+    if (!next.config) return { state: "unchanged", result: next.result };
+    const text = JSON.stringify({ ...next.config, handle: store.handle, callsId: store.callsId ?? null });
+    const read = typeof raw === "string" ? ["1", raw] : ["0", ""];
+    const swapped = repliesFor(await redisPipeline([["EVAL", CALENDAR_CONFIG_SWAP, 1, cfgKey(store.statsId), ...read, text]]), 1);
+    if (swapped?.[0] === 1) return { state: "written", result: next.result };
+    if (swapped?.[0] !== 0) throw new UnknownReplyError("a store's calendar settings written over what was read");
+  }
+  return { state: "busy" };
+}
 
 /**
  * Adds a calendar, after reading it once: an address that cannot be read is
  * refused with the reason, so a creator never leaves the studio believing a
- * calendar is blocking times when it is not.
+ * calendar is blocking times when it is not. The remote read (up to
+ * FEED_TIMEOUT_MS) comes before the settings are read for the write, so a
+ * change made meanwhile is never written over (issue #3984).
  */
 export async function addFeed(store: Store, raw: string, now = Date.now(), hooks: FetchHooks = {}): Promise<AddFeedResult> {
-  if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
+  const statsId = store.statsId;
+  if (!statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   const text = raw.trim();
   if (text.length > MAX_FEED_URL) return { ok: false, reason: "long", message: "That address is longer than any calendar address we know of." };
+  const full: AddFeedResult = { ok: false, reason: "full", message: `A store can read ${MAX_FEEDS} calendars. Remove one first.` };
+  const duplicate: AddFeedResult = { ok: false, reason: "duplicate", message: "That calendar is already added." };
   const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
-  if (config.feeds.length >= MAX_FEEDS) return { ok: false, reason: "full", message: `A store can read ${MAX_FEEDS} calendars. Remove one first.` };
+  if (config.feeds.length >= MAX_FEEDS) return full;
   let url: string;
   try {
     url = checkUrl(text).toString();
   } catch (error) {
     return { ok: false, reason: "invalid", message: problemWords(error) };
   }
-  if (config.feeds.some((f) => f.url === url)) return { ok: false, reason: "duplicate", message: "That calendar is already added." };
+  if (config.feeds.some((f) => f.url === url)) return duplicate;
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable", message: "Calendar changes are temporarily unavailable. Try again later." };
   let reading: Reading;
   try {
@@ -398,7 +467,15 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
     return { ok: false, reason: "invalid", message: error instanceof Error ? error.message : "The calendar could not be read." };
   }
   const feed: Feed = { id: randomBytes(8).toString("hex"), url, addedAt: new Date(now).toISOString() };
-  await writeConfig(store, { ...config, feeds: [...config.feeds, feed] });
+  // Read again for the write: a calendar removed or added while this one was read is kept as it now is.
+  const changed = await changeConfig({ ...store, statsId }, (current): { config: Config | null; result: AddFeedResult | null } => {
+    const base = current ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+    if (base.feeds.length >= MAX_FEEDS) return { config: null, result: full };
+    if (base.feeds.some((f) => f.url === url)) return { config: null, result: duplicate };
+    return { config: { ...base, feeds: [...base.feeds, feed] }, result: null };
+  });
+  if (changed.state === "busy") return { ok: false, reason: "busy", message: CALENDAR_CHANGE_BUSY };
+  if (changed.result) return changed.result;
   const saved = JSON.stringify(reading);
   await redisPipeline([
     ["SET", busyKey(feed.id), saved, "EX", CACHE_SECONDS],
@@ -407,35 +484,53 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
   return { ok: true, view: await calendarView(store), busyTimes: reading.busy.length };
 }
 
-/** Stops reading a calendar and forgets its address and everything read from it. */
+/**
+ * Stops reading a calendar and forgets its address and everything read from it, written only over the settings it
+ * read (issue #3984); CalendarChangeBusyError when other changes kept winning, with nothing changed.
+ */
 export async function removeFeed(store: Store, id: string): Promise<CalendarView> {
-  const config = await readConfig(store);
-  if (config && config.feeds.some((f) => f.id === id)) {
-    await writeConfig(store, { ...config, feeds: config.feeds.filter((f) => f.id !== id) });
-    await redisPipeline([["DEL", busyKey(id), goodKey(id), errKey(id)]]);
-  }
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return calendarView(store);
+  const changed = await changeConfig({ ...store, statsId }, (config) => ({
+    config: config && config.feeds.some((f) => f.id === id) ? { ...config, feeds: config.feeds.filter((f) => f.id !== id) } : null,
+    result: null,
+  }));
+  if (changed.state === "busy") throw new CalendarChangeBusyError();
+  if (changed.state === "written") await redisPipeline([["DEL", busyKey(id), goodKey(id), errKey(id)]]);
   return calendarView(store);
 }
 
 /**
  * Makes the store's subscription address, or a new one in place of the old,
- * which stops answering at once.
+ * which stops answering at once. Once the settings read exactly, the new
+ * address's key is written (it answers only once the settings name it:
+ * storeIdForToken), then the settings only over what was read (issue #3984),
+ * and the replaced address's key deleted after; CalendarChangeBusyError when
+ * other changes kept winning, the new key deleted again.
  */
 export async function newFeedToken(store: Store, keepStopped = false): Promise<CalendarView> {
-  const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return calendarView(store);
   const token = randomBytes(24).toString("hex");
-  const commands: (string | number)[][] = [["SET", tokenKey(token), store.statsId as string]];
-  if (config.token) commands.push(["DEL", tokenKey(config.token)]);
-  await redisPipeline(commands);
+  let keyed = false;
+  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
+  const changed = await changeConfig({ ...store, statsId }, async (read) => {
+    if (!keyed) {
+      await redisPipeline([["SET", tokenKey(token), statsId]]);
+      keyed = true;
+    }
+    const { stoppedAt, ...rest } = read ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+    return { config: { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() }, result: read?.token ?? null };
+  });
+  if (changed.state === "busy") {
+    await redisPipeline([["DEL", tokenKey(token)]]);
+    throw new CalendarChangeBusyError();
+  }
+  if (changed.result) await redisPipeline([["DEL", tokenKey(changed.result)]]);
   // The last copy stays, so the new address answers at once even when the day's makings are spent; only a
   // tombstone (the store's handle once led elsewhere) goes, since this store is plainly its handle's own.
-  if (store.statsId) {
-    const [kept] = await redisPipeline([["GET", outKey(store.statsId)]]);
-    if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(store.statsId)]]);
-  }
-  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
-  const { stoppedAt, ...rest } = config;
-  await writeConfig(store, { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() });
+  const [kept] = await redisPipeline([["GET", outKey(statsId)]]);
+  if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(statsId)]]);
   return calendarView(store);
 }
 

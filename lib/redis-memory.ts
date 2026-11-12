@@ -252,6 +252,16 @@ export class MemoryRedis {
           this.run(["ZADD", all, at, member]);
           return 1;
         }
+        // lib/email-sync.ts WRITE_IF_READ: how a try went written (and queued) only over the job record as it was read.
+        if (key.startsWith("-- marktmorgen:esync-write-if-read:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, job, queue, expected, json, seconds, due, member] = args;
+          const held = this.run(["GET", job]);
+          if (held === null || held === undefined) return 0;
+          if (held !== expected) return -1;
+          this.run(["SET", job, json, "EX", seconds]);
+          if (due !== "") this.run(["ZADD", queue, due, member]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

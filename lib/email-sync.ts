@@ -383,10 +383,18 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
 
 // ---- Sending ------------------------------------------------------------------------
 
-/** One try of one job. Returns the job as it stands after it. */
-async function attempt(job: Job, now: number, budget: number): Promise<Job> {
+/**
+ * One try of one job, read as `raw`. Returns the job as it stands after it, or null when its record no longer holds
+ * what was read (the person's erasure deleted it, #4266): then nothing is tried and nothing is to be written. The
+ * record is read again with the settings, right before the platform is asked, so a job erased since it was read is
+ * never sent; an erasure landing during the platform's answer is caught where the outcome is written (WRITE_IF_READ).
+ */
+async function attempt(job: Job, raw: string, now: number, budget: number): Promise<Job | null> {
   const next: Job = { ...job, attempts: job.attempts + 1, lastAt: now };
-  const config = await readConfig(job.statsId);
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(job.statsId)], ["GET", jobKey(job.id)]]), 2);
+  if (!read) throw new UnknownReplyError("an email platform job and its settings");
+  if (read[1] !== raw) return null;
+  const config = parseConfig(read[0]);
   if (!config || !config.target) {
     return { ...next, state: "failed", next: 0, lastError: "The email platform was disconnected before this could be sent." };
   }
@@ -440,12 +448,51 @@ async function runClaimed(statsId: string, id: string, budget: number, now = Dat
     await retire(statsId, id, now);
     return job;
   }
-  const done = await attempt(job, now, budget);
-  const record: (string | number)[] = ["SET", jobKey(id), JSON.stringify(done), "EX", JOB_SECONDS];
-  if (done.state === "retrying") await redisPipeline([record, ["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`]]);
-  else await retire(statsId, id, now, [record]);
+  // A job parses only from text (parseJob), so here the record as read is that text.
+  const read = String(raw);
+  const done = await attempt(job, read, now, budget);
+  // Erased (or rewritten by another holder) since it was read: nothing is written back and nothing queued (#4266).
+  if (!done) return unlessRewritten(statsId, id, now);
+  const member = `${statsId}|${id}`;
+  // Written only over the record as it was read (#4266): a job the person's erasure deleted during the try is not
+  // written back with their address, nor queued for another try. A reply in another shape throws; the job stays on
+  // the queue under its lease and comes back, read afresh, when it ends.
+  const written = repliesFor(
+    await redisPipeline([["EVAL", WRITE_IF_READ, 2, jobKey(id), QUEUE_KEY, read, JSON.stringify(done), JOB_SECONDS, done.state === "retrying" ? done.next : "", member]]),
+    1,
+  );
+  const outcome = written ? countOf(written[0]) : null;
+  if (outcome === null && written?.[0] !== -1) throw new UnknownReplyError("writing how an email platform job went");
+  if (outcome !== 1) return unlessRewritten(statsId, id, now);
+  if (done.state !== "retrying") await retire(statsId, id, now);
   return done;
 }
+
+/**
+ * A claimed job whose record no longer holds what was read. Gone (the person's erasure, or its week ended): taken off
+ * the queue as a finished one is (retire), with nothing written. Rewritten instead: left to whoever wrote it.
+ */
+async function unlessRewritten(statsId: string, id: string, now: number): Promise<null> {
+  const replies = repliesFor(await redisPipeline([["EXISTS", jobKey(id)]]), 1);
+  const exists = replies ? countOf(replies[0]) : null;
+  if (exists === null) throw new UnknownReplyError("the record of an email platform job");
+  if (exists === 0) await retire(statsId, id, now);
+  return null;
+}
+
+/**
+ * How a try went, written only over the job's record as it was read (#4266): KEYS[1] the job, KEYS[2] the queue;
+ * ARGV[1] the record as read, ARGV[2] the new record, ARGV[3] its seconds, ARGV[4] when the next try is due (empty
+ * when there is none), ARGV[5] the queue member. Answers 1 when written (and queued), 0 when the record is gone, -1
+ * when it holds something else; then nothing is written. lib/redis-memory.ts runs it the same way.
+ */
+export const WRITE_IF_READ = `-- marktmorgen:esync-write-if-read:v1
+local held = redis.call("GET", KEYS[1])
+if not held then return 0 end
+if held ~= ARGV[1] then return -1 end
+redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+if ARGV[4] ~= "" then redis.call("ZADD", KEYS[2], ARGV[4], ARGV[5]) end
+return 1`;
 
 /**
  * Every job record, which holds a buyer's address for a week, stays where a
@@ -509,8 +556,8 @@ async function forgetFinished(log: string, ids: string[]): Promise<void> {
 }
 
 /**
- * Takes a job that is done off the queue, after the commands that write how it
- * went, and deletes its record when it is no longer in the store's log, so no
+ * Takes a job that is done off the queue, once how it went is written (or its
+ * record is gone), and deletes its record when it is no longer in the store's log, so no
  * record holding an address is left where neither the log nor the queue finds
  * it (dropOverflow). The job leaves the queue only once its record is known to
  * be in the log or gone (Claude 4 on #2860): the log is read first, with the
@@ -522,11 +569,10 @@ async function forgetFinished(log: string, ids: string[]): Promise<void> {
  * the queue, to be retired again when its lease would have ended, and throws
  * (CX-123 rule 24); before that, the job is still there.
  */
-async function retire(statsId: string, id: string, now: number, first: (string | number)[][] = []): Promise<void> {
+async function retire(statsId: string, id: string, now: number): Promise<void> {
   const member = `${statsId}|${id}`;
   const log = logKey(statsId);
-  const commands = [...first, ["LRANGE", log, 0, -1]];
-  const logged = stringList(repliesFor(await redisPipeline(commands), commands.length)?.[commands.length - 1]);
+  const logged = stringList(repliesFor(await redisPipeline([["LRANGE", log, 0, -1]]), 1)?.[0]);
   if (!logged) throw new UnknownReplyError("a store's email platform job log, retiring a job");
   if (!logged.includes(id)) {
     if (!countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) throw new UnknownReplyError("the record of an email platform job, retiring it");

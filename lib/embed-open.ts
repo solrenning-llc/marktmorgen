@@ -7,7 +7,9 @@
  * for like a visit to the store's own pages:
  *
  *   - counted toward the visits the store's plan covers (lib/traffic.ts), once
- *     a person a day, never a robot's or the store's own people's;
+ *     a person a day, never a robot's or the store's own people's: by the
+ *     page itself (components/store-beacon.tsx), through the host's browser
+ *     check (app/api/store/hit), never here, where any program can ask;
  *   - refused its buy button and form when the store is past them
  *     (isResting), as its other pages rest, and when one connection has
  *     opened more than OPENS_PER_TEN_MINUTES in ten minutes: the frame then
@@ -15,13 +17,10 @@
  *   - in a frame, given its buttons and its messages only on a site the
  *     creator listed (lib/embed-sites.ts), read from the Referer.
  */
-import { after } from "next/server";
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import { type Store } from "@/lib/store";
 import { clientAddress, withinLimit } from "@/lib/request-guard";
-import { isResting, recordVisit } from "@/lib/traffic";
-import { isStorePeople } from "@/lib/visit";
-import { isBot } from "@/lib/source-rules";
+import { isResting } from "@/lib/traffic";
 import { SITE_URL } from "@/lib/site-url";
 import { OPENS_PER_TEN_MINUTES, type ScriptMode, listedReturn, listedSite, scriptTags, scriptVia } from "@/lib/embed-sites";
 
@@ -52,10 +51,9 @@ function fromThisSite(referer: string | null, host: string | null): boolean {
   }
 }
 
-/** Reads the open, counts it, and says what the page may show. Never throws. */
+/** Reads the open and says what the page may show; the page counts the visit itself (components/store-beacon.tsx). Never throws. */
 export async function readScriptOpen(store: Store, mode: ScriptMode, query: Record<string, unknown>): Promise<ScriptOpen> {
   const asked = await headers();
-  const jar = await cookies();
   const ip = clientAddress({ headers: asked });
   const referer = asked.get("referer");
   // A frame that moved on inside itself (the sign-up form's answer) was sent
@@ -69,15 +67,9 @@ export async function readScriptOpen(store: Store, mode: ScriptMode, query: Reco
     via: scriptVia(query.via),
     tags: scriptTags(query),
   };
-  const userAgent = asked.get("user-agent") ?? "";
-  after(async () => {
-    try {
-      if (isBot(userAgent) || (await isStorePeople({ cookies: jar, headers: asked }, store))) return;
-      await recordVisit(store, ip);
-    } catch (error) {
-      console.error("counting a checkout script open failed", error);
-    }
-  });
+  // The visit itself is not counted here: an open is a request any program can send, and a visit is counted only
+  // when the host's check says a person's browser sent it (app/api/store/hit). The page sends that count itself
+  // (components/store-beacon.tsx, on the card and the sign-up form opened by the script).
   // A frame on a site the creator did not list shows the plain link and asks nothing more.
   if (mode === "overlay" && !site) return { ...base, live: false, reason: "site" };
   if (!(await withinLimit("embed-open", `${ip}|${store.handle}`, OPENS_PER_TEN_MINUTES, 600))) return { ...base, live: false, reason: "limited" };

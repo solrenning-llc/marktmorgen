@@ -21,6 +21,7 @@ import { STARTER_PROMPTS, templateLeft } from "@/lib/template-text";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { readPage } from "@/lib/sales-page-store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
 import { BLOCK_KINDS, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
 import { POST as savePage } from "@/app/api/store/page/route";
@@ -209,6 +210,43 @@ async function main(): Promise<void> {
   await post(savePage, "page", { id: draft.product.id, page: { blocks: [why], seoTitle: "Bread", seoDescription: STARTER_PART } });
   const inSearch = await publish();
   is("and a campaign's part in the search line", [inSearch.status, inSearch.data.field, inSearch.data.block, inSearch.data.part], [409, "search", null, STARTER_PART]);
+
+  part("Publishing and saving at once (Codex P on #3693)");
+  // Runs `then` once, right after the next read of this draft's page answers, before its caller goes on.
+  const pageGet = `nl:product:page:${(await storeForEmail(OWNER))!.statsId}:${draft.product.id}`;
+  const pipeline = redis.pipeline;
+  const afterPageRead = (then: () => Promise<unknown>) => {
+    let pending: (() => Promise<unknown>) | null = then;
+    redis.pipeline = async (commands) => {
+      const out = await pipeline(commands);
+      if (pending && commands.some((command) => command[0] === "GET" && command[1] === pageGet)) {
+        const run = pending;
+        pending = null;
+        await run();
+      }
+      return out;
+    };
+  };
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
+  let raced: { status: number; data: Record<string, unknown> } | null = null;
+  afterPageRead(async () => {
+    raced = await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, marked] } });
+  });
+  const published = await publish();
+  redis.pipeline = pipeline;
+  is("a part saved while the draft is being published: the draft's save goes through, the publication is refused and it stays a draft", [(raced as { status: number } | null)?.status, published.status, published.data.error, published.data.block, await stillDraft()], [200, 409, "placeholder", "text0002", true]);
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
+  let racedPublish: { status: number; data: Record<string, unknown> } | null = null;
+  afterPageRead(async () => {
+    racedPublish = await publish();
+  });
+  const saving = await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, marked] } });
+  redis.pipeline = pipeline;
+  const keptPage = await readPage((await storeForEmail(OWNER))!.statsId, draft.product.id);
+  is("published while a part is being saved: the publication goes through, the save is refused and the page keeps no part", [(racedPublish as { status: number } | null)?.status, await stillDraft(), saving.status, saving.data.error, templateLeft(keptPage)], [200, false, 400, "placeholder", null]);
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+
   await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
   const clean = await publish();
   is("once written in the creator's own words, it is published", [clean.status, clean.data.ok, await stillDraft()], [200, true, false]);

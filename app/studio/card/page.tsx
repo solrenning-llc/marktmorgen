@@ -7,7 +7,6 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { CreatorCardEditor } from "@/components/creator-card-editor";
 import { readCreatorCardHeld } from "@/lib/creator-card";
-import { contactWords } from "@/lib/buyer-words/contact";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { SITE_URL } from "@/lib/site-url";
@@ -80,7 +79,7 @@ export default async function StudioCardPage({ searchParams }: Params) {
                 held={read?.held}
                 handle={store.handle}
                 storeName={store.name}
-                words={contactWords(store.language).card}
+                language={store.language}
                 address={address}
                 look={{ className: `st-page st-theme-${store.look.theme}`, style: lookStyle(store.look) as React.CSSProperties, lang: speech(store).lang.locale }}
               />

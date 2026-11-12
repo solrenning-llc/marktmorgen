@@ -1,5 +1,5 @@
 /**
- * A person's course-open and course-finish marks are deleted only when Redis
+ * A person's course-open, course-finish and course-progress marks are deleted only when Redis
  * gives the exact one-slot DEL count. Any other reply leaves this erasure
  * part unknown so the aggregate eraser can report it for a safe retry.
  */
@@ -15,6 +15,8 @@ const learner = emailKey(EMAIL);
 const keys = COURSES.flatMap((course) => [
   `nl:course:${course}:fin:${learner}`,
   `nl:course:${course}:open:${learner}`,
+  // How far through the course they got (287 [H4-1]): erased with the other two.
+  `nl:course:${course}:reach:${learner}`,
 ]);
 
 function seed(): void {
@@ -40,16 +42,16 @@ async function main(): Promise<void> {
     ["missing reply", []],
     ["undefined slot", [undefined]],
     ["null slot", [null]],
-    ["numeric text", ["4"]],
+    ["numeric text", ["6"]],
     ["negative count", [-1]],
     ["fractional count", [1.5]],
-    ["count above the distinct key bound", [5]],
+    ["count above the distinct key bound", [7]],
     ["far-above-bound count", [99]],
     ["maximum safe count above the distinct key bound", [Number.MAX_SAFE_INTEGER]],
     ["unsafe count", [Number.MAX_SAFE_INTEGER + 1]],
     ["infinite count", [Number.POSITIVE_INFINITY]],
     ["not-a-number count", [Number.NaN]],
-    ["extra reply", [4, 0]],
+    ["extra reply", [6, 0]],
     ["sparse slot", new Array(1)],
     ["inherited slot", inherited],
     ["getter slot", getter],
@@ -73,7 +75,7 @@ async function main(): Promise<void> {
     }
     is(`${label}: unknown evidence refuses this erasure part`, refused, true);
     is(`${label}: all marks remain for a safe retry`, kept(), keys.length);
-    is(`${label}: a healthy retry removes the exact four marks`, await forgetFinishPerson(COURSES, EMAIL), keys.length);
+    is(`${label}: a healthy retry removes the exact six marks`, await forgetFinishPerson(COURSES, EMAIL), keys.length);
   }
   is("a reply getter is never used as deletion evidence", getterReads, 0);
 

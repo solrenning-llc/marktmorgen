@@ -35,6 +35,16 @@ const to = (subject: string) =>
   mail.ses.filter((message) => message.subject === subject).flatMap((message) => message.to).sort();
 const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
 
+/** How many times the store's sequences were read: the list's key, by GET. */
+let flowReads = 0;
+let unknownMark = false;
+const real = redis.pipeline.bind(redis);
+(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
+  flowReads += list.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:")).length;
+  if (unknownMark && list.length === 1 && list[0][0] === "GET" && String(list[0][1]).includes(":reach:")) return Promise.resolve(["half"]) as ReturnType<typeof redis.pipeline>;
+  return real(list);
+}) as typeof redis.pipeline;
+
 async function main(): Promise<void> {
   redis.clear();
   mail.configure();
@@ -116,14 +126,23 @@ async function main(): Promise<void> {
   await noteIfFinished(store, courseId, course.id, "ana@example.com");
   await run();
   is("half done starts the half one, and the quarter one not again", [to("Quarter"), to("Halfway there"), to("Almost done")], [["ana@example.com"], ["ana@example.com"], []]);
+  flowReads = 0;
   await markLesson(course.id, "ana@example.com", two, false, ROOM);
   await noteIfFinished(store, courseId, course.id, "ana@example.com");
   await markLesson(course.id, "ana@example.com", two, true, ROOM);
   await noteIfFinished(store, courseId, course.id, "ana@example.com");
+  const toggledReads = flowReads;
   await run();
-  is("undone and done again starts nothing more", [to("Quarter"), to("Halfway there")], [["ana@example.com"], ["ana@example.com"]]);
+  is("undone and done again starts nothing more, and reads no sequence", [to("Quarter"), to("Halfway there"), toggledReads], [["ana@example.com"], ["ana@example.com"], 0]);
   for (const lesson of [one, two, three]) await markLesson(course.id, "ben@example.com", lesson, true, ROOM);
+  unknownMark = true;
   await noteIfFinished(store, courseId, course.id, "ben@example.com");
+  unknownMark = false;
+  await run();
+  is("a kept step that cannot be read starts nothing on a guess", to("Almost done"), []);
+  flowReads = 0;
+  await noteIfFinished(store, courseId, course.id, "ben@example.com");
+  is("a new step reads the sequences once", flowReads, 1);
   await run();
   is("three quarters at once starts every share reached, each once", [to("Quarter"), to("Halfway there"), to("Almost done")], [["ana@example.com", "ben@example.com"], ["ana@example.com", "ben@example.com"], ["ben@example.com"]]);
 

@@ -341,6 +341,13 @@ async function stampOnTheFly(file: ProductFile, sale: Sale, store: { language?: 
   const used = flyUnits(Math.max(0, Date.now() - started), file.bytes + sent);
   if (Number.isNaN(used)) return RETRY;
   if (used < held) await meter.give(held - used).catch(() => {});
+  // A file refused for what it is (unreadable, password-protected, signed, encrypted) is refused again by the same
+  // bytes: handed over as uploaded, with the problem noted for the creator, as a store with room does (Codex X5's
+  // MEDIUM on #3899). Only what may work later (the store's requests, a read, the size sent) asks to try again.
+  if (stamped && !stamped.ok) {
+    await noteProblem(file.pathname, stamped.problem);
+    return ORIGINAL;
+  }
   if (!stamped?.ok || sent === 0) return RETRY;
   if (used > held && !(await meter.take(used - held).catch(() => false))) return RETRY;
   return { kind: "fly", bytes: stamped.bytes, name: file.name, contentType: stamped.contentType };

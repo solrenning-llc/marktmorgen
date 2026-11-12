@@ -56,6 +56,9 @@ for (const [label, alter] of [
   ["the store ids as a number", (r: unknown[]) => [r[0], 7]],
   ["the store ids as null", (r: unknown[]) => [r[0], null]],
   ["a store id that is not text", (r: unknown[]) => [r[0], [...(r[1] as unknown[]), 7]]],
+  // Codex review on #3889 (ALTO): text this binary does not read as a store id is unknown, never "no such store".
+  ["a store id in text this version does not know", (r: unknown[]) => [r[0], [...(r[1] as unknown[]), "future_store_id"]]],
+  ["the only other store id in text this version does not know", (r: unknown[]) => [r[0], ["future_store_id"]]],
   ["the first store as a number", (r: unknown[]) => [7, r[1]]],
   ["the first store as text that is not a store", (r: unknown[]) => ["{not json", r[1]]],
 ] as [string, (r: unknown[]) => unknown[]][]) {
@@ -92,6 +95,16 @@ test("moveAccount: the account's other stores read as unknown move nothing and k
   assert.equal((await storeForEmail(OWNER))?.handle, "firstshop");
   assert.equal(await storeForEmail("newhome@example.com"), null);
   assert.deepEqual((await accountStores(OWNER)).map((s) => s.handle), ["firstshop", "secondshop", "thirdshop"]);
+});
+
+test("moveAccount: a store id in text this version does not know moves nothing and keeps the account's list", async () => {
+  await fixture;
+  const result = await answered(listing, (r) => [r[0], [...(r[1] as unknown[]), "future_store_id"]], () => moveAccount(OWNER, "newhome@example.com"));
+  assert.ok(result.error || (result.value && !result.value.ok), `not moved, not ${JSON.stringify(result.value)}`);
+  assert.equal((await storeForEmail(OWNER))?.handle, "firstshop");
+  assert.equal(await storeForEmail("newhome@example.com"), null);
+  assert.deepEqual((await accountStores(OWNER)).map((s) => s.handle), ["firstshop", "secondshop", "thirdshop"]);
+  assert.deepEqual(await accountStores("newhome@example.com"), []);
 });
 
 for (const [label, value] of [["text", "x"], ["null", null], ["a list", []]] as [string, unknown][]) {

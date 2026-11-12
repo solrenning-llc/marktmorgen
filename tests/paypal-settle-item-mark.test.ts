@@ -243,6 +243,21 @@ async function main(): Promise<void> {
   is("Tom is written, Sara stays on her way", mixed, { paid: 1, released: 0, waiting: 1 });
   is("(the book)", await book(store), { "sara@example.com": [0, 3000], "tom@example.com": [1500, 0] });
   is("Sara is written on the next run", [(await settlePayPal(store)).paid, await payoutCount()], [1, 2]);
+
+  // MR (Claude 3 cloud O on #3842): the book of payments is read once per batch, not twice per paid line, and a
+  // mark taken over is the only other time it is read again.
+  part("The book of payments is read once per batch");
+  await sent(store);
+  itemStatus = { aaaaaaaaaaaa: "SUCCESS", bbbbbbbbbbbb: "SUCCESS" };
+  let reads = 0;
+  answering((batch) => batch.some((c) => c[0] === "HGETALL" && c[1] === PAYOUTS), async (_batch, run) => {
+    reads += 1;
+    return run();
+  });
+  const both = await settled(store);
+  redis.pipeline = pipeline;
+  is("Sara and Tom written once each", [both, await payoutCount()], [{ paid: 2, released: 0, waiting: 0 }, 2]);
+  is("one read of the book for the batch", reads, 1);
 }
 
 main().then(done, (error) => {

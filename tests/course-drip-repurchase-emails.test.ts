@@ -193,6 +193,24 @@ async function main() {
   is("once", await run(second + 31 * DAY), []);
   current = course;
 
+  part("Students who finished long ago never take the reads a due email needs (Claude 7 on #3369)");
+  current = short;
+  await fresh([session("cs_test_once", first, false)]);
+  const figure = allowanceFor(store, "email", first + 70 * DAY);
+  const past = Array.from({ length: figure }, (_, n) => `past-${n}@example.test`);
+  const late = first + 40 * DAY;
+  for (const who of past) {
+    await recordEnrollment(store, who, product.id, first);
+    // Seen the day before: the most recently seen come first in the job's list.
+    await redis.pipeline([["HSET", `nl:course:${courseId}:students`, emailKey(who), JSON.stringify({ e: who, s: first, l: late + 29 * DAY })]]);
+  }
+  await recordEnrollment(store, "new-one@example.test", product.id, late);
+  await openedOn(late, "new-one@example.test");
+  stripe.asked = [];
+  is(`with ${figure} past students, the one whose Month 1 opens today is emailed`, await run(late + 30 * DAY), [subject("Month 1")]);
+  is("and only that start is read at Stripe", stripe.asked.filter((p) => p.startsWith("/checkout/sessions?")).length, 1);
+  current = course;
+
   part("One purchase, written down on its thanks page (unchanged)");
   await fresh([session("cs_test_once", first, false)]);
   await recordEnrollment(store, buyer, product.id, first);

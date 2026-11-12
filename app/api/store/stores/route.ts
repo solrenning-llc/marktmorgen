@@ -5,7 +5,12 @@ import { forgetStoreReadings } from "@/lib/store-readings";
 import { away, creatorFrom, storeCookie } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { forgetStoreWorkflows } from "@/lib/flows";
-import { deleteStore } from "@/lib/store";
+import { type Store, deleteStore, imageFolder, storeFolder, storeRef } from "@/lib/store";
+import { deleteFile, listFiles } from "@/lib/file-store";
+import { isVaultConfigured } from "@/lib/vault";
+import { noteTaskUpload } from "@/lib/assignment";
+import { communityFolder } from "@/lib/community-image";
+import { forgetPictures } from "@/lib/community-files";
 import { dropTeam } from "@/lib/team";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetStorePhones } from "@/lib/phone-alerts";
@@ -17,6 +22,41 @@ import { forgetPath } from "@/lib/path";
 import { queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreCalendar } from "@/lib/calendar-sync";
 import { forgetMemory } from "@/lib/assistant-memory-store";
+
+/**
+ * A deleted store's files: its picture folder (its links', pages' and emails' pictures), its own folder in either file
+ * store (an upload never attached) and its community's pictures. Once its record is gone nothing finds them again
+ * (lib/plan-closing.ts removeStored reads the record first), so they go now. A delete that fails goes to the daily job
+ * that deletes uploads nobody keeps (sweepTaskUploads, app/api/cron/courses); a folder that cannot be listed is said in
+ * the log. Its cost: one listing of each folder and a delete per hundred files, once for a store.
+ */
+async function forgetStoreFiles(store: Store): Promise<void> {
+  const ref = storeRef(store);
+  const folder = await storeFolder(ref);
+  const prefixes = [
+    `images/${await imageFolder(ref)}/`,
+    `stores/${folder}/`,
+    ...(isVaultConfigured() ? [`vault/${folder}/`] : []),
+    ...(store.community ? [`community/${communityFolder(store.community.id)}/`] : []),
+  ];
+  for (const prefix of prefixes) {
+    let paths: string[];
+    try {
+      paths = await listFiles(prefix);
+    } catch (error) {
+      console.error(`a deleted store's files under ${prefix.split("/")[0]}/ could not be listed; they are kept`, error);
+      continue;
+    }
+    for (let at = 0; at < paths.length; at += 100) {
+      const some = paths.slice(at, at + 100);
+      await deleteFile(some).catch(async (error: unknown) => {
+        console.error("a deleted store's files could not be deleted now; they go to the daily job", error);
+        for (const path of some) await noteTaskUpload(path, 0).catch((noteError: unknown) => console.error("a deleted store's file could not be handed to the daily job", noteError));
+      });
+    }
+  }
+  if (store.community) await forgetPictures(communityFolder(store.community.id)).catch(() => {});
+}
 
 /**
  * The studio's switcher, and the door out for a store.
@@ -82,6 +122,7 @@ export async function POST(request: NextRequest) {
         await forgetMemory(result.store.statsId ?? null, result.store);
       };
       await Promise.all([
+        forgetStoreFiles(result.store).catch((error: unknown) => console.error("forgetting a deleted store's files failed", error)),
         Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
           console.error("forgetting a deleted store's integrations failed", error),
         ),

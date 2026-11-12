@@ -222,6 +222,22 @@ export class MemoryRedis {
           this.run(["SET", book, json]);
           return 1;
         }
+        // lib/contacts.ts FENCED_CONTACT_WRITE: a contact written (and its erasure print lifted) only while its fence exists and no print appeared since the read.
+        if (key.startsWith("-- marktmorgen:contact-fenced-write:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, fence, list, prints, email, row, print, seen, lift] = args;
+          if (this.run(["EXISTS", fence]) === 0) return 0;
+          if (seen !== "1" && this.run(["HEXISTS", prints, print]) === 1) return 0;
+          this.run(["HSET", list, email, row]);
+          if (lift === "1") this.run(["HDEL", prints, print]);
+          return 1;
+        }
+        // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link and the entry still exist.
+        if (key.startsWith("-- marktmorgen:waitlist-confirm:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, link, list, email, entry] = args;
+          if (this.run(["EXISTS", link]) === 0 || this.run(["HEXISTS", list, email]) === 0) return 0;
+          this.run(["HSET", list, email, entry]);
+          return 1;
+        }
         // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
         if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
           const target = args[1];

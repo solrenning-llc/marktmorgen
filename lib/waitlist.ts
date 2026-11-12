@@ -173,6 +173,18 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
   return parseStoreWaitlistGrant(raw);
 }
 
+/**
+ * Writes a confirmed waitlist entry back only while its confirmation link and the entry itself still exist, in one
+ * step (#4268): KEYS[1] the link, KEYS[2] the waitlist; ARGV[1] the address, ARGV[2] the entry. Answers 1 written, 0
+ * not. Billed as one EVAL; lib/redis-memory.ts runs the same check in one step.
+ */
+const WAIT_CONFIRM = [
+  "-- marktmorgen:waitlist-confirm:v1",
+  'if redis.call("EXISTS", KEYS[1]) == 0 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 0 then return 0 end',
+  'redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])',
+  "return 1",
+].join("\n");
+
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
 export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
   const grant = await readWaitToken(token);
@@ -180,13 +192,20 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
   const entry = parseEntry(raw);
   if (!entry) return { ok: false };
+  // Both writes are fenced by this link (#4268): the person's erasure deletes it (its erasure note, joinWaitlist), so
+  // a press read before an erasure that completes meanwhile neither writes the entry back nor puts the address on
+  // the list again and lifts the erasure print.
   if (!entry.ok) {
-    await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 2, tokenKey(token), listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    if (written !== 1) return { ok: false };
   }
   if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
-      console.error("could not add a waitlist address to a list", error),
-    );
+    const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: tokenKey(token) }, store).catch((error) => {
+      console.error("could not add a waitlist address to a list", error);
+      // An answer that is not known is not finished (CX-123 rule 24); a full list or room still confirms the spot.
+      return error instanceof UnknownReplyError ? ({ gone: true } as const) : null;
+    });
+    if (added?.gone) return { ok: false };
   }
   return { ok: true, productId: grant.p };
 }

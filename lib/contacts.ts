@@ -38,7 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { liftCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -193,7 +193,27 @@ export type AddResult = {
   /** Newly recorded as having got or bought this product. */
   gotProduct: boolean;
   full: boolean;
+  /** Refused because the fence (upsertContact's `fence`) was gone at the write: nothing was written. */
+  gone?: true;
 };
+
+/**
+ * One contact write that happens only while the key fencing it still exists (#4268): KEYS[1] the fence, KEYS[2] the
+ * list, KEYS[3] the store's erasure prints; ARGV[1] the address, ARGV[2] the row, ARGV[3] the address's print,
+ * ARGV[4] "1" when the read found the print, ARGV[5] "1" to lift it. Refused (0) when the fence is gone, or when a print
+ * the read did not find is there now; otherwise writes the row, lifts the print when asked and answers 1. A
+ * confirmation link is noted for erasure, so an erasure that completes while its confirmation is in flight deletes
+ * the fence, and the confirmation can no longer put the person back or lift the print the erasure wrote.
+ * Billed as one EVAL; lib/redis-memory.ts runs the same check in one step.
+ */
+const FENCED_CONTACT_WRITE = [
+  "-- marktmorgen:contact-fenced-write:v1",
+  'if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end',
+  'if ARGV[4] ~= "1" and redis.call("HEXISTS", KEYS[3], ARGV[3]) == 1 then return 0 end',
+  'redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])',
+  'if ARGV[5] == "1" then redis.call("HDEL", KEYS[3], ARGV[3]) end',
+  "return 1",
+].join("\n");
 
 /**
  * Puts an address on the list, or updates it.
@@ -215,6 +235,12 @@ export async function upsertContact(
     clicks?: boolean;
     /** The store's id, given when the person typed the address themselves, so asking to be deleted from every store finds this one (lib/joined-stores.ts). */
     sid?: string;
+    /**
+     * A key that must still exist when the contact is written, checked in one step with the write and the lift of an
+     * erasure print (FENCED_CONTACT_WRITE): the confirmation link a yes was given by, which the person's erasure
+     * deletes. Gone, nothing is written and the answer says `gone`. Not for an order's room.
+     */
+    fence?: string;
   },
   /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
@@ -288,6 +314,25 @@ export async function upsertContact(
   if (clicks) next.clicks = clicks;
   if (deleted && !agreed) delete next.clicks;
   await needContacts(room, [{ before, next }]);
+  if (input.fence && !(room && isOrderRoom(room))) {
+    const [written] = await redisPipeline([[
+      "EVAL", FENCED_CONTACT_WRITE, 3, input.fence, key, suppressedKey(listId),
+      email, JSON.stringify(next), suppressionPrint(listId, email), deleted ? "1" : "0", deleted && ownYes ? "1" : "0",
+    ]]);
+    // Exactly 1 (written) or 0 (refused); anything else is unknown, never "joined" and never "refused".
+    if (written === 0) {
+      // Nothing was written: the growth needContacts took goes back to the room.
+      await settleContacts(room, [{ before, next }], [false]);
+      return { ...none, gone: true };
+    }
+    if (written !== 1) throw new UnknownReplyError("a fenced contact write");
+    const rest: (string | number)[][] = [];
+    if (agreed && !before?.agreed) rest.push(["INCR", agreedKey(listId)]);
+    if (resubscribe) rest.push(["DECR", unsubKey(listId)]);
+    if (input.sid) rest.push(...joinedCommands(input.sid, email));
+    if (rest.length) await redisPipeline(rest);
+    return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
+  }
   const commands: (string | number)[][] = [["HSET", key, email, JSON.stringify(next)]];
   if (agreed && !before?.agreed) commands.push(["INCR", agreedKey(listId)]);
   if (resubscribe) commands.push(["DECR", unsubKey(listId)]);

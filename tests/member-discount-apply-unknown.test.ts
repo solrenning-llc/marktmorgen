@@ -9,7 +9,6 @@
  *     "nothing was changed". The idempotency key keeps a second press from applying it twice.
  * Synthetic Stripe through fetch; no real account.
  */
-import { NextRequest } from "next/server";
 import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
 import { applyMemberDiscount } from "@/lib/member-discount";
 import { done, is, part } from "./check";
@@ -17,7 +16,6 @@ import { done, is, part } from "./check";
 process.env.STRIPE_SECRET_KEY = "sk_test_member_apply_unknown";
 
 let post: "ok" | 400 | 402 | 500 | 503 | "timeout" = "ok";
-let posts = 0;
 const membership = { id: "sub_ApplyUnknown01", status: "active", metadata: { store: "applyunknown", product: "prod000001" }, items: { data: [{ price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] }, discounts: [] };
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -28,7 +26,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", has_more: false, data: [membership] });
   if (path === "/promotion_codes") return answer({ object: "list", has_more: false, data: [{ id: "promo_active0001", code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } }] });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
-    posts += 1;
+
     if (post === "timeout") throw new TypeError("fetch failed");
     if (post === "ok") return answer({ id: membership.id });
     return answer({ error: { type: post === 400 ? "invalid_request_error" : "api_error", message: "synthetic" } }, post);

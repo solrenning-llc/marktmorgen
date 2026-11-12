@@ -19,7 +19,7 @@
  * since putting it on would replace whatever is there.
  */
 import { types } from "node:util";
-import { onAccount } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePage, type StripeRow } from "@/lib/stripe-list";
 import { saleHandles, type Store } from "@/lib/store";
 import { listCodes } from "@/lib/discount";
@@ -173,7 +173,7 @@ export async function memberSubRows(store: Store, email: string): Promise<{ row:
   }
 }
 
-export type ApplyResult = { ok: true } | { ok: false; reason: "not_member" | "discounted" | "code" | "stripe" | "refused" | "unavailable" };
+export type ApplyResult = { ok: true } | { ok: false; reason: "not_member" | "discounted" | "code" | "stripe" | "refused" | "unavailable" | "unknown" };
 
 /**
  * Puts one of the store's active codes on one of the member's running
@@ -199,9 +199,12 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.
-    const status = (error as { status?: unknown }).status;
+    const status = error instanceof StripeError ? error.status : null;
     if (status === 400) return { ok: false, reason: "refused" };
     console.error("putting a discount on a membership failed", error);
-    return { ok: false, reason: "stripe" };
+    // Stripe refused the request (another 4xx): nothing was changed. A 5xx, or no answer at all, may have landed:
+    // not known, never "nothing was changed" (#2979, Claude 2's LEVE 2). The idempotency key keeps a second press
+    // from applying it twice.
+    return status !== null && status >= 400 && status < 500 ? { ok: false, reason: "stripe" } : { ok: false, reason: "unknown" };
   }
 }

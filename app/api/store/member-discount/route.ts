@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
       refused: ["Stripe did not accept that code for this membership, by the code's own rules (for example a first order only, or a minimum). Nothing was changed.", 409],
       stripe: ["Your Stripe account could not be reached just now, so nothing was changed. Try again in a minute.", 502],
       unavailable: ["Stripe's answer could not be read, so we could not check this membership. Nothing was changed. Try again in a minute.", 503],
+      unknown: ["Stripe's answer did not come back, so the code may or may not be on that membership now. Find the member again to see. Pressing again never applies it twice.", 502],
     };
     return refuse(done.reason, words[done.reason][0], words[done.reason][1]);
   }

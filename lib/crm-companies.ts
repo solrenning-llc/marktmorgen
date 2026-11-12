@@ -284,7 +284,15 @@ export async function changeCompanies(statsId: string, room: DataStore, change: 
   try {
     const stored = await readStored(statsId);
     const unreadable = unreadableOf(stored);
-    const asked = change(stored.companies, unreadable, readsUndo ? undoCompany(await readUndo(statsId)) : null);
+    // The company kept for an undo, read exactly (CX-123 rule 24; Codex G's and Claude 4's LOW on #3694): a kept record
+    // that cannot be read as a company is unknown, never "none kept", so the change is refused and nothing is written.
+    let kept: Company | null = null;
+    if (readsUndo) {
+      const raw = await readUndo(statsId);
+      kept = undoCompany(raw);
+      if (raw !== null && kept === null) throw new CompaniesUnreadable("the company kept for an undo cannot be read");
+    }
+    const asked = change(stored.companies, unreadable, kept);
     if (!asked.ok) return asked;
     const drop = ("drop" in asked && asked.drop) || [];
     // A company deleted is kept a day for its undo, with its people (the last one, if one change deleted more).

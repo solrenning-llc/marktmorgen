@@ -433,13 +433,27 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
   return sent;
 }
 
+/** The products listed, and every product still marked coming soon, whether or not the store lists it now. Exact, or throws (rule 24). */
+async function withMarkedSoon(sid: string, listed: string[]): Promise<string[]> {
+  const marked = stringList(repliesFor(await redisPipeline([["SMEMBERS", soonKey(sid)]]), 1)?.[0]);
+  if (!marked) throw new UnknownReplyError("the products coming soon, for a person's waitlist places");
+  return [...new Set([...listed, ...marked.filter((p) => p && !p.includes(":"))])];
+}
+
 /**
  * Takes one address off every waitlist of the store, out of any launch email
  * still going out, and deletes its confirm and leave links (lib/person-erasure.ts).
+ *
+ * Every waitlist means the products the store lists now and every product
+ * still marked coming soon: a product removed while coming soon keeps its
+ * waitlist and its mark (removing a product never touches them), so its
+ * places are found through the mark. The mark is read exactly (rule 24): an
+ * unknown reply throws, and the erasure says this part did not finish.
  */
-export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
+export async function forgetWaitlistPerson(sid: string | null, listed: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
+  const productIds = await withMarkedSoon(sid, listed);
   const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
@@ -451,8 +465,11 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
  * and whether they also asked to hear from the creator. The secret in their
  * waitlist link is left out. Only reads.
  */
-export async function waitlistPlacesOf(sid: string | null, productIds: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
-  if (!sid || !productIds.length || !isRedisConfigured()) return [];
+export async function waitlistPlacesOf(sid: string | null, listed: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
+  if (!sid || !isRedisConfigured()) return [];
+  // The same waitlists the erasure deletes from: those of a product removed while coming soon too.
+  const productIds = await withMarkedSoon(sid, listed);
+  if (!productIds.length) return [];
   const address = normaliseEmail(email);
   // One reply per product, each the place or an exact null (none). Anything
   // else is unknown, never "on no waitlist" (rule 24): the copy says it could

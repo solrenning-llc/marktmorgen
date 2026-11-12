@@ -23,11 +23,16 @@ const WORD = String.raw`[\p{L}\p{N}'’\-]+`;
 const NOT_TOPIC = String.raw`(?!(?:about|of|on|with|regarding|around|concerning)\b)`;
 // Explicit asks win over question wording, including "Could you share your Gmail password?".
 const EXPLICIT = new RegExp(String.raw`^(?:(?:please|kindly)\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|(?:do|would)\s+you\s+mind\s+)?(?:enter|provide|type(?:\s+in)?|input|write|share|send|tell|give|choose|create|confirm|re[-\s]?enter|entering|providing|typing|sharing|sending|telling|giving)\s+(?:(?:the|a|an)\s+)?(?:${NOT_TOPIC}${WORD}\s+){0,5}${SECRET}\b`, "iu");
-// "What's the password for Instagram?"
-const PASSWORD_FOR = new RegExp(String.raw`^(?:what(?:'s|\s+is)|which\s+is|where(?:'s|\s+is))\s+(?:the\s+)?${SECRET}\s+(?:for|to)\s+(?:(?:your|my)\s+)?${WORD}`, "iu");
+// Words that make a sentence ask about passwords in general ("What is the best password?"), not for one.
+const NOT_KIND = String.raw`(?!(?:good|best|strong|strongest|secure|safe|weak|weakest|ideal|perfect|typical|common)\b)`;
+// A courtesy word after the secret ("What's your Instagram password, please?").
+const COURTESY = String.raw`(?:\s*,?\s*(?:please|thanks|thank\s+you))?`;
+// "What's the password for Instagram?", "What is your password for Instagram?", "What's the password of your Instagram?"
+// (Claude 1 cloud, #3668 @d05ed05d16).
+const PASSWORD_FOR = new RegExp(String.raw`^(?:what(?:'s|\s+is)|which\s+is|where(?:'s|\s+is))\s+(?:(?:the|your|my)\s+(?:${NOT_KIND}${WORD}\s+){0,2})?${SECRET}\s+(?:for|to|of|on|at)\s+(?:(?:your|my|the)\s+)?${WORD}`, "iu");
 // "What is the password?", "What is the Instagram password?", "Which is your password?": the secret itself, as the
 // whole answer. Never "What is a password?" or "What is the best password?", which ask about passwords.
-const PASSWORD_IS = new RegExp(String.raw`^(?:what(?:'s|\s+is|\s+are)|which\s+(?:is|are)|where(?:'s|\s+is|\s+are))\s+(?!(?:a|an)\b)(?:(?!(?:good|best|strong|strongest|secure|safe|weak|weakest|ideal|perfect|typical|common)\b)${WORD}\s+){0,3}${SECRET}$`, "iu");
+const PASSWORD_IS = new RegExp(String.raw`^(?:what(?:'s|\s+is|\s+are)|which\s+(?:is|are)|where(?:'s|\s+is|\s+are))\s+(?!(?:a|an)\b)(?:${NOT_KIND}${WORD}\s+){0,3}${SECRET}${COURTESY}$`, "iu");
 // "Your Instagram password", "Please send me your password": the secret named as the visitor's own.
 const OWN_SECRET = new RegExp(String.raw`\b(?:your|my)\b(?:\s+${NOT_TOPIC}${WORD}){0,5}\s+${SECRET}\b`, "iu");
 // Words that open a question, a review or an opinion: credential pairs are only refused outside them (below).
@@ -42,8 +47,9 @@ const REQUEST_VERB = /^(?:(?:please|kindly|now|then|and|also)\s+)*(?:(?:can|coul
 const REQUEST_IT = /\b(?:enter|provide|type|input|write|share|send|tell|give|confirm|re[-\s]?enter|put|paste|fill)\s+(?:(?:in|out|down|us|me)\s+)?(?:it|them|that|this)\b/i;
 
 // A question whose answer is the visitor's own secret (Claude 4 cloud D, #3668): "What do you use as your password?",
-// "Which password do you use for Gmail?". Never "What do you use to store your passwords?" (no "as"/"for" + secret).
-const OWN_USE = new RegExp(String.raw`^(?:what\s+(?:do|did|would|will)\s+you\s+use\s+(?:as|for)\s+(?:(?:your|the|a)\s+)?(?:${WORD}\s+){0,3}${SECRET}(?=\s*$|\s+(?:for|on|to|at|in)\b)|(?:which|what)\s+(?:${WORD}\s+){0,2}${SECRET}\s+(?:do|did|would|will)\s+you\s+use)\b`, "iu");
+// "Which password do you use for Gmail?", "What is the password you use for Gmail?". Never "What do you use to store
+// your passwords?" (no "as"/"for" + secret) or "What is the password you use most often based on?".
+const OWN_USE = new RegExp(String.raw`^(?:what\s+(?:do|did|would|will)\s+you\s+use\s+(?:as|for)\s+(?:(?:your|the|a)\s+)?(?:${WORD}\s+){0,3}${SECRET}(?=\s*$|\s+(?:for|on|to|at|in)\b)|(?:which|what)\s+(?:${WORD}\s+){0,2}${SECRET}\s+(?:do|did|would|will)\s+you\s+use|(?:what(?:'s|\s+is)|which\s+is)\s+(?:the|your|my)\s+(?:${NOT_KIND}${WORD}\s+){0,2}${SECRET}\s+(?:that\s+)?you\s+(?:use|have)(?=${COURTESY}\s*$|\s+(?:for|on|to|at|in|with)\b))\b`, "iu");
 // A secret named as the subject ("Do you have a Netflix password?") before "What is it?" (Claude 3 cloud A LEVE).
 const NAMED_SECRET = new RegExp(String.raw`\b(?:a|an|the|your|my)\s+(?:${NOT_TOPIC}${WORD}\s+){0,3}${SECRET}\b`, "iu");
 // "What is it?" after a sentence naming the visitor's own secret ("Do you remember your password? If so, what is it?").
@@ -52,7 +58,7 @@ const WHAT_IS_IT = /^(?:(?:and|so|then)\s+)?what(?:'s|\s+is|\s+are)\s+(?:it|they
 function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.
   // Keep the other secret in "your password manager's password" detectable.
-  const request = label.replace(/\bpass(?:word|code|phrase)s?\s+(?=(?:manager|hints?|safety|courses?|lessons?|chapters?|habits?|rules?|polic(?:y|ies)|strength|hygiene|tips?|advice)\b)/gi, "");
+  const request = label.replace(/\bpass(?:word|code|phrase)s?\s+(?=(?:managers?|hints?|safety|courses?|lessons?|chapters?|habits?|rules?|polic(?:y|ies)|strength|hygiene|tips?|advice)\b)/gi, "");
   // Each sentence on its own, so a survey question cannot hide a request after it ("Do you reuse your passwords?
   // Enter your password") and a request is never excused by the question before it.
   const sentences = request.split(/[?!.:;\n]+/).map((part) => part.trim()).filter(Boolean);
@@ -79,11 +85,12 @@ function asksForPassword(label: string): boolean {
   if (credentialPair && !topicQuestion) return true;
 
   // A short field name may name a service, or use "email and password" with
-  // a courtesy suffix. Narrow exceptions below keep ordinary password questions.
+  // a courtesy suffix or a reason ("Instagram password so we can post for you"). Narrow exceptions below keep
+  // ordinary password questions.
   const fieldName = request.replace(/(\bpass(?:word|code|phrase)s?)\s*\([^)]*\)(?=\s*(?:please|here|below)?\s*[:*?]?$)/gi, "$1")
     .replace(/[,:;|.–—():&/+]/g, " ").replace(/\s+/g, " ").trim();
   return !/^(?:how|what|why|which|when|where|who|do|did|does|would|could|can|have|has|should|rate|describe|feedback|opinion|thoughts|experience|review)\b/i.test(fieldName) &&
-    /^(?:(?:[\p{L}\p{N}'’\-]+|[&/+])\s+){0,3}pass(?:word|code|phrase)s?\s*(?:please|here|below)?\s*[:*?]?$/iu.test(fieldName) ||
+    /^(?:(?:[\p{L}\p{N}'’\-]+|[&/+])\s+){0,3}pass(?:word|code|phrase)s?(?:\s+(?:so|to|because|needed|required|in\s+order)\b.*)?\s*(?:please|here|below)?\s*[:*?]?$/iu.test(fieldName) ||
     /^(?:(?:a|the|new|current|account|email|login)\s+)*pass(?:word|code|phrase)s?\b/i.test(request);
 }
 

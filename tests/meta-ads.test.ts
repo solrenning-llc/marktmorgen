@@ -268,7 +268,7 @@ async function main(): Promise<void> {
   await readMetaSpend(statsId, store.currency);
   const before = revoked.length;
   const gone = await disconnectMeta(statsId);
-  is("disconnecting gives it back to Meta and deletes what was read; the typed line stays", [gone && gone.id, revoked.length - before, (await readSpends(statsId)).map((s) => s.source ?? "typed")], ["act_111", 1, ["typed"]]);
+  is("disconnecting gives it back to Meta and deletes what was read; the typed line stays", [gone && gone.account?.id, revoked.length - before, (await readSpends(statsId)).map((s) => s.source ?? "typed")], ["act_111", 1, ["typed"]]);
   is("disconnecting what is not connected says so", await disconnectMeta(statsId), false);
 
   done();

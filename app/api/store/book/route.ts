@@ -1,7 +1,7 @@
 import { bookingLength } from "@/lib/call-lengths";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
-import { holdSession, prepareSession } from "@/lib/call-packages";
+import { boughtByToken, holdSession, prepareSession } from "@/lib/call-packages";
 import { isComingSoon } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
@@ -153,6 +153,12 @@ export async function POST(request: NextRequest) {
     session: request.cookies.get(affiliateCookieName(store.handle))?.value,
   }).catch(() => null);
   // From a package: checked, and the session's coupon made, before the time is held.
+  // A package pays only for sessions of the call it was bought for (MM-SA-32): sent
+  // with another call's id, it is answered as a package this call does not have.
+  if (pkg) {
+    const owned = await boughtByToken(pkg).catch(() => null);
+    if (!owned || owned.bought.s !== store.statsId || owned.bought.p !== product.id) return back("pkg-gone");
+  }
   const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store)) : null;
   if (prepared && !prepared.ok) return back(`pkg-${prepared.reason}`);
   const result = await holdAndCheckout({

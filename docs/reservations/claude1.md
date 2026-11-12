@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Buyer path walk (12/11/2026): a gift's receipt says the buyer's name went only when it did | claude1/fix-comprador-recibo-presente | `lib/buyer-words/giving.ts` (weEmailed in each language, series), `lib/gifts.ts` (its one call), `tests/gift-receipt-name.test.ts` | 12/11/2026 19h51 |

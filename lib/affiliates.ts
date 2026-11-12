@@ -2235,6 +2235,23 @@ export async function addPayoutOnce(store: Store, input: PayoutInput & { id: str
 }
 
 /**
+ * Every payout written in the store's book, read exactly; UnknownReplyError when the reply is not a list of field
+ * and value pairs. A value that does not read as a payout is left out, as readBook leaves it out of the book.
+ */
+export async function readPayoutsExact(store: Store): Promise<Payout[]> {
+  if (!store.statsId) throw new Error("a store's payouts need its statsId");
+  const reply = repliesFor(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
+  const payouts: Payout[] = [];
+  for (let i = 1; i < flat.length; i += 2) {
+    const payout = parsePayout(flat[i]);
+    if (payout) payouts.push(payout);
+  }
+  return payouts;
+}
+
+/**
  * The references of every payout written in the store's book, read exactly; UnknownReplyError when the reply is not
  * a list of field and value pairs. A value that does not read as a payout is not counted in the book (readBook), so
  * it is left out here too.
@@ -3664,7 +3681,8 @@ export function idleRemovalAllowed(setting: { recurring: number }): boolean {
  *     so on the high side, is more than the creator wrote down as paid to them
  *     (a sale in another currency counts as owed). Removal takes them out of
  *     every later payment batch, so it waits until they are paid; and while
- *     those invoices cannot all be read, nobody is warned or removed;
+ *     those invoices cannot all be read, nobody is warned or removed (a store
+ *     with no Stripe account has none to read);
  *   - every affiliate of a program that credits memberships (idleRemovalAllowed).
  *
  * The count starts no earlier than when the creator switched this on, changed
@@ -3764,8 +3782,9 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   // anybody is warned or removed, those are read too, from the same oldest application on as readBook, without
   // product names (no Redis read), and counted on the high side like the sales above. When they cannot all be read,
   // what is still owed is not known, and not known is never "nothing owed": nobody is warned or removed this run.
-  if (stepsNow().length) {
-    if (!store.stripeAccountId) return done;
+  // A store with no Stripe account has no invoices at all, so nothing is unknown there and the sweep runs on what
+  // is written down, as readBook treats it (review of #3906, MÉDIO 1).
+  if (stepsNow().length && store.stripeAccountId) {
     let read: { lines: Referral[]; complete: boolean };
     try {
       read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, deadline, false);

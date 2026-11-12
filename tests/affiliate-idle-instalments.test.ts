@@ -11,7 +11,9 @@
  *
  *   - warned already and past the date, but an instalment's commission not yet paid: not removed;
  *   - the invoices unreadable: "still owed" is not known, so nobody is removed;
- *   - once the creator wrote the commission down as paid: removed, as before.
+ *   - once the creator wrote the commission down as paid: removed, as before;
+ *   - a store with no Stripe account (PayPal only) has no invoices, so nothing is unknown: an idle affiliate owed
+ *     nothing is removed, as before this change (review of #3906, MÉDIO 1).
  */
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { idleSweep, readAffiliate } from "@/lib/affiliates";
@@ -87,6 +89,20 @@ async function main(): Promise<void> {
   ]);
   is("removed", await idleSweep(store, ms(430)), { warned: 0, removed: 1 });
   is("their record stays, removed", await status(), "removed");
+
+  part("No Stripe account: no invoices to read, so the sweep runs on what is written down");
+  const OTHER = "paypal.only@example.com";
+  const QUIET = "0a0b0c0d0e0f";
+  await claimHandle(OTHER, "paypalonly", "PayPal Only", "");
+  await ensureStatsId(OTHER);
+  await setAffiliateSetting(OTHER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, recurring: 0, idle: 90, idleOn: T0 + 300 * DAY }));
+  const noStripe = (await storeForEmail(OTHER))!;
+  is("it has no Stripe account", Boolean(noStripe.stripeAccountId), false);
+  await redis.pipeline([
+    ["HSET", `nl:aff:${noStripe.statsId}:people`, QUIET, JSON.stringify({ id: QUIET, email: "quiet.aff@example.com", code: "quiet", status: "approved", appliedAt: ms(0), decidedAt: ms(0), note: "", warned: T0 + 400 * DAY })],
+  ]);
+  is("an idle affiliate owed nothing is removed", await idleSweep(noStripe, ms(414)), { warned: 0, removed: 1 });
+  is("their record stays, removed", (await readAffiliate(noStripe, QUIET))?.status, "removed");
 
   done();
 }

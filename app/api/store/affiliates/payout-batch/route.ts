@@ -3,8 +3,9 @@ import { creatorFrom } from "@/lib/studio-route";
 import { storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_REFERENCE_LENGTH, readBook } from "@/lib/affiliates";
-import { type BatchProvider, batchFile, keepPayFile } from "@/lib/affiliate-payouts";
-import { confirmPayFile, onTheirWay, payableLines } from "@/lib/paypal-payouts";
+import { type BatchProvider, batchFile, batchTotal } from "@/lib/affiliate-payouts";
+import { confirmPayFile, keepPayFileLocked, onTheirWay, payableLines } from "@/lib/paypal-payouts";
+import { LockBusyError } from "@/lib/redis-lock";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -47,7 +48,16 @@ export async function GET(request: NextRequest) {
     const provider: BatchProvider = asked === "paypal" ? "paypal" : "worksheet";
     const day = new Date().toISOString().slice(0, 10);
     const { body, filename } = batchFile(provider, lines, store, day);
-    const file = await keepPayFile(store, lines);
+    let file: string;
+    try {
+      file = await keepPayFileLocked(store, lines);
+    } catch (error) {
+      if (!(error instanceof LockBusyError)) throw error;
+      return new Response("Payments to your affiliates are being written down right now. Download the file again in a minute.", {
+        status: 409,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
     return new Response(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -70,8 +80,9 @@ export async function GET(request: NextRequest) {
  * the download was not in the file, nobody sent it, and it stays owed for the
  * next file. A file not kept (never downloaded, already written down, run out)
  * writes nothing and says so; so does a confirmation while an automatic PayPal
- * payout is being written for the store. `left` is what is still owed after it,
- * when the book could be read.
+ * payout is being written for the store, and so does a file overlapping a
+ * PayPal payment on its way or a payout written since ("stale"). `left` is what
+ * the next file would pay after it (payableLines), when the book could be read.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 8_000);
@@ -93,9 +104,9 @@ export async function POST(request: NextRequest) {
     });
     if (!done.ok) return fail(done.reason, 409);
 
-    // What is still owed after it, from the book read again: shown to the creator, never written anywhere.
-    const book = await readBook(store).catch(() => null);
-    const left = book ? book.rows.reduce((sum, row) => sum + Math.max(0, row.owed), 0) : null;
+    // What the next file would pay, from the book read again: shown to the creator, never written anywhere.
+    const [book, away] = await Promise.all([readBook(store).catch(() => null), onTheirWay(store).catch(() => null)]);
+    const left = book && away ? batchTotal(payableLines(book, away)) : null;
     return Response.json({ ok: true, written: done.written, cents: done.cents, skipped: done.skipped, left });
   } catch (error) {
     console.error("writing down the affiliate payout batch failed", error);

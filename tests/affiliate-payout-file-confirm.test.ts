@@ -11,7 +11,11 @@
  *   - confirming that file writes $30 for Ana and nothing for Bea; the $75 stays owed;
  *   - confirming it twice, one after the other or at the same instant, writes it once;
  *   - an unknown, missing or expired file writes nothing and says so;
- *   - while the automatic PayPal payout holds the store's payout lock, nothing is written.
+ *   - while the automatic PayPal payout holds the store's payout lock, nothing is written;
+ *   - a file superseded by a later one already written down (every file is a snapshot of the whole balance) is
+ *     refused, never written on top of it (review of #3906, Claude 1, MEDIUM 2);
+ *   - a file that overlaps a PayPal payment on its way, or a payout written after it was downloaded, is refused;
+ *   - `left` is what the next file would pay, not every row's balance (review of #3906, LEVE 3).
  */
 import { NextRequest } from "next/server";
 import { readBook } from "@/lib/affiliates";
@@ -132,6 +136,34 @@ async function main(): Promise<void> {
   is("a new id", next.file !== file.file && /^[0-9a-f]{24}$/.test(next.file), true);
   await redis.pipeline([["DEL", `nl:affpay:${statsId}`]]);
   is("an expired file: refused", [(await confirm({ date: "2026-11-12", reference: "x", file: next.file })).status, await paidTo()], [409, { [ANA]: 3_000 }]);
+
+  part("A file superseded by a later one is never written down on top of it");
+  const f1 = await download();
+  is("f1 pays Ana $45 and Bea $30", [f1.body.includes(",45.00,USD,"), f1.body.includes(",30.00,USD,")], [true, true]);
+  await redis.pipeline([["HSET", sales, "cs_ana3", sale("cs_ana3", ANA, 10_000)]]);
+  const f2 = await download();
+  is("f2 pays Ana $75, f1's $45 included", f2.body.includes(",75.00,USD,"), true);
+  const paidF2 = await confirm({ date: "2026-11-12", reference: "PayPal batch 2", file: f2.file });
+  is("f2 is written down", [paidF2.status, paidF2.data.cents, paidF2.data.left], [200, 10_500, 0]);
+  is("nobody is owed anything", await owed(), { [ANA]: 0, [BEA]: 0 });
+  const paidF1 = await confirm({ date: "2026-11-12", reference: "PayPal batch 1b", file: f1.file });
+  is("f1 is refused afterwards", [paidF1.status, paidF1.data.ok], [409, false]);
+  is("and Ana is never paid twice", [await paidTo(), await owed()], [{ [ANA]: 10_500, [BEA]: 3_000 }, { [ANA]: 0, [BEA]: 0 }]);
+
+  part("A file overlapping a PayPal payment on its way is refused");
+  await redis.pipeline([["HSET", sales, "cs_bea2", sale("cs_bea2", BEA, 10_000)]]);
+  const f3 = await download();
+  is("f3 pays Bea $30", f3.body.includes(",30.00,USD,"), true);
+  await redis.pipeline([["HSET", `nl:pp:open:${statsId}`, "?nl-test-batch", JSON.stringify({ at: Date.now(), currency: "usd", lines: [{ a: BEA, c: 3_000 }] })]]);
+  const overlap = await confirm({ date: "2026-11-12", reference: "x", file: f3.file });
+  is("refused as out of date, nothing written", [overlap.status, overlap.data.error, (await paidTo())[BEA]], [409, "stale", 3_000]);
+  await redis.pipeline([["DEL", `nl:pp:open:${statsId}`]]);
+
+  part("A file overlapping a payout written by hand after it was downloaded is refused");
+  const f4 = await download();
+  await redis.pipeline([["HSET", payoutsKey, "abcdefabcdef", JSON.stringify({ id: "abcdefabcdef", aff: BEA, cents: 3_000, currency: "usd", date: "2026-11-12", reference: "cash", at: Date.now() + 1_000 })]]);
+  const byHand = await confirm({ date: "2026-11-12", reference: "x", file: f4.file });
+  is("refused as out of date, nothing written", [byHand.status, byHand.data.error, (await paidTo())[BEA]], [409, "stale", 6_000]);
   done();
 }
 

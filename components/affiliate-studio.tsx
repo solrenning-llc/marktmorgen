@@ -78,6 +78,7 @@ const MESSAGES: Record<string, string> = {
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
   file: "We could not find that payout file, so nothing was written down. It may be written down already, or it was downloaded more than 30 days ago. Reload the page, and download the file again if you still need it.",
   busy: "Payments to your affiliates are being written down right now, so nothing was saved. Try again in a minute.",
+  stale: "That file is out of date, so nothing was written down: a payment to one of its affiliates was sent through PayPal or written down after you downloaded it. If you paid this file too, write each of those payments down by hand. Otherwise, download a new file.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
@@ -406,9 +407,9 @@ export function AffiliateStudio({
                   className="mt-4 rounded-xl border-2 border-violet-brand/30 bg-white p-3"
                   onSubmit={async (e) => {
                     e.preventDefault();
+                    if (!chosenFile) return;
                     setBusy("batch");
                     setError(null);
-                    if (!chosenFile) return;
                     const done = await postBatch({ date: batchDate, reference: batchReference, file: chosenFile.id });
                     setBusy(null);
                     if ("error" in done) {

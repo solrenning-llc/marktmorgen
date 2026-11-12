@@ -350,10 +350,14 @@ export async function readPayFile(statsId: string, id: string): Promise<KeptPayF
   return parsePayFile(reply[0]);
 }
 
-/** Lets a confirmed file go, so it is never written down twice. */
-export async function dropPayFile(statsId: string, id: string): Promise<void> {
-  const reply = repliesFor(await redisPipeline([["HDEL", payFilesKey(statsId), id]]), 1);
-  if (!reply || (reply[0] !== 0 && reply[0] !== 1)) throw new UnknownReplyError("a payout file let go");
+/**
+ * Lets every kept file of a store go once one is written down: each file is a snapshot of the whole balance payable
+ * when it was downloaded, so once a payout is written every other file overlaps it and would pay the same commission
+ * twice (review of #3906, Claude 1, MEDIUM 2). The confirmed file goes with them, so it is never written down twice.
+ */
+export async function dropPayFiles(statsId: string): Promise<void> {
+  const reply = repliesFor(await redisPipeline([["DEL", payFilesKey(statsId)]]), 1);
+  if (!reply || (reply[0] !== 0 && reply[0] !== 1)) throw new UnknownReplyError("the payout files let go");
 }
 
 /**

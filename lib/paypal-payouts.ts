@@ -32,11 +32,11 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
-import { type BatchLine, batchTotal, dropPayFile, owedLines, payoutIdForFileLine, payoutNote, readPayFile } from "@/lib/affiliate-payouts";
+import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook, readPayoutsExact } from "@/lib/affiliates";
+import { type BatchLine, batchTotal, dropPayFiles, keepPayFile, owedLines, payoutIdForFileLine, payoutNote, readPayFile } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
@@ -435,8 +435,25 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
 
 export type FileConfirmed =
   | { ok: true; written: number; cents: number; skipped: number }
-  /** "file": no kept file under that id (never downloaded, already written down, run out or unreadable); "busy": the store's payouts are being written by another request. */
-  | { ok: false; reason: "file" | "busy" };
+  /**
+   * "file": no kept file under that id (never downloaded, already written down, run out or unreadable); "stale": one
+   * of its affiliates has a PayPal payment on its way or a payout written after the file was downloaded, so writing
+   * it would pay the same commission twice; "busy": the store's payouts are being written by another request.
+   */
+  | { ok: false; reason: "file" | "stale" | "busy" };
+
+/** Lines written between two renewals of the payout lock while a file is written down (review of #3906, LEVE 5). */
+const LINES_PER_HOLD = 20;
+
+/**
+ * Keeps a payout file about to be handed out (keepPayFile) under the store's payout lock, so two downloads at the
+ * same moment never both read the kept files before either writes, and the store never keeps more than
+ * MAX_PAY_FILES (review of #3906, LEVE 2). LockBusyError when the lock stays taken.
+ */
+export async function keepPayFileLocked(store: Store, lines: BatchLine[]): Promise<string> {
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Payout records are unavailable");
+  return withLock(`nl:pp:${store.statsId}:lock`, 120, 5_000, () => keepPayFile(store, lines));
+}
 
 /**
  * Writes down a payout file the creator says they paid in their own provider (app/api/store/affiliates/payout-batch,
@@ -445,22 +462,36 @@ export type FileConfirmed =
  *
  * Under the store's payout lock, the one payWithPayPal and settlePayPal hold, so a confirmation never runs beside an
  * automatic PayPal payout reading the same book. Each line is written once under an id named by the file and the
- * affiliate (addPayoutOnce), and the file is let go only after every line is in the book: a double click, a retry
+ * affiliate (addPayoutOnce), and the files are let go only after every line is in the book: a double click, a retry
  * after an unknown reply or a second confirmation writes nothing twice, and one that finds the file gone writes
  * nothing at all. A line whose affiliate has no record any more is skipped and counted.
+ *
+ * A file is refused as "stale", with nothing written, when any of its affiliates has a PayPal payment on its way
+ * or a payout written after the file was downloaded, other than this file's own lines (a retry): every file is a
+ * snapshot of the whole balance, so it overlaps whatever was paid since (review of #3906, MEDIUM 2 and LEVE 4).
+ * Once it is written down, every kept file of the store goes, for the same reason. The lock is renewed every
+ * LINES_PER_HOLD lines; lost, the writing stops as "busy" and a retry writes the rest once.
  */
 export async function confirmPayFile(store: Store, file: string, input: { date: string; reference: string }): Promise<FileConfirmed> {
   if (!store.statsId || !isRedisConfigured()) throw new Error("Payout records are unavailable");
   const statsId = store.statsId;
   try {
-    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<FileConfirmed> => {
+    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (held): Promise<FileConfirmed> => {
       const kept = await readPayFile(statsId, file);
       if (!kept) return { ok: false, reason: "file" };
+      const inFile = new Set(kept.lines.map((line) => line.a));
+      const away = await onTheirWay(store);
+      if ([...inFile].some((id) => away.has(id))) return { ok: false, reason: "stale" };
+      const since = (await readPayoutsExact(store)).some(
+        (payout) => inFile.has(payout.aff) && payout.at > kept.at && payout.id !== payoutIdForFileLine(file, payout.aff),
+      );
+      if (since) return { ok: false, reason: "stale" };
       const reference = payoutReference(input.reference);
       let written = 0;
       let cents = 0;
       let skipped = 0;
-      for (const line of kept.lines) {
+      for (const [index, line] of kept.lines.entries()) {
+        if (index > 0 && index % LINES_PER_HOLD === 0 && !(await holdLock(held))) return { ok: false, reason: "busy" };
         const result = await addPayoutOnce(store, { id: payoutIdForFileLine(file, line.a), aff: line.a, cents: line.c, currency: kept.currency, date: input.date, reference });
         if (result === "gone") {
           skipped += 1;
@@ -469,7 +500,7 @@ export async function confirmPayFile(store: Store, file: string, input: { date: 
         written += 1;
         cents += line.c;
       }
-      await dropPayFile(statsId, file);
+      await dropPayFiles(statsId);
       return { ok: true, written, cents, skipped };
     });
   } catch (error) {

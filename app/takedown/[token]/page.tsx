@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { LegalPage, LegalSection } from "@/components/legal-page";
+import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
+import { isOperator } from "@/lib/search-console";
 import { TakedownButton } from "@/components/takedown-actions";
 import { openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
 import { NewTab } from "@/components/new-tab";
@@ -16,6 +19,10 @@ type Params = { params: Promise<{ token: string }> };
  */
 export default async function TakedownPage({ params }: Params) {
   const { token } = await params;
+  // Only the operator sees the notice (the reporter's name, address, telephone) and its buttons: the token alone,
+  // which a reply to the support email hands the reporter, opens nothing (#4036). No operator configured: nobody.
+  const email = await emailForSession((await cookies()).get(SESSION_COOKIE)?.value).catch(() => null);
+  if (!isOperator(email)) notFound();
   const opened = await openReport(token);
   if (!opened) notFound();
   const { report, store } = opened;

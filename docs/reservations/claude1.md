@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #4036: a takedown is acted on only from the operator's session | claude/blissful-carson-2v8k2m-takedown-operator | `app/api/takedown/route.ts`, `app/takedown/[token]/page.tsx`, `tests/takedown-operator-only.test.ts`, `tests/takedown-response.test.ts`, `tests/takedown-review-3087.test.ts`, `tests/takedown-unknown.test.ts` | 12/11/2026 17h20 |

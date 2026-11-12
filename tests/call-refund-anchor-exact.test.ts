@@ -31,7 +31,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
-const store = { handle: "callshop", statsId: "0123456789abcdef0123456789abcd06", callsId: CALLS, stripeAccountId: "acct_1CallRefundAnchor", previousHandles: [], releasedHandles: [] } as unknown as Store;
+const store = { handle: "callshop", statsId: "0123456789abcdef0123456789abcd06", callsId: CALLS, stripeAccountId: "acct_1CallRefund01", previousHandles: [], releasedHandles: [] } as unknown as Store;
 const find = async (handle: string) => (handle === "callshop" ? store : null);
 type Batch = (string | number)[][];
 const pipeline = redis.pipeline.bind(redis);

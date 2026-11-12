@@ -44,6 +44,7 @@ import { companyPostal } from "@/lib/company-postal";
 import { membersOf, paidPeriods } from "@/lib/closing-holds";
 import { returnCredit, takeCredit } from "@/lib/closing-credit";
 import {
+  BUYER_NOTICE_DAYS,
   BUYER_PAGES_PER_RUN,
   EMAILS_PER_BUYER_PER_ENDING,
   type BuyerLetter,
@@ -55,6 +56,10 @@ import {
 } from "@/lib/closing-buyers-rules";
 
 export const toldKey = (folder: string) => `nl:closing:told:${folder}`;
+
+const DAY_MS = 86_400_000;
+/** The most PayPal sales one closing reads for its notice; a reading cut there tells the ones it read. */
+const PAYPAL_CLOSING_READ = 100_000;
 
 /**
  * How a buyer reaches the creator, as the creator published it: the contact
@@ -240,13 +245,25 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     // A PayPal reading that failed whole (its range or records out of shape: partial with nothing read) is not done:
     // the first step stays unmarked and the closing job asks again, so no PayPal buyer is left out for good
     // (Claude 1 cloud's L1 on #3443). A reading cut at its limit still tells the ones it read.
-    const paypal = await readPayPalSales(store.statsId, 0, 100_000);
+    const paypal = await readPayPalSales(store.statsId, 0, PAYPAL_CLOSING_READ);
     if (paypal.partial && !paypal.sales.length) {
       console.error("closing-buyers: a closing store's PayPal sales could not be read; tried again");
       return out;
     }
     kept.push(...paypal.sales.map((sale) => sale.email));
     if (!(await tell(kept))) return out;
+    // Some PayPal rows read and others not (a record or an order out of shape; Codex X5 on #4236): the ones read are
+    // told now (their told marks keep them from a second email) and the step waits for the rest, asked again by the
+    // closing job, while the buyers can still get their whole notice (BUYER_NOTICE_DAYS before the day). A row still
+    // unreadable after that may never be readable: it is counted untold, once, and the closing goes on, never held
+    // for good by one bad record.
+    if (paypal.partial && paypal.sales.length < PAYPAL_CLOSING_READ) {
+      if (Date.now() < day - BUYER_NOTICE_DAYS * DAY_MS) {
+        console.error("closing-buyers: some of a closing store's PayPal sales could not be read; tried again");
+        return out;
+      }
+      if (await markUntold(folder, "#paypal", 0)) out.untold += 1;
+    }
     out.after = "start";
   }
   const account = store.stripeAccountId;

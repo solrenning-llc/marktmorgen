@@ -190,9 +190,17 @@ export async function openCommunityDoor(path: string, author: string, now = Date
 export async function takeCommunityUpload(path: string, author: string): Promise<boolean> {
   const [held] = await redisPipeline([["GETDEL", uploadKey(path)]]);
   if (held === author) {
-    // In a post now: no longer a door to sweep.
-    await redisPipeline([["ZREM", DOORS_KEY, path]]).catch(() => null);
-    return true;
+    // In a post now: no longer a door to sweep. Read exactly (CX-123 rule 24): a removal that is not confirmed may
+    // leave the path listed, and the sweep would then delete the picture from under the post. So it is not taken:
+    // the door is noted again and the path listed again, and the member's next try takes it.
+    const answered = await redisPipeline([["ZREM", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);
+    const removed = answered ? countOf(answered[0]) : null;
+    if (removed === 0 || removed === 1) return true;
+    await redisPipeline([
+      ["SET", uploadKey(path), author, "NX", "EX", UPLOAD_TTL_SECONDS],
+      ["ZADD", DOORS_KEY, "NX", Math.floor(Date.now() / 1000), path],
+    ]).catch(() => console.error("could not note again a community picture whose removal from the doors' list is unknown"));
+    return false;
   }
   if (typeof held === "string" && held) {
     await redisPipeline([["SET", uploadKey(path), held, "NX", "EX", UPLOAD_TTL_SECONDS]]).catch(() => null);

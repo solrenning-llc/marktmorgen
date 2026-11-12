@@ -502,11 +502,12 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   const email = held?.email ?? null;
   const record = email ? await read(email) : null;
   if (!email || !record) return null;
+  // Who is told, and everything else the notice needs, is read before anything is written (review of #2883; Claude 6
+  // on #2948): an unknown recovery address (rule 24) throws here, with the waiting login not spent, no reset day set
+  // and nothing opened, so two-step login never turns off on a login the owner was not told of.
+  const backup = await backupOf(email, record);
   const through = (to: "sign-in" | "recovery") =>
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
-  // Everything the notice needs is read before anything is written (Claude 6 on #2948): a read that fails here spends
-  // nothing, sets no day and opens nothing, so two-step login never turns off on a login the owner was not told of.
-  const backup = await backupOf(email, record);
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (countOf(removed) !== 1) return null;
@@ -823,9 +824,14 @@ export async function finishSetup(
   });
   if (made !== "made") return made;
   // The account's recovery address from now on, for losing the email too (lib/recovery-address.ts).
-  await keepRecoveryAddress(email, pending.b);
+  // Two-step login is on either way, and its codes are answered once: a keep Redis did not confirm is said as not
+  // kept, never as a way back in (review of #2883).
+  const keptBackup = await keepRecoveryAddress(email, pending.b);
   await redisPipeline([["DEL", setupKey(session)]]);
-  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`);
+  const way = keptBackup
+    ? `If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`
+    : `Your recovery address (${hideAddress(pending.b)}) could not be saved just now: add it again under Account in your studio, so a link sent there can let you back in if you ever lose your phone and your recovery codes.`;
+  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. ${way}`);
   return { codes };
 }
 

@@ -799,11 +799,20 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
     }
     return 0;
   }
-  const writes = ids.map((id, at) => ["SET", deliveryKey(id), kept[at], "NX", "EX", DELIVERY_SECONDS]);
   try {
-    const written = await redisPipeline(writes);
+    // Queued whatever the writes answer, even when their read back is unknown too, and before that unknown is thrown
+    // (Codex C2's M1 on #3446): a line that did land is then still found and tried by deliverDue, for a caller that
+    // emits only once (free/download, join/confirm, the PayPal hand-over), and runClaimed takes one that is not there
+    // off the queue. The unknown still throws below, and the mark goes.
+    const wrote = await writeLines(ids.map((id, at) => ({ id, text: kept[at] })), true).then((lines) => ({ lines }), (error: unknown) => ({ error }));
     await redisPipeline(ids.map((id) => ["ZADD", QUEUE_KEY, "NX", now, `${statsId}|${id}`]));
-    await pushMissing(statsId, ids.filter((_, at) => written[at] !== "OK"), ids.filter((_, at) => written[at] === "OK"));
+    if ("error" in wrote) throw wrote.error;
+    const written = wrote.lines;
+    // A line written now goes in the log; one there already, or found on the read back, only if the log lacks it, so
+    // a caller that emits only once still has its delivery in the creator's log. A line not there was not written:
+    // it throws, and the mark goes, so the event is written again when it is noticed again.
+    await pushMissing(statsId, ids.filter((_, at) => written[at] === "there"), ids.filter((_, at) => written[at] === "new"));
+    if (written.includes("absent")) throw new UnknownReplyError("a webhook delivery line's write");
   } catch (error) {
     // The event is marked sent above; without its deliveries written it
     // would never be: the mark goes, so the next time it is noticed it is
@@ -1853,8 +1862,9 @@ async function skippedLines(statsId: string, deliveries: Delivery[], reason: "la
   if (n === null || n < 1) throw new Error("the day's messages not kept could not be counted");
   if (n <= SKIPPED_LINES_PER_DAY) {
     const lines = deliveries.map((d) => noticeLine(d.id, statsId, d.endpoint, d.eventId, d.type as WebhookEvent, words, now));
-    const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
-    await pushMissing(statsId, lines.filter((_, at) => written[at] !== "OK").map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
+    const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), true);
+    await pushMissing(statsId, lines.filter((_, at) => written[at] === "there").map((line) => line.id), lines.filter((_, at) => written[at] === "new").map((line) => line.id));
+    if (written.includes("absent")) await countNotKept(key);
     return;
   }
   const more = n - SKIPPED_LINES_PER_DAY;
@@ -1867,8 +1877,19 @@ async function skippedLines(statsId: string, deliveries: Delivery[], reason: "la
       `${more} more ${more === 1 ? "message" : "messages"} on ${date} ${why}. Nothing was counted for ${more === 1 ? "it" : "them"}.`, now,
     ),
   }));
-  await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "EX", DELIVERY_SECONDS]));
-  await pushMissing(statsId, lines.map((line) => line.id));
+  const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), false);
+  await pushMissing(statsId, lines.filter((_, at) => written[at] !== "absent").map((line) => line.id));
+  if (written.includes("absent")) await countNotKept(key);
+}
+
+/**
+ * A message not kept whose lines are not there: its count for the day is given back, so it is counted once when
+ * the event is noticed again, and it throws (emitEvent lets the event's mark go). A count that cannot be given back
+ * is said in the server's log; the figure is then one more than the messages.
+ */
+async function countNotKept(key: string): Promise<never> {
+  await redisPipeline([["DECR", key]]).catch((lost) => console.error("a webhook day's count of messages not kept could not be given back", key, lost));
+  throw new UnknownReplyError("a webhook delivery line's write");
 }
 
 /** A line of the delivery log no message is behind: the studio shows it "Not sent", with `words`. */
@@ -1876,12 +1897,42 @@ function noticeLine(id: string, statsId: string, endpoint: string, eventId: stri
   return { id, statsId, endpoint, eventId, type, body: "", attempts: 0, state: "failed", next: 0, lastStatus: 0, lastError: words, lastAt: now, createdAt: now, givenUp: true };
 }
 
+/**
+ * Writes delivery lines (SET … EX DELIVERY_SECONDS, NX when `nx`) and tells, for each, "new" when written now,
+ * "there" when it is there (already, with NX, or found on the read back) and "absent" when it is not. The replies
+ * are read exactly (CX-123 rule 24): SET answers "OK" when it wrote and, with NX only, null when the line was there.
+ * Any other reply, or a call that fails, may have landed: the lines are read back once, exactly (GET, text or null).
+ * With NX any text there is the line; without, only the text written is. A read back in another shape throws.
+ */
+async function writeLines(lines: { id: string; text: string }[], nx: boolean): Promise<("new" | "there" | "absent")[]> {
+  if (!lines.length) return [];
+  let replies: unknown = null;
+  try {
+    replies = await redisPipeline(lines.map(({ id, text }) => (nx ? ["SET", deliveryKey(id), text, "NX", "EX", DELIVERY_SECONDS] : ["SET", deliveryKey(id), text, "EX", DELIVERY_SECONDS])));
+  } catch (error) {
+    console.error("writing webhook delivery lines failed; they are read back", error);
+  }
+  const read = repliesFor(replies, lines.length);
+  if (read && read.every((reply) => reply === "OK" || (nx && reply === null))) return read.map((reply) => (reply === "OK" ? "new" : "there"));
+  const back = textsOrNull(await redisPipeline(lines.map(({ id }) => ["GET", deliveryKey(id)])), lines.length, "a webhook delivery line's write");
+  return back.map((text, at) => (text === null || (!nx && text !== lines[at].text) ? "absent" : "there"));
+}
+
+/** GET's replies, each text or null (CX-123 rule 24), one for each of `count` keys; any other shape throws. */
+function textsOrNull(replies: unknown, count: number, what: string): (string | null)[] {
+  const read = repliesFor(replies, count);
+  if (!read || read.some((reply) => reply !== null && typeof reply !== "string")) throw new UnknownReplyError(what);
+  return read as (string | null)[];
+}
+
 /** Puts in the store's log those of `ids` it does not hold yet (one a visit that died left out, or one trimmed since). */
 async function pushMissing(statsId: string, ids: string[], known: string[] = []): Promise<void> {
   let push = known;
   if (ids.length) {
-    const [rawLog] = await redisPipeline([["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
-    const inLog = new Set(Array.isArray(rawLog) ? (rawLog as unknown[]).map(String) : []);
+    // A list of text, exactly (CX-123 rule 24): a log in another shape is unknown, never empty, so no line goes in twice.
+    const logged = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]), 1)?.[0]);
+    if (!logged) throw new UnknownReplyError("a store's webhook delivery log");
+    const inLog = new Set(logged);
     push = [...known, ...ids.filter((id) => !inLog.has(id))];
   }
   if (push.length) await redisPipeline([...push.map((id) => ["LPUSH", logKey(statsId), id]), ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
@@ -1923,9 +1974,11 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
   const stripeEvent = str(event.id) ?? "";
   const mark = givenUpMark(statsId, stripeEvent);
   const as = waitedAs(event, saleHandles(store), confirmed);
-  const [marked, ...sent] = await redisPipeline([["GET", mark], ...as.parts.map((part) => ["GET", eventKey(eventIdFor(statsId, part.type, part.seed))])]);
-  if (marked !== null && marked !== undefined) return;
-  const unsent = as.parts.filter((_, at) => sent[at] === null || sent[at] === undefined);
+  // Each mark text or null (CX-123 rule 24): one in another shape is unknown and throws before anything is written
+  // or marked, never "already told" nor "already sent"; the visit fails and the next one gives the event up again.
+  const [marked, ...sent] = textsOrNull(await redisPipeline([["GET", mark], ...as.parts.map((part) => ["GET", eventKey(eventIdFor(statsId, part.type, part.seed))])]), 1 + as.parts.length, "a passed-over Stripe event's marks");
+  if (marked !== null) return;
+  const unsent = as.parts.filter((_, at) => sent[at] === null);
   const hearing = config.endpoints.flatMap((endpoint) => {
     const part = unsent.find((p) => endpoint.events.includes(p.type));
     return part ? [{ endpoint, type: part.type }] : [];
@@ -1987,23 +2040,27 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
       `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
       statsId, endpoint.id, eventId, type, words, now,
     ));
-    const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
-    // A new line goes in the log; one already there from a visit that died, only when that visit died before putting it there.
-    await pushMissing(statsId, lines.filter((_, at) => written[at] !== "OK").map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
+    const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), true);
+    // A new line goes in the log; one already there from a visit that died, or found on the read back, only when the
+    // log lacks it. A line not there throws before the event is marked, so a later visit writes it.
+    await pushMissing(statsId, lines.filter((_, at) => written[at] === "there").map((line) => line.id), lines.filter((_, at) => written[at] === "new").map((line) => line.id));
+    if (written.includes("absent")) throw new UnknownReplyError("a webhook delivery line's write");
   }
 
   if (summed.length) {
     const date = new Date(day * 86_400_000).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
     const ids = summed.map(({ endpoint }) => `dlv_${createHash("sha256").update(`${statsId}|${day}|${endpoint.id}|given-up-day`).digest("hex").slice(0, 24)}`);
     // The line keeps when it was first written and what it was first said as; only its count and its time move.
-    const before = (await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)]))).map(parseDelivery);
+    // Each read text or null (CX-123 rule 24); another shape throws, never read as no line yet.
+    const before = textsOrNull(await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)])), ids.length, "a passed-over day's summary line").map(parseDelivery);
     const lines = summed.map(({ endpoint, type, more }, at) => {
       const words = `${more} more Stripe ${more === 1 ? "event" : "events"} could not be processed on ${date}. Look ${more === 1 ? "it" : "them"} up in your Stripe dashboard.`;
       const kept = before[at];
       return { ...noticeLine(ids[at], statsId, endpoint.id, eventIdFor(statsId, "stripe.given_up_day", `${day}|${endpoint.id}`), kept?.type && kept.type !== "test" ? kept.type : type, words, now), createdAt: kept?.createdAt ?? now };
     });
-    await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "EX", DELIVERY_SECONDS]));
-    await pushMissing(statsId, ids);
+    const written = await writeLines(lines.map((line) => ({ id: line.id, text: JSON.stringify(line) })), false);
+    await pushMissing(statsId, ids.filter((_, at) => written[at] !== "absent"));
+    if (written.includes("absent")) throw new UnknownReplyError("a passed-over day's summary line's write");
   }
   await redisPipeline([["SET", mark, "1", "EX", EVENT_SECONDS]]);
 }
@@ -2012,7 +2069,9 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
 async function watchStore(store: Store, statsId: string, config: Config, now = Date.now()): Promise<number> {
   const account = store.stripeAccountId as string;
   const types = STRIPE_TYPES.map((t, i) => `types[${i}]=${encodeURIComponent(t)}`).join("&");
-  const [anchorRaw, waitRaw] = await redisPipeline([["GET", anchorKey(statsId)], ["GET", waitKey(statsId)]]);
+  // Each text or null (CX-123 rule 24): another shape is unknown and throws, so the store is not read this run and
+  // neither its anchor nor its wait moves (never read as no anchor, which reads it again from far back).
+  const [anchorRaw, waitRaw] = textsOrNull(await redisPipeline([["GET", anchorKey(statsId)], ["GET", waitKey(statsId)]]), 2, "a store's Stripe anchor and wait");
   const anchor = typeof anchorRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(anchorRaw) ? anchorRaw : "";
   const nowSeconds = Math.floor(now / 1000);
   // "<evt>|<visits>|<since>": the event waited on, the visits it failed and
@@ -2033,8 +2092,10 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
     // A store read again from far back (its first run, or an anchor Stripe
     // lost): events already passed over are passed over again at once, not
     // held again; one pipeline a page, and only then.
-    const marks = reread ? await redisPipeline(rows.map((row) => ["GET", givenUpMark(statsId, str(row.id) ?? "")])) : [];
-    const passed = new Set(rows.filter((_, at) => marks[at] !== null && marks[at] !== undefined).map((row) => str(row.id) ?? ""));
+    // Each mark text or null (CX-123 rule 24): one in another shape is unknown and throws before anything is sent,
+    // never taken as passed over, so the anchor does not move past the event.
+    const marks = reread ? textsOrNull(await redisPipeline(rows.map((row) => ["GET", givenUpMark(statsId, str(row.id) ?? "")])), rows.length, "the marks of passed-over Stripe events") : [];
+    const passed = new Set(rows.filter((_, at) => reread && marks[at] !== null).map((row) => str(row.id) ?? ""));
     // Stripe lists newest first; they are sent in the order they happened.
     for (const event of [...rows].reverse()) {
       const id = str(event.id) ?? "";
@@ -2162,8 +2223,13 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
 export async function watchStripe(deadline: number, now = Date.now()): Promise<{ stores: number; events: number }> {
   const counts = { stores: 0, events: 0 };
   if (!isRedisConfigured()) return counts;
-  const [members, saved] = await redisPipeline([["SMEMBERS", STORES_KEY], ["GET", POSITION_KEY]]);
-  const ids = (Array.isArray(members) ? (members as unknown[]).map(String) : []).sort();
+  // The stores a list of text and the place text or null (CX-123 rule 24): another shape is unknown and throws before
+  // any store is read, so the place does not move (never read as no stores, or as starting over).
+  const read = repliesFor(await redisPipeline([["SMEMBERS", STORES_KEY], ["GET", POSITION_KEY]]), 2);
+  const members = stringList(read?.[0]);
+  const saved = read?.[1];
+  if (!members || (saved !== null && typeof saved !== "string")) throw new UnknownReplyError("the stores the Stripe watch reads, or its place");
+  const ids = members.sort();
   if (!ids.length) return counts;
   const start = Math.max(0, ids.findIndex((id) => id > (typeof saved === "string" ? saved : "")));
   for (let n = 0; n < ids.length && Date.now() < deadline; n += 1) {

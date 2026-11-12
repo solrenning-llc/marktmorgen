@@ -47,7 +47,7 @@ import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
   type FunnelStep,
@@ -95,7 +95,10 @@ type UpsellRecord = {
    * offer was taken, which is what this buyer gets (lib/bundle-rules.ts).
    */
   items?: string[];
-  /** The random value of the press that took the offer's once mark (claimMark), on the first pending record only. */
+  /**
+   * The random value of the press that took the offer's once mark (claimMark), on its pending records: the claim and
+   * the record naming the customer (nameCustomer), so each is known to be that press's own and no other's.
+   */
   claim?: string;
 };
 
@@ -180,6 +183,30 @@ async function readAnswers(session: string): Promise<Map<string, UpsellRecord>> 
 
 async function writeUpsell(session: string, slot: string, record: UpsellRecord): Promise<void> {
   await redisPipeline([["SET", recordKey(session, slot), JSON.stringify(record), "EX", RECORD_SECONDS]]);
+}
+
+/** Writes the record naming the customer over the press's own claim (ARGV[1]) only, in one step: 1 written, 0 not. */
+const NAME_CUSTOMER = `-- marktmorgen:upsell-name-customer:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3]) return 1 end
+return 0`;
+
+/**
+ * The write that comes right before the charge is asked of Stripe, read exactly (Claude 1 on #3834, rule 24): it
+ * replaces only this press's own claim, never a record written since (the claim let go as an orphan, and the offer
+ * answered again meanwhile), and it counts as landed only on exactly 1, or, answered in any other shape, when the
+ * record read back is exactly the one written (it holds this press's random claim value, so no other press wrote it).
+ * Otherwise it throws, and Stripe is not asked: a pending record naming neither a customer nor a payment therefore
+ * always means the charge was never sent (settleOne lets it go).
+ */
+async function nameCustomer(session: string, slot: string, claimRecord: string, record: UpsellRecord): Promise<void> {
+  const key = recordKey(session, slot);
+  const named = JSON.stringify(record);
+  const reply = repliesFor(await redisPipeline([["EVAL", NAME_CUSTOMER, 1, key, claimRecord, named, RECORD_SECONDS]]), 1);
+  if (reply?.[0] === 1) return;
+  if (reply?.[0] === 0) throw new Error("an offer's claim was let go or answered since; nothing is charged");
+  const held = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (held?.[0] === named) return;
+  throw new UnknownReplyError("the write naming an offer's customer");
 }
 
 export type TakeResult =
@@ -367,11 +394,9 @@ export async function takeUpsell(input: {
   // Once, however many times the button is pressed. Only "OK" makes this press the one that answers (claimMark): a
   // reply cut short or of another shape is read back, never taken as ours, so two presses at the same moment never
   // both count the order and send the payment (rule 24). The claim's own random value tells the two apart.
-  const claimed = await claimMark(
-    recordKey(session, slot),
-    RECORD_SECONDS,
-    JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim: claimValue() }),
-  );
+  const claim = claimValue();
+  const claimRecord = JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim });
+  const claimed = await claimMark(recordKey(session, slot), RECORD_SECONDS, claimRecord);
   if (claimed === "unknown") throw new UnknownReplyError("an offer's answer mark");
   if (claimed === "taken") {
     const existing = await readUpsell(session, slot);
@@ -395,8 +420,11 @@ export async function takeUpsell(input: {
   }
 
   // Written down before Stripe is asked, so a lost answer can be looked for,
-  // by the thanks page and by the five-minute job.
-  await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+  // by the thanks page and by the five-minute job. Stripe is asked only once
+  // this write is known to have landed over this press's own claim
+  // (nameCustomer): a record naming neither a customer nor a payment then
+  // proves the charge was never sent, so the thanks page can let it go.
+  await nameCustomer(session, slot, claimRecord, { state: "pending", product: target.id, ...extra, customer, at: Date.now(), claim });
   await watchPending(store, session, slot);
 
   const email = typeof view.customer_details?.email === "string" ? view.customer_details.email : "";
@@ -558,6 +586,29 @@ export async function findOfferCharge(
   throw new StripeListUnreadable("more payments than are read");
 }
 
+/**
+ * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
+ * written since — naming the customer, a payment or an answer — is never taken off.
+ */
+const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+
+/**
+ * Lets go of an offer's orphan claim: the stored string is read exactly and compared as it is, never as parsed and
+ * written again, and only a pending record naming neither a customer nor a payment, older than LOST_ANSWER_MS, is
+ * deleted. Anything else read (another record, an unreadable reply) is left as it is.
+ */
+async function releaseOrphan(session: string, slot: string): Promise<void> {
+  const key = recordKey(session, slot);
+  const held = repliesFor(await redisPipeline([["GET", key]]), 1)?.[0];
+  if (typeof held !== "string") return;
+  const record = parseRecord(held);
+  if (!record || record.state !== "pending" || record.customer !== undefined || record.pi !== undefined) return;
+  if (typeof record.at !== "number" || !(Date.now() - record.at > LOST_ANSWER_MS)) return;
+  await redisPipeline([["EVAL", ORPHAN_RELEASE, 1, key, held]]);
+}
+
 /** Settles one offer still waiting on an answer. Nothing is ever charged here. */
 async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
   if (record.state !== "pending" || !store.stripeAccountId) return;
@@ -576,6 +627,12 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
         return;
       }
     } else {
+      // Neither a customer nor a payment: only the claim was written (its reply unknown, the write naming the
+      // customer failed or was not applied, or the press stopped before it), and the charge is asked of Stripe only
+      // once that write is known to have landed over this very claim (nameCustomer). So it was never sent and can no
+      // longer be: once older than a request in flight could still be, it is let go, only while it is still exactly
+      // the record read, and the buyer can answer the offer again. Never shown as checking until it expires.
+      if (Date.now() - record.at > LOST_ANSWER_MS) await releaseOrphan(session, slot);
       return;
     }
     const meta = pi.metadata as Record<string, string> | null;

@@ -352,8 +352,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Where do I find my plan's invoices?",
         a: [
-          "In your studio, under \u201cWhat you pay us\u201d, choose \u201cYour plan\u2019s invoices\u201d. It lists the invoices Marktmorgen has made for this store\u2019s plan, newest first, read from Stripe when the page opens. Each one opens on Stripe\u2019s own page, where you can see it, download it and, if it is not paid yet, pay it.",
-          "The link is there once your store has a plan. Only the plan your store has now is listed: invoices of an earlier one are not shown. Anyone on your team who may manage the plan can open it.",
+          "In your studio, under \u201cWhat you pay us\u201d, choose \u201cYour plan\u2019s invoices\u201d. It lists the most recent invoices Marktmorgen has made for this store\u2019s plan, newest first, read from Stripe when the page opens. Each one opens on Stripe\u2019s own page, where you can see it, download it and, if it is not paid yet, pay it.",
+          "The link is there once your store has a plan, and only the store\u2019s owner can open it. Only the plan your store has now is listed: invoices of an earlier one are not shown. It is read a few times a day at most, so that changing or canceling your plan always has room; if the page cannot read them now, nothing was changed.",
         ],
       },
       {
@@ -698,7 +698,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "How do I choose a growth goal and see what to do next?",
         a: [
           "Choose \u201cGrowth\u201d under \u201cMore in your studio\u201d. Pick one goal: \u201cGrow my list\u201d, \u201cSell more products\u201d, \u201cClose service deals\u201d or \u201cKeep customers\u201d. Until you pick one, the page shows \u201cSell more products\u201d.",
-          "\u201cYour next steps\u201d lists actions in order, each linking to the tool you need. You only see steps your role can use. Under \u201cMeasure one change\u201d, open \u201cPlan a fair comparison\u201d for a simple before-and-after plan; the page does not run a test or calculate a result. Some goals also show \u201cCampaigns for this goal\u201d, with \u201cExplore matching campaigns\u201d to see them in Funnels.",
+          "\u201cYour next steps\u201d lists actions in order, each linking to the tool you need. You only see steps your role can use. If your role can see your numbers, \u201cMeasure one change\u201d has \u201cPlan a fair comparison\u201d, a simple before-and-after plan; the page does not run a test or calculate a result. Some goals also show \u201cCampaigns for this goal\u201d, with \u201cExplore matching campaigns\u201d to see them in Funnels.",
           "Lower on the page, \u201cYour template library\u201d lets you filter and preview templates. \u201cUse this template\u201d opens an unsaved draft or a setup preview. It does not publish or send anything.",
         ],
       },
@@ -782,7 +782,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "Can I put a label on many contacts at once?",
         a: [
           `Yes. On \u201cMoving from another platform\u201d in your studio, next to bringing contacts in, choose \u201cLabel several contacts at once\u201d. Paste their addresses, one per line or separated by commas, up to ${MAX_BULK_ADDRESSES.toLocaleString("en-US")} at a time, type the label (up to ${MAX_TAG_LENGTH} characters), choose \u201cAdd the label\u201d or \u201cTake the label off\u201d, then \u201cReview the change\u201d.`,
-          `Before anything is saved you see how many contacts will change, how many already have it, which addresses are not on your list and which contacts already have ${MAX_CONTACT_TAGS} labels, the most a contact can have. Then press \u201cAdd it to\u201d or \u201cTake it off\u201d. No automation starts and no email is sent, and \u201cUndo\u201d puts everything back until you start another change or leave the page. Anyone on your team who may bring contacts in can do it.`,
+          `Before anything is saved you see how many contacts will change, how many already have it, how many addresses are not on your list and how many contacts already have ${MAX_CONTACT_TAGS} labels, the most a contact can have. Then press \u201cAdd it to\u201d or \u201cTake it off\u201d. No automation starts and no email is sent, and \u201cUndo\u201d puts back what the change did, and tells you if any contact could not go back, until you start another change or leave the page. Anyone on your team who may bring contacts in can do it.`,
         ],
       },
       {
@@ -822,8 +822,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "How do I build a funnel?",
         a: [
-          `Open your studio and choose \u201cFunnels\u201d under \u201cMore in your studio\u201d. The page has three parts: \u201cStart from a kind of funnel\u201d, \u201cPages in order\u201d and \u201cOffers after they pay\u201d.`,
-          `To build one yourself, press \u201cNew funnel\u201d. Type a \u201cName, for you\u201d and an \u201cAddress\u201d, pick each step from your pages and your products\u2019 pages, and use \u201cAdd a step\u201d for more. A funnel can have up to ${MAX_FUNNEL_PAGES} steps, and a store up to ${MAX_PAGE_FUNNELS} funnels. Check \u201cOn: its address leads through the steps\u201d only when it is ready, then press \u201cMake the funnel\u201d. Or press \u201cChoose a kind\u201d, then \u201cUse this\u201d, and the funnel is made with the pages it needs. It starts switched off, and its new pages stay hidden.`,
+          `Open your studio and choose \u201cFunnels\u201d under \u201cMore in your studio\u201d. The page includes \u201cStart from a kind of funnel\u201d, \u201cPages in order\u201d and \u201cOffers after they pay\u201d.`,
+          `To build one yourself, press \u201cNew funnel\u201d. Type a \u201cName, for you\u201d and an \u201cAddress\u201d, pick each step from your pages and your products\u2019 pages, and use \u201cAdd a step\u201d for more. A funnel can have up to ${MAX_FUNNEL_PAGES} steps, and a store up to ${MAX_PAGE_FUNNELS} funnels. Check \u201cOn: its address leads through the steps\u201d only when it is ready, then press \u201cMake the funnel\u201d. Or press \u201cChoose a kind\u201d, then \u201cUse this\u201d on one, name it, choose your products for its steps, press \u201cReview funnel\u201d, then \u201cCreate disabled funnel\u201d: the funnel is made with the pages it needs. It starts switched off, and its new pages stay hidden.`,
           `To offer more right after a purchase, pick a paid one-off product under \u201cOffers after they pay\u201d, press \u201cAdd the first offer\u201d, choose it in \u201cOffer this\u201d and press \u201cSave the funnel\u201d. A product can have up to ${MAX_FUNNEL_STEPS} offers. Buyers see them on the thank-you page, one at a time. Nothing is offered while your store charges sales tax.`,
         ],
       },
@@ -843,7 +843,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can my buyers get into my Discord server?",
         a: [
-          "Yes, once your studio shows \u201cDiscord\u201d: it appears when the Discord connection is set up on Marktmorgen, for whoever may change the store\u2019s settings. Open it and press \u201cConnect your server\u201d to add the bot on Discord\u2019s own page, then, under \u201cWhich products give which roles\u201d, choose the roles each product gives.",
+          "Yes, once your studio shows \u201cDiscord\u201d: it appears when the Discord connection is set up on Marktmorgen, for whoever may change the store\u2019s settings. Open it and, under \u201cConnect your server\u201d, press \u201cConnect a Discord server\u201d to add the bot on Discord\u2019s own page, then, under \u201cWhich products give which roles\u201d, choose the roles each product gives.",
           `A buyer presses \u201cJoin the Discord\u201d after paying, or on their orders, says yes on Discord\u2019s own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, about every ${DISCORD_CHECK_HOURS} hours. You can also tick \u201cRemove people from the server when their access ends.\u201d`,
         ],
       },
@@ -879,9 +879,9 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "How do I approve changes my AI assistant prepared?",
         a: [
-          `An AI assistant connected to your store with a key you allowed to prepare changes never changes your store by itself. What it prepares waits in your studio on \u201cWhat the AI proposes\u201d, at /studio/agent.`,
+          `An AI assistant connected to your store with a key you allowed to prepare changes never changes your store by itself. What it prepares waits on \u201cWhat the AI proposes\u201d, at /studio/agent; there is no link to it in your studio yet. You or an admin can open it.`,
           `Under \u201cWaiting for you\u201d, each proposal shows \u201cNow\u201d beside \u201cWould become\u201d. Press \u201cConfirm\u201d to make the change, or \u201cDecline\u201d and nothing changes. Proposals wait ${WAITING_DAYS} days.`,
-          `Every change you confirm is listed under \u201cWhat the AI did\u201d. Most can be put back with \u201cUndo\u201d for ${UNDO_DAYS} days.`,
+          `Every change you confirm is listed under \u201cWhat the AI did\u201d. You can put a change back with \u201cUndo\u201d for ${UNDO_DAYS} days, unless it was changed again since.`,
         ],
       },
       {

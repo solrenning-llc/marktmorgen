@@ -14,7 +14,7 @@ import { POST } from "@/app/api/store/appeal/route";
 import StudioAppealsPage from "@/app/studio/appeals/page";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setSubscription, storeForEmail } from "@/lib/store";
-import { NUMBER_TRIES, decisionsOf, fileAppeal, kindOfStrike, readAppeals } from "@/lib/takedown-appeals";
+import { NUMBER_TRIES, TRIES_SPENT_WORDS, decisionsOf, fileAppeal, kindOfStrike, readAppeals } from "@/lib/takedown-appeals";
 import { APPEAL_NUMBER } from "@/lib/takedown-appeal-rules";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -150,6 +150,9 @@ async function main() {
   const t5 = await ask(cookie, failing.sid, { action: "again", decision: kit.key });
   is("three tries fail, the fourth and fifth are not tried", [t1.status, t2.status, t3.status, t4.status, t5.status, sent.length - sentBefore], [202, 202, 202, 202, 202, 1]);
   is("and the words say how to reach a person", String(t5.data.message).startsWith("Your request is kept with its number, but we could not pass it on to our team. Reply to the email"), true);
+  // Claude 1's LOW on 8c89e7e9: once the tries are spent, the page must not offer a button that can only refuse (VR 2).
+  const spentPage = await page(cookie, failing.sid);
+  is("the page then says how to reach a person, and offers no Send it again", [spentPage.includes(TRIES_SPENT_WORDS), /Send it again<\/button>/.test(spentPage)], [true, false]);
 
   part("A store switched off can still ask");
   await noteTakedown(email, STORE_OFF, true);
@@ -200,6 +203,31 @@ async function main() {
   const recoveredNumber = recovered.ok ? recovered.kept.appeal.number : "";
   is("the next try takes that same number, so nothing is left behind", [recovered.ok, numbers() - lostBefore, redis.keys().includes(`nl:report:an:${recoveredNumber}`)], [true, 1, true]);
   is(`never more than ${NUMBER_TRIES} numbers a decision`, NUMBER_TRIES, 3);
+
+  part("A request kept whose next step's answer is lost is never said to be not kept");
+  // Claude 3 cloud K, LEVE 1 on 27dded69: the record is written, then the reply to counting the inbox try is lost.
+  const halfEmail = "appeal-half@example.test";
+  const half = await creator(halfEmail, "appealshophalf");
+  await noteTakedown(halfEmail, PRODUCT);
+  const halfStore = (await storeForEmail(halfEmail))!;
+  const halfKey = decisionsOf(halfStore)[0].key;
+  const halfSent = sent.length;
+  let lostCount = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await realPipeline(commands);
+    if (!lostCount && commands[0]?.[0] === "SET" && commands[0].includes("XX")) {
+      lostCount = true;
+      throw new Error("reply lost");
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  const halfAnswer = await ask(half.cookie, halfStore.sid, { action: "file", decision: halfKey, explanation: "The reply to my try was lost." });
+  redis.pipeline = realPipeline;
+  is("the request is kept, and nothing reached the inbox", [lostCount, (await readAppeals(halfStore)).has(halfKey), sent.length - halfSent], [true, true, 0]);
+  is("the answer never says it was not kept, and points to the page that knows", [halfAnswer.status, /not keep|nothing was kept/i.test(String(halfAnswer.data.message)), /Reload this page/.test(String(halfAnswer.data.message))], [503, false, true]);
+  is("and that page offers to send it", /Send it again<\/button>/.test(await page(half.cookie, halfStore.sid)), true);
+  const formWords = readFileSync("components/takedown-appeal-form.tsx", "utf8");
+  is("the form's own fallbacks never say nothing was sent, since a reply lost on the way may follow a kept and sent request", /Nothing was sent/.test(formWords), false);
 
   part("The studio's notice links here for whoever may change the settings");
   const studio = readFileSync("app/studio/page.tsx", "utf8");

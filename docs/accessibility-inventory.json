@@ -1612,6 +1612,7 @@
     "components/store-socials-row.tsx",
     "components/store-tip-box.tsx",
     "components/store-tracking.tsx",
+    "components/store-trust-card.tsx",
     "components/structured-data.tsx",
     "components/studio-app.tsx",
     "components/studio-header.tsx",

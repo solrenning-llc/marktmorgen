@@ -2587,6 +2587,8 @@ export async function noteSession(
   // affiliate's own page both say out loud.
   let how: Credit = "click";
   if (!AFFILIATE_ID_PATTERN.test(aff)) {
+    // Program off: no code, bond or contact credits (as the sweep and PayPal).
+    if (!affiliatesOn(store)) return;
     // Then the code the buyer typed, which is the only trace a sale made on a
     // podcast or from a stage leaves at all (lib/affiliate-codes.ts). Read only
     // for a sale that carries a code: a sale with none never waits on that read.

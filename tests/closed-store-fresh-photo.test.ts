@@ -344,6 +344,37 @@ async function main(): Promise<void> {
     is("the record is gone then", await storeForEmail(email), null);
   }
 
+  part("Claude 7's LEVE on #3643: a store with no id given one while it closes is still itself, and its record goes");
+  redis.clear();
+  {
+    const email = "legacy@example.com";
+    await claimHandle(email, "legacyclose", "legacyclose", "");
+    await ensureStatsId(email);
+    // A store from before ids: its record written as such, with no id (sid "").
+    for (const key of redis.keys()) {
+      const raw = redis.run(["GET", key]);
+      if (typeof raw !== "string" || !raw.startsWith("{")) continue;
+      const value = JSON.parse(raw) as Record<string, unknown>;
+      if (value.handle === "legacyclose" && typeof value.sid === "string") redis.run(["SET", key, JSON.stringify({ ...value, sid: "" })]);
+    }
+    // And no id names it yet: the one the claim made is taken away with it (a store from before ids never had one).
+    for (const key of redis.keys().filter((k) => k.startsWith("nl:store:id:"))) redis.run(["DEL", key]);
+    const before = await storeForEmail(email);
+    is("setup: a store from before ids", before?.sid ?? null, "");
+    // Its first use by id lands between the walk's read and the read again under the lock (ensureStoreId).
+    inWindow = async () => {
+      await ensureStoreId(email);
+    };
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const report = await erase(T);
+    is("it is prepared, walked and finished as itself", [report.stores, report.finished], [1, 1]);
+    is("its record is gone, never kept as another store's", await storeForEmail(email), null);
+    is("and it left the line", redis.run(["ZSCORE", DUE_KEY, email]), null);
+    const given = String(redis.keys().find((key) => key.startsWith("nl:store:id:")) ?? "");
+    is("the id it was given is released too, never left naming it", given, "");
+  }
+
   part("Claude 6's P4 on #3643: an account moved while an extra store's erasure runs keeps the erased store's id at neither address");
   redis.clear();
   {

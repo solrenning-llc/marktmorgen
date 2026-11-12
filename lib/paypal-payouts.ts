@@ -6,6 +6,7 @@
  *   nl:pp:open:<statsId>     batches sent and not yet settled: what each affiliate was sent
  *   nl:pp:item:<item>        a PayPal payout item already written into the book (once)
  *   nl:pp:stores             the stores with a batch still open, for the daily job
+ *   nl:pp:pace:<statsId>     a reading asked for by a view, so the next views for a few minutes do not ask PayPal again
  *
  * How it works, and why this way. PayPal's Payouts API only ever sends money
  * from the balance of the account whose app makes the call. So the creator
@@ -37,6 +38,7 @@ import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affilia
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { claimMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
@@ -59,6 +61,9 @@ const linkKey = (statsId: string) => `nl:pp:${statsId}`;
 const openKey = (statsId: string) => `nl:pp:open:${statsId}`;
 const itemKey = (item: string) => `nl:pp:item:${item}`;
 const STORES = "nl:pp:stores";
+const paceKey = (statsId: string) => `nl:pp:pace:${statsId}`;
+/** How long a reading asked for by a view stands for the next views (settlePayPal, `paced`). */
+const SETTLE_PACE_SECONDS = 300;
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
 
 type Link = { client: string; secret: string; at: number; auto: boolean };
@@ -451,8 +456,13 @@ async function earlierItemMark(item: string): Promise<boolean> {
  * Reads every open batch from PayPal and writes into the book what PayPal
  * says was paid — once per item, whoever asks first. Items PayPal could not
  * pay go back to owed; the rest stay on their way.
+ *
+ * `paced`: asked for by a view (the studio's affiliates page, the route's "settle"), not by the daily job. Each reading
+ * is a new token from the creator's PayPal app and up to 10 pages of every open batch, so one reading is made per store
+ * every SETTLE_PACE_SECONDS and the views between them ask PayPal nothing: everyone is still on their way, as they were,
+ * until the next reading or the daily job (which is never paced). A pace mark that cannot be confirmed asks nothing.
  */
-export async function settlePayPal(store: Store): Promise<Settled> {
+export async function settlePayPal(store: Store, options: { paced?: boolean } = {}): Promise<Settled> {
   const out: Settled = { paid: 0, released: 0, waiting: 0 };
   if (!store.statsId || !isRedisConfigured()) return out;
   const statsId = store.statsId;
@@ -461,8 +471,10 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     await redisPipeline([["SREM", STORES, store.sid]]);
     return out;
   }
+  const onTheirWayNow = () => ({ ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) });
+  if (options.paced && (await claimMark(paceKey(statsId), SETTLE_PACE_SECONDS)) !== "ours") return onTheirWayNow();
   const auth = await bearer(store).catch(() => null);
-  if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  if (!auth) return onTheirWayNow();
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a

@@ -44,7 +44,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
   const { store } = view;
 
   // What PayPal paid since the last look is written into the book first (lib/paypal-payouts.ts).
-  await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));
+  await settlePayPal(store, { paced: true }).catch((error) => console.error("settling PayPal payouts failed", error));
   const [paypal, away, owners, codeList, checks] = await Promise.all([
     readPayPal(store).catch(() => null),
     onTheirWay(store).catch(() => null),

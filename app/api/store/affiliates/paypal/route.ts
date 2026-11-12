@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
       return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" || result.reason === "unknown" ? 502 : 409);
     }
     if (op === "settle") {
-      return Response.json({ ok: true, ...(await settlePayPal(store)) });
+      return Response.json({ ok: true, ...(await settlePayPal(store, { paced: true })) });
     }
     return fail("op");
   } catch (error) {

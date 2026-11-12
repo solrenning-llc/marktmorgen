@@ -9,8 +9,10 @@
  * reads. It fails closed:
  *
  *   - no complete, valid record set: nobody can buy (today: none is recorded);
- *   - fewer than two location pieces, or a piece that is not a country code:
- *     refused as unknown, never guessed;
+ *   - location comes from two named sources, the visitor's IP country and the
+ *     billing country, never from a bare list that could hold the same source
+ *     twice; a missing, extra or unreadable source, or a piece that is not a
+ *     country code: refused as unknown, never guessed;
  *   - any piece that points to a refusing jurisdiction refuses, even when
  *     another piece points elsewhere;
  *   - a territory whose VAT or sales-tax status was not verified against an
@@ -23,10 +25,12 @@ import { DEEMED_SUPPLIER_RECORDS, deemedSupplierReady, type DeemedSupplierRecord
 import {
   ASSIGNED_COUNTRY_CODES,
   EU_MEMBER_STATES,
+  LOCATION_EVIDENCE_SOURCES,
   MIN_LOCATION_EVIDENCE,
   UNVERIFIED_TERRITORIES,
   candidateJurisdictions,
   checkoutLocationDecision,
+  type LocationEvidence,
 } from "@/lib/jurisdiction-refusal-rules";
 import { done, is, part } from "./check";
 
@@ -40,13 +44,19 @@ const record = (jurisdiction: DeemedSupplierRecord["jurisdiction"], treatment: D
 });
 /** EU and UK consumers refused; US and other collected. Invented for the test. */
 const SYNTHETIC: DeemedSupplierRecord[] = [record("EU", "refuse-consumers"), record("UK", "refuse-consumers"), record("US", "collect"), record("other", "collect")];
-const decide = (countries: readonly (string | null | undefined)[], records: unknown = SYNTHETIC) => checkoutLocationDecision(countries, records);
+type Piece = string | null | undefined;
+/** The two sources by name: where the visitor's IP is, and the billing country the buyer gives. */
+const at = (ipCountry: Piece, billingCountry: Piece): LocationEvidence => ({ ipCountry, billingCountry });
+const decide = ([ip, billing]: readonly [Piece, Piece], records: unknown = SYNTHETIC) => checkoutLocationDecision(at(ip, billing), records);
+/** A shape the type does not allow, as a careless caller could still send it. */
+const raw = (value: unknown, records: unknown = SYNTHETIC) => checkoutLocationDecision(value as LocationEvidence, records);
+const reasonOf = (got: ReturnType<typeof checkoutLocationDecision>) => (got.allowed ? null : got.reason);
 
 part("Today nothing is recorded, so nobody can buy");
 is("the real records are still empty", DEEMED_SUPPLIER_RECORDS.length, 0);
 is("and the gate still says not ready", deemedSupplierReady(), false);
-for (const where of [["US", "US"], ["DE", "DE"], ["BR", "BR"]]) {
-  const today = checkoutLocationDecision(where);
+for (const where of [["US", "US"], ["DE", "DE"], ["BR", "BR"]] as const) {
+  const today = checkoutLocationDecision(at(where[0], where[1]));
   is(`${where.join("+")} is refused as not recorded`, [today.allowed, today.allowed ? null : today.reason], [false, "not-recorded"]);
 }
 
@@ -55,17 +65,38 @@ is("a jurisdiction recorded twice", decide(["US", "US"], [...SYNTHETIC, record("
 is("a jurisdiction missing", decide(["US", "US"], SYNTHETIC.slice(0, 3)).allowed, false);
 is("not a list", decide(["US", "US"], { US: "collect" }).allowed, false);
 
-part("Location evidence: two pieces, each a country code");
-is("two pieces are required", MIN_LOCATION_EVIDENCE, 2);
-const one = decide(["US"]);
-is("one piece is not enough", [one.allowed, one.allowed ? null : one.reason], [false, "location-unknown"]);
-const none = decide([]);
-is("no piece at all", [none.allowed, none.allowed ? null : none.reason], [false, "location-unknown"]);
+part("Location evidence: two named sources, each a country code");
+is("the sources are the IP country and the billing country", [...LOCATION_EVIDENCE_SOURCES], ["ipCountry", "billingCountry"]);
+is("two pieces are required, one per source", MIN_LOCATION_EVIDENCE, 2);
+is("the IP and the billing country agreeing is the usual case, and sells", decide(["US", "US"]), { allowed: true, jurisdictions: ["US"] });
+const one = raw({ ipCountry: "US" });
+is("only the IP country: not enough", [one.allowed, reasonOf(one)], [false, "location-unknown"]);
+const onlyBilling = raw({ billingCountry: "US" });
+is("only the billing country: not enough", [onlyBilling.allowed, reasonOf(onlyBilling)], [false, "location-unknown"]);
+const none = raw({});
+is("no piece at all", [none.allowed, reasonOf(none)], [false, "location-unknown"]);
 for (const bad of [null, undefined, "", "us", "USA", "1A", "XX", "ZZ", "T1", "AA", "QM"]) {
-  const got = decide(["US", bad]);
-  is(`${JSON.stringify(bad)} is unknown, never guessed`, [got.allowed, got.allowed ? null : got.reason], [false, "location-unknown"]);
+  const asIp = decide([bad, "US"]);
+  const asBilling = decide(["US", bad]);
+  is(`${JSON.stringify(bad)} is unknown, never guessed, from either source`, [reasonOf(asIp), reasonOf(asBilling)], ["location-unknown", "location-unknown"]);
 }
-is("more than two pieces are all read", decide(["US", "US", "FR"]).allowed, false);
+
+part("Two pieces must be two sources, not one source given twice (LEVE on #3681, 11/11 18:18)");
+// A bare list says nothing about where each piece came from, so the same IP country could be sent twice and pass as two.
+const bareList = raw(["US", "US"]);
+is("a bare list of two countries is refused as unknown, though both are US", [bareList.allowed, reasonOf(bareList)], [false, "location-unknown"]);
+is("so is a bare list of three", reasonOf(raw(["US", "US", "US"])), "location-unknown");
+const thirdSource = raw({ ipCountry: "US", billingCountry: "US", cardCountry: "FR" });
+is("a source this rule does not name is never ignored: unknown", [thirdSource.allowed, reasonOf(thirdSource)], [false, "location-unknown"]);
+const misnamed = raw({ ipCountry: "US", ipCountryAgain: "US" });
+is("the IP country under a second name is not a billing country", reasonOf(misnamed), "location-unknown");
+const getter = raw({ ipCountry: "US", get billingCountry() { return "US"; } });
+is("a source read through a getter is unknown", reasonOf(getter), "location-unknown");
+const inherited = raw(Object.assign(Object.create({ billingCountry: "US" }) as object, { ipCountry: "US" }));
+is("an inherited source is unknown", reasonOf(inherited), "location-unknown");
+for (const shape of [null, undefined, "US", 2, new Map([["ipCountry", "US"], ["billingCountry", "US"]])]) {
+  is(`${Object.prototype.toString.call(shape)} is not location evidence`, reasonOf(raw(shape)), "location-unknown");
+}
 
 part("Only assigned ISO 3166-1 codes are countries; every other two letters are unknown (Claude 3 on #3681, MEDIUM)");
 // Never assigned (JJ, OO, WW, ZX), Greece's VAT prefix (EL, never a country code: Greece is GR), and codes ISO only keeps
@@ -114,8 +145,8 @@ is("no unverified territory is also an EU member", UNVERIFIED_TERRITORIES.filter
 
 part("What the buyer reads");
 const refused = decide(["DE", "DE"]);
-const unknown = decide(["US"]);
-const notRecorded = checkoutLocationDecision(["US", "US"]);
+const unknown = raw({ ipCountry: "US" });
+const notRecorded = checkoutLocationDecision(at("US", "US"));
 for (const [name, got] of [["refused", refused], ["unknown", unknown], ["not recorded", notRecorded]] as const) {
   const words = got.allowed ? "" : got.buyerMessage;
   is(`${name}: says nothing was charged`, /Nothing was charged\./.test(words), true);

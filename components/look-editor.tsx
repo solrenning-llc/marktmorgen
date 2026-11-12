@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { formatMoney } from "@/lib/money";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -139,6 +140,8 @@ export function LookEditor({
   const adjusted = colours.accent !== accent;
   // Emails need 7:1 for every word, links included (369 [SU2]); when that moves the color, the creator is told which.
   const emailNotice = useMemo(() => emailColourNotice({ theme, accent, font }), [theme, accent, font]);
+  // Picks wait for "Save look": leaving the page asks first, so they are not lost by accident (AX274, WCAG 3.3.6).
+  useLeaveGuard(changed && status.kind !== "working");
 
   async function post(path: string, body: unknown): Promise<{ ok?: boolean; error?: string }> {
     const response = await fetch(path, {

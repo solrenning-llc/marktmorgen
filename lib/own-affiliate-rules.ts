@@ -70,12 +70,14 @@ export function ownCommission(input: OwnCommissionInput): OwnCommission {
     input.paidOutCents > 0 ? { kind: "take_back", takeBackCents: input.paidOutCents } : { kind: "none", reason };
 
   if (!input.succeeded) return stop("not_paid");
-  const answers = [input.referral.samePerson, input.referral.sameCard, input.referral.sameDevice, input.referral.sameAddress];
-  if (answers.some((answer) => answer === true)) return stop("self_referral");
-  if (answers.some((answer) => answer !== false)) return { kind: "unknown", reason: "referral_unknown" };
+  // Certain stops first: a dispute or a full refund earns nothing whatever the self-referral signals say, so what was
+  // paid out is taken back even while one of them is unknown (review of #3853).
   if (input.disputed) return stop("disputed");
   const kept = input.amountCents - input.refundedCents;
   if (kept <= 0) return stop("refunded");
+  const answers = [input.referral.samePerson, input.referral.sameCard, input.referral.sameDevice, input.referral.sameAddress];
+  if (answers.some((answer) => answer === true)) return stop("self_referral");
+  if (answers.some((answer) => answer !== false)) return { kind: "unknown", reason: "referral_unknown" };
 
   const owedCents = Math.floor((kept * input.rateBps) / 10_000);
   if (input.paidOutCents > owedCents) return { kind: "take_back", takeBackCents: input.paidOutCents - owedCents };

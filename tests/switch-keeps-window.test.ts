@@ -544,8 +544,10 @@ async function main(): Promise<void> {
     // IRPF 15% and IOF 0.38% (MOST_CORRECT_READING), the IOF taken on the profit sent home before the IRPF.
     const taxShare = (MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000;
     const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
-    is("11: Store, Studio and Scale keep 45.12, 313.84 and 703.28 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.84", "703.28"]);
-    is("11: and 37.06, 258.72 and 580.01 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.72", "580.01"]);
+    // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
+    // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
+    is("11: Store, Studio and Scale keep 45.12, 313.83 and 703.27 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.83", "703.27"]);
+    is("11: and 37.06, 258.71 and 580.00 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.71", "580.00"]);
   } finally {
     Date.now = realNow;
   }

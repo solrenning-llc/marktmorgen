@@ -150,6 +150,20 @@ async function main(): Promise<void> {
   is("and brings back the five parts already written", stoppedSays.value?.sections.map((s) => s.title), outlineOf(5).sections.map((s) => s.title));
   is("the parts never asked for never said they started", seen.some((l) => ["section-6", "section-7", "section-8"].includes(l.step)), false);
 
+  part("The creator's Stop, as the page asks it (markAiStop), is taken while the first batch runs (#3474 over #3435)");
+  fresh();
+  let stopTaken: boolean | null = null;
+  onCall = (n) => {
+    if (n === 1) {
+      void ai.markAiStop(store, "runfilepagestop1").then((taken) => {
+        stopTaken = taken;
+      });
+    }
+  };
+  const asked = (await writeFileSections(store, { productTitle: "Recipes", outline: outlineOf(8), notes: "" }, stepsOf("runfilepagestop1", []))) as typeof stoppedSays;
+  is("the stop is kept, over the run's own live mark", stopTaken, true);
+  is("so the second batch is never asked for", [calls, asked.reason, asked.returned], [5, "stopped", 3]);
+
   part("An unknown reply about the stop asks for nothing more");
   fresh();
   before = await ai.aiLeft(store);

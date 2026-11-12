@@ -18,6 +18,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { PAYPAL_REFUND_TELL_RETRY } from "./plan-cost-registry";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const { captureOrder, openOrder } = sales;
 const { addEndpoint, recentMessages, setSendHooksForTests, webhooksView } = hooks;
@@ -26,7 +27,6 @@ process.env.PAYPAL_PARTNER_CLIENT_ID = "AZpartnerClientId0123456789";
 process.env.PAYPAL_PARTNER_SECRET = "EPpartnerSecret0123456789";
 process.env.PAYPAL_PARTNER_MERCHANT_ID = "PARTNERMERCH01";
 process.env.PAYPAL_BN_CODE = "NimbusLabs_SP";
-process.env.RESEND_API_KEY = "re_test_paypal_refund_told_retry";
 delete process.env.PAYPAL_ENV;
 
 /** The test's clock: Date.now moved forward by `shift`, which lib/redis-memory.ts reads too, so marks expire with it. */
@@ -43,10 +43,10 @@ const payers = new Map<string, string>();
 const orderId = (n: number) => `5O190127TN36481${String(n).padStart(2, "0")}`;
 let payer = "";
 
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+/** PayPal and every other host but the senders; the receipt goes through the SES and Resend stand-ins (tests/ses-mail-fixture.ts). */
+const paypal = async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.resend.com") return json({ id: "e" });
   if (url.hostname !== "api-m.paypal.com") return json({ object: "list", data: [], has_more: false });
   const method = init?.method ?? "GET";
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AApartner", token_type: "Bearer", expires_in: 32400 });
@@ -70,7 +70,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const cap = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
   if (cap) return json({ id: cap, status: captures.get(cap) ?? "COMPLETED" });
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
-}) as typeof fetch;
+};
+const mail = installSesMailFixture({ fallback: paypal });
 setSendHooksForTests({ fetch: { resolve: async () => [{ address: "127.0.0.1", family: 4 }] } });
 
 /** Telling fails while `failing` holds: the deletion print's read gets no answer, as when Redis does not reply. */
@@ -107,6 +108,8 @@ console.error = (...args: unknown[]) => {
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true);
   const OWNER = "paypal-told@example.com";
   await claimHandle(OWNER, "paypal-told-shop", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);

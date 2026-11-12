@@ -36,7 +36,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
 import type { Store } from "@/lib/store";
@@ -145,8 +145,12 @@ export async function forgetBuyer(store: Store, email: string): Promise<boolean>
  */
 export async function forgetBondPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["HDEL", bondKey(statsId), buyerHash(statsId, email)]]);
-  return Number(gone) || 0;
+  // Read exactly (unknown is never zero): a reply in another shape throws, so the erasure reports this part as
+  // not done and can be pressed again, never "nothing to delete" while the bond may still be kept.
+  const replies = repliesFor(await redisPipeline([["HDEL", bondKey(statsId), buyerHash(statsId, email)]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of a person's affiliate bond");
+  return gone;
 }
 
 /**

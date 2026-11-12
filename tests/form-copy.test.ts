@@ -13,6 +13,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { FormsEditor } from "@/components/forms-editor";
+import * as formCopyModule from "@/lib/form-copy";
 import { COPY_PREFIX, canCopy, copyBase, copyName, formCopy } from "@/lib/form-copy";
 import { END, MAX_FORM_NAME, MAX_FORMS, newFormId, parseForm, tierIssues, type FormDef } from "@/lib/forms";
 import { readForm, writeForm } from "@/lib/form-store";
@@ -60,6 +61,9 @@ async function main() {
   const longCopy = copyName(long, [`${COPY_PREFIX}${long}`.slice(0, MAX_FORM_NAME)]);
   is("never longer than a form's name may be: the original's name is shortened, never the number", [copyName(long, []).length <= MAX_FORM_NAME, longCopy.length <= MAX_FORM_NAME, longCopy.endsWith(" (2)"), copyName(long, []).startsWith(COPY_PREFIX)], [true, true, true, true]);
   is("an empty name still makes a name the server keeps", [copyName("   ", []), copyBase(" Copy of ")], ["Copy of form", ""]);
+  // Review of e974a02 (LOW): a number in the original's own name is part of it, not a copy's count.
+  is("a number that belongs to the name is kept", [copyName("Workshop (2026)", []), copyName("Application (2)", []), copyName("Copy of Workshop (2026)", [])], ["Copy of Workshop (2026)", "Copy of Application (2)", "Copy of Workshop (2026)"]);
+  is("a copy's own count is still dropped", [copyName("Copy of Workshop (2026) (2)", []), copyName("Copy of Application (3)", [])], ["Copy of Workshop (2026)", "Copy of Application"]);
 
   part("What the copy holds");
   const copy = formCopy(quiz, [quiz.name]);
@@ -115,6 +119,12 @@ async function main() {
     ],
     [true, true, true, true, true],
   );
+  // Review of e974a02 (LOWs): the note says results only for a form that has them, and is read with the name field
+  // the focus moves to, since a live region mounted already filled is often not announced.
+  const note = (formCopyModule as Record<string, unknown>).copyNote as ((from: string, form: FormDef) => string) | undefined;
+  const plain = { ...quiz, outcomes: [], scoring: undefined, categories: undefined } as FormDef;
+  is("the note says results only for a quiz that has them", [note ? note("Intake", plain).includes("results") : null, note ? note("Quiz", quiz).includes("the same questions and results") : null], [false, true]);
+  is("the name field is described by the note while it shows", [source.includes('aria-describedby={copiedFrom !== null && !draft.id ? "form-copy-note" : undefined}'), source.includes('id="form-copy-note"'), source.includes("{copyNote(copiedFrom, draft)}")], [true, true, true]);
   is("editing a saved form or canceling forgets the note", [source.includes("setCopiedFrom(null); setDraft(structuredClone(form));"), source.includes("setDraft(null); setError(null); setCopiedFrom(null);")], [true, true]);
   done();
 }

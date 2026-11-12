@@ -30,7 +30,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
+import { NIMBUS_FROM, type SendOutcome, sendEmail, sendEmailOutcome, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -1000,23 +1000,25 @@ export async function sendDripEmails(
           await releaseMark(mark, value);
         }
         if (claimed !== "ours") continue;
-        const ok = await sendDripEmail(store, product, unit, student.email, origin);
-        if (ok) counts.sent += 1;
-        // Not sent: its own mark let go (compare-and-delete, never another's; never throws, so the pass goes on), and
-        // a later pass sends it; a mark that cannot be let go stays. Not yet told apart (Claude 2 on #3276, finding
-        // 2, open): sendEmail's false is also an SES answer lost after the POST, which a later pass may send again.
-        else await releaseMark(mark, value);
+        const outcome = await sendDripEmail(store, product, unit, student.email, origin).catch(() => "uncertain" as const);
+        if (outcome === "sent") counts.sent += 1;
+        // Refused (known not taken): its own mark let go (compare-and-delete, never another's; never throws, so the
+        // pass goes on), and a later pass sends it; a mark that cannot be let go stays. Unknown (a 5xx, a reply lost
+        // after the request, a throw from inside the send) may already be in the inbox, so the mark is kept and a
+        // later pass never sends it again (Claude 2 on #3276, finding 2).
+        else if (outcome === "refused") await releaseMark(mark, value);
+        else console.error("a drip email may have gone; kept as sent", course.id, unit.id);
       }
     }
   }
   return counts;
 }
 
-async function sendDripEmail(store: Store, product: Listing, unit: CourseModule, email: string, origin: string): Promise<boolean> {
+async function sendDripEmail(store: Store, product: Listing, unit: CourseModule, email: string, origin: string): Promise<SendOutcome> {
   // In the store's language (lib/buyer-words/courses.ts); the button it
   // names is the course page's own.
   const w = coursesWords(store.language);
-  return sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  return sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
     to: email,
     subject: w.dripSubject(product.title, unit.title).slice(0, 200),

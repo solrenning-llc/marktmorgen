@@ -168,6 +168,8 @@ export const en = {
   unitSaving: (percent: number) => `save ${percent}%`,
   chooseOptionFor: (title: string) => `Choose an option for ${title}`,
   chooseOne: "Choose one",
+  /** Above the price options, when a link named one and it is chosen for that reason (630 [HN6](27), lib/option-link-rules.ts). */
+  optionFromLink: (label: string) => `You came here for ${label}, so it is chosen below. You can choose another.`,
   recommended: "Recommended",
   recommendedAfter: " (recommended)",
   howToPayFor: (title: string) => `How to pay for ${title}`,

@@ -82,7 +82,7 @@ import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
-import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
+import { grantUnlessErased, importedFor, importedFrom, importedKey } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
@@ -788,9 +788,10 @@ async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipp
 /**
  * Notes each key as seen on its row; answers, for each, the earlier row it
  * was seen on, or null when this is the first. Seeing the same row again
- * (a step repeated after a failure) is not a repeat.
+ * (a step repeated after a failure) is not a repeat: its index is put in
+ * `tried`, when given, for a step that must tell its own earlier writes.
  */
-async function firstSeen(job: ImportJob, keys: { key: string; line: number }[]): Promise<(number | null)[]> {
+async function firstSeen(job: ImportJob, keys: { key: string; line: number }[], tried?: Set<number>): Promise<(number | null)[]> {
   if (!keys.length) return [];
   const answers = await redisPipeline([
     ...keys.map(({ key, line }) => ["HSETNX", seenKey(job.id), key, String(line)]),
@@ -803,7 +804,9 @@ async function firstSeen(job: ImportJob, keys: { key: string; line: number }[]):
   return keys.map(({ line }, i) => {
     if (!again[i]) return null;
     const earlier = Number(Array.isArray(lines) ? lines[i] : NaN);
-    return Number.isFinite(earlier) && earlier !== line ? earlier : null;
+    if (Number.isFinite(earlier) && earlier !== line) return earlier;
+    tried?.add(i);
+    return null;
   });
 }
 
@@ -1150,6 +1153,18 @@ function classifyPurchases(listings: Awaited<ReturnType<typeof readListings>>, r
   return { valid, problems, skipped };
 }
 
+/**
+ * Of these rows, whose grant answered "already", the ones this import itself gave: their record names this import's
+ * job (lib/imported-purchases.ts). One HGET a row, read exactly (CX-123 rule 24): any reply but text or nothing
+ * throws, the step left as it was, never taken as somebody else's grant. Nothing is read when there are no rows.
+ */
+async function grantedByThisImport<T extends { email: string; productId: string }>(statsId: string, job: ImportJob, rows: T[]): Promise<Set<T>> {
+  if (!rows.length) return new Set();
+  const replies = repliesFor(await redisPipeline(rows.map((v) => ["HGET", importedKey(statsId, v.email), v.productId])), rows.length);
+  if (!replies || replies.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("the purchases an import gave before");
+  return new Set(rows.filter((v, i) => importedFrom([v.productId, replies[i]])[0]?.job === job.id));
+}
+
 async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Promise<void> {
   const statsId = store.statsId;
   if (!statsId) throw new Error("the store has no statsId");
@@ -1165,7 +1180,9 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
     skipped.push({ line: v.line, column: "email", problem: DELETED, value: "" });
     return false;
   });
-  const seen = await firstSeen(job, kept.map((v) => ({ key: `p:${v.email}|${v.productId}`, line: v.line })));
+  const tried = new Set<number>();
+  const seen = await firstSeen(job, kept.map((v) => ({ key: `p:${v.email}|${v.productId}`, line: v.line })), tried);
+  const retried = new Set(kept.filter((_, i) => tried.has(i)));
   const repeats: { v: (typeof kept)[number]; earlier: number }[] = [];
   const fresh = kept.filter((v, i) => {
     if (seen[i] === null) return true;
@@ -1175,6 +1192,9 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
   // Checked again where each is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since is left out
   // the same way, nothing written for them, and let go from the rows the import saw.
   const given = await grantUnlessErased(statsId, job.id, fresh.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), erasedCheck(listId), store).catch(writeUnknown);
+  // A row this step saw before, in an earlier try that failed after the grant (issue #3957), answers "already": when
+  // its grant is this import's own, it is still added and still emailed, never lost between the grant and the queue.
+  const mine = await grantedByThisImport(statsId, job, fresh.filter((v, i) => given[i] === "already" && retried.has(v)));
   // A repeated row is said once that step has answered: of an address it found deleted, as deleted, by its row only.
   const goneNow = new Set(fresh.filter((_, i) => given[i] === "erased").map((v) => v.email));
   for (const { v, earlier } of repeats) {
@@ -1186,7 +1206,7 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
     if (answer === "erased") {
       skipped.push({ line: fresh[i].line, column: "email", problem: DELETED, value: "" });
       unseen.push(`p:${fresh[i].email}|${fresh[i].productId}`);
-    } else if (answer === "new") {
+    } else if (answer === "new" || mine.has(fresh[i])) {
       job.counts.added += 1;
       toMail.push(fresh[i].email);
     } else job.counts.already += 1;

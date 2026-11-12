@@ -132,21 +132,49 @@ export async function inviteMembers(
     { until: now + longest * 1000, bytes: made.reduce((sum, m) => sum + m.link, 0) },
   ], now);
   const answers = erased ? await invitedUnlessErased(statsId, made, erased) : await redisPipeline(made.map(({ field, value }) => ["HSETNX", invitesKey(statsId), field, value]));
-  const fresh = made.filter((_, i) => Number(answers[i]) === 1);
   // An address already invited to that membership, or deleted from the store, was not written: its room goes back.
   const already = made.filter((_, i) => Number(answers[i]) !== 1).reduce((sum, m) => sum + m.bytes, 0);
   if (already > 0) await giveData(store, [{ slot: INVITES_SLOT, bytes: already }], now);
+  // One already invited by this same job and not kept was written by an earlier try of this step that failed before
+  // its link, its reminder or its email were seen to (issue #3957): its link and reminder are set again from its own
+  // record (the same token, the same renewal day) and it answers as new, so the import queues its email and counts it
+  // as added. Its room was taken by that earlier try, so it is given back above with the others not written now.
+  const again = await ownInvites(statsId, job, made.filter((_, i) => Number(answers[i]) === 0));
+  const fresh = [
+    ...made.filter((_, i) => Number(answers[i]) === 1).map(({ row, field, token }) => ({ renews: row.renews, field, token })),
+    ...[...again].map(([field, invite]) => ({ renews: invite.r, field, token: invite.t })),
+  ];
   if (fresh.length) {
-    const reminders = fresh.flatMap(({ row, field }) => {
-      const when = reminderAt(row.renews, now);
+    const reminders = fresh.flatMap(({ renews, field }) => {
+      const when = reminderAt(renews, now);
       return when ? [when, `${store.sid}|${field}`] : [];
     });
     await redisPipeline([
-      ...fresh.map(({ row, field, token }) => ["SET", linkKey(token), JSON.stringify({ s: statsId, f: field }), "EX", linkSeconds(row.renews, now)]),
+      ...fresh.map(({ renews, field, token }) => ["SET", linkKey(token), JSON.stringify({ s: statsId, f: field }), "EX", linkSeconds(renews, now)]),
       ...(reminders.length ? [["ZADD", DUE_KEY, ...reminders]] : []),
     ]);
   }
-  return made.map(({ field }, i) => (Number(answers[i]) === 1 ? field : Number(answers[i]) === -1 ? false : null));
+  return made.map(({ field }, i) => (Number(answers[i]) === 1 || again.has(field) ? field : Number(answers[i]) === -1 ? false : null));
+}
+
+/**
+ * Of these invitations found already written, the ones this same job wrote and nobody has kept yet, by field: one
+ * HMGET, read exactly (CX-123 rule 24). A reply in any other shape throws, so the step is left as it was and done
+ * again, never taken as somebody else's. Nothing is read when none was found already written.
+ */
+async function ownInvites(statsId: string, job: string, found: { row: { email: string; productId: string }; field: string }[]): Promise<Map<string, Invite>> {
+  const own = new Map<string, Invite>();
+  if (!found.length) return own;
+  const replies: unknown = await redisPipeline([["HMGET", invitesKey(statsId), ...found.map((f) => f.field)]]);
+  const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!Array.isArray(reply) || reply.length !== found.length || !reply.every((raw) => raw === null || typeof raw === "string")) {
+    throw new Error("the invitations already written could not be read");
+  }
+  found.forEach(({ row, field }, i) => {
+    const invite = parseInvite(reply[i]);
+    if (invite && invite.job === job && !invite.kept && TOKEN_PATTERN.test(invite.t) && invite.e === normaliseEmail(row.email) && invite.p === row.productId) own.set(field, invite);
+  });
+  return own;
 }
 
 /**

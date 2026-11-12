@@ -311,24 +311,10 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
 
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  // An answer that is not one list is unknown, never "no earlier versions" (CX-123 rule 24; audit of the API routes,
-  // 11 Nov 2026): app/api/store/page-versions then refuses, and the editor says they could not be read just now.
-  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
-  const list: unknown[] = reply[0];
-  const out: PageVersion[] = [];
-  for (const entry of list) {
-    if (typeof entry !== "string") continue;
-    const cut = entry.indexOf("\n");
-    const at = Number(entry.slice(0, cut));
-    if (cut < 1 || !Number.isFinite(at)) continue;
-    try {
-      out.push({ at, page: parsePage(JSON.parse(entry.slice(cut + 1))) });
-    } catch {
-      // A version that cannot be read is left out, never shown half.
-    }
-  }
-  return out;
+  // Read exactly (CX-123 rule 24; audit of the API routes, 11 Nov 2026, and Claude 7 on #3805): a reply that is not one
+  // list, and a kept entry that is not a version, are unknown, never "no earlier versions" or the part that read.
+  // app/api/store/page-versions then refuses, and the editor says they could not be read just now.
+  return (await readVersionsExact(statsId, productId)).versions;
 }
 
 /**

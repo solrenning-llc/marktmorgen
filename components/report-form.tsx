@@ -4,7 +4,7 @@ import { useState } from "react";
 import { UrlField } from "@/components/url-field";
 import { type LinkCheck, checkWith } from "@/lib/url-check";
 import { reportAnswer } from "@/lib/report-response";
-import { MAX_REPORT_CONTACT, MAX_REPORT_NAME, MAX_REPORT_TEXT, MAX_REPORT_URL, REPORT_PROBLEMS, type ReportKind } from "@/lib/takedown-rules";
+import { INTIMATE_IMAGE_STATEMENTS, MAX_REPORT_CONTACT, MAX_REPORT_NAME, MAX_REPORT_TEXT, MAX_REPORT_URL, REPORT_PROBLEMS, type ReportKind } from "@/lib/takedown-rules";
 
 // The page's address, checked when its field is left by the reading the notice is held to (lib/takedown-rules.ts), and required.
 const URL_SHAPE = checkWith((raw) => (/^https?:\/\/\S+$/i.test(raw) ? raw : null), REPORT_PROBLEMS.url, MAX_REPORT_URL);
@@ -89,7 +89,7 @@ export function ReportForm({ url: given }: { url: string }) {
             ["copyright", "Copyright infringement"],
             ["other", "Other illegal content"],
             ["child_safety", "A child being sexually exploited"],
-            ["intimate_image", "An intimate image of me shared without my consent"],
+            ["intimate_image", "An intimate image of me, or of the person I represent, shared without consent"],
           ] as const).map(([value, label]) => (
             <label key={value} className="flex items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3 text-ink">
               <input type="radio" name="kind" value={value} checked={kind === value} onChange={() => setKind(value)} className="size-5 accent-violet-brand" />
@@ -151,7 +151,7 @@ export function ReportForm({ url: given }: { url: string }) {
             {copyright
               ? "I believe in good faith that the use described above is not authorized by the copyright owner, its agent or the law."
               : intimate
-                ? "I believe in good faith that this intimate image of me was published without my consent."
+                ? INTIMATE_IMAGE_STATEMENTS.goodFaith
                 : "I believe in good faith that the content described above is illegal, for the reasons I gave."}
           </span>
         </label>
@@ -161,7 +161,7 @@ export function ReportForm({ url: given }: { url: string }) {
             {copyright
               ? "The information in this notice is accurate, and, under penalty of perjury, I am the owner of the copyright or authorized to act on the owner's behalf."
               : intimate
-                ? "The information in this request is accurate, and I am the person shown or authorized to act for them."
+                ? INTIMATE_IMAGE_STATEMENTS.accurate
                 : "The information in this notice is accurate and complete to the best of my knowledge."}
           </span>
         </label>

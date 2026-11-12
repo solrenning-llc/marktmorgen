@@ -4,10 +4,14 @@ import { LegalPage, LegalSection } from "@/components/legal-page";
 import { TakedownButton } from "@/components/takedown-actions";
 import { openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
 import { NewTab } from "@/components/new-tab";
+import { REPORT_TITLES, statedBySender } from "@/lib/takedown-rules";
 
 export const metadata: Metadata = { title: "A notice — Marktmorgen", robots: { index: false, follow: false } };
 
 type Params = { params: Promise<{ token: string }> };
+
+/** The label over the sender's own words, for each kind of notice. */
+const WORK_LABELS = { copyright: "The work:", other: "Why:", child_safety: "What they added:", intimate_image: "Which image:" } as const;
 
 /**
  * One notice, opened from the email it was sent in (lib/takedown.ts): what it
@@ -19,6 +23,7 @@ export default async function TakedownPage({ params }: Params) {
   const opened = await openReport(token);
   if (!opened) notFound();
   const { report, store } = opened;
+  const stated = statedBySender(report.kind);
   // The product the address points at, however far down the list, and the first page of the rest.
   const pointed = store ? await reportedProduct(report, store) : null;
   const products = store ? [...(pointed && !pointed.hidden ? [pointed] : []), ...store.catalog.head.filter((p) => !p.hidden && p.id !== pointed?.id)] : [];
@@ -37,13 +42,25 @@ export default async function TakedownPage({ params }: Params) {
     }
   }
   return (
-    <LegalPage title={report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"} eyebrow={`Notice ${report.id}`} effective={null} legalNav={false} lastUpdated={new Date(report.at).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC"}>
+    <LegalPage title={REPORT_TITLES[report.kind]} eyebrow={`Notice ${report.id}`} effective={null} legalNav={false} lastUpdated={new Date(report.at).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC"}>
       <LegalSection title="What it says">
-        <p><strong className="text-black">Where:</strong> <a href={report.url} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-2 [overflow-wrap:anywhere]">{report.url}<NewTab /></a></p>
-        <p className="whitespace-pre-line [overflow-wrap:anywhere]"><strong className="text-black">{report.kind === "copyright" ? "The work:" : "Why:"}</strong> {report.work}</p>
+        {report.kind === "child_safety" ? (
+          // Not a link: nobody opens the reported content (docs/incident-response.md); the products below say which page it names.
+          <p className="[overflow-wrap:anywhere]"><strong className="text-black">Where:</strong> {report.url}. Do not open, download, forward or describe the reported content.</p>
+        ) : (
+          <p><strong className="text-black">Where:</strong> <a href={report.url} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-2 [overflow-wrap:anywhere]">{report.url}<NewTab /></a></p>
+        )}
+        {report.work ? (
+          <p className="whitespace-pre-line [overflow-wrap:anywhere]"><strong className="text-black">{WORK_LABELS[report.kind]}</strong> {report.work}</p>
+        ) : null}
         {report.original ? <p className="[overflow-wrap:anywhere]"><strong className="text-black">Original:</strong> {report.original}</p> : null}
-        <p><strong className="text-black">From:</strong> {report.name} &lt;{report.email}&gt;{report.contact ? `, ${report.contact}` : ""}</p>
-        <p><strong className="text-black">Signed:</strong> {report.signature}, with both statements confirmed.</p>
+        <p><strong className="text-black">From:</strong> {report.name ? <>{report.name} &lt;{report.email}&gt;</> : report.email}{report.contact ? `, ${report.contact}` : ""}</p>
+        {/* Only what the sender stated: a child-safety report asks for no signature or statement (Revisor 2 on #3587). */}
+        {stated ? (
+          <p><strong className="text-black">Signed:</strong> {report.signature}. {stated}</p>
+        ) : (
+          <p>They were asked for no signature or sworn statement, so that nobody is put off reporting.</p>
+        )}
       </LegalSection>
       {store ? (
         <LegalSection title={`The store @${store.handle}`}>

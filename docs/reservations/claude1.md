@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Defect (custo): the unused image optimizer is turned off | claude1/cost-vercel-image-optimizer | `next.config.ts`, `tests/c1-cost-image-optimizer.test.ts` | 12/11/2026 18h10 |

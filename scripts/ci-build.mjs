@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ciBuildNodeEnvironment } from "./ci-build-args.mjs";
+import { ciBuildTypeCheckEnvironment } from "./ci-build-args.mjs";
 
 if (process.env.GITHUB_ACTIONS !== "true") {
   throw new Error("ci-build.mjs is only for synthetic GitHub Actions builds; use npm run build elsewhere");
@@ -41,6 +42,8 @@ try {
     env: {
       ...process.env,
       ...ciBuildNodeEnvironment(process.platform, process.env.NODE_OPTIONS),
+      // Browser legs whose commit product-checks' verify job type-checks skip the identical check (ci-build-args.mjs).
+      ...ciBuildTypeCheckEnvironment(process.env),
       NEXT_FONT_GOOGLE_MOCKED_RESPONSES: join(root, "tests/e2e/google-fonts-mock.cjs"),
       E2E_FONT_ORIGIN: `http://127.0.0.1:${address.port}`,
     },

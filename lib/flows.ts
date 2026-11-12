@@ -168,11 +168,6 @@ const QUEUE = "nl:mail:flowq";
 const LEASE = "nl:mail:flowq:lease";
 const LEASE_SECONDS = 15 * 60;
 /**
- * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
- * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
- * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
- */
-/**
  * Moves each member from one sorted set to another, at a score, in one step (CX-123 rule 24): a member is written to
  * KEYS[2] only by whoever took it off KEYS[1], and the answer is 1 or 0 for each, in order. Taking due runs off the
  * queue into the lease, and putting them back, never leaves a run in neither: a reply lost after it ran leaves the run
@@ -203,6 +198,11 @@ async function moveMembers(from: string, to: string, score: number, members: str
   });
 }
 
+/**
+ * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
+ * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
+ * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
+ */
 const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v1
 if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
   redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])

@@ -17,6 +17,7 @@
  *   nl:depth:<statsId>:<productId>   hash: <blockId> (stopped there); _n (visitors) until 11 October 2026
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { cappedCount } from "@/lib/capped-count";
 import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 import { BLOCK_ID_PATTERN } from "@/lib/sales-page";
@@ -79,16 +80,44 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
   return { shares, visitors };
 }
 
+/** What was counted for a product: visitors, how many stopped at each block id, why they did not buy, how far into each video. */
+export type Depth = { visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach> };
+
 /** What was counted for a product: visitors, and how many stopped at each block id. */
-export async function readDepth(
-  statsId: string | null,
-  productId: string,
-): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach> }> {
+export async function readDepth(statsId: string | null, productId: string): Promise<Depth> {
   if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {} };
   const [raw] = await redisPipeline([["HGETALL", key(statsId, productId)]]);
   const pairs: Record<string, string> = {};
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
   else if (raw && typeof raw === "object") Object.assign(pairs, raw);
+  return depthOf(pairs);
+}
+
+/** A count as countDepth keeps it with HINCRBY by one: a whole number, never below zero, as text (Codex T on #3225). */
+const COUNT_TEXT = /^\d{1,15}$/;
+
+/**
+ * What was counted for a product, read only in its exact shape (CX-123 rule 24): the hash as a list of field and
+ * count pairs, where an empty list is a product nobody was counted for. A reply of another shape, a count that is not
+ * a whole number of zero or more, or no Redis throws UnknownReplyError, never zero visitors. readDepth stays as it is for the studio's
+ * own page.
+ */
+export async function readDepthExact(statsId: string, productId: string): Promise<Depth> {
+  const what = "how far down a page visitors read";
+  if (!isRedisConfigured()) throw new UnknownReplyError(what);
+  const list = stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId, productId)]]), 1)?.[0]);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+  // No prototype: a field is only ever a count, whatever its name.
+  const pairs = Object.create(null) as Record<string, string>;
+  for (let i = 0; i < list.length; i += 2) {
+    if (!COUNT_TEXT.test(list[i + 1])) throw new UnknownReplyError(what);
+    pairs[list[i]] = list[i + 1];
+  }
+  return depthOf(pairs);
+}
+
+/** The counts of a depth record, by field, added up into what readDepth answers. Pure. */
+function depthOf(pairs: Record<string, string>): Depth {
   const stopped: Record<string, number> = {};
   const whyNot: Partial<Record<WhyNot, number>> = {};
   const videos: Record<string, VideoReach> = {};

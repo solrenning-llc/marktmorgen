@@ -6,6 +6,7 @@ import { launch, setSoon, waitlistViews } from "@/lib/waitlist";
 import { queueRelease, runPreorderReleases, waitingCount } from "@/lib/preorders";
 import { preorderDeps } from "@/lib/purchase-email";
 import { hasContent } from "@/lib/preorder-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * The studio's waitlist switches.
@@ -70,6 +71,12 @@ export async function POST(request: NextRequest) {
     if (!views) return Response.json({ ok: true, viewsUnread: true });
     return Response.json({ ok: true, view: views[product.id] ?? { soon: false, confirmed: 0, waiting: 0, launch: null } });
   } catch (error) {
+    // A pre-order count or a hand-over job that Redis answered in an unknown shape (sweep APP3): before the switch,
+    // an empty product stays coming soon; after it, the job was queued unless this says so. Never said as done.
+    if (error instanceof UnknownReplyError) {
+      console.error("changing a waitlist could not read or write its pre-orders", error);
+      return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    }
     console.error("changing a waitlist failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

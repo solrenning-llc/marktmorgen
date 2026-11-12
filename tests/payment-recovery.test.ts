@@ -258,6 +258,17 @@ async function main(): Promise<void> {
   const mark = posts.length;
   is("control: its own page and membership still set the card", [await finishCardUpdate(store, sessionId), touched(mark)], ["updated", ["/subscriptions/sub_Running000001"]]);
 
+  part("Rule 24: a membership whose status Stripe has no name for is unknown, never \"not ended\"");
+  for (const [label, status] of [["a status Stripe never named", "a_status_stripe_never_named"], ["a status that is a number", 7], ["no status", undefined]] as const) {
+    const row: Record<string, unknown> = { ...running, customer: "cus_Member000001", latest_invoice: null, status };
+    if (status === undefined) delete row.status;
+    state.subs.set("sub_Running000001", row);
+    const before = posts.length;
+    is(`${label}: the page does not show it`, await cardView(store, grant!), null);
+    is(`${label}: no card is set from it`, [await finishCardUpdate(store, sessionId), touched(before)], ["error", []]);
+  }
+  state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
+
   part("What came back");
   const nowS = Math.floor(Date.now() / 1000);
   const paid = (id: string, attempts: number, cents: number, extra: Record<string, unknown> = {}) => ({

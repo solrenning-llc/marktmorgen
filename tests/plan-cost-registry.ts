@@ -114,9 +114,10 @@ import {
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
-import { assistantMonthWorst } from "@/lib/store-assistant-rules";
+import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
+import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
@@ -443,6 +444,13 @@ export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + 
  * waited on at 2 GB.
  */
 export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMANDS, (NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES) * 16_384 + MAX_PRODUCT_BYTES + 4_096);
+/**
+ * One reading of a course's "More from" shelf for a student (lib/course-shelf.ts, 628 [HN4](b)), at the most: what the
+ * buyer owns read as the next product after a purchase reads it (ownedHere: the same commands and up to five Stripe
+ * calls waited on at 2 GB), at most MAX_SHELF listings (fewer than that one's NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES)
+ * and one pipeline of MAX_SHELF PayPal counts on top. Taken as SHELF_REQUEST_UNITS public requests before it reads.
+ */
+export const SHELF_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMANDS + MAX_SHELF, (NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES) * 16_384 + MAX_PRODUCT_BYTES + 4_096);
 /**
  * What one Store assistant checkout reminder costs besides the model and its
  * email (lib/assistant-reminder.ts), at the most: its commands and its
@@ -887,6 +895,15 @@ export const PLATFORM_SUBSCRIPTION_SEARCH = {
   deploymentRegionVerified: false,
 } as const;
 export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet;
+/**
+ * #3334: the seconds one start of the Store assistant add-on can hold the function past the two GETs the line above
+ * already prices for the same essential event: the smaller of its most calls each waited on for STRIPE_TIMEOUT_MS (plus
+ * the in-progress wait) and its hard end ASSISTANT_START_CUTOFF_MS (lib/store-assistant-rules.ts). With the cutoff at
+ * those two GETs' 40 s it is 0: priced, and inside what is already paid for.
+ */
+export const ASSISTANT_START_EXTRA_SECONDS = Math.max(0,
+  Math.min(ASSISTANT_START_STRIPE_CALLS * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds + ASSISTANT_IN_PROGRESS_WAIT_MS / 1000, ASSISTANT_START_CUTOFF_MS / 1000) -
+    PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds);
 export const UTC_DAYS = 31;
 
 /** CX-67 company exposure, deliberately outside paid-unit COST_LINES. These
@@ -963,6 +980,20 @@ export const COST_LINES: CostLine[] = [
       { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
     ],
     basis: "CX-61, sources read 2026-11-04: at most two GETs (one Search over at most MAX_ADDRESSES current names, one captured-customer List), each waited on for STRIPE_TIMEOUT_MS at 2 GB and the highest regional memory rate $0.0183/GB-hour (https://vercel.com/docs/functions/usage-and-pricing). Billing and deletion share ESSENTIAL_PER_DAY, not that many each; scheduled closing is counted at DAY_WINDOWS. Never multiplied by visits. This is a function-memory ceiling; existing CPU, invocation and other costs remain. Stripe GET tariff stays null (https://stripe.com/pricing does not establish an endpoint-specific zero); deployment region and financed post-cancellation exposure remain unverified. No sale, price, quota or gate is activated.",
+  },
+  {
+    id: "assistant-start-reads",
+    feature: "Starting the Store assistant add-on: its Stripe reads and writes before a checkout opens (#3334)",
+    monthlyUsd: () => ASSISTANT_START_EXTRA_SECONDS * PLATFORM_SUBSCRIPTION_SEARCH.memoryGb * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGbHour / 3600 *
+      PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow,
+    sources: [
+      { file: "lib/store-assistant-rules.ts", names: ["ASSISTANT_START_LIST_PAGES", "ASSISTANT_START_STRIPE_CALLS", "ASSISTANT_IN_PROGRESS_WAIT_MS", "ASSISTANT_START_CUTOFF_MS"] },
+      { file: "lib/assistant-billing.ts", names: ["startAssistant", "withCutoff(Date.now() + ASSISTANT_START_CUTOFF_MS", "timeLeft() <= ASSISTANT_IN_PROGRESS_WAIT_MS", "START_LIST_PAGES", "readCustomerList", "ensureAssistantPrice", "createAssistantCheckout", "error.status !== 409"] },
+      { file: "app/api/billing/assistant/route.ts", names: ["creatorFrom(request, \"billing\")", "startAssistant(store, origin)"] },
+      { file: "lib/studio-allowance-rules.ts", names: ["ESSENTIAL_PER_DAY"] },
+      { file: "lib/fetch-timeout.ts", names: ["STRIPE_TIMEOUT_MS"] },
+    ],
+    basis: `A start of the add-on is a billing request (creatorFrom "billing"), inside ESSENTIAL_PER_DAY with the plan's checkout and deletion, so every essential event of the month (${PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow}) is taken as a start held for its longest: the smaller of its most calls, ${ASSISTANT_START_STRIPE_CALLS} (${ASSISTANT_START_LIST_PAGES} pages of subscriptions, ${ASSISTANT_START_LIST_PAGES} of open pages and ${ASSISTANT_START_LIST_PAGES} more after a 409, the price read, the product read and write, the price write, the checkout POST) each waited on for STRIPE_TIMEOUT_MS plus the ASSISTANT_IN_PROGRESS_WAIT_MS wait, and its hard end ASSISTANT_START_CUTOFF_MS (${ASSISTANT_START_CUTOFF_MS / 1000} s, withCutoff), at the platform-subscription-search memory rate, less the ${PLATFORM_SUBSCRIPTION_SEARCH.maxGets} GETs of ${PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds} s that line already prices for the same event: ${ASSISTANT_START_EXTRA_SECONDS} s more. The cutoff is set to those ${PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds} s, so this line is $0 because the start's longest hold fits inside what the event is already priced at, not because a cost is unknown. Adopting a live add-on makes fewer calls, inside the same cutoff. A function-memory ceiling, not CPU or invocations; the Stripe tariff per call stays unknown (null), never zero, as in platform-subscription-search. Not on sale while ASSISTANT_ON_SALE is false; the line is counted now so the start is priced before it can be.`,
   },
   {
     id: "storage",
@@ -1256,6 +1287,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A course's "More from" shelf reads what a student owns the same way, counted before (628 [HN4](b), 10 November 2026).
+      { file: "lib/course-shelf.ts", names: ["takeBuyerRead(store, SHELF_REQUEST_UNITS)", "SHELF_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "ownedHere(store, email)"] },
+      { file: "app/[handle]/course/[product]/page.tsx", names: ["shelfShown(store, course.shelf, product.id, access.learner.email)"] },
       // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // An opening of a buyer's orders page takes ORDERS_OPEN_UNITS before anything is read, and its meter more before each read
@@ -1294,6 +1328,10 @@ export const COST_LINES: CostLine[] = [
       // is kept by the CDN five minutes (C3, 4 November 2026; CERTIFICATE_PDF_READ in tests/plan-cost-registry.test.ts).
       { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
+      // The picture its shared link unfolds into is paid for the same way, CERTIFICATE_CARD_UNITS as many as the PDF and lighter than it
+      // (153 KB, 0.59 s of CPU cold, measured; audit R41, item 3), so CERTIFICATE_PDF_READ prices it too (tests/certificate-card-standing.test.ts).
+      { file: "app/[handle]/certificate/[id]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_CARD_UNITS - 1)"] },
+      { file: "lib/certificate.ts", names: ["CERTIFICATE_CARD_UNITS = 2"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
       // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).

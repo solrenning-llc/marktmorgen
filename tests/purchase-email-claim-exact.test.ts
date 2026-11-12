@@ -10,7 +10,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { confirmOffer, confirmationKey } from "@/lib/purchase-email";
+import { confirmOffer, confirmPurchase, confirmationKey, type SessionRecord } from "@/lib/purchase-email";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -67,6 +67,35 @@ async function main() {
   mode = "ok";
   is("a mark that cannot be read back sends nothing and is not done", [gone === "sent", emails], [false, 1]);
   is("and the other run's mark is never deleted", (await run([["GET", confirmationKey(offer(3).reference)]]))[0], "sending");
+
+  // Claude 1's LEVE on #3817: the checkout's own confirmation (confirmPurchase) takes the same mark, so it is held to
+  // the same three cases, not only the offer's.
+  const checkout = (n: number): SessionRecord => ({
+    id: `cs_test_claimconfirmbuy${String(n).padStart(6, "0")}`,
+    status: "complete",
+    payment_status: "paid",
+    mode: "payment",
+    created: Math.floor(Date.now() / 1000),
+    payment_intent: { id: `pi_claimconfirmbuy${String(n).padStart(6, "0")}`, latest_charge: { refunded: false } },
+    amount_total: 1900,
+    currency: "usd",
+    customer_details: { email: "buyer@example.com" },
+    metadata: { store: store.handle, product: product.id },
+  } as unknown as SessionRecord);
+  const before = emails;
+  is("a healthy checkout confirmation is sent once", [await confirmPurchase(store, String(checkout(1).id), checkout(1)), emails - before], ["sent", 1]);
+
+  mode = "crossed";
+  const crossedBuy = await confirmPurchase(store, String(checkout(2).id), checkout(2));
+  mode = "ok";
+  is("checkout: another run holds the mark and this run's answer was lost: nothing sent again", [crossedBuy, emails - before], ["already", 1]);
+  is("checkout: the other run's mark is left as it was", (await run([["GET", confirmationKey(String(checkout(2).id))]]))[0], "sending");
+
+  mode = "gone";
+  const goneBuy = await confirmPurchase(store, String(checkout(3).id), checkout(3));
+  mode = "ok";
+  is("checkout: a mark that cannot be read back sends nothing", [goneBuy === "sent", emails - before], [false, 1]);
+  is("checkout: the other run's mark is never deleted", (await run([["GET", confirmationKey(String(checkout(3).id))]]))[0], "sending");
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1994,12 +1994,17 @@ a.chip {
   color: var(--ink);
 }
 
+/*
+ * WCAG 1.4.6 (AAA): white words on the delete button keep 7:1. --danger
+ * (#c2261f) gave 5.85:1; --danger-text gives 8.81:1, and the pointer darkens
+ * it further (tests/danger-button-contrast.test.ts).
+ */
 .btn-danger-solid {
-  background-color: var(--danger);
+  background-color: var(--danger-text);
   color: #fff;
 }
 .btn-danger-solid:hover {
-  background-color: #a8271f;
+  background-color: #741a15;
 }
 
 /* ------------------------------------------------------------------------

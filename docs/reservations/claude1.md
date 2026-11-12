@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Buyer path walk (12/11/2026): the solid delete button keeps 7:1 (1.4.6) | claude1/fix-comprador-botao-excluir-contraste | `app/globals.css` (the .btn-danger-solid block only), `tests/danger-button-contrast.test.ts` | 12/11/2026 19h36 |

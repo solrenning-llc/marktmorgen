@@ -23,6 +23,7 @@
  *   day record h:<answer>     answers; hc:<answer> the money of their sales
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -35,10 +36,25 @@ const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 /** An order is asked about on the page the buyer lands on; a month later it is not answered. */
 const ANSWER_WITHIN_SECONDS = 30 * 86400;
 
+/**
+ * Whether the store does not ask: true when its creator switched it off, and
+ * also when the answer is in any other shape than 0 or 1 (CX-123 rule 24, as
+ * weeklyOff in lib/stats-report.ts): an unknown answer is never "not off", so
+ * the buyer is not asked this time, and it is said in the log.
+ */
 export async function heardOff(handle: string): Promise<boolean> {
   if (!isRedisConfigured()) return true;
-  const [member] = await redisPipeline([["SISMEMBER", OFF, handle]]);
-  return Number(member) === 1;
+  const off = await readHeardOff(handle);
+  if (off !== "unknown") return off;
+  console.error("heard-off: whether the store asks where buyers heard about it is unknown; not asked this time");
+  return true;
+}
+
+/** The mark read exactly: true or false only on a reply of 1 or 0, "unknown" on any other shape. */
+async function readHeardOff(handle: string): Promise<boolean | "unknown"> {
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
+  const member = replies ? countOf(replies[0]) : null;
+  return member === 0 ? false : member === 1 ? true : "unknown";
 }
 
 export async function setHeardOff(handle: string, off: boolean): Promise<void> {
@@ -55,7 +71,13 @@ export type HeardResult = "counted" | "already" | "invalid" | "off" | "unavailab
 export async function recordHeard(store: Store, sessionId: unknown, answer: unknown, now = Date.now()): Promise<HeardResult> {
   if (!isHeardAnswer(answer) || typeof sessionId !== "string" || !SESSION.test(sessionId)) return "invalid";
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return "unavailable";
-  if (await heardOff(store.handle)) return "off";
+  // A mark that cannot be read is not "off" (Claude 6 on #3115): nothing is counted now and the reply says so.
+  const off = await readHeardOff(store.handle);
+  if (off === "unknown") {
+    console.error("heard-off: whether the store asks where buyers heard about it is unknown; the answer is not counted now");
+    return "unavailable";
+  }
+  if (off) return "off";
   let session: Record<string, unknown>;
   try {
     session = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(sessionId)}`)) as Record<string, unknown>;

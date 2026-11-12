@@ -11,8 +11,10 @@ async function main() {
   let reply: unknown = normal;
   let apply = false;
   let attempts = 0;
+  /** The draft's delete: since #3343's follow-up, one script that names the drafts hash and checks the lease. */
+  const deletes = (command: (string | number)[]) => (command[0] === "HDEL" && command[1] === key) || (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:draft-del-held:") && command.includes(key));
   redis.pipeline = async commands => {
-    if (!commands.some(command => command[0] === "HDEL" && command[1] === key)) return original.call(redis, commands);
+    if (!commands.some(deletes)) return original.call(redis, commands);
     attempts += 1;
     if (reply === normal) return original.call(redis, commands);
     if (apply) await original.call(redis, commands);

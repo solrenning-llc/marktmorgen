@@ -11,6 +11,13 @@ import { done, is, part } from "./check";
 type Command = (string | number)[];
 const original = redis.pipeline.bind(redis);
 /** Each SET NX on a key `match` picks: `before` runs first (another writer), then it is sent and answered by `answer`. */
+/**
+ * One fixed clock for every record: the legacy recording grace ends at LEGACY_INVITE_RECORDING_UNTIL
+ * (16 December 2026 UTC), after which recordInvite answers "paused" whatever Redis says, so the real clock made
+ * every check here fail from that day on (found under a shifted clock at 2026-12-31T23:30Z).
+ */
+const NOW = Date.UTC(2026, 9, 16, 12);
+
 function claimAnswers(match: (key: string) => boolean, answer: (wrote: boolean) => unknown[] | Error, opts: { before?: (key: string) => Promise<void>; read?: () => unknown[] } = {}) {
   redis.pipeline = async (commands: Command[]) => {
     const [first] = commands;
@@ -72,10 +79,10 @@ async function main(): Promise<void> {
     const cal = await made("cal@example.com", "cal");
     const anaCode = (await inviteCode(ana.sid))!;
     const beaCode = (await inviteCode(bea.sid))!;
-    is("ana's invite is the first, written down", await recordInvite(cal, anaCode), "recorded");
+    is("ana's invite is the first, written down", await recordInvite(cal, anaCode, NOW), "recorded");
     claimAnswers((key) => key === byKey(cal.sid), () => [...reply]);
     let second: unknown = "threw";
-    try { second = await recordInvite(cal, beaCode); } catch { /* checked below */ }
+    try { second = await recordInvite(cal, beaCode, NOW); } catch { /* checked below */ }
     restore();
     const listed = (await original([["ZSCORE", listKey(bea.sid), cal.sid]]))[0];
     is(`${label} on a store already invited by ana: never written down under bea`, [second === "recorded", listed], [false, null]);
@@ -87,7 +94,7 @@ async function main(): Promise<void> {
     const anaCode = (await inviteCode(ana.sid))!;
     claimAnswers((key) => key === byKey(cal.sid), () => new Error("synthetic lost reply"));
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, NOW); } catch { /* checked below */ }
     restore();
     const listed = (await original([["ZSCORE", listKey(ana.sid), cal.sid], ["ZSCORE", ALL_KEY, cal.sid]]));
     is("an invite written whose reply was lost: read back as this one, listed under ana", [first, listed.every((x) => x !== null)], ["recorded", true]);
@@ -99,7 +106,7 @@ async function main(): Promise<void> {
     const anaCode = (await inviteCode(ana.sid))!;
     claimAnswers((key) => key === byKey(cal.sid), () => [undefined], { read: () => [undefined] });
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, NOW); } catch { /* checked below */ }
     restore();
     const listed = (await original([["ZSCORE", listKey(ana.sid), cal.sid]]))[0];
     is("answered and read back in no known shape: not said recorded, not listed", [first === "recorded", listed], [false, null]);
@@ -107,7 +114,7 @@ async function main(): Promise<void> {
     // record. Ana's own list is left alone, since nothing confirmed that this record is hers.
     const all = (await original([["ZSCORE", ALL_KEY, cal.sid]]))[0];
     is("and the record written stays on the settlement walk, under its own inviter", [first, (await invitedBy(cal.sid))?.r === ana.sid, all !== null], ["threw", true, true]);
-    is("a later try answers already", await recordInvite(cal, anaCode), "already");
+    is("a later try answers already", await recordInvite(cal, anaCode, NOW), "already");
   }
   {
     // The same two unknown answers, when the SET was never applied: no record is made up, nobody's list gains it.
@@ -121,11 +128,11 @@ async function main(): Promise<void> {
       return original(commands);
     };
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, NOW); } catch { /* checked below */ }
     restore();
     const [mine] = await original([["ZSCORE", listKey(ana.sid), cal.sid]]);
     is("not applied, answered and read back in no known shape: no record, not on ana's list", [first, await invitedBy(cal.sid), mine], ["threw", null, null]);
-    is("and a later try records it", await recordInvite(cal, anaCode), "recorded");
+    is("and a later try records it", await recordInvite(cal, anaCode, NOW), "recorded");
   }
   {
     // Bea invited cal first; ana's try is answered in no known shape: bea's record and lists stay, ana gains nothing.
@@ -135,12 +142,12 @@ async function main(): Promise<void> {
     const cal = await made("cal@example.com", "cal");
     const anaCode = (await inviteCode(ana.sid))!;
     const beaCode = (await inviteCode(bea.sid))!;
-    await recordInvite(cal, beaCode);
+    await recordInvite(cal, beaCode, NOW);
     const [allBefore] = await original([["ZSCORE", ALL_KEY, cal.sid]]);
     // Ana's try a second later, so a score written over bea's would show.
     claimAnswers((key) => key === byKey(cal.sid), () => [undefined], { read: () => [undefined] });
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode, Date.now() + 1_000); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, NOW + 1_000); } catch { /* checked below */ }
     restore();
     const [mine, theirs, all] = await original([["ZSCORE", listKey(ana.sid), cal.sid], ["ZSCORE", listKey(bea.sid), cal.sid], ["ZSCORE", ALL_KEY, cal.sid]]);
     is("and its place on the settlement walk keeps bea's time", all, allBefore);
@@ -153,7 +160,7 @@ async function main(): Promise<void> {
     const cal = await made("cal@example.com", "cal");
     const anaCode = (await inviteCode(ana.sid))!;
     const beaCode = (await inviteCode(bea.sid))!;
-    is("healthy: the first invite is recorded, a second is already", [await recordInvite(cal, anaCode), await recordInvite(cal, beaCode)], ["recorded", "already"]);
+    is("healthy: the first invite is recorded, a second is already", [await recordInvite(cal, anaCode, NOW), await recordInvite(cal, beaCode, NOW)], ["recorded", "already"]);
   }
   done();
 }

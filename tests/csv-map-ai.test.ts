@@ -159,6 +159,29 @@ async function main(): Promise<void> {
   is("a field set meanwhile is not suggested over", ui.includes("suggestions.filter((s) => (mapping[s.field] ?? -1) < 0"), true);
   is("it says only names are sent, and that nothing changes until each is chosen", [ui.includes("Only the column names are sent, never what is in the rows."), ui.includes("Nothing changes until you choose")], [true, true]);
   is("it sends names and the guess, nothing else", ui.includes("body: JSON.stringify({ kind, header, guess })"), true);
+  // Out-of-family review of #3559 at c720cc496a, LOW 1: the first row is checked in the browser, so a file with no
+  // header row sends nothing at all, not even to our server, and "only the column names are sent" is what happens.
+  is(
+    "a first row that is not clearly a header is never sent: the screen checks it before asking, with the rules' own clearHeader",
+    [ui.includes('import { clearHeader, type Source } from "@/lib/csv-map-ai-rules";'), /if \(!clearHeader\(header\)\) \{\n\s+setNote\(SUGGEST_MESSAGES\.no_header\);\n\s+return;\n\s+\}/.test(ui), ui.indexOf("if (!clearHeader(header))") < ui.indexOf('fetch("/api/store/import-columns"')],
+    [true, true, true],
+  );
+  // Claude 1's review of #3559 at a323e8a3ae, LOW: a refusal a retry cannot help never says "try again".
+  const { SUGGEST_MESSAGES, suggestMessage } = await import("@/components/import-column-suggest");
+  is(
+    "every refusal the route sends has its own words, and only a failed call says to try again",
+    [
+      ["off", "not_needed", "no_header", "cost_unknown", "used", "failed", "unreadable", "slow", "renewal_unpaid", "plan_disputed", "invalid", "signed_out", "role", "server_error"].every((code) => typeof SUGGEST_MESSAGES[code] === "string"),
+      Object.entries(SUGGEST_MESSAGES).filter(([, words]) => /try again in a moment/i.test(words)).map(([code]) => code).sort(),
+    ],
+    [true, ["failed", "server_error"]],
+  );
+  is(
+    "a code the screen does not know is never called a passing failure, and the route's own message is kept",
+    [suggestMessage("two_step_required", undefined), suggestMessage("locked", "This store is locked."), suggestMessage(undefined, undefined), /try again/i.test(suggestMessage("anything_new", undefined))],
+    [SUGGEST_MESSAGES.refused, "This store is locked.", SUGGEST_MESSAGES.failed, false],
+  );
+  is("it says each ask uses one of this month's AI writing jobs (MEDIUM 1)", [ui.includes("Each time you ask, it uses one of this month's AI writing jobs."), /used: "[^"]*writing jobs are used up/.test(ui)], [true, true]);
   is("a status region tells what happened; every suggestion says it is from AI", [ui.includes('role="status"'), ui.includes("suggested by AI, not checked yet")], [true, true]);
   is(
     "each button's name is its visible text (2.5.3), what it acts on its description; no label hides the words",

@@ -801,6 +801,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pause:@lib/store.ts": { what: "The same break, read only: a store with one set keeps its address until it is taken back or over (moveAccount, closingUnderway)", parts: [capped(4 * KB, "Same one-a-store break; one EXISTS a move, no read of its bytes and no write (Revisor 2 on #3672).")] },
   "nl:pause:due@lib/store.ts": company("The same line of breaks, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Revisor 2 on #3672)."),
   "nl:pause:last:@lib/plan-pause.ts": { what: "When a break was last taken", parts: [capped(KEY, "One a store.")] },
+  "nl:pause:last:@lib/store.ts": { what: "The same once-a-year break mark, carried by a move to the new address (moveAccount, breakYearAt)", parts: [capped(KEY, "Same one-a-store mark: a move reads it (GET, PTTL), writes the same value at most 12 digits under the new address with the time it had left (PX, never longer) and deletes the old one in the same step, so it stays one a store and never outlives its year.")] },
   "nl:plan:ended@lib/plan-standing.ts": company("Stores whose plan ended, by the day", "One sorted set for every store."),
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),
   "nl:share:stores@lib/platform-share.ts": company("Stores whose sales pay a share", "One set for every store."),

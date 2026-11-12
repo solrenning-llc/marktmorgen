@@ -5,6 +5,7 @@ import { StoreBeacon } from "@/components/store-beacon";
 import { AffiliateClick } from "@/components/affiliate-click";
 import { type PixelEvent, StorePixels } from "@/components/store-pixels";
 import { placeOf } from "@/lib/reddit-pixel";
+import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
 
 /**
  * What a store page carries besides the page: the visit count, on the store
@@ -12,7 +13,7 @@ import { placeOf } from "@/lib/reddit-pixel";
  * store with affiliates, and the creator's own ad pixels, on every page of
  * the store that has any. Whether a visitor is asked first, for the pixels and
  * for remembering an affiliate's link, is decided here, from the country the
- * request came from.
+ * request came from. Both requests speak the store's language.
  */
 export async function StoreTracking({
   store,
@@ -38,17 +39,18 @@ export async function StoreTracking({
     <>
       {countVisit ? <StoreBeacon handle={store.handle} /> : presence ? <StoreBeacon handle={store.handle} front={false} product={product} /> : null}
       {store.affiliates.enabled ? (
-        <AffiliateClick handle={store.handle} storeName={store.name} days={store.affiliates.days} askFirst={askFirst} />
+        <AffiliateClick handle={store.handle} storeName={store.name} days={store.affiliates.days} askFirst={askFirst} language={store.language} />
       ) : null}
       {withPixels ? (
         <StorePixels
           handle={store.handle}
           storeName={store.name}
           pixels={store.pixels}
-          names={pixelNames(store.pixels)}
+          names={pixelNames(store.pixels, trackingConsentWords(store.language).and)}
           askFirst={askFirst}
           place={place}
           event={event}
+          language={store.language}
         />
       ) : null}
     </>

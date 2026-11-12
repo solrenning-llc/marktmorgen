@@ -31,9 +31,13 @@ import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { LessonPlayer } from "@/components/lesson-player";
-import { devicePlaceKey } from "@/lib/lesson-position";
+import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { RememberLastLesson } from "@/components/remember-last-lesson";
+import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
+import { LessonNotes } from "@/components/lesson-notes";
+import { readNote } from "@/lib/lesson-notes";
 import { EmptyState } from "@/components/empty-state";
 
 type Params = {
@@ -146,6 +150,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
       ])
     : [false, [], ""];
   const threads = reader && talking ? threadsFor(comments, reader).slice(0, SHOWN_THREADS) : [];
+  // The student's own private note (290 [SQ1]): read only for them, never for the creator or a visitor, and never on
+  // a lesson held behind a quiz or work to hand in, whose saves the route refuses (Claude 2's review of #3031, L5).
+  const note = student && open && !blocker ? await readNote(store.statsId ?? "", who, course.id, lesson.id) : null;
   const mustPass = Boolean(student && quiz && lesson.quiz?.required && !passed.has(lesson.id));
   // Work to hand in, still holding the lessons after it shut.
   const mustHandIn = Boolean(student && task && lesson.task?.gate && !passed.has(lesson.id));
@@ -165,6 +172,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // This lesson kept on the student's device as the last one they opened, offered back in their library (650 [WG10],
+  // unit 2, components/library-continue.tsx), under a key made from their address alone; never for the creator or a visitor.
+  const lastPerson = student ? deviceLastKey(student.email) : null;
+  const lastPath = lessonPath(store.handle, product.id, lesson.id);
   // Plain text only: a function cannot cross to the client player (Claude 5 on #2728).
   const resumeWords = resumeWordsOf(w);
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
@@ -176,6 +187,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
+        {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
         <p className="text-sm">
           <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
           <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>
@@ -354,6 +366,14 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 mode={quizMode}
                 where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
                 storeName={store.name}
+                language={store.language}
+              />
+            ) : null}
+
+            {note ? (
+              <LessonNotes
+                initial={note.state === "kept" ? { state: "kept", text: note.text } : note}
+                where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
                 language={store.language}
               />
             ) : null}

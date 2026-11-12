@@ -18,7 +18,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
   "nl:dc:mem:", "nl:dc:prod:", "nl:depth:", "nl:erased:", "nl:esync:tags:", "nl:form:r:", "nl:imp:buy:",
-  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:withdraw:",
+  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:lnote:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:withdraw:",
   "nl:lib:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
   "nl:path:board:v1", "nl:path:board:owners:v1",
   "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
@@ -89,7 +89,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
   "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:recent:", "nl:recent:feed:",
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
-  "nl:recover:asks", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:ref:all", "nl:ref:by:",
+  "nl:recover:asks", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:recover:tries:", "nl:ref:all", "nl:ref:by:",
   "nl:ref:c:", "nl:ref:code:", "nl:ref:cursor", "nl:ref:list:", "nl:ref:mine:", "nl:ref:mycode:",
   "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
   "nl:resend-budget:{", "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
@@ -103,11 +103,12 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
   "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:stamp:drop",
   "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
-  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:taken:",
+  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sweep:cursor", "nl:sweep:walk:", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:taken:",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:x:", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
@@ -118,6 +119,9 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
+  "nl:mail:pin:", "nl:ppsell:receipt:", "nl:ppsell:mail:",
+  // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
+  "nl:tip:co:",
 ];
 
 /** Whether a key belongs to a family the room counts: the longest family name it starts with is one of COUNTED_FAMILIES. */
@@ -289,6 +293,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:join:t:": T("nl:erase:ix:", 7),
   "nl:keys:": E,
   "nl:lc:": E,
+  // A student's private lesson notes (290 [SQ1], lib/lesson-notes.ts), named by the store's statsId.
+  "nl:lnote:": E,
   "nl:learn:enr:": E, "nl:learn:link:": X(1), "nl:learn:paid:": E, "nl:learn:pass:": T("nl:learn:passes:", 90), "nl:learn:passes:": E,
   "nl:learn:rate:addr:": X(1), "nl:learn:rate:ip:": X(1),
   "nl:leave:": E,
@@ -359,6 +365,12 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
   "nl:ppsell:refunded:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
+  // A PayPal receipt tried again (lib/paypal-delivery.ts, lib/email.ts sendEmailPinned): the time of its first try,
+  // named by the order and holding only that time, gone within RECEIPT_MARK_SECONDS; the sender kept for its key, the company's, a day.
+  "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1),
+  // The receipt as first made (lib/paypal-delivery.ts), so every try sends the same bytes: the store's words and the
+  // buyer's address, named by the order, gone within RECEIPT_MAIL_SECONDS, and with the person (lib/erasure-index.ts).
+  "nl:ppsell:mail:": er(1),
   "nl:pre:": E, "nl:pre:give:": X(1), "nl:pre:jobs": I, "nl:pre:pi:": X(430),
   "nl:preview:": T("prepare", 400),
   "nl:product:about:": E, "nl:product:landing:": E, "nl:product:note:": E, "nl:product:page:": E, "nl:product:pages:": E, "nl:product:pics:": E,
@@ -368,7 +380,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:quiz:usage:": E,
   "nl:recent:": E, "nl:recent:feed:": E,
   "nl:recount:": C, "nl:recount:ids": C, "nl:recount:lock": C, "nl:recount:state": C, "nl:recount:sum": C,
-  "nl:recover:asks": I, "nl:recover:link:": T("nl:erase:ix:", 400), "nl:recover:off:": E, "nl:recover:once:": E, "nl:recover:sent:": X(15),
+  "nl:recover:asks": I, "nl:recover:link:": T("nl:erase:ix:", 400), "nl:recover:off:": E, "nl:recover:once:": E, "nl:recover:sent:": X(15), "nl:recover:tries:": X(1),
   "nl:ref:all": C, "nl:ref:by:": C, "nl:ref:c:": C, "nl:ref:code:": C, "nl:ref:cursor": C, "nl:ref:list:": C, "nl:ref:mine:": C,
   "nl:ref:mycode:": C, "nl:ref:owed": C,
   "nl:remind:": C, "nl:remind:failed:": C, "nl:remind:lock": C,
@@ -399,6 +411,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
+  "nl:stamp:drop": C,
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:lock:": E,
   "nl:storage:pending:": X(1),
@@ -409,6 +422,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:stream:lock": C, "nl:stream:peek:": E, "nl:stream:v:": E,
   "nl:stripe-check:last": C, "nl:stripe-check:lock": C, "nl:stripe-check:runs": C,
   "nl:sweep:cursor": C,
+  // The checkout sweep's place in one store's completed or expired checkouts of the day (lib/checkout-sweep.ts, walkDay):
+  // the five-minute job's own, like its cursor; two keys a store at most, each kept a day.
+  "nl:sweep:walk:": C,
   // ---------------------------------------------------------------- t-z
   // Consent state is token-keyed, encrypted, and expires after 600 seconds; the registry conservatively prices one day.
   "nl:teams:state:": X(1),
@@ -437,6 +453,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:yearly-offer:": C, "nl:yearly:link:": X(30), "nl:yearly:price:": E,
   // A failed yearly renewal moved to monthly (lib/yearly-fallback.ts): its tries lapse; the daily job takes each entry out of its list.
   "nl:yearly:fallback:both": I, "nl:yearly:fallback:check": I, "nl:yearly:fallback:try:": X(2), "nl:yearly:fallback:void": I,
+  // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3): a hash names it, never the store; gone by itself in two days.
+  "nl:tip:co:": X(2),
 };
 
 /**

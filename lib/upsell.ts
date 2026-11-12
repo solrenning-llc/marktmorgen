@@ -175,8 +175,10 @@ async function readAnswers(session: string): Promise<Map<string, UpsellRecord>> 
   return out;
 }
 
-async function writeUpsell(session: string, slot: string, record: UpsellRecord): Promise<void> {
-  await redisPipeline([["SET", recordKey(session, slot), JSON.stringify(record), "EX", RECORD_SECONDS]]);
+/** Writes an offer's record; true only on Redis's exact "OK" (CX-123 rule 24), so a caller can refuse to go on. */
+async function writeUpsell(session: string, slot: string, record: UpsellRecord): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["SET", recordKey(session, slot), JSON.stringify(record), "EX", RECORD_SECONDS]]), 1);
+  return reply?.[0] === "OK";
 }
 
 export type TakeResult =
@@ -395,7 +397,12 @@ export async function takeUpsell(input: {
 
   // Written down before Stripe is asked, so a lost answer can be looked for,
   // by the thanks page and by the five-minute job.
-  await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+  // Only on an exact "OK" is Stripe asked (Claude 1 on #3834): a write that did not land would leave a bare claim,
+  // which the orphan release lets go once old, so a charge posted after it could be asked again. Unconfirmed, the
+  // press is refused here, nothing is sent, and the bare claim is released as an orphan (settleUpsells).
+  if (!(await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() }))) {
+    throw new UnknownReplyError("an offer's record naming the customer before its charge");
+  }
   await watchPending(store, session, slot);
 
   const email = typeof view.customer_details?.email === "string" ? view.customer_details.email : "";

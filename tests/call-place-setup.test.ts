@@ -123,10 +123,10 @@ async function main(): Promise<void> {
   is("no room kept from when it was online is used, in the emails, the reminders, the calendar file or the creator's calendar feed", [
     callsSource.includes("const room = !writesAboutBookings(store) || place ? null : await roomOf"),
     (callsSource.match(/const room = place \? null : await roomOf/g) ?? []).length,
-    remindersSource.includes("const room = product.call.place ? null : await roomOf"),
+    (remindersSource.match(/const room = setup\.place \? null : await roomOf/g) ?? []).length,
     readFileSync("app/api/store/ics/route.ts", "utf8").includes("const room = order.product.call.place ? null : await roomOf"),
     readFileSync("lib/calendar-sync.ts", "utf8").includes("const room = place ? null :"),
-  ], [true, 1, true, true, true]);
+  ], [true, 1, 2, true, true]);
   is("a meeting retried for it later sends no new link", readFileSync("lib/call-meetings.ts", "utf8").includes('whereOf(product.call).kind !== "place"'), true);
   is("the studio's save takes it, now that the booking pages and the editor say where (unit 3)", readFileSync("app/api/store/call/route.ts", "utf8").includes('if (setup.place) return Response.json({ ok: false, error: "place" }'), false);
 

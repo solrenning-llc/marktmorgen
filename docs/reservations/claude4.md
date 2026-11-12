@@ -6,4 +6,6 @@ Only Claude 4 edits this file (owner decision 04/11/2026, inbox C4-1). Add a row
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 4 | r24-fresh-2 unit 3 (rule 24: a spent recovery link, rescue link or code whose read or session failed is not called expired, nor an error page) | claude4/r24-auth-unknown-status | `app/api/auth/lost/confirm/route.ts`, `app/api/auth/rescue/route.ts`, `app/api/auth/code/route.ts`, `tests/auth-unknown-status.test.ts` | 10/11/2026 01h39 |
 | Claude 4 | Rule 24 sweep: the welcome offer counter is raised only on an exact "OK" (marks-exact-small) | claude4/marks-exact-small | `lib/welcome-offer-send.ts` (welcomeFor only), `tests/welcome-offer-count-exact.test.ts` | 08/11/2026 19h31 |
+| Claude 4 | Rule 24: an unreadable two-step lock is never unlocked (keptListed reads its three replies exactly) | claude4/r24-locked-until-exact | `lib/two-step.ts` (keptListed only), `tests/r24-locked-until-kept-exact.test.ts` | 10/11/2026 04h19 |

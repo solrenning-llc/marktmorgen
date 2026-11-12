@@ -95,3 +95,14 @@ test("the copy: a yes that does not read is unknown, one that expired is not lis
   await withReply("SMEMBERS", () => [[SESSION]], () =>
     withReply("GET", () => [null], async () => assert.deepEqual(await remindersOf(STATS, EMAIL), [])));
 });
+
+// Claude 1's LEVE on #3823: a yes that IS text but does not read as one (not JSON, or no address in it) is a record
+// this code never writes. It is unknown, never left out of the person's copy as "no reminder", as lib/person-copy.ts
+// already treats the same shapes for call packages.
+test("the copy: a yes that is text but does not read as one is unknown, never left out", async () => {
+  redis.clear();
+  for (const raw of ["{not json", JSON.stringify({ s: SESSION, t: "x" }), JSON.stringify({ e: 7 }), "7"]) {
+    await withReply("SMEMBERS", () => [[SESSION]], () =>
+      withReply("GET", () => [raw], () => assert.rejects(() => remindersOf(STATS, EMAIL), UnknownReplyError, raw)));
+  }
+});

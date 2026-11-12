@@ -115,9 +115,10 @@ const STATUS: Record<string, number> = {
  * with a word the caller has never seen would be worse than "unknown".
  */
 function asProductReason(
-  reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped",
+  reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" | "last_delivery",
 ): "none" | "unknown" | "call" | "course" | "bundle" | "shipped" {
-  return reason === "invalid" ? "unknown" : reason;
+  // "last_delivery" is answered before this by the unlink action itself; anything else reads as unknown.
+  return reason === "invalid" || reason === "last_delivery" ? "unknown" : reason;
 }
 
 /**
@@ -434,7 +435,9 @@ export async function POST(request: NextRequest) {
       // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.
       const found = await readDelivery(guarded.store, id);
       if (found && takesLastDelivery(found.product, id, "link")) return Response.json({ ok: false, error: "last_delivery", product: found.product.title }, { status: 409 });
-      const cleared = await setProductLink(ref, id, null);
+      // Checked again under the store's lock in the same step as the write, so two tabs never both pass (Claude 7 on #3432).
+      const cleared = await setProductLink(ref, id, null, { keepLast: true });
+      if (!cleared.ok && cleared.reason === "last_delivery") return Response.json({ ok: false, error: "last_delivery", product: cleared.product ?? null }, { status: 409 });
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };
     } else {
       const direction =

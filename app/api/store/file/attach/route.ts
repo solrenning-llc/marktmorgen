@@ -84,7 +84,11 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    const result = await setProductFile(ref, id, file);
+    // A detach is checked again under the store's lock in the same step as the write (Claude 7 on #3432).
+    const result = await setProductFile(ref, id, file, { keepLast: detach });
+    if (!result.ok && result.reason === "last_delivery") {
+      return Response.json({ ok: false, error: "last_delivery", product: result.product ?? null }, { status: 409 });
+    }
     if (!result.ok) {
       return Response.json(
         { ok: false, error: result.reason },

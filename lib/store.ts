@@ -57,6 +57,7 @@ import {
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
   parseDetails,
+  takesLastDelivery,
   type ProductOption,
 } from "@/lib/product-option";
 import { type Recurring } from "@/lib/product-recurring";
@@ -3276,7 +3277,16 @@ export async function moveProduct(
 
 export type FileResult =
   | { ok: true; store: Store; removed: ProductFile | null }
-  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" };
+  | { ok: false; reason: "none" | "unknown" | "invalid" | "call" | "course" | "bundle" | "shipped" | "last_delivery"; product?: string };
+
+/**
+ * `keepLast`: taking the file or the link off is refused ("last_delivery") when
+ * it is the last thing a product on the store hands over, checked under the
+ * store's lock in the same step as the write (754 [STN1]; Claude 7 on #3432),
+ * so two studio tabs can never both pass. The studio asks for it; a plan
+ * closing does not.
+ */
+export type DeliveryOptions = { keepLast?: boolean };
 
 /** What is handed over when something is paid for. One or the other. */
 export type Delivery = { file: ProductFile | null; link: string | null };
@@ -3322,7 +3332,8 @@ async function changeDelivery(
   id: string,
   giving: boolean,
   change: (current: Delivery) => Delivery,
-): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" }> {
+  keepLast: "file" | "link" | null = null,
+): Promise<{ ok: true; store: Store; previous: Delivery } | { ok: false; reason: "none" | "unknown" | "call" | "course" | "bundle" | "shipped" | "last_delivery"; product?: string }> {
   const result = await withStore(email, async (store, save) => {
     const owner = productIdFor(store, id);
     const product = owner ? await readProduct(store, owner) : null;
@@ -3335,6 +3346,7 @@ async function changeDelivery(
     // A physical product delivers what the creator ships (lib/shipping.ts).
     // Nor on one of its sizes or versions: each ships the same way.
     if (giving && product.shipping) return { ok: false as const, reason: "shipped" as const };
+    if (!giving && keepLast && takesLastDelivery(product, id, keepLast)) return { ok: false as const, reason: "last_delivery" as const, product: product.title };
     const done = rewriteDelivery(product, id, change);
     if (!done) return { ok: false as const, reason: "unknown" as const };
     const next = await save(store, { put: [done.product] });
@@ -3356,12 +3368,13 @@ export async function setProductFile(
   email: string,
   id: string,
   file: ProductFile | null,
+  options: DeliveryOptions = {},
 ): Promise<FileResult> {
   // A file replaces a link. One thing is delivered, never two.
   const done = await changeDelivery(email, id, file !== null, (current) => ({
     file,
     link: file ? null : current.link,
-  }));
+  }), options.keepLast ? "file" : null);
   if (!done.ok) return done;
   return { ok: true, store: done.store, removed: done.previous.file };
 }
@@ -3377,11 +3390,12 @@ export async function setProductLink(
   email: string,
   id: string,
   link: string | null,
+  options: DeliveryOptions = {},
 ): Promise<FileResult> {
   const done = await changeDelivery(email, id, link !== null, (current) => ({
     link,
     file: link ? null : current.file,
-  }));
+  }), options.keepLast ? "link" : null);
   if (!done.ok) return done;
   // Taking a link off displaces nothing; putting one on displaces the file.
   return { ok: true, store: done.store, removed: link ? done.previous.file : null };

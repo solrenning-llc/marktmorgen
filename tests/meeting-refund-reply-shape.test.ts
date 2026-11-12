@@ -17,7 +17,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_meeting_refund_shape_only";
-const ACCOUNT = "acct_1TestMeetShape01";
+const ACCOUNT = "acct_1TestMeetShape1";
 const NOW = Math.floor(Date.now() / 1000);
 const refund = { id: "re_MeetShape0001", object: "refund", status: "succeeded", created: NOW - 60, payment_intent: "pi_MeetShape0001", charge: { object: "charge", refunded: true, amount: 5_000, amount_refunded: 5_000 } };
 

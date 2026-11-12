@@ -100,6 +100,41 @@ async function main(): Promise<void> {
   const toGone = await sendTo(goneKey);
   is("a message to a removed member is answered the same", toGone.includes("n=dmasked"), true);
   is("and nothing waits in their requests", await requestsOf(goneKey), 0);
+
+  // The answer must not tell a member from a key nobody holds in any state:
+  // a key is a plain hash of an address, so a different answer would tell
+  // whether that address bought the ticket.
+  const addMember = async (email: string) => {
+    const k = memberKey(email);
+    await redis.pipeline([["HSET", members, k, JSON.stringify({ k, e: email, n: "Quiet", h: "quiet", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] } satisfies Member)]]);
+    return k;
+  };
+  const sameShape = (location: string, a: string, b: string) => location.split(pairOf(senderKey, a)).join("<pair>").split(pairOf(senderKey, b)).join("<pair>");
+
+  part("Past the day's openings: a member and a key nobody holds get the same answer");
+  {
+    const quiet = await addMember("quiet.one@huntdm.example");
+    const nobody = memberKey("nobody.one@huntdm.example");
+    await redis.pipeline([["SET", `nl:cm:rl:${cid}:${senderKey}:dmNew`, "10", "EX", 86_400]]);
+    const toMember = await sendTo(quiet);
+    const toNobody = await sendTo(nobody);
+    is("the member's answer is slow (control)", toMember.includes("n=slow"), true);
+    is("the same answer for a key nobody holds", sameShape(toNobody, quiet, nobody), sameShape(toMember, quiet, nobody));
+    is("and nothing waits under that key", await requestsOf(nobody), 0);
+    await redis.pipeline([["DEL", `nl:cm:rl:${cid}:${senderKey}:dmNew`]]);
+  }
+
+  part("Requests off: a member and a key nobody holds get the same answer");
+  {
+    await saveConfig(cid, { ...freshConfig(club.name), access: [ticket.product.id], dm: parseDmSetting({ on: true, between: true, ask: false }) });
+    const quiet = await addMember("quiet.two@huntdm.example");
+    const nobody = memberKey("nobody.two@huntdm.example");
+    const toMember = await sendTo(quiet);
+    const toNobody = await sendTo(nobody);
+    is("the member's answer is the conversation, sent (control)", toMember.includes("n=dmsent"), true);
+    is("the same answer for a key nobody holds", sameShape(toNobody, quiet, nobody), sameShape(toMember, quiet, nobody));
+    is("and no conversation is kept for it", (await redis.pipeline([["EXISTS", `nl:cm:${cid}:dm:${pairOf(senderKey, nobody)}`]]))[0], 0);
+  }
   done();
 }
 

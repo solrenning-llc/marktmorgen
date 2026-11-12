@@ -17,7 +17,7 @@ import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey,
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, noteData, takeData } from "@/lib/store-data";
 import { HASH_SWAP_IF, HASH_TAKE_ALL, HASH_TAKE_FIELD, takenPairs } from "@/lib/redis-take";
-import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
+import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
@@ -148,7 +148,14 @@ export async function joinWaitlist(input: {
         await redisPipeline([["DEL", tokenKey(confirm), ...(lastLink ? [tokenKey(lastLink)] : [])]]);
         return "error";
       }
-      if (Number(size) >= MAX_WAITLIST) return "full";
+      // A size that is not an exact count is unknown, never under the cap (rule 24): nothing is written yet, so it fails.
+      let count: number;
+      try {
+        count = replyCount(size, "a waitlist's size");
+      } catch {
+        return "error";
+      }
+      if (count >= MAX_WAITLIST) return "full";
       const t = newToken();
       const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t } satisfies WaitEntry);
       // A new address takes room in the store's data room, with its link to leave
@@ -213,7 +220,10 @@ export async function joinWaitlist(input: {
   // asked to try again later.
   if (store.listId) {
     const [erasedAt] = await redisPipeline([suppressedAtCommand(store.listId, email)]);
-    if (erasedAt !== null && erasedAt !== undefined && Number(erasedAt) >= startedAt - ERASURE_SECONDS) {
+    // Only an exact null is "not deleted"; a mark that is not whole seconds (a missing or other reply) is unknown and
+    // taken as a recent deletion (rule 24), as is one that recent.
+    const known = erasedAt === null || (typeof erasedAt === "string" && /^\d{1,15}$/.test(erasedAt));
+    if (!known || (erasedAt !== null && Number(erasedAt) >= startedAt - ERASURE_SECONDS)) {
       const [taken] = await redisPipeline([["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, product.id), email], ["DEL", tokenKey(confirm), tokenKey(leave)]]);
       if (typeof taken === "string") await giveData(store, [{ slot: waitSlot(product.id), bytes: placeBytes(sid, product.id, email, taken) }]);
       return "error";

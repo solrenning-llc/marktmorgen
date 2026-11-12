@@ -26,6 +26,7 @@ import { LANGUAGE_CODES } from "@/lib/store-language";
 import { readListing } from "@/lib/catalog";
 import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
+import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_learn_access_exact";
@@ -228,6 +229,24 @@ async function main(): Promise<void> {
   is("unknown: 'try again', not 'sent'", asked, "error");
   is("and nothing was sent", sends, 0);
   garble = null;
+
+  part("While Stripe cannot be read, the link form gives every address the same answer (Claude 7's MEDIUM on #3376)");
+  await forgetPaid(store, "rec@example.com");
+  await forgetPaid(store, "nob@example.com");
+  await recordEnrollment(store, "rec@example.com", one.id, START, "stripe");
+  // Email that goes out, so a buyer's link is really sent: the leak is a "sent" only a buyer gets.
+  const mail = installSesMailFixture({ fallback: globalThis.fetch });
+  mail.configure();
+  const mailedTo = (address: string) => mail.sent.filter((message) => message.to.includes(address)).length;
+  garble = GARBLED[0][1];
+  const recordedBuyer = await requestCourseLink({ store, product: one, email: "rec@example.com", ip: "203.0.113.10", origin: "https://marktmorgen.com" });
+  const nonBuyer = await requestCourseLink({ store, product: one, email: "nob@example.com", ip: "203.0.113.11", origin: "https://marktmorgen.com" });
+  garble = null;
+  mail.restore();
+  is("a recorded buyer and an address that bought nothing get the same answer", recordedBuyer, nonBuyer);
+  is("and that answer is 'try again', never a 'sent' that only a buyer gets", nonBuyer, "error");
+  is("the recorded buyer is still emailed the link", mailedTo("rec@example.com"), 1);
+  is("the address that bought nothing is emailed nothing", mailedTo("nob@example.com"), 0);
 
   part("The course page says it, in every store language, and sells nothing to the member");
   for (const code of LANGUAGE_CODES) {

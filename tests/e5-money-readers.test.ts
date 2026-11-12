@@ -25,4 +25,9 @@ is("every file that reads the store's currency is listed", readers.filter((f) =>
 is("nothing listed that no longer reads it", rows.filter((r) => !readers.includes(r.file)).map((r) => r.file), []);
 is("each listed once, under a known class", [rows.length === new Set(rows.map((r) => r.file)).size, rows.filter((r) => !CLASSES.includes(r.kind)).map((r) => r.file)], [true, []]);
 
+is("the Counts table matches the rows, per class and in all", (() => {
+  const counts = Object.fromEntries([...doc.matchAll(/^\| ([A-Z-]+|All) \| (\d+) \|$/gm)].map((m) => [m[1], Number(m[2])]));
+  return [...CLASSES.map((k) => counts[k] === rows.filter((r) => r.kind === k).length), counts.All === rows.length];
+})(), [...CLASSES.map(() => true), true]);
+
 done();

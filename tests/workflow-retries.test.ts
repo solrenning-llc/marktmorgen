@@ -22,6 +22,8 @@ import {
   MAX_WAIT_DAYS_PER_STEP,
   QUEUE_COMMANDS_PER_STEP,
   RUN_START_COMMANDS,
+  SES_WAIT_COMMANDS_PER_TRY,
+  SES_WAKE_COMMANDS_PER_TRY,
   WAIT_COMMANDS_PER_TRY,
   WORKFLOW_LIMITS,
   WORST_COMMANDS_PER_RUN,
@@ -106,10 +108,12 @@ async function main(): Promise<void> {
 
   part("The worst case per run counts every wait and every retry");
   is(
-    "start, every step and each retry of the creator's, and every wait",
+    "start, every step and each retry of the creator's, every wait, and every try that can meet no Amazon SES room",
     WORST_COMMANDS_PER_RUN,
-    RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY,
+    RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY
+      + (MAX_STEPS + MAX_RETRIES_BY_YOU + MAX_WAITS_PER_RUN) * (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY),
   );
+  is("waiting for Amazon SES room only adds to the worst case, never takes from it", WORST_COMMANDS_PER_RUN > RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY, true);
   is("and the commercial review captures the bounds", [WORKFLOW_LIMITS.maxWaitsPerRun, WORKFLOW_LIMITS.maxWaitDaysPerStep, WORKFLOW_LIMITS.maxRetriesByYou, WORKFLOW_LIMITS.worstCommandsPerRun], [MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, MAX_RETRIES_BY_YOU, WORST_COMMANDS_PER_RUN]);
 
   part("Every way a run stops, listed");

@@ -113,10 +113,46 @@ export const QUEUE_COMMANDS_PER_STEP = 7;
  * 4 November 2026, with the lease read); 32 with room to spare.
  */
 export const WAIT_COMMANDS_PER_TRY = 32;
+/**
+ * Waiting only for room at Amazon SES (ALL-160, 12 November 2026; the owner's
+ * rule LC: email waits in the Amazon queue and is never discarded). Until this
+ * date such a wait was counted like any other, so after MAX_WAITS_PER_RUN
+ * waits (about two hours of growing delays) the run stopped and the email was
+ * never sent. Now it is not counted against MAX_WAITS_PER_RUN or
+ * MAX_WAIT_DAYS_PER_STEP: the step stays in the queue, parked
+ * (SES_PARK_SCORE in lib/flows.ts), for as long as it takes, and costs no
+ * command while it is parked. The scheduled job wakes parked steps only when
+ * Amazon's room is confirmed, at most SES_WAKE_PER_JOB a job, oldest first.
+ *
+ *   - SES_WAIT_COMMANDS_PER_TRY: one try that meets no SES room, for a batch
+ *     of one person (the dearest case): everything WAIT_COMMANDS_PER_TRY
+ *     counts, with the send's own reads of Amazon's room (the account's state
+ *     read and written back, the 25 hourly counts of the last 24 hours, the
+ *     monthly notice's mark) instead of the wait counted, and the step's
+ *     day clock let go (1). Measured in tests/flow-ses-wait-queue.test.ts.
+ *   - SES_WAKE_COMMANDS_PER_TRY: the step woken (1).
+ *   - SES_WAITS_PER_RUN: every try a run can make other than a woken one can
+ *     meet no room once: each step's first try, each "try it again", each
+ *     retry after an ordinary wait. A woken step meets no room again only
+ *     when room confirmed for it was taken in between by another send; those
+ *     tries are bounded by the job, SES_WAKE_PER_JOB a job, not by the run.
+ */
+export const SES_WAIT_COMMANDS_PER_TRY = 60;
+export const SES_WAKE_COMMANDS_PER_TRY = 1;
+export const SES_WAITS_PER_RUN = MAX_STEPS + MAX_RETRIES_BY_YOU + MAX_WAITS_PER_RUN;
+/** Parked steps one scheduled job wakes at the most, and never more than Amazon's confirmed room. */
+export const SES_WAKE_PER_JOB = 300;
+/**
+ * The job's own commands to look for parked steps (1) and, only when there
+ * are some, to read Amazon's room (the state read and written back, 2, and
+ * the 25 hourly counts): a company cost of the five-minute job, not a run's.
+ */
+export const SES_WAKE_JOB_COMMANDS = 1 + 2 + 25;
 export const WORST_COMMANDS_PER_RUN =
   RUN_START_COMMANDS +
   (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) +
-  MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY;
+  MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY +
+  SES_WAITS_PER_RUN * (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY);
 
 type PlanView = { tier: Tier; subscriptionActive: boolean; trialEnds: number };
 const inTrial = (store: PlanView, nowSeconds: number) => store.trialEnds > nowSeconds;

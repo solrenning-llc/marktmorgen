@@ -14,9 +14,12 @@
  *   - every scheduled run's database commands stay bounded, and a run with
  *     nothing it can send spends only a few;
  *   - once room returns, the email goes out once and the run moves on;
- *   - the waits counted against MAX_WAITS_PER_RUN are not used up by it.
+ *   - the waits counted against MAX_WAITS_PER_RUN are not used up by it;
+ *   - the dearest try that meets no room (Amazon's 24-hour counts read in
+ *     full) stays within SES_WAIT_COMMANDS_PER_TRY, the job's own looking
+ *     within SES_WAKE_JOB_COMMANDS.
  */
-import { MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, WAIT_COMMANDS_PER_TRY } from "@/lib/flow-limits";
+import { MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, SES_WAIT_COMMANDS_PER_TRY, SES_WAKE_JOB_COMMANDS, WAIT_COMMANDS_PER_TRY } from "@/lib/flow-limits";
 import { personOf, readRun } from "@/lib/flow-runs";
 import { enroll, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
@@ -43,7 +46,8 @@ globalThis.Date = new Proxy(RealDate, {
 const mail = installSesMailFixture({
   fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
 });
-const sent = mail.sesAttempts;
+// The creators' list emails Amazon was asked to take; the notice to the site's own inbox that SES has no room is not one.
+const listSent = () => mail.sesAttempts.flatMap((m) => m.to).filter((to) => to.endsWith("@example.com"));
 
 let commands = 0;
 const pipeline = redis.pipeline.bind(redis);
@@ -110,23 +114,45 @@ async function main(): Promise<void> {
   const waiting = await readRun(flowId, ivy);
   is(
     "still waiting, still in the queue, nothing sent, nothing stopped",
-    [waiting?.run.status, await inQueue("ivy@example.com"), sent.length, waiting?.events.some((e) => e.state === "failed" || e.state === "ended") ?? null],
+    [waiting?.run.status, await inQueue("ivy@example.com"), listSent().length, waiting?.events.some((e) => e.state === "failed" || e.state === "ended") ?? null],
     ["waiting", true, 0, false],
   );
   is(`well past ${MAX_WAITS_PER_RUN} waits and ${MAX_WAIT_DAYS_PER_STEP} days`, (shift / 1000) > (MAX_WAIT_DAYS_PER_STEP + 1) * 86_400, true);
-  is("the waits a run may make for other reasons are not used up by it", (waiting?.run.waits ?? 0) <= MAX_WAITS_PER_RUN, true);
+  is(`the ${MAX_WAITS_PER_RUN} waits a run may make for other reasons are not used up by it`, waiting?.run.waits, 0);
   is(`every scheduled run stays within ${2 * WAIT_COMMANDS_PER_TRY} database commands`, most <= 2 * WAIT_COMMANDS_PER_TRY, true);
+  // The queue's two scans (the lease and the queue), and the job's look for parked steps with Amazon's room.
   const idle = perRun.slice(-10);
-  is("a scheduled run with nothing it can send spends only a few commands", Math.max(...idle) <= 4, true);
+  is(`a scheduled run with nothing it can send spends only the job's own look, ${2 + SES_WAKE_JOB_COMMANDS} commands at the most`, Math.max(...idle) <= 2 + SES_WAKE_JOB_COMMANDS && Math.max(...idle) > 0, true);
+
+  part("The dearest try that meets no room: Amazon's 24-hour counts read in full");
+  // Amazon has room for some list email, all of it used in the last 24 hours.
+  await mail.setReady(true, { max24: 1_000, rate: 100 });
+  await redisPipeline([["SET", `nl:ses:h:${new Date(Date.now()).toISOString().slice(0, 13)}`, 800]]);
+  await setSubscription(OWNER, { customerId: "cus_Wren0001", subscriptionId: "sub_Wren0001", active: true, tier: "pro", period: paidPeriod() });
+  store = (await storeForEmail(OWNER))!;
+  await upsertContact(list, "oak@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "oak@example.com", { joined: false, tag: "welcome" });
+  const dear = commands;
+  await run();
+  const dearest = commands - dear;
+  console.log(`dearest job with one try that met no room: ${dearest} commands`);
+  is(
+    `the whole job stays within the queue's scans, the job's look and one try: ${2 + SES_WAKE_JOB_COMMANDS + SES_WAIT_COMMANDS_PER_TRY} commands`,
+    [dearest <= 2 + SES_WAKE_JOB_COMMANDS + SES_WAIT_COMMANDS_PER_TRY, (await readRun(flowId, personOf("oak@example.com")))?.run.status, listSent().length],
+    [true, "waiting", 0],
+  );
+  shift += 86_400 * 1000;
 
   part("Room returns: it goes out once, and the run moves on");
+  // The store's plan renewed meanwhile, as a paying store's does.
+  await setSubscription(OWNER, { customerId: "cus_Wren0001", subscriptionId: "sub_Wren0001", active: true, tier: "pro", period: paidPeriod() });
   await mail.setReady(true, { max24: 50_000, rate: 100 });
   await run();
   const after = await readRun(flowId, ivy);
-  is("sent once, to that person", sent.map((m) => m.to), ["ivy@example.com"]);
+  is("sent once to each", listSent().sort(), ["ivy@example.com", "oak@example.com"]);
   is("the run goes on to its next step", [after?.run.status, after?.events.at(-1)?.state], ["running", "confirmed"]);
   await run();
-  is("not sent twice", sent.length, 1);
+  is("not sent twice", listSent().length, 2);
 
   mail.restore();
   done();

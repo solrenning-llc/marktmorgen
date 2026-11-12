@@ -1,11 +1,11 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
-import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
-import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
+import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, SES_WAKE_PER_JOB, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
+import { FIRST_DELAY_SECONDS, type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, letGoWaitClock, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -45,7 +45,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
-import { MAX_MAIL_BODY, MAX_SUBJECT, giveBackToMonth, monthlyAllowance, sendTo, takeFromMonth } from "@/lib/mail";
+import { MAX_MAIL_BODY, MAX_SUBJECT, giveBackToMonth, monthlyAllowance, sendTo, senderRoom, takeFromMonth } from "@/lib/mail";
 import type { Store } from "@/lib/store";
 import { hasProduct, idsOfKind } from "@/lib/catalog";
 import { stepCampaign } from "@/lib/mail-links";
@@ -167,6 +167,32 @@ const QUEUE = "nl:mail:flowq";
  */
 const LEASE = "nl:mail:flowq:lease";
 const LEASE_SECONDS = 15 * 60;
+/**
+ * Steps waiting only for room at Amazon SES stay in the queue at this score
+ * plus the earliest time they may be woken (waitOrStop): far beyond any real
+ * time, so no job takes them by time and they cost nothing while they wait.
+ * Being in the queue, everything that removes a person from it (a stop step,
+ * an erasure, a deleted workflow) removes them there too. wakeSesWaits brings
+ * them back to now when Amazon's room is confirmed.
+ */
+const SES_PARK_SCORE = 100_000_000_000;
+
+/**
+ * Wakes steps parked for Amazon SES room: only when there are some, and only
+ * as many as Amazon's confirmed room for list email, at most SES_WAKE_PER_JOB,
+ * the longest waiting first. A woken step is only moved to now (XX: one taken
+ * out meanwhile is not put back), and its try is an ordinary one: with room
+ * gone again in between, it is parked again, never stopped.
+ */
+async function wakeSesWaits(nowSeconds: number): Promise<void> {
+  const [found] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, SES_PARK_SCORE, SES_PARK_SCORE + nowSeconds, "LIMIT", 0, SES_WAKE_PER_JOB]]);
+  const parked = Array.isArray(found) ? found.filter((m): m is string => typeof m === "string") : [];
+  if (!parked.length) return;
+  const room = await senderRoom(true);
+  if (!(room >= 1)) return;
+  const woken = parked.slice(0, Math.min(parked.length, Math.floor(Math.min(room, SES_WAKE_PER_JOB))));
+  await redisPipeline(woken.map((member) => ["ZADD", QUEUE, "XX", nowSeconds, member]));
+}
 /**
  * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
  * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
@@ -1048,17 +1074,32 @@ const SWITCHED_OFF_WAIT = `Waiting: your store is switched off after notices abo
  * each is tried again when lib/flow-retry.ts says, or stops there with
  * nothing done when the run has waited as often or as long as it may. What
  * comes back is the queue's new entries and each person's outcome.
+ *
+ * Except a wait only for room at Amazon SES ("sender"; ALL-160, the owner's
+ * rule LC: email waits in the Amazon queue and is never discarded): it is not
+ * counted and never stops the run. The step stays in the queue, parked at
+ * SES_PARK_SCORE, where no job takes it by time, and wakeSesWaits puts it back
+ * when Amazon's room is confirmed (lib/flow-limits.ts).
  */
 async function waitOrStop(
   flowId: string,
   group: string,
   index: number,
-  people: { email: string; reason: WaitReason; note: string }[],
+  everyone: { email: string; reason: WaitReason; note: string }[],
   nowSeconds: number,
   known: { windowEnd?: number | null; pauseUntil?: number | null } = {},
 ): Promise<{ queue: (string | number)[][]; outcomes: Settled[] }> {
   const queue: (string | number)[][] = [];
   const outcomes: Settled[] = [];
+  const parked = everyone.filter((p) => p.reason === "sender");
+  if (parked.length) {
+    await letGoWaitClock(flowId, parked.map((p) => p.email));
+    for (const p of parked) {
+      queue.push(["ZADD", QUEUE, SES_PARK_SCORE + nowSeconds + FIRST_DELAY_SECONDS, `${group}|${p.email}`]);
+      outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
+    }
+  }
+  const people = everyone.filter((p) => p.reason !== "sender");
   if (!people.length) return { queue, outcomes };
   const counted = await countWaits(flowId, people.map((p) => p.email), index, nowSeconds);
   for (const p of people) {
@@ -1143,6 +1184,9 @@ export async function sendDueSteps(
     const mine = orphans.filter((_, i) => Number(back[i]) === 1);
     if (mine.length) await redisPipeline(mine.map((m) => ["ZADD", QUEUE, Math.floor(Date.now() / 1000), m]));
   }
+  // Steps parked for Amazon SES room come back only when that room is confirmed. A failure here wakes nobody and
+  // stops nothing: they stay parked for the next job.
+  await wakeSesWaits(Math.floor(Date.now() / 1000)).catch((error) => console.error("waking workflow steps waiting for Amazon SES failed", error));
   while (Date.now() < deadline) {
     const now = Math.floor(Date.now() / 1000);
     const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 300]]);
@@ -1381,7 +1425,8 @@ export async function sendDueSteps(
           refused.push(...rest.map((email) => ({ email, state: "failed" as const, note: "The sender refused this email as it is, so the run ended.", to: -1, status: "failed" as const })));
         } else {
           // Tried again later rather than lost: when the month turns, at the next day, at the pause's end, or after
-          // a growing delay; and at most MAX_WAITS_PER_RUN times a run (lib/flow-retry.ts).
+          // a growing delay; and at most MAX_WAITS_PER_RUN times a run (lib/flow-retry.ts). A wait only for Amazon SES room
+          // ("sender") is not counted and never stops the run: it stays parked in the queue until room is confirmed (waitOrStop).
           const reason: WaitReason = result.stopped === "allowance" || result.stopped === "day" || result.stopped === "sender" || result.stopped === "paused" || result.stopped === "portion" ? result.stopped : "retry";
           const why =
             result.stopped === "allowance" ? "Waiting: this month's emails ran out. It goes out when the month turns." : result.stopped === "day" || result.stopped === "portion" || result.stopped === "sender" ? "Waiting for room to send; it goes out by itself." : result.stopped === "paused" ? "Waiting: email to your list is paused for now." : "Waiting to be tried again later; it was not sent.";

@@ -27,6 +27,11 @@
  * with nothing done at that step, and its history says why. A count that
  * cannot be read stops it too: an unknown count is not room for one more.
  *
+ * Except a wait only for room at Amazon SES ("sender"; ALL-160, 12 November
+ * 2026): it is not counted, never stops the run and is not tried by time. It
+ * stays parked in the queue until the scheduled job confirms Amazon's room
+ * (lib/flows.ts, waitOrStop and wakeSesWaits; lib/flow-limits.ts).
+ *
  * Pure and browser-safe.
  */
 import { MAX_WAIT_DAYS_PER_STEP, MAX_WAITS_PER_RUN } from "@/lib/flow-limits";

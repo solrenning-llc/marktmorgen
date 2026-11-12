@@ -254,7 +254,6 @@ const PENDING = new Set([
   "app/studio/email/page.tsx",
   "app/studio/pages/page.tsx",
   "app/studio/site/page.tsx",
-  "app/studio/funnels/page.tsx",
   "app/studio/outreach/page.tsx",
   "app/studio/course/[product]/page.tsx",
   "app/api/store/numbers/ask/route.ts",

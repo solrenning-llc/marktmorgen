@@ -156,6 +156,15 @@ export async function admitRuns(listId: string, limit: number, wanted: number, n
   return admitted;
 }
 
+/**
+ * Gives back `n` places in today's runs taken by admitRuns for starts that were not confirmed queued (lib/flows.ts,
+ * startFlows): not refused, so not counted as such; their start may come again today.
+ */
+export async function giveBackRuns(listId: string, n: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (n <= 0) return;
+  await redisPipeline([["HINCRBY", dayKey(listId, nowSeconds), "started", -n]]).catch(() => {});
+}
+
 /** Moves runs admitted today to refused: the ones that could not start after all (no room for them, lib/flows.ts). */
 export async function refuseRuns(listId: string, n: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
   if (n <= 0) return;

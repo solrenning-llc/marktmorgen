@@ -74,7 +74,8 @@
  *                                  is under way, the last row dealt with, the time the place may move to and whether
  *                                  an unreadable row waits for the next readable one
  *   nl:certrefunds:seen:<stats>    the refunds and closing events already handled, each by its time, trimmed below
- *                                  the place; and "w:<id>" for a row left unknown, by the time it may be tried again
+ *                                  the place and to the newest CERTIFICATE_REFUND_SEEN_AT_MOST; and "w:<id>" for a row
+ *                                  left unknown, by the time it may be tried again
  *   nl:certrefunds:next:<stats>    "1" while the store's pass is not due, for CERTIFICATE_PASS_EVERY_SECONDS
  *   nl:certrefunds:n:<stats>:<month>  the rows marked handled and courses checked in a calendar month (UTC), forty days
  *   nl:certrefunds:n:<stats>:<month>:r  of them, those taken by rows tried again, forty days
@@ -101,6 +102,14 @@ export const CERTIFICATE_REFUND_PAGES_PER_STORE = 3;
 export const CERTIFICATE_REFUND_LOOKUPS_PER_STORE = 20;
 /** How far back a store's first pass reads, and how long its place and the refunds read are kept. */
 export const CERTIFICATE_REFUND_LOOKBACK_SECONDS = 7 * 86_400;
+/**
+ * The most members the set of rows handled keeps (nl:certrefunds:seen): each write keeps only the newest this many, so
+ * a refund that stays pending, and holds the place at its own time, never lets the set outgrow the 64 KB
+ * tests/store-data-registry.ts prices for it (quality review of #3409, MEDIUM 2). A handled row trimmed this way is read
+ * again and handled again inside the month's checks, so the cost stays inside its line; a row left unknown keeps its
+ * wait while there are fewer than this many rows handled after it.
+ */
+export const CERTIFICATE_REFUND_SEEN_AT_MOST = 400;
 /**
  * How old a refund or a lost dispute must be before it takes a certificate: the ten minutes an answer about a buyer's
  * courses is kept (PAID_SECONDS), and five more for a press of "Get my certificate" still under way on such an answer.
@@ -209,6 +218,8 @@ async function seenAmong(sid: string, rows: Record<string, unknown>[]): Promise<
 
 const anchorKey = (sid: string) => `nl:certrefunds:since:${sid}`;
 const seenKey = (sid: string) => `nl:certrefunds:seen:${sid}`;
+/** The command that keeps only the newest CERTIFICATE_REFUND_SEEN_AT_MOST members of the set of rows handled. */
+const keepNewest = (sid: string): string[] => ["ZREMRANGEBYRANK", seenKey(sid), "0", String(-(CERTIFICATE_REFUND_SEEN_AT_MOST + 1))];
 const nextKey = (sid: string) => `nl:certrefunds:next:${sid}`;
 /** The value of a store's turn while its pass is not due. */
 const NOT_DUE = "1";
@@ -446,11 +457,12 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
           await redisPipeline([
             ["ZADD", seenKey(sid), now + pause, waitMember(id)],
             ["EXPIRE", seenKey(sid), CERTIFICATE_REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+            keepNewest(sid),
           ]),
-          2,
+          3,
           WHAT,
-        ).forEach((reply) => {
-          if (replyCount(reply, WHAT) > 1) throw new UnknownReply(WHAT);
+        ).forEach((reply, at) => {
+          if (replyCount(reply, WHAT) > 1 && at < 2) throw new UnknownReply(WHAT);
         });
       } catch (error) {
         // Not known to be marked: it is tried again at the next pass, inside the month's checks.
@@ -495,11 +507,12 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
       await redisPipeline([
         ["ZADD", seenKey(sid), created, id],
         ["EXPIRE", seenKey(sid), CERTIFICATE_REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+        keepNewest(sid),
       ]),
-      2,
+      3,
       WHAT,
-    ).forEach((reply) => {
-      if (replyCount(reply, WHAT) > 1) throw new UnknownReply(WHAT);
+    ).forEach((reply, at) => {
+      if (replyCount(reply, WHAT) > 1 && at < 2) throw new UnknownReply(WHAT);
     });
     return "done";
   };

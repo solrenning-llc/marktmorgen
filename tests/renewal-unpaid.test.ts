@@ -185,7 +185,7 @@ async function main() {
       const source = readFileSync(file, "utf8");
       // costPauseCode answers renewal_unpaid for an unpaid renewal (unit 5 shares the door; checked below).
       const check = source.indexOf("costPauseCode(store)");
-      is(`${file} checks before reserving`, check > 0 && check < source.indexOf("reserveStoreUpload(store"), true);
+      is(`${file} checks before reserving`, check > 0 && check < source.search(/reserveStoreUpload(Receipt)?\(store/), true);
       is(`${file} answers the code it is given`, /const paused = costPauseCode\(store\); if \(paused\) (throw new Error\(paused\)|return fail\(paused, 409\)|return Response\.json\(\{ ok: false, error: paused \}, \{ status: 409 \}\))/.test(source), true);
     }
     for (const [file, before] of [["app/api/store/image/upload/route.ts", "issueSignedToken("], ["app/api/store/mail/picture/route.ts", "keepMailPicture("]] as const) {

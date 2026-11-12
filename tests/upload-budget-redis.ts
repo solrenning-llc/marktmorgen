@@ -18,6 +18,7 @@ const amount=(value:unknown)=>typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(
 /** Atomic contract double. It does not execute or certify the production Lua. */
 export async function redisPipeline(commands:(string|number)[][]):Promise<unknown[]>{
  calls.push(commands);if(failing)throw Error('Redis unavailable');if(reply)return reply;
+ if(commands.length===1&&commands[0][0]==='EVAL'&&String(commands[0][1]).includes("'company:bytes', -bytes"))return giveBack(commands[0]);
  if(commands.length===2&&commands[0][0]==='EVAL'&&commands[0][2]===2){const first=openLedger(commands[0]);const second=take(commands[1]);return lostAck?[]:[first,second[0]];}
  return take(commands[0],commands.length);
 }
@@ -49,4 +50,11 @@ function take(cmd:(string|number)[],count=1):unknown[]{
  if(currentScope===undefined){row.set('slots:'+scope,String(slots!-1));row.set(prefix+'scope',scope);}
  for(let i=0;i<3;i++){row.set(prefix+names[i],String(used[i]!+charge[i]));row.set('company:'+names[i],String(company[i]!+charge[i]));}
  return lostAck?[]:[1];
+}
+/** Contract double of RETURN_UPLOAD_BYTES: same ledger, policy and scope, never below zero. */
+function giveBack(cmd:(string|number)[]):unknown[]{
+ const [snapshot,id,scope,bytesRaw]=cmd.slice(4).map(String);const row=hashes.get(String(cmd[3]));const prefix='store:'+id+':';
+ const bytes=amount(bytesRaw),store=amount(row?.get(prefix+'bytes')),company=amount(row?.get('company:bytes'));
+ if(!row||wrongType||expiring||row.get('policy')!==snapshot||row.get(prefix+'scope')!==scope||bytes===null||bytes<=0||store===null||company===null||store<bytes||company<bytes)return[0];
+ row.set(prefix+'bytes',String(store-bytes));row.set('company:bytes',String(company-bytes));return[1];
 }

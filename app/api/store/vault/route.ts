@@ -1,5 +1,5 @@
 import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
-import { reserveStoreUpload, reserveUploadControl } from "@/lib/upload-budget";
+import { reserveStoreUploadReceipt, reserveUploadControl } from "@/lib/upload-budget";
 import { openReservedVault, closeReservedVault, abortReservedVault } from "@/lib/vault-storage";
 import type { NextRequest } from "next/server";
 import { readKind } from "@/lib/catalog";
@@ -16,6 +16,8 @@ import { PIECES_PER_ASK, readVaultPath } from "@/lib/vault-rules";
 /** Uploads one store may open in an hour, and times it may ask for addresses: a full catalog, moved in one sitting. */
 const OPENS_PER_HOUR = 600;
 const ASKS_PER_HOUR = 6_000;
+/** Storage admission refusals thrown before the provider opens anything (lib/storage-reservations.ts). */
+const STORAGE_REFUSALS = new Set(["storage_limit", "storage_pending", "storage_busy"]);
 
 /**
  * The door a sold file goes through from the studio's browser straight to
@@ -75,10 +77,19 @@ export async function POST(request: NextRequest) {
       if (body.multipart !== true) return fail("upload_refresh", 409);
       // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
       { const paused = costPauseCode(store); if (paused) return fail(paused, 409); }
-      if (!(await reserveStoreUpload(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
+      const receipt = await reserveStoreUploadReceipt(store, bytes, "r2");
+      if (!receipt) return fail("upload_budget_unavailable", 503);
       await rememberFolderOwner(folder, ref);
 
-      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier));
+      let opened: Awaited<ReturnType<typeof openReservedVault>>;
+      try {
+        opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier));
+      } catch (error) {
+        // Storage refused before any upload session was opened: the bytes go
+        // back to the month, the open (which paid for the measurement) does not.
+        if (error instanceof Error && STORAGE_REFUSALS.has(error.message)) await receipt.returnBytes();
+        throw error;
+      }
       if (!opened.ok) return fail(opened.reason === "off" ? "off" : opened.reason === "invalid" ? "invalid" : "files_unavailable", opened.reason === "off" ? 404 : opened.reason === "invalid" ? 400 : 503);
       return Response.json({ ok: true, upload: opened.upload }, { headers: { "Cache-Control": "no-store" } });
     }

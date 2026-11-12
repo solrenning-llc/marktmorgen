@@ -71,6 +71,30 @@ end
 return 1
 `;
 
+/** Gives one open's bytes back to the store and the company, only on the
+ * same ledger, policy and scope it was taken under and never below zero.
+ * Opens and controls are never given back.
+ */
+export const RETURN_UPLOAD_BYTES = `
+local function amount(value)
+  if not value or not string.match(value, '^%d+$') or (#value > 1 and string.sub(value, 1, 1) == '0') then return nil end
+  local n = tonumber(value)
+  if not n or n < 0 or n > 9000000000000000 or n ~= math.floor(n) then return nil end
+  return n
+end
+if redis.call('TYPE', KEYS[1]).ok ~= 'hash' or redis.call('TTL', KEYS[1]) ~= -1 then return 0 end
+if redis.call('HGET', KEYS[1], 'policy') ~= ARGV[1] then return 0 end
+local prefix = 'store:' .. ARGV[2] .. ':'
+if redis.call('HGET', KEYS[1], prefix .. 'scope') ~= ARGV[3] then return 0 end
+local bytes = amount(ARGV[4])
+local store = amount(redis.call('HGET', KEYS[1], prefix .. 'bytes'))
+local company = amount(redis.call('HGET', KEYS[1], 'company:bytes'))
+if not bytes or bytes <= 0 or not store or not company or store < bytes or company < bytes then return 0 end
+redis.call('HINCRBY', KEYS[1], prefix .. 'bytes', -bytes)
+redis.call('HINCRBY', KEYS[1], 'company:bytes', -bytes)
+return 1
+`;
+
 /** Opens the automatic policy's month once, and carries a changed automatic
  * policy onto the same counters. It never resets or recreates anything: a
  * month whose ledger was opened and later went missing stays refused, a
@@ -130,31 +154,33 @@ return 1
  * month began in, under the store and the month's own name, so one payment
  * buys one month of uploads however many calendar months it touches.
  */
-async function reserve(statsId: string, scope: UploadBudgetScope, action: 'open'|'control', bytes: number, given: UploadBudgetPolicy|null, window: AllowanceWindow|null): Promise<boolean> {
-  if(!window)return false;
+type UploadReceipt = { key: string; snapshot: string; member: string; scope: UploadBudgetScope; bytes: number };
+async function reserve(statsId: string, scope: UploadBudgetScope, action: 'open'|'control', bytes: number, given: UploadBudgetPolicy|null, window: AllowanceWindow|null): Promise<UploadReceipt|null> {
+  if(!window)return null;
   const began=window.billing?new Date(window.start):null;
-  if(began && (Date.now()-window.start>32*86_400_000 || window.start-Date.now()>300_000))return false;
+  if(began && (Date.now()-window.start>32*86_400_000 || window.start-Date.now()>300_000))return null;
   const policy=began && given?.reviewId===AUTOMATIC_UPLOAD_REVIEW_ID?currentUploadBudgetPolicy(began):given;
   if(!isUploadBudgetConfigured(policy,began??new Date()) || !isRedisConfigured() || !/^[a-f0-9]{32}$/.test(statsId)
     || !(UPLOAD_BUDGET_SCOPES as readonly string[]).includes(scope)
     || !Number.isSafeInteger(bytes) || bytes<0 || bytes>UPLOAD_BUDGET_RULES.maxInteger
-    || (action==='open' && bytes===0) || (action==='control' && bytes!==0))return false;
+    || (action==='open' && bytes===0) || (action==='control' && bytes!==0))return null;
   const cap=policy.perStore[scope], company=policy.company;
-  if(cap.controlRequests<1 || (action==='open' && (cap.opens<1 || bytes>cap.authorizedBytes)))return false;
-  const key=uploadLedgerKey(policy.month), snapshot=uploadBudgetSnapshot(policy);
+  if(cap.controlRequests<1 || (action==='open' && (cap.opens<1 || bytes>cap.authorizedBytes)))return null;
+  const key=uploadLedgerKey(policy.month), snapshot=uploadBudgetSnapshot(policy), member=window.billing?statsId+'@'+window.id:statsId;
+  const receipt:UploadReceipt={key,snapshot,member,scope,bytes};
   const take:(string|number)[]=['EVAL',RESERVE_UPLOAD_BUDGET,1,key,
-      snapshot,window.billing?statsId+'@'+window.id:statsId,scope,action,bytes,cap.opens,cap.authorizedBytes,cap.controlRequests,
+      snapshot,member,scope,action,bytes,cap.opens,cap.authorizedBytes,cap.controlRequests,
       company.opens,company.authorizedBytes,company.controlRequests,policy.fundedStores[scope]];
   try{
     if(policy.reviewId!==AUTOMATIC_UPLOAD_REVIEW_ID){
       const result=await redisPipeline([take]);
-      return result.length===1 && result[0]===1;
+      return result.length===1 && result[0]===1?receipt:null;
     }
     const open:(string|number)[]=['EVAL',OPEN_UPLOAD_BUDGET,2,key,uploadOpenedKey(policy.month),policy.reviewId,snapshot,
       ...UPLOAD_BUDGET_SCOPES.map(name=>policy.fundedStores[name])];
     const result=await redisPipeline([open,take]);
-    return result.length===2 && result[0]===1 && result[1]===1;
-  }catch{return false;}
+    return result.length===2 && result[0]===1 && result[1]===1?receipt:null;
+  }catch{return null;}
 }
 /** The full authorized size is retained on abort, timeout, rejection or lost
  * acknowledgement. Reopening is a new reservation; deleting a file never
@@ -162,9 +188,27 @@ async function reserve(statsId: string, scope: UploadBudgetScope, action: 'open'
  */
 export async function reserveStoreUpload(store: UploadStore, bytes: number, backend: UploadBackend, policy: UploadBudgetPolicy|null=currentUploadBudgetPolicy()): Promise<boolean> {
   // Only the doors uploadBackendOpen names open (lib/upload-budget-policy.ts).
-  if(!uploadBackendOpen(backend)||!Number.isSafeInteger(bytes)||bytes<=0)return false;
-  if(store?.period?.funded===true&&!(await reservePaidResourceWindow(store)))return false;
-  return !!store?.statsId && reserve(store.statsId,uploadScopeFor(store),'open',bytes,policy,allowanceWindow(store));
+  return !!(await reserveStoreUploadReceipt(store,bytes,backend,policy));
+}
+/** Same reservation, answering a receipt whose bytes, and only bytes, can be
+ * given back while no upload session exists for it: a storage refusal before
+ * the provider was asked to open anything (issue #3960). The open stays spent,
+ * because admission already paid for the storage measurement.
+ */
+export async function reserveStoreUploadReceipt(store: UploadStore, bytes: number, backend: UploadBackend, policy: UploadBudgetPolicy|null=currentUploadBudgetPolicy()): Promise<{ returnBytes(): Promise<boolean> }|null> {
+  if(!uploadBackendOpen(backend)||!Number.isSafeInteger(bytes)||bytes<=0)return null;
+  if(store?.period?.funded===true&&!(await reservePaidResourceWindow(store)))return null;
+  const receipt=store?.statsId?await reserve(store.statsId,uploadScopeFor(store),'open',bytes,policy,allowanceWindow(store)):null;
+  if(!receipt)return null;
+  let returned=false;
+  return { async returnBytes(){
+    if(returned)return false;
+    returned=true;
+    try{
+      const result=await redisPipeline([['EVAL',RETURN_UPLOAD_BYTES,1,receipt.key,receipt.snapshot,receipt.member,receipt.scope,receipt.bytes]]);
+      return result.length===1 && result[0]===1;
+    }catch{return false;}
+  } };
 }
 /** Signing requests share the store's monthly control ceiling.
  * Completing or canceling an existing grant remains accessible; the reviewed
@@ -172,5 +216,5 @@ export async function reserveStoreUpload(store: UploadStore, bytes: number, back
  */
 export async function reserveUploadControl(store: UploadStore, policy: UploadBudgetPolicy|null=currentUploadBudgetPolicy()): Promise<boolean> {
   if(store?.period?.funded===true&&!(await reservePaidResourceWindow(store)))return false;
-  return !!store?.statsId && reserve(store.statsId,uploadScopeFor(store),'control',0,policy,allowanceWindow(store));
+  return !!store?.statsId && !!(await reserve(store.statsId,uploadScopeFor(store),'control',0,policy,allowanceWindow(store)));
 }

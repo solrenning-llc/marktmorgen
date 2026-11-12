@@ -2,8 +2,8 @@ import type { Tier } from '@/lib/plan';
 export { storageBrakeFor } from '../lib/storage-rules';
 export const FOLDER='a'.repeat(32);
 export const PATH='vault/'+FOLDER+'/product-1/0123456789abcdef-file.pdf';
-export const state={auth:true,owns:true,lessonOwned:true,rateAllowed:true,vaultConfigured:true,providerFails:false,events:[] as string[],storageLimits:[] as number[],store:{statsId:'b'.repeat(32),tier:'creator' as Tier,subscriptionActive:true,subscriptionId:null as string|null,trialEnds:0,planEndedAt:''}};
-export function resetWorld(){state.auth=true;state.owns=true;state.lessonOwned=true;state.rateAllowed=true;state.vaultConfigured=true;state.providerFails=false;state.events.length=0;state.storageLimits.length=0;state.store.tier="creator";state.store.trialEnds=0;}
+export const state={auth:true,owns:true,lessonOwned:true,rateAllowed:true,vaultConfigured:true,providerFails:false,storageRefuses:'',events:[] as string[],storageLimits:[] as number[],store:{statsId:'b'.repeat(32),tier:'creator' as Tier,subscriptionActive:true,subscriptionId:null as string|null,trialEnds:0,planEndedAt:''}};
+export function resetWorld(){state.auth=true;state.owns=true;state.lessonOwned=true;state.rateAllowed=true;state.vaultConfigured=true;state.providerFails=false;state.storageRefuses='';state.events.length=0;state.storageLimits.length=0;state.store.tier="creator";state.store.trialEnds=0;}
 export async function guardStoreWrite(request:Request){return state.auth?{ok:true,ref:'owner@example.test',body:await request.json()}:{ok:false,response:Response.json({ok:false,error:'signed_out'},{status:401})};}
 export async function studioAccess(){return state.auth?{ok:true,access:{store:state.store,ref:'owner@example.test'}}:{ok:false,reason:'signed_out'};}
 export const storeForEmail=async()=>state.store;
@@ -28,7 +28,7 @@ export const limited=async(request:Request)=>request;
 export const rememberFolderOwner=async()=>{};
 export const isVaultConfigured=()=>state.vaultConfigured;
 export const isStreamConfigured=()=>true;
-export async function openReservedVault(_input:unknown,limit:number){state.storageLimits.push(limit);state.events.push('provider:open');return state.providerFails?{ok:false,reason:'unavailable'}:{ok:true,upload:{pathname:PATH,pieces:1,pieceBytes:16*1024*1024,multipart:true}};}
+export async function openReservedVault(_input:unknown,limit:number){state.storageLimits.push(limit);if(state.storageRefuses){state.events.push('provider:measurement');throw new Error(state.storageRefuses);}state.events.push('provider:open');return state.providerFails?{ok:false,reason:'unavailable'}:{ok:true,upload:{pathname:PATH,pieces:1,pieceBytes:16*1024*1024,multipart:true}};}
 export async function closeReservedVault(){state.events.push('provider:complete');return {ok:true,file:{pathname:PATH,bytes:5,contentType:'application/pdf'}};}
 export async function abortReservedVault(){state.events.push('provider:abort');return true;}
 export async function signPieces(){state.events.push('provider:sign');return [{number:1,url:'https://provider.example.test/part',type:null}];}

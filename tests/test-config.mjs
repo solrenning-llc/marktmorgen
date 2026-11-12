@@ -106,7 +106,7 @@ function centralAliases(file,root,here){
  if(file==='billing-resume-unknown-route.test.ts')for(const name of ['studio-route','request-guard'])aliases['@/lib/'+name]=join(here,'billing-resume-route-world.ts');
  if(['ai-spend.test.ts','ai-spend-provider.test.ts','automatic-ai-spend.test.ts'].includes(file))aliases['@/lib/redis']=join(here,'ai-spend-redis.ts');
  else aliases['@/lib/ai-spend']=join(here,'ai-spend-regression-stub.ts');
- if(file==='upload-budget-routes.test.ts'){
+ if(file==='upload-budget-routes.test.ts'||file==='vault-storage-refusal-budget.test.ts'){
   aliases['@/lib/redis']=join(here,'upload-budget-redis.ts');
   aliases['@/lib/upload-budget-policy']=join(here,'upload-budget-approved-policy.ts');
   for(const name of ['store','catalog','course','delivery','storage-quota','stream','vault','vault-storage','request-guard','store-request','studio-route','blob','metered-limits'])aliases['@/lib/'+name]=join(here,'upload-route-world.ts');

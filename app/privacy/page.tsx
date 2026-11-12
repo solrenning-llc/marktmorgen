@@ -1600,6 +1600,18 @@ export default function PrivacyPage() {
           numbers and links taken out first, and the visitor&apos;s name and
           address are never sent.
         </p>
+        <p id="inbox-refund-history" className="scroll-mt-24">
+          <strong className="text-black">Past refunds and disputes, in a store&apos;s inbox.</strong>{" "}
+          When a store&apos;s team asks, in one conversation of its inbox, we
+          read from that store&apos;s own Stripe account how many of the paid
+          checkouts made with the conversation&apos;s address in that store
+          were refunded in full or in part, or had a dispute opened. We show
+          those counts only to that store&apos;s team, so it can decide how to
+          answer; they are read at that moment and we keep nothing but how
+          many such checks the store made that day. Subscriptions, payments not
+          made yet, checkouts under another spelling of the address and any
+          past the newest 100 are said as not checked, never as none.
+        </p>
         <p>
           <strong className="text-black">Usage and technical data.</strong> We
           may collect information such as IP address, browser type, device

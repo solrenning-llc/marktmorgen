@@ -186,6 +186,10 @@ async function saveDraftUnlocked(
     id = randomBytes(8).toString("hex");
   }
   const draft: Draft = { ...(subjectTest !== undefined ? { subjectTest } : {}), ...(audience ? { audience } : {}), id, subject, body, productId, by: who.toLowerCase(), savedAt };
+  // The HLEN above is only a first check: two saves at once could both pass it. A new draft's write is followed by a
+  // count; past MAX_DRAFTS the draft just written is taken back and the save answers "full" (Claude 2 (nuvem D) bug
+  // hunt), so the cap holds however many saves race (at worst both are refused, never one too many kept).
+  const isNew = !input.id;
   let acknowledgement: unknown;
   try {
     acknowledgement = await redisPipeline([["HSET", key, id, JSON.stringify(draft)]]);
@@ -193,6 +197,16 @@ async function saveDraftUnlocked(
     throw new DraftWriteUnconfirmed();
   }
   if (!Array.isArray(acknowledgement) || acknowledgement.length !== 1 || (acknowledgement[0] !== 0 && acknowledgement[0] !== 1)) throw new DraftWriteUnconfirmed();
+  if (isNew) {
+    const counted = await redisPipeline([["HLEN", key]]).catch(() => null);
+    const total = Array.isArray(counted) && counted.length === 1 ? counted[0] : null;
+    if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new DraftWriteUnconfirmed();
+    if (total > MAX_DRAFTS) {
+      const undone = await redisPipeline([["HDEL", key, id]]).catch(() => null);
+      if (!Array.isArray(undone) || undone.length !== 1 || (undone[0] !== 0 && undone[0] !== 1)) throw new DraftWriteUnconfirmed();
+      return { ok: false, reason: "full" };
+    }
+  }
   return { ok: true, draft };
 }
 

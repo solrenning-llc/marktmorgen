@@ -71,9 +71,15 @@ part("A list not read whole is unknown");
     ["done not a yes or no", [{ ...good[0], done: "yes" }]],
     ["a time not whole", [{ ...good[0], createdAt: 1.5 }]],
     ["open with a done time", [{ ...good[0], doneAt: NOW }]],
+    // A time no date can hold (past +275760-09-13) would make the data copy throw (Codex C2 and Claude 1 on #3560, LOW).
+    ["a written time past what a date can hold", [{ ...good[0], createdAt: 8_640_000_000_001 }]],
+    ["a written time of the largest safe integer", [{ ...good[0], createdAt: Number.MAX_SAFE_INTEGER }]],
+    ["a done time past what a date can hold", [{ ...good[0], done: true, doneAt: 9_000_000_000_000 }]],
   ];
   for (const [what, raw] of bent) is(`${what}: the whole list unknown, never the rest`, parseBusinessTasks(raw), null);
   is("an older task without its times reads with 0", parseBusinessTasks([{ id: id(3), title: "Old", due: "", done: false }]), [{ id: id(3), title: "Old", due: "", done: false, createdAt: 0, doneAt: 0 }]);
+  const latest = parseBusinessTasks([{ ...good[0], done: true, createdAt: 8_640_000_000_000, doneAt: 8_640_000_000_000 }]);
+  is("the latest time a date can hold still reads, and its data copy does not throw", latest ? businessTaskCopy(latest)[0].done_utc : null, "+275760-09-13T00:00:00.000Z");
 }
 
 part("Edit, mark and remove");
@@ -112,6 +118,18 @@ part("Order, today and progress");
   is("progress", businessProgress(list), { done: 2, total: 6, words: "2 of 6 done." });
   is("no tasks", businessProgress([]), { done: 0, total: 0, words: "No tasks yet." });
   is("a list not known has no progress, never 0 of 0", businessProgress(null), null);
+}
+
+part("A clock that is not known writes 0, never a time the list cannot read back");
+{
+  // Codex C2 on #3560, LOW 2: a clock that is not a number a date can hold was written as is (NaN), and the
+  // list's own reader then refused the whole list.
+  for (const clock of [Number.NaN, Number.POSITIVE_INFINITY, -5, 9_000_000_000_000]) {
+    const added = addBusinessTask([], { title: "Synthetic", due: "" }, id(1), clock);
+    const marked = markBusinessTask([task(id(2))], id(2), true, clock);
+    const kept = [added.ok ? added.tasks : [], marked.ok ? marked.tasks : []];
+    is(`clock ${clock}: written as 0, and the list reads back whole`, [kept[0][0]?.createdAt, kept[1][0]?.doneAt, parseBusinessTasks(kept[0]) !== null, parseBusinessTasks(kept[1]) !== null], [0, 0, true, true]);
+  }
 }
 
 part("The data copy");

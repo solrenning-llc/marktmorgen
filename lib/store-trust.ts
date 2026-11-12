@@ -5,9 +5,9 @@
  *
  * Unit 2 is the first fact: the month the store was opened on Marktmorgen,
  * read from the store's own record (`createdAt`, written once when the store
- * is made and never edited). It says "open since", not "selling since": a
- * store may be open before it sells anything, and the card says only what the
- * record proves. The creator chooses to show it (StoreLook.since, off by
+ * is made and never edited). It says "on Marktmorgen since", not "selling
+ * since" or "open since": a store may be here before it sells anything, and
+ * may have rested for a while, and the card says only what the record proves. The creator chooses to show it (StoreLook.since, off by
  * default); a record without a readable date, or with a date still to come,
  * shows nothing rather than a guess (VR 2).
  *
@@ -25,13 +25,13 @@ export type TrustWords = {
   sinceSource: string;
 };
 
-const en: TrustWords = { heading: "About this store", since: (m) => `Open on Marktmorgen since ${m}`, sinceSource: "From Marktmorgen's records, not typed by the creator." };
-const es: TrustWords = { heading: "Sobre esta tienda", since: (m) => `Abierta en Marktmorgen desde ${m}`, sinceSource: "Según los registros de Marktmorgen, no escrito por el creador." };
-const fr: TrustWords = { heading: "À propos de cette boutique", since: (m) => `Ouverte sur Marktmorgen depuis ${m}`, sinceSource: "D'après les registres de Marktmorgen, pas saisi par le créateur." };
+const en: TrustWords = { heading: "About this store", since: (m) => `On Marktmorgen since ${m}`, sinceSource: "From Marktmorgen's records, not typed by the creator." };
+const es: TrustWords = { heading: "Sobre esta tienda", since: (m) => `En Marktmorgen desde ${m}`, sinceSource: "Según los registros de Marktmorgen, no escrito por el creador." };
+const fr: TrustWords = { heading: "À propos de cette boutique", since: (m) => `Sur Marktmorgen depuis ${m}`, sinceSource: "D'après les registres de Marktmorgen, pas saisi par le créateur." };
 const de: TrustWords = { heading: "Über diesen Shop", since: (m) => `Auf Marktmorgen seit ${m}`, sinceSource: "Aus den Aufzeichnungen von Marktmorgen, nicht vom Ersteller eingegeben." };
-const it: TrustWords = { heading: "Su questo negozio", since: (m) => `Aperto su Marktmorgen da ${m}`, sinceSource: "Dai registri di Marktmorgen, non inserito dal creatore." };
-const nl: TrustWords = { heading: "Over deze winkel", since: (m) => `Open op Marktmorgen sinds ${m}`, sinceSource: "Uit de gegevens van Marktmorgen, niet door de maker ingevuld." };
-const pt: TrustWords = { heading: "Sobre esta loja", since: (m) => `Aberta na Marktmorgen desde ${m}`, sinceSource: "Dos registos da Marktmorgen, não escrito pelo criador." };
+const it: TrustWords = { heading: "Su questo negozio", since: (m) => `Su Marktmorgen da ${m}`, sinceSource: "Dai registri di Marktmorgen, non inserito dal creatore." };
+const nl: TrustWords = { heading: "Over deze winkel", since: (m) => `Op Marktmorgen sinds ${m}`, sinceSource: "Uit de gegevens van Marktmorgen, niet door de maker ingevuld." };
+const pt: TrustWords = { heading: "Sobre esta loja", since: (m) => `Na Marktmorgen desde ${m}`, sinceSource: "Dos registos da Marktmorgen, não escrito pelo criador." };
 
 export const TRUST_WORDS: Record<LanguageCode, TrustWords> = { en, es, fr, de, it, nl, pt };
 

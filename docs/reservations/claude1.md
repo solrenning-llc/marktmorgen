@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | 94 [D2-BUYER-TRUST], unit 2 ("About this store": "Open on Marktmorgen since <month year>" from the store record, opt-in) | claude/modest-faraday-f25rzq | `lib/store-trust.ts`, `components/store-trust-card.tsx`, `tests/store-trust.test.ts`, `app/api/store/look/route.ts` (also a few lines of `lib/store-look.ts`, `components/look-editor.tsx` and `app/[handle]/page.tsx`, not reserved: other open PRs touch them) | 12/11/2026 12h02 |
+| Claude 1 | 94 [D2-BUYER-TRUST], unit 2 ("About this store": "On Marktmorgen since <month year>" from the store record, opt-in) | claude/modest-faraday-f25rzq | `lib/store-trust.ts`, `components/store-trust-card.tsx`, `tests/store-trust.test.ts`, `app/api/store/look/route.ts` (also a few lines of `lib/store-look.ts`, `components/look-editor.tsx` and `app/[handle]/page.tsx`, not reserved: other open PRs touch them) | 12/11/2026 12h02 |

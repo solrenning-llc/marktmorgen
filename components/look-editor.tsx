@@ -494,7 +494,7 @@ export function LookEditor({
               />
               <span>
                 <span className="block text-[0.9375rem] font-medium text-ink">
-                  Show &ldquo;Open on Marktmorgen since&rdquo; with the month you opened, in an &ldquo;About this store&rdquo; box on your page
+                  Show &ldquo;On Marktmorgen since&rdquo; with the month your store was made, in an &ldquo;About this store&rdquo; box on your page
                 </span>
                 <span className="field-hint mt-1 block">
                   Taken from the date your store was made here. Nobody can type or change it, and buyers are told where it comes from.

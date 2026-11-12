@@ -17,7 +17,8 @@
  *   - the store page draws the card and the studio's look editor has a labeled
  *     checkbox for it (read in their source);
  *   - every language names the card, the line and its source, and the line
- *     says "open", never "selling" or "verified", which the record cannot prove.
+ *     never says "open", "selling" or "verified", which the record cannot prove
+ *     (a store may have rested for a while; independent review, 12 November 2026).
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -50,7 +51,7 @@ async function main(): Promise<void> {
   const store = (since: boolean | undefined, createdAt: unknown = "2025-03-04T10:00:00.000Z", language = "en") => ({ createdAt, language, look: { since } });
   is("off: no fact", trustFacts(store(false), NOW), []);
   is("left unset: no fact", trustFacts(store(undefined), NOW), []);
-  is("on: the line and its source", trustFacts(store(true), NOW), [{ key: "since", text: "Open on Marktmorgen since March 2025", source: "From Marktmorgen's records, not typed by the creator." }]);
+  is("on: the line and its source", trustFacts(store(true), NOW), [{ key: "since", text: "On Marktmorgen since March 2025", source: "From Marktmorgen's records, not typed by the creator." }]);
   is("on, but the record has no date: no fact rather than a guess", trustFacts(store(true, ""), NOW), []);
 
   part("The look");
@@ -80,10 +81,10 @@ async function main(): Promise<void> {
   part("The card");
   const html = renderToStaticMarkup(createElement(StoreTrustCard, { store: store(true, "2024-07-09T08:00:00.000Z") }));
   is("a section named by its heading", html.includes('<section') && html.includes('aria-labelledby="store-trust"') && html.includes('<h2 id="store-trust"'), true);
-  is("each fact an item of a list, with its source in words", html.includes("<ul") && html.includes("<li") && html.includes("Open on Marktmorgen since July 2024") && html.includes("From Marktmorgen&#x27;s records, not typed by the creator."), true);
+  is("each fact an item of a list, with its source in words", html.includes("<ul") && html.includes("<li") && html.includes("On Marktmorgen since July 2024") && html.includes("From Marktmorgen&#x27;s records, not typed by the creator."), true);
   is("no image, no icon, no seal", /<img|<svg|role="img"/.test(html), false);
   is("no fact, no card", renderToStaticMarkup(createElement(StoreTrustCard, { store: store(false) })), "");
-  is("the card is in the store's language", renderToStaticMarkup(createElement(StoreTrustCard, { store: store(true, "2024-07-09T08:00:00.000Z", "es") })).includes("Abierta en Marktmorgen desde julio de 2024"), true);
+  is("the card is in the store's language", renderToStaticMarkup(createElement(StoreTrustCard, { store: store(true, "2024-07-09T08:00:00.000Z", "es") })).includes("En Marktmorgen desde julio de 2024"), true);
 
   part("Where it is drawn and set");
   const page = readFileSync("app/[handle]/page.tsx", "utf8");
@@ -100,6 +101,7 @@ async function main(): Promise<void> {
   }
   const all = JSON.stringify(Object.values(TRUST_WORDS).map((w) => [w.heading, w.since("X"), w.sinceSource]));
   is("never says selling, verified or guaranteed, which the record cannot prove", /sell|verif|guarant|vend|vérif|verkauf|geprüf|garant|verkoop|geverifieerd/i.test(all), false);
+  is("nor open, since a store may have rested", /\bopen|abiert|ouvert|geöffnet|apert|aberta/i.test(all), false);
 
   done();
 }

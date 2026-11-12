@@ -1,29 +1,52 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Source } from "@/lib/csv-map-ai-rules";
+import { clearHeader, type Source } from "@/lib/csv-map-ai-rules";
 
 /** A field of the import, as the import screen lists it. */
 export type SuggestField = { key: string; label: string };
 
 type Suggestion = { field: string; column: number };
 
-/** What the route's refusals mean, in plain words. */
+/**
+ * What the route's refusals mean, in plain words. Only a call that failed on the way says to try again; a refusal
+ * that a retry cannot change (a paused plan, a used-up month, a missing permission) says what to do instead.
+ */
 export const SUGGEST_MESSAGES: Readonly<Record<string, string>> = {
   off: "AI suggestions come with the Studio and Scale plans, paid and up to date. Choose the columns yourself below.",
   not_needed: "Every column already has a match. Check them below.",
   no_header: "The first row of this file does not look like column names, so nothing was sent to the AI. Choose the columns yourself below.",
   cost_unknown: "The AI suggestion could not be priced, so it was not asked. Choose the columns yourself below.",
+  used: "This month's AI writing jobs are used up, so nothing was asked. They come back with your next billing month. Choose the columns yourself below.",
   failed: "The AI suggestion could not be made just now. Choose the columns yourself, or try again in a moment.",
   unreadable: "The AI's answer could not be read, so nothing was suggested. Choose the columns yourself below.",
   slow: "You asked for several suggestions in a short time. Try again in a few minutes.",
+  renewal_unpaid: "Your plan's last renewal is unpaid, so AI suggestions are paused until it is paid. Choose the columns yourself below.",
+  plan_disputed: "A payment for your plan is disputed, so AI suggestions are paused. Choose the columns yourself below.",
+  invalid: "This file's column names could not be read for a suggestion. Choose the columns yourself below.",
+  signed_out: "You are signed out. Sign in again to ask for suggestions, or choose the columns yourself below.",
+  role: "Only the store's owner and admins can ask for AI suggestions. Choose the columns yourself below.",
+  server_error: "Something went wrong on our side. Choose the columns yourself, or try again in a moment.",
+  refused: "The AI suggestion was not made. Choose the columns yourself below.",
   none: "The AI found no column for the fields still open. Choose them yourself below, or leave the optional ones out.",
 };
 
 /**
+ * The words for a refusal: its own when the screen knows the code, else the route's own message when it sent one,
+ * else a plain "not made". Never "try again" for a code it does not know; no answer at all is a failed call.
+ */
+export function suggestMessage(code: string | undefined, message: string | undefined): string {
+  if (code === undefined) return SUGGEST_MESSAGES.failed;
+  if (Object.hasOwn(SUGGEST_MESSAGES, code) && code !== "none") return SUGGEST_MESSAGES[code];
+  return typeof message === "string" && message.trim() ? message.trim() : SUGGEST_MESSAGES.refused;
+}
+
+/**
  * "Suggest the open columns with AI" on the import screen (lib/csv-map-ai.ts,
  * app/api/store/import-columns). Only the file's column names are sent, never
- * a cell. Each suggestion waits for the creator: "Use this column" sets that
+ * a cell, and only when its first row is clearly a header (clearHeader, checked
+ * here before anything leaves the browser). Each ask is one of the month's AI
+ * writing jobs, as the screen says. Each suggestion waits for the creator: "Use this column" sets that
  * one field (onUse), "Not this one" drops it; nothing changes otherwise, and
  * a field the creator has set meanwhile is never suggested over.
  *
@@ -59,6 +82,11 @@ export function ImportColumnSuggest({
 
   async function ask() {
     if (busy) return;
+    // A file with no header row has a person in its first row: nothing of it leaves the browser.
+    if (!clearHeader(header)) {
+      setNote(SUGGEST_MESSAGES.no_header);
+      return;
+    }
     setBusy(true);
     setNote("");
     setSuggestions([]);
@@ -69,9 +97,9 @@ export function ImportColumnSuggest({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind, header, guess }),
       });
-      const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; columns?: Record<string, { column: number; from: Source }> } | null;
+      const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string; columns?: Record<string, { column: number; from: Source }> } | null;
       if (!data?.ok || !data.columns) {
-        setNote(SUGGEST_MESSAGES[data?.error ?? ""] ?? SUGGEST_MESSAGES.failed);
+        setNote(suggestMessage(typeof data?.error === "string" ? data.error : undefined, data?.message));
         return;
       }
       const found = Object.entries(data.columns)
@@ -111,7 +139,7 @@ export function ImportColumnSuggest({
       </h3>
       <p className="mt-1 text-sm text-ink-soft">
         AI can suggest a column for each field that has none yet. Only the column names are sent, never what is in the rows. Nothing changes until you choose
-        &ldquo;Use this column&rdquo; for each one.
+        &ldquo;Use this column&rdquo; for each one. {"Each time you ask, it uses one of this month's AI writing jobs."}
       </p>
       {open.length > 0 ? (
         <button type="button" onClick={ask} aria-disabled={busy} aria-busy={busy} className="btn btn-ghost btn-sm mt-3">

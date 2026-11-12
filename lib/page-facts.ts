@@ -14,6 +14,7 @@
  */
 import type { FactKey } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { finishedWords } from "@/lib/buyer-words/finished";
 import { listedLengths } from "@/lib/call-lengths";
 
 export type FactValue = { key: FactKey; value: string; label: string };
@@ -34,7 +35,15 @@ export type FactInputs = {
   sold: number | null;
   /** Its reviews: how many count toward the average, their stars, and how many are visible. */
   reviews: { count: number; stars: number; visible: number } | null;
+  /**
+   * How many students hold the course's certificate (lib/certificate.ts, earnedCount), or null when not read; said
+   * from FINISHED_SHOWN_FROM up, like the bought count, so a small number never speaks for the creator.
+   */
+  finished?: number | null;
 };
+
+/** Below this, how many earned the certificate is not said (the same threshold as the bought count, lib/sold-count.ts). */
+export const FINISHED_SHOWN_FROM = 10;
 
 export function pageFacts(input: FactInputs): PageFacts {
   const w = blockWords(input.language);
@@ -51,6 +60,8 @@ export function pageFacts(input: FactInputs): PageFacts {
   const call = input.product.call;
   if (call && call.kind === "weekly" && call.minutes > 0 && listedLengths(call, input.product.priceCents ?? 0).length === 0) out.length = { key: "length", value: number(call.minutes), label: w.minutes(call.minutes) };
   if (input.sold !== null && input.sold > 0) out.buyers = { key: "buyers", value: number(input.sold), label: w.bought(input.sold) };
+  const finished = input.finished ?? null;
+  if (input.product.course && finished !== null && finished >= FINISHED_SHOWN_FROM) out.finished = { key: "finished", value: number(finished), label: finishedWords(input.language)(finished) };
   const reviews = input.reviews;
   if (reviews && reviews.count >= 1) {
     const average = Math.round((reviews.stars / reviews.count) * 10) / 10;

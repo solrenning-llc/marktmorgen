@@ -61,6 +61,7 @@ import { BuyBox, GiftBox, GroupBox, PriceTag, ProductFacts, RemindBox, pageActio
 import { askable } from "@/lib/checkout-ask";
 import { type BlockContext, HeroView, PageSections } from "@/components/sales-blocks";
 import { pageFacts } from "@/lib/page-facts";
+import { earnedCount } from "@/lib/certificate";
 import { LANGUAGES } from "@/lib/store-language";
 import { RatingLine, ReviewsSection } from "@/components/review-list";
 import { StoreTracking } from "@/components/store-tracking";
@@ -343,6 +344,11 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
+  // How many earned the course's certificate (93 [D2-VERIFIED-SOCIAL]): one HLEN, read only when a "By the numbers"
+  // block of this page asks for it; a read that fails says nothing (lib/certificate.ts, earnedCount).
+  const finished = product.course && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))
+    ? await earnedCount(product.course.id).catch(() => null)
+    : null;
   if (store.look.sold && stale(soldCounts)) after(() => refreshSoldCounts(store, readAllTimeSales).then(() => undefined));
   const soldCount = soldCounts?.byProduct[product.id];
   const sold = soldCount && soldCount >= SHOWN_FROM ? w.bought(num(soldCount)) : null;
@@ -651,6 +657,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       bundleItems: product.bundle ? (pick ?? inside?.length ?? 0) : null,
       sold: soldCount && soldCount >= SHOWN_FROM ? soldCount : null,
       reviews: summary,
+      finished,
     }),
     // Other products the page shows as cards, from what the store record holds (lib/featured-cards.ts).
     featured: page.blocks.some((block) => block.kind === "product")

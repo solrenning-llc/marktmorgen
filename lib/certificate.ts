@@ -543,3 +543,16 @@ export async function certificateCount(courseIds: string[]): Promise<number> {
     return sum + Math.min(count, LEGACY_SCAN);
   }, 0);
 }
+
+/**
+ * How many students hold this course's certificate now (93 [D2-VERIFIED-SOCIAL], unit 1): one HLEN of the course's
+ * standing certificates, one per student. A withdrawn certificate and a deleted person are taken out of that hash,
+ * so neither is counted; an expired one was still earned and is. A reply that is not a count throws UnknownReply
+ * (CX-123 rule 24), so a page says nothing rather than a number it did not read.
+ */
+export async function earnedCount(courseId: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const what = "the certificates earned in a course";
+  const [raw] = exactReplies(await redisPipeline([["HLEN", indexKey(courseId)]]), 1, what);
+  return replyCount(raw, what);
+}

@@ -266,7 +266,7 @@ export type BonusesBlock = { id: string; kind: "bonuses"; heading: string; items
  * creator only chooses which may appear; a number that is not there yet is
  * simply not drawn, so the block can never say something false.
  */
-export type FactKey = "lessons" | "episodes" | "products" | "length" | "buyers" | "rating";
+export type FactKey = "lessons" | "episodes" | "products" | "length" | "buyers" | "rating" | "finished";
 export const FACT_KEYS: { key: FactKey; label: string; hint: string }[] = [
   { key: "lessons", label: "Lessons", hint: "How many lessons the course has." },
   { key: "episodes", label: "Episodes", hint: "How many episodes the private podcast has." },
@@ -274,7 +274,15 @@ export const FACT_KEYS: { key: FactKey; label: string; hint: string }[] = [
   { key: "length", label: "Call length", hint: "How long each call lasts." },
   { key: "buyers", label: "Times bought", hint: "Shown from 10 sales up, and only while your store's look shows how many times products were bought." },
   { key: "rating", label: "Average rating", hint: "From verified buyers' reviews, with how many there are." },
+  /*
+   * 93 [D2-VERIFIED-SOCIAL], unit 1 (12 November 2026): how many students earned the course's certificate and still
+   * hold it (withdrawn ones are not counted), from ten up (lib/certificate.ts, earnedCount). Not in a new block's
+   * default choice (FACTS_ON_BY_DEFAULT): it is a different claim from "bought", so the creator checks it.
+   */
+  { key: "finished", label: "Certificates earned", hint: "How many students finished the course and earned its certificate, withdrawn ones left out. Shown from 10 up." },
 ];
+/** The numbers a new "By the numbers" block starts with: all but the certificates earned, which the creator chooses. */
+export const FACTS_ON_BY_DEFAULT: FactKey[] = FACT_KEYS.map((f) => f.key).filter((key) => key !== "finished");
 export type FactsBlock = { id: string; kind: "facts"; heading: string; show: FactKey[] };
 
 /**
@@ -1413,7 +1421,7 @@ export function emptyBlock(kind: BlockKind, id = newBlockId()): PageBlock {
     case "bonuses":
       return { id, kind, heading: "Also included", items: [] };
     case "facts":
-      return { id, kind, heading: "", show: FACT_KEYS.map((f) => f.key) };
+      return { id, kind, heading: "", show: [...FACTS_ON_BY_DEFAULT] };
     case "feature":
       return { id, kind, heading: "", body: "", picture: null, side: "left" };
     case "product":

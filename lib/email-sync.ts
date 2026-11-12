@@ -53,6 +53,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
   type EmailProvider,
@@ -314,6 +315,22 @@ function firstName(name: string | null | undefined): string | null {
 }
 
 /**
+ * Whether this address was deleted from the store (lib/suppression.ts) and the yes being handed over (`at`, ms) is not
+ * known to be later: the print holds the second of the deletion on Redis's clock, so only a yes from the next second on
+ * is. A store with no list has deleted nobody. A print that does not read as whole seconds is unknown and throws
+ * (CX-123 rule 24), never "not deleted".
+ */
+async function consentBeforeErasure(listId: string | null | undefined, email: string, at: number): Promise<boolean> {
+  if (!listId) return false;
+  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]), 1);
+  const raw = replies ? replies[0] : undefined;
+  if (raw === null) return false;
+  const text = typeof raw === "number" ? String(raw) : raw;
+  if (typeof text !== "string" || !/^\d{1,12}$/.test(text)) throw new UnknownReplyError("whether a person handed to an email platform was deleted");
+  return !(Number.isFinite(at) && at >= (Number(text) + 1) * 1000);
+}
+
+/**
  * Hands one person to the creator's platform, when the creator's settings
  * take them and they agreed. Returns what happened: "off" (not connected, or
  * not wanted), "seen" (sent already), "skipped" (did not agree: logged,
@@ -334,6 +351,10 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
   if (!wanted || person.at < config.since - GRACE_MS) return "off";
   const email = (person.email ?? "").trim().toLowerCase();
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "off";
+  // A person deleted from this store is never handed to a platform on a yes given before the deletion: a thank-you page
+  // reloaded after the sale's and this person's marks ran out repeats the checkout's old consent. Read first, so
+  // nothing is marked, queued or logged for them.
+  if (await consentBeforeErasure(store.listId, email, person.at)) return "off";
   // Read exactly (CX-123 rule 24): only a mark that is ours writes a job. One held by another run is a person already
   // handed over; one that cannot be read writes nothing and is said as not done, so a person is never handed over twice.
   const seen = seenKey(statsId, `${person.source}|${person.seed}`);

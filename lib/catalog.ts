@@ -283,6 +283,11 @@ export type Catalog = {
   head: Listing[];
   /** A record from before this layout: its products, read in full. Null otherwise. */
   inline: Product[] | null;
+  /**
+   * The products of the head or inline whose stored schedule (`recurring`) is there but could not be read: read as
+   * no schedule everywhere else (parseRecurring), unknown to readListingsAll (Codex's review of #1824). Only when any.
+   */
+  unreadSchedules?: string[];
 };
 
 /** What a product is, in bits a store record can carry for thousands of them. */
@@ -470,6 +475,12 @@ function parseListing(entry: unknown): Listing | null {
   return product ? listingOf(product) : null;
 }
 
+/** Whether a stored entry's schedule is there (not absent, not null) and was read as none. */
+function scheduleUnread(entry: unknown, read: Pick<Product, "recurring">): boolean {
+  const recurring = entry && typeof entry === "object" ? (entry as { recurring?: unknown }).recurring : undefined;
+  return recurring !== undefined && recurring !== null && !read.recurring;
+}
+
 /** The kind bits of a product. */
 export function kindOf(product: Listing & { funnel?: Product["funnel"] }): number {
   let bits = product.priceCents > 0 ? KIND.paid : KIND.free;
@@ -519,22 +530,29 @@ export function parseCatalog(raw: unknown, legacy: unknown): Catalog {
   if (value && typeof value.id === "string" && CATALOG_ID_PATTERN.test(value.id)) {
     const items = parseItems(value.items);
     const known = new Set(items.map((item) => item.id));
-    const head = Array.isArray(value.head)
-      ? value.head.map(parseListing).filter((listing): listing is Listing => listing !== null && known.has(listing.id))
-      : [];
-    return { id: value.id, items, head, inline: null };
+    const head: Listing[] = [];
+    const unread: string[] = [];
+    for (const entry of Array.isArray(value.head) ? value.head : []) {
+      const listing = parseListing(entry);
+      if (listing === null || !known.has(listing.id)) continue;
+      head.push(listing);
+      if (scheduleUnread(entry, listing)) unread.push(listing.id);
+    }
+    return { id: value.id, items, head, inline: null, ...(unread.length ? { unreadSchedules: unread } : {}) };
   }
   const inline: Product[] = [];
+  const unread: string[] = [];
   const seen = new Set<string>();
   for (const entry of Array.isArray(legacy) ? legacy : []) {
     const product = parseProduct(entry);
     if (!product || seen.has(product.id)) continue;
     seen.add(product.id);
     inline.push(product);
+    if (scheduleUnread(entry, product)) unread.push(product.id);
     if (inline.length >= MAX_PRODUCTS) break;
   }
   const items = inline.map(itemOf);
-  return { id: null, items, head: headFrom(items, new Map(inline.map((p) => [p.id, listingOf(p)]))), inline };
+  return { id: null, items, head: headFrom(items, new Map(inline.map((p) => [p.id, listingOf(p)]))), inline, ...(unread.length ? { unreadSchedules: unread } : {}) };
 }
 
 /** How a catalog is written into the store record. */
@@ -739,13 +757,17 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
  * missing from Redis, a reply that is not one exact answer per GET
  * (repliesFor), a record that is not that product's listing, or one whose
  * `recurring` is there but not a schedule makes the whole read unknown, never
- * a shorter list or a membership read as none (Codex G's review of #1824). Stricter than readListingsExact below,
+ * a shorter list or a membership read as none (Codex G's review of #1824), wherever it is read from: Redis, the
+ * head or a record from before product records (unreadSchedules), and a head listing with no schedule whose item
+ * says it is a membership (Codex's review of #1824 @ 48fc8e11e6). Stricter than readListingsExact below,
  * which leaves out a record Redis confirms is not there.
  */
 export async function readListingsAll(store: Store, ids: readonly string[]): Promise<Listing[]> {
   const asked = wanted(store, ids);
   if (asked.length !== ids.length) throw new UnknownReplyError("a listing read for products the store does not have");
   const catalog = store.catalog;
+  const unread = new Set(catalog.unreadSchedules ?? []);
+  if (asked.some((id) => unread.has(id))) throw new UnknownReplyError("a listing read with a membership schedule unreadable in the store record");
   if (catalog.inline) {
     const byId = new Map(catalog.inline.map((p) => [p.id, p]));
     return asked.map((id) => {
@@ -755,6 +777,13 @@ export async function readListingsAll(store: Store, ids: readonly string[]): Pro
     });
   }
   const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  // The head and its item are written together: a head listing with no schedule whose item says a membership is
+  // a contradiction, never "not a membership".
+  const kinds = new Map(catalog.items.map((item) => [item.id, item.kind]));
+  for (const id of asked) {
+    const listing = found.get(id);
+    if (listing && !listing.recurring && ((kinds.get(id) ?? 0) & KIND.recurring) !== 0) throw new UnknownReplyError("a listing read whose head says no schedule while its item says a membership");
+  }
   const missing = asked.filter((id) => !found.has(id));
   if (missing.length) {
     if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a listing read with no catalog storage");

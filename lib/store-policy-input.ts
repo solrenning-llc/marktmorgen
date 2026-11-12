@@ -11,7 +11,7 @@
  *   - the postal address on its emails, when set.
  */
 import type { Store } from "@/lib/store";
-import { readListingsAll, visibleIds } from "@/lib/catalog";
+import { type Listing, readListingsAll, visibleIds } from "@/lib/catalog";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
@@ -19,7 +19,12 @@ import type { PolicyFactsInput } from "@/lib/store-policy-facts";
 import { takePublicRequest } from "@/lib/traffic";
 import { bundleItemUnits } from "@/lib/page-read-rules";
 
-type Sold = { priceCents?: number; recurring?: unknown; pwyw?: unknown; plan?: unknown } & Parameters<typeof deliversDigitally>[0];
+/**
+ * The fields the policy reads, each named as Listing's own (Pick fails to compile on a name Listing does not have),
+ * so a rename or removal there cannot quietly drop a policy section (Codex T's LOW on #1824).
+ */
+type Read = keyof Pick<Listing, "priceCents" | "recurring" | "pwyw" | "plan" | keyof Parameters<typeof deliversDigitally>[0]>;
+type Sold = { priceCents?: number } & Partial<Record<Exclude<Read, "priceCents">, unknown>> & Parameters<typeof deliversDigitally>[0];
 
 /** Whether a product is paid for: a price, a membership, a choose-your-price or a payment plan. */
 const paid = (p: Sold) => (p.priceCents ?? 0) > 0 || Boolean(p.recurring) || Boolean(p.pwyw) || Boolean(p.plan);
@@ -42,7 +47,7 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   // No catch, and every listed product read exactly (readListingsAll): a page that could not read one
   // must not quietly leave out the 14-day rules or the subscription terms (Codex G's review of #1824).
   const products = await readListingsAll(store, visibleIds(store));
-  return policyInputFrom(store, products as unknown as Sold[], sellsThroughPayPal(store));
+  return policyInputFrom(store, products, sellsThroughPayPal(store));
 }
 
 /**

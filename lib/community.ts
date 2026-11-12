@@ -616,8 +616,9 @@ export async function setProfile(
   const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};
   const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });
   const grown = dataBytes([countedMember(JSON.parse(after) as Member)]) - dataBytes([countedMember(member)]) + nameBytes(name) - nameBytes(member.n);
+  // A record that shrinks gives it back only once the shorter one is written (Claude 1 cloud's LEVE on #2576): a write
+  // whose answer is lost, or a record gone in between, gives nothing back (below).
   if (grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
   // The handle is taken before the name is written, so a member is never left
   // named but unmentionable. Claiming gives back what they ended up with,
   // which may carry a number when somebody already held the plain one. It
@@ -666,6 +667,7 @@ export async function setProfile(
     return member;
   }
   await giveBackUnlessCarried(id, member.k, [had, replaced && replaced !== handle ? replaced : ""]);
+  if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
   return saved;
 }
 

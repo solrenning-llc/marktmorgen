@@ -13,6 +13,12 @@ export const shipmentPolicy = (now = Date.now()): ShipmentMailPolicy => ({
   admissionsUntil: now + 86_400_000,
 });
 
+/** Mirrors the shared Lua: an open (unpaid) physical confirmation checkout
+ * gets its check back on defer, and stays claimable, until its latest
+ * possible Stripe expiry. */
+export const confirmationPaymentWait = (r: { kind?: unknown; originKind?: unknown; phase?: unknown; created?: unknown }, now: number) =>
+  r.kind === "confirmation" && r.originKind === undefined && r.phase === "awaiting_payment" && typeof r.created === "number" && now < r.created + 169_200_000;
+
 export function shipmentOutboxFixture() {
   const base = store.pipeline.bind(store);
   const commands: (string | number)[][] = [];
@@ -61,6 +67,7 @@ export function shipmentOutboxFixture() {
           value.state = op === "dispatch" ? "dispatching" : op === "refused" ? "refused" : "queued";
           value.leaseUntil = 0;
           value.next = value.state === "queued" ? now + policy!.retryMilliseconds : 0;
+          if (op === "defer" && value.checks > 0 && confirmationPaymentWait(value, now)) value.checks--;
           const next = JSON.stringify(value); store.run(["SET", k[0], next]);
           if (value.next) store.run(["ZADD", k[2], value.next, value.id]); else store.run(["ZREM", k[2], value.id]);
           answer = [value.state, next];

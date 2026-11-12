@@ -5,7 +5,8 @@
  * run on the in-memory Redis with its counter full, then with Redis throwing on
  * that counter only; nothing is sent in either case.
  */
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setContact, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setContact, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { askCartReminder, askReminder } from "@/lib/checkout-ask";
 import { requestHubLink } from "@/lib/affiliate-hub";
 import { requestLibraryLink } from "@/lib/buyer-library";
 import { sendContact } from "@/lib/store-contact";
@@ -92,6 +93,21 @@ async function main(): Promise<void> {
   part("A podcast feed link (lib/podcast-access.ts)");
   const feed = async () => sendFeedLink({ store: await store(), product, email: "lee@example.org", ip: "5.5.5.5", base: ORIGIN, from: ORIGIN });
   await both("per address", "podcast-link-address", feed);
+
+  part("A checkout or page reminder (lib/checkout-ask.ts)");
+  process.env.STRIPE_SECRET_KEY ??= "sk_test_essential_limit_stand_in";
+  await setStripeAccount(OWNER, "acct_1TestHarbor0001", true);
+  const sold = await addProduct(OWNER, "Pantry Guide", "", "12", null);
+  if (!sold.ok) throw new Error("setup: sold product");
+  await setProductLink(OWNER, sold.product.id, `https://example.com/${sold.product.id}`);
+  await setRecovery(OWNER, { enabled: true, address: "9 Kiln Road, Portland, OR 97201", asks: true });
+  const guide = async () => (await readListing(await store(), sold.product.id))!;
+  is("setup: a reminder can be asked for", await askReminder({ store: await store(), product: await guide(), email: "kim@example.org", ip: "8.8.8.8", from: "page", when: "hour" }), "asked");
+  const remind = async () => askReminder({ store: await store(), product: await guide(), email: "lee@example.org", ip: "6.6.6.6", from: "page", when: "hour" });
+  await both("per connection", "remind-ask", remind);
+  await both("per store", "remind-store", remind);
+  const cart = async () => askCartReminder({ store: await store(), items: [await guide()], email: "lee@example.org", ip: "7.7.7.7" });
+  await both("a cart, per connection", "remind-ask", cart);
 
   done();
 }

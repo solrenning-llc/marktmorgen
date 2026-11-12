@@ -189,8 +189,10 @@ function closingKnown(event: unknown): boolean {
  * A charge not expanded, or not marked, counts as not lost, as with refunds.
  * Throws when Stripe cannot be asked, and when its answer is not this
  * charge's own list (rule 30): a reply that is not a list, a row that is not
- * a dispute object, a row naming another charge or none, and a list not said
- * to be whole without a lost row of its own. Not paged, so no request is
+ * a dispute object or a row naming another charge or none, whatever else
+ * the list holds; and, only when no lost row of its own decides, a prevented
+ * row whose money cannot be read or a list not said to be whole. Not paged,
+ * so no request is
  * added: a charge with more disputes than one page holds reads as unknown.
  * Throws too when a dispute listed cannot be read (a status Stripe does not
  * give, or a prevented one whose balance transactions cannot be read) and

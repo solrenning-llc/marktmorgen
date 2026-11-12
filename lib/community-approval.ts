@@ -324,29 +324,40 @@ async function hold(id: string, held: Held, room: DataStore, now: number): Promi
   const picture = held.img ? JSON.stringify({ a: held.a, p: held.img.path }) : null;
   // The record and its places (and its picture's line), kept until it is gone by itself.
   await needData(room, [{ until: (now + KEEP_SECONDS) * 1000, bytes: dataBytes([json, picture], picture ? 4 : 3) }]);
+  // The member's list and the picture's line are written before the record, so that whichever request is lost,
+  // erasing the author (forgetHeldPerson, which finds items only through these lists) finds the record and its
+  // picture: a record in no list could neither be seen, withdrawn nor erased (Claude 1's MEDIUM on #3020).
+  const named = repliesFor(
+    await redisPipeline([
+      ...(picture ? [["HSET", picturesKey(id), held.id, picture]] : []),
+      ["ZADD", mineKey(id, held.a), held.at, held.id],
+      ["EXPIRE", mineKey(id, held.a), KEEP_SECONDS],
+    ]),
+    picture ? 3 : 2,
+  );
+  if (!named || countOf(named[picture ? 1 : 0]) !== 1 || (picture && countOf(named[0]) === null)) {
+    throw new UnknownReplyError("naming a held community item");
+  }
   const written = repliesFor(await redisPipeline([["SET", itemKey(id, held.id), json, "EX", KEEP_SECONDS, "NX"]]), 1);
   if (!written || written[0] !== "OK") throw new UnknownReplyError("writing a held community item");
   const replies = repliesFor(
     await redisPipeline([
-      // Its picture is listed before the item is on the queue, so nothing on the queue has a picture nobody can find.
-      ...(picture ? [["HSET", picturesKey(id), held.id, picture]] : []),
       ["ZREMRANGEBYSCORE", mineKey(id, held.a), "-inf", now - KEEP_SECONDS],
       ["ZADD", queueKey(id), held.at, held.id],
       // Only what still waits takes the community's room: what expired was already refused (finding 4).
       ["ZCOUNT", queueKey(id), `(${now - HELD_DAYS * DAY}`, "+inf"],
-      ["ZADD", mineKey(id, held.a), held.at, held.id],
       ["ZCARD", mineKey(id, held.a)],
       ["EXPIRE", mineKey(id, held.a), KEEP_SECONDS],
     ]),
-    picture ? 7 : 6,
+    5,
   );
-  const counts = replies?.slice(picture ? 1 : 0).map(countOf);
-  if (!replies || !counts || counts.some((n) => n === null) || counts[1] !== 1 || counts[3] !== 1 || (picture && countOf(replies[0]) === null)) {
+  const counts = replies?.map(countOf);
+  if (!replies || !counts || counts.some((n) => n === null) || counts[1] !== 1) {
     throw new UnknownReplyError("placing a held community item");
   }
   // Added first and counted after: two sent at once at the ceiling are both
   // refused rather than both kept, and the queue is never left past it.
-  const over = (counts[2] as number) > MAX_HELD ? "full" : (counts[4] as number) > MAX_MINE ? "mine" : null;
+  const over = (counts[2] as number) > MAX_HELD ? "full" : (counts[3] as number) > MAX_MINE ? "mine" : null;
   if (over) {
     await redisPipeline([
       ["ZREM", queueKey(id), held.id],

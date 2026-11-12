@@ -74,7 +74,7 @@ const PERSON = PERSON_KEY;
 
 export type Company = { id: string; name: string; website: string; note: string; people: string[]; createdAt: number };
 
-export type CompanyRefusal = "name" | "taken" | "website" | "note" | "full" | "people" | "unknown" | "busy" | "unconfirmed";
+export type CompanyRefusal = "name" | "taken" | "website" | "note" | "full" | "people" | "unknown" | "busy" | "unconfirmed" | "erased";
 
 /** What each refusal tells the creator, in plain words, with what to do. */
 export const COMPANY_REFUSALS: Record<CompanyRefusal, string> = {
@@ -87,6 +87,7 @@ export const COMPANY_REFUSALS: Record<CompanyRefusal, string> = {
   unknown: "That company is no longer there. Reload the page.",
   busy: "Someone else is changing your companies right now. Try again in a moment.",
   unconfirmed: "That change may not have been saved. Reload the page to see your companies as they are, then try again if it is not there.",
+  erased: "That person was deleted from your store, so they can't be added to a company. Reload the page.",
 };
 
 export type CompanyResult = { ok: true; companies: Company[] } | { ok: false; error: CompanyRefusal };
@@ -180,14 +181,21 @@ export function addCompany(companies: readonly Company[], value: Pick<Company, "
  * A deleted company put back, with its people (the studio's undo): one
  * change, so nobody is linked one at a time. Only the people who are not at
  * another company now come back; someone who moved since stays where they
- * went. `skipped` are those left out.
+ * went, and someone deleted from the store since (`erased`, read under the
+ * companies' lock: lib/crm-companies.ts changeCompanies) never comes back
+ * (Codex G2's MEDIUM 3 on #2574). `skipped` are those left out.
  */
-export function restoreCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number, people: readonly unknown[]): { ok: true; companies: Company[]; skipped: string[] } | { ok: false; error: CompanyRefusal } {
+export function restoreCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number, people: readonly unknown[], erased: ReadonlySet<string> = new Set()): { ok: true; companies: Company[]; skipped: string[] } | { ok: false; error: CompanyRefusal } {
   const added = addCompany(companies, value, id, nowSeconds);
   if (!added.ok) return added;
-  const asked = [...new Set(people.filter((p): p is string => typeof p === "string" && PERSON.test(p)))].slice(0, MAX_COMPANY_PEOPLE);
-  const back = asked.filter((p) => !companies.some((c) => c.people.includes(p)));
+  const asked = restoredPeople(people);
+  const back = asked.filter((p) => !erased.has(p) && !companies.some((c) => c.people.includes(p)));
   return { ok: true, companies: added.companies.map((c) => (c.id === id ? { ...c, people: back } : c)), skipped: asked.filter((p) => !back.includes(p)) };
+}
+
+/** The people an undo asks to put back, as restoreCompany reads them: well-formed keys, each once, at most MAX_COMPANY_PEOPLE. */
+export function restoredPeople(people: readonly unknown[]): string[] {
+  return [...new Set(people.filter((p): p is string => typeof p === "string" && PERSON.test(p)))].slice(0, MAX_COMPANY_PEOPLE);
 }
 
 /**

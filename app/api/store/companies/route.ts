@@ -18,6 +18,7 @@ import {
   readCompanies,
   readCompanyInput,
   restoreCompany,
+  restoredPeople,
   unlinkPerson,
 } from "@/lib/crm-companies";
 import { StoreFullError } from "@/lib/store";
@@ -111,7 +112,8 @@ export async function POST(request: NextRequest) {
     } else if (body.action === "link") {
       if (!PERSON.test(person)) return refuse("unknown");
       if ((refused = await countRead(store))) return refused;
-      result = await changeCompanies(statsId, store, (companies) => linkPerson(companies, id, person));
+      // Never a person deleted from the store (Codex G2's MEDIUM 3): changeCompanies reads their mark under the lock.
+      result = await changeCompanies(statsId, store, (companies, _unreadable, erased) => (erased.has(person) ? { ok: false, error: "erased" } : linkPerson(companies, id, person)));
     } else if (body.action === "restore") {
       // The undo of a delete: the company and its people back in one change (review A2/A3).
       const input = readCompanyInput(body);
@@ -119,9 +121,11 @@ export async function POST(request: NextRequest) {
       if (!Array.isArray(body.people) || body.people.length > MAX_COMPANY_PEOPLE) return refuse("people");
       const madeId = newCompanyId();
       let skipped: string[] = [];
+      const people = restoredPeople(body.people as unknown[]);
       if ((refused = await countRead(store))) return refused;
-      result = await changeCompanies(statsId, store, (companies) => {
-        const restored = restoreCompany(companies, input.value, madeId, Date.now() / 1000, body.people as unknown[]);
+      // Never with a person deleted from the store since (Codex G2's MEDIUM 3): left out, and said in `skipped`.
+      result = await changeCompanies(statsId, store, (companies, _unreadable, erased) => {
+        const restored = restoreCompany(companies, input.value, madeId, Date.now() / 1000, people, erased);
         if (restored.ok) skipped = restored.skipped;
         return restored;
       });

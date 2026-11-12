@@ -842,18 +842,23 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
-          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
-          // from Redis only on keys of the wrong type: a lock key that is not a string reads here as not ours (0), where
-          // Redis's GET would fail the script; a hash key that is not a hash fails in both.
-          const [lock, target, token] = [args[1], args[2], args[3]];
+        const companyKeys = Number(args[0]);
+        if (key.startsWith("-- marktmorgen:crm-companies-write:v2\n") && Number.isSafeInteger(companyKeys) && companyKeys >= 2 && args.length >= companyKeys + 2 && (args.length - companyKeys - 2) % 2 === 0) {
+          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token, and none
+          // of the people it links is marked as deleted from the store (2). It differs from Redis only on keys of the
+          // wrong type: a lock key that is not a string reads here as not ours (0), where Redis's GET would fail the
+          // script; a hash key that is not a hash fails in both.
+          const [lock, target] = [args[1], args[2]];
+          const marks = args.slice(3, companyKeys + 1);
+          const token = args[companyKeys + 1];
           this.live(lock);
           this.live(target);
           if (this.data.get(lock) !== token) return 0;
+          if (marks.some((mark) => (this.live(mark), this.data.has(mark)))) return 2;
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
           const hash = this.hash(target);
-          for (let i = 4; i < args.length; i += 2) {
+          for (let i = companyKeys + 2; i < args.length; i += 2) {
             if (args[i + 1] === "") hash.delete(args[i]);
             else hash.set(args[i], args[i + 1]);
           }

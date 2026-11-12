@@ -371,15 +371,18 @@ async function main(): Promise<void> {
   part("A delete undone (review A2/A3)");
   is("the rule: the company back with its people, except who is at another company now", (() => { const r = restoreCompany([{ ...base("bbbbbbbbbb", "South"), people: [b] }], { name: "North", website: "", note: "" }, "cccccccccc", 9, [a, b, "nope", a]); return r.ok ? [r.companies.find((c) => c.id === "cccccccccc")?.people, r.skipped] : r; })(), [[a], [b]]);
   const ben = personKey(statsId, "ben@example.com");
+  // Not ann: a deletion of ann was begun above (it could not take the lock), and a person whose deletion began is
+  // never put back on a company (Codex G2's MEDIUM 3; tests/company-erased-person.test.ts).
+  const ava = personKey(statsId, "ava@example.com");
   const tmp = await post({ action: "add", name: "Temp School" });
   const tmpId = tmp.body.added!;
-  await post({ action: "link", id: tmpId, person: ann });
+  await post({ action: "link", id: tmpId, person: ava });
   await post({ action: "link", id: tmpId, person: ben });
   await post({ action: "remove", id: tmpId });
   await post({ action: "link", id, person: ben });
-  const restored = await post({ action: "restore", name: "Temp School", website: "", note: "", people: [ann, ben] });
+  const restored = await post({ action: "restore", name: "Temp School", website: "", note: "", people: [ava, ben] });
   const again = (await readCompanies(statsId)).find((c) => c.id === restored.body.added);
-  is("put back in one change: who is free comes back, who moved since stays where they went, and the screen is told", [restored.status, again?.name, again?.people, restored.body.skipped, (await readCompanies(statsId)).find((c) => c.id === id)?.people.includes(ben)], [200, "Temp School", [ann], [ben], true]);
+  is("put back in one change: who is free comes back, who moved since stays where they went, and the screen is told", [restored.status, again?.name, again?.people, restored.body.skipped, (await readCompanies(statsId)).find((c) => c.id === id)?.people.includes(ben)], [200, "Temp School", [ava], [ben], true]);
   is("too many people at once is refused", (await post({ action: "restore", name: "Other", people: Array.from({ length: 51 }, () => ann) })).body.error, "people");
   await post({ action: "remove", id: restored.body.added });
   await post({ action: "unlink", person: ben });

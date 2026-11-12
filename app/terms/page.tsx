@@ -832,10 +832,9 @@ export default function TermsPage() {
           <strong className="text-black">A store closes {CLOSING_DAYS} days after its plan ends.</strong>{" "}
           Until then the store stays as it is: its page, products, prices,
           files, courses, community, contacts and orders, and buyers go on
-          reaching what they bought. Nothing new that costs us to keep or
-          run is added meanwhile: imports from other platforms, a new photo
-          on the store&rsquo;s page and buyers&rsquo; new review photos wait
-          for a plan, and a review&rsquo;s words are still saved. We email the store&rsquo;s owner when the
+          reaching what they bought. Meanwhile, imports from other platforms,
+          a new photo on the store&rsquo;s page and buyers&rsquo; new review
+          photos wait for a plan; a review&rsquo;s words are still saved. We email the store&rsquo;s owner when the
           plan ends, {WARN_MONTH_DAYS} days before the closing day and {WARN_WEEK_DAYS} days
           before it, each time with the date, and a store never closes sooner
           than a week after the last of those emails. Starting a plan again

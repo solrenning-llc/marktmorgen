@@ -77,9 +77,12 @@ export function costPauseCode(store: Pick<PlanFields, "subscriptionActive" | "re
 /**
  * The reason new work that costs us to run or keep is refused for, or null
  * (232 [CA1], the original unit 4c): `costPauseCode` while a running plan's
- * renewal is unpaid or a payment for it is disputed, and "plan_ended" once a
- * plan has ended, because nobody pays for that store any more and it is on
- * its way to closing (lib/plan-closing.ts). It covers what still ran there on
+ * renewal is unpaid or a payment for it is disputed, and "plan_ended" once
+ * the plan is not running at all (`standingOf` "ended": a plan that ended,
+ * or one on a break the creator chose), because nobody pays for that store
+ * meanwhile. Not every such store has a closing date (a break, or a plan
+ * ended before 18 October 2026, lib/plan-closing-rules.ts), so the words
+ * for it never name one. It covers what still ran there on
  * Store's figures: imports and funnel migrations, a new photo on the
  * creator's page and a buyer's new review photo. A store that never had a
  * plan ("none") is not refused here: setting a store up is what its own

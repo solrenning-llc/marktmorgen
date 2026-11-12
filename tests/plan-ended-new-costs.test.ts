@@ -89,20 +89,21 @@ async function main() {
   }
   const funnel = await json(funnelRoute, "/api/store/import/funnel", { action: "page", html: "<html><body>Synthetic</body></html>", file: "a.html" });
   is("a funnel migration is refused", [funnel.status, funnel.body.error], [409, "plan_ended"]);
-  is("the import page has words for it", IMPORTS_PAUSED.plan_ended.startsWith("Your plan has ended, so imports are paused."), true);
-  is("and the funnel page", FUNNEL_PAUSED.plan_ended.startsWith("Your plan has ended, so funnel imports are paused."), true);
+  is("the import page has words for it", IMPORTS_PAUSED.plan_ended.startsWith("Your store's plan is not running, so imports are paused."), true);
+  is("and the funnel page", FUNNEL_PAUSED.plan_ended.startsWith("Your store's plan is not running, so funnel imports are paused."), true);
 
   part("Taking the page photo off stays open once the plan has ended");
   const removed = await photo({ remove: true });
   is("removed", [removed.body.ok, removed.body.photoId], [true, null]);
 
   part("What the studio and the Terms say matches what the code does");
-  const where = "Check your studio's main page for your store's closing date.";
-  is("each message points at where the closing date is shown", [STUDIO_MESSAGES.plan_ended, IMPORTS_PAUSED.plan_ended, FUNNEL_PAUSED.plan_ended].every((m) => m.includes(where)), true);
-  const studio = readFileSync("app/studio/page.tsx", "utf8");
-  is("the studio's main page does show it", studio.includes("Your plan has ended, and your store closes on ${dayWords(closing.day)}"), true);
+  // A break the creator chose, or a plan ended before 18 October 2026, has no closing date, and not every role sees one:
+  // the words name none (independent review of 05f99bd4, finding 2).
+  const told = [STUDIO_MESSAGES.plan_ended, IMPORTS_PAUSED.plan_ended, FUNNEL_PAUSED.plan_ended];
+  is("each message says what to do next", told.every((m) => m.includes("Try again once a plan is running")), true);
+  is("and none names a closing date", told.some((m) => /clos/i.test(m)), false);
   const terms = readFileSync("app/terms/page.tsx", "utf8").replace(/\s+/g, " ");
-  is("the Terms say what waits for a plan", terms.includes("imports from other platforms, a new photo on the store&rsquo;s page and buyers&rsquo; new review photos wait for a plan, and a review&rsquo;s words are still saved."), true);
+  is("the Terms say what waits for a plan, and only that", terms.includes("Meanwhile, imports from other platforms, a new photo on the store&rsquo;s page and buyers&rsquo; new review photos wait for a plan; a review&rsquo;s words are still saved."), true);
   const tool = readFileSync("components/import-tool.tsx", "utf8");
   is("the import page keeps showing the pause while a running import is stepped", tool.includes('data.error === "plan_ended"'), true);
 

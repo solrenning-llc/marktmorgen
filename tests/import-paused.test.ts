@@ -7,7 +7,10 @@
  * goes on where it stopped once the plan is paid again; canceling, reading
  * where it stands and the report stay open; the five-minute job does not
  * work on it; and the allowance a paused plan shows is Store's, not its own.
+ * Since the original unit 4c (12/11/2026), the same once the plan is not
+ * running at all (lib/plan-standing.ts newCostCode, "plan_ended").
  */
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { GET as importGet, POST as importPost } from "@/app/api/store/import/route";
 import { POST as funnelPost } from "@/app/api/store/import/funnel/route";
@@ -15,7 +18,7 @@ import { claimHandle, ensureListId, ensureStatsId, recordPlanDispute, setSubscri
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { RAW_DAYS, advanceImports, jobOf, runImport, startImport } from "@/lib/imports";
 import { FUNNEL_PAUSED, IMPORTS_PAUSED, IMPORT_ALLOWANCES, IMPORT_ROWS_KEPT_DAYS, importAllowanceFor } from "@/lib/import-limits";
-import { costsPaused } from "@/lib/plan-standing";
+import { costsPaused, newCostCode } from "@/lib/plan-standing";
 import { leadsKey } from "@/lib/contacts";
 import { RENEWAL_PAUSED_WORDS } from "@/lib/renewal-unpaid-words";
 import { DISPUTE_PAUSED_WORDS } from "@/lib/plan-dispute-rules";
@@ -123,10 +126,48 @@ async function main() {
   const funnel2 = await post(funnelPost, "/api/store/import/funnel", { action: "page", html: "<html></html>", file: "a.html" });
   is("funnel: 409 plan_disputed", [funnel2.status, await errorOf(funnel2)], [409, "plan_disputed"]);
 
+  part("The plan is not running: an upload under way finishes queued, and the import waits (the original 4c)");
+  const ENDED = "import-ended@example.com";
+  await claimHandle(ENDED, "import-ended", "Import Ended Shop", "");
+  await ensureStatsId(ENDED);
+  await ensureListId(ENDED);
+  cookie = `${SESSION_COOKIE}=${await openSession(ENDED)}`;
+  await setSubscription(ENDED, { customerId: "cus_ImportEnded0001", subscriptionId: "sub_ImportEnded0001", active: true, tier: "pro", cycle: "month", period: paidPeriod(), renewalUnpaid: false });
+  let ended = (await storeForEmail(ENDED))!;
+  const third = await startImport(ended, ENDED, "contacts", INPUT);
+  if (!third.ok) throw new Error(`not started: ${third.reason}`);
+  const endedId = third.job.id;
+  is("its rows arrive while paid", (await post(importPost, "/api/store/import", { action: "rows", id: endedId, rows: ROWS })).status, 200);
+  await setSubscription(ENDED, { active: false, period: null });
+  ended = (await storeForEmail(ENDED))!;
+  is("the plan is not running", [costsPaused(ended), newCostCode(ended)], [false, "plan_ended"]);
+  const endedFinish = await post(importPost, "/api/store/import", { action: "finish", id: endedId });
+  is("finishing the upload queues it, with nothing applied", [endedFinish.status, ((await endedFinish.json()) as { import?: { state?: string } }).import?.state, (await jobOf(ended, endedId))?.done], [200, "queued", 0]);
+  // lib/request-guard.ts withinMonth's own key: finishing spends none of the month's steps on a plan not running.
+  const month = windowId(ended);
+  const stepKey = `nl:rlm:import-step-month:${createHash("sha256").update(`nimbus-import-step-month:${ended.sid}`).digest("hex").slice(0, 32)}:${month}`;
+  is("the month's import steps are a counted window here", typeof month, "string");
+  is("and finishing took none of them", await redis.pipeline([["GET", stepKey]]), [null]);
+  const endedStep = await runImport(endedId, Date.now() + 30_000);
+  is("a step does no work and keeps the job", [endedStep?.state, endedStep?.done, endedStep?.counts.added], ["queued", 0, 0]);
+  await advanceImports(Date.now() + 30_000);
+  is("the five-minute job leaves it queued", [(await jobOf(ended, endedId))?.state, (await jobOf(ended, endedId))?.done], ["queued", 0]);
+  is("no contact was added", await redis.pipeline([["HLEN", leadsKey(ended.listId!)]]), [0]);
+  for (const [label, body] of [
+    ["start", { action: "start", kind: "contacts", ...INPUT }],
+    ["dry run", { action: "preview", kind: "contacts", ...INPUT, rows: ROWS }],
+    ["step", { action: "step", id: endedId }],
+  ] as const) {
+    const res = await post(importPost, "/api/store/import", body as Record<string, unknown>);
+    is(`${label}: 409 plan_ended`, [res.status, await errorOf(res)], [409, "plan_ended"]);
+  }
+  const endedOne = await importGet(new NextRequest(`https://marktmorgen.com/api/store/import?id=${endedId}`, { headers: { cookie, host: "marktmorgen.com" } }));
+  is("where it stands still reads", [endedOne.status, ((await endedOne.json()) as { import?: { state?: string } }).import?.state], [200, "queued"]);
+
   part("What the creator is told");
   is("the days the words promise are the days the rows are kept", IMPORT_ROWS_KEPT_DAYS, RAW_DAYS);
-  for (const words of [IMPORTS_PAUSED.renewal_unpaid, IMPORTS_PAUSED.plan_disputed]) is("the import words say imports are paused and nothing brought in is lost", /imports are paused/.test(words) && /already brought in stays/.test(words), true);
-  for (const words of [FUNNEL_PAUSED.renewal_unpaid, FUNNEL_PAUSED.plan_disputed]) is("the funnel words say so too", /funnel imports are paused/.test(words), true);
+  for (const words of [IMPORTS_PAUSED.renewal_unpaid, IMPORTS_PAUSED.plan_disputed, IMPORTS_PAUSED.plan_ended]) is("the import words say imports are paused and nothing brought in is lost", /imports are paused/.test(words) && /already brought in stays/.test(words), true);
+  for (const words of [FUNNEL_PAUSED.renewal_unpaid, FUNNEL_PAUSED.plan_disputed, FUNNEL_PAUSED.plan_ended]) is("the funnel words say so too", /funnel imports are paused/.test(words), true);
   is("the studio notice, the email and the Terms name imports (renewal)", RENEWAL_PAUSED_WORDS.includes("imports from other platforms"), true);
   is("the same for a dispute", DISPUTE_PAUSED_WORDS.includes("imports from other platforms"), true);
 

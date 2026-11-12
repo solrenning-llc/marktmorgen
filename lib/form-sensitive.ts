@@ -64,6 +64,12 @@ const APOSTROPHES = /[\u2018\u2019\u02BC\u2032\uFF07`\u00B4]/g;
 const CREDENTIAL = String.raw`(?:e-?mail|user\s*name|username|login)`;
 const JOINED = String.raw`(?:and|plus|then|also|with)`;
 const CREDENTIAL_JOINED = new RegExp(String.raw`\b${CREDENTIAL}\b(?:\s+${WORD}){0,8}?\s+${JOINED}\b(?:\s+${NOT_TOPIC}${WORD}){0,4}?\s+${SECRET}\b|\b${SECRET}\b(?:\s+${WORD}){0,8}?\s+${JOINED}\b(?:\s+${NOT_TOPIC}${WORD}){0,4}?\s+${CREDENTIAL}\b`, "iu");
+// A short field name with the secret "for" a service or a team ("Admin password for your WordPress site",
+// "Instagram password for our team"; Claude 2 cloud I, #3668 @973c1e1e88), unless it names advice or a topic.
+const SECRET_FOR = new RegExp(String.raw`^(?:${WORD}\s+){0,3}${SECRET}\s+(?:for|of|on|at)\b`, "iu");
+const ADVICE = /\b(?:good|best|strong|stronger|strongest|secure|safe|weak|weakest|ideal|perfect|typical|common|tips?|advice|polic(?:y|ies)|rules?|managers?|hints?|reset|resets|recovery|strength|hygiene|security|habits?|courses?|lessons?|chapters?|guides?|ideas?|examples?|requirements?|feedback|opinions?|thoughts|experiences?)\b/i;
+// The bare word "pass" counts only right after a login ("Login and pass", "Username/pass"), never alone ("Day pass").
+const LOGIN_PASS = /\b(?:e-?mail|user\s*name|username|login)(?:\s*[/&+,|:]\s*|\s+(?:and|or|plus)\s+)pass\b/i;
 
 function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.
@@ -95,14 +101,16 @@ function asksForPassword(label: string): boolean {
   // to disclose a secret. Explicit questions for the actual password matched above.
   const topicQuestion = TOPIC_QUESTION.test(normalized);
   const credentialPair = /\b(?:e-?mail|user\s*name|username|login)\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+pass(?:word|code|phrase)s?\b|\bpass(?:word|code|phrase)s?\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+\b(?:e-?mail|user\s*name|username|login)\b/iu.test(normalized);
-  if ((credentialPair || CREDENTIAL_JOINED.test(normalized)) && !topicQuestion) return true;
+  if ((credentialPair || CREDENTIAL_JOINED.test(normalized) || LOGIN_PASS.test(request)) && !topicQuestion) return true;
 
   // A short field name may name a service, or use "email and password" with
   // a courtesy suffix or a reason ("Instagram password so we can post for you"). Narrow exceptions below keep
   // ordinary password questions.
   const fieldName = request.replace(/(\bpass(?:word|code|phrase)s?)\s*\([^)]*\)(?=\s*(?:please|here|below)?\s*[:*?]?$)/gi, "$1")
     .replace(/[,:;|.–—():&/+]/g, " ").replace(/\s+/g, " ").trim();
-  return !/^(?:how|what|why|which|when|where|who|do|did|does|would|could|can|have|has|should|rate|describe|feedback|opinion|thoughts|experience|review)\b/i.test(fieldName) &&
+  const fieldQuestion = /^(?:how|what|why|which|when|where|who|do|did|does|would|could|can|have|has|should|rate|describe|feedback|opinion|thoughts|experience|review)\b/i.test(fieldName);
+  if (!fieldQuestion && SECRET_FOR.test(fieldName) && !ADVICE.test(fieldName)) return true;
+  return !fieldQuestion &&
     /^(?:(?:[\p{L}\p{N}'’\-]+|[&/+])\s+){0,3}pass(?:word|code|phrase)s?(?:\s+(?:so|to|because|needed|required|in\s+order)\b.*)?\s*(?:please|here|below)?\s*[:*?]?$/iu.test(fieldName) ||
     /^(?:(?:a|the|new|current|account|email|login)\s+)*pass(?:word|code|phrase)s?\b/i.test(request);
 }

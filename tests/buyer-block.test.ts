@@ -7,6 +7,7 @@
  * is kept, per store; the studio's inbox route blocks, says why and unblocks;
  * deleting the person removes their entry. Synthetic stores, in-memory Redis.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, setContact, setInboxSetting, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -90,6 +91,17 @@ async function main(): Promise<void> {
     is("and they can still answer in their own case", (await visitorSend(caseToken, "Here is my order number again.", async () => store)).ok, true);
   }
   is("the withdrawal notice and the order-problem report are filed (fileContact and fileOrderProblem do not read the list)", await fileContact({ store, email: RUDE, name: "", text: "I withdraw from order cs_test_x." }), true);
+  {
+    // Review of #3839 (LEVE): a withdrawal is its own source, so once the creator answers it the blocked buyer can still
+    // write in it, as in their own order case.
+    is("the EU withdrawal notice is filed as a withdrawal", readFileSync("lib/withdrawal.ts", "utf8").includes('source: "withdrawal"'), true);
+    is("a withdrawal is filed for a blocked person", await fileContact({ store, email: RUDE, name: "", text: "I withdraw from order cs_test_y.", source: "withdrawal" }), true);
+    const kept = (await readInbox(store.statsId!)).find((c) => (c as { source?: string }).source === "withdrawal");
+    is("kept as a withdrawal", Boolean(kept), true);
+    const [keptRaw] = await redis.pipeline([["GET", `nl:inbox:${store.statsId}:c:${kept?.id ?? ""}`]]);
+    const keptToken = keptRaw ? (JSON.parse(String(keptRaw)) as { token: string }).token : "";
+    is("and they can still write in their own withdrawal", (await visitorSend(keptToken, "About my withdrawal again.", async () => store)).ok, true);
+  }
 
   part("The list cannot be read: nobody is let in");
   const realPipeline = redis.pipeline.bind(redis);

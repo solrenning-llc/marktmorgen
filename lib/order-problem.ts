@@ -14,9 +14,11 @@
  * whether the creator answered. A report of an order whose case is open is
  * answered from the mark alone. The mark's bytes are counted in the store's
  * data room once it is ours and before anything is filed, and it goes by
- * itself. A filing that fails gives the mark back;
- * if even that fails, the "pending" mark ends by itself after a few minutes,
- * so a buyer is never told a case was filed when it was not.
+ * itself. A filing refused before any write gives the mark back; if even that
+ * fails, the "pending" mark ends by itself after a few minutes, so a buyer is
+ * never told a case was filed when it was not. A filing that threw on its way
+ * is looked for by its case's own record (lib/inbox.ts fileOrderProblem): found,
+ * it is filed; not readable, the mark is kept, so no second case is filed.
  *
  * Cost: one inbox message from the store's own allowance (lib/inbox.ts,
  * open: takeAllowance before it is written), and the creator's notice from
@@ -42,11 +44,13 @@ export const orderProblemKey = (sid: string, reference: string) => `nl:oprob:${s
 /**
  * "filed": in the creator's inbox, and the creator told; "already": this
  * order has an open case; "busy": a report of this order is being filed right
- * now; "limited": the store's inbox takes no more today; "full": the store's
- * data room is full; "error": nothing could be confirmed, nothing is said as
- * filed.
+ * now; "limited": the store's inbox takes no more today; "used": the store's
+ * inbox messages for its billing window are used up; "full": the store's
+ * data room is full; "error": nothing was filed; "unknown": the filing threw on
+ * its way and whether the case is in the inbox could not be read, so it is said
+ * as neither filed nor not, and the order's pending mark is kept to its end.
  */
-export type ReportOutcome = "filed" | "already" | "busy" | "limited" | "full" | "error";
+export type ReportOutcome = "filed" | "already" | "busy" | "limited" | "used" | "full" | "error" | "unknown";
 
 export async function reportOrderProblem(
   store: Store,
@@ -93,8 +97,11 @@ export async function reportOrderProblem(
     console.error("filing a problem with an order failed", error);
     return "error" as const;
   });
+  // Not known whether the case was written (review of #3837): the pending mark is kept to its end, never given back on a
+  // guess, so a retry in those minutes is "busy" and never a second case of the same order.
+  if (filed !== "error" && filed.state === "unknown") return "unknown";
   if (filed === "error" || filed.state !== "filed") {
-    // Given back so the buyer can try again; if this fails too, the pending mark ends by itself.
+    // Nothing was filed: given back so the buyer can try again; if this fails too, the pending mark ends by itself.
     await redisPipeline([["DEL", key]]).catch(() => null);
     return filed === "error" ? "error" : filed.state;
   }

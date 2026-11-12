@@ -172,10 +172,10 @@ async function trim(statsId: string): Promise<void> {
   ]);
 }
 
-type NewInput = { store: Store; email: unknown; name: unknown; text: unknown; source: Source; now?: number };
+type NewInput = { store: Store; email: unknown; name: unknown; text: unknown; source: Source; now?: number; id?: string };
 
 /** A new conversation, its first message and the visitor's token. */
-async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; messages: Message[] } | { ok: false; reason: "email" | "short" | "limited" | "closed" }> {
+async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; messages: Message[] } | { ok: false; reason: "email" | "short" | "limited" | "used" | "closed" }> {
   const { store } = input;
   const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return { ok: false, reason: "closed" };
@@ -187,9 +187,11 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
   const now = input.now ?? Date.now();
   // One of the store's inbox messages for its window (lib/store-allowance-rules.ts), before it is written.
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
-  if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
+  // The store's own inbox messages for its window are used up: "used", told apart from the day's cap above (review of #3837).
+  const allowed = await takeAllowance(store, "inbox", 1, now);
+  if (!allowed.ok) return { ok: false, reason: allowed.reason === "used" ? "used" : "limited" };
   const conversation: Kept = {
-    id: newId(),
+    id: input.id && CONVERSATION_ID.test(input.id) ? input.id : newId(),
     email,
     name: nameText(input.name),
     source: input.source,
@@ -230,15 +232,16 @@ export async function startChat(input: { store: Store; email: unknown; name: unk
     if (error instanceof DataRoomError) return { ok: false as const, reason: "closed" as const };
     throw error;
   });
-  if (!made.ok) return made;
+  if (!made.ok) return { ok: false, reason: made.reason === "used" ? "limited" : made.reason };
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a chat failed", error));
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
 /** A message sent with the store's contact form, filed in the inbox too. Nothing more is sent: the form already emailed the creator. */
-export async function fileContact(input: { store: Store; email: string; name: string; text: string; now?: number }): Promise<boolean> {
+export async function fileContact(input: { store: Store; email: string; name: string; text: string; now?: number; source?: "contact" | "withdrawal" }): Promise<boolean> {
   if (!input.store.statsId || !isRedisConfigured()) return false;
-  const made = await open({ ...input, source: "contact" }).catch((error) => {
+  // An EU withdrawal notice (lib/withdrawal.ts) is its own source, so a block never stops the buyer writing in it (review of #3839).
+  const made = await open({ ...input, source: input.source === "withdrawal" ? "withdrawal" : "contact" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const };
     throw error;
   });
@@ -261,13 +264,29 @@ export async function handOver(input: { store: Store; email: unknown; name: unkn
     if (error instanceof DataRoomError) return { ok: false as const, reason: "closed" as const };
     throw error;
   });
-  if (!made.ok) return made;
+  if (!made.ok) return { ok: false, reason: made.reason === "used" ? "limited" : made.reason };
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a handed-over question failed", error));
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
-/** "filed" with the conversation that holds the case; otherwise why nothing was filed. */
-export type FiledProblem = { state: "filed"; id: string } | { state: "limited" | "full" | "error" };
+/**
+ * "filed" with the conversation that holds the case; "unknown" with the id the case would have, when the filing threw
+ * on its way and whether it was written could not be read either; otherwise why nothing was filed.
+ */
+export type FiledProblem = { state: "filed"; id: string } | { state: "unknown"; id: string } | { state: "limited" | "used" | "full" | "error" };
+
+/** One conversation's record read exactly (rule 24): the record, "none" when Redis answered nothing is kept, or "unknown". */
+async function keptExactly(statsId: string, id: string): Promise<Kept | "none" | "unknown"> {
+  let read: unknown[] | null;
+  try {
+    read = repliesFor(await redisPipeline([["GET", convKey(statsId, id)]]), 1);
+  } catch {
+    return "unknown";
+  }
+  if (!read) return "unknown";
+  if (read[0] === null) return "none";
+  return parseKept(read[0]) ?? "unknown";
+}
 
 /**
  * A buyer's report of a problem with an order (567 [GD1] (a), lib/order-problem.ts):
@@ -278,11 +297,24 @@ export type FiledProblem = { state: "filed"; id: string } | { state: "limited" |
 export async function fileOrderProblem(input: { store: Store; email: string; text: string; now?: number }): Promise<FiledProblem> {
   const { store } = input;
   if (!store.statsId || !isRedisConfigured()) return { state: "error" };
-  const made = await open({ ...input, name: "", source: "order" }).catch((error) => {
-    if (error instanceof DataRoomError) return { ok: false as const, reason: "full" as const };
-    throw error;
-  });
-  if (!made.ok) return { state: made.reason === "limited" ? "limited" : made.reason === "full" ? "full" : "error" };
+  // The case's id is chosen before anything is written, so a filing that throws on its way can be looked for.
+  const id = newId();
+  let made: Awaited<ReturnType<typeof open>>;
+  try {
+    made = await open({ ...input, name: "", source: "order", id });
+  } catch (error) {
+    // The data room refused it before any write (needData): nothing was filed.
+    if (error instanceof DataRoomError) return { state: "full" };
+    // Anything else may have come after the write (a lost reply, the clean-up failing): not known until the case's own
+    // record is read (review of #3837). There, it is filed and the team is told; confirmed not there, nothing was filed.
+    console.error("filing a problem with an order threw; looking for the case it may have written", error);
+    const kept = await keptExactly(store.statsId, id);
+    if (kept === "none") return { state: "error" };
+    if (kept === "unknown") return { state: "unknown", id };
+    await tellTeam(store, kept, messageText(input.text)).catch((tellError) => console.error("telling a store of a problem with an order failed", tellError));
+    return { state: "filed", id };
+  }
+  if (!made.ok) return { state: made.reason === "limited" ? "limited" : made.reason === "used" ? "used" : "error" };
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a problem with an order failed", error));
   return { state: "filed", id: made.conversation.id };
 }
@@ -329,8 +361,9 @@ export async function visitorSend(
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
   const conversation = await readKept(found.statsId, found.id);
   if (!conversation || conversation.token !== token) return { ok: false, reason: "gone" };
-  // A buyer's own order case is never stopped by a block (567 [GD1]): it protects what they already paid for.
-  if (conversation.source !== "order" && !(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
+  // A buyer's own order case and their own withdrawal are never stopped by a block (567 [GD1]): they protect what they
+  // already paid for (review of #3839).
+  if (conversation.source !== "order" && conversation.source !== "withdrawal" && !(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
   if (!(await withinLimit("chat-send", `${found.statsId}:${found.id}`, VISITOR_PER_HOUR, 3_600))) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };

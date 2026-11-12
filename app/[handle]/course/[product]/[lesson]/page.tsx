@@ -322,7 +322,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {lesson.files.length ? (
               <div className="mt-6 rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
-                <p className="st-label">{w.downloads}</p>
+                <h2 className="st-label">{w.downloads}</h2>
                 <ul className="mt-2 space-y-2">
                   {lesson.files.map((file, i) => (
                     <li key={file.pathname} className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
@@ -417,8 +417,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
             </div>
           </article>
 
-          <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2">
-            <p className="st-label">{w.inThisCourse}</p>
+          <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2" aria-labelledby="lesson-outline-title">
+            <h2 id="lesson-outline-title" className="st-label">{w.inThisCourse}</h2>
             <div className="mt-3">
               <CourseOutline course={course} base={base} start={start} done={done ?? new Set<string>()} current={lesson.id} held={held} language={store.language} />
             </div>

@@ -298,7 +298,7 @@ if not supported then return {'unknown'} end
 -- not for delivery: a pass that finds it still unpaid and defers it gives its
 -- check back, and a parked budget does not stop claiming it. The wait is
 -- bounded by the latest possible Stripe session expiry (creation replay
--- window 23h plus the 24h maximum session life); afterwards every pass spends
+-- window 23h plus the 24h maximum session life); after that every pass spends
 -- a check again. Shipment rows (no 'confirmation' kind) are unaffected.
 local paymentWait = r.kind=='confirmation' and r.originKind==nil and r.phase=='awaiting_payment' and type(r.created)=='number' and now<r.created+169200000
 if op == 'claim' then

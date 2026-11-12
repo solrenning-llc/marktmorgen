@@ -1286,9 +1286,8 @@ export async function accountStores(email: string): Promise<Store[]> {
     ["GET", await ownerKey(address)],
     ["SMEMBERS", await accountKey(address)],
   ]), 2);
-  const members = listed ? stringList(listed[1]) : null;
-  if (!listed || !members) throw new UnknownReplyError("an account's stores");
-  const ids = members.filter((id) => STORE_ID_PATTERN.test(id));
+  const ids = listed ? storeIdList(listed[1]) : null;
+  if (!listed || !ids) throw new UnknownReplyError("an account's stores");
   const records = ids.length
     ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length)
     : [];
@@ -1300,6 +1299,17 @@ export async function accountStores(email: string): Promise<Store[]> {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const main = listed[0] === null ? null : exactStore(listed[0], "an account's first store");
   return main ? [main, ...others] : others;
+}
+
+/**
+ * An account's SMEMBERS of other store ids read exactly: a list of text in which every member is a store id this
+ * version reads, or null. A member in another form (written by a later version, or damaged) is unknown, never left
+ * out: a shorter list reads as "no other store", which lets a closing erase a shared Stripe account's records and a
+ * move drop the account's list with that store still in it (Codex review on #3889).
+ */
+function storeIdList(reply: unknown): string[] | null {
+  const members = stringList(reply);
+  return members && members.every((id) => STORE_ID_PATTERN.test(id)) ? members : null;
 }
 
 /** A store record that must read: text that parses as a store, or UnknownReplyError. */
@@ -2215,8 +2225,10 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string): Pr
       const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
       const home = typeof points === "string" ? points.toLowerCase() : "";
       if (home !== from && home !== to) return null;
-      const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
-      const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));
+      const read = repliesFor(await redisPipeline([["SMEMBERS", await accountKey(from)]]), 1);
+      // Rule 30: the same exact read as accountStores; an unknown member stops the repair before any write.
+      const extras = read ? storeIdList(read[0]) : null;
+      if (!extras) throw new UnknownReplyError("an account's stores");
       for (const sid of extras) {
         const back = await withStore(extraRef(sid), async (extra, _save, held) => {
           if (extra.email.toLowerCase() === home) return true;

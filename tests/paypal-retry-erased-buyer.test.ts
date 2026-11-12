@@ -185,6 +185,41 @@ async function main(): Promise<void> {
   is("no receipt is sent", toBuyer(raced).length, receiptsBeforeRace);
   is("and the order leaves the list", (await listed()).includes(raced), false);
 
+  part("The deletion again after a raced hand-over fails once (Claude 7 on #4163): the next sweep still deletes the grant");
+  ahead += 120_000;
+  mail = "422";
+  const failedOnce = await pay(5);
+  mail = "up";
+  is("control: granted on the return and kept for its receipt", [await grants(), (await listed()).includes(failedOnce)], [1, true]);
+  const realFail: Pipe = redis.pipeline.bind(redis);
+  let hgets = 0;
+  let broken = false;
+  (redis as unknown as { pipeline: Pipe }).pipeline = async (commands) => {
+    if (broken) throw new Error("synthetic: Redis down for the rest of this sweep");
+    const answer = await realFail(commands);
+    if (commands.length === 1 && commands[0][0] === "HGET" && String(commands[0][1]).startsWith("nl:erased:")) {
+      hgets += 1;
+      // After the first read (none yet) the person is deleted; after the second, Redis fails, so the deletion again fails.
+      if (hgets === 1) {
+        (redis as unknown as { pipeline: Pipe }).pipeline = realFail;
+        await erasePerson(await fresh(), BUYER, { kind: "person" });
+        (redis as unknown as { pipeline: Pipe }).pipeline = async (c) => {
+          if (broken) throw new Error("synthetic: Redis down for the rest of this sweep");
+          const a = await realFail(c);
+          if (c.length === 1 && c[0][0] === "HGET" && String(c[0][1]).startsWith("nl:erased:")) broken = true;
+          return a;
+        };
+      }
+    }
+    return answer;
+  };
+  await sweep().catch(() => 0);
+  (redis as unknown as { pipeline: Pipe }).pipeline = realFail;
+  is("control: the deletion again did fail on that sweep", broken, true);
+  await sweep();
+  is("the next sweep deletes what the raced hand-over wrote: no grant", await grants(), 0);
+  is("and only then the order leaves the list", (await listed()).includes(failedOnce), false);
+
   part("Control: deleted before paying again, the new purchase is handed over");
   // A payment made after the deletion, at a later second than it.
   ahead += 120_000;

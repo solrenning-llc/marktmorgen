@@ -9,8 +9,9 @@
  * Fast Origin Transfer US$0.06 to US$0.43 a GB on a miss. The figures are typed here, not imported, so this check
  * cannot agree with the registry by sharing its number.
  *
- * Then a refunded first year of the Store plan, with that logo, must stay under the owner's US$65 ceiling
- * (tests/plan-margin.test.ts). The ceiling is never raised to pass: if the logo cannot fit, it is not drawn.
+ * Then a refunded first year of the Store plan, with that logo, must stay under the owner's US$65 ceiling, leaving
+ * out only the studio pictures' Blob lines, for which the owner added one dollar (US$66 with them, DONO-156,
+ * tests/plan-margin.test.ts). The ceiling is never raised to pass: if the logo cannot fit, it is not drawn.
  */
 import { render } from "@/lib/mail";
 import * as emailThemeModule from "@/lib/email-theme";
@@ -48,6 +49,8 @@ const dearestFetch = DEAREST_CDN_REQUEST_USD + MAX_PHOTO_BYTES * (DEAREST_FAST_D
 const exportedReads = (emailThemeModule as Record<string, unknown>).EMAIL_LOGO_READS;
 const reads = typeof exportedReads === "number" && exportedReads >= 1 ? exportedReads : 4;
 const line = COST_LINES.find((l) => l.id === "email-logo");
+/** The lines the owner's extra dollar is for (DONO-156): the studio pictures' Blob operations. */
+const PICTURE_UPLOAD_LINES = ["picture-uploads"];
 
 part(`A store email ${drawsPhoto ? "draws" : "does not draw"} the store photo as its logo`);
 if (drawsPhoto) {
@@ -73,8 +76,14 @@ part("A refunded first year stays under the owner's US$65 with the logo at the d
   const kept = (paidStorageBytes(tier) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
   const year = worstCost(tier) + providerFeeUsd(PRICES_WITHOUT_COMMISSION[tier].year) + kept;
   const extra = Math.max(0, floorFor(tier) - (line ? line.monthlyUsd(tier) : 0));
-  is(`a refunded Store first year, repriced at the dearest region, is under US$65 (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
-    year + extra < 65, true);
+  // The owner's ceiling is US$ 66 since 6 November 2026 (C4-20261106-2640-DONO-156), and that dollar is room for the
+  // studio pictures' Blob operations only (lib/store-reading-rules.ts), as tests/read-ceilings.test.ts reads it: so the
+  // year with the logo stays under US$ 65 without those lines, and under US$ 66 with them. A missing line fails (NaN).
+  const pictures = PICTURE_UPLOAD_LINES.reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd(tier) ?? Number.NaN), 0);
+  is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the picture-upload lines (now ${(year - pictures).toFixed(4)}, repriced ${(year - pictures + extra).toFixed(4)})`,
+    year - pictures + extra < 65, true);
+  is(`and under the owner's US$66 with them (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
+    year + extra < 66, true);
 }
 
 done();

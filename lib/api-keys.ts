@@ -233,20 +233,46 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   return { ok: true, key, made: { id, name, hint: stored.hint, madeAt: stored.madeAt, usedAt: 0, write, agent } };
 }
 
-/** Takes a key away. The next request with it is refused. */
+/** Takes a key away. The next request with it is refused. True only when that is confirmed (revokeKeyOutcome). */
 export async function revokeKey(sid: string, id: string): Promise<boolean> {
-  if (!SID_PATTERN.test(sid) || !ID_PATTERN.test(id) || !isRedisConfigured()) return false;
+  return (await revokeKeyOutcome(sid, id)) === "revoked";
+}
+
+/**
+ * Takes a key away: "revoked" once every deletion is confirmed, "gone" when the
+ * key's record is confirmed absent (another tab revoked it first), "unknown"
+ * for anything else, never retried here.
+ */
+export async function revokeKeyOutcome(sid: string, id: string): Promise<"revoked" | "gone" | "unknown"> {
+  if (!SID_PATTERN.test(sid) || !ID_PATTERN.test(id) || !isRedisConfigured()) return "unknown";
   const read = repliesFor(await redisPipeline([["HGET", listKey(sid), id]]), 1);
-  if (!read || (read[0] !== null && typeof read[0] !== "string")) return false;
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) return "unknown";
   const [raw] = read;
+  if (raw === null) return "gone";
   const stored = parseStored(raw);
-  if (!stored || stored.id !== id) return false;
+  if (!stored || stored.id !== id) return "unknown";
+  // The global lookup is deleted only when it is this key's (or already gone): a record of
+  // this key carrying another key's hash never takes that other key's access away.
+  const lookup = repliesFor(await redisPipeline([["GET", lookupKey(stored.hash)]]), 1);
+  if (!lookup || (lookup[0] !== null && !lookupIs(lookup[0], sid, id))) return "unknown";
   // The lookup first: from this moment the key opens nothing, whatever
-  // happens to the second write.
-  const deleted = repliesFor(await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id], ["HDEL", holdKey(sid), id], ["HDEL", usedKey(sid), id]]), 4);
+  // happens to the second write. A transport error may follow an applied
+  // deletion, so it is unknown too, never "nothing was changed".
+  const deleted = repliesFor(await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id], ["HDEL", holdKey(sid), id], ["HDEL", usedKey(sid), id]]).catch(() => null), 4);
   // Each command targets one key/field. An uncertain receipt is retryable,
   // never proof that the key has stopped opening the store. Do not replay it.
-  return deleted !== null && deleted.every((reply) => reply === 0 || reply === 1);
+  return deleted !== null && deleted.every((reply) => reply === 0 || reply === 1) ? "revoked" : "unknown";
+}
+
+/** Whether a lookup record names exactly this store's key. */
+function lookupIs(raw: unknown, sid: string, id: string): boolean {
+  if (typeof raw !== "string") return false;
+  try {
+    const found = JSON.parse(raw) as { sid?: unknown; id?: unknown } | null;
+    return !!found && typeof found === "object" && !Array.isArray(found) && found.sid === sid && found.id === id;
+  } catch {
+    return false;
+  }
 }
 
 /**

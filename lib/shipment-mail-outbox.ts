@@ -832,7 +832,10 @@ export async function enqueueShipmentMail(input: { statsId: string | null; sessi
   } catch { return { ok: false, reason: "unknown" }; }
 }
 
-export type ShipmentMailDispatch = (message: ShipmentMailMessage, beforePost: () => Promise<boolean>, context: { id: string }) => Promise<"accepted" | "waiting" | "not_accepted" | "not_posted" | "refused" | "unknown">;
+/** `afterPost` marks a re-check about an earlier provider POST (an accepted
+ * receipt): its refusal is no evidence that nothing was posted. */
+export type ShipmentMailBeforePost = (check?: { afterPost: true }) => Promise<boolean>;
+export type ShipmentMailDispatch = (message: ShipmentMailMessage, beforePost: ShipmentMailBeforePost, context: { id: string }) => Promise<"accepted" | "waiting" | "not_accepted" | "not_posted" | "refused" | "unknown">;
 export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDispatch, runtime: ShipmentMailRuntime = {}, onlyId?: string): Promise<{ accepted: number; waiting: number; unknown: number }> {
   if (lifecycle(runtime) !== "active") return { accepted: 0, waiting: 0, unknown: 1 };
   const counts = { accepted: 0, waiting: 0, unknown: 0 };
@@ -887,8 +890,9 @@ export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDi
         if (value && Object.keys(value).length === 5 && ["from", "to", "subject", "text", "replyTo"].every(key => typeof value[key] === "string") && person(String(value.to)) === row.person) message = value as unknown as ShipmentMailMessage;
       } catch { /* Retain protected evidence; it cannot authorize sending. */ }
     }
-    let barrier = false;
-    const beforePost = async () => {
+    let barrier = false, withheld = false, afterPost = false;
+    const beforePost: ShipmentMailBeforePost = async check => {
+      if (check?.afterPost === true) afterPost = true;
       if (barrier || now() >= deadline || !shipmentMailPolicy(p, now(), false)) return false;
       const dispatchAt = now();
       const result = await mutate("dispatch", row, raw, p, runtime, owner, dispatchAt);
@@ -896,7 +900,9 @@ export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDi
       if (!next || !samePayload(next, row) || next.state !== "dispatching" || next.owner !== owner || next.checks !== row.checks ||
           next.reviewId !== row.reviewId || next.next !== 0 || next.leaseUntil !== dispatchAt + 60_000) return false;
       raw = String(result![1]); row = next;
-      if (now() >= deadline || now() >= next.leaseUntil) return false;
+      // This call's own dispatching row is confirmed, but it is too late to
+      // POST. The refusal grants nothing, so custody can be restored below.
+      if (now() >= deadline || now() >= next.leaseUntil) { withheld = true; return false; }
       barrier = true; return true;
     };
     let outcome: Awaited<ReturnType<ShipmentMailDispatch>> = "waiting";
@@ -906,7 +912,12 @@ export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDi
         outcome = result === "accepted" || result === "waiting" || result === "not_accepted" || result === "not_posted" || result === "refused" || result === "unknown" ? result : "unknown";
       } catch { outcome = "unknown"; }
     }
-    if (outcome === "not_posted") {
+    // Restore custody through the existing no-POST transition both when the
+    // sender says so and when this call's own barrier refused after its
+    // confirmed dispatch: real senders report that refusal as "unknown", and
+    // a dispatching row can never be deferred. A lost dispatch ACK and a
+    // re-check about an earlier POST keep their unknown outcome.
+    if (outcome === "not_posted" || (withheld && !barrier && !afterPost)) {
       const at = now();
       const restored = await mutate("not-posted", row, raw, p, runtime, owner, at);
       if (confirmedQueued(restored, row, at, p)) counts.waiting++; else counts.unknown++;

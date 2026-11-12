@@ -66,7 +66,8 @@ async function main(): Promise<void> {
   part("A refused barrier after this call's own dispatch returns to waiting with the real sender contract");
   // lib/email.ts and lib/resend-fallback-transport.ts report a refused barrier
   // as "unknown"; the worker itself knows no POST followed its dispatch.
-  for (const stage of ["deadline", "lease", "lost"] as const) {
+  // A lost dispatch ACK keeps its unknown outcome (tests/shipment-mail-outbox.test.ts).
+  for (const stage of ["deadline", "lease"] as const) {
     store.clear();
     const lateWorld = shipmentOutboxFixture();
     let clock = now, slowed = false;
@@ -82,7 +83,6 @@ async function main(): Promise<void> {
     const lateInput = { ...input, statsId: `synthetic_late_${stage}`, session: `cs_test_shipmentlate${stage}0001` };
     await enqueueShipmentMail(lateInput, lateRuntime);
     const created = lateWorld.commands.find(command => command[0] === "EVAL")!;
-    if (stage === "lost") lateWorld.loseNext("dispatch");
     let posts = 0;
     const realSender = async (_message: unknown, beforePost: () => Promise<boolean>) => {
       if (!(await beforePost())) return "unknown" as const;
@@ -98,6 +98,24 @@ async function main(): Promise<void> {
     const second = await runShipmentMail(clock + 5_000, realSender, lateRuntime);
     is(`${stage}: a later pass sends the buyer's shipping email once`, [second, posts], [{ accepted: 1, waiting: 0, unknown: 0 }, 1]);
     is(`${stage}: acceptance releases the protected row`, store.run(["GET", String(created[3])]), null);
+  }
+
+  part("A late re-check about an earlier accepted POST never restores custody");
+  {
+    store.clear();
+    const receiptWorld = shipmentOutboxFixture();
+    let clock = now, slowed = false;
+    const receiptRuntime = { ...runtime, now: () => clock, pipeline: async (commands: (string | number)[][]) => {
+      const answer = await receiptWorld.pipeline(commands);
+      if (!slowed && commands.some(command => command[0] === "EVAL" && command[13] === "dispatch")) { slowed = true; clock = now + 5_001; }
+      return answer;
+    } };
+    const receiptInput = { ...input, statsId: "synthetic_late_receipt", session: "cs_test_shipmentlatereceipt01" };
+    await enqueueShipmentMail(receiptInput, receiptRuntime);
+    // lib/email.ts: an accepted receipt re-checks the barrier with afterPost.
+    const result = await runShipmentMail(now + 5_000, async (_message, beforePost) => (await beforePost({ afterPost: true })) ? "accepted" : "unknown", receiptRuntime);
+    is("an earlier accepted POST is never reported as known no-POST waiting", result, { accepted: 0, waiting: 0, unknown: 1 });
+    is("its dispatch barrier stays closed as acceptance unknown", (await shipmentMailStatus(receiptInput.statsId, receiptInput.session, receiptRuntime))?.state, "acceptance_unknown");
   }
 
   part("Incomplete receipts and unrecognized provider outcomes stay unknown");

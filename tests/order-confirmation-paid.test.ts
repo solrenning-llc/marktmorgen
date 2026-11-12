@@ -296,7 +296,7 @@ test("a paid confirmation reported as not posted after its barrier stays queued 
   assert.deepEqual(first, { accepted: 0, waiting: 1, unknown: 0 });
   const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the paid origin is kept");
   assert.equal(kept.row.state, "queued"); assert.equal(kept.row.owner, ""); assert.ok(kept.payload.message);
-  f.advance(61_000);
+  f.advance(2 * 61_000); // advance() is absolute from creation: one retry interval after the restore.
   const later = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
     assert.equal(await beforePost(), true); posts++; return "accepted";
   }, f.runtime, f.id);

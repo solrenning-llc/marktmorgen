@@ -14,7 +14,7 @@ const serverReady = () => false;
  * area of the studio by name, each to its answer's page, with "Filter by name"
  * narrowing only this list, in the browser. On a small screen the list starts
  * folded under "All help topics"; on a wide one it is always open. Without
- * scripts the whole list is simply there, open, and the filter is off.
+ * scripts the whole list is simply there, open, with no filter.
  */
 export function HelpTopics({ topics, current }: { topics: HelpTopic[]; current?: string }) {
   const ready = useSyncExternalStore(subscribe, clientReady, serverReady);
@@ -23,6 +23,7 @@ export function HelpTopics({ topics, current }: { topics: HelpTopic[]; current?:
   const field = useId();
   const listId = useId();
   const shown = filterTopics(topics, typed);
+  const here = current ? topics.find((topic) => topic.href === current) : undefined;
   return (
     <nav aria-label="All help topics" className="min-w-0" data-help-topics>
       {ready ? (
@@ -34,20 +35,27 @@ export function HelpTopics({ topics, current }: { topics: HelpTopic[]; current?:
         </div>
       ) : null}
       <div id={listId} className={`${!ready || open ? "block" : "hidden"} mt-3 lg:mt-0 lg:block`}>
-        <label htmlFor={field} className="text-sm font-semibold text-ink">
-          Filter by name
-        </label>
-        <input id={field} type="search" disabled={!ready} className="field mt-1 w-full" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
-        <p role="status" className="mt-2 text-sm text-ink-soft">
-          {typed.trim() ? (shown.length ? `${shown.length} ${shown.length === 1 ? "topic" : "topics"}` : "No topic has that in its name.") : ""}
-        </p>
+        {/* Drawn once scripts run: before that a filter could not filter, so none is offered, not even a disabled one. */}
+        {ready ? (
+          <>
+            <label htmlFor={field} className="text-sm font-semibold text-ink">
+              Filter by name
+            </label>
+            <input id={field} type="search" className="field mt-1 w-full" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+            <p role="status" className="mt-2 text-sm text-ink-soft">
+              {typed.trim() ? (shown.length ? `${shown.length} ${shown.length === 1 ? "topic" : "topics"}` : "No topic has that in its name.") : ""}
+            </p>
+          </>
+        ) : null}
         <ul className="mt-2 space-y-0.5">
           {shown.map((topic) => (
             <li key={topic.href + topic.name}>
+              {/* The whole row is the link, so even "Tax" is a 44 by 44 px target (2.5.5). Areas that share an answer
+                  share its page: only the first of them is marked as the page you are on. */}
               <Link
                 href={topic.href}
-                aria-current={topic.href === current ? "page" : undefined}
-                className={`inline-flex min-h-11 items-center text-[0.9375rem] underline-offset-4 hover:underline ${topic.href === current ? "font-semibold text-ink" : "text-ink-soft"}`}
+                aria-current={topic === here ? "page" : undefined}
+                className={`flex min-h-11 w-full items-center text-[0.9375rem] underline-offset-4 hover:underline ${topic === here ? "font-semibold text-ink" : "text-ink-soft"}`}
               >
                 {topic.name}
               </Link>

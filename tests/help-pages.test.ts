@@ -135,10 +135,16 @@ async function main(): Promise<void> {
     is("every studio area is a topic, each to its answer's page", [topics.length, topics.every((t) => answers.some((a) => t.href === helpAnswerPath(a.section, a.id)))], [HELP_AREAS.length, true]);
     is("the filter keeps names with every word typed, any case, with or without accents", [filterTopics([{ name: "Café menu", href: "/a" }, { name: "Funnels", href: "/b" }], "CAFE").map((t) => t.href), filterTopics(topics, "  ").length, filterTopics(topics, "your pa").map((t) => t.name)], [["/a"], topics.length, ["Your Path", "Your pages"].filter((n) => topics.some((t) => t.name === n)).sort((a, b) => a.localeCompare(b, "en-US"))]);
     const server = renderToStaticMarkup(createElement(HelpTopics, { topics }));
-    is("before scripts run, the list is open, the filter off and no fold button", [server.includes('class="block mt-3 lg:mt-0 lg:block"'), /<input[^>]*disabled=""/.test(server), server.includes("All help topics</button>")], [true, true, false]);
-    is("it is a named navigation with a visible label on the filter", [server.includes('<nav aria-label="All help topics"'), /<label for="[^"]+"[^>]*>Filter by name<\/label>/.test(server)], [true, true]);
+    is("before scripts run, the list is open, with no filter (not even a disabled one) and no fold button", [server.includes('class="block mt-3 lg:mt-0 lg:block"'), server.includes("<input"), server.includes("Filter by name"), server.includes("All help topics</button>")], [true, false, false, false]);
+    is("it is a named navigation", server.includes('<nav aria-label="All help topics"'), true);
+    const rows = [...server.matchAll(/<a [^>]*class="([^"]*)"[^>]*>/g)].map((m) => m[1].split(" "));
+    is("every topic link is a whole row at least 44 px tall, so even a short name is a 44 by 44 target", rows.length === topics.length && rows.every((c) => c.includes("flex") && c.includes("w-full") && c.includes("min-h-11")), true);
+    const shared = topics.filter((t) => t.href === topics.find((u) => topics.filter((v) => v.href === u.href).length > 1)?.href);
+    const marked = renderToStaticMarkup(createElement(HelpTopics, { topics, current: shared[0]?.href }));
+    is("areas sharing an answer: only the first is marked as the page you are on", [shared.length > 1, (marked.match(/aria-current="page"/g) ?? []).length], [true, 1]);
     const shown = await mount(HelpTopics, { topics });
     const tree = () => shown.tree();
+    is("with scripts, the filter has its visible label", texts(find(tree(), (n) => n.type === "label")[0]).join("").trim(), "Filter by name");
     const button = find(tree(), (n) => n.type === "button")[0];
     is("with scripts: folded on a small screen behind All help topics", [texts(button).join(""), button.props?.["aria-expanded"], String(find(tree(), (n) => typeof n.props?.className === "string" && (n.props.className as string).includes("lg:block") && n.type === "div")[0]?.props?.className).startsWith("hidden")], ["All help topics", false, true]);
     (button.props?.onClick as () => void)();
@@ -150,6 +156,19 @@ async function main(): Promise<void> {
     (find(tree(), (n) => n.type === "input")[0].props?.onChange as (e: { target: { value: string } }) => void)({ target: { value: "zzzz" } });
     await shown.settle();
     is("nothing found is said", texts(find(tree(), (n) => n.props?.role === "status")[0]).join(""), "No topic has that in its name.");
+  }
+
+  part("Skip to content lands on the page, past the topics (review of #4191)");
+  {
+    const first = answers[0];
+    for (const [what, page] of [
+      ["an answer's page", await HelpAnswerPage({ params: Promise.resolve({ section: first.section, answer: first.id }) })],
+      ["a section's page", await HelpSectionPage({ params: Promise.resolve({ section: first.section }) })],
+    ] as const) {
+      const html = renderToStaticMarkup(page);
+      const main = html.slice(html.indexOf('<main id="content"'), html.indexOf("</main>"));
+      is(`${what}: the main region holds the page's heading and not the topics`, [main.includes("<h1"), main.includes("data-help-topics"), html.indexOf("data-help-topics") < html.indexOf('<main id="content"')], [true, false, true]);
+    }
   }
 
   part("From /help");

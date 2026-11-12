@@ -31,11 +31,12 @@ export default async function HelpSectionPage({ params }: Params) {
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
       <SiteNav />
-      <main id="content" className="container-page grid flex-1 gap-8 py-12 sm:py-16 lg:grid-cols-[15rem_1fr] lg:gap-14">
+      {/* The topics sit beside the page, outside its main region, so "Skip to content" lands on the page itself (review of #4191). */}
+      <div className="container-page grid flex-1 gap-8 py-12 sm:py-16 lg:grid-cols-[15rem_1fr] lg:gap-14">
         <aside className="min-w-0 print:hidden lg:sticky lg:top-24 lg:self-start">
           <HelpTopics topics={helpTopics()} />
         </aside>
-        <div className="min-w-0">
+        <main id="content" className="min-w-0">
         <Breadcrumb path={[{ label: "Help center", href: "/help" }]} here={section.title} />
         <h1 className="t-h2 mt-4">{section.title}</h1>
         <p className="t-lead mt-3 max-w-2xl text-ink-soft">{section.blurb}</p>
@@ -49,8 +50,8 @@ export default async function HelpSectionPage({ params }: Params) {
             </li>
           ))}
         </ul>
-        </div>
-      </main>
+        </main>
+      </div>
       <SiteFooter />
     </div>
   );

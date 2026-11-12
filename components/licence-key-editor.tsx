@@ -71,7 +71,7 @@ async function call(method: "GET" | "POST", url: string, body?: Record<string, u
 
 const count = (n: number) => n.toLocaleString("en-US");
 const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-const quiet = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:opacity-40";
+const quiet = "min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:opacity-40";
 
 /** A product's license keys in the studio: where they come from, how many are left, and who has which. */
 export function LicenceKeyEditor({ product, handle }: { product: Product; handle: string }) {
@@ -154,7 +154,7 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
   if (!on && !editing) {
     return (
       <div className="mt-3">
-        <button type="button" className={quiet} onClick={() => setEditing(true)}>
+        <button type="button" className={`inline-flex ${quiet}`} onClick={() => setEditing(true)}>
           Give each buyer a unique license key
         </button>
       </div>
@@ -352,7 +352,7 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
                   </div>
                   <button
                     type="button"
-                    className={quiet}
+                    className={`inline-flex ${quiet}`}
                     disabled={busy}
                     onClick={async () => {
                       const data = await post({ action: "revoke", key: entry.key, revoked: !entry.revokedAt });
@@ -389,12 +389,12 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
       </details>
 
       <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
-        <button type="button" className={quiet} disabled={busy} onClick={() => setEditing(true)}>
+        <button type="button" className={`inline-flex ${quiet}`} disabled={busy} onClick={() => setEditing(true)}>
           Change how keys are made
         </button>
         {pool && counts.left > 0 ? (
           <ConfirmAction
-            className={quiet}
+            className={`inline-flex ${quiet}`}
             disabled={busy}
             question="Remove the keys not yet given? They cannot be brought back; keys already given stay with their buyers."
             yes="Yes, remove them"

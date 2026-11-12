@@ -69,7 +69,7 @@ export function RenameForm({ current }: { current: string }) {
       <button
         type="button"
         onClick={() => setState({ kind: "open" })}
-        className="mt-4 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
+        className="mt-4 inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
       >
         Change my address
       </button>

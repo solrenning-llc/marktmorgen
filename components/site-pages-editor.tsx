@@ -186,7 +186,7 @@ export function SitePageSettings({
             ))}
           </select>
         </label>
-        <label className="flex items-start gap-3 self-end text-sm text-ink">
+        <label className="flex min-h-11 items-start gap-3 self-end text-sm text-ink">
           <input type="checkbox" className="mt-1 h-4 w-4" checked={nav} onChange={(e) => setNav(e.target.checked)} />
           <span>In the menu at the top of your store and its pages</span>
         </label>

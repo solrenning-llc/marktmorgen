@@ -434,7 +434,7 @@ export function LookEditor({
           */}
           <fieldset disabled={working} className="mt-2">
             <legend className="field-label">Our name on your page</legend>
-            <label className="mt-2 flex items-start gap-3">
+            <label className="mt-2 flex min-h-11 items-start gap-3">
               <input
                 type="checkbox"
                 checked={!badge}
@@ -462,7 +462,7 @@ export function LookEditor({
           */}
           <fieldset disabled={working} className="mt-2">
             <legend className="field-label">How many times each product was bought</legend>
-            <label className="mt-2 flex items-start gap-3">
+            <label className="mt-2 flex min-h-11 items-start gap-3">
               <input
                 type="checkbox"
                 checked={sold}

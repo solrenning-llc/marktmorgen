@@ -29,14 +29,14 @@ export function ProductUpdateBox({ product }: { product: Product }) {
   // A first press shows what will go out; only the review's own button sends (487 [IT4], pattern 8).
   const [reviewing, setReviewing] = useState(false);
   if (!canTellBuyers(product)) return null;
-  const link = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
+  const link = "min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
   const id = `upd-${product.id}`;
 
   if (!open) {
     return (
       <div className="mt-2 text-sm text-ink-soft">
         {sent !== null ? <p className="mb-1 font-semibold text-ink" role="status">{`Going out to ${sent.toLocaleString("en-US")} ${sent === 1 ? "buyer" : "buyers"} now.`}</p> : null}
-        <button type="button" className={`block ${link}`} onClick={() => setOpen(true)}>
+        <button type="button" className={`flex ${link}`} onClick={() => setOpen(true)}>
           Tell buyers about an update
         </button>
       </div>

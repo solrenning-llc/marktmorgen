@@ -1,4 +1,5 @@
 import {checkContentFocusTarget} from "./skip-content-focus.mjs";
+import {targetsUnder44} from "./target-size.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {readFileSync,mkdtempSync,rmSync} from "node:fs";
@@ -93,6 +94,9 @@ try{
      if(state){focused++;if(!state.visible||state.width<=0||state.height<=0)throw Error("Keyboard focus not visible "+JSON.stringify(state));}
     }
     if(!focused)throw Error("No keyboard target reached");
+    // 2.5.5 Target Size (Enhanced, AAA): every control on the screen is at least 44 by 44 CSS px.
+    const small=await targetsUnder44(page);
+    if(small.length)throw Error("Target under 44 by 44 px "+JSON.stringify(small));
    }
    if(mode==="dark"&&!await page.evaluate(()=>matchMedia("(prefers-color-scheme: dark)").matches))throw Error("Dark color-scheme request not honored");
    await page.addScriptTag({content:axe});

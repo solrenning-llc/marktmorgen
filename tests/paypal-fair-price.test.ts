@@ -128,6 +128,29 @@ async function main(): Promise<void> {
   is("sale 60%, fair 50% in India: 60% off", payPalPrice({ ...withSale(60), visitorCountry: "IN" } as Store, product), 1600);
   is("sale 20% elsewhere: 20% off, as before", payPalPrice({ ...withSale(20), visitorCountry: "US" } as Store, product), 3200);
   is("no country known: the sale alone, as before", payPalPrice(withSale(20), product), 3200);
+
+  part("A returning-buyer code from the same form: PayPal cannot take it, so the buyer is told, never charged as if it had gone on");
+  // components/returning-code-box.tsx sits in the card checkout's form, whose PayPal button posts here too (#3690,
+  // Claude 3 cloud L, LEVE 1: this was held only by a pattern over the route's source).
+  const withCode = async (fields: Record<string, string>): Promise<{ orders: number; location: string | null }> => {
+    const before = sent.length;
+    const form = withConsent(new URLSearchParams({ handle: store.handle, product: product.id, ...fields }));
+    let location: string | null = null;
+    try {
+      const response = await payPayPal(new NextRequest("https://marktmorgen.com/api/store/paypal/checkout", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", "x-vercel-ip-country": "US" }, body: form.toString() }));
+      location = response.headers.get("location");
+    } catch (error) {
+      // As in buy(): outside Next's request scope the visit count scheduled with `after` throws, once the order is opened.
+      if (!/outside a request scope/.test(String(error))) throw error;
+    }
+    return { orders: sent.length - before, location };
+  };
+  const back = `https://marktmorgen.com/@${store.handle}/p/${product.id}?returning=other#returning`;
+  is("a typed code: no PayPal order, sent back to the field with the reason", await withCode({ rcode: "THANKS" }), { orders: 0, location: back });
+  is("the emailed link's token: no PayPal order, sent back the same way", await withCode({ rtoken: "b".repeat(64) }), { orders: 0, location: back });
+  const blank = await buy(store, product.id, "US");
+  const blankBoxes = await withCode({ rcode: "  ", rtoken: "", remail: "someone@example.com" });
+  is("control: empty code boxes (and an email alone) are no code, and PayPal opens the order", [blank.value, blankBoxes.orders], ["40.00", 1]);
   done();
 }
 

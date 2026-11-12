@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Defect (custo): weekly and monthly report crons remember the stores decided this period | claude1/cost-cron-weekly | `lib/stats-report.ts`, `app/api/cron/weekly/route.ts`, `app/api/cron/monthly/route.ts`, `tests/c1-cost-weekly-idle.test.ts`, `tests/aliases/c1-cost-weekly-idle.test.ts.json` | 12/11/2026 17h45 |

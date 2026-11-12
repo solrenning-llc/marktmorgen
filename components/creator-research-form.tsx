@@ -30,6 +30,12 @@ const FIELD_MESSAGES: Record<string, string> = {
   consentResearch: "Please check the first box so we can store your answers.",
 };
 
+/** Answers the server gives without a field: the list is full, or the answer is too long to keep. */
+const ERROR_MESSAGES: Record<string, string> = {
+  full: `This survey has no room for more answers right now, so yours was not saved. You can email your answers to ${SUPPORT_EMAIL}.`,
+  too_large: "Your answers are too long to save. Please shorten them and send them again.",
+};
+
 const inputClass = "field";
 const fieldClass = inputClass;
 const labelClass = "field-label mb-2";
@@ -86,6 +92,8 @@ export function CreatorResearchForm() {
 
       const errorField = result && typeof result === "object" && !Array.isArray(result) &&
         Object.hasOwn(result, "field") ? (result as Record<string, unknown>).field : undefined;
+      const errorCode = result && typeof result === "object" && !Array.isArray(result) &&
+        Object.hasOwn(result, "error") ? (result as Record<string, unknown>).error : undefined;
 
       setStatus("error");
       if (response.status === 429) {
@@ -94,6 +102,8 @@ export function CreatorResearchForm() {
         );
       } else if (typeof errorField === "string" && Object.hasOwn(FIELD_MESSAGES, errorField)) {
         setMessage(FIELD_MESSAGES[errorField]);
+      } else if (typeof errorCode === "string" && Object.hasOwn(ERROR_MESSAGES, errorCode)) {
+        setMessage(ERROR_MESSAGES[errorCode]);
       } else {
         setMessage(
           `We could not confirm that your answers were saved. Please try again, or email ${SUPPORT_EMAIL}.`,

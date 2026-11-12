@@ -19,7 +19,8 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, setJoin, setProdu
 import { readListing } from "@/lib/catalog";
 import { askToJoin } from "@/lib/store-join";
 import { addEndpoint, QUEUE_KEY } from "@/lib/webhooks";
-import { replayKept } from "@/lib/webhook-outbox";
+import * as outbox from "@/lib/webhook-outbox";
+import { emitOrKeep, replayKept } from "@/lib/webhook-outbox";
 import { suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -143,6 +144,22 @@ async function main(): Promise<void> {
   await original([suppressCommand(store.listId!, "gus@example.com", Math.floor(Date.now() / 1000))]);
   const dropped = await replayKept(later(1), later(6));
   is("let go, nothing queued", [dropped.dropped, dropped.sent, await queued()], [1, 0, 0]);
+
+  part("A full outbox admits nothing more: kept events never pass the company's ceiling (Codex X5 on #4319)");
+  const CAP = 1_000;
+  is("the ceiling is the one priced", (outbox as Record<string, unknown>).OUTBOX_MAX_KEPT, CAP);
+  for (let i = 0; i < CAP; i += 1) await original([["ZADD", "nl:hookout:due", later(60 * 24) / 1000, `evt_${createHash("md5").update(`filler-${i}`).digest("hex")}`]]);
+  const full = await freeLink("ida@example.com");
+  failDeliveryWrites = 1;
+  const pressed = await quietly(() => press(full));
+  await quietly(drainAfter);
+  is("the buyer still gets the link", pressed.status, 303);
+  is("nothing more in line", Number((await original([["ZCARD", "nl:hookout:due"]]))[0]), CAP);
+  is("and no record written past it", (await original([["KEYS", "nl:hookout:evt_*"]]))[0], []);
+  failDeliveryWrites = 1;
+  is("said as lost, never as kept", await quietly(() => emitOrKeep(store, "lead.captured", "ceiling-seed", { email: "jo@example.com" })), "lost");
+  is("still at the ceiling", Number((await original([["ZCARD", "nl:hookout:due"]]))[0]), CAP);
+  await original([["DEL", "nl:hookout:due"]]);
 
   part("Control: with no failure the event is queued at once and nothing is kept");
   await press(await freeLink("hal@example.com"));

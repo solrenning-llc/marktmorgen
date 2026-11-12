@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 274 [AX1] audit 12/11: "See campaign results" scrolls with no glide under reduced motion (WCAG 2.3.3) | claude/tender-curie-w4hw92-motion | `components/promotion-planner.tsx`, `tests/promotion-results-scroll-motion.test.ts` | 12/11/2026 10h11 |

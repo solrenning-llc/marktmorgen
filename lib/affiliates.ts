@@ -2419,7 +2419,7 @@ export async function notePartners(
       currency: readCurrencyCode(sale.currency),
       percent: shareOn(partner.share, sale.product),
       // A 50% partner buying their own product at 50% off is not a sale.
-      self: Boolean(buyer) && canonicalEmail(partner.email) === buyer,
+      self: Boolean(buyer) && ownPurchase(store, partner, sale.buyer),
     };
     commands.push(["HSETNX", sharesKey(store.statsId), `${sale.ref}:${partner.id}`, JSON.stringify(earning)]);
   }
@@ -2456,7 +2456,18 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string):
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {
   if (!buyer) return false;
   const affiliate = await readAffiliate(store, aff);
-  return Boolean(affiliate) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer);
+  return Boolean(affiliate) && ownPurchase(store, affiliate!, buyer);
+}
+
+/**
+ * Whether `buyer` is the affiliate themselves, or the creator, buying: one inbox however it is written, under the
+ * address they joined with, the address their commission is paid to, or the store's own (as the lead rule's isOwn,
+ * lib/affiliate-leads.ts, and sameInboxAsAnother take them). Neither earns a commission on their own purchase.
+ */
+export function ownPurchase(store: Pick<Store, "email">, affiliate: Pick<Affiliate, "email" | "paypal">, buyer: string): boolean {
+  const person = canonicalEmail(buyer);
+  if (!person) return false;
+  return [affiliate.email, payAddress(affiliate), store.email ?? ""].some((address) => Boolean(address) && canonicalEmail(address) === person);
 }
 
 /**
@@ -3258,7 +3269,7 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
       total,
       currency: readCurrencyCode(invoice.currency),
       rate: Number(meta.via_rate) || 0,
-      self: Boolean(affiliate && buyer) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer),
+      self: Boolean(affiliate && buyer) && ownPurchase(store, affiliate!, buyer),
       how: "recurring",
       promotion: affiliatePromotionFrom(meta) ?? undefined,
     });

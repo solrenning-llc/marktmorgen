@@ -51,8 +51,9 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
-import { readKind, readListing } from "@/lib/catalog";
-import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
+import { readKind, readListing, readListingExactly } from "@/lib/catalog";
+import { storeForHandleExactly } from "@/lib/store-exact";
+import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse, readCourseExact } from "@/lib/course";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
@@ -943,6 +944,25 @@ const DRIP_SET = "nl:courses:drip";
 const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;
 
+/**
+ * Whether a drip list member's store, product or course is confirmed gone (each read exactly), so the member may be
+ * taken off the list; false when all three are there, null when any answer could not be read.
+ */
+async function dripGone(handle: string, productId: string, courseId: string): Promise<boolean | null> {
+  try {
+    const store = await storeForHandleExactly(handle);
+    if (store === "unknown") return null;
+    if (store === "none") return true;
+    const product = await readListingExactly(store, productId);
+    if (product === "unknown") return null;
+    if (product === null || product.course?.id !== courseId) return true;
+    return (await readCourseExact(courseId)) === null;
+  } catch (error) {
+    console.error("checking whether a drip course is gone failed; it stays on the list", courseId, error);
+    return null;
+  }
+}
+
 /** Remembers that this course opens modules over time, for the daily job. */
 export async function registerDrip(store: Store, product: Listing, course: Course): Promise<void> {
   const member = `${course.id}|${store.handle}|${product.id}`;
@@ -971,7 +991,10 @@ export async function sendDripEmails(
     const product = store ? await readListing(store, productId) : null;
     const course = product?.course?.id === courseId ? await loadCourse(courseId) : null;
     if (!store || !product || !course) {
-      await redisPipeline([["SREM", DRIP_SET, member]]);
+      // Taken off the list only when the store, the product or the course is confirmed gone: these readers answer
+      // null for a reply they could not read too (CX-123 rule 24), and the list is the only way the job finds the
+      // course again, so an unknown answer leaves it for the next run.
+      if ((await dripGone(handle, productId, courseId)) === true) await redisPipeline([["SREM", DRIP_SET, member]]);
       continue;
     }
     const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);

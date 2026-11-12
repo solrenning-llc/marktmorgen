@@ -7,3 +7,4 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 2 | 655 [WG15], unit 2 (the studio's tax setting links to /studio/tax; stacked on #2735) | claude2/wg15-tax-link | `components/tax-editor.tsx`, `tests/wg15-tax-link.test.ts`, its row of `tests/test-config.mjs` | 07/11/2026 10h35 |
+| Claude 2 | Drip list: a course is taken off only when its store, product or course is confirmed gone (bug hunt, courses) | claude2/drip-set-unknown-keeps | `lib/learn.ts` (sendDripEmails, dripGone only), `tests/drip-set-unknown-keeps.test.ts` | 12/11/2026 19h25 |

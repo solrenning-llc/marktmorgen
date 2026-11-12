@@ -8,7 +8,7 @@ import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
 import { claimMonth, lastMonthOf, releaseMonth, monthlyMessage, readNumbers, weeklyOff, weeklyToken } from "@/lib/stats-report";
-import { goalForMonth, readSalesGoal } from "@/lib/sales-goal";
+import { UNKNOWN_SALES_GOAL_CENTS, goalForMonth, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
 
 /**
@@ -52,7 +52,12 @@ export async function GET(request: NextRequest) {
         continue;
       }
       const emailOff = await weeklyOff(store.handle);
-      const chat = await chatAddress(store.statsId).catch(() => null);
+      // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
+      const chat = await chatAddress(store.statsId).catch(() => undefined);
+      if (chat === undefined) {
+        out.failed += 1;
+        continue;
+      }
       if (emailOff && !chat) {
         out.stopped += 1;
         continue;
@@ -69,9 +74,9 @@ export async function GET(request: NextRequest) {
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
       // Only a goal set by the month being reported is measured: one set on the 1st is for the month ahead.
-      const kept = await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0, since: "" }));
+      const kept = await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS, since: "" }));
       const goal = goalForMonth(kept, month);
-      const message = data && token ? monthlyMessage(store, data, month, stopUrl, goal) : null;
+      const message = withGoalAvailability(token ? monthlyMessage(store, data, month, stopUrl, goal) : null, goal);
       if (!message) {
         out.quiet += 1;
         continue;

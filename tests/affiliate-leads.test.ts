@@ -112,8 +112,11 @@ async function main(): Promise<void> {
   is("an hour holds a quarter of the day, at least one", [hourlyLeads(10), hourlyLeads(1), hourlyLeads(500)], [3, 1, 125]);
 
   part("How each lead stands");
-  // The start of a UTC day 40 days ago, so the leads below stay inside one day.
-  const old = Math.floor((NOW - 40 * DAY) / DAY) * DAY;
+  // The start of the 2nd day of the UTC month two months back: always past every hold below (at least
+  // 32 days old), and the three days the monthly-budget leads use (2nd to 4th) never cross into another
+  // month, whatever today's date. "40 days ago" crossed a month end on some dates (on 8 November it put
+  // the third lead on 1 October), so the monthly budget was never reached and the test failed by date.
+  const old = ((at: Date) => Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - 2, 2) / 1000)(new Date(NOW * 1000));
   const settled = settleLeads([lead({ at: NOW - DAY })], NOW);
   is("inside its hold it earns and waits", [settled[0].status, settled[0].commission, settled[0].readyAt], ["in hold", 500, NOW - DAY + 30 * DAY]);
   is("after it, it needs the creator's approval", settleLeads([lead({})], NOW)[0].status, "needs approval");

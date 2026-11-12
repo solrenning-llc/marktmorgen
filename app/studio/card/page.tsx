@@ -11,6 +11,8 @@ import { contactWords } from "@/lib/buyer-words/contact";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { SITE_URL } from "@/lib/site-url";
+import { contactOpen } from "@/lib/store-contact";
+import type { Store } from "@/lib/store";
 
 export const metadata: Metadata = {
   title: "Business card — Marktmorgen",
@@ -26,6 +28,13 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
  * pages, as the route that keeps it (app/api/store/creator-card), and
  * reached from "Your pages" (app/studio/site).
  */
+/** Why a contact form that is switched on cannot take messages now, in plain words, with what the creator can do. */
+function contactUnavailableWords(store: Store): string {
+  if (store.suspended) return "Your store's contact form is on, but it takes no messages while your store is switched off, so the card shows no way for visitors to leave their details.";
+  if (!store.email) return "Your store's contact form is on, but it takes no messages until your store has an email address to send them to, so the card shows no way for visitors to leave their details.";
+  return "Your store's contact form is on, but it cannot take messages just now, so the card shows no way for visitors to leave their details. Check again later.";
+}
+
 export default async function StudioCardPage({ searchParams }: Params) {
   const query = await searchParams;
   const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "page");
@@ -50,13 +59,20 @@ export default async function StudioCardPage({ searchParams }: Params) {
           <p className="mt-3 max-w-2xl text-ink-soft">
             One address to give anyone you meet. It shows only what you type here, and a Save contact button that adds you to their phone&apos;s contacts. It stays off until you turn it on.
           </p>
-          {card?.on ? (
-            <p className="mt-3">
-              <Link href={`/@${store.handle}/contact`} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
-                {`Open your card at ${address}`}
+          {contactOpen(store) ? (
+            <p className="mt-3 max-w-2xl text-sm text-ink-soft">Under your card, your store&apos;s contact form lets visitors leave their name, their email and a message for you, in your inbox.</p>
+          ) : !store.contact.on ? (
+            <p className="mt-3 max-w-2xl text-sm text-ink-soft">
+              {"Your store's contact form is off, so the card shows no way for visitors to leave their details. "}
+              <Link href={`${studioPath(store)}#contact`} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                Turn on the contact form
               </Link>
             </p>
-          ) : null}
+          ) : (
+            // Switched on, but it cannot take messages now (the store switched off, no email, or sending unavailable):
+            // turning it on again would change nothing, so that is not offered (independent review of #1965).
+            <p className="mt-3 max-w-2xl text-sm text-ink-soft">{contactUnavailableWords(store)}</p>
+          )}
           {card ? (
             <div className="mt-8">
               <CreatorCardEditor

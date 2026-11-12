@@ -2,14 +2,16 @@
 273 [BK1], inbox C4-30: how long a key's DUMP is against the bytes the
 application sends (its key and values) and against Redis's own MEMORY USAGE,
 for every kind of key the stores keep (docs/backup-cost-2026-11-04.md, section
-5, item 6). Run against a local, empty, throwaway Redis on port 6399 (it is
-flushed first): redis-server --port 6399 --save "" --appendonly no. Synthetic
-values only; nothing real is read or written.
+5, item 6). Run against a local, empty, throwaway Redis on port 6399:
+redis-server --port 6399 --save "" --appendonly no. It refuses a Redis that
+holds any key, in any database, or whose keyspace it cannot read, and never
+flushes one. Synthetic values only; nothing real is read or written.
 """
 import json
 import random
 import string
 import subprocess
+import sys
 def dump_len(k):
     # DUMP returns binary; use redis-cli --raw piped length minus trailing newline
     out = subprocess.run(["redis-cli","-p","6399","--raw","DUMP",k], capture_output=True).stdout
@@ -21,7 +23,13 @@ cases=[]
 def add(name, key, logical):
     d=dump_len(key); m=mem(key)
     cases.append((name, logical, d, m))
-subprocess.run(["redis-cli","-p","6399","FLUSHALL"],capture_output=True)
+def keyspace_empty():
+    # An unreadable or unexpected answer is not "empty".
+    info = subprocess.run(["redis-cli","-p","6399","INFO","keyspace"],capture_output=True,text=True)
+    lines = [line.strip() for line in info.stdout.splitlines() if line.strip()]
+    return info.returncode == 0 and lines == ["# Keyspace"]
+if not keyspace_empty():
+    sys.exit("Refused: the Redis on port 6399 is not an empty throwaway (it holds keys, or its keyspace could not be read). Nothing was written or flushed.")
 # strings
 for n in [10, 100, 1000, 10000, 100000]:
     k=f"nl:s:{n}"; v=rnd(n); subprocess.run(["redis-cli","-p","6399","SET",k,v],capture_output=True); add(f"string random {n}B",k,len(k)+n)

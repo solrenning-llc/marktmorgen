@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isDemoCheckoutConfigured } from "@/lib/demo-store";
 import { type Check, verifyCartShipping, verifyPackages, verifyTaxDocuments, verifyTiers } from "@/lib/verify-stripe";
@@ -40,8 +41,14 @@ export async function GET(request: NextRequest) {
     const ok = checks.length > 0 && checks.every((c) => c.ok);
     // In Vercel's logs for every run, passing or not.
     console.log(`stripe-check ${ok ? "pass" : "FAIL"}: ${checks.map((c) => `${c.ok ? "PASS" : "FAIL"} ${c.check} (${c.detail})`).join(" | ")}`);
-    const [previous] = await redisPipeline([["GET", LAST]]);
+    const read = repliesFor(await redisPipeline([["GET", LAST]]), 1);
+    const previous = read?.[0];
     const failedBefore = typeof previous === "string" && previous.includes('"ok":false');
+    // An unknown reply is not an earlier pass either: no "passing again" is
+    // claimed, but a recovery it may hide is said in the log, not dropped.
+    if (ok && (!read || (previous !== null && typeof previous !== "string"))) {
+      console.error('stripe-check passes, but the previous result could not be read: no "passing again" notice was sent');
+    }
     const at = Date.now();
     await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks }), "EX", 30 * 86_400]]);
     if ((!ok || failedBefore) && isSenderConfigured()) {

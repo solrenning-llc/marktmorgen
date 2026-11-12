@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -62,7 +63,8 @@ export async function GET(request: NextRequest) {
       const ok = checks.length > 0 && checks.every((c) => c.ok);
       // In Vercel's logs for every run, passing or not.
       console.log(`mail-check ${ok ? "pass" : "FAIL"}: ${checks.map((c) => `${c.ok ? "PASS" : "FAIL"} ${c.check} (${c.detail})`).join(" | ")}`);
-      const [previous] = await redisPipeline([["GET", LAST]]);
+      const read = repliesFor(await redisPipeline([["GET", LAST]]), 1);
+      const previous = read?.[0];
       // Only the delivery result controls existing notices. A nested usage
       // failure is evidence missing, not a failed bounce/complaint loop.
       let failedBefore = false;
@@ -73,6 +75,10 @@ export async function GET(request: NextRequest) {
             Object.prototype.hasOwnProperty.call(prior, "ok") &&
             (prior as { ok?: unknown }).ok === false;
         } catch { /* Malformed history is not proof of an earlier failure. */ }
+      } else if (ok && (!read || previous !== null)) {
+        // An unknown reply is not an earlier pass either: no "passing again" is
+        // claimed, but a recovery it may hide is said in the log, not dropped.
+        console.error("mail-check passes, but the previous result could not be read: no \"passing again\" notice was sent");
       }
       const at = Date.now();
       await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks, usage }), "EX", 30 * 86_400]]);

@@ -15,7 +15,11 @@
  *   or startup_failure (a broken workflow file gives that on every later head), or a canceled run in
  *   which a job other than the aggregator "All checks (…)" ended in failure or timed_out: pushes
  *   cancel most main runs, so a job's failure inside one would otherwise never be seen (Claude 5 on
- *   #3042). The aggregator fails in every canceled run, so it is not read. Pushes to main cancel each other's runs (cancel-in-progress on the main-push group),
+ *   #3042). The aggregator fails in every canceled run, so it is not read. A canceled run in which
+ *   such a job was itself canceled is red too when no newer run of its workflow and event began before
+ *   it ended (C1-20261109-1241-TODOS-56): a job past its timeout-minutes ends canceled, and so does its
+ *   run, while a push that supersedes a main run creates its own run first (cancel-in-progress), and a
+ *   run canceled that way is no evidence. A cancel by hand reads as red too, on the safe side. Pushes to main cancel each other's runs (cancel-in-progress on the main-push group),
  *   so with merges closer together than CI lasts a red on head A would otherwise be lost: its run
  *   completes after main moved to B, or is canceled. The issue labeled main-vermelho is opened (or
  *   the open one gets a comment naming each red run not yet named in it).
@@ -36,7 +40,8 @@
  * - none: anything else (a run still going with no red behind it, a workflow without a run, an
  *   unexpected conclusion).
  *
- * Never counted, either way: skipped, neutral and stale runs, canceled runs with no failed job,
+ * Never counted, either way: skipped, neutral and stale runs, canceled runs with no failed job and
+ * either no stopped job or a newer run of their workflow and event that superseded them (redInside),
  * runs of another branch, of another file, or of any other event (pull_request, workflow_dispatch...);
  * merge_group runs only as above, from their own listing, and only a success on the current head. The jobs of a canceled run are read for every one on the current head and,
  * on earlier heads, newest first, for at most JOB_READS runs per workflow per alarm run; beyond
@@ -74,6 +79,8 @@ const COUNTED_EVENTS = new Set(["push", "schedule"]);
 const RED = new Set(["failure", "timed_out", "startup_failure"]);
 /** A job's results that make the canceled run holding it red. */
 const RED_JOB = new Set(["failure", "timed_out"]);
+/** A job's result that makes the canceled run holding it red unless a newer run superseded it. */
+const STOPPED_JOB = "cancelled";
 /** The aggregator job of each required workflow: it fails whenever a job before it was canceled. */
 const AGGREGATOR = /^All checks \(/;
 /** Results that are evidence of nothing: they never open and never close. */
@@ -91,7 +98,7 @@ const QUEUE_BRANCH = /^gh-readonly-queue\/main\//;
 /**
  * @typedef {{ id: number, name: string, path: string, event: string, head_branch: string | null,
  *   head_sha: string, status: string, conclusion: string | null, html_url: string,
- *   updated_at: string }} Run
+ *   updated_at: string, created_at?: string }} Run
  * @typedef {{ file: string, name: string, state: string, run: Run | null, earlier: Run | null }} State
  *   state: green, red, running (in progress), queued (not started), missing (no evidence on the head:
  *   no run, or canceled with no failed job, skipped, neutral, stale) or unknown (another conclusion)
@@ -104,7 +111,7 @@ function checked(run) {
   if (!r || typeof r !== "object" || !Number.isSafeInteger(r.id) || /** @type {number} */ (r.id) <= 0
       || !text("name") || !text("path") || !text("event") || !text("head_sha") || !text("status")
       || !(r.conclusion === null || text("conclusion")) || !(r.head_branch === null || text("head_branch"))
-      || !text("html_url") || !text("updated_at")) {
+      || !text("html_url") || !text("updated_at") || !(r.created_at === undefined || text("created_at"))) {
     throw new Error("unreadable workflow run: " + JSON.stringify(run)?.slice(0, 300));
   }
   return /** @type {Run} */ (r);
@@ -130,18 +137,41 @@ function evidenceFor(r, file, redJobs) {
 const isRed = (r, redJobs) => r.status === "completed" && r.conclusion !== null
   && (RED.has(r.conclusion) || (r.conclusion === "cancelled" && redJobs.has(r.id)));
 
+/**
+ * The canceled runs that are red by their jobs: those with a job that failed (redJobs), and those with a job
+ * that was canceled (stoppedJobs) when no newer counted run of the same workflow and event on main, on any
+ * head, was created before the run ended: nothing superseded it, so its time ran out or a person stopped it
+ * (C1-20261109-1241-TODOS-56). A run's end that does not read throws: never green, never red.
+ * @param {Run[]} all @param {number[]} redJobs @param {number[]} stoppedJobs @returns {Set<number>}
+ */
+export function redInside(all, redJobs, stoppedJobs) {
+  const red = new Set(redJobs);
+  const byId = new Map(all.map((r) => [r.id, r]));
+  for (const id of stoppedJobs) {
+    const r = byId.get(id);
+    if (!r || red.has(id) || !canceled(r) || !COUNTED_EVENTS.has(r.event) || r.head_branch !== "main") continue;
+    const ended = Date.parse(r.updated_at);
+    if (!Number.isFinite(ended)) throw new Error("unreadable run time: " + r.html_url);
+    const superseded = all.some((x) => x.id > r.id && x.path === r.path && x.event === r.event && x.head_branch === "main"
+      && typeof x.created_at === "string" && Number.isFinite(Date.parse(x.created_at)) && Date.parse(x.created_at) <= ended);
+    if (!superseded) red.add(id);
+  }
+  return red;
+}
+
 /** @param {Run[]} runs */
 const newest = (runs) => runs.reduce((a, b) => (a && a.id > b.id ? a : b), /** @type {Run | null} */ (null));
 
 /**
- * @param {{ runs: unknown[], trigger: unknown, head: string, redJobs?: number[], queueRuns?: unknown[] }} input
+ * @param {{ runs: unknown[], trigger: unknown, head: string, redJobs?: number[], stoppedJobs?: number[], queueRuns?: unknown[] }} input
  *   runs of the current head and, for the workflows earlierNeeded() names, of earlier main heads;
  *   redJobs: the canceled runs in which a job other than the aggregator ended in failure or
- *   timed_out; queueRuns: the merge_group runs on the current head, from their own listing
+ *   timed_out; stoppedJobs: the canceled runs in which such a job was canceled (red unless superseded);
+ *   queueRuns: the merge_group runs on the current head, from their own listing
  * @returns {{ action: "open" | "close" | "none", red: Run[], states: State[], queueGreen: string[] }}
  *   queueGreen: the files whose green on the head is their merge_group run's
  */
-export function decide({ runs, trigger, head, redJobs = [], queueRuns = [] }) {
+export function decide({ runs, trigger, head, redJobs = [], stoppedJobs = [], queueRuns = [] }) {
   if (typeof head !== "string" || !SHA.test(head)) throw new Error("unreadable main head: " + String(head));
   if (!Array.isArray(runs)) throw new Error("unreadable run list");
   if (!Array.isArray(queueRuns)) throw new Error("unreadable merge-queue run list");
@@ -149,7 +179,7 @@ export function decide({ runs, trigger, head, redJobs = [], queueRuns = [] }) {
   const queue = queueRuns.map(checked).filter((r) => r.event === "merge_group" && r.head_branch !== null
     && QUEUE_BRANCH.test(r.head_branch) && r.head_sha === head);
   if (!Array.isArray(redJobs) || !redJobs.every((n) => Number.isSafeInteger(n))) throw new Error("unreadable job evidence");
-  const failedInside = new Set(redJobs);
+  if (!Array.isArray(stoppedJobs) || !stoppedJobs.every((n) => Number.isSafeInteger(n))) throw new Error("unreadable job evidence");
   const woke = checked(trigger);
   // One entry per run: the same run can come from two listings, one taken while it still ran.
   const byId = new Map();
@@ -159,6 +189,7 @@ export function decide({ runs, trigger, head, redJobs = [], queueRuns = [] }) {
   // The trigger's own completed result is newer than a listing that may still show it running.
   byId.set(woke.id, woke);
   const all = /** @type {Run[]} */ ([...byId.values()]);
+  const failedInside = redInside(all, redJobs, stoppedJobs);
   const states = REQUIRED.map(({ file, name }) => {
     const mine = all.filter((r) => evidenceFor(r, file, failedInside));
     const onHead = mine.filter((r) => r.head_sha === head);
@@ -254,22 +285,27 @@ export function greenComment(head, viaQueue = false) {
  */
 
 /**
- * Whether a job other than the aggregator ended in failure or timed_out in this run. An unreadable
- * reply throws: never green, never red.
- * @param {Api} api @param {number} id
+ * What the jobs other than the aggregator say about this canceled run: "red" when one ended in failure or
+ * timed_out, "stopped" when none did and one was itself canceled (red unless a newer run superseded the
+ * run, decide), "clean" otherwise. An unreadable reply throws: never green, never red.
+ * @param {Api} api @param {number} id @returns {Promise<"red" | "stopped" | "clean">}
  */
-async function failedInside(api, id) {
+async function jobVerdict(api, id) {
   const listing = await api("GET", `actions/runs/${id}/jobs?per_page=100`);
   if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.jobs) || listing.jobs.length !== listing.total_count) {
     throw new Error(`unreadable job listing of run ${id}`);
   }
-  return listing.jobs.some((job) => {
+  let verdict = /** @type {"red" | "stopped" | "clean"} */ ("clean");
+  for (const job of listing.jobs) {
     if (!job || typeof job !== "object" || typeof job.name !== "string" || !("conclusion" in job)
         || !(job.conclusion === null || typeof job.conclusion === "string")) {
       throw new Error(`unreadable job in run ${id}`);
     }
-    return !AGGREGATOR.test(job.name) && job.conclusion !== null && RED_JOB.has(job.conclusion);
-  });
+    if (AGGREGATOR.test(job.name) || job.conclusion === null) continue;
+    if (RED_JOB.has(job.conclusion)) verdict = "red";
+    else if (job.conclusion === STOPPED_JOB && verdict === "clean") verdict = "stopped";
+  }
+  return verdict;
 }
 
 /**
@@ -291,16 +327,24 @@ export async function alarm({ api, trigger, log = console.log }) {
     }
     if (page >= MAX_PAGES) throw new Error("run listing too long");
   }
-  // Canceled runs of the nine on the current head: a job that failed inside one makes it red.
+  // Canceled runs of the nine on the current head: a job that failed inside one makes it red, and so does a
+  // job canceled inside one that nothing superseded (decide).
   const redJobs = /** @type {number[]} */ ([]);
+  const stoppedJobs = /** @type {number[]} */ ([]);
+  /** @param {number} id */
+  const readJobs = async (id) => {
+    const verdict = await jobVerdict(api, id);
+    if (verdict === "red") redJobs.push(id);
+    else if (verdict === "stopped") stoppedJobs.push(id);
+  };
   const onHead = new Map([...runs, trigger].map(checked).map((r) => [r.id, r]));
   for (const r of onHead.values()) {
-    if (r.head_sha === head && canceled(r) && REQUIRED.some((w) => counted(r, w.file)) && (await failedInside(api, r.id))) redJobs.push(r.id);
+    if (r.head_sha === head && canceled(r) && REQUIRED.some((w) => counted(r, w.file))) await readJobs(r.id);
   }
   // Not all green on the head's own runs: the merge queue's runs on this same commit, in their own
   // listing. Anything unreadable there is never green: it is logged and the decision goes on without it.
   let queueRuns = /** @type {Run[]} */ ([]);
-  if (decide({ runs, trigger, head, redJobs }).action !== "close") {
+  if (decide({ runs, trigger, head, redJobs, stoppedJobs }).action !== "close") {
     try {
       const listing = await api("GET", `actions/runs?head_sha=${head}&event=merge_group&per_page=100`);
       if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.workflow_runs) || listing.workflow_runs.length !== listing.total_count) {
@@ -314,13 +358,17 @@ export async function alarm({ api, trigger, log = console.log }) {
   }
   // Earlier main heads, only for the workflows with no result on the current head, newest first,
   // until the first completed counted run on an earlier head (the latest one) is found. A canceled
-  // one is evidence only when a job inside it failed; at most JOB_READS of them are read.
-  for (const file of earlierNeeded(decide({ runs, trigger, head, redJobs, queueRuns }).states)) {
+  // one is evidence only when a job inside it failed, or was stopped with nothing newer begun before it
+  // ended (redInside); at most JOB_READS of them are read. Read in every status, not only completed:
+  // the run that superseded a canceled one may itself still be going, being canceled by a later push,
+  // and would otherwise be missing, so the canceled run would read as a time-out (Claude 6 on #3422).
+  // Runs still going are only ever candidates that supersede, never evidence (the loop below skips them).
+  for (const file of earlierNeeded(decide({ runs, trigger, head, redJobs, stoppedJobs, queueRuns }).states)) {
     const workflow = file.slice(file.lastIndexOf("/") + 1);
     let jobReads = 0;
     let settled = false;
     for (let page = 1; !settled; page += 1) {
-      const listing = await api("GET", `actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}`);
+      const listing = await api("GET", `actions/workflows/${workflow}/runs?branch=main&per_page=100&page=${page}`);
       if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.workflow_runs)) throw new Error("unreadable earlier run listing");
       const found = listing.workflow_runs.map(checked);
       runs.push(...found);
@@ -328,9 +376,10 @@ export async function alarm({ api, trigger, log = console.log }) {
         if (!counted(r, file) || r.head_sha === head || r.status !== "completed") continue;
         if (canceled(r) && jobReads < JOB_READS) {
           jobReads += 1;
-          if (await failedInside(api, r.id)) redJobs.push(r.id);
+          await readJobs(r.id);
         }
-        if (evidenceFor(r, file, new Set(redJobs))) {
+        // Evidence: its own failed job, or a canceled job that no newer run read so far superseded.
+        if (evidenceFor(r, file, redInside([...runs, trigger].map(checked), redJobs, stoppedJobs))) {
           settled = true;
           break;
         }
@@ -339,7 +388,7 @@ export async function alarm({ api, trigger, log = console.log }) {
       if (page >= MAX_PAGES) throw new Error(`earlier run listing too long: ${workflow}`);
     }
   }
-  const decision = decide({ runs, trigger, head, redJobs, queueRuns });
+  const decision = decide({ runs, trigger, head, redJobs, stoppedJobs, queueRuns });
   log(`head ${head}: ${decision.action}${decision.queueGreen.length ? ` (green from the merge queue on this commit: ${decision.queueGreen.join(", ")})` : ""}`);
   for (const s of decision.states) {
     log(`  ${s.name}: ${s.state}${s.run ? " " + s.run.html_url : ""}${s.earlier ? `; earlier head red ${s.earlier.html_url}` : ""}`);

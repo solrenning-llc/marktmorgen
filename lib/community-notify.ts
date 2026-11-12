@@ -28,7 +28,7 @@
  * thinner still — who did what, and where to go, never the words.
  */
 import { redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { type StillIn, pushMembers, stillMembers } from "@/lib/community-push";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -120,8 +120,10 @@ export async function tell(
     // oldest go, and none of its own room changes hands for it (each is
     // counted at the most a notice weighs). With no room left, nothing is
     // filed: what it is about was written, and that is what matters.
-    const sizes = await redisPipeline(who.map((one) => ["ZCARD", listKey(id, one)]));
-    const growing = sizes.filter((n) => Number(n) < MAX_NOTICES).length;
+    // Rule 24: a size in an unknown shape files nothing, so no list grows without its room.
+    const sizes = repliesFor(await redisPipeline(who.map((one) => ["ZCARD", listKey(id, one)])), who.length)?.map(countOf);
+    if (!sizes || sizes.some((n) => n === null)) throw new UnknownReplyError("a community notice list's size");
+    const growing = sizes.filter((n) => n !== null && n < MAX_NOTICES).length;
     const taken = growing ? await takeData(room, [{ slot: NOTICES_SLOT, bytes: growing * NOTICE_BYTES }]) : { ok: true as const };
     if (taken.ok) {
       await redisPipeline(

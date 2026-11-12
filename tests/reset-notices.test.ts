@@ -59,9 +59,12 @@ async function withConfirmedRecovery(email: string, backup: string): Promise<voi
   if (typeof finished === "string") throw new Error(finished);
 }
 
-/** An account from before there was a separate recovery address: its record kept `backup` itself. */
+/**
+ * An account from before there was a separate recovery address: its record kept `backup` itself. Turned on a day
+ * ago, as finishSetup writes `since: now` (lib/two-step.ts TURNED_ON_FROM): its turn-off day is read against it.
+ */
 async function legacyRecord(email: string, backup: string): Promise<void> {
-  await redis.pipeline([["SET", recordKey(email), JSON.stringify({ s: "sealed-stand-in", since: 1, codes: [], last: -1, reset: 0, backup })]]);
+  await redis.pipeline([["SET", recordKey(email), JSON.stringify({ s: "sealed-stand-in", since: Date.now() - 86_400_000, codes: [], last: -1, reset: 0, backup })]]);
 }
 
 async function withPasskey(email: string, id: string): Promise<void> {

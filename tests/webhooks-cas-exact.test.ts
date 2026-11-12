@@ -8,9 +8,10 @@
  * handed out); the text read means not written (made again from it, as for [-1]); anything else, or a read back in
  * another shape, stays unsure, and the words say it may have been saved, never "Nothing was changed". Settings
  * text that is not settings is unknown, never "no settings". A resend sends nothing on an unknown mark and answers
- * that it could not be sent just now, and the original keeps the time it had left (the script's SET clears a key's
- * expiry in real Redis, and the in-memory model does the same). The reads beside the resend's mark (the delivery
- * with its time left, and the last resend) are exact too.
+ * that it could not be sent just now, and the original keeps the time it had left: the resend's mark is its own
+ * script (RESEND_MARK in lib/webhooks.ts, same compare and replies), whose write keeps the key's expiry (KEEPTTL),
+ * while the settings' script's SET clears it, in real Redis and in the in-memory model alike. The reads beside the
+ * resend's mark (the delivery with its time left, and the last resend) are exact too.
  *
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts); no request leaves (the address resolver refuses).
  */
@@ -37,7 +38,9 @@ setSendHooksForTests({ fetch: { resolve: (async () => { sends += 1; throw new Er
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
-const isCas = (c: Command) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-pipelines-save:v2\n");
+const SETTINGS_CAS = "-- marktmorgen:crm-pipelines-save:v2\n";
+/** The settings' compare-and-set or the resend's mark (RESEND_MARK): the same compare, the same replies. */
+const isCas = (c: Command) => c[0] === "EVAL" && (String(c[1]).startsWith(SETTINGS_CAS) || String(c[1]).startsWith("-- marktmorgen:webhook-resend-mark:v1\n"));
 /** A reply standing for a call that fails (the connection closed). */
 const FAILS = Symbol("the call fails");
 /** While set, a compare-and-set is not run: this is its reply (FAILS: the call fails). */
@@ -64,8 +67,9 @@ redis.pipeline = (async (commands: Command[]) => {
     }
     if (casLanded) {
       await real(commands);
-      // Real Redis's SET inside the script clears the key's expiry (it has no KEEPTTL), whatever the model does.
-      await real([["PERSIST", String(commands[0][3])]]);
+      // Real Redis's SET inside the settings' script clears the key's expiry (it has no KEEPTTL), whatever the model
+      // does; the resend's mark keeps it (KEEPTTL), as real Redis does, so nothing is cleared for it here.
+      if (String(commands[0][1]).startsWith(SETTINGS_CAS)) await real([["PERSIST", String(commands[0][3])]]);
       if (meanwhile) await meanwhile();
       if (casLanded.value === FAILS) throw new Error("the connection closed after the write");
       return [casLanded.value];

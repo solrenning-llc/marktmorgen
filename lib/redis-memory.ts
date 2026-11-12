@@ -833,6 +833,18 @@ export class MemoryRedis {
           this.until.delete(target);
           return 1;
         }
+        // lib/webhooks.ts RESEND_MARK: the same compare and replies, but the write keeps the key's expiry (SET KEEPTTL),
+        // and a key left with none is given ARGV[3] seconds, in the same step.
+        if (key.startsWith("-- marktmorgen:webhook-resend-mark:v1\n") && args[0] === "1" && args.length === 5) {
+          const target = args[1];
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
+          this.data.set(target, args[3]);
+          if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
           const target = args[1];
           this.live(target);

@@ -6,8 +6,8 @@
  * around: the refusal was counted as a failure and the same place was saved again, with a fresh expiry, so step 1
  * never read Stripe's list again — a subscription canceled at Stripe whose store step 2 does not reach on its own
  * was never brought in line, and an unwritten paying one was never adopted. Now a place Stripe says it does not
- * know is dropped and the list is read again from its start, once, in the same run; the run still counts the
- * failure and is not complete. Any other refusal keeps the place, as before. Synthetic data only; no write is sent.
+ * know is dropped and the list is read again from its start, once, in the same run; the refusal is still counted
+ * as a failure. Any other refusal keeps the place, as before. Synthetic data only; no write is sent.
  */
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { store as redis } from "./redis-stub";
@@ -44,7 +44,7 @@ async function main() {
   const first = await syncSubscriptions(Date.now() + 60_000);
   is("the list is asked from the place, then from its start", listCalls, ["sub_FromAnotherMode01", null]);
   is("the unknown place is not kept", (await redis.pipeline([["GET", CURSOR]]))[0], null);
-  is("the refusal still counts as a failure and the run is not complete", [first.failed, first.complete], [1, false]);
+  is("the refusal still counts as a failure; the list read from its start completes the run", [first.failed, first.complete], [1, true]);
   listCalls.length = 0;
   const second = await syncSubscriptions(Date.now() + 60_000);
   is("the next run reads the list from its start and completes", [listCalls, second.failed, second.complete], [[null], 0, true]);

@@ -28,6 +28,8 @@ import {
 } from "@/lib/outreach-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import { OutreachResultsCard } from "@/components/outreach-results";
+import { outreachResults } from "@/lib/outreach-results";
 
 type Site = { domain: string; home: string; company: string; about: string; found: (FoundAddress & { refuses: boolean })[] };
 
@@ -439,6 +441,8 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
           </p>
         ) : null}
       </section>
+
+      <OutreachResultsCard results={outreachResults(pitches)} />
 
       <section aria-labelledby="list-title">
         <h2 id="list-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">

@@ -1479,6 +1479,7 @@
     "components/option-link-copy.tsx",
     "components/orders-bundle.tsx",
     "components/orders-shared.tsx",
+    "components/outreach-results.tsx",
     "components/outreach-studio.tsx",
     "components/package-editor.tsx",
     "components/page-answers.tsx",

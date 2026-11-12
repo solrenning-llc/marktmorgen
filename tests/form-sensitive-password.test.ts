@@ -140,6 +140,18 @@ for (const label of [
   "Instagram password for our team",
   "WordPress admin login and pass",
   "Username/pass",
+  // Claude 1 cloud (rev-prs-novos) @fff18e7784 (MEDIUM): a reassurance after the service never excuses the ask,
+  // and a word that names the secret asked for ("Security password") is not advice.
+  "Instagram password for our team (safe with us)",
+  "Instagram password for our team, kept secure",
+  "Instagram password for our team (100% safe)",
+  "Gmail password for setup (kept secure)",
+  "Admin password for your WordPress site (we follow strict security rules)",
+  "Security password for your bank",
+  "Recovery password for your Gmail",
+  "Common password for all your accounts",
+  // the same review (LEVE, open since rev-pares 6834285977): four words before the secret.
+  "What's your current Gmail account password?",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -148,6 +160,12 @@ for (const label of [
 
 part("Questions about passwords and ordinary instructions remain available");
 for (const label of [
+  // Claude 1 cloud (rev-prs-novos) @fff18e7784: advice before the secret, and an event pass's number (LOW: "pass"
+  // followed by a noun is not a login's password).
+  "Best password for Gmail",
+  "Strong password for Gmail",
+  "Email or pass number",
+  "Name, email or pass ID",
   "What did the chapter on passwords teach you?",
   "How do you choose a password?",
   "Please enter your email",

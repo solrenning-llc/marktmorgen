@@ -12,7 +12,7 @@ import { makeKey } from "@/lib/api-keys";
 import { importedFor } from "@/lib/imported-purchases";
 import { POST as postLead } from "@/app/api/v1/leads/route";
 import { POST as postAccess } from "@/app/api/v1/access/route";
-import { IDEMPOTENCY_SECONDS } from "@/lib/api-idempotency-rules";
+import { IDEMPOTENCY_COMMANDS, IDEMPOTENCY_SECONDS } from "@/lib/api-idempotency-rules";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -128,6 +128,32 @@ async function main(): Promise<void> {
   const b = await shop("idem-owner-b@example.test", "idemshopb");
   const bFirst = await call(postAccess, b.key, { email: "buyer-two@example.test", product: b.product }, KEY);
   is("another store's request under the same key string runs, as its own", [bFirst.status, bFirst.json.data?.status, bFirst.replayed], [200, "given", null]);
+
+  part("A claim written but whose reply was lost: the advice to send it again holds");
+  {
+    // Quality review on #3537 @cc03e43a75: the SET NX took, its reply never came back. The try answers 503 ("send the
+    // same request again with the same key") and must then leave the key as it found it, so that retry runs once.
+    const pipeline = redis.pipeline.bind(redis);
+    let cut = true;
+    const sent: string[] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      for (const c of commands) if (String(c[1]).startsWith("nl:api:idem:")) sent.push(String(c[0]));
+      const reply = await pipeline(commands);
+      if (cut && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:api:idem:") && c.includes("NX"))) { cut = false; throw new Error("the reply was lost"); }
+      return reply;
+    }) as typeof redis.pipeline;
+    const lostKey = "lost-reply-key-1";
+    const body = { email: "buyer-eight@example.test", product: a.product };
+    const first = await call(postAccess, a.key, body, lostKey);
+    redis.pipeline = pipeline;
+    const owner = () => storeForEmail("idem-owner-a@example.test").then((s) => importedFor(s!, "buyer-eight@example.test"));
+    is("the first try ran nothing and said to send it again", [first.status, first.json.error, (await owner()).length], [503, "unavailable", 0]);
+    is("its commands on the record fit the ceiling the cost is priced at", [sent, sent.length <= IDEMPOTENCY_COMMANDS], [["GET", "SET", "GET", "DEL"], true]);
+    const retry = await call(postAccess, a.key, body, lostKey);
+    is("the retry with the same key runs, once", [retry.status, retry.json.data?.status, retry.replayed, (await owner()).length], [200, "given", null, 1]);
+    const repeat = await call(postAccess, a.key, body, lostKey);
+    is("and a repeat after it is its answer, replayed", [repeat.status, repeat.replayed, (await owner()).length], [200, "true", 1]);
+  }
 
   part("Gone after 24 hours from when the write began");
   advance(IDEMPOTENCY_SECONDS * 1_000 + 1_000);

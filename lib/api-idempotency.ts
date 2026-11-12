@@ -129,8 +129,16 @@ async function getRecord(rk: string): Promise<unknown> {
 
 async function claim(rk: string, value: string): Promise<"ok" | "taken" | "unknown"> {
   const replies = repliesFor(await redisPipeline([["SET", rk, value, "NX", "EX", IDEMPOTENCY_SECONDS]]).catch(() => null), 1);
-  if (!replies) return "unknown";
-  return replies[0] === "OK" ? "ok" : replies[0] === null ? "taken" : "unknown";
+  if (replies && replies[0] === "OK") return "ok";
+  if (replies && replies[0] === null) return "taken";
+  // Unknown: the claim may have been written with its reply lost. This try runs nothing and answers 503, "send the same
+  // request again with the same key", so a claim of exactly this value is let go first; otherwise that retry would be
+  // told 409 for 24 hours (quality review on #3537). Only this exact value is deleted: it holds this request's
+  // fingerprint and the millisecond this try began, so it is another try's only when that try sent the same key and
+  // body in the same millisecond. Nothing runs either way.
+  const read = repliesFor(await redisPipeline([["GET", rk]]).catch(() => null), 1);
+  if (read && read[0] === value) await redisPipeline([["DEL", rk]]).catch(() => {});
+  return "unknown";
 }
 
 /** The largest answer a keyed write here may give: what the rules keep. */

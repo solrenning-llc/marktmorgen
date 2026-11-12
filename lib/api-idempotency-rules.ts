@@ -43,7 +43,8 @@ export const MAX_IDEMPOTENCY_RECORD_BYTES = MAX_KEPT_ANSWER_BYTES + RECORD_ROOM_
 const recordBytes = (record: string) => new TextEncoder().encode(record).length;
 /**
  * Database commands one keyed write adds at most: read the record, claim it, list it under the person it is about
- * and set that list's expiry (SADD, EXPIRE: lib/api-idempotency.ts, unit 3), keep the answer.
+ * and set that list's expiry (SADD, EXPIRE: lib/api-idempotency.ts, unit 3), keep the answer. A claim whose reply is
+ * unknown sends fewer: read the record, claim it, read it again and let go of this try's own claim (#3537).
  */
 export const IDEMPOTENCY_COMMANDS = 5;
 /** The most one record's line in the person's index weighs, as kept (tests/store-data-registry.ts, nl:api:idem:p:). */

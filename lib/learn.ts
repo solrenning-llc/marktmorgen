@@ -219,6 +219,12 @@ type Ledger = {
    * sale written down on the thanks page does not outlive its refund.
    */
   refunded: Set<string>;
+  /**
+   * Courses bought again after a purchase refunded in full: the date the
+   * thanks page wrote down may be the refunded purchase's, so it counts only
+   * when it is not earlier than the purchase that stands.
+   */
+  rebought?: Set<string>;
 };
 
 /** Asks the creator's Stripe account what this address paid for here. */
@@ -275,11 +281,12 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   }
   // Joined again after it ended, or bought again after a refund: the
   // purchase that stands is what counts.
+  const rebought = new Set<string>();
   for (const id of found.keys()) {
     ended.delete(id);
-    refunded.delete(id);
+    if (refunded.delete(id)) rebought.add(id);
   }
-  return { paid: found, ended, refunded };
+  return { paid: found, ended, refunded, rebought };
 }
 
 /** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
@@ -297,6 +304,7 @@ function parseLedger(cached: string): Ledger | null {
         paid: new Map(Object.entries(value.p as Record<string, number>)),
         ended: new Set(Array.isArray(value.x) ? (value.x as string[]) : []),
         refunded: new Set(Array.isArray(value.r) ? (value.r as string[]) : []),
+        rebought: new Set(Array.isArray(value.b) ? (value.b as string[]) : []),
       };
     }
     return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set() };
@@ -330,7 +338,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   if (!asked) {
     try {
       asked = await paidAtStripe(store, email);
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
+      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], b: [...(asked.rebought ?? [])] });
       await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
     } catch (error) {
       console.error("reading course purchases failed", error);
@@ -369,9 +377,12 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
     // unless Stripe now says it was refunded in full.
-    const start = product.recurring || asked.refunded.has(product.id)
-      ? fromStripe.get(product.id)
-      : recorded.get(product.id) ?? fromStripe.get(product.id);
+    // Bought again after a full refund: a date written down before the
+    // purchase that stands is the refunded one's, and never starts the drip.
+    const standing = fromStripe.get(product.id);
+    const written = recorded.get(product.id);
+    const stale = written !== undefined && standing !== undefined && written < standing && asked.rebought?.has(product.id) === true;
+    const start = product.recurring || asked.refunded.has(product.id) || stale ? standing : written ?? standing;
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
     if (opens !== undefined && Number.isFinite(opens)) result.set(product.id, opens);
   }

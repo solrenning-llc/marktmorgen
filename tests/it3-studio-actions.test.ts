@@ -145,9 +145,16 @@ is("\"discount\" (another word for a sale) opens the store sale", first("discoun
 is("\"refund\" finds the plan's refund", ids("refund").includes("refund"), true);
 is("\"refund\" finds the buyers, where refunds show", ids("refund").includes("people"), true);
 is("\"refnd\" (a typo) still finds the refund", ids("refnd").includes("refund"), true);
+is("a bare \"refund\" puts the buyers first, where a buyer's money back is", first("refund"), "people");
+is("a typo of \"refund\" also puts the buyers first", first("refnud"), "people");
+is("\"plan refund\" opens the plan's own refund", first("plan refund"), "refund");
+is("\"refund my plan\" opens the plan's own refund", first("refund my plan"), "refund");
 is("\"afiliate\" (a typo) opens Affiliates", first("afiliate"), "affiliates");
 is("\"affiliates\" (plural) opens Affiliates", first("affiliates"), "affiliates");
 is("\"invoice\" opens Payment requests", first("invoice"), "requests");
+is("\"invoice\" also finds the plan's own invoices", ids("invoice").includes("invoices"), true);
+is("\"plan invoice\" opens the plan's own invoices", first("plan invoice"), "invoices");
+is("\"receipt\" opens the plan's own invoices", first("receipt"), "invoices");
 is("\"zoom\" opens video calls", first("zoom"), "meetings");
 is("\"move from gumroad\" opens the import", first("move from gumroad"), "import");
 is("\"tax\" opens the tax report", first("tax"), "tax");
@@ -174,6 +181,7 @@ for (const role of ["owner", "admin", "editor", "support"] as const) {
 }
 is("support: no plan refund (billing)", ids("refund", context("support")).includes("refund"), false);
 is("support: buyers still found for \"refund\" (orders)", ids("refund", context("support")).includes("people"), true);
+is("support: no plan invoices (billing)", ids("receipt", context("support")).includes("invoices"), false);
 is("Discord never found without Discord's keys", ids("discord", context("owner", { has: { ...everything, discord: false } })), []);
 is("video calls never found without a meeting app", ids("zoom", context("owner", { has: { ...everything, meet: false } })).includes("meetings"), false);
 

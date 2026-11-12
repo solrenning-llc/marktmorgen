@@ -2518,6 +2518,22 @@ function bumpCents(value: unknown): number {
 }
 
 /**
+ * What an order charged and the buyer's sales tax in it (`amount_total`, `total_details.amount_tax`), read exactly
+ * (rule 24), as lib/share-settle.ts goodsPaid reads them. A share is taken of what was paid before tax, so a tax
+ * figure that does not read is never 0 (the share would be written on the buyer's tax too) and a total that does
+ * not read is never 0 (the share would be written at nothing), each for good (HSETNX). Either throws
+ * UnknownReplyError before anything is written, and the sweep keeps the order for its next run (failOrder), as it
+ * does for a share that does not read (linkShare).
+ */
+function chargedWithTax(session: SessionLike): { total: number; tax: number } {
+  const total = session.amount_total;
+  const tax = session.total_details?.amount_tax;
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new UnknownReplyError("what an order charged");
+  if (typeof tax !== "number" || !Number.isSafeInteger(tax) || tax < 0 || tax > total) throw new UnknownReplyError("the sales tax on an order");
+  return { total, tax };
+}
+
+/**
  * Writes down a settled checkout that came through an affiliate's link.
  * Anything else is left alone, so it is safe to call on every checkout.
  *
@@ -2540,8 +2556,7 @@ export async function noteSession(
   const handles = saleHandles(store);
   if (!handles.has(meta.store ?? "")) return;
 
-  const total = typeof session.amount_total === "number" ? session.amount_total : 0;
-  const tax = typeof session.total_details?.amount_tax === "number" ? session.total_details.amount_tax : 0;
+  const { total, tax } = chargedWithTax(session);
   const pi =
     typeof session.payment_intent === "string"
       ? session.payment_intent
@@ -2549,7 +2564,7 @@ export async function noteSession(
         ? ((session.payment_intent as { id: string }).id)
         : "";
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
-  const base = Math.max(0, total - tax);
+  const base = total - tax;
   const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
   const currency = readCurrencyCode(session.currency);
 

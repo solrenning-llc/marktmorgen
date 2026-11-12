@@ -31,6 +31,13 @@ const whole = (n: number) => (Number.isFinite(n) && n > 0 ? Math.ceil(n) : 0);
  * while it works, and its counting.
  */
 export const AFFILIATE_PAGE_UNITS = 4;
+/**
+ * The picture a product's shared link unfolds into (app/[handle]/p/[product]/opengraph-image.tsx): a certificate's
+ * card (CERTIFICATE_CARD_UNITS, 2, measured in audit R41 with no picture on it) plus one for the product's own picture,
+ * read from the file store (up to MAX_IMAGE_BYTES) and turned into a JPEG when it is a WebP. Not measured on its own:
+ * at least the lighter card's cost, never less.
+ */
+export const PRODUCT_CARD_UNITS = 3;
 /** Each page of the creator's Stripe account read for the book, its body up to a megabyte worked through: one request each. */
 export const AFFILIATE_STRIPE_PAGES_PER_UNIT = 1;
 /** Fields of the program's records (affiliates, clicks, sales, payouts, shares, paid clicks, leads), read in one go, per request. */

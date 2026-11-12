@@ -1280,6 +1280,10 @@ export const COST_LINES: CostLine[] = [
       // (153 KB, 0.59 s of CPU cold, measured; audit R41, item 3), so CERTIFICATE_PDF_READ prices it too (tests/certificate-card-standing.test.ts).
       { file: "app/[handle]/certificate/[id]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_CARD_UNITS - 1)"] },
       { file: "lib/certificate.ts", names: ["CERTIFICATE_CARD_UNITS = 2"] },
+      // A product's shared card reads its picture from the file store and draws: one request before its listing, the rest of
+      // PRODUCT_CARD_UNITS before the picture is read (tests/c1-cost-product-card.test.ts).
+      { file: "app/[handle]/p/[product]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, PRODUCT_CARD_UNITS - 1)"] },
+      { file: "lib/public-read-rules.ts", names: ["PRODUCT_CARD_UNITS = 3"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
       // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).

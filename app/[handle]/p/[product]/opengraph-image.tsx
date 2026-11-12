@@ -7,6 +7,10 @@ import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { averageText, showsRating, summaryOf } from "@/lib/reviews";
 import { canUseDomain } from "@/lib/domains";
 import { pricePill } from "@/components/store-product";
+import { takePublicRequest } from "@/lib/traffic";
+import { PRODUCT_CARD_UNITS } from "@/lib/public-read-rules";
+import { speech } from "@/lib/buyer-words";
+import { plain } from "@/lib/serve-file";
 
 /**
  * The picture a product's link unfolds into when it is shared: the product's
@@ -72,6 +76,12 @@ export default async function OpengraphImage({ params }: Params) {
     // An address with a broken escape in it names no store: the plain card.
   }
   const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
+  // Paid for as the store's other public pages are, before anything is read or drawn: one of its public requests
+  // before its listing is read, the rest of PRODUCT_CARD_UNITS before its picture is read from the file store and the
+  // card drawn. A store past its requests gets no card; an address asked again and again (a query string makes each
+  // one new to every cache) never reads the file store or draws for nothing.
+  const now = Date.now();
+  if (store && !(await takePublicRequest(store, "public", now, 1))) return plain(503, speech(store).w.restingTitle);
   // A store switched off after notices (lib/takedown.ts) shows no product on
   // its pages, so its card is the plain one a missing product gets. A store
   // that cannot be read is already null above: the plain card too.
@@ -79,6 +89,7 @@ export default async function OpengraphImage({ params }: Params) {
     store && !store.suspended ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
   // A draft has no picture to share either.
   const product = found && !found.hidden ? found : null;
+  if (store && PRODUCT_CARD_UNITS > 1 && !(await takePublicRequest(store, "public", now, PRODUCT_CARD_UNITS - 1))) return plain(503, speech(store).w.restingTitle);
   const colours = lookColours(store?.look ?? { theme: "light", accent: "#5a36ee" });
   const title = product?.title ?? "Marktmorgen";
   const storeName = store?.name ?? "Marktmorgen";

@@ -163,6 +163,18 @@ const MESSAGES: Record<string, string> = {
   plan_disputed: IMPORTS_PAUSED.plan_disputed,
 };
 
+/**
+ * Why a members import did not start: the file has more members than the emails that can go now (lib/imports.ts,
+ * startImport, which takes them for the whole file or none). `opens` is the server's sentence on when the allowance
+ * opens again.
+ */
+function emailsMonthWords(left: number, members: number, opens?: string): string {
+  const n = (v: number) => Math.max(0, Math.floor(v)).toLocaleString("en-US");
+  const can = left > 0 ? `Your plan can send ${n(left)} more of these emails now` : "Your plan cannot send any more of these emails now";
+  const part = left > 0 ? ` Bring in up to ${n(left)} members now, and the rest after that.` : "";
+  return `Each member must get an email with their own link. ${can}, and this file has ${n(members)} members, so nothing was imported.${part} ${opens ?? ""}`.trim();
+}
+
 const running = (state: ImportView["state"]) => state === "receiving" || state === "queued" || state === "running" || state === "mailing";
 
 /** The progress of one import, and what came of it. */
@@ -319,7 +331,7 @@ export function ImportTool({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; import?: ImportView; limit?: number };
+    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; import?: ImportView; limit?: number; opens?: string };
   }, []);
 
   // While the page is open, a running import is moved along a step at a time.
@@ -506,7 +518,11 @@ export function ImportTool({
     try {
       const begun = await post({ action: "start", ...options() });
       if (!begun.ok || !begun.import) {
-        setError((kind === "members" && begun.error === "email" ? MESSAGES.members_email : MESSAGES[begun.error ?? ""]) ?? MESSAGES.server_error);
+        setError(
+          begun.error === "emails_month"
+            ? emailsMonthWords(begun.limit ?? 0, rows.length, begun.opens)
+            : ((kind === "members" && begun.error === "email" ? MESSAGES.members_email : MESSAGES[begun.error ?? ""]) ?? MESSAGES.server_error),
+        );
         return;
       }
       current = begun.import;
@@ -771,6 +787,9 @@ export function ImportTool({
                   ) : null}
                   <p className="text-sm text-ink-soft">
                     {`Each member gets one email from ${storeName}'s name with their own link to keep their membership here, on your Stripe account. Nothing is charged until the date in the file, the day it would have renewed where it is now, so nobody pays twice for the same weeks; a date less than two days away is charged when they keep it. A member who has not kept it gets one reminder three days before that date. Nobody gets the membership without keeping it.`}
+                  </p>
+                  <p className="text-sm text-ink-soft">
+                    {`These emails count in a monthly allowance: on Store, up to ${IMPORT_ALLOWANCES.creator.movedEmails} a month; on Studio and Scale, they come out of your monthly emails. If the file has more members than can be emailed now, nothing is imported. Once it starts, the emails for all its members are set aside for it, so nothing else can use them first.`}
                   </p>
                   {!canEmail ? <p className="notice notice-warn text-sm">{MESSAGES.members_email}</p> : null}
                   <label htmlFor="import-stopped" className="flex cursor-pointer items-start gap-3">
